@@ -478,6 +478,7 @@ class FileWriterConfig:
                     path=experiment_dir,
                     label=self.label,
                     initial_condition_times=initial_condition_times,
+                    timestep=timestep,
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,

@@ -114,6 +114,7 @@ def test_monthly_zarr_writer_matches_netcdf_writer(tmp_path):
         path=str(tmp_path),
         label="monthly_mean",
         initial_condition_times=initial_condition_times,
+        timestep=TIMESTEP,
         save_names=None,
         variable_metadata={"foo": VariableMetadata(units="m", long_name="foo")},
         coords=COORDS,
@@ -198,3 +199,34 @@ def test_monthly_zarr_writer_writes_to_non_local_filesystem():
     writer.finalize()
     ds = xr.open_zarr("memory://experiment_dir/monthly.zarr", decode_timedelta=False)
     np.testing.assert_allclose(ds["foo"].isel(sample=0, time=0, lat=0, lon=0), 1.0)
+
+
+def test_monthly_zarr_writer_month_zero_follows_the_first_output_time(tmp_path):
+    """An IC late in a month has its first output time in the next month, so
+    month 0 of the lead-time axis is the later month, not the IC's."""
+    initial_condition_times = np.array([cftime.DatetimeProlepticGregorian(2020, 1, 30)])
+    # forward times: Feb 4, Feb 9 -- the run never writes anything in January
+    writer = _writer(tmp_path / "monthly.zarr", initial_condition_times, n_timesteps=2)
+    writer.append_batch(
+        *_batch(
+            [[1.0, 3.0]],
+            [
+                [
+                    cftime.DatetimeProlepticGregorian(2020, 2, 4),
+                    cftime.DatetimeProlepticGregorian(2020, 2, 9),
+                ]
+            ],
+        )
+    )
+    writer.finalize()
+
+    ds = xr.open_zarr(str(tmp_path / "monthly.zarr"), decode_timedelta=False)
+    # one month, February, rather than a January origin with an empty month 0
+    assert dict(ds.sizes) == {"sample": 1, "time": 1, "lat": 2, "lon": 3}
+    np.testing.assert_array_equal(ds["counts"].values, [[2]])
+    np.testing.assert_allclose(ds["foo"].isel(sample=0, lat=0, lon=0), [2.0])
+    np.testing.assert_array_equal(
+        ds["valid_time"].isel(sample=0).values,
+        np.array(["2020-02-15"], dtype="datetime64[ns]"),
+    )
+    assert ds["init_time"].isel(sample=0).values == np.datetime64("2020-01-30")

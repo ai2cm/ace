@@ -184,8 +184,15 @@ def _batch_time(times: list[list[cftime.datetime]]) -> xr.DataArray:
     return xr.DataArray(times, dims=["sample", "time"])
 
 
-def test_month_indexer_indexes_relative_to_first_batch():
-    indexer = MonthIndexer(n_samples=2)
+def test_month_indexer_indexes_relative_to_each_samples_first_output_time():
+    indexer = MonthIndexer(
+        first_output_times=[
+            cftime.DatetimeProlepticGregorian(2020, 1, 15),
+            cftime.DatetimeProlepticGregorian(2020, 3, 15),
+        ]
+    )
+    np.testing.assert_array_equal(indexer.init_years, [2020, 2020])
+    np.testing.assert_array_equal(indexer.init_months, [0, 2])
     first = indexer.month_indices(
         _batch_time(
             [
@@ -195,8 +202,8 @@ def test_month_indexer_indexes_relative_to_first_batch():
         )
     )
     np.testing.assert_array_equal(first, [[0], [0]])
-    # each sample's origin is its own first time, so the same calendar month
-    # maps to a different index per sample
+    # each sample's origin is its own first output time, so the same calendar
+    # month maps to a different index per sample
     later = indexer.month_indices(
         _batch_time(
             [
@@ -206,19 +213,24 @@ def test_month_indexer_indexes_relative_to_first_batch():
         )
     )
     np.testing.assert_array_equal(later, [[13], [11]])
-    np.testing.assert_array_equal(indexer.init_years, [2020, 2020])
-    np.testing.assert_array_equal(indexer.init_months, [0, 2])
+
+
+def test_month_indexer_indices_are_negative_before_month_zero():
+    indexer = MonthIndexer(
+        first_output_times=[cftime.DatetimeProlepticGregorian(2020, 3, 1)]
+    )
+    indices = indexer.month_indices(
+        _batch_time([[cftime.DatetimeProlepticGregorian(2020, 1, 15)]])
+    )
+    np.testing.assert_array_equal(indices, [[-2]])
 
 
 def test_month_indexer_n_months_through():
-    indexer = MonthIndexer(n_samples=2)
-    indexer.month_indices(
-        _batch_time(
-            [
-                [cftime.DatetimeProlepticGregorian(2020, 1, 15)],
-                [cftime.DatetimeProlepticGregorian(2020, 3, 15)],
-            ]
-        )
+    indexer = MonthIndexer(
+        first_output_times=[
+            cftime.DatetimeProlepticGregorian(2020, 1, 15),
+            cftime.DatetimeProlepticGregorian(2020, 3, 15),
+        ]
     )
     final_times = [
         cftime.DatetimeProlepticGregorian(2020, 5, 1),
@@ -226,9 +238,3 @@ def test_month_indexer_n_months_through():
     ]
     # sample 0 spans January through May (5), sample 1 March through August (6)
     assert indexer.n_months_through(final_times) == 6
-
-
-def test_month_indexer_requires_a_batch_before_its_origin_is_read():
-    indexer = MonthIndexer(n_samples=1)
-    with pytest.raises(RuntimeError, match="no origin yet"):
-        indexer.init_years

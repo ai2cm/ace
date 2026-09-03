@@ -90,10 +90,16 @@ class MonthlyZarrWriter:
         self._save_names = save_names
         self._calendar = infer_calendar(initial_condition_times)
         self._initial_condition_times = initial_condition_times
-        self._month_indexer = MonthIndexer(len(initial_condition_times))
-        self._final_times = [
-            time + n_timesteps * timestep for time in initial_condition_times
-        ]
+        # The inference loop drops the initial condition step, so the run's
+        # output times are IC + timestep through IC + n_timesteps * timestep.
+        # Both ends of the month axis therefore follow from the constructor
+        # args, and n_months with them.
+        self._month_indexer = MonthIndexer(
+            first_output_times=[time + timestep for time in initial_condition_times]
+        )
+        self._n_months = self._month_indexer.n_months_through(
+            [time + n_timesteps * timestep for time in initial_condition_times]
+        )
         self._chunks = _validate_chunks(chunks)
 
         label = os.path.basename(path).removesuffix(".zarr")
@@ -101,10 +107,8 @@ class MonthlyZarrWriter:
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         self._dataset_metadata = dataset_metadata.as_flat_str_dict()
 
-        # The month axis origin is the calendar month of the first output time,
-        # which need not be the IC's month, so it and the spatial dims are only
-        # known once a batch arrives.
-        self._n_months: int | None = None
+        # With save_names=None the variables to create aren't known until the
+        # first batch, so the store is created then.
         self._root: zarr.Group | None = None
 
     @property
@@ -123,8 +127,9 @@ class MonthlyZarrWriter:
             self._chunks.get(dim, size) for dim, size in zip(dims, sizes, strict=True)
         )
 
-    def _initialize_store(self, data: Mapping[str, torch.Tensor], n_months: int):
+    def _initialize_store(self, data: Mapping[str, torch.Tensor]):
         """Create the store, with the lead-time axis pre-allocated."""
+        n_months = self._n_months
         dim_info = DIM_INFO_HEALPIX if "face" in self.coords else DIM_INFO_LATLON
         example = next(iter(data.values()))
         n_samples = example.shape[0]
@@ -241,9 +246,6 @@ class MonthlyZarrWriter:
             )
 
         months = self._month_indexer.month_indices(batch_time)
-        if self._n_months is None:
-            # month_indices has now fixed the axis origin, which this needs.
-            self._n_months = self._month_indexer.n_months_through(self._final_times)
         n_months = self._n_months
         if np.min(months) < 0 or np.max(months) >= n_months:
             raise ValueError(
@@ -253,7 +255,7 @@ class MonthlyZarrWriter:
                 "timestep and number of timesteps."
             )
         if self._root is None:
-            self._initialize_store(data, n_months)
+            self._initialize_store(data)
         month_min = int(np.min(months))
         month_slice = slice(month_min, int(np.max(months)) + 1)
 

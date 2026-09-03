@@ -27,39 +27,29 @@ class MonthIndexer:
     """
     Maps batch times to indices along a monthly lead-time axis.
 
-    Month index 0 is the calendar month of each sample's first output time,
-    which is taken from the first batch the indexer sees. Samples are indexed
-    independently, so ensemble members with different initial times each start
-    at their own month 0.
+    Month index 0 is the calendar month of each sample's first output time.
+    Samples are indexed independently, so ensemble members with different
+    initial times each start at their own month 0.
     """
 
-    def __init__(self, n_samples: int):
-        self._init_years = np.full([n_samples], -1, dtype=int)
-        self._init_months = np.full([n_samples], -1, dtype=int)
-
-    @property
-    def initialized(self) -> bool:
-        """Whether a batch has been seen, fixing month 0."""
-        return bool(self._init_years[0] != -1)
+    def __init__(self, first_output_times: Sequence[cftime.datetime]):
+        """
+        Args:
+            first_output_times: The first time each sample will write, one per
+                sample. The inference loop drops the initial condition step, so
+                this is each sample's initial condition time plus one timestep.
+        """
+        self._init_years, self._init_months = _years_and_months(first_output_times)
 
     @property
     def init_years(self) -> np.ndarray:
         """Calendar year of month 0, per sample."""
-        self._require_initialized()
         return self._init_years.copy()
 
     @property
     def init_months(self) -> np.ndarray:
         """Zero-indexed calendar month of month 0, per sample."""
-        self._require_initialized()
         return self._init_months.copy()
-
-    def _require_initialized(self):
-        if not self.initialized:
-            raise RuntimeError(
-                "MonthIndexer has no origin yet; it is fixed by the first call "
-                "to month_indices."
-            )
 
     def month_indices(self, batch_time: xr.DataArray) -> np.ndarray:
         """
@@ -67,18 +57,15 @@ class MonthIndexer:
 
         Args:
             batch_time: Time coordinate for each sample in the batch, of shape
-                [sample, time]. On the first call these are taken to start at
-                each sample's first output time, fixing month 0.
+                [sample, time].
 
         Returns:
-            Month indices for the batch, of shape [sample, time].
+            Month indices for the batch, of shape [sample, time]. Negative
+            where a time precedes its sample's month 0.
         """
         years = batch_time.dt.year.values
         # datetime months are 1-indexed, we want 0-indexed
         months = batch_time.dt.month.values - 1
-        if not self.initialized:
-            self._init_years[:] = years[:, 0]
-            self._init_months[:] = months[:, 0]
         return 12 * (years - self._init_years[:, None]) + (
             months - self._init_months[:, None]
         )
@@ -94,11 +81,18 @@ class MonthIndexer:
             Number of months from month 0 through the latest of ``times``,
             inclusive, maximized over samples.
         """
-        self._require_initialized()
-        years = np.array([time.year for time in times], dtype=int)
-        months = np.array([time.month - 1 for time in times], dtype=int)
+        years, months = _years_and_months(times)
         elapsed = 12 * (years - self._init_years) + (months - self._init_months)
         return int(np.max(elapsed)) + 1
+
+
+def _years_and_months(
+    times: Sequence[cftime.datetime],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Calendar years and zero-indexed calendar months of ``times``."""
+    years = np.array([time.year for time in times], dtype=int)
+    months = np.array([time.month - 1 for time in times], dtype=int)
+    return years, months
 
 
 def add_data(

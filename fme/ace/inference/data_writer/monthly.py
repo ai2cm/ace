@@ -57,6 +57,7 @@ class PairedMonthlyDataWriter:
             path=path,
             label="monthly_mean_target",
             initial_condition_times=initial_condition_times,
+            timestep=timestep,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -66,6 +67,7 @@ class PairedMonthlyDataWriter:
             path=path,
             label="monthly_mean_predictions",
             initial_condition_times=initial_condition_times,
+            timestep=timestep,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -104,6 +106,7 @@ class MonthlyDataWriter:
         path: str,
         label: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
+        timestep: datetime.timedelta,
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -115,6 +118,9 @@ class MonthlyDataWriter:
             label: Label to append to the filename.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
+            timestep: The time delta between each timestep, used with
+                ``initial_condition_times`` to place month 0 of the lead-time
+                axis.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.
@@ -157,7 +163,9 @@ class MonthlyDataWriter:
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
-        self._month_indexer = MonthIndexer(n_initial_conditions)
+        self._month_indexer = MonthIndexer(
+            first_output_times=[time + timestep for time in initial_condition_times]
+        )
         self._dataset_dims_created = False
 
     def _get_variable_names_to_save(
