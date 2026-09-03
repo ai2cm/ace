@@ -1,0 +1,59 @@
+aggregator:
+  log_global_mean_norm_time_series: false
+  log_global_mean_time_series: false
+  log_histograms: false
+  log_zonal_mean_images: false
+checkpoint_path: /ckpt.tar
+coupled_steps_in_memory: 20
+data_writer:
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+  ocean:
+    names:
+    - sst
+    - zos
+    - thetao_2
+    - thetao_6
+    - thetao_12
+    - so_2
+    - so_6
+    - so_12
+    save_monthly_files: true
+    save_prediction_files: false
+experiment_dir: /results
+loader:
+  dataset:
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        engine: zarr
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+      - data_path: /climate-default
+        engine: zarr
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+    ocean:
+      merge:
+      - data_path: /climate-default
+        engine: zarr
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+      - data_path: /climate-default
+        engine: zarr
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+      - data_path: /climate-default
+        engine: zarr
+        file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
+  num_data_workers: 1
+  start_indices:
+    times:
+    - '0231-01-03T12:00:00'
+logging:
+  entity: ai2cm
+  log_to_file: true
+  log_to_screen: true
+  log_to_wandb: true
+  project: ace-samudra-coupled-cm4
+n_coupled_steps: 7300
