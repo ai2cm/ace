@@ -8,7 +8,6 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import xarray as xr
-import zarr
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly_aggregation import (
@@ -30,7 +29,7 @@ from fme.ace.inference.data_writer.utils import (
     get_all_names,
 )
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.writer import DATETIME_ENCODING_UNITS
+from fme.core.writer import DATETIME_ENCODING_UNITS, ZarrWriter
 
 FLOAT_DTYPE = "f4"
 
@@ -72,7 +71,9 @@ class MonthlyZarrWriter:
             save_names: Names of variables to save. If None, all predicted
                 variables will be saved.
             variable_metadata: Metadata for each variable to be written.
-            coords: Coordinate data to be written to the store.
+            coords: Coordinate data to be written to the store. Must include a
+                coordinate for each spatial dimension, as for the raw zarr
+                writer, since the store is sized before any data arrives.
             dataset_metadata: Metadata for the dataset.
             chunks: Optional mapping of dimension name to chunk size. Omitted
                 dimensions are chunked whole, except the sample and lead-time
@@ -84,12 +85,9 @@ class MonthlyZarrWriter:
                 sharding would place unrelated months in one storage object. At
                 monthly resolution the resulting chunk count is small.
         """
-        self.path = path
-        self.coords = coords
-        self.variable_metadata = variable_metadata
         self._save_names = save_names
-        self._calendar = infer_calendar(initial_condition_times)
-        self._initial_condition_times = initial_condition_times
+        calendar = infer_calendar(initial_condition_times)
+        n_samples = len(initial_condition_times)
         # The inference loop drops the initial condition step, so the run's
         # output times are IC + timestep through IC + n_timesteps * timestep.
         # Both ends of the month axis therefore follow from the constructor
@@ -100,123 +98,48 @@ class MonthlyZarrWriter:
         self._n_months = self._month_indexer.n_months_through(
             [time + n_timesteps * timestep for time in initial_condition_times]
         )
-        self._chunks = _validate_chunks(chunks)
+
+        dim_info = DIM_INFO_HEALPIX if "face" in coords else DIM_INFO_LATLON
+        spatial_names = [dim.name for dim in dim_info]
 
         label = os.path.basename(path).removesuffix(".zarr")
         dataset_metadata = copy.copy(dataset_metadata)
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
-        self._dataset_metadata = dataset_metadata.as_flat_str_dict()
 
+        self._writer = ZarrWriter(
+            path=path,
+            dims=(ENSEMBLE_DIM, LEAD_TIME_DIM, *spatial_names),
+            coords={
+                ENSEMBLE_DIM: np.arange(n_samples),
+                LEAD_TIME_DIM: np.arange(self._n_months),
+                **{name: np.asarray(coords[name]) for name in spatial_names},
+            },
+            chunks=_validate_chunks(chunks),
+            array_attributes={
+                name: metadata.as_attrs()
+                for name, metadata in variable_metadata.items()
+            },
+            group_attributes=dataset_metadata.as_flat_str_dict(),
+            mode="w",  # ACE data writers are expected to overwrite existing data
+            # each batch rewrites the months it touches, by design
+            overwrite_check=False,
+            # the lead-time axis is a month count, not a date
+            time_units=LEAD_TIME_UNITS,
+            time_calendar=None,
+            nondim_coords=_nondim_coords(
+                initial_condition_times=initial_condition_times,
+                month_indexer=self._month_indexer,
+                n_months=self._n_months,
+                n_samples=n_samples,
+                calendar=calendar,
+            ),
+        )
         # With save_names=None the variables to create aren't known until the
-        # first batch, so the store is created then.
-        self._root: zarr.Group | None = None
+        # first batch, so the store is initialized then.
+        self._store_initialized = False
 
-    @property
-    def _store(self) -> zarr.Group:
-        if self._root is None:
-            raise RuntimeError("Zarr store is not initialized yet.")
-        return self._root
-
-    def _get_variable_names_to_save(
-        self, *data_varnames: Iterable[str]
-    ) -> Iterable[str]:
-        return get_all_names(*data_varnames, allowlist=self._save_names)
-
-    def _chunks_for(self, dims: Sequence[str], sizes: Sequence[int]) -> tuple[int, ...]:
-        return tuple(
-            self._chunks.get(dim, size) for dim, size in zip(dims, sizes, strict=True)
-        )
-
-    def _initialize_store(self, data: Mapping[str, torch.Tensor]):
-        """Create the store, with the lead-time axis pre-allocated."""
-        n_months = self._n_months
-        dim_info = DIM_INFO_HEALPIX if "face" in self.coords else DIM_INFO_LATLON
-        example = next(iter(data.values()))
-        n_samples = example.shape[0]
-        root = zarr.open_group(self.path, mode="w")
-        root.update_attributes(self._dataset_metadata)
-
-        lead_time = root.create_array(
-            name=LEAD_TIME_DIM,
-            shape=(n_months,),
-            dtype="int64",
-            dimension_names=[LEAD_TIME_DIM],
-        )
-        lead_time.attrs["units"] = LEAD_TIME_UNITS
-        lead_time[:] = np.arange(n_months)
-
-        init_time = root.create_array(
-            name=INIT_TIME,
-            shape=(n_samples,),
-            dtype="int64",
-            dimension_names=[ENSEMBLE_DIM],
-        )
-        init_time.attrs["units"] = DATETIME_ENCODING_UNITS
-        init_time.attrs["calendar"] = self._calendar
-        init_time[:] = cftime.date2num(
-            self._initial_condition_times,
-            units=DATETIME_ENCODING_UNITS,
-            calendar=self._calendar,
-        )
-
-        valid_time = root.create_array(
-            name=VALID_TIME,
-            shape=(n_samples, n_months),
-            dtype="int64",
-            dimension_names=[ENSEMBLE_DIM, LEAD_TIME_DIM],
-        )
-        valid_time.attrs["units"] = TIME_UNITS
-        valid_time.attrs["calendar"] = self._calendar
-        valid_time[:] = get_valid_times(
-            init_years=self._month_indexer.init_years,
-            init_months=self._month_indexer.init_months,
-            n_months=n_months,
-            calendar=self._calendar,
-        )
-
-        root.create_array(
-            name=COUNTS,
-            shape=(n_samples, n_months),
-            dtype="int64",
-            fill_value=0,
-            dimension_names=[ENSEMBLE_DIM, LEAD_TIME_DIM],
-        )
-
-        spatial_names = []
-        spatial_sizes = []
-        for dim in dim_info:
-            dim_size = example.shape[dim.index]
-            spatial_names.append(dim.name)
-            spatial_sizes.append(dim_size)
-            if dim.name in self.coords:
-                coord = root.create_array(
-                    name=dim.name,
-                    shape=(dim_size,),
-                    dtype=FLOAT_DTYPE,
-                    dimension_names=[dim.name],
-                )
-                coord[:] = np.asarray(self.coords[dim.name])
-
-        dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, *spatial_names)
-        sizes = (n_samples, n_months, *spatial_sizes)
-        for name in self._get_variable_names_to_save(data.keys()):
-            variable = root.create_array(
-                name=name,
-                shape=sizes,
-                chunks=self._chunks_for(dims, sizes),
-                dtype=FLOAT_DTYPE,
-                # means start at zero, not NaN, since add_data folds into the
-                # stored value; months the run never reaches have a zero count
-                fill_value=0.0,
-                dimension_names=dims,
-            )
-            attrs: dict[str, str] = {}
-            if name in self.variable_metadata:
-                attrs.update(self.variable_metadata[name].as_attrs())
-            attrs["coordinates"] = " ".join([INIT_TIME, VALID_TIME, COUNTS])
-            variable.attrs.update(attrs)
-        zarr.consolidate_metadata(root.store)
-        self._root = zarr.open_group(self.path, mode="r+")
+    def _get_variable_names_to_save(self, *data_varnames: Iterable[str]) -> list[str]:
+        return list(get_all_names(*data_varnames, allowlist=self._save_names))
 
     def append_batch(
         self,
@@ -246,34 +169,36 @@ class MonthlyZarrWriter:
             )
 
         months = self._month_indexer.month_indices(batch_time)
-        n_months = self._n_months
-        if np.min(months) < 0 or np.max(months) >= n_months:
+        if np.min(months) < 0 or np.max(months) >= self._n_months:
             raise ValueError(
                 f"Batch times span month indices {np.min(months)} to "
                 f"{np.max(months)}, outside the pre-allocated range of "
-                f"{n_months} months implied by the run's initial condition times, "
-                "timestep and number of timesteps."
+                f"{self._n_months} months implied by the run's initial condition "
+                "times, timestep and number of timesteps."
             )
-        if self._root is None:
-            self._initialize_store(data)
-        month_min = int(np.min(months))
-        month_slice = slice(month_min, int(np.max(months)) + 1)
 
-        counts = self._store[COUNTS]
-        start_counts = counts[:, month_slice]
-        for variable_name in self._get_variable_names_to_save(data.keys()):
-            variable = self._store[variable_name]
-            month_data = variable[:, month_slice]
+        names = self._get_variable_names_to_save(data.keys())
+        if not self._store_initialized:
+            self._writer.initialize_store(data_dtype=FLOAT_DTYPE, data_vars=names)
+            self._store_initialized = True
+
+        month_min = int(np.min(months))
+        position_slices = {LEAD_TIME_DIM: slice(month_min, int(np.max(months)) + 1)}
+
+        # counts is stored as a non-dimension coordinate, so that readers attach
+        # it to the data, but it is read back and updated like the data itself.
+        stored = self._writer.read_batch([*names, COUNTS], position_slices)
+        start_counts = stored[COUNTS]
+        for name in names:
             add_data(
-                target=month_data,
+                target=stored[name],
                 target_start_counts=start_counts,
-                source=data[variable_name].detach().cpu().numpy(),
+                source=data[name].detach().cpu().numpy(),
                 months_elapsed=months - month_min,
             )
-            variable[:, month_slice] = month_data
-        # counts must be added after data, as we use the base counts when
-        # updating means
-        counts[:, month_slice] = start_counts + np.stack(
+        # counts must be updated after the data, as the base counts are what
+        # the mean update above folds into
+        stored[COUNTS] = start_counts + np.stack(
             [
                 np.bincount(
                     months[i_sample] - month_min, minlength=start_counts.shape[1]
@@ -281,12 +206,51 @@ class MonthlyZarrWriter:
                 for i_sample in range(n_samples_data)
             ]
         )
+        self._writer.record_batch(data=stored, position_slices=position_slices)
 
     def flush(self):
         """No-op: each append_batch writes through to the store."""
 
     def finalize(self):
         """No-op: each append_batch writes through to the store."""
+
+
+def _nondim_coords(
+    initial_condition_times: npt.NDArray[cftime.datetime],
+    month_indexer: MonthIndexer,
+    n_months: int,
+    n_samples: int,
+    calendar: str,
+) -> dict[str, xr.DataArray]:
+    """Init time, valid time and counts, in the order readers should see them."""
+    init_time = xr.DataArray(
+        cftime.date2num(
+            initial_condition_times,
+            units=DATETIME_ENCODING_UNITS,
+            calendar=calendar,
+        ).astype(np.int64),
+        dims=(ENSEMBLE_DIM,),
+        attrs={"units": DATETIME_ENCODING_UNITS, "calendar": calendar},
+    )
+    valid_time = xr.DataArray(
+        get_valid_times(
+            init_years=month_indexer.init_years,
+            init_months=month_indexer.init_months,
+            n_months=n_months,
+            calendar=calendar,
+        ),
+        dims=(ENSEMBLE_DIM, LEAD_TIME_DIM),
+        attrs={"units": TIME_UNITS, "calendar": calendar},
+    )
+    # counts starts at zero, and so do the means, since add_data folds into the
+    # stored value; a month the run never reaches keeps a mean of 0 and a count
+    # of 0, so consumers must use counts to tell a real zero from an unwritten
+    # month
+    counts = xr.DataArray(
+        np.zeros((n_samples, n_months), dtype=np.int64),
+        dims=(ENSEMBLE_DIM, LEAD_TIME_DIM),
+    )
+    return {INIT_TIME: init_time, VALID_TIME: valid_time, COUNTS: counts}
 
 
 def _validate_chunks(chunks: Mapping[str, int] | None) -> dict[str, int]:
