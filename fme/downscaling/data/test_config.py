@@ -417,7 +417,7 @@ def test_PairedDataLoaderConfig_prime_meridian_crossing(tmp_path):
     # test_build_aligned_subset_pair_preserves_scale_factor_across_seam.
     coarse_spacing = 360.0 / coarse_n_lon
     for grid, margin in ((batch.coarse, 0.0), (batch.fine, coarse_spacing / 2)):
-        lon = grid.latlon_coordinates.lon[0].cpu()  # batch members are identical
+        lon = grid.latlon_coordinates.lon.cpu()
         _assert_lon_in_extent_convention(lon, lon_extent, margin=margin)
         values = grid.data["var0"][0].cpu()  # (n_lat, n_lon)
         # lon broadcasts against the trailing lon dim of values

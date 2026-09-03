@@ -10,13 +10,7 @@ from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data import (
-    BatchData,
-    BatchedLatLonCoordinates,
-    PairedBatchData,
-    StaticInput,
-    StaticInputs,
-)
+from fme.downscaling.data import BatchData, PairedBatchData, StaticInput, StaticInputs
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModel,
@@ -91,12 +85,9 @@ def make_batch_data(
     assert lon_size == len(lon_values)
     data = {"x": torch.ones(batch_size, lat_size, lon_size, device=get_device())}
     time = xr.DataArray(range(batch_size), dims=["batch"])
-    lat = torch.tensor(lat_values, dtype=torch.float32)
-    lon = torch.tensor(lon_values, dtype=torch.float32)
-    latlon = BatchedLatLonCoordinates(
-        lat=lat.unsqueeze(0).expand(batch_size, -1),
-        lon=lon.unsqueeze(0).expand(batch_size, -1),
-    )
+    lat = torch.as_tensor(lat_values, dtype=torch.float32, device=get_device())
+    lon = torch.as_tensor(lon_values, dtype=torch.float32, device=get_device())
+    latlon = LatLonCoordinates(lat=lat, lon=lon)
     return BatchData(data=data, time=time, latlon_coordinates=latlon)
 
 

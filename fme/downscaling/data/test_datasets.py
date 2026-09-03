@@ -25,7 +25,7 @@ from fme.downscaling.data.datasets import (
     patched_batch_gen_from_paired_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
-from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
+from fme.downscaling.data.utils import ClosedInterval
 
 
 @pytest.mark.parametrize("drop_last", [True, False])
@@ -99,75 +99,6 @@ def get_batch_items(num_items=3, lat_dim=8, lon_dim=16):
         BatchItem(*item)
         for item in get_example_data_tuples(num_items, lat_dim, lon_dim)
     ]
-
-
-def test_batched_latlon_coordinates_from_sequence():
-    coords = get_example_latlon_coordinates()
-    items = [coords] * 3
-
-    # Test from_sequence method
-    batched = BatchedLatLonCoordinates.from_sequence(items)
-
-    # Verify shape matches shapes
-    assert batched.lat.shape == (3, 4)  # batch_size=3, n_lat=4
-    assert batched.lon.shape == (3, 5)  # batch_size=3, n_lon=5
-    assert torch.allclose(batched.lat[0], coords.lat)
-    assert torch.allclose(batched.lon[1], coords.lon)
-
-    # Test dunder methods
-    assert len(batched) == 3
-    batched2 = BatchedLatLonCoordinates.from_sequence(items)
-    assert batched == batched2
-
-    item = batched[0]
-    assert isinstance(item, LatLonCoordinates)
-    assert torch.allclose(item.lat, coords.lat)
-    assert torch.allclose(item.lon, coords.lon)
-
-
-def test_batched_latlon_shape_inconsistent():
-    coords = get_example_latlon_coordinates()
-    # inconsistent shapes in join
-    mishaped_coord = LatLonCoordinates(
-        lat=torch.tensor(
-            [
-                0.0,
-                30.0,
-            ]
-        ),
-        lon=torch.tensor([0.0, 90.0, 180.0, 270.0, 360.0]),
-    )
-    with pytest.raises(RuntimeError):
-        BatchedLatLonCoordinates.from_sequence([coords, mishaped_coord])
-
-    # inconsistent leading dimensions
-    lat = torch.randn(3, 5, 6)
-    lon = torch.randn(5, 3, 12)
-    with pytest.raises(ValueError):
-        BatchedLatLonCoordinates(lat=lat, lon=lon)
-
-    # inconsistent leading dimensions
-    lat = torch.randn(5, 6)
-    lon = torch.randn(3, 5, 12)
-    with pytest.raises(ValueError):
-        BatchedLatLonCoordinates(lat=lat, lon=lon)
-
-    # fail on single dimensional input
-    lat = torch.randn(5)
-    lon = torch.randn(3, 12)
-    with pytest.raises(ValueError):
-        BatchedLatLonCoordinates(lat=lat, lon=lon)
-
-
-def test_batched_latlon_coordinates_area_weights():
-    # Create example coordinates
-    coords = get_example_latlon_coordinates()
-    items = [coords] * 3
-
-    # Test from_sequence method
-    batched = BatchedLatLonCoordinates.from_sequence(items)
-    area_weights = batched.area_weights
-    assert area_weights.shape == (3, 4, 5)
 
 
 def test_batch_item():
@@ -320,8 +251,8 @@ def test_batch_data_from_sequence():
     assert len(batched.time) == num_items
     xr.testing.assert_equal(batched.time[0], items[0].time)
 
-    assert batched.latlon_coordinates.lat.shape == (num_items, 8)
-    assert batched.latlon_coordinates.lon.shape == (num_items, 16)
+    assert batched.latlon_coordinates.lat.shape == (8,)
+    assert batched.latlon_coordinates.lon.shape == (16,)
 
 
 def test_batch_data_get_item():
@@ -341,8 +272,8 @@ def test_batch_data_expand_and_fold():
     assert torch.equal(expanded.data["x"][9], batched.data["x"][0])
     assert expanded.time.shape == (30,)
     assert expanded.time[9].values == batched.time[0].values
-    assert expanded.latlon_coordinates.lat.shape == (30, 8)
-    assert expanded.latlon_coordinates.lon.shape == (30, 16)
+    assert expanded.latlon_coordinates.lat.shape == (8,)
+    assert expanded.latlon_coordinates.lon.shape == (16,)
 
 
 def get_mock_dataset(field_leading_dim=1):
@@ -458,11 +389,11 @@ def test_BatchData_slice_latlon():
 
     assert torch.equal(
         batch_slice.latlon_coordinates.lat,
-        batch.latlon_coordinates.lat[:, lat_slice],
+        batch.latlon_coordinates.lat[lat_slice],
     )
     assert torch.equal(
         batch_slice.latlon_coordinates.lon,
-        batch.latlon_coordinates.lon[:, lon_slice],
+        batch.latlon_coordinates.lon[lon_slice],
     )
     assert torch.equal(
         batch_slice.data["x"],
@@ -481,10 +412,7 @@ def _make_batch_data_for_patching(batch_size=2):
         )
     }
     time = xr.DataArray(list(range(batch_size)), dims=["batch"])
-    latlon_coordinates = BatchedLatLonCoordinates(
-        lat=lat.unsqueeze(0).expand(batch_size, -1).clone(),
-        lon=lon.unsqueeze(0).expand(batch_size, -1).clone(),
-    )
+    latlon_coordinates = LatLonCoordinates(lat=lat, lon=lon)
     return BatchData(data=data, time=time, latlon_coordinates=latlon_coordinates)
 
 
@@ -505,15 +433,15 @@ def test_batch_data_generate_from_patches():
     assert len(generated) == 2
 
     # Patch 0: rows 1-2, all columns
-    expected_lat = torch.tensor([[1.0, 2.0], [1.0, 2.0]])
-    expected_lon = torch.tensor([[0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 2.0, 3.0]])
+    expected_lat = torch.tensor([1.0, 2.0])
+    expected_lon = torch.tensor([0.0, 1.0, 2.0, 3.0])
     assert torch.equal(generated[0].latlon_coordinates.lat, expected_lat)
     assert torch.equal(generated[0].latlon_coordinates.lon, expected_lon)
     assert torch.equal(generated[0].data["x"], batch.data["x"][:, 1:3, :])
 
     # Patch 1: rows 0-1, column 2
-    expected_lat = torch.tensor([[0.0, 1.0], [0.0, 1.0]])
-    expected_lon = torch.tensor([[2.0], [2.0]])
+    expected_lat = torch.tensor([0.0, 1.0])
+    expected_lon = torch.tensor([2.0])
     assert torch.equal(generated[1].latlon_coordinates.lat, expected_lat)
     assert torch.equal(generated[1].latlon_coordinates.lon, expected_lon)
     assert torch.equal(generated[1].data["x"], batch.data["x"][:, 0:2, 2:3])
@@ -623,10 +551,7 @@ def _make_paired_batch(
     coarse = BatchData(
         data={"x": torch.zeros(batch_size, n_lat, n_lon)},
         time=xr.DataArray(list(range(batch_size)), dims=["batch"]),
-        latlon_coordinates=BatchedLatLonCoordinates(
-            lat=lat_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
-            lon=lon_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
-        ),
+        latlon_coordinates=LatLonCoordinates(lat=lat_coarse, lon=lon_coarse),
     )
     n_lat_fine = n_lat * downscale_factor
     n_lon_fine = n_lon * downscale_factor
@@ -635,10 +560,7 @@ def _make_paired_batch(
     fine = BatchData(
         data={"x": torch.zeros(batch_size, n_lat_fine, n_lon_fine)},
         time=xr.DataArray(list(range(batch_size)), dims=["batch"]),
-        latlon_coordinates=BatchedLatLonCoordinates(
-            lat=lat_fine.unsqueeze(0).expand(batch_size, -1).clone(),
-            lon=lon_fine.unsqueeze(0).expand(batch_size, -1).clone(),
-        ),
+        latlon_coordinates=LatLonCoordinates(lat=lat_fine, lon=lon_fine),
     )
     return PairedBatchData(fine=fine, coarse=coarse)
 
