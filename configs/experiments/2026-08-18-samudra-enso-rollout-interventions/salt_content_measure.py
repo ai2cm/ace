@@ -44,6 +44,7 @@ def main() -> None:
             for k in range(19)
         ]
     )  # (19, lat, lon)
+    dz = np.where(np.isfinite(dz), dz, 0.0)  # deptho is NaN over land
 
     n_time = g["so_0"].shape[0]
     chunk = 360
