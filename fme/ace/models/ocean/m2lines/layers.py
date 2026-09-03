@@ -72,9 +72,7 @@ class MultiResolutionFiLM(torch.nn.Module):
     construction ``ConditionalLayerNorm`` uses for the SFNO:
     ``x -> x * (1 + W_scale(c)) + W_bias(c)``. Both convolutions are
     zero-initialized, so an untrained model is exactly deterministic and any
-    dependence on ``c`` is learned. Nothing here is specific to noise: ``c`` is
-    any per-sample conditioning field carried on the ``Context``, and Samudra
-    passes the noise field today.
+    dependence on ``c`` is learned.
 
     Resolution handling is this module's other responsibility. The conditioning
     field arrives at the model's input resolution while a conditioned block may
