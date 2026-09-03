@@ -1,5 +1,6 @@
-version: "2026-07-22"
-family_name: cm4-1pctco2-4deg-coupled
+# make cm4_1pctCO2_coupled RESOLUTION=1deg
+version: "2026-07-15"
+family_name: om4-1pctco2-1deg-coupled
 output_directory: gs://vcm-ml-intermediate
 
 coupled_datasets:
@@ -7,7 +8,7 @@ coupled_datasets:
     how: interpolate_sst
   coupled_sea_surface:
     precomputed_sea_ice_mask:
-      zarr_path: gs://vcm-ml-intermediate/2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
+      zarr_path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
     ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
     ocean_extra_fill_values:
       UI: 0.0
@@ -42,15 +43,15 @@ coupled_datasets:
 input_datasets:
   climate_data_type: "CM4"
   atmosphere:
-    zarr_path: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr.zarr
+    zarr_path: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
     time_chunk_size: 360
     extra_fields:
       names_and_prefixes: ["ak_", "bk_"]
   ocean:
-    zarr_path: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr
+    zarr_path: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
     time_chunk_size: 365
     extra_fields:
       names_and_prefixes: ["idepth_", "mask_", "deptho"]
   stats:
-    atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr-stats/combined
-    ocean_dir: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-4deg-ocean-5daily-stats/2026-07-15-om4-1pctco2-4deg-ocean-5daily
+    atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats/combined
+    ocean_dir: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-1deg-ocean-5daily-stats
