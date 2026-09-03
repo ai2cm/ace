@@ -47,6 +47,6 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|
 # save_monthly_files overridden OFF per row rather than edited in the shared
 # config: the monthly files are ~35 GiB per job and dominated the datasets that
 # got reclaimed in the first place. They feed no diagnostic this report uses.
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
