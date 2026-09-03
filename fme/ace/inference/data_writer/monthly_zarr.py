@@ -101,14 +101,9 @@ class MonthlyZarrWriter:
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         self._dataset_metadata = dataset_metadata.as_flat_str_dict()
 
-        # The lead-time axis is anchored at both ends, but only one end is known
-        # here. Its origin is the calendar month of the run's first *output*
-        # time, which is not necessarily the initial condition's month: in
-        # production the deriver drops the IC step, so the first time this
-        # writer sees is IC + timestep, which can land in the next calendar
-        # month. Nothing in the constructor args says which convention is in
-        # play, so the origin is fixed from the first batch, as
-        # MonthlyDataWriter does. The spatial dims likewise come from the data.
+        # The month axis origin is the calendar month of the first output time,
+        # which need not be the IC's month, so it and the spatial dims are only
+        # known once a batch arrives.
         self._n_months: int | None = None
         self._root: zarr.Group | None = None
 
@@ -247,8 +242,7 @@ class MonthlyZarrWriter:
 
         months = self._month_indexer.month_indices(batch_time)
         if self._n_months is None:
-            # month_indices has now fixed the axis origin, which n_months_through
-            # needs; _final_times pinned the other end at construction.
+            # month_indices has now fixed the axis origin, which this needs.
             self._n_months = self._month_indexer.n_months_through(self._final_times)
         n_months = self._n_months
         if np.min(months) < 0 or np.max(months) >= n_months:
