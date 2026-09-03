@@ -75,7 +75,7 @@ Table of contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Downscaling (e.g. HiRO-ACE)
+   :caption: Downscaling (e.g. HiRO)
 
    Inference <downscaling_inference>
 
