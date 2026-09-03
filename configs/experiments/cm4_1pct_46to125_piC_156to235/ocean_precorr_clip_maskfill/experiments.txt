@@ -49,3 +49,14 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|0
 # per-channel overrides.
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+
+# Arm C (freshwater trio masked, sea_surface_fraction excluded) finished 75
+# epochs 2026-08-27, exit 0, selected epoch 45. Both rollouts, against the
+# shared cm4_eval ocean configs. The readout is collapse/no-collapse, not a
+# so_0 number: Arm C is one channel from ..._fillmean_maskfw, which collapsed
+# at yr 29 (1pct) / 57 (piC), so this is the first clean test of the freshwater
+# hypothesis with the sea_surface_fraction confound removed. It is also the
+# only measurement of whether masking radiation, sensible heat and wind stress
+# buys anything beyond masking the freshwater trio.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|01M0TSBVYP97KP2MQQMMZXKEZZ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|01M0TSBVYP97KP2MQQMMZXKEZZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
