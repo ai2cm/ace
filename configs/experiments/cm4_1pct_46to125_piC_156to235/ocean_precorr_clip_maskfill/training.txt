@@ -29,7 +29,7 @@
 # writes it back, so an rs0 row left at `train` relaunches rs0 alongside the new
 # seeds.
 
-group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean
@@ -230,6 +230,6 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs2|s
 # one seed reads a ~40-60% so_0 effect and no smaller. The primary readouts here
 # (sst, the thetao family mean) have 3-5% seed CV, so they are readable at rs0.
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'|3h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'|3h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'|3h
