@@ -484,7 +484,7 @@ def test_ocean_salt_content_correction():
     config = OceanCorrectorConfig(
         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
             method="scaled_salinity",
-            ice_salinity_psu=5.0,
+            ice_volume_salt_slope_psu=5.849,
             constant_unaccounted_salting=1e-9,
         )
     )
@@ -530,7 +530,7 @@ def test_ocean_salt_content_correction():
     corrected_salt = depth_coordinate.depth_integral(
         corrected_od.sea_water_salinity
     ).nanmean(dim=(-1, -2), keepdim=True)
-    expected_change = -5.0 * 0.2 + 1e-9 * timestep.total_seconds()
+    expected_change = 5.849 * 0.2 + 1e-9 * timestep.total_seconds()
     torch.testing.assert_close(
         corrected_salt,
         input_salt + expected_change,

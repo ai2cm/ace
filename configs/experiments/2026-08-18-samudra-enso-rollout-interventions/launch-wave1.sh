@@ -67,6 +67,12 @@ launch() {
                 --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
                 --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
 
+  if [[ "$arm" == "residfixft2" ]]; then
+    mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
+            --dataset "${RESIDFIX_SNAPSHOT_DATASET}:best_ckpt.tar:/ocean_ckpt.tar"
+            --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
+            --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "residfixft" ]]; then
     mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
             --dataset "${RESIDFIX_SNAPSHOT_DATASET}:best_ckpt.tar:/ocean_ckpt.tar"

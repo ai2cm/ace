@@ -262,6 +262,37 @@ def arm_residfixft(c: dict) -> dict:
     return c
 
 
+def arm_residfixft2(c: dict) -> dict:
+    """Residfixft plus the two stabilizers the rollout anatomy motivated.
+
+    Same tendency-forward residual ocean as residfixft, with (1) the salt
+    content corrector, constants measured from the truth zarr (per-step
+    dS = +5.849 * d(ice volume) - 3.7e-5 psu m per 5-day step, residual std
+    4.2e-2 - three orders below the runaway this constrains), and (2) the
+    DLESyM-Ocean-style rollout curriculum: coupled training windows extended
+    to 12 steps so training sees the drift it must oppose, with hzn12's
+    memory settings (validation batch 4).
+    """
+    c = arm_residfixft(c)
+    step = c["stepper"]["ocean"]["stepper"]["step"]["config"]
+    corr = step["corrector"]["config"]
+    corr["ocean_salt_content_correction"] = {
+        "method": "scaled_salinity",
+        "ice_volume_salt_slope_psu": 5.849,
+        "constant_unaccounted_salting": -8.63e-11,
+    }
+    st = c["stepper_training"]
+    st["n_coupled_steps"] = 12
+    st["ocean"]["n_steps"]["outcomes"] = [
+        {"steps": 0, "probability": 0.1},
+        {"steps": 2, "probability": 0.3},
+        {"steps": 6, "probability": 0.3},
+        {"steps": 12, "probability": 0.3},
+    ]
+    c["validation"]["loader"]["batch_size"] = 4
+    return c
+
+
 ARMS = {
     "wint5": arm_wint5,
     "wint20": arm_wint20,
@@ -269,6 +300,7 @@ ARMS = {
     "noohc": arm_noohc,
     "tendloss": arm_tendloss,
     "residfixft": arm_residfixft,
+    "residfixft2": arm_residfixft2,
 }
 
 

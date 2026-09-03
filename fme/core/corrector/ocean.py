@@ -125,11 +125,14 @@ class OceanSaltContentBudgetConfig:
         method: The available option is "scaled_salinity", which enforces
             the salt budget by scaling the predicted salinity by a
             vertically and horizontally uniform correction factor.
-        ice_salinity_psu: Effective salinity of sea ice. Water converted to
-            ice carries this salinity out of the ocean column, so the
-            expected change in global column salt content per step is
-            ``-ice_salinity_psu * change_in_global_mean_ice_volume``. Set to
-            0 to ignore the ice exchange.
+        ice_volume_salt_slope_psu: Empirical slope of the global column
+            salt content change against the change in global-mean sea ice
+            volume: ``expected_change = slope * delta_ice_volume``. Simple
+            bookkeeping (ice exporting salt at its own salinity) suggests a
+            small negative slope, but CM4's brine-rejection plumbing
+            measures +5.85 psu on the 1pctCO2 dataset - calibrate against
+            the target data rather than assuming. Set to 0 to ignore the
+            ice exchange and hold salt content fixed.
         constant_unaccounted_salting: Area-weighted global mean rate of
             column salt content change, in psu m / s, added to the expected
             change at every step. Useful when the target data's salt budget
@@ -137,7 +140,7 @@ class OceanSaltContentBudgetConfig:
     """
 
     method: Literal["scaled_salinity"]
-    ice_salinity_psu: float = 5.0
+    ice_volume_salt_slope_psu: float = 0.0
     constant_unaccounted_salting: float = 0.0
 
 
@@ -375,7 +378,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     vertical_coordinate,
                     timestep_seconds,
                     self.ocean_salt_content_correction.method,
-                    self.ocean_salt_content_correction.ice_salinity_psu,
+                    self.ocean_salt_content_correction.ice_volume_salt_slope_psu,
                     self.ocean_salt_content_correction.constant_unaccounted_salting,
                 )
             )
@@ -394,7 +397,7 @@ class OceanSaltContentCorrection:
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
     method: Literal["scaled_salinity"]
-    ice_salinity_psu: float
+    ice_volume_salt_slope_psu: float
     unaccounted_salting: float
 
     def __call__(
@@ -421,7 +424,7 @@ class OceanSaltContentCorrection:
             self.vertical_coordinate,
             self.timestep_seconds,
             self.method,
-            self.ice_salinity_psu,
+            self.ice_volume_salt_slope_psu,
             self.unaccounted_salting,
         )
         return corrected, corrector_state
@@ -576,7 +579,7 @@ def _force_conserve_ocean_salt_content(
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
     method: Literal["scaled_salinity"] = "scaled_salinity",
-    ice_salinity_psu: float = 5.0,
+    ice_volume_salt_slope_psu: float = 0.0,
     unaccounted_salting: float = 0.0,
 ) -> TensorDict:
     """Scale the predicted salinity so global column salt content changes
@@ -605,14 +608,14 @@ def _force_conserve_ocean_salt_content(
         name="ocean_salt_content",
     )
     expected_change = torch.zeros_like(global_input_salt)
-    if ice_salinity_psu != 0.0:
+    if ice_volume_salt_slope_psu != 0.0:
         try:
             ice_change = area_weighted_mean(
                 gen.sea_ice_volume - input.sea_ice_volume,
                 keepdim=True,
                 name="ocean_salt_content",
             )
-            expected_change = expected_change - ice_salinity_psu * ice_change
+            expected_change = expected_change + ice_volume_salt_slope_psu * ice_change
         except KeyError:
             pass  # no sea ice volume in this model: no ice exchange term
     expected_change = expected_change + unaccounted_salting * timestep_seconds
