@@ -1,8 +1,10 @@
 import datetime
+import os
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import cftime
+import fsspec
 import numpy as np
 import pandas as pd
 import pytest
@@ -598,6 +600,8 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
     time_coarsen: TimeCoarsenConfig | MonthlyCoarsenConfig | None,
 ):
     experiment_dir = "memory://experiment_dir"
+    fs, _ = fsspec.url_to_fs(experiment_dir)
+    fs.makedirs(experiment_dir, exist_ok=True)
     format = NetCDFWriterConfig()
     config = FileWriterConfig(
         label="test",
@@ -606,8 +610,8 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
         format=format,
     )
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
-    with pytest.raises(ValueError, match="only supports local"):
-        config.build(
+    try:
+        writer = config.build(
             experiment_dir=experiment_dir,
             initial_condition_times=initial_condition_times,
             n_timesteps=1,
@@ -616,6 +620,10 @@ def test_netcdf_file_writer_with_non_local_experiment_dir(
             coords={},
             dataset_metadata=DatasetMetadata(),
         )
+        writer.finalize()
+        assert fs.exists(os.path.join(experiment_dir, "test.nc"))
+    finally:
+        fs.rm(experiment_dir, recursive=True)
 
 
 @pytest.mark.parametrize(
