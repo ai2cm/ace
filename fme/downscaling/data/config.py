@@ -1,8 +1,11 @@
 import dataclasses
+import datetime
 from collections.abc import Sequence
 from typing import final
 
+import numpy as np
 import torch
+import xarray as xr
 from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
@@ -40,6 +43,27 @@ from fme.downscaling.data.video_datasets import (
     VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.requirements import DataRequirements
+
+
+def _expand_clip_starts_to_frame_times(
+    clip_start_times: xr.CFTimeIndex,
+    n_timesteps: int,
+    timestep: datetime.timedelta,
+) -> tuple[xr.CFTimeIndex, np.ndarray]:
+    """Sorted, deduplicated union of every clip's frame times, plus the index
+    of each clip's start time within that union.
+
+    Expands per clip start rather than from one global anchor, so this only
+    ever extrapolates within a clip's own span -- exactly what a non-None
+    ``timestep`` (see ``_get_timestep``) already guarantees is safe, since a
+    clip never spans a dataset boundary.
+    """
+    frame_time_set = {
+        t + j * timestep for t in clip_start_times for j in range(n_timesteps)
+    }
+    frame_times = xr.CFTimeIndex(sorted(frame_time_set))
+    clip_start_indices = np.array([frame_times.get_loc(t) for t in clip_start_times])
+    return frame_times, clip_start_indices
 
 
 def _roll_lons_to_extent_convention(
@@ -687,11 +711,24 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
         train: bool,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        drop_last: bool | None = None,
     ) -> PairedVideoGriddedData:
         """Build a paired fine/coarse loader of video clips.
 
         Each sample is a clip of ``self.n_timesteps`` consecutive frames with an
         explicit leading time axis, spaced ``self.clip_start_stride`` apart.
+
+        Args:
+            train: Whether this is the training split (enables shuffling).
+            requirements: Which fine/coarse variables to load.
+            dist: Distributed instance; defaults to the global singleton.
+            drop_last: Override for whether trailing partial batches are
+                dropped, both across ranks (sampler) and within a rank's
+                final batch (dataloader). Defaults to ``self.drop_last`` for
+                the sampler and ``True`` for the dataloader, matching
+                training's tolerance for slightly uneven batches. Pass
+                ``False`` (e.g. for test-set inference) to guarantee no
+                samples are silently dropped.
         """
         if dist is None:
             dist = Distributed.get_instance()
@@ -727,7 +764,12 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
                 f"Expected clips of {self.n_timesteps} timesteps, got "
                 f"{dataset_fine.sample_n_times}."
             )
-        all_times = dataset_fine.sample_start_times
+        fine_start_times = dataset_fine.sample_start_times
+        if properties_fine.timestep is None:
+            raise ValueError(
+                "Video clips require a uniform timestep; set infer_timestep=True "
+                "(the default) on the fine XarrayDataConfig(s)."
+            )
 
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
@@ -760,12 +802,20 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
         if stride > 1:
             keep = list(range(0, len(paired_dataset), stride))
             dataset = Subset(paired_dataset, keep)
-            all_times = all_times[::stride]
+            clip_start_times = fine_start_times[::stride]
         else:
             dataset = paired_dataset
+            clip_start_times = fine_start_times
+
+        frame_times, clip_start_indices = _expand_clip_starts_to_frame_times(
+            clip_start_times, self.n_timesteps, properties_fine.timestep
+        )
 
         sampler = self._get_sampler(
-            dataset=dataset, dist=dist, train=train, drop_last=self.drop_last
+            dataset=dataset,
+            dist=dist,
+            train=train,
+            drop_last=self.drop_last if drop_last is None else drop_last,
         )
         dataloader = DataLoader(
             dataset,
@@ -773,7 +823,7 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
             num_workers=self.num_data_workers,
             shuffle=(sampler is None) and train,
             sampler=sampler,
-            drop_last=True,
+            drop_last=True if drop_last is None else drop_last,
             pin_memory=using_gpu(),
             collate_fn=PairedVideoBatchData.from_sequence,
             multiprocessing_context=self._mp_context(),
@@ -792,6 +842,10 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
             n_timesteps=self.n_timesteps,
             dims=example.fine.latlon_coordinates.dims,
             variable_metadata=variable_metadata,
-            all_times=all_times,
+            clip_start_times=clip_start_times,
+            timestep=properties_fine.timestep,
+            frame_times=frame_times,
+            clip_start_indices=clip_start_indices,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
+            fine_extent_latlon_coords=example.fine.latlon_coordinates,
         )

@@ -500,14 +500,15 @@ class CoupledStepperConfig:
     @property
     def all_names(self) -> CoupledNames:
         """All variable names to log (outputs plus input-only forcings)."""
-        atmosphere_names = list(
-            set(
-                self.atmosphere.stepper.output_names
-                + self._atmosphere_forcing_exogenous_names
+        atmosphere_names = sorted(
+            set(self.atmosphere.stepper.output_names).union(
+                self._atmosphere_forcing_exogenous_names
             )
         )
-        ocean_names = list(
-            set(self.ocean.stepper.output_names + self._ocean_forcing_exogenous_names)
+        ocean_names = sorted(
+            set(self.ocean.stepper.output_names).union(
+                self._ocean_forcing_exogenous_names
+            )
         )
         return CoupledNames(ocean=ocean_names, atmosphere=atmosphere_names)
 
