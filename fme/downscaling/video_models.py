@@ -2159,6 +2159,7 @@ class VideoDiffusionModel:
             for k, v in generated.items()
         }
 
+    @torch.no_grad()
     def generate(
         self,
         batch: PairedVideoBatchData,
