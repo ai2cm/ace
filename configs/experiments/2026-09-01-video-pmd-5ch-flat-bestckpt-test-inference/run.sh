@@ -24,6 +24,15 @@
 # Expect ~16.5h (ensemble_chunk_size=1, 4 GPUs) -- same as the latest.ckpt run
 # (../2026-07-22-video-pmd-5ch-flat-test-inference/).
 #
+# RETRY NOTE (2026-09-03): with overwrite fixed, this OOM'd on titan itself --
+# "GPU 2 has a total capacity of 178.36 GiB ... 171.10 GiB allocated ...
+# 4.06 GiB reserved by PyTorch but unallocated", needing 1.63 GiB more. Same
+# batch_size as the 2026-07-22 run that succeeded on this same cluster/config,
+# so this is a razor-thin miss (need <1% more), not a real sizing error --
+# trying PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True (PyTorch's own
+# suggestion for exactly this "reserved but unallocated" shape of OOM) before
+# reaching for the throughput-halving fix of dropping batch_size.
+#
 # Prereqs: beaker-gantry installed; code committed + pushed (gantry runs your
 # pushed git commit; --allow-dirty lets the untracked eval scratch coexist).
 #
@@ -54,6 +63,7 @@ gantry run --allow-dirty \
     --beaker-image "$DEPS_ONLY_IMAGE" \
     --gpus "$N_GPUS" \
     --shared-memory 64GiB \
+    --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --budget ai2/atec-climate \
     --weka climate-default:/climate-default \
     --dataset "${CHECKPOINT_DATASET}:/checkpoint" \
