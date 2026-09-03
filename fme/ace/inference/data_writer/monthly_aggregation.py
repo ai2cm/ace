@@ -155,48 +155,6 @@ def find_boundary(month_array, start_month) -> int:
     return np.searchsorted(month_array, start_month, side="right")
 
 
-def get_days_since_reference(
-    years: np.ndarray,
-    months: np.ndarray,
-    reference_date: cftime.datetime,
-    n_months: int,
-    calendar: str,
-    month_offset: int = 0,
-) -> np.ndarray:
-    """
-    Get the days since a reference date for each month.
-
-    Args:
-        years: Array of years, of shape [n_samples].
-        months: Array of months, of shape [n_samples], zero-indexed.
-        reference_date: Reference date for the calendar.
-        n_months: Number of months to compute starting at each sample (year, month).
-        calendar: Calendar to use.
-        month_offset: Optional offset to enable computing days since the reference for
-            a range of elapsed months that does not start at zero (default 0).
-    """
-    months_elapsed = np.arange(month_offset, month_offset + n_months)
-    calendar_month = (months[:, None] + months_elapsed[None, :]) % 12
-    calendar_year = years[:, None] + (months[:, None] + months_elapsed[None, :]) // 12
-    days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)
-    for i in range(calendar_month.shape[0]):
-        dates_sample = xr.date_range(
-            cftime.datetime(
-                calendar_year[i, 0], calendar_month[i, 0] + 1, 1, calendar=calendar
-            ),
-            cftime.datetime(
-                calendar_year[i, -1], calendar_month[i, -1] + 1, 1, calendar=calendar
-            ),
-            freq="MS",
-            calendar=calendar,
-            use_cftime=True,
-        )
-        days_since_reference[i, :] = (
-            dates_sample.values - reference_date
-        ) // datetime.timedelta(days=1)
-    return days_since_reference
-
-
 def get_valid_times(
     init_years: np.ndarray,
     init_months: np.ndarray,
@@ -221,12 +179,25 @@ def get_valid_times(
         [n_samples, n_months].
     """
     reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
-    days_since_reference = get_days_since_reference(
-        years=init_years,
-        months=init_months,
-        n_months=n_months,
-        reference_date=reference_date,
-        calendar=calendar,
-        month_offset=month_offset,
+    months_elapsed = np.arange(month_offset, month_offset + n_months)
+    calendar_month = (init_months[:, None] + months_elapsed[None, :]) % 12
+    calendar_year = (
+        init_years[:, None] + (init_months[:, None] + months_elapsed[None, :]) // 12
     )
+    days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)
+    for i in range(calendar_month.shape[0]):
+        dates_sample = xr.date_range(
+            cftime.datetime(
+                calendar_year[i, 0], calendar_month[i, 0] + 1, 1, calendar=calendar
+            ),
+            cftime.datetime(
+                calendar_year[i, -1], calendar_month[i, -1] + 1, 1, calendar=calendar
+            ),
+            freq="MS",
+            calendar=calendar,
+            use_cftime=True,
+        )
+        days_since_reference[i, :] = (
+            dates_sample.values - reference_date
+        ) // datetime.timedelta(days=1)
     return days_since_reference + 14

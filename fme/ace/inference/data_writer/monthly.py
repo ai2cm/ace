@@ -115,7 +115,6 @@ class MonthlyDataWriter:
             label: Label to append to the filename.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
-            n_months: Number of months to write to the file.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.

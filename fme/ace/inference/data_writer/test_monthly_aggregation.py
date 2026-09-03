@@ -7,25 +7,38 @@ from fme.ace.inference.data_writer.monthly_aggregation import (
     MonthIndexer,
     add_data,
     find_boundary,
-    get_days_since_reference,
+    get_valid_times,
 )
+
+
+def _days_since_january(valid_times: np.ndarray, first_year: int, calendar: str):
+    """
+    Re-express valid times as days since ``first_year``-01-01.
+
+    ``get_valid_times`` returns the 15th of each month as days since
+    1970-01-01; this removes both offsets so expectations can be written
+    relative to the start of the first year.
+    """
+    reference_offset = (
+        cftime.datetime(first_year, 1, 1, calendar=calendar)
+        - cftime.datetime(1970, 1, 1, calendar=calendar)
+    ).days
+    return valid_times - 14 - reference_offset
 
 
 @pytest.mark.parametrize("num_years", [2, 500])
 @pytest.mark.parametrize("calendar", ["proleptic_gregorian", "noleap"])
-def test_get_days_since_reference(num_years, calendar):
+def test_get_valid_times(num_years, calendar):
     first_year = 2020
     final_year = first_year + num_years - 1
     years = np.array([i for i in range(first_year, final_year + 1)])
     months = np.zeros((num_years,), dtype=int)
     # For last year set month to 1
     months[-1] = 1
-    if calendar == "proleptic_gregorian":
-        reference_date = cftime.DatetimeProlepticGregorian(2020, 1, 1)
-    else:
-        reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
     n_months = 3
-    days = get_days_since_reference(years, months, reference_date, n_months, calendar)
+    days = _days_since_january(
+        get_valid_times(years, months, n_months, calendar), first_year, calendar
+    )
     assert days.shape == (num_years, 3)
     # 2020 is a leap year in proleptic_gregorian
     if calendar == "proleptic_gregorian":
@@ -53,7 +66,7 @@ def test_get_days_since_reference(num_years, calendar):
             assert days[499, 1] == 182135 + 31 + 28
 
 
-def test_days_since_reference_with_month_offset():
+def test_get_valid_times_with_month_offset():
     calendar = "noleap"
     month_offset = 2
     offset_n_months = 3
@@ -61,14 +74,12 @@ def test_days_since_reference_with_month_offset():
 
     years = np.array([2020, 2021])
     months = np.zeros((2,), dtype=int)
-    reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
 
-    full = get_days_since_reference(years, months, reference_date, n_months, calendar)
+    full = get_valid_times(years, months, n_months, calendar)
     expected = full[:, month_offset:]
-    result = get_days_since_reference(
+    result = get_valid_times(
         years,
         months,
-        reference_date,
         offset_n_months,
         calendar,
         month_offset=month_offset,
