@@ -23,8 +23,8 @@ max_epochs: 40
 ema:
   decay: 0.999
 inference:
-  - name: 10year
-    weight: 0.0
+  - name: 10year_insample
+    weight: 1.0
     epochs:
       start: 3
       step: 4
@@ -34,14 +34,14 @@ inference:
     loader:
       start_indices:
         times:
-          - '2015-01-01T06:00:00'
-          - '2015-01-02T06:00:00'
-          - '2015-01-03T06:00:00'
-          - '2015-01-04T06:00:00'
-          - '2015-01-05T06:00:00'
-          - '2015-01-06T06:00:00'
-          - '2015-01-07T06:00:00'
-          - '2015-01-08T06:00:00'
+          - '1995-01-01T06:00:00'
+          - '1995-01-02T06:00:00'
+          - '1995-01-03T06:00:00'
+          - '1995-01-04T06:00:00'
+          - '1995-01-05T06:00:00'
+          - '1995-01-06T06:00:00'
+          - '1995-01-07T06:00:00'
+          - '1995-01-08T06:00:00'
       dataset:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
@@ -105,54 +105,7 @@ inference:
         enabled: false
       histogram:
         enabled: true
-  - name: 10year_insample
-    weight: 1.0
-    epochs:
-      start: 3
-      step: 4
-    n_forward_steps: 14608
-    forward_steps_in_memory: 40
-    n_ensemble_per_ic: 1
-    loader:
-      start_indices:
-        times:
-          - '1995-01-01T06:00:00'
-          - '1995-01-02T06:00:00'
-          - '1995-01-03T06:00:00'
-          - '1995-01-04T06:00:00'
-          - '1995-01-05T06:00:00'
-          - '1995-01-06T06:00:00'
-          - '1995-01-07T06:00:00'
-          - '1995-01-08T06:00:00'
-      dataset:
-        data_path: /climate-default/
-        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
-        engine: zarr
-      num_data_workers: 4
-    aggregator:
-      step_means:
-        - step: 20
-          target: denorm
-          name: day_5
-          variables: *inference_variables
-        - step: 20
-          target: norm
-          name: day_5_norm
-          variables: *inference_variables
-      ensembles: []
-      mean_denorm:
-        enabled: false
-        target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      enso_index:
-        enabled: false
-      enso_coefficient:
-        enabled: false
-      histogram:
-        enabled: true
-  - name: weather_2024
+  - name: weather_2014
     weight: 0.0
     n_forward_steps: 20
     forward_steps_in_memory: 20
@@ -160,14 +113,14 @@ inference:
     loader:
       start_indices:
         times:
-          - '2024-06-01T06:00:00'
-          - '2024-06-02T06:00:00'
-          - '2024-06-03T06:00:00'
-          - '2024-06-04T06:00:00'
-          - '2024-06-05T06:00:00'
-          - '2024-06-06T06:00:00'
-          - '2024-06-07T06:00:00'
-          - '2024-06-08T06:00:00'
+          - '2014-06-01T06:00:00'
+          - '2014-06-02T06:00:00'
+          - '2014-06-03T06:00:00'
+          - '2014-06-04T06:00:00'
+          - '2014-06-05T06:00:00'
+          - '2014-06-06T06:00:00'
+          - '2014-06-07T06:00:00'
+          - '2014-06-08T06:00:00'
       dataset:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
@@ -268,12 +221,12 @@ inference:
         enabled: false
       ipo_index:
         enabled: false
-  - name: long_46year
+  - name: long_36year
     weight: 0.0
     epochs:
       start: 29
       step: 5
-    n_forward_steps: 67176
+    n_forward_steps: 52566
     forward_steps_in_memory: 40
     n_ensemble_per_ic: 1
     loader:

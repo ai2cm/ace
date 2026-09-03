@@ -194,11 +194,25 @@ base_name="train-1deg-6hourly-v2-era5-only-no-residual-no-co2"
 # selected best only as the submission. Select on validation inference error -- never on
 # trend, which the intercomparison scores as E2.
 #
-# Every stage runs for every seed. Stage-1 metrics do not predict final quality (the P0
-# probe), so there is no best-of-N shortcut that skips stage 2.
+# Stages 1 and 2 run for every seed; STAGE 3 RUNS FOR THE SELECTED SEED ONLY. Stage-1
+# metrics do not predict final quality (the P0 probe), so seeds cannot be culled before
+# stage 2. But the comparison is scored on stage-2 checkpoints -- stage 3 only fits the
+# pressure-level secondary decoder with the trunk frozen, and every field the seed
+# comparison uses already exists after stage 2 (this is why the findings report scores
+# long36-ace22-stage2 and long36-p1-rs*, not their stage-3 successors). Stage 3 is needed
+# only for the model that is actually submitted, whose E1-E5 scoring reads the plev
+# diagnostics. So: STAGE=3 SEEDS="<winner>", not the default.
 #
-# Usage:  STAGE=1 ./run-train.sh            # all three seeds
+# Evaluating a seed means a standalone long36 backfill of its stage-2 checkpoint, not the
+# inline long_36year entry. The inline one fires on a fixed epoch schedule (29/34/39) and
+# the selected checkpoint is not on it -- rs0's stage-2 best_inference_error was flat from
+# epoch 8. Matching the selected epoch would mean running the rollout every epoch, ~6 GPU-h
+# x 40 = ~240 GPU-h against 165 for the training itself. The inline entry is an in-flight
+# drift signal, not the evaluation.
+#
+# Usage:  STAGE=1 ./run-train.sh                  # all three seeds
 #         STAGE=2 SEEDS="1 2" ./run-train.sh
+#         STAGE=3 SEEDS="2" ./run-train.sh        # winner only
 #         CLUSTER=jupiter STAGE=1 ./run-train.sh
 
 SEEDS=${SEEDS:-"1 2 3"}
