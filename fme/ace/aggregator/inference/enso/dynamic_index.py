@@ -309,8 +309,8 @@ class PairedRegionalIndexAggregator:
             )
             if gathered_p is None or gathered_t is None:
                 continue
-            p_all = torch.cat(gathered_p, dim=0).numpy()
-            t_all = torch.cat(gathered_t, dim=0).numpy()
+            p_all = torch.cat(gathered_p, dim=0).cpu().numpy()
+            t_all = torch.cat(gathered_t, dim=0).cpu().numpy()
             accs = np.full(n_leads, np.nan)
             for k in range(n_leads):
                 a, b = p_all[:, k], t_all[:, k]
