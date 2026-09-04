@@ -109,6 +109,7 @@ OVERRIDE=()
 
 run_eval () {
   local label="$1" checkpoint_dataset="$2"
+  local checkpoint_file="${3:-best_inference_ckpt.tar}"   # within training_checkpoints/
   local job_name="long36-${label}${SUFFIX}"
 
   if [[ -n "$SELECT" && "$label" != *"$SELECT"* ]]; then
@@ -138,7 +139,7 @@ run_eval () {
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset "${checkpoint_dataset}:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
+    --dataset "${checkpoint_dataset}:training_checkpoints/${checkpoint_file}:/ckpt.tar" \
     --gpus "$N_GPUS" \
     --shared-memory 200GiB \
     --weka climate-default:/climate-default \
@@ -150,6 +151,19 @@ run_eval () {
 
 # ACE2.2 stage 2 (multi-step FT), the counterpart to the P1/P2 stage-2 chains.
 run_eval "ace22-stage2" "01M0RFP2DKAGABV89KRPMXX5C3"
+
+# ACE2.2 stage 2 at epochs 30, 35 and 40. Every other stage-2 run in the campaign evaluates
+# its EMA checkpoint on this same 36-year rollout inline at those epochs (`long_36year`,
+# epochs {start: 29, step: 5}); ACE2.2 seed 0's stage 2 predates that entry and ran a 46-year
+# rollout instead, whose time-mean and annual errors cover a different window. These three
+# backfills of its `ema_ckpt_00NN.tar` files -- the same EMA weights the inline entry evaluates
+# -- put seed 0 on the footing seeds 1-3 get for free. The filter is POSITIONAL:
+# `./run-long36-backfill.sh stage2-ep` launches the three; no argument relaunches every entry.
+# EMA checkpoints for epochs 5-25 also exist, for every stage-2 run, should a trajectory study
+# ever be wanted; it would have to be done for all seeds alike.
+for EP in 30 35 40; do
+  run_eval "ace22-stage2-ep${EP}" "01M0RFP2DKAGABV89KRPMXX5C3" "ema_ckpt_00${EP}.tar"
+done
 
 # ACE2.1's four training seeds. Ids from
 # ACE2.1-ERA5-AIMIP/scripts/run-ace-evaluator-seed-selection-single.sh.
