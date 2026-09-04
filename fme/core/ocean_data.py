@@ -38,12 +38,17 @@ class HasOceanDepthIntegral(Protocol):
     ) -> torch.Tensor: ...
 
     @property
-    def dz(self) -> torch.Tensor:
-        """Layer thickness in meters, the weight ``depth_integral`` applies.
+    def mask(self) -> torch.Tensor:
+        """Per-level validity: 1 where a layer holds data, 0 elsewhere.
 
-        The last dimension is the vertical. Thickness is zero wherever a layer
-        is invalid (below the sea floor or on land), so ``dz > 0`` is exactly
-        the set of cells a depth integral can see.
+        The last dimension is the vertical; any leading dimensions are
+        horizontal and broadcast against the integrand.
+
+        This is the store's own record of which cells hold data, and it is more
+        permissive than the bathymetry: a cell can be marked valid and still
+        have zero layer thickness, in which case it holds real data but carries
+        no weight in ``depth_integral``. So ``mask > 0`` and ``dz > 0`` are
+        different cell sets and are not interchangeable.
         """
         ...
 

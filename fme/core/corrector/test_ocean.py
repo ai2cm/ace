@@ -40,8 +40,8 @@ class _MockDepth:
         return torch.nansum(_MASK * integrand * thickness, dim=-1)
 
     @property
-    def dz(self) -> torch.Tensor:
-        return _MASK * _MOCK_IDEPTH.diff(dim=-1)
+    def mask(self) -> torch.Tensor:
+        return _MASK
 
 
 _VERTICAL_COORD = _MockDepth()
@@ -653,12 +653,21 @@ _SEA_FLOOR_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
 def _make_sea_floor_fixture(nsamples: int = 2, seed: int = 0):
     """Build a masked multi-level ocean fixture with a non-trivial sea floor.
 
-    Three of the nine columns are special: one is all land, one has only its
-    surface layer in the water, and one has two of its three layers. Every wet
-    column's deepest valid layer is a partial bottom cell (``deptho`` falls
-    inside it), so the effective thickness is neither the nominal layer
-    thickness nor a 0/1 multiple of it, and a correction derived from a
-    hand-rolled nominal ``dz`` sum would not conserve heat.
+    Four of the nine columns are special:
+
+    - (0, 0) is all land.
+    - (0, 1) has only its surface layer in the water.
+    - (1, 1) has two of its three layers.
+    - (2, 0) is marked valid at all three levels but its ``deptho`` puts the
+      bottom one below the sea floor, so that cell has ``mask == 1`` and
+      ``dz == 0``. This is how the 1 degree ocean store actually is -- the mask
+      is uniformly more permissive than the bathymetry -- and it is the case
+      that separates ``mask > 0`` from ``dz > 0``.
+
+    Every other wet column's deepest valid layer is a partial bottom cell
+    (``deptho`` falls inside it), so the effective thickness is neither the
+    nominal layer thickness nor a 0/1 multiple of it, and a correction derived
+    from a hand-rolled nominal ``dz`` sum would not conserve heat.
 
     Returns:
         ``(ops, depth_coordinate, input_data, gen_data, forcing_data)``.
@@ -672,9 +681,13 @@ def _make_sea_floor_fixture(nsamples: int = 2, seed: int = 0):
     levels = torch.arange(nz, device=DEVICE)
     mask = (levels < n_valid_levels.unsqueeze(-1)).to(torch.float32)
     deptho = torch.tensor(
-        [[0.0, 7.0, 45.0], [45.0, 22.0, 45.0], [45.0, 45.0, 52.0]], device=DEVICE
+        [[0.0, 7.0, 45.0], [45.0, 22.0, 45.0], [22.0, 45.0, 52.0]], device=DEVICE
     )
     depth_coordinate = DepthCoordinate(_SEA_FLOOR_IDEPTH, mask, deptho)
+    # (2, 0) level 2: marked valid, zero thickness
+    assert (
+        (depth_coordinate.mask > 0.0) & (depth_coordinate.dz == 0.0)
+    ).any(), "fixture must contain a valid-marked zero-thickness cell"
     masks: TensorDict = {f"mask_{k}": mask[:, :, k] for k in range(nz)}
     masks["mask_2d"] = mask[:, :, 0]
     # non-uniform in latitude only, as the area weights require
@@ -744,6 +757,7 @@ def test_uniform_temperature_conserves_with_an_unmasked_depth_coordinate():
     # increment has to broadcast against that without changing shape.
     nlat, nlon, nz, nsamples = 4, 4, 3, 2
     depth_coordinate = DepthCoordinate(_SEA_FLOOR_IDEPTH, torch.ones(nz, device=DEVICE))
+    assert depth_coordinate.mask.shape == (nz,)
     assert depth_coordinate.dz.shape == (nz,)
     area = (
         torch.tensor([0.5, 1.0, 1.5, 1.0], device=DEVICE)
@@ -787,7 +801,8 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
     )
     nz = _SEA_FLOOR_NZ
     dz = depth_coordinate.dz
-    valid = dz > 0.0
+    # the increment lands on the mask; the heat it deposits goes as dz
+    shifted = depth_coordinate.mask > 0.0
     uniform = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
         input_data, gen_data, forcing_data, None
     ).corrected
@@ -804,7 +819,7 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
     heat_capacity = SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
     for k in range(nz):
         expected = torch.where(
-            valid[..., k], delta_temperature, torch.zeros_like(delta_temperature)
+            shifted[..., k], delta_temperature, torch.zeros_like(delta_temperature)
         ).expand(uniform_increment[k].shape)
         torch.testing.assert_close(uniform_increment[k], expected, rtol=1e-5, atol=1e-8)
         # so the heat added at each level is cp * rho * dz_k * delta_T: the only
@@ -836,29 +851,78 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
     assert not torch.allclose(scaled_increment[1], uniform_increment[1])
 
 
-def test_uniform_temperature_leaves_invalid_cells_unchanged():
-    # Invalid cells hold raw denormalized network output, and with no spatial
+def test_uniform_temperature_leaves_cells_outside_the_mask_unchanged():
+    # Cells the mask excludes hold fill rather than data, and with no spatial
     # mask provider nothing overwrites them after the corrector, so the
-    # increment must not shift them. This is the assertion the dz > 0 mask
-    # exists for; conservation holds with or without it.
+    # increment must not shift them. This is the assertion the mask exists for;
+    # conservation holds with or without it.
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
     corrected = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
         input_data, gen_data, forcing_data, None
     ).corrected
-    dz = depth_coordinate.dz
+    mask, dz = depth_coordinate.mask, depth_coordinate.dz
+    # this pins mask == 0, which on this fixture (as on the real store) is a
+    # strictly smaller set than dz == 0
+    assert ((mask > 0.0) & (dz == 0.0)).any()
     for k in range(_SEA_FLOOR_NZ):
         name = f"thetao_{k}"
-        invalid = (dz[..., k] == 0.0).expand(gen_data[name].shape)
-        assert invalid.any(), f"fixture has no invalid cell at level {k}"
+        outside = (mask[..., k] == 0.0).expand(gen_data[name].shape)
+        assert outside.any(), f"fixture has no out-of-mask cell at level {k}"
         torch.testing.assert_close(
-            corrected[name][invalid], gen_data[name][invalid], rtol=0.0, atol=0.0
+            corrected[name][outside], gen_data[name][outside], rtol=0.0, atol=0.0
         )
     # the sst on a dry column is likewise untouched
-    dry = (dz[..., 0] == 0.0).expand(gen_data["sst"].shape)
+    dry = (mask[..., 0] == 0.0).expand(gen_data["sst"].shape)
     torch.testing.assert_close(
         corrected["sst"][dry], gen_data["sst"][dry], rtol=0.0, atol=0.0
+    )
+
+
+def test_uniform_temperature_shifts_valid_zero_thickness_cells():
+    # The 1 degree ocean store marks cells valid that its bathymetry puts below
+    # the sea floor: 4.6% of all valid-marked cells, and 60% of the bottom
+    # level's. They hold real data, the output masker keeps them and every
+    # metric scores them, so the increment has to reach them -- otherwise a
+    # scored level splits into shifted and unshifted cells along a
+    # mask/bathymetry inconsistency, and the unshifted ones are tied to
+    # neither the budget nor their neighbors over a long rollout. Shifting
+    # them adds no heat, so the budget still closes exactly.
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    mask, dz = depth_coordinate.mask, depth_coordinate.dz
+    valid_zero_thickness = (mask > 0.0) & (dz == 0.0)
+    assert valid_zero_thickness.any()
+    corrected = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    increment = [
+        corrected[f"thetao_{k}"] - gen_data[f"thetao_{k}"] for k in range(_SEA_FLOOR_NZ)
+    ]
+    # the global increment, read off a column where every level has thickness
+    delta_temperature = increment[0][:, 2:3, 2:3]
+    checked = 0
+    for k in range(_SEA_FLOOR_NZ):
+        cells = valid_zero_thickness[..., k].expand(increment[k].shape)
+        if not cells.any():
+            continue
+        checked += 1
+        torch.testing.assert_close(
+            increment[k][cells],
+            delta_temperature.expand(increment[k].shape)[cells],
+            rtol=1e-5,
+            atol=1e-8,
+        )
+    assert checked > 0
+    # and the budget still closes exactly, because those cells absorb no heat
+    target = (
+        _global_mean_ohc(ops, depth_coordinate, input_data)
+        + _SEA_FLOOR_NET_FLUX * _SEA_FLOOR_TIMESTEP.total_seconds()
+    )
+    torch.testing.assert_close(
+        _global_mean_ohc(ops, depth_coordinate, corrected), target, rtol=1e-6, atol=0.0
     )
 
 
