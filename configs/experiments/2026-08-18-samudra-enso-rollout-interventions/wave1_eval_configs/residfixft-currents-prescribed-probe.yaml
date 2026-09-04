@@ -1,0 +1,92 @@
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_coupled_steps: 800
+coupled_steps_in_memory: 10
+loader:
+  num_data_workers: 4
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+    - '0232-12-29T12:00:00'
+    - '0233-02-02T12:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - sst
+    - zos
+    - thetao_2
+    - thetao_4
+    - thetao_6
+    - thetao_8
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+ocean_stepper_override:
+  prescribed_prognostic_names:
+  - ssu
+  - ssv
+  - uo_0
+  - uo_1
+  - uo_2
+  - uo_3
+  - uo_4
+  - uo_5
+  - uo_6
+  - uo_7
+  - uo_8
+  - uo_9
+  - uo_10
+  - uo_11
+  - uo_12
+  - uo_13
+  - uo_14
+  - uo_15
+  - uo_16
+  - uo_17
+  - uo_18
+  - vo_0
+  - vo_1
+  - vo_2
+  - vo_3
+  - vo_4
+  - vo_5
+  - vo_6
+  - vo_7
+  - vo_8
+  - vo_9
+  - vo_10
+  - vo_11
+  - vo_12
+  - vo_13
+  - vo_14
+  - vo_15
+  - vo_16
+  - vo_17
+  - vo_18
