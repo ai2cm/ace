@@ -1,4 +1,5 @@
 import dataclasses
+from collections.abc import Mapping
 
 import torch
 
@@ -75,3 +76,43 @@ class ForcePositive:
             gen_data, self.names, keep_gradient=self.keep_gradient
         )
         return clamped, corrector_state
+
+
+@dataclasses.dataclass
+class ForceBounded:
+    """Correction that clamps named generated fields to closed physical ranges.
+
+    ``bounds`` maps a field name to a ``(lower, upper)`` pair; either side may
+    be ``None`` to leave that side unbounded. Implements the ``Correction``
+    protocol; ``input_data``, ``forcing_data`` and ``corrector_state`` are
+    unused and passed through.
+
+    If ``keep_gradient`` is True, the clamp is applied with a straight-through
+    estimator (see :func:`replace_value_keep_gradient`) so out-of-range cells
+    still get a learning signal.
+    """
+
+    bounds: Mapping[str, tuple[float | None, float | None]]
+    keep_gradient: bool = False
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the clamped fields
+            (the keys of ``self.bounds`` present in ``gen_data``).
+        """
+        out: TensorDict = {}
+        for name, (lower, upper) in self.bounds.items():
+            if name not in gen_data:
+                continue
+            clamped = torch.clamp(gen_data[name], min=lower, max=upper)
+            if self.keep_gradient:
+                clamped = replace_value_keep_gradient(gen_data[name], clamped)
+            out[name] = clamped
+        return out, corrector_state

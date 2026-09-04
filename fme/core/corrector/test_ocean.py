@@ -572,6 +572,7 @@ def test_ocean_corrector_config_fields_are_known():
     # modified-return tests need to exercise it.
     expected = {
         "force_positive_names",
+        "variable_bounds",
         "sea_ice_fraction_correction",
         "surface_energy_flux_correction",
         "ocean_heat_content_correction",
@@ -629,3 +630,32 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     assert dict(result.diagnostics.delta) == {}
     assert set(result.modified_names) == set()
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_variable_bounds_clamps_generated_fields():
+    """ForceBounded via OceanCorrectorConfig: out-of-range generated values are
+    clamped to the configured (lower, upper); in-range values and unlisted
+    fields pass through untouched."""
+    torch.manual_seed(0)
+    config = OceanCorrectorConfig(
+        variable_bounds={"so_0": (0.0, 45.0), "thetao_0": (-4.0, None)}
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = config._build(ops, _VERTICAL_COORD, timestep)
+    input_data = {
+        name: torch.randn(IMG_SHAPE, device=DEVICE)
+        for name in ("so_0", "thetao_0", "zos")
+    }
+    gen_data = {
+        "so_0": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
+        "thetao_0": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
+        "zos": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
+    }
+    zos_before = gen_data["zos"].clone()
+    corrected_gen = corrector(input_data, gen_data, {}, None).corrected
+    assert torch.all(corrected_gen["so_0"] >= 0.0)
+    assert torch.all(corrected_gen["so_0"] <= 45.0)
+    assert torch.all(corrected_gen["thetao_0"] >= -4.0)
+    assert torch.any(corrected_gen["thetao_0"] > 45.0)  # upper side open
+    torch.testing.assert_close(corrected_gen["zos"], zos_before)

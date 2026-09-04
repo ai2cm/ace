@@ -17,7 +17,11 @@ from fme.core.corrector.registry import (
     CorrectorConfigABC,
 )
 from fme.core.corrector.state import CorrectorState
-from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
+from fme.core.corrector.utils import (
+    ForceBounded,
+    ForcePositive,
+    replace_value_keep_gradient,
+)
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
@@ -278,6 +282,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     Parameters:
         force_positive_names: Names of fields that should be forced to be greater
             than or equal to zero.
+        variable_bounds: Mapping from field name to a (lower, upper) pair the
+            generated field is clamped to after each step; either side may be
+            null to leave it unbounded.
         sea_ice_fraction_correction: Optional configuration for a sea-ice-fraction
             correction (bounds sea_ice_fraction to 0-1 and keeps the land, ocean,
             and sea-ice fractions summing to one).
@@ -294,6 +301,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     """
 
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
+    variable_bounds: Mapping[str, tuple[float | None, float | None]] = (
+        dataclasses.field(default_factory=dict)
+    )
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
@@ -347,6 +357,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             corrections.append(
                 ForcePositive(
                     self.force_positive_names,
+                    keep_gradient=self.keep_gradient_through_clamps,
+                )
+            )
+        if len(self.variable_bounds) > 0:
+            corrections.append(
+                ForceBounded(
+                    self.variable_bounds,
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
