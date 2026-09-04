@@ -23,3 +23,20 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs0|trained|high|jupiter|4|500
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs1|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+# ocean_wide_uniformdt_clip
+#
+# `ocean_wide_ohc_clip` with the ocean heat content correction switched from
+# `scaled_temperature` (multiply every level by one global ratio, so heat is
+# deposited proportional to T_k * dz_k) to `uniform_temperature` (add one global
+# increment to every level, so heat is deposited proportional to dz_k). Every
+# other term -- architecture, data, `optimization.max_grad_norm=1.0`, the 4-step
+# unroll, the post-corrector loss -- is held fixed, so this row and the
+# `ocean_wide_ohc_clip` rows above differ in exactly the corrector's functional
+# form. Motivation: research investigation on how the corrector places its
+# temperature adjustment; the multiplicative form's corrected output is
+# invariant under rescaling the network's raw temperature output, which leaves
+# the amplitude unconstrained by a post-corrector loss, and the additive form
+# has no such invariance.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
