@@ -191,6 +191,10 @@ class Optimization(OptimizationABC):
                 params, self._max_grad_norm
             ).item()
 
+    @property
+    def last_grad_norm(self) -> float | None:
+        return self._last_grad_norm
+
     def _step_weights(self):
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
