@@ -1,0 +1,64 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# STAGE 2 DEEP-TAIL VARIANT: the same four stage-1 best_ckpts as
+# ../ocean_wide_stochastic/finetuning.txt and
+# ../ocean_wide_stochastic_longtail/finetuning.txt, refinetuned on a schedule
+# with mass moved off depths 1, 2 and 4 onto 12 and 20 (mean optimised depth
+# 7.5 -> 12.3). Same max_epochs 12 as the long-tail wave, so the two are read
+# at equal epochs. See finetune-config-template.yaml for why.
+#
+# Forked from the stage-1 checkpoints, NOT resumed from the long-tail wave's
+# stage-2 checkpoints. Resuming would confound the schedule change with 12
+# extra epochs of training; forking keeps schedule the single axis across all
+# three waves, which all start from the same four best_ckpts.
+#
+# Runs in PARALLEL with the long-tail extension: that wave resumes its own
+# stage-2 result datasets (see ../ocean_wide_stochastic_longtail/resuming.txt)
+# while this one reads the stage-1 result datasets, which are finalised and
+# immutable. Neither wave waits on the other.
+#
+# Its own config directory because uncoupled_finetune.sh writes
+# finetune-config.yaml into the directory it reads -- three waves from one
+# directory would clobber each other's config mid-launch.
+#
+# Same four seeds as both prior waves, deliberately: paired comparison rather
+# than three independent screens. Both rs2 seeds stay held to match, even
+# though allblocks rs2 (uajyh7lf) finished pretraining on 2026-09-03 and the
+# original reason for holding them is gone -- two seeds per injection point is
+# what the other two waves carry, and unbalancing the arms would cost more in
+# comparability than a third seed buys.
+#
+# Read on inference_piC/time_mean_norm/rmse/channel_mean, against the
+# long-tail wave's 0.0501-0.0562 at epoch 12, the ERA5 wave's 0.077-0.093, and
+# the deterministic ocean_wide_ohc_clip-ft baseline's 0.0357-0.0372. NOT on
+# val_piC/mean_norm/weighted_rmse/channel_mean, which is single-member one-step
+# RMSE and structurally penalises a CRPS-trained model -- and which the
+# long-tail schedule already degrades relative to the ERA5 one (0.256-0.263
+# against 0.242-0.243), so a further shift is expected to degrade it again.
+# That is the trade being bought, not a fault.
+#
+# Priority is split rs0 high / rs1 normal, deliberately: eight runs across this
+# wave and its sibling would otherwise sit at high simultaneously and crowd the
+# rest of the team off jupiter. One seed per group at high guarantees each arm
+# produces a readable curve on schedule; the second seed arrives when capacity
+# allows and only sharpens the seed spread, which in this protocol has been
+# small (the 12-epoch long-tail seeds agree to 0.0003 and 0.0000).
+#
+# min_runtime set on every row -- the Beaker scheduler has required one since
+# 2026-08-28 and uncoupled_finetune.sh otherwise defaults it to 0.
+#
+# Stage-1 wandb ids and their final val_piC/mean/loss at epoch 75:
+#   allblocks  rs0 0yk7nnr7 0.04254 | rs1 ifui1igf 0.04261 | rs2 uajyh7lf held
+#   bottleneck rs0 c4wgztd9 0.04266 | rs1 nxvtysb5 0.04238 | rs2 cupqztpv held
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs0|ace-samudra-cm4|0yk7nnr7|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs1|ace-samudra-cm4|ifui1igf|best_ckpt|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs2|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs0|ace-samudra-cm4|c4wgztd9|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs1|ace-samudra-cm4|nxvtysb5|best_ckpt|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs2|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2||3h

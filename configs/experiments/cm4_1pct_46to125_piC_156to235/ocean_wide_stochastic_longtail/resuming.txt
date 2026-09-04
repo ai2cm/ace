@@ -1,0 +1,61 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime
+
+# EXTENSION of the long-tail stage-2 wave from 12 epochs to 24, resuming each
+# run in place: same wandb id, same run, one unbroken curve.
+#
+# Why extend rather than conclude at 12: all four runs were still descending
+# monotonically at epoch 12 on inference_piC/time_mean_norm/rmse/channel_mean
+# (allblocks 0.0504/0.0501, bottleneck 0.0562/0.0562), unlike the ERA5 wave,
+# which was flat from epoch ~2. The schedule change is doing something the
+# 12-epoch budget cut short. 24 is chosen to double the run: at the observed
+# ~1%/epoch and decelerating, 12 more epochs distinguishes "asymptoting near
+# 0.045" from "still closing on the deterministic 0.036".
+#
+# resume.sh runs /existing-results/config.yaml -- the ORIGINAL frozen config --
+# so the long-tail schedule, EMA, corrector and masking all carry over
+# verbatim. The override column is the only thing that changes, and it must
+# carry BOTH terms:
+#
+#   resume_results.resume_wandb=true
+#       NOT the default. ResumeResultsConfig.resume_wandb defaults to False and
+#       resume.sh injects only existing_dir, so without this prepare_directory
+#       DELETES the wandb_run_id file and the extension logs to a new run
+#       instead of continuing the old one.
+#   max_epochs=24
+#       Total, not additional: the loop is `while _epochs_trained <
+#       segment_max_epochs`. LR is a flat 1e-4 with no scheduler configured, so
+#       raising the total does not distort the schedule, and
+#       evaluate_before_training is gated on _epochs_trained == 0, so no
+#       duplicate epoch-0 point is logged.
+#
+# WANDB_NAME is built as ${group}-${tag}-train, so reusing the original group
+# and tag reproduces the run name exactly -- no rename. The beaker experiment
+# name collides and is auto-suffixed, which is what we want: a distinct beaker
+# experiment continuing one wandb run.
+#
+# results_dataset is pinned rather than left blank. Blank makes resume.sh
+# resolve it wandb id -> beaker experiment -> last job's result dataset; pinning
+# removes that lookup from the launch path and records exactly which checkpoint
+# each extension started from. All four were verified to contain
+# training_checkpoints/ckpt.tar and wandb_run_id.
+#
+# Priority is split rs0 high / rs1 normal, deliberately: eight runs across this
+# wave and its sibling would otherwise sit at high simultaneously and crowd the
+# rest of the team off jupiter. One seed per group at high guarantees each arm
+# produces a readable curve on schedule; the second seed arrives when capacity
+# allows and only sharpens the seed spread, which in this protocol has been
+# small (the 12-epoch long-tail seeds agree to 0.0003 and 0.0000).
+#
+# allblocks rs0 is the odd one: its original job HUNG rather than finishing --
+# no exit code, last log line Step 6800 at 2026-09-04T09:12Z, so `retries` never
+# fired and it held 4 GPUs idle until cancelled. Its result dataset has a good
+# ckpt.tar at epoch ~9, so it resumes from there and catches up to the other
+# three rather than needing a relaunch from stage 1.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs0|ace-samudra-cm4|jshu3e8a|train|high|jupiter|4|500GiB|3|ai2/ace|resume_results.resume_wandb=true max_epochs=24|01M1MNA04B1PNC8T91N3B6EA3C|||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs1|ace-samudra-cm4|rssferbq|train|normal|jupiter|4|500GiB|3|ai2/ace|resume_results.resume_wandb=true max_epochs=24|01M1MNAB7SZWWGD0Z7B3BDXHKC|||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftlt|rs0|ace-samudra-cm4|l9gshc45|train|high|jupiter|4|500GiB|3|ai2/ace|resume_results.resume_wandb=true max_epochs=24|01M1MNAQTTMXQV3JFJZJ72ZG9Y|||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftlt|rs1|ace-samudra-cm4|zjarlgla|train|normal|jupiter|4|500GiB|3|ai2/ace|resume_results.resume_wandb=true max_epochs=24|01M1MNB2T0WRPKV2K5R07AF0Z7|||3h
