@@ -11,6 +11,18 @@ import xarray as xr
 from netCDF4 import Dataset
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.inference.data_writer.monthly_aggregation import (
+    COUNTS,
+    ENSEMBLE_DIM,
+    INIT_TIME,
+    LEAD_TIME_DIM,
+    LEAD_TIME_UNITS,
+    TIME_UNITS,
+    VALID_TIME,
+    MonthIndexer,
+    add_data,
+    get_valid_times,
+)
 from fme.ace.inference.data_writer.raw import infer_calendar
 from fme.ace.inference.data_writer.utils import (
     DIM_INFO_HEALPIX,
@@ -20,14 +32,6 @@ from fme.ace.inference.data_writer.utils import (
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.writer import DATETIME_ENCODING_UNITS
-
-LEAD_TIME_DIM = "time"
-LEAD_TIME_UNITS = "months"
-ENSEMBLE_DIM = "sample"
-INIT_TIME = "init_time"
-VALID_TIME = "valid_time"
-TIME_UNITS = "days since 1970-01-01 00:00:00"
-COUNTS = "counts"
 
 
 class PairedMonthlyDataWriter:
@@ -53,6 +57,7 @@ class PairedMonthlyDataWriter:
             path=path,
             label="monthly_mean_target",
             initial_condition_times=initial_condition_times,
+            timestep=timestep,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -62,6 +67,7 @@ class PairedMonthlyDataWriter:
             path=path,
             label="monthly_mean_predictions",
             initial_condition_times=initial_condition_times,
+            timestep=timestep,
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -88,9 +94,11 @@ class PairedMonthlyDataWriter:
 
 class MonthlyDataWriter:
     """
-    Write monthly total data and sample counts to a netCDF file.
+    Write monthly mean data and sample counts to a netCDF file.
 
-    Allows computing the mean afterwards by dividing the total by the counts.
+    Each batch is folded into the stored means using the stored counts, so the
+    values on disk are means over however many timesteps have been written for
+    that calendar month, and the counts say how many that is.
     """
 
     def __init__(
@@ -98,6 +106,7 @@ class MonthlyDataWriter:
         path: str,
         label: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
+        timestep: datetime.timedelta,
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -109,7 +118,9 @@ class MonthlyDataWriter:
             label: Label to append to the filename.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
-            n_months: Number of months to write to the file.
+            timestep: The time delta between each timestep, used with
+                ``initial_condition_times`` to place month 0 of the lead-time
+                axis.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.
@@ -152,42 +163,10 @@ class MonthlyDataWriter:
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         for key, value in dataset_metadata.as_flat_str_dict().items():
             self.dataset.setncattr(key, value)
-        self._init_years = np.full([n_initial_conditions], -1, dtype=int)
-        self._init_months = np.full([n_initial_conditions], -1, dtype=int)
-        self._dataset_dims_created = False
-
-    def _get_initial_year_and_month(
-        self,
-        years: np.ndarray,
-        months: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if self._init_years[0] == -1:
-            self._init_years[:] = years
-            self._init_months[:] = months
-        return (self._init_years, self._init_months)
-
-    def _get_month_indices(self, batch_time: xr.DataArray) -> np.ndarray:
-        """
-        Get the month indices for the batch of data.
-
-        If this is the first time called, the times are assumed to be the
-        initial times for the data, and are stored for determining the month
-        indices in this and future calls.
-
-        Args:
-            batch_time: Time coordinate for each sample in the batch, of shape
-                [ensemble_member, lead_time].
-
-        Returns:
-            Month indices for the batch of data.
-        """
-        years = batch_time.dt.year.values
-        # datetime months are 1-indexed, we want 0-indexed
-        months = batch_time.dt.month.values - 1
-        init_years, init_months = self._get_initial_year_and_month(
-            years=years[:, 0], months=months[:, 0]
+        self._month_indexer = MonthIndexer(
+            first_output_times=[time + timestep for time in initial_condition_times]
         )
-        return 12 * (years - init_years[:, None]) + (months - init_months[:, None])
+        self._dataset_dims_created = False
 
     def _get_variable_names_to_save(
         self, *data_varnames: Iterable[str]
@@ -202,18 +181,13 @@ class MonthlyDataWriter:
         n_months = new_size - old_size
         if n_months > 0:
             valid_time = self.dataset.variables[VALID_TIME]
-            calendar = valid_time.calendar
-            reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
-            days_since_reference = get_days_since_reference(
-                years=self._init_years,
-                months=self._init_months,
+            valid_time[:, old_size:new_size] = get_valid_times(
+                init_years=self._month_indexer.init_years,
+                init_months=self._month_indexer.init_months,
                 n_months=n_months,
-                reference_date=reference_date,
-                calendar=calendar,
+                calendar=valid_time.calendar,
                 month_offset=old_size,
             )
-            # use the 15th of each month, which is 14 days into the month
-            valid_time[:, old_size:new_size] = days_since_reference + 14
 
     def _extend_variable(
         self,
@@ -266,7 +240,7 @@ class MonthlyDataWriter:
             self._dataset_dims_created = True
 
         save_names = self._get_variable_names_to_save(data.keys())
-        months = self._get_month_indices(batch_time)
+        months = self._month_indexer.month_indices(batch_time)
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
 
@@ -334,99 +308,3 @@ class MonthlyDataWriter:
     def finalize(self):
         self.flush()
         self.dataset.close()
-
-
-def add_data(
-    *,
-    target: np.ndarray,
-    target_start_counts: np.ndarray,
-    source: np.ndarray,
-    months_elapsed: np.ndarray,
-):
-    """
-    Add source data to target monthly mean data, aggregating by month.
-
-    All operations are performed independently on each batch member [b, ...].
-
-    Args:
-        target: Array of monthly mean data to add to, of shape
-            [b, month].
-        target_start_counts: Array of counts for each month, of shape
-            [b, month]. This array does not get updated.
-        source: Array of values to add into the monthly aggregates, of shape [b, time].
-        months_elapsed: Elapsed months of source since the start of the data,
-            of shape [b, time],
-            corresponding to an index of the target array for each value in source.
-            Assumed to be monotonically increasing.
-    """
-    for i_sample in range(source.shape[0]):
-        i_time = 0
-        while i_time < source.shape[1]:
-            month_index = months_elapsed[i_sample, i_time]
-            i_month_boundary = i_time + find_boundary(
-                months_elapsed[i_sample, i_time:], month_index
-            )
-            # Calculate sum of new data for the current month
-            new_data_sum = np.sum(source[i_sample, i_time:i_month_boundary], axis=0)
-            new_samples_count = i_month_boundary - i_time
-
-            # Update target mean for the month
-            old_mean = target[i_sample, month_index]
-            old_count = target_start_counts[i_sample, month_index]
-            new_mean = (old_mean * old_count + new_data_sum) / (
-                old_count + new_samples_count
-            )
-
-            target[i_sample, month_index] = new_mean
-
-            i_time = i_month_boundary
-
-
-def find_boundary(month_array, start_month) -> int:
-    """
-    Assuming month_array is an ordered array of months,
-    find the index of the first month that is not start_month.
-    """
-    return np.searchsorted(month_array, start_month, side="right")
-
-
-def get_days_since_reference(
-    years: np.ndarray,
-    months: np.ndarray,
-    reference_date: cftime.datetime,
-    n_months: int,
-    calendar: str,
-    month_offset: int = 0,
-) -> np.ndarray:
-    """
-    Get the days since a reference date for each month.
-
-    Args:
-        years: Array of years, of shape [n_samples].
-        months: Array of months, of shape [n_samples], zero-indexed.
-        reference_date: Reference date for the calendar.
-        n_months: Number of months to compute starting at each sample (year, month).
-        calendar: Calendar to use.
-        month_offset: Optional offset to enable computing days since the reference for
-            a range of elapsed months that does not start at zero (default 0).
-    """
-    months_elapsed = np.arange(month_offset, month_offset + n_months)
-    calendar_month = (months[:, None] + months_elapsed[None, :]) % 12
-    calendar_year = years[:, None] + (months[:, None] + months_elapsed[None, :]) // 12
-    days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)
-    for i in range(calendar_month.shape[0]):
-        dates_sample = xr.date_range(
-            cftime.datetime(
-                calendar_year[i, 0], calendar_month[i, 0] + 1, 1, calendar=calendar
-            ),
-            cftime.datetime(
-                calendar_year[i, -1], calendar_month[i, -1] + 1, 1, calendar=calendar
-            ),
-            freq="MS",
-            calendar=calendar,
-            use_cftime=True,
-        )
-        days_since_reference[i, :] = (
-            dates_sample.values - reference_date
-        ) // datetime.timedelta(days=1)
-    return days_since_reference

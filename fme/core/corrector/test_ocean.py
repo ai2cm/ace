@@ -1,14 +1,18 @@
 import dataclasses
 import datetime
+from typing import Any, cast
 
+import dacite
 import pytest
 import torch
 
 from fme import get_device
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
+    OceanHeatContentCorrection,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
@@ -16,7 +20,7 @@ from fme.core.corrector.ocean import (
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
 from fme.core.spatial_mask_provider import SpatialMaskProvider
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 DEVICE = get_device()
 IMG_SHAPE = (5, 5)
@@ -27,11 +31,17 @@ _LAT, _LON = 2, 2
 _MASK[_LAT, _LON, :] = 0.0
 
 
+_MOCK_IDEPTH = torch.tensor([0.0, 5.0, 15.0], device=DEVICE)
+
+
 class _MockDepth:
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
-        idepth = torch.tensor([0, 5, 15], device=DEVICE)
-        thickness = idepth.diff(dim=-1)
+        thickness = _MOCK_IDEPTH.diff(dim=-1)
         return torch.nansum(_MASK * integrand * thickness, dim=-1)
+
+    @property
+    def dz(self) -> torch.Tensor:
+        return _MASK * _MOCK_IDEPTH.diff(dim=-1)
 
 
 _VERTICAL_COORD = _MockDepth()
@@ -539,3 +549,374 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     assert dict(result.diagnostics.delta) == {}
     assert set(result.modified_names) == set()
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+@pytest.mark.parametrize("method", ["scaled_temperature", "uniform_temperature"])
+def test_ocean_corrector_is_per_member_under_ensemble_folding(method):
+    """Ensemble training folds the ensemble members into the batch dimension, so
+    the corrector sees several members at once. Every correction must act
+    per-member: one that coupled across the batch dim (e.g. a global mean taken
+    over samples too) would tie the members together and silently collapse the
+    ensemble spread the proper scoring rule is meant to reward.
+    """
+    torch.manual_seed(0)
+    n_members, nlat, nlon, nlevels = 2, 3, 3, 2
+    config = OceanCorrectorConfig(
+        force_positive_names=["so_0", "so_1"],
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["sea_ice_thickness"],
+        ),
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method=method,
+            constant_unaccounted_heating=0.1,
+        ),
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, :] = 0.0
+    masks = {
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
+    }
+    # non-uniform in latitude only, as the area weights require
+    area = torch.tensor([0.5, 1.0, 1.5]).unsqueeze(-1).expand(nlat, nlon)
+    ops = LatLonOperations(area, SpatialMaskProvider(masks))
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10.0, 20.0]), mask)
+    corrector = config._build(ops, depth_coordinate, timestep)
+
+    def randoms(shape):
+        return torch.randn(shape)
+
+    input_data = {
+        "thetao_0": randoms((n_members, nlat, nlon)) + 2.0,
+        "thetao_1": randoms((n_members, nlat, nlon)) + 2.0,
+        "sst": randoms((n_members, nlat, nlon)) + 275.0,
+        "land_fraction": torch.zeros(n_members, nlat, nlon),
+    }
+    # members differ in every generated field, as they would under different
+    # noise draws
+    gen_data = {
+        "thetao_0": randoms((n_members, nlat, nlon)) + 2.0,
+        "thetao_1": randoms((n_members, nlat, nlon)) + 2.0,
+        "sst": randoms((n_members, nlat, nlon)) + 275.0,
+        "so_0": randoms((n_members, nlat, nlon)),
+        "so_1": randoms((n_members, nlat, nlon)),
+        # spans the clamp range at both ends so the sea-ice rebalance engages
+        "sea_ice_fraction": randoms((n_members, nlat, nlon)) * 0.8 + 0.5,
+        "sea_ice_thickness": randoms((n_members, nlat, nlon)),
+        "hfds": randoms((n_members, nlat, nlon)),
+    }
+    forcing_data = {
+        "hfgeou": randoms((n_members, nlat, nlon)),
+        "sea_surface_fraction": mask[:, :, 0].expand(n_members, nlat, nlon),
+    }
+
+    folded = corrector(input_data, gen_data, forcing_data, None).corrected
+    assert set(folded) >= {"so_0", "sea_ice_fraction", "thetao_0", "sst"}
+
+    for member in range(n_members):
+
+        def slice_member(data, member=member):
+            return {name: value[member : member + 1] for name, value in data.items()}
+
+        alone = corrector(
+            slice_member(input_data),
+            slice_member(gen_data),
+            slice_member(forcing_data),
+            None,
+        ).corrected
+        for name, value in alone.items():
+            torch.testing.assert_close(
+                folded[name][member : member + 1],
+                value,
+                msg=lambda m, name=name, member=member: (
+                    f"{name} for member {member} depends on the other members: {m}"
+                ),
+            )
+
+    # and the members really are distinct after correction, so the comparison
+    # above is not vacuous
+    for name in folded:
+        assert not torch.allclose(folded[name][0], folded[name][1])
+
+
+_SEA_FLOOR_NLAT, _SEA_FLOOR_NLON, _SEA_FLOOR_NZ = 3, 3, 3
+_SEA_FLOOR_IDEPTH = torch.tensor([0.0, 10.0, 30.0, 60.0], device=DEVICE)
+# hfds + hfgeou in the fixture, uniform over the wet columns, in W/m**2
+_SEA_FLOOR_NET_FLUX = 4.0
+_SEA_FLOOR_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
+
+
+def _make_sea_floor_fixture(nsamples: int = 2, seed: int = 0):
+    """Build a masked multi-level ocean fixture with a non-trivial sea floor.
+
+    Three of the nine columns are special: one is all land, one has only its
+    surface layer in the water, and one has two of its three layers. Every wet
+    column's deepest valid layer is a partial bottom cell (``deptho`` falls
+    inside it), so the effective thickness is neither the nominal layer
+    thickness nor a 0/1 multiple of it, and a correction derived from a
+    hand-rolled nominal ``dz`` sum would not conserve heat.
+
+    Returns:
+        ``(ops, depth_coordinate, input_data, gen_data, forcing_data)``.
+    """
+    torch.manual_seed(seed)
+    nlat, nlon, nz = _SEA_FLOOR_NLAT, _SEA_FLOOR_NLON, _SEA_FLOOR_NZ
+    n_valid_levels = torch.full((nlat, nlon), nz, device=DEVICE)
+    n_valid_levels[0, 0] = 0  # all land
+    n_valid_levels[0, 1] = 1  # only the surface layer is in the water
+    n_valid_levels[1, 1] = 2
+    levels = torch.arange(nz, device=DEVICE)
+    mask = (levels < n_valid_levels.unsqueeze(-1)).to(torch.float32)
+    deptho = torch.tensor(
+        [[0.0, 7.0, 45.0], [45.0, 22.0, 45.0], [45.0, 45.0, 52.0]], device=DEVICE
+    )
+    depth_coordinate = DepthCoordinate(_SEA_FLOOR_IDEPTH, mask, deptho)
+    masks: TensorDict = {f"mask_{k}": mask[:, :, k] for k in range(nz)}
+    masks["mask_2d"] = mask[:, :, 0]
+    # non-uniform in latitude only, as the area weights require
+    area = torch.tensor([0.5, 1.0, 1.5], device=DEVICE).unsqueeze(-1).expand(nlat, nlon)
+    ops = LatLonOperations(area, SpatialMaskProvider(masks))
+    shape = (nsamples, nlat, nlon)
+
+    def rand(offset: float) -> torch.Tensor:
+        return torch.rand(shape, device=DEVICE) * 4.0 + offset
+
+    input_data = {f"thetao_{k}": rand(1.0) for k in range(nz)}
+    input_data["sst"] = rand(274.15)
+    gen_data = {f"thetao_{k}": rand(1.0) for k in range(nz)}
+    gen_data["sst"] = rand(274.15)
+    gen_data["hfds"] = torch.full(shape, 3.0, device=DEVICE)
+    forcing_data = {
+        "hfgeou": torch.full(shape, 1.0, device=DEVICE),
+        "sea_surface_fraction": mask[:, :, 0].expand(shape),
+    }
+    return ops, depth_coordinate, input_data, gen_data, forcing_data
+
+
+def _build_ohc_corrector(ops, depth_coordinate, method, unaccounted_heating=0.0):
+    return OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method=method,
+            constant_unaccounted_heating=unaccounted_heating,
+        )
+    )._build(ops, depth_coordinate, _SEA_FLOOR_TIMESTEP)
+
+
+def _global_mean_ohc(ops, depth_coordinate, data: TensorMapping) -> torch.Tensor:
+    return ops.area_weighted_mean(
+        OceanData(data, depth_coordinate).ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+
+
+@pytest.mark.parametrize("unaccounted_heating", [0.0, 0.1])
+def test_uniform_temperature_conserves_ocean_heat_content(unaccounted_heating):
+    # The additive correction must hit the same budget the multiplicative one
+    # does. This is what pins the increment's denominator: if it came from
+    # anything other than depth_integral over the same columns as the heat
+    # content (a nominal dz sum, or a mean including the dry columns) the
+    # corrected heat content would miss the target.
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    corrector = _build_ohc_corrector(
+        ops, depth_coordinate, "uniform_temperature", unaccounted_heating
+    )
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    expected_change = (
+        _SEA_FLOOR_NET_FLUX + unaccounted_heating
+    ) * _SEA_FLOOR_TIMESTEP.total_seconds()
+    target = _global_mean_ohc(ops, depth_coordinate, input_data) + expected_change
+    torch.testing.assert_close(
+        _global_mean_ohc(ops, depth_coordinate, corrected), target, rtol=1e-6, atol=0.0
+    )
+
+
+def test_uniform_temperature_conserves_with_an_unmasked_depth_coordinate():
+    # A dataset with no mask_0 gets a DepthCoordinate whose mask is 1-D and no
+    # spatial mask provider (see fme.core.dataset.xarray), so dz carries no
+    # horizontal dimensions and the valid-cell mask is a scalar per level. The
+    # increment has to broadcast against that without changing shape.
+    nlat, nlon, nz, nsamples = 4, 4, 3, 2
+    depth_coordinate = DepthCoordinate(_SEA_FLOOR_IDEPTH, torch.ones(nz, device=DEVICE))
+    assert depth_coordinate.dz.shape == (nz,)
+    area = (
+        torch.tensor([0.5, 1.0, 1.5, 1.0], device=DEVICE)
+        .unsqueeze(-1)
+        .expand(nlat, nlon)
+    )
+    ops = LatLonOperations(area)  # NullSpatialMaskProvider
+    shape = (nsamples, nlat, nlon)
+    torch.manual_seed(0)
+
+    def rand(offset: float) -> torch.Tensor:
+        return torch.rand(shape, device=DEVICE) * 4.0 + offset
+
+    input_data = {f"thetao_{k}": rand(1.0) for k in range(nz)}
+    gen_data: TensorDict = {f"thetao_{k}": rand(1.0) for k in range(nz)}
+    gen_data["sst"] = rand(274.15)
+    gen_data["hfds"] = torch.full(shape, 3.0, device=DEVICE)
+    forcing_data = {
+        "hfgeou": torch.full(shape, 1.0, device=DEVICE),
+        "sea_surface_fraction": torch.ones(shape, device=DEVICE),
+    }
+    corrected = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    for name in [f"thetao_{k}" for k in range(nz)] + ["sst"]:
+        assert corrected[name].shape == gen_data[name].shape, name
+    target = (
+        _global_mean_ohc(ops, depth_coordinate, input_data)
+        + _SEA_FLOOR_NET_FLUX * _SEA_FLOOR_TIMESTEP.total_seconds()
+    )
+    torch.testing.assert_close(
+        _global_mean_ohc(ops, depth_coordinate, corrected), target, rtol=1e-6, atol=0.0
+    )
+
+
+def test_uniform_temperature_deposits_heat_proportional_to_thickness():
+    # The property the whole experiment turns on: uniform_temperature deposits
+    # heat in proportion to dz_k, scaled_temperature in proportion to T_k * dz_k.
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    nz = _SEA_FLOOR_NZ
+    dz = depth_coordinate.dz
+    valid = dz > 0.0
+    uniform = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    scaled = _build_ohc_corrector(ops, depth_coordinate, "scaled_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+
+    uniform_increment = [
+        uniform[f"thetao_{k}"] - gen_data[f"thetao_{k}"] for k in range(nz)
+    ]
+    # one global increment per sample, read off a column where every level is
+    # valid; the correction is per-sample, so keep the sample dimension
+    delta_temperature = uniform_increment[0][:, 2:3, 2:3]
+    heat_capacity = SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
+    for k in range(nz):
+        expected = torch.where(
+            valid[..., k], delta_temperature, torch.zeros_like(delta_temperature)
+        ).expand(uniform_increment[k].shape)
+        torch.testing.assert_close(uniform_increment[k], expected, rtol=1e-5, atol=1e-8)
+        # so the heat added at each level is cp * rho * dz_k * delta_T: the only
+        # k dependence is dz_k
+        heat_added = heat_capacity * dz[..., k] * uniform_increment[k]
+        torch.testing.assert_close(
+            heat_added,
+            heat_capacity * dz[..., k] * delta_temperature.expand(heat_added.shape),
+            rtol=1e-5,
+            atol=1e-8,
+        )
+
+    scaled_increment = [
+        scaled[f"thetao_{k}"] - gen_data[f"thetao_{k}"] for k in range(nz)
+    ]
+    # contrast: the multiplicative increment is (ratio - 1) * T_k, so the heat
+    # added at each level goes as T_k * dz_k
+    ratio_minus_one = (
+        scaled_increment[0][:, 2:3, 2:3] / gen_data["thetao_0"][:, 2:3, 2:3]
+    )
+    for k in range(nz):
+        torch.testing.assert_close(
+            scaled_increment[k],
+            gen_data[f"thetao_{k}"] * ratio_minus_one,
+            rtol=1e-5,
+            atol=1e-8,
+        )
+    # and the two profiles are genuinely different on this fixture
+    assert not torch.allclose(scaled_increment[1], uniform_increment[1])
+
+
+def test_uniform_temperature_leaves_invalid_cells_unchanged():
+    # Invalid cells hold raw denormalized network output, and with no spatial
+    # mask provider nothing overwrites them after the corrector, so the
+    # increment must not shift them. This is the assertion the dz > 0 mask
+    # exists for; conservation holds with or without it.
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    corrected = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    dz = depth_coordinate.dz
+    for k in range(_SEA_FLOOR_NZ):
+        name = f"thetao_{k}"
+        invalid = (dz[..., k] == 0.0).expand(gen_data[name].shape)
+        assert invalid.any(), f"fixture has no invalid cell at level {k}"
+        torch.testing.assert_close(
+            corrected[name][invalid], gen_data[name][invalid], rtol=0.0, atol=0.0
+        )
+    # the sst on a dry column is likewise untouched
+    dry = (dz[..., 0] == 0.0).expand(gen_data["sst"].shape)
+    torch.testing.assert_close(
+        corrected["sst"][dry], gen_data["sst"][dry], rtol=0.0, atol=0.0
+    )
+
+
+@pytest.mark.parametrize("method", ["scaled_temperature", "uniform_temperature"])
+def test_ocean_heat_content_correction_is_differentiable(method):
+    # The correction runs inside the training loop and the loss differentiates
+    # through it, so the corrected output must stay on the autograd graph.
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    network_output = {
+        name: value.clone().requires_grad_(True) for name, value in gen_data.items()
+    }
+    corrected = _build_ohc_corrector(ops, depth_coordinate, method)(
+        input_data, network_output, forcing_data, None
+    ).corrected
+    loss = corrected["sst"].sum()
+    for k in range(_SEA_FLOOR_NZ):
+        loss = loss + corrected[f"thetao_{k}"].sum()
+    loss.backward()
+    # the temperature levels and the surface heat flux the budget reads all
+    # carry gradient
+    for name in [f"thetao_{k}" for k in range(_SEA_FLOOR_NZ)] + ["hfds"]:
+        grad = network_output[name].grad
+        assert grad is not None, f"no gradient reached {name}"
+        assert torch.isfinite(grad).all(), f"non-finite gradient at {name}"
+        assert (grad != 0.0).any(), f"gradient at {name} is identically zero"
+
+
+def test_ocean_heat_content_method_round_trips_through_from_state():
+    config = OceanCorrectorConfig.from_state(
+        {
+            "ocean_heat_content_correction": {
+                "method": "uniform_temperature",
+                "constant_unaccounted_heating": 0.25,
+            }
+        }
+    )
+    assert config.ocean_heat_content_correction == OceanHeatContentBudgetConfig(
+        method="uniform_temperature", constant_unaccounted_heating=0.25
+    )
+
+
+def test_ocean_heat_content_unknown_method_raises():
+    with pytest.raises(dacite.DaciteError):
+        OceanCorrectorConfig.from_state(
+            {"ocean_heat_content_correction": {"method": "not_a_method"}}
+        )
+    # a method that got past config validation still fails loudly at the write
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    correction = OceanHeatContentCorrection(
+        area_weighted_mean=ops.area_weighted_mean,
+        vertical_coordinate=depth_coordinate,
+        timestep_seconds=_SEA_FLOOR_TIMESTEP.total_seconds(),
+        method=cast(Any, "not_a_method"),
+        unaccounted_heating=0.0,
+    )
+    with pytest.raises(NotImplementedError):
+        correction(input_data, gen_data, forcing_data, None)
