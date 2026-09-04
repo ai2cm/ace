@@ -218,11 +218,17 @@ base_name="train-1deg-6hourly-v2-era5-only-no-residual-no-co2"
 SEEDS=${SEEDS:-"1 2 3"}
 STAGE=${STAGE:-}
 
-# Result dataset id of each seed's own stage-1 run, filled after STAGE=1 completes.
+# Result dataset id of each seed's own stage-1 run. Each experiment ran a single job (no
+# restarts), so the job's result dataset is the experiment's; a restart would have issued a
+# new id, and the id below would then point at the dead job's short checkpoints.
+#   rs1  experiment 01M1J6WF8B2FDS0GCFMXVNEA87  job 01M1J6WFDXMS3FREJ8Z0PCEJ9V
+#   rs2  experiment 01M1J6WW2Y7EQB8KWZGACRC2JC  job 01M1J6WW7C7N6SN2732ABZ2104
+#   rs3  experiment 01M1J6X90YXZ7EFFG01BD8CWEB  job 01M1J6X94M9ZNC8J41SSJ2CKJ7
+# Stage 1 launched 2026-09-02 23:23-23:58Z, 4 GPUs each on titan.
 declare -A STAGE1_DONOR=(
-  [1]=FILL-AFTER-STAGE-1
-  [2]=FILL-AFTER-STAGE-1
-  [3]=FILL-AFTER-STAGE-1
+  [1]=01M1J6WF8NQM6AV14WW90MF2T9
+  [2]=01M1J6WW372RKP423AYD0A9JYQ
+  [3]=01M1J6X918YK0W7ZP9WA422MT9
 )
 
 # Result dataset id of each seed's own stage-2 run, filled after STAGE=2 completes. Take the
