@@ -8,3 +8,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_opc_nohfds_poo|rs0|01M1N45HNKG5HPX92ANVJCMX26|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_opc_nohfds_poo|rs1|01M1N45ZMY5VGVTN04DXEBDDJZ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_opc_nohfds_poo|rs2|01M1N46D6X3SFX972KSHEHQCYA|training|best_inference_ckpt|normal|--min-runtime 8h
