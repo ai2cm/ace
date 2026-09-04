@@ -1,4 +1,4 @@
-group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
 # ocean_wide
 
@@ -23,3 +23,29 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs0|trained|high|jupiter|4|500
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs1|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+# ocean_wide_ohc_clip_mae_lr* -- the from-scratch L1 learning-rate sweep of
+# research tasks/2026-09-04-l1-lr-sweep-from-scratch. Three lrs, ONE seed, 15
+# epochs, at the pretraining stage's n_forward_steps 4 -- not the 8-step
+# finetune, because the L1/MSE raw-gradient ratio goes as 1/|error| and |error|
+# runs 0.58 -> 0.21 through pretraining against a flat 0.21 in the finetune, so a
+# finetune-tuned lr samples the extreme end of the range and would under-train
+# from a random init.
+#
+# Everything else is the ohc_clip recipe unchanged, including
+# max_grad_norm=1.0. Clipping is the one channel AdamW's per-parameter
+# normalization does not absorb, which is why these rows ship the grad_norm
+# logging (cherry-picked ace#1479) -- `grad_norm` in wandb is the pre-clip norm,
+# so how often the clip binds is readable per arm.
+#
+# 0.81 h/epoch at 4 steps from the 75-epoch MSE pretrain, so ~12 h per row;
+# min_runtime 4h with training auto-resume covering the rest.
+#
+# The 1e-4 row is not redundant with the existing MSE pretrain: it is L1 at the
+# recipe's lr, i.e. the control that isolates lr from the loss.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-5|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.00003 max_epochs=15|4h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr1e-4|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0001 max_epochs=15|4h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-4|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003 max_epochs=15|4h
