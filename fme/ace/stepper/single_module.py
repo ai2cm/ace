@@ -1724,6 +1724,9 @@ class TrainStepper(
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
+        grad_norm = optimization.last_grad_norm
+        if grad_norm is not None:
+            metrics["grad_norm"] = torch.tensor(grad_norm)
 
         gen_data = process_ensemble_prediction_generator_list(output_list)
 

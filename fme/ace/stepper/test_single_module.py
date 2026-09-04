@@ -594,6 +594,10 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         ),
     )
     optimization = unittest.mock.Mock(wraps=NullOptimization())
+    # `wraps` proxies method calls but not property access, so the protocol's
+    # `last_grad_norm` would otherwise read back as a Mock. Match the wrapped
+    # NullOptimization, which reports no norm because it does no clipping.
+    optimization.last_grad_norm = None
     stepper.train_on_batch(data=data_with_ic, optimization=optimization)
     if optimize_last_step_only:
         assert len(optimization.accumulate_loss.call_args_list) == 1
