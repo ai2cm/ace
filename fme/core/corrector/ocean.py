@@ -443,16 +443,25 @@ def _force_conserve_ocean_heat_content(
         denominator is the area-weighted global mean of the column integral of
         ``rho * cp``.
 
-    The invariant the ``uniform_temperature`` masking relies on is that
-    ``vertical_coordinate.dz`` is zero exactly where a layer is invalid (land,
-    or below the sea floor), which is the same weight
-    ``vertical_coordinate.depth_integral`` applies. So restricting the
-    increment to ``dz > 0`` both keeps it out of invalid cells and leaves the
-    heat it adds equal to ``delta_T`` times the very integral that forms the
-    denominator -- making conservation exact rather than off by the masked
-    fraction. ``scaled_temperature`` needs no such mask because it scales
-    invalid cells rather than shifting them, and invalid cells carry no weight
-    in the integral either way.
+    ``uniform_temperature`` conserves exactly because its denominator is the
+    same integral that weights the heat it deposits. Adding ``delta_T`` at
+    every level raises the column integral of ``rho * cp * T`` by ``delta_T``
+    times the column integral of ``rho * cp``, and ``heat_capacity_per_area``
+    is the area-weighted mean of exactly that column integral, taken through
+    ``vertical_coordinate.depth_integral`` over the same columns. So the
+    denominator must keep coming from ``depth_integral``: a nominal ``dz`` sum,
+    or a mean over a different set of columns, would leave the corrected heat
+    content off by the difference between the two integrals.
+
+    Restricting the increment to ``dz > 0`` is a separate concern and does not
+    affect conservation. ``vertical_coordinate.dz`` is zero wherever a layer is
+    invalid (land, or below the sea floor), so an unmasked increment would
+    deposit no heat there either. The mask is there so that invalid cells pass
+    through unchanged rather than being shifted by a physical increment: they
+    hold raw denormalized network output, and when no spatial mask provider is
+    configured nothing overwrites them after the corrector runs.
+    ``scaled_temperature`` rescales invalid cells instead of leaving them
+    alone, which is pre-existing behavior and not something the budget needs.
     """
     if method not in ("scaled_temperature", "uniform_temperature"):
         raise NotImplementedError(
@@ -524,6 +533,9 @@ def _force_conserve_ocean_heat_content(
                 gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
             ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
     else:
+        # this must stay a depth_integral over the same columns as the heat
+        # content itself, or conservation is off by the difference; see the
+        # docstring
         heat_capacity_per_area = area_weighted_mean(
             vertical_coordinate.depth_integral(
                 torch.ones_like(gen_potential_temperature)
@@ -536,8 +548,9 @@ def _force_conserve_ocean_heat_content(
         temperature_increment = (
             target_ocean_heat_content - global_gen_ocean_heat_content
         ) / heat_capacity_per_area
-        # zero thickness marks a layer the depth integral cannot see, so the
-        # increment must not land there; see the docstring.
+        # zero thickness marks a layer the depth integral cannot see; the mask
+        # leaves those cells' raw network output untouched, and costs the budget
+        # nothing because they absorb no heat either way
         is_valid = (vertical_coordinate.dz > 0.0).to(
             dtype=gen_potential_temperature.dtype
         )
@@ -546,8 +559,10 @@ def _force_conserve_ocean_heat_content(
             out[name] = gen.data[name] + temperature_increment * is_valid.select(-1, k)
         if "sst" in gen.data:
             # an increment needs no Kelvin offset, unlike the multiplicative
-            # path; the surface layer's validity is the ocean-column indicator
-            # depth_integral itself uses.
+            # path. sst is not in the heat content integral, so shifting it by
+            # the same increment as thetao_0 is a consistency choice, not a
+            # budget requirement; the surface layer's validity is the
+            # wet-column indicator depth_integral itself uses.
             out["sst"] = gen.data["sst"] + temperature_increment * is_valid.select(
                 -1, 0
             )

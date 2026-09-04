@@ -717,8 +717,10 @@ def _global_mean_ohc(ops, depth_coordinate, data: TensorMapping) -> torch.Tensor
 @pytest.mark.parametrize("unaccounted_heating", [0.0, 0.1])
 def test_uniform_temperature_conserves_ocean_heat_content(unaccounted_heating):
     # The additive correction must hit the same budget the multiplicative one
-    # does. If the increment's denominator and its valid-cell mask came from
-    # different integrals this would be off by the masked fraction.
+    # does. This is what pins the increment's denominator: if it came from
+    # anything other than depth_integral over the same columns as the heat
+    # content (a nominal dz sum, or a mean including the dry columns) the
+    # corrected heat content would miss the target.
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -793,6 +795,10 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
 
 
 def test_uniform_temperature_leaves_invalid_cells_unchanged():
+    # Invalid cells hold raw denormalized network output, and with no spatial
+    # mask provider nothing overwrites them after the corrector, so the
+    # increment must not shift them. This is the assertion the dz > 0 mask
+    # exists for; conservation holds with or without it.
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
