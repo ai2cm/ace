@@ -639,12 +639,6 @@ def test_step_loss_forwards_data_mask():
 
 
 def test_step_loss_config_l1_is_reachable_from_config():
-    """``type: L1`` must be admitted by StepLossConfig's Literal.
-
-    ``_L1Loss`` and ``LossConfig``'s ``"L1"`` branch have always worked, but
-    the value was missing from ``StepLossConfig``'s ``Literal``, so dacite
-    rejected it at config parse for every stepper.
-    """
     out_names = ["var_0"]
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
