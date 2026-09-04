@@ -737,6 +737,48 @@ def test_uniform_temperature_conserves_ocean_heat_content(unaccounted_heating):
     )
 
 
+def test_uniform_temperature_conserves_with_an_unmasked_depth_coordinate():
+    # A dataset with no mask_0 gets a DepthCoordinate whose mask is 1-D and no
+    # spatial mask provider (see fme.core.dataset.xarray), so dz carries no
+    # horizontal dimensions and the valid-cell mask is a scalar per level. The
+    # increment has to broadcast against that without changing shape.
+    nlat, nlon, nz, nsamples = 4, 4, 3, 2
+    depth_coordinate = DepthCoordinate(_SEA_FLOOR_IDEPTH, torch.ones(nz, device=DEVICE))
+    assert depth_coordinate.dz.shape == (nz,)
+    area = (
+        torch.tensor([0.5, 1.0, 1.5, 1.0], device=DEVICE)
+        .unsqueeze(-1)
+        .expand(nlat, nlon)
+    )
+    ops = LatLonOperations(area)  # NullSpatialMaskProvider
+    shape = (nsamples, nlat, nlon)
+    torch.manual_seed(0)
+
+    def rand(offset: float) -> torch.Tensor:
+        return torch.rand(shape, device=DEVICE) * 4.0 + offset
+
+    input_data = {f"thetao_{k}": rand(1.0) for k in range(nz)}
+    gen_data: TensorDict = {f"thetao_{k}": rand(1.0) for k in range(nz)}
+    gen_data["sst"] = rand(274.15)
+    gen_data["hfds"] = torch.full(shape, 3.0, device=DEVICE)
+    forcing_data = {
+        "hfgeou": torch.full(shape, 1.0, device=DEVICE),
+        "sea_surface_fraction": torch.ones(shape, device=DEVICE),
+    }
+    corrected = _build_ohc_corrector(ops, depth_coordinate, "uniform_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    for name in [f"thetao_{k}" for k in range(nz)] + ["sst"]:
+        assert corrected[name].shape == gen_data[name].shape, name
+    target = (
+        _global_mean_ohc(ops, depth_coordinate, input_data)
+        + _SEA_FLOOR_NET_FLUX * _SEA_FLOOR_TIMESTEP.total_seconds()
+    )
+    torch.testing.assert_close(
+        _global_mean_ohc(ops, depth_coordinate, corrected), target, rtol=1e-6, atol=0.0
+    )
+
+
 def test_uniform_temperature_deposits_heat_proportional_to_thickness():
     # The property the whole experiment turns on: uniform_temperature deposits
     # heat in proportion to dz_k, scaled_temperature in proportion to T_k * dz_k.
