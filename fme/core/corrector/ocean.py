@@ -453,15 +453,26 @@ def _force_conserve_ocean_heat_content(
     or a mean over a different set of columns, would leave the corrected heat
     content off by the difference between the two integrals.
 
-    Restricting the increment to ``dz > 0`` is a separate concern and does not
-    affect conservation. ``vertical_coordinate.dz`` is zero wherever a layer is
-    invalid (land, or below the sea floor), so an unmasked increment would
-    deposit no heat there either. The mask is there so that invalid cells pass
-    through unchanged rather than being shifted by a physical increment: they
-    hold raw denormalized network output, and when no spatial mask provider is
-    configured nothing overwrites them after the corrector runs.
-    ``scaled_temperature`` rescales invalid cells instead of leaving them
-    alone, which is pre-existing behavior and not something the budget needs.
+    Which cells the increment lands on is a separate concern and does not
+    affect conservation. It lands on every cell ``vertical_coordinate.mask``
+    marks valid. ``dz > 0`` is not the right test for this and is not the same
+    cell set: the mask is more permissive than the bathymetry, so a cell can be
+    marked valid and still have zero thickness. On the 1 degree ocean store
+    that is 4.6% of all valid-marked cells and 60% of the bottom level's. Those
+    cells hold real data, the output masker keeps them and the metrics score
+    them, so restricting the increment to ``dz > 0`` would split a scored level
+    into shifted and unshifted cells along a mask/bathymetry inconsistency in
+    the store rather than along anything physical, leaving the unshifted
+    majority of a deep level tied to neither the budget nor its neighbors.
+    Shifting them costs the budget nothing, because zero thickness means they
+    absorb no heat either way.
+
+    Cells the mask excludes are a different matter and are left alone: they hold
+    fill rather than data, and when no spatial mask provider is configured
+    nothing overwrites them after the corrector runs, so ``+ delta_T`` there
+    would drift away from the fill value where ``* ratio`` keeps a zero fill at
+    zero. ``scaled_temperature`` rescales every cell regardless, which is
+    pre-existing behavior and not something the budget needs.
     """
     if method not in ("scaled_temperature", "uniform_temperature"):
         raise NotImplementedError(
@@ -548,22 +559,26 @@ def _force_conserve_ocean_heat_content(
         temperature_increment = (
             target_ocean_heat_content - global_gen_ocean_heat_content
         ) / heat_capacity_per_area
-        # zero thickness marks a layer the depth integral cannot see; the mask
-        # leaves those cells' raw network output untouched, and costs the budget
-        # nothing because they absorb no heat either way
-        is_valid = (vertical_coordinate.dz > 0.0).to(
+        # every cell the store marks valid is shifted, including the ones the
+        # bathymetry puts at zero thickness -- they hold data and are scored, and
+        # shifting them adds no heat. Cells outside the mask hold fill, so they
+        # are left alone. Not interchangeable with dz > 0; see the docstring.
+        # ``> 0`` rather than ``== 1`` mirrors depth_integral's own mask test.
+        is_masked_valid = (vertical_coordinate.mask > 0.0).to(
             dtype=gen_potential_temperature.dtype
         )
         for k in range(n_levels):
             name = f"thetao_{k}"
-            out[name] = gen.data[name] + temperature_increment * is_valid.select(-1, k)
+            out[name] = gen.data[name] + temperature_increment * is_masked_valid.select(
+                -1, k
+            )
         if "sst" in gen.data:
             # an increment needs no Kelvin offset, unlike the multiplicative
             # path. sst is not in the heat content integral, so shifting it by
             # the same increment as thetao_0 is a consistency choice, not a
-            # budget requirement; the surface layer's validity is the
-            # wet-column indicator depth_integral itself uses.
-            out["sst"] = gen.data["sst"] + temperature_increment * is_valid.select(
-                -1, 0
-            )
+            # budget requirement; the surface level's mask is the wet-column
+            # indicator depth_integral itself uses.
+            out["sst"] = gen.data[
+                "sst"
+            ] + temperature_increment * is_masked_valid.select(-1, 0)
     return out
