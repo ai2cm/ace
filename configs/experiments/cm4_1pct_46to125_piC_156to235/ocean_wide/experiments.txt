@@ -59,3 +59,23 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs0|01M1MTATMCQBVZJ5B5G
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|01M1MTB5Q2WA4DXGSQ0BEH6HBZ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|01M1MTBHSTNQBBW548Q4K19J0M|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ocean_wide_ohc_clip_mae-ft -- 200-yr piControl rollouts for the band-variance
+# read-out of research investigations/2026-09-03-ocean-loss-crps-vs-mae-samudrace.
+# Same evaluator-config-piC-200yr-var.yaml the MSE seeds used (the stepper is
+# restored from the checkpoint, so one config serves both arms unchanged), so the
+# two arms' variance is measured by an identical rollout.
+#
+# min-runtime 3h, not the 1h the MSE wave used: that rollout takes ~65 min and two
+# of three were preempted minutes short of the last step. See
+# experiments/2026-08-25-ohc-clip-ft-piC-200yr-variance.
+#
+# rs2 is held at hold_ rather than run_: its training result dataset
+# (01M1MTBHT78655EZ3S1YCTN87W) had not finalized at arming time. Flip to
+# run_piC-200yr-var once it has.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs0|01M1MTATMCQBVZJ5B5G3ZZDEDJ|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|01M1MTB5Q2WA4DXGSQ0BEH6HBZ|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|01M1MTBHSTNQBBW548Q4K19J0M|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
