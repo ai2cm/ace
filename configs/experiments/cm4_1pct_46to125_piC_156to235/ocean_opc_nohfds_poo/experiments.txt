@@ -1,0 +1,6 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# Rows are not hand-written, but this file is hand-edited. experiment_id is a
+# Beaker id that exists only after submission, and the job runner appends one
+# row per launched job (see append_to_experiments_file in job_runner/lib.sh,
+# called from job_runner/uncoupled_train.sh and job_runner/uncoupled_finetune.sh).
