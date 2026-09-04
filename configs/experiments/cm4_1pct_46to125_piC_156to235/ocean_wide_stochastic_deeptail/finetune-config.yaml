@@ -1,0 +1,551 @@
+# STAGE 2 DEEP-TAIL VARIANT of the stochastic Samudra protocol at 1 degree.
+#
+# Identical to ../ocean_wide_stochastic_longtail in every respect except the
+# rollout schedule. Resumes the SAME stage-1 best_ckpts as both prior stage-2
+# waves, so the three read against each other with schedule as the only axis.
+#
+# The schedule series, by mean optimised depth:
+#
+#   ../ocean_wide_stochastic          (ERA5)      3.0
+#   ../ocean_wide_stochastic_longtail (long tail) 7.5
+#   this directory                    (deep tail) 12.3
+#
+# Why: the ERA5 -> long-tail step was a clean win. Inline-inference time-mean
+# RMSE (inference_piC/time_mean_norm/rmse/channel_mean) went from a 30-epoch
+# plateau at 0.077-0.093 to 0.0501-0.0562 in 12 epochs, and the long-tail runs'
+# EPOCH 1 already beat anything the ERA5 wave reached in 40. Depth, not
+# training length, is the active ingredient. This variant asks whether that
+# relationship continues or turns over.
+#
+# Mass again moves off the shallow depths onto 12 and 20 only; depths 2 and 4
+# fall to 0.1 alongside depth 1, so the axis stays "shallow mass -> deep mass"
+# and not a reshuffle among the deep depths. 0.1 is kept at depth 1 rather than
+# 0 for the same reason the long-tail variant keeps 0.3: the one-step
+# distribution stage 1 optimised needs an anchor, and under
+# optimize_last_step_only nothing else in the schedule supplies one.
+#
+# Expected to cost, not to break: optimize_last_step_only runs every
+# non-optimized step inside torch.no_grad, so peak memory is one step's
+# backward at any depth. The long-tail wave already runs 40% of its batches at
+# depth 12 or 20 on 4 GPUs without OOM; this raises that to 70%, changing the
+# frequency and not the peak.
+#
+# Wall clock: the long-tail template's fit (~24 min fixed + ~8.6 min per unit
+# mean depth) projected 89 min/epoch for mean depth 7.5 and the wave actually
+# ran at 63-67, so that fit is pessimistic. Refitting on the measured points
+# -- 32.8 min/epoch at fixed depth 1 and ~65 at mean depth 7.5 -- gives ~28 min
+# fixed + ~4.9 min per unit depth, so mean depth 12.3 projects to ~88 min/epoch
+# and ~17.6 h per run at max_epochs 12.
+#
+# max_epochs stays 12, matching the long-tail wave exactly so the two are read
+# at equal epochs. If this variant wins it extends by the same route the
+# long-tail wave does -- job_runner/resume.sh with a resuming.txt carrying
+# resume_results.resume_wandb=true and a raised max_epochs.
+#
+# As in the other two waves the stepper block is dropped:
+# uncoupled_finetune.sh merges it in from the pretraining run's saved config,
+# so masking, corrector and variable lists carry over verbatim.
+#
+# job_runner/uncoupled_finetune.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_deeptail . \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+
+experiment_dir: /results
+evaluate_before_training: true # epoch-0 reference for the pretrained checkpoint
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 12 # matched to ../ocean_wide_stochastic_longtail so the two
+# schedules are compared at equal epochs rather than equal wall clock.
+inference:
+  - name: inference_1pct
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+          # (validation + training), never entering the 131-140 holdout
+          - '0041-01-01T00:00:00'
+          - '0051-01-01T00:00:00'
+          - '0061-01-01T00:00:00'
+          - '0071-01-01T00:00:00'
+          - '0081-01-01T00:00:00'
+          - '0091-01-01T00:00:00'
+          - '0101-01-01T00:00:00'
+          - '0111-01-01T00:00:00'
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+            engine: zarr
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+            engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+  - name: inference_piC
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+          # 1-90, never entering the relative-year-91+ holdout. The first IC
+          # is the store's first 5-daily snapshot.
+          - '0151-01-06T00:00:00'
+          - '0161-01-01T00:00:00'
+          - '0171-01-01T00:00:00'
+          - '0181-01-01T00:00:00'
+          - '0191-01-01T00:00:00'
+          - '0201-01-01T00:00:00'
+          - '0211-01-01T00:00:00'
+          - '0221-01-01T00:00:00'
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+            engine: zarr
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+            engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235: 80
+    # years each, 160 total. Neither window enters its run's validation years
+    # (1pctCO2 0041-0045 and 0126-0130, piControl 0236-0240) or holdout (1pctCO2
+    # 0131-0140, piControl 0241-0350). One concat list per store, both in the
+    # same simulation order so the merged members share sample start times.
+    merge:
+      - concat:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0046-01-06T00:00:00'
+              stop_time: '0126-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0156-01-06T00:00:00'
+              stop_time: '0236-01-01T00:00:00'
+      - concat:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0046-01-06T00:00:00'
+              stop_time: '0126-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0156-01-06T00:00:00'
+              stop_time: '0236-01-01T00:00:00'
+validation:
+  - name: val_1pct_early
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0041-01-06T00:00:00'
+              stop_time: '0046-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0041-01-06T00:00:00'
+              stop_time: '0046-01-01T00:00:00'
+  - name: val_1pct_late
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0126-01-06T00:00:00'
+              stop_time: '0131-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0126-01-06T00:00:00'
+              stop_time: '0131-01-01T00:00:00'
+  - name: val_piC
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0236-01-06T00:00:00'
+              stop_time: '0241-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0236-01-06T00:00:00'
+              stop_time: '0241-01-01T00:00:00'
+optimization:
+  # The "clip" of the ocean_wide_ohc_clip arm, which passes it as an
+  # override_arg. Stated here so every arm inherits it. This is not
+  # optional at 1deg: unclipped, these runs diverge (see the report
+  # 'Gradient clipping fixes the 1deg mean-fill training failure').
+  max_grad_norm: 1.0
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  # Deep-tail schedule. Mean optimised depth 12.3, against 7.5 for the
+  # long-tail schedule this forks, 3.0 for the ERA5 schedule and 2.5 for the
+  # deterministic 4-step pretrain. 70% of batches now optimise at depth 12 or
+  # 20, against the long-tail wave's 40%.
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.1 # long-tail: 0.3
+      - steps: 2
+        probability: 0.1 # long-tail: 0.2
+      - steps: 4
+        probability: 0.1 # unchanged
+      - steps: 12
+        probability: 0.3 # long-tail: 0.2
+      - steps: 20
+        probability: 0.4 # long-tail: 0.2
+  optimize_last_step_only: true
+  # The stage-1 objective, restated. create_finetune_config.sh merges only
+  # .stepper from the pretraining config, so stepper_training carries nothing
+  # over: stage 1 passed these as override_args, and without them here stage 2
+  # trains MSE and discards the calibration stage 1 bought. n_ensemble would
+  # default to 2 under EnsembleLoss; stated so the ensemble size is visible.
+  n_ensemble: 2
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.0
+      patch_energy_score_weight: 0.1
+      patch_energy_score_size: 3
+  # Loads the stage-1 best_ckpt mounted at /ckpt.tar by uncoupled_finetune.sh.
+  # Without it the finetune trains from random init.
+  parameter_init:
+    weights_path: /ckpt.tar
+stepper:
+  input_masking:
+    mask_value: 0
+    fill_value: 0.0
+    exclude_names_and_prefixes:
+      - land_fraction
+      - sea_surface_fraction
+      - DLWRFsfc
+      - DSWRFsfc
+      - ULWRFsfc
+      - USWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - total_frozen_precipitation_rate
+  step:
+    type: single_module
+    config:
+      builder:
+        type: Samudra
+        config:
+          ch_width:
+            - 280
+            - 380
+            - 480
+            - 520
+          dilation:
+            - 1
+            - 2
+            - 4
+            - 8
+          n_layers:
+            - 1
+            - 1
+            - 1
+            - 1
+          norm: layer
+          checkpoint_strategy: all
+          zonally_periodic_upsample: true
+          conditioned_blocks: all_blocks
+          noise_embed_dim: 32
+      normalization:
+        network:
+          global_means_path: /ocean_stats/centering.nc
+          global_stds_path: /ocean_stats/scaling-full-field.nc
+      corrector:
+        type: ocean_corrector
+        config:
+          ocean_heat_content_correction:
+            method: scaled_temperature
+          surface_energy_flux_correction:
+            method: prescribed
+          force_positive_names:
+            - so_0
+            - so_1
+            - so_2
+            - so_3
+            - so_4
+            - so_5
+            - so_6
+            - so_7
+            - so_8
+            - so_9
+            - so_10
+            - so_11
+            - so_12
+            - so_13
+            - so_14
+            - so_15
+            - so_16
+            - so_17
+            - so_18
+            - sea_ice_volume
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: ocean_sea_ice_fraction
+            land_fraction_name: land_fraction
+            remove_negative_ocean_fraction: false
+            zero_where_ice_free_names:
+              - sea_ice_volume
+              - sfdsi
+              - UI
+              - VI
+      next_step_forcing_names:
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
+      in_names:
+        - land_fraction
+        - sea_surface_fraction
+        - deptho
+        - hfgeou
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
+        - sst
+        - zos
+        - so_0
+        - so_1
+        - so_2
+        - so_3
+        - so_4
+        - so_5
+        - so_6
+        - so_7
+        - so_8
+        - so_9
+        - so_10
+        - so_11
+        - so_12
+        - so_13
+        - so_14
+        - so_15
+        - so_16
+        - so_17
+        - so_18
+        - thetao_0
+        - thetao_1
+        - thetao_2
+        - thetao_3
+        - thetao_4
+        - thetao_5
+        - thetao_6
+        - thetao_7
+        - thetao_8
+        - thetao_9
+        - thetao_10
+        - thetao_11
+        - thetao_12
+        - thetao_13
+        - thetao_14
+        - thetao_15
+        - thetao_16
+        - thetao_17
+        - thetao_18
+        - uo_0
+        - uo_1
+        - uo_2
+        - uo_3
+        - uo_4
+        - uo_5
+        - uo_6
+        - uo_7
+        - uo_8
+        - uo_9
+        - uo_10
+        - uo_11
+        - uo_12
+        - uo_13
+        - uo_14
+        - uo_15
+        - uo_16
+        - uo_17
+        - uo_18
+        - vo_0
+        - vo_1
+        - vo_2
+        - vo_3
+        - vo_4
+        - vo_5
+        - vo_6
+        - vo_7
+        - vo_8
+        - vo_9
+        - vo_10
+        - vo_11
+        - vo_12
+        - vo_13
+        - vo_14
+        - vo_15
+        - vo_16
+        - vo_17
+        - vo_18
+        - ocean_sea_ice_fraction
+        - sea_ice_volume
+        - sfdsi
+        - UI
+        - VI
+      out_names:
+        - sst
+        - zos
+        - so_0
+        - so_1
+        - so_2
+        - so_3
+        - so_4
+        - so_5
+        - so_6
+        - so_7
+        - so_8
+        - so_9
+        - so_10
+        - so_11
+        - so_12
+        - so_13
+        - so_14
+        - so_15
+        - so_16
+        - so_17
+        - so_18
+        - thetao_0
+        - thetao_1
+        - thetao_2
+        - thetao_3
+        - thetao_4
+        - thetao_5
+        - thetao_6
+        - thetao_7
+        - thetao_8
+        - thetao_9
+        - thetao_10
+        - thetao_11
+        - thetao_12
+        - thetao_13
+        - thetao_14
+        - thetao_15
+        - thetao_16
+        - thetao_17
+        - thetao_18
+        - uo_0
+        - uo_1
+        - uo_2
+        - uo_3
+        - uo_4
+        - uo_5
+        - uo_6
+        - uo_7
+        - uo_8
+        - uo_9
+        - uo_10
+        - uo_11
+        - uo_12
+        - uo_13
+        - uo_14
+        - uo_15
+        - uo_16
+        - uo_17
+        - uo_18
+        - vo_0
+        - vo_1
+        - vo_2
+        - vo_3
+        - vo_4
+        - vo_5
+        - vo_6
+        - vo_7
+        - vo_8
+        - vo_9
+        - vo_10
+        - vo_11
+        - vo_12
+        - vo_13
+        - vo_14
+        - vo_15
+        - vo_16
+        - vo_17
+        - vo_18
+        - ocean_sea_ice_fraction
+        - sea_ice_volume
+        - sfdsi
+        - UI
+        - VI
+        - hfds_total_area
+        - tauuo
+        - tauvo
+        - wfo
