@@ -65,6 +65,12 @@ class SingleModuleStepConfig(StepConfigABC):
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
+        residual_prediction_names: When set, restrict residual prediction to
+            these prognostic names; the remaining prognostics are predicted
+            full-field. Enables hybrid steppers (e.g. temperature stepped as a
+            tendency while velocities, salinity and ice are full-field).
+            Requires ``residual_prediction``. Default (None) applies residual
+            prediction to every prognostic.
         residual_normalized_prediction: When using residual prediction, treat
             the network's prognostic outputs as residuals in
             residual-normalized units (the ``normalization.residual``
@@ -101,6 +107,7 @@ class SingleModuleStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    residual_prediction_names: list[str] | None = None
     residual_normalized_prediction: bool = False
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
@@ -108,6 +115,8 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.residual_prediction_names is not None and not self.residual_prediction:
+            raise ValueError("residual_prediction_names requires residual_prediction")
         if self.residual_normalized_prediction:
             if not self.residual_prediction:
                 raise ValueError(
@@ -269,7 +278,9 @@ class SingleModuleStepConfig(StepConfigABC):
         if self.residual_normalized_prediction:
             assert self.normalization.residual is not None
             residual_normalizer: StandardNormalizer | None = (
-                self.normalization.residual.build(names=self.prognostic_names)
+                self.normalization.residual.build(
+                    names=self.residual_prediction_names or self.prognostic_names
+                )
             )
         else:
             residual_normalizer = None
@@ -323,7 +334,9 @@ class SingleModuleStep(StepABC):
         if residual_normalizer is not None:
             self._residual_transform: TensorDict | None = {
                 name: residual_normalizer.stds[name] / normalizer.stds[name]
-                for name in config.prognostic_names
+                for name in (
+                    config.residual_prediction_names or config.prognostic_names
+                )
             }
         else:
             self._residual_transform = None
@@ -497,6 +510,7 @@ class SingleModuleStep(StepABC):
             residual_prediction=self._config.residual_prediction,
             residual_transform=self._residual_transform,
             prognostic_names=self.prognostic_names,
+            residual_names=self._config.residual_prediction_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
             data_mask=args.data_mask,
@@ -656,6 +670,7 @@ def step_with_adjustments(
     ocean: Ocean | None,
     residual_prediction: bool,
     prognostic_names: list[str],
+    residual_names: list[str] | None = None,
     residual_transform: TensorMapping | None = None,
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
@@ -680,6 +695,8 @@ def step_with_adjustments(
         ocean: The ocean model to use.
         residual_prediction: Whether to use residual prediction.
         prognostic_names: Names of prognostic variables.
+        residual_names: Prognostic names stepped as residuals; the rest are
+            full-field. Defaults to all of ``prognostic_names``.
         residual_transform: Optional per-prognostic scale mapping for
             residual-normalized prediction: the network's prognostic outputs
             are multiplied by ``residual_std / field_std`` in
@@ -723,12 +740,14 @@ def step_with_adjustments(
         input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
+        if residual_names is None:
+            residual_names = prognostic_names
         if residual_transform is not None:
             output_norm = dict(output_norm)
-            for name in prognostic_names:
+            for name in residual_names:
                 if name in output_norm:
                     output_norm[name] = output_norm[name] * residual_transform[name]
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
+        output_norm = add_names(input_norm, output_norm, residual_names)
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         assert gmr_state is not None

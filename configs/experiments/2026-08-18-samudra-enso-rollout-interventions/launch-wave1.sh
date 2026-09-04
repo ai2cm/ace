@@ -85,6 +85,12 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "hybridresid" ]]; then
+    config="${CONFIG_DIR}/hybridresid-pretrain.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "residfix" ]]; then
     config="${CONFIG_DIR}/residfix-pretrain.yaml"
     module="fme.ace.train"

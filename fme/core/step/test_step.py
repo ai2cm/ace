@@ -2260,3 +2260,50 @@ def test_multi_call_step_forwards_train_eval():
     wrapped_step.train.reset_mock()
     step.train()
     wrapped_step.train.assert_called_once_with(True)
+
+
+def test_step_with_adjustments_hybrid_residual_names():
+    """residual_names restricts the residual add to a subset of prognostics:
+    listed names step as input + output, the rest are full-field."""
+    import torch
+
+    from fme.core.normalizer import StandardNormalizer
+    from fme.core.step.single_module import step_with_adjustments
+
+    names = ["a", "b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.tensor(0.0) for n in names},
+        stds={n: torch.tensor(1.0) for n in names},
+    )
+    input_data = {n: torch.full((1, 4, 4), 2.0) for n in names}
+    delta = {n: torch.full((1, 4, 4), 0.5) for n in names}
+
+    def network_calls(input_norm):
+        return dict(delta)
+
+    out = step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=network_calls,
+        normalizer=normalizer,
+        corrector=None,
+        ocean=None,
+        residual_prediction=True,
+        prognostic_names=names,
+        residual_names=["a"],
+    ).output
+    torch.testing.assert_close(out["a"], torch.full((1, 4, 4), 2.5))  # residual
+    torch.testing.assert_close(out["b"], torch.full((1, 4, 4), 0.5))  # full-field
+
+    # default (residual_names=None): every prognostic residual
+    out_all = step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=network_calls,
+        normalizer=normalizer,
+        corrector=None,
+        ocean=None,
+        residual_prediction=True,
+        prognostic_names=names,
+    ).output
+    torch.testing.assert_close(out_all["b"], torch.full((1, 4, 4), 2.5))
