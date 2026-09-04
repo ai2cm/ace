@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+import warnings
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -1559,6 +1560,7 @@ class TrainStepperConfig:
             A TrainStepper wrapping the built stepper with training
             functionality.
         """
+        self._warn_if_input_dropout_schedule_is_inert(stepper_config)
         parameter_initializer = self._get_parameter_initializer(
             load_weights_and_history_fn
         )
@@ -1569,6 +1571,30 @@ class TrainStepperConfig:
         return TrainStepper(
             stepper=stepper,
             config=self,
+        )
+
+    def _warn_if_input_dropout_schedule_is_inert(
+        self, stepper_config: StepperConfig
+    ) -> None:
+        """Warn when input dropout is confined to steps that are all optimized.
+
+        This loop rolls out exactly as many steps as the sampled loss length,
+        so without ``optimize_last_step_only`` every forward step is optimized
+        and confining dropout to optimized steps changes nothing. The setting
+        is inert rather than wrong, so warn instead of raising and leave
+        existing training configs runnable.
+        """
+        if self.optimize_last_step_only:
+            return
+        if not stepper_config.step.input_dropout_optimized_steps_only:
+            return
+        warnings.warn(
+            "input_dropout_optimized_steps_only is set but "
+            "optimize_last_step_only is False, so every forward step of this "
+            "rollout is optimized and input dropout is applied on all of "
+            "them. Set optimize_last_step_only to confine dropout to the "
+            "optimized step, or remove input_dropout_optimized_steps_only.",
+            stacklevel=2,
         )
 
 

@@ -1222,6 +1222,7 @@ def get_stepper_config(
     ocean_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
+    atmosphere_input_dropout_optimized_steps_only: bool = False,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1266,6 +1267,9 @@ def get_stepper_config(
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
                             input_dropout=atmosphere_input_dropout,
+                            input_dropout_optimized_steps_only=(
+                                atmosphere_input_dropout_optimized_steps_only
+                            ),
                         ),
                     ),
                 ),
@@ -1314,6 +1318,7 @@ def get_stepper_and_batch(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
+    atmosphere_input_dropout_optimized_steps_only: bool = False,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
@@ -1349,6 +1354,9 @@ def get_stepper_and_batch(
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
         atmosphere_input_dropout=atmosphere_input_dropout,
+        atmosphere_input_dropout_optimized_steps_only=(
+            atmosphere_input_dropout_optimized_steps_only
+        ),
     )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=coupled_data.vertical_coord

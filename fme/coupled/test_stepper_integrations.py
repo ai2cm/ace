@@ -9,6 +9,7 @@ from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.loss import StepLossConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.registry.module import ModuleSelector
+from fme.core.var_masking import BernoulliMaskingConfig, VariableMaskingConfig
 
 from .data_loading.data_typing import CoupledVerticalCoordinate
 from .stepper import (
@@ -556,3 +557,85 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
         assert tensor.shape[2] == 2  # [sample, ensemble, time, ...]
     for tensor in result.atmosphere.gen_data.values():
         assert tensor.shape[2] == 3
+
+
+def _atmosphere_dropout_applied_per_step(
+    optimized_steps_only: bool,
+) -> list[bool]:
+    """Train one coupled batch; report whether dropout hit each atmosphere step.
+
+    A rate-1.0 Bernoulli default drops every atmosphere input channel, so the
+    packed network input is exactly zero on a masked step and nonzero on an
+    unmasked one.
+    """
+    torch.manual_seed(0)
+    n_forward_times_ocean = 2
+    n_forward_times_atmosphere = 4
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            optimize_last_step_only=True,
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=1,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableAddOne()}
+        ),
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": _LearnableTimesTwo()}
+        ),
+        atmosphere_input_dropout=VariableMaskingConfig(
+            default=BernoulliMaskingConfig(rate=1.0)
+        ),
+        atmosphere_input_dropout_optimized_steps_only=optimized_steps_only,
+    )
+    # modules is [*atmosphere.modules, *ocean.modules], so index 0 is the
+    # atmosphere network that input_dropout is configured on.
+    atmosphere_module = train_stepper.modules[0]
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = atmosphere_module.register_forward_pre_hook(_pre_hook)
+    optim = OptimizationConfig(use_gradient_accumulation=True).build(
+        train_stepper.modules, 1
+    )
+    try:
+        train_stepper.train_on_batch(
+            data=coupled_data.data,
+            optimization=optim,
+        )
+    finally:
+        handle.remove()
+
+    assert len(captured) == n_forward_times_atmosphere
+    return [bool((packed == 0.0).all()) for packed in captured]
+
+
+@pytest.mark.parametrize("optimized_steps_only", [True, False])
+def test_coupled_input_dropout_optimized_steps_only(optimized_steps_only: bool):
+    """The coupled loop honors input_dropout_optimized_steps_only.
+
+    The flag is implemented purely as a grad-state gate in the step, so the
+    coupled trainer inherits it only because it pulls each forward step from
+    the generator inside that step's grad context. This pins that: with
+    atmosphere optimize_last_step_only, the three non-optimized atmosphere
+    steps stay unmasked under the flag and only the last is masked, while the
+    default masks all four.
+    """
+    applied = _atmosphere_dropout_applied_per_step(optimized_steps_only)
+    if optimized_steps_only:
+        assert applied == [False, False, False, True]
+    else:
+        assert applied == [True, True, True, True]

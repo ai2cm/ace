@@ -5,6 +5,7 @@ import os
 import pathlib
 import unittest
 import unittest.mock
+import warnings
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
 from typing import Literal
@@ -1282,7 +1283,10 @@ class _DummyParamModule(torch.nn.Module):
 
 
 def _input_dropout_stepper_config(
-    in_names: list[str], out_names: list[str], input_dropout: VariableMaskingConfig
+    in_names: list[str],
+    out_names: list[str],
+    input_dropout: VariableMaskingConfig,
+    input_dropout_optimized_steps_only: bool = False,
 ) -> StepperConfig:
     return StepperConfig(
         step=StepSelector(
@@ -1297,6 +1301,9 @@ def _input_dropout_stepper_config(
                     normalization=trivial_network_and_loss_normalization(in_names),
                     include_channel_mask_inputs=True,
                     input_dropout=input_dropout,
+                    input_dropout_optimized_steps_only=(
+                        input_dropout_optimized_steps_only
+                    ),
                 )
             ),
         ),
@@ -1400,6 +1407,122 @@ def test_input_dropout_mask_sampled_per_forward_step():
     for packed in captured:
         indicators = packed[:, 1:, 0, 0]  # [batch, 1]
         assert (indicators == 0.0).all(), "dropped channel indicator must be 0"
+
+
+def _rollout_dropout_indicators(
+    optimized_steps_only: bool,
+    optimize_last_step_only: bool,
+    n_steps: int = 3,
+) -> list[float]:
+    """Train one rollout batch and return the per-step presence indicator of "a".
+
+    A rate-1.0 Bernoulli group always drops "a", so each step's indicator is
+    deterministic: 0.0 where input dropout applied, 1.0 where it did not.
+    """
+    config = _input_dropout_stepper_config(
+        ["a"],
+        ["a"],
+        VariableMaskingConfig(
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=1.0)
+                )
+            ]
+        ),
+        input_dropout_optimized_steps_only=optimized_steps_only,
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_ensemble=1,
+        loss=StepLossConfig(type="MSE"),
+        n_forward_steps=n_steps,
+        optimize_last_step_only=optimize_last_step_only,
+    )
+    data = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert len(captured) == n_steps
+    # channel 0 is the input "a", channel 1 its presence indicator
+    indicators = []
+    for packed in captured:
+        indicator = packed[:, 1, 0, 0]
+        assert (indicator == indicator[0]).all()
+        indicators.append(float(indicator[0]))
+    return indicators
+
+
+def _inert_dropout_warnings(
+    recorded: Iterable[warnings.WarningMessage],
+) -> list[str]:
+    """Recorded warnings about an input-dropout schedule that cannot take effect."""
+    return [
+        str(w.message)
+        for w in recorded
+        if "input_dropout_optimized_steps_only is set" in str(w.message)
+    ]
+
+
+@pytest.mark.parametrize("optimized_steps_only", [True, False])
+def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
+    optimized_steps_only: bool,
+):
+    """input_dropout_optimized_steps_only leaves non-optimized steps unmasked.
+
+    With optimize_last_step_only the training loop runs every step but the last
+    under no_grad, so with the flag set the two non-optimized steps see "a"
+    present (1.0) and only the final optimized step sees it dropped (0.0),
+    while the default masks every step. The schedule takes effect either way,
+    so no inert-schedule warning is emitted.
+    """
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        indicators = _rollout_dropout_indicators(
+            optimized_steps_only=optimized_steps_only,
+            optimize_last_step_only=True,
+        )
+    assert not _inert_dropout_warnings(recorded)
+    expected = [1.0, 1.0, 0.0] if optimized_steps_only else [0.0, 0.0, 0.0]
+    assert indicators == expected
+
+
+def test_input_dropout_optimized_steps_only_warns_without_last_step_only():
+    """Without optimize_last_step_only the flag is inert, and that is warned.
+
+    The rollout is exactly as long as the sampled loss length here, so no step
+    runs under no_grad and every step is still masked. Building the train
+    stepper warns rather than silently ignoring the setting.
+    """
+    with pytest.warns(UserWarning, match="every forward step of this rollout"):
+        indicators = _rollout_dropout_indicators(
+            optimized_steps_only=True,
+            optimize_last_step_only=False,
+        )
+    assert indicators == [0.0, 0.0, 0.0]
+
+
+def test_input_dropout_masks_every_step_without_optimized_steps_only():
+    """Plain input_dropout masks every step and has no schedule to warn about."""
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        indicators = _rollout_dropout_indicators(
+            optimized_steps_only=False,
+            optimize_last_step_only=False,
+        )
+    assert not _inert_dropout_warnings(recorded)
+    assert indicators == [0.0, 0.0, 0.0]
 
 
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
