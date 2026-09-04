@@ -171,9 +171,18 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_names = []
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
+        # Loss scaling follows the prediction convention per variable: names
+        # stepped as residuals are scored in tendency-std units, full-field
+        # names in full-field-std units. Scoring a full-field state error in
+        # tendency units inflates it by (field_std / tendency_std)^2.
+        residual_scaled = (
+            self.residual_prediction_names
+            if self.residual_prediction_names is not None
+            else self.prognostic_names
+        )
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            residual_scaled_names=residual_scaled + extra_residual_scaled_names,
         )
 
     @classmethod
