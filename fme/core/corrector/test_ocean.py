@@ -926,6 +926,36 @@ def test_uniform_temperature_shifts_valid_zero_thickness_cells():
     )
 
 
+def test_uniform_temperature_conserves_under_a_fractional_mask():
+    # Why the valid-cell test is mask > 0 and not mask == 1. dz is itself
+    # mask-weighted, so dz * (mask > 0) == dz cell for cell whatever values the
+    # mask takes, which is the identity conservation rests on. DepthCoordinate
+    # documents a 0/1 mask but does not enforce one -- it is read straight out
+    # of the store's mask_<k> variables -- and under mask == 1 a fractional
+    # cell would carry integral weight while going unshifted, so the budget
+    # would miss.
+    ops, depth_coordinate, input_data, gen_data, forcing_data = (
+        _make_sea_floor_fixture()
+    )
+    mask = depth_coordinate.mask.clone()
+    # a full-thickness, fully-wet column, so this is not also a dz == 0 cell
+    mask[2, 2, 1] = 0.5
+    fractional = DepthCoordinate(
+        _SEA_FLOOR_IDEPTH, mask, cast(torch.Tensor, depth_coordinate.deptho)
+    )
+    assert (fractional.dz[2, 2, 1] > 0.0) and (mask[2, 2, 1] != 1.0)
+    corrected = _build_ohc_corrector(ops, fractional, "uniform_temperature")(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    target = (
+        _global_mean_ohc(ops, fractional, input_data)
+        + _SEA_FLOOR_NET_FLUX * _SEA_FLOOR_TIMESTEP.total_seconds()
+    )
+    torch.testing.assert_close(
+        _global_mean_ohc(ops, fractional, corrected), target, rtol=1e-6, atol=0.0
+    )
+
+
 @pytest.mark.parametrize("method", ["scaled_temperature", "uniform_temperature"])
 def test_ocean_heat_content_correction_is_differentiable(method):
     # The correction runs inside the training loop and the loss differentiates

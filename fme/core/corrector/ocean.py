@@ -467,9 +467,20 @@ def _force_conserve_ocean_heat_content(
     Shifting them costs the budget nothing, because zero thickness means they
     absorb no heat either way.
 
+    The test is ``mask > 0`` rather than ``mask == 1`` because ``dz`` is itself
+    ``mask``-weighted, so ``dz_k`` is zero wherever ``mask_k`` is zero and
+    ``dz_k * (mask_k > 0)`` equals ``dz_k`` cell for cell whatever values the
+    mask takes. That identity is exactly what makes the deposited heat equal
+    ``delta_T * heat_capacity_per_area``. ``mask == 1`` would only hold it for
+    a strictly 0/1 mask, which is what ``DepthCoordinate`` documents but not
+    what it enforces -- the mask is read straight out of the store's
+    ``mask_<k>`` variables.
+
     Cells the mask excludes are a different matter and are left alone: they hold
-    fill rather than data, and when no spatial mask provider is configured
-    nothing overwrites them after the corrector runs, so ``+ delta_T`` there
+    fill rather than data, and nothing necessarily overwrites them after the
+    corrector runs -- the output masker skips any variable it has no matching
+    mask for, so e.g. ``sst`` is left as the corrector wrote it on a store with
+    per-level masks but no ``mask_sst`` or ``mask_2d``. There ``+ delta_T``
     would drift away from the fill value where ``* ratio`` keeps a zero fill at
     zero. ``scaled_temperature`` rescales every cell regardless, which is
     pre-existing behavior and not something the budget needs.
@@ -563,7 +574,8 @@ def _force_conserve_ocean_heat_content(
         # bathymetry puts at zero thickness -- they hold data and are scored, and
         # shifting them adds no heat. Cells outside the mask hold fill, so they
         # are left alone. Not interchangeable with dz > 0; see the docstring.
-        # ``> 0`` rather than ``== 1`` mirrors depth_integral's own mask test.
+        # ``> 0`` rather than ``== 1`` because dz is mask-weighted, so this is
+        # the indicator for which dz * indicator == dz; see the docstring.
         is_masked_valid = (vertical_coordinate.mask > 0.0).to(
             dtype=gen_potential_temperature.dtype
         )
