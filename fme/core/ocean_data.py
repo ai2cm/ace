@@ -37,6 +37,16 @@ class HasOceanDepthIntegral(Protocol):
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
+    @property
+    def dz(self) -> torch.Tensor:
+        """Layer thickness in meters, the weight ``depth_integral`` applies.
+
+        The last dimension is the vertical. Thickness is zero wherever a layer
+        is invalid (below the sea floor or on land), so ``dz > 0`` is exactly
+        the set of cells a depth integral can see.
+        """
+        ...
+
 
 class HasCellAreaInMetersSquared(Protocol):
     """Protocol for objects that can provide cell areas in square meters."""
