@@ -1,0 +1,50 @@
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_forward_steps: 400
+forward_steps_in_memory: 40
+loader:
+  num_data_workers: 2
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '0251-01-03T12:00:00'
+    - '0262-06-22T12:00:00'
+data_writer:
+  save_prediction_files: true
+  names:
+  - sst
+  - zos
+  - ssu
+  - ssv
+  - thetao_0
+  - thetao_4
+  - thetao_8
+  - thetao_12
+  - thetao_18
+  - so_0
+  - so_18
+  - uo_0
+  - uo_8
+  - vo_8
+  - ocean_sea_ice_fraction
+  - sea_ice_volume
+  - hfds_total_area
+aggregator:
+  log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+stepper_override:
+  prescribed_prognostic_names:
+  - ocean_sea_ice_fraction
+  - sea_ice_volume
