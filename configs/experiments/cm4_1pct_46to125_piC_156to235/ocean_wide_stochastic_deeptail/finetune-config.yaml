@@ -309,7 +309,7 @@ stepper:
           norm: layer
           checkpoint_strategy: all
           zonally_periodic_upsample: true
-          conditioned_blocks: all_blocks
+          conditioned_blocks: bottleneck
           noise_embed_dim: 32
       normalization:
         network:
