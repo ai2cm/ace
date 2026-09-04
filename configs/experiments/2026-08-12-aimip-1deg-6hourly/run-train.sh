@@ -231,6 +231,14 @@ declare -A STAGE1_DONOR=(
   [3]=01M1J6X918YK0W7ZP9WA422MT9
 )
 
+# Stage 2 launched 2026-09-04 06:05-06:29Z on jupiter (8 GPUs, high, 8h) at commit e10a9be:
+#   rs1  experiment 01M1NGC06NPTEZJS1H2KSE8KV2
+#   rs2  experiment 01M1NGNEMV2A1ETM4ZGAZ1X2T4
+#   rs3  experiment 01M1NHPDTMZ0N8K9W7XEWPRYP5
+# Job and result-dataset ids are deliberately NOT recorded here yet: these jobs auto-resume,
+# and a preemption after the 8h min-runtime issues a new job with a new result dataset. Take
+# both from the job that exited 0, after completion.
+#
 # Result dataset id of each seed's own stage-2 run, filled after STAGE=2 completes. Take the
 # id from the JOB that exited 0, not from the experiment: a preempted-and-resumed experiment
 # commits the dead job's dataset too, with checkpoints short of the final epoch, and mounting
