@@ -12,9 +12,9 @@ INITIAL_CONDITION_ROOT=/climate-default/2026-01-28-vertically-resolved-1deg-c96-
 
 declare -A INITIAL_CONDITION_DATASETS
 INITIAL_CONDITION_DATASETS=( \
-    ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
-    ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
-    ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
+    # ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
+    # ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
+    # ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
     ["4xCO2"]="${INITIAL_CONDITION_ROOT}/4xCO2-ic_0005.zarr" \
 )
 
@@ -46,7 +46,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 # Use an initial condition ensemble to run multiple ensemble members with a
 # deterministic model. No need to provide a seed. We will assume there are less
 # than 10 ensemble members per climate.
-for ensemble_member in {0..0}; do
+for ensemble_member in {1..5}; do
     day=$(( ensemble_member + 1 ))
     initial_condition_time=2032-01-0${day}T00:00:00
     for model in "${!MODELS[@]}"; do
@@ -71,7 +71,6 @@ for ensemble_member in {0..0}; do
                 --workspace ai2/ace \
                 --priority high \
                 --cluster ai2/titan \
-                --env CM_PRIORITY=high \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \

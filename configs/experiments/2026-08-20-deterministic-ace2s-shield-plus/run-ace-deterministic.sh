@@ -13,7 +13,8 @@ STATS_DATASET=andrep/2026-02-06-vertically-resolved-1deg-c96-shield-ramped-climS
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this
 
-for seed in 0
+# for seed in 0
+for seed in 1
 do
     job_name="ace-shield-deterministic-train-full-b16-rs${seed}"
     override="seed=${seed}"
@@ -25,7 +26,6 @@ do
         --workspace ai2/ace \
         --priority high \
         --cluster ai2/titan \
-        --env CM_PRIORITY=high \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
@@ -36,6 +36,7 @@ do
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
+        --min-runtime 8h \
         --weka climate-default:/climate-default \
         --system-python \
         --install "pip install --no-deps ." \
