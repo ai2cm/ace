@@ -81,3 +81,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|01M1MTB5Q2WA4DXGSQ0
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|01M1MTBHSTNQBBW548Q4K19J0M|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-5|rs0|01M1PVTNJYZQAHYFE36WFDVBZG|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr1e-4|rs0|01M1PVTYMJX2N5JBB5S82BYVVY|training|best_inference_ckpt|normal|--min-runtime 8h
