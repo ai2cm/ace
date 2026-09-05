@@ -39,6 +39,7 @@ from .layers import (
     ContextConfig,
     DropPath,
 )
+from .local_filter import LocalFilterConfig
 from .lora import LoRAConv2d
 from .s2convolutions import SpectralConvS2, validate_spectral_ratio
 from .makani.spectral_convolution import SpectralConv
@@ -74,6 +75,8 @@ class SFNONetConfig:
         filter_output: Whether to filter the output through a SHT round-trip.
         local_blocks: List of block indices to use local (DISCO) filters
             instead of spectral filters.
+        local_filter: Configuration of the local (DISCO) filter used by the
+            blocks named in local_blocks. Ignored when local_blocks is empty.
         normalize_big_skip: Whether to normalize the big skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
@@ -126,6 +129,9 @@ class SFNONetConfig:
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    local_filter: LocalFilterConfig = dataclasses.field(
+        default_factory=LocalFilterConfig
+    )
     normalize_big_skip: bool = False
     affine_norms: bool = False
     lora_rank: int = 0
@@ -144,23 +150,6 @@ class SFNONetConfig:
             filter_type=self.filter_type,
             local_blocks=bool(self.local_blocks),
         )
-
-
-# heuristic for finding theta_cutoff
-def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
-    theta_cutoff_factor = {
-        "piecewise linear": 0.5,
-        "morlet": 0.5,
-        "isotropic morlet": 0.5,
-        "zernike": math.sqrt(2.0),
-    }
-
-    return (
-        (kernel_shape[0] + 1)
-        * theta_cutoff_factor[basis_type]
-        * math.pi
-        / float(nlat - 1)
-    )
 
 
 class DiscreteContinuousConvS2(nn.Module):
@@ -189,6 +178,7 @@ class SpectralFilterLayer(nn.Module):
         lora_alpha: float | None = None,
         preserve_global_mean: bool = False,
         spectral_ratio: float = 1.0,
+        local_filter: LocalFilterConfig | None = None,
     ):
         super(SpectralFilterLayer, self).__init__()
 
@@ -236,25 +226,14 @@ class SpectralFilterLayer(nn.Module):
             )
 
         elif filter_type == "local":
-            # heuristic for finding theta_cutoff
-            theta_cutoff = 2 * _compute_cutoff_radius(
-                nlat=forward_transform.nlat,
-                kernel_shape=(3, 3),
-                basis_type="morlet",
-            )
-            self.filter = DiscreteContinuousConvS2(
-                embed_dim,
+            config = local_filter if local_filter is not None else LocalFilterConfig()
+            self.filter = config.build(
                 embed_dim,
                 in_shape=(forward_transform.nlat, forward_transform.nlon),
                 out_shape=(inverse_transform.nlat, inverse_transform.nlon),
-                kernel_shape=(3, 3),
-                basis_type="morlet",
-                basis_norm_mode="mean",
-                groups=1,
                 grid_in=forward_transform.grid,
                 grid_out=inverse_transform.grid,
-                bias=False,
-                theta_cutoff=theta_cutoff,
+                lmax=forward_transform.lmax,
             )
         else:
             raise (NotImplementedError)
@@ -293,6 +272,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         spectral_lora_alpha: float | None = None,
         filter_preserves_global_mean: bool = False,
         spectral_ratio: float = 1.0,
+        local_filter: LocalFilterConfig | None = None,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -320,6 +300,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             lora_alpha=spectral_lora_alpha,
             preserve_global_mean=filter_preserves_global_mean,
             spectral_ratio=spectral_ratio,
+            local_filter=local_filter,
         )
 
         if inner_skip == "linear":
@@ -341,7 +322,9 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-        if filter_type == "linear" or filter_type == "real linear":
+        # "local" is included so that swapping the spectral filter for a DISCO
+        # filter changes only the filter, not the block's activation placement.
+        if filter_type in ("linear", "real linear", "local"):
             self.act_layer = act_layer()
 
         # dropout
@@ -562,6 +545,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             ]
         else:
             self.local_blocks = []
+        self.local_filter = params.local_filter
         self.affine_norms = params.affine_norms
         self.filter_num_groups = params.filter_num_groups
         self.lora_rank = params.lora_rank
@@ -677,6 +661,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 spectral_lora_alpha=self.spectral_lora_alpha,
                 filter_preserves_global_mean=self.filter_preserves_global_mean,
                 spectral_ratio=self.spectral_ratio,
+                local_filter=self.local_filter,
             )
 
             self.blocks.append(block)

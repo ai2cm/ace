@@ -5,11 +5,11 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
+from fme.core.disco import compute_cutoff_radius
 from fme.core.distributed import Distributed
 
 from .initialization import trunc_normal_
 from .layers import Context, ContextConfig
-from .sfnonet import _compute_cutoff_radius
 
 
 @dataclasses.dataclass
@@ -47,7 +47,7 @@ class GroupedDiscreteContinuousConvS2(nn.Module):
         super().__init__()
         nlat, nlon = img_shape
         kernel_shape = (kernel_size, kernel_size)
-        theta_cutoff = _compute_cutoff_radius(
+        theta_cutoff = compute_cutoff_radius(
             nlat=nlat,
             kernel_shape=kernel_shape,
             basis_type="morlet",
