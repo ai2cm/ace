@@ -33,10 +33,12 @@ class CollateFn:
         horizontal_dims: list[str],
         label_encoding: LabelEncoding | None = None,
         allow_missing_variables: bool = False,
+        label_dropout_rate: float = 0.0,
     ):
         self.horizontal_dims = horizontal_dims
         self.label_encoding = label_encoding
         self.allow_missing_variables = allow_missing_variables
+        self.label_dropout_rate = label_dropout_rate
 
     def __call__(self, samples: Sequence[DatasetItem]) -> BatchData:
         return BatchData.from_sample_tuples(
@@ -44,6 +46,7 @@ class CollateFn:
             horizontal_dims=self.horizontal_dims,
             label_encoding=self.label_encoding,
             allow_missing_variables=self.allow_missing_variables,
+            label_dropout_rate=self.label_dropout_rate,
         )
 
 
@@ -124,6 +127,10 @@ def get_gridded_data(
     else:
         label_encoding = None
 
+    # Label dropout is a training-only augmentation; never withhold labels on the
+    # validation path so validation metrics use the true per-source conditioning.
+    label_dropout_rate = config.label_dropout_rate if train else 0.0
+
     dataloader = get_data_loader(
         dataset=dataset,
         batch_size=batch_size,
@@ -139,6 +146,7 @@ def get_gridded_data(
             list(properties.horizontal_coordinates.dims),
             label_encoding,
             allow_missing_variables=requirements.allow_missing_variables,
+            label_dropout_rate=label_dropout_rate,
         ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
