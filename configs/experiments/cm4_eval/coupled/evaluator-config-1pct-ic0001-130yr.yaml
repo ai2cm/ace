@@ -2,7 +2,7 @@
 #   --config-dir configs/experiments/cm4_eval/coupled
 experiment_dir: /results
 n_coupled_steps: 9488
-coupled_steps_in_memory: 40
+coupled_steps_in_memory: 16
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
