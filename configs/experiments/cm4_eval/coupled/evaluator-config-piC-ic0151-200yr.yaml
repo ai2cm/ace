@@ -27,6 +27,7 @@ loader:
           engine: zarr
         - data_path: /climate-default
           file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
     atmosphere:
       merge:
         - data_path: /climate-default
