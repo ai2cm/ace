@@ -1,3 +1,9 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
-cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|o1a2rs0|01KZ5DWPA1NAHYMC1C516E504M|training|best_inference_ckpt|normal|--min-runtime 8h
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|o1a2rs0|01KZ5DWPA1NAHYMC1C516E504M|run_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|o1a2rs0|01KZ5DWPA1NAHYMC1C516E504M|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
