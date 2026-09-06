@@ -117,6 +117,8 @@ run_eval () {
   fi
   local CONFIG="$CONFIG_2026"
   [[ "$label" == ace21-* ]] && CONFIG="$CONFIG_2024"
+  [[ "$label" == seedsel-single-* ]] && CONFIG="$SCRIPT_PATH/seedsel-single-evaluator-config.yaml"
+  [[ "$label" == seedsel-7ic-* ]] && CONFIG="$SCRIPT_PATH/seedsel-7ic-evaluator-config.yaml"
   echo "  submitting $job_name  ($(basename "$CONFIG"))"
 
   gantry run \
@@ -171,6 +173,23 @@ done
 run_eval "ace22-rs1" "01M1NGC06ZYNV8CNX62WE7JQ4P"
 run_eval "ace22-rs2" "01M1NGNEN34KX4BVKWPTNFA2YG"
 run_eval "ace22-rs3" "01M1NHPDTXGJGJBBCP24H42DRK"
+
+# Seed selection on ACE2.1's sampling design -- see seedsel-*.yaml for why. One 36-year
+# rollout from a single initial condition and seven 5-year rollouts, per seed, over the four
+# ACE2.2 seeds. Roughly an eighth of a long36 run each, so ~1 GPU-h per seed. Filter with
+# `./run-long36-backfill.sh seedsel`.
+declare -A ACE22_SEED_CKPT=(
+  [0]=01M0RFP2DKAGABV89KRPMXX5C3
+  [1]=01M1NGC06ZYNV8CNX62WE7JQ4P
+  [2]=01M1NGNEN34KX4BVKWPTNFA2YG
+  [3]=01M1NHPDTXGJGJBBCP24H42DRK
+)
+for S in 0 1 2 3; do
+  CONFIG_SEEDSEL_SINGLE="$SCRIPT_PATH/seedsel-single-evaluator-config.yaml" \
+    run_eval "seedsel-single-rs${S}" "${ACE22_SEED_CKPT[$S]}"
+  CONFIG_SEEDSEL_7IC="$SCRIPT_PATH/seedsel-7ic-evaluator-config.yaml" \
+    run_eval "seedsel-7ic-rs${S}" "${ACE22_SEED_CKPT[$S]}"
+done
 
 # ACE2.1's four training seeds. Ids from
 # ACE2.1-ERA5-AIMIP/scripts/run-ace-evaluator-seed-selection-single.sh.

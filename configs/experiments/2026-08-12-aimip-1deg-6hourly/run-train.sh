@@ -266,6 +266,14 @@ case "$STAGE" in
     done
     ;;
   3)
+    # Stage 3 is for the selected seed only, so refuse the default SEEDS list: reaching here
+    # with more than one seed means SEEDS was not set, and would launch a chain per seed.
+    if [[ $(wc -w <<< "$SEEDS") -ne 1 ]]; then
+      echo "ERROR: STAGE=3 takes exactly one seed, got SEEDS='$SEEDS'." >&2
+      echo "       Stage 3 runs only for the seed chosen by the seed-selection evaluation;" >&2
+      echo "       pass it explicitly, e.g. STAGE=3 SEEDS=\"2\" $0" >&2
+      exit 1
+    fi
     for SEED in $SEEDS; do
       run_training "$base_name-plev-ft.yaml" "$base_name-plev-ft-rs${SEED}" \
         "seed=${SEED}" "${STAGE2_DONOR[$SEED]}"

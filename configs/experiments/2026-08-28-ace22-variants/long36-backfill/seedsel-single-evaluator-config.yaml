@@ -1,0 +1,98 @@
+# One 36-year rollout from a single initial condition. Seed selection for the ACE2.2 four-seed ensemble, replicating ACE2.1's sampling design.
+#
+# ACE2.1 chose its seed from two evaluator runs -- one 36-year rollout from a single initial
+# condition, and seven 5-year rollouts spread across 1980-2010 (ACE2.1-ERA5-AIMIP configs
+# ace-evaluator-seed-selection-single-config.yaml and ace-evaluator-seed-selection-config.yaml).
+# The `long36` config in this directory instead uses eight initial conditions over 36 years,
+# inherited from ACE2.2's own inline `long_46year` monitoring entry. That is the right common
+# footing for comparing configurations, and it is what the campaign comparison uses, but it is
+# a lower-noise criterion than ACE2.1 selected on. Selection gain scales with how well the
+# criterion tracks the truth, so choosing ACE2.2's seed on the better criterion would hand it a
+# selection advantage ACE2.1 never had -- inside the very comparison the seed ensemble exists
+# to make fair. These two configs restore the symmetry.
+#
+# What is matched to ACE2.1: the number and placement of initial conditions and the rollout
+# length. What is not, deliberately: the ERA5 build (2026-03-19, as every ACE2.2-generation run
+# in this campaign uses). The aggregator block is written in the current config schema rather
+# than ACE2.1's, which is a reorganisation of the config classes and not a change in what is
+# computed -- ACE2.1's own seed-selection runs logged the same metrics. Both rollouts end
+# 2014-12-31 and never enter the 2015-2024 holdout, as ACE2.1's did not.
+#
+# The checkpoint is mounted at /ckpt.tar by the launcher, once per model. Unseeded, for the
+# reason given in long36-evaluator-config.yaml.
+checkpoint_path: /ckpt.tar
+experiment_dir: /results
+logging:
+  project: ace
+n_forward_steps: 52960
+forward_steps_in_memory: 40
+loader:
+  start_indices:
+    times:
+    - '1978-10-01T00:00:00'
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  step_means: []
+  ensembles: []
+  mean_denorm:
+    enabled: false
+    target: denorm
+  mean_norm:
+    enabled: false
+    target: norm
+  zonal_mean:
+    enabled: false
+  time_mean_denorm:
+    target: denorm
+    variables: &id001
+    - PRATEsfc
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - h500
+    - TMP850
+    - PRESsfc
+    - surface_temperature
+    - ULWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - DSWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - LHTFLsfc
+    - SHTFLsfc
+    - tendency_of_total_water_path_due_to_advection
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_3
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_3
+    - specific_total_water_7
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_3
+    - eastward_wind_7
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_3
+    - northward_wind_7
+    - total_water_path
+  time_mean_norm:
+    target: norm
+    variables: *id001
+  annual:
+    variables: *id001
+  power_spectrum:
+    variables: *id001
+  histogram:
+    enabled: true
