@@ -191,8 +191,10 @@ base_name="train-1deg-6hourly-v2-era5-only-no-residual-no-co2"
 # point estimate and the +4K response, not on a test.
 #
 # Selection discipline: report the 4-seed MEAN when comparing against P1 or ACE2.1, and the
-# selected best only as the submission. Select on validation inference error -- never on
-# trend, which the intercomparison scores as E2.
+# selected best only as the submission. Per ACE2.1's protocol the checkpoint is the
+# best-inference-error epoch, and the seed is then chosen on the 36-year in-sample rollout's
+# time-mean error and trend skill. Selecting on in-sample trend is legitimate; the constraint
+# is the 2015-2024 holdout, not trend as a quantity.
 #
 # Stages 1 and 2 run for every seed; STAGE 3 RUNS FOR THE SELECTED SEED ONLY. Stage-1
 # metrics do not predict final quality (the P0 probe), so seeds cannot be culled before
@@ -243,10 +245,12 @@ declare -A STAGE1_DONOR=(
 # id from the JOB that exited 0, not from the experiment: a preempted-and-resumed experiment
 # commits the dead job's dataset too, with checkpoints short of the final epoch, and mounting
 # it fails silently. This bit the P1 chains.
+# Each experiment ran a single job, exit 0, dataset committed (checked 2026-09-06); selected
+# epochs 4, 20, 24 against seed 0's 8.
 declare -A STAGE2_DONOR=(
-  [1]=FILL-AFTER-STAGE-2
-  [2]=FILL-AFTER-STAGE-2
-  [3]=FILL-AFTER-STAGE-2
+  [1]=01M1NGC06ZYNV8CNX62WE7JQ4P
+  [2]=01M1NGNEN34KX4BVKWPTNFA2YG
+  [3]=01M1NHPDTXGJGJBBCP24H42DRK
 )
 
 case "$STAGE" in

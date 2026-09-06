@@ -165,6 +165,13 @@ for EP in 30 35 40; do
   run_eval "ace22-stage2-ep${EP}" "01M0RFP2DKAGABV89KRPMXX5C3" "ema_ckpt_00${EP}.tar"
 done
 
+# ACE2.2 seeds 1-3, at the checkpoint each run's criterion selected (epochs 4, 20, 24). Their
+# epoch-30/35/40 behaviour comes free from the inline long_36year entry, so only the selected
+# checkpoints need backfilling; these complete the four-seed ensemble on the protocol basis.
+run_eval "ace22-rs1" "01M1NGC06ZYNV8CNX62WE7JQ4P"
+run_eval "ace22-rs2" "01M1NGNEN34KX4BVKWPTNFA2YG"
+run_eval "ace22-rs3" "01M1NHPDTXGJGJBBCP24H42DRK"
+
 # ACE2.1's four training seeds. Ids from
 # ACE2.1-ERA5-AIMIP/scripts/run-ace-evaluator-seed-selection-single.sh.
 run_eval "ace21-rs0" "01K9B1MR70QWN90KNY7NM22K5M"
