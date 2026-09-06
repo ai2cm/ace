@@ -2,12 +2,12 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # 1pct-ic0001-130yr
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_1pct-ic0001-130yr|best_ckpt|normal|--min-runtime 2h
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_1pct-ic0001-130yr|best_ckpt|normal|--min-runtime 2h
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_1pct-ic0001-130yr|best_ckpt|normal|--min-runtime 2h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
 
 # piC-ic0151-200yr
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr|best_ckpt|normal|--min-runtime 3h
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-200yr|best_ckpt|normal|--min-runtime 3h
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr|best_ckpt|normal|--min-runtime 3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
