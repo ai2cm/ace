@@ -816,6 +816,59 @@ def _setup_and_train_on_batch(
     return stepper.train_on_batch(data, optimization=optimization)
 
 
+def test_train_on_batch_metrics_share_one_device():
+    """Every metric must live on the same device.
+
+    MetricsAggregator all_reduces each metric at the end of the epoch and NCCL
+    has no CPU backend, so a single CPU tensor among device-resident metrics
+    aborts distributed training with "No backend type associated with device
+    type cpu" -- which is invisible to a CPU-only or single-process test run.
+    Asserting the metrics share one device is the platform-independent form of
+    that invariant.
+    """
+    in_names = out_names = ["a", "b"]
+    data, _, _ = get_data(in_names, 3, 2)
+    stepped = _setup_and_train_on_batch(
+        data,
+        in_names,
+        out_names,
+        None,
+        OptimizationConfig(max_grad_norm=1.0),
+        {},
+    )
+    assert "grad_norm" in stepped.metrics, sorted(stepped.metrics)
+    devices = {
+        v.device for v in stepped.metrics.values() if isinstance(v, torch.Tensor)
+    }
+    assert len(devices) == 1, f"metrics span multiple devices: {devices}"
+    assert devices == {get_device()}
+
+
+def test_grad_norm_metric_is_placed_on_the_training_device():
+    """The grad_norm metric follows get_device(), not torch's CPU default.
+
+    The assertion above is vacuous on a CPU-only run, where every device is
+    already `cpu`. Redirecting the stepper's `get_device` to the meta device
+    makes the placement observable without a GPU: an unplaced
+    `torch.tensor(grad_norm)` lands on cpu and fails this.
+    """
+    in_names = out_names = ["a", "b"]
+    data, _, _ = get_data(in_names, 3, 2)
+    with patch(
+        "fme.ace.stepper.single_module.get_device",
+        return_value=torch.device("meta"),
+    ):
+        stepped = _setup_and_train_on_batch(
+            data,
+            in_names,
+            out_names,
+            None,
+            OptimizationConfig(max_grad_norm=1.0),
+            {},
+        )
+    assert stepped.metrics["grad_norm"].device == torch.device("meta")
+
+
 @pytest.mark.parametrize("has_epoch", [True, False])
 @pytest.mark.parametrize("uses_scheduling", [True, False])
 def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
