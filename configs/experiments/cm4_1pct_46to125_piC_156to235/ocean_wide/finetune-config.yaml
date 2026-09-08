@@ -188,6 +188,7 @@ stepper:
     fill_value: 0.0
     exclude_names_and_prefixes:
       - land_fraction
+      - sea_surface_fraction
       - DLWRFsfc
       - DSWRFsfc
       - ULWRFsfc
@@ -261,7 +262,7 @@ stepper:
               - UI
               - VI
           ocean_heat_content_correction:
-            method: scaled_temperature
+            method: uniform_temperature
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
