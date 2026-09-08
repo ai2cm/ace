@@ -79,5 +79,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meant
 # name, WANDB_NAME, WANDB_RUN_GROUP) -- the checkpoint is located by the
 # experiment id in field 3 -- so shortening it changes nothing functional. The
 # training rows keep the full name.
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zd_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zd_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zd_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zd_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
