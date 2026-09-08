@@ -91,3 +91,9 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBH
 # the finetune's second (post-preemption) dataset, as for the rows above.
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
+
+# The ramp counterpart of the pair above, so figures 1 and 2 of the uniform-dT
+# report can both carry a prescribed-flux line. No fresh ramp control: the piC
+# pair above measures whether this commit changes the un-prescribed trajectory,
+# and the published 1pct-ic0001-130yr rollout from 401cc1c03 is the control.
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_1pct-ic0001-130yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
