@@ -9,6 +9,8 @@ loader:
     data_path: gs://vcm-ml-intermediate
     file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
     engine: zarr
+    fill_nans:
+      value: 0.0
   start_indices:
     times:
     - '2016-01-03T09:00:00'
