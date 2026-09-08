@@ -9,6 +9,7 @@ import pytest
 import xarray as xr
 import zarr
 
+from fme.core.timing import GlobalTimer
 from fme.core.writer import (
     ZarrWriter,
     _initialize_zarr,
@@ -322,6 +323,21 @@ def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
     read_all = writer.read_batch(["var"], position_slices={})
     assert read_all["var"].shape == (4, NLAT, NLON)
     np.testing.assert_array_equal(read_all["var"][:2], 0.0)
+
+
+def test_ZarrWriter_records_storage_timings(tmp_path):
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        writer.record_batch(
+            data={"var": np.random.rand(2, NLAT, NLON)},
+            position_slices={"time": slice(0, 2)},
+        )
+        writer.read_batch(["var"], position_slices={"time": slice(0, 2)})
+        durations = timer.get_durations()
+    assert durations["storage_write"] > 0.0
+    assert durations["storage_read"] > 0.0
 
 
 def test_ZarrWriter_read_batch_before_initialization_errors(tmp_path):
