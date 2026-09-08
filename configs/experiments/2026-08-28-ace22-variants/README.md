@@ -15,6 +15,7 @@ of the experiment; differences that matter stay, now justified by measurement.
 | **P0** | inference probe of the *existing* ACE2.2 stage-1 checkpoint — no training | — |
 | **P1** | ACE2.2 recipe with the ACE2.1 train/val split and out-of-sample checkpoint selection | 3 |
 | **P2** | P1, plus near-surface fields reverted to secondary-decoder diagnostics | 1 |
+| **P4** | uniform +4 K SST response across the ACE2.2 seed ensemble — inference only | 4 |
 
 P1 is a test, not a foregone conclusion: if the shorter, cooler 1979–2008 span costs
 forced-response skill, the ACE2.2 split stays and the difference is documented rather
@@ -26,6 +27,15 @@ usable stand-in for a trained model. It carries a *larger* uniform-SST response 
 final model, but its time-mean bias is far worse on every near-surface field and its
 global-mean temperature is several times over-dispersed year to year. **Both variants
 must be evaluated after all three stages** — there is no stage-1 shortcut for either.
+
+P4 asks whether ACE2.2's uniform-SST response varies with the seed. That response is
+~45% of a physics-based model's (2.0 K against GFDL-CM4's 4.6 K for +4 K), the largest
+known deficiency in the model, and it is measured only on submitted checkpoints — so it
+rests on two seeds today, which differ by 3% while their historical trend shares differ
+by 27 points. Four seeds cannot explain the shortfall, but they can say whether seed
+selection is a lever on it, and they supply the across-seed test of whether the
+lowest-bias seed has the weakest response. Inference only, on the stage-2 checkpoints
+already in hand: 8 single-GPU jobs, ~14 GPU-h.
 
 P2 is judged against that spread. `TMP2m`/`Q2m`/`UGRD10m`/`VGRD10m` move out of the
 prognostic set and into the stage-3 secondary decoder (27 → 31 names), matching ACE2.1.
@@ -79,6 +89,23 @@ preemption — it only orders contention inside our own budget, hence `high` rat
 
 Seeds come from the launcher via `--override seed=N`, as in ACE2.1's `run-ace-train.sh`;
 the configs themselves all say `seed: 0`.
+
+P4 runs from its own launcher, independent of the training chain:
+
+```bash
+bash run-seed-perturbation.sh                      # 8 jobs: 4 seeds x {control, +4K}
+SEEDS=1 EXPERIMENTS=p4k bash run-seed-perturbation.sh   # redo one job
+CHECKPOINT_FILE=ema_ckpt_0040.tar bash run-seed-perturbation.sh  # matched training length
+```
+
+It reuses P0's `gn`-only configs (renamed `source_id`), which already omit the 12 `gr`
+pressure-level entries the stage-3 decoder supplies. Stages 1 and 2 share an output set,
+so those configs are valid on a stage-2 checkpoint unchanged, and near-surface temperature
+is prognostic in ACE2.2, so no third stage is needed per seed. All eight jobs pin one ace
+ref even though the four checkpoints trained at different commits, because `fme/` is
+byte-identical across them — the comparison must not carry an inference-code difference.
+The inference `seed=1` is fixed across all eight so the four models differ by training
+seed alone and not also by rollout noise.
 
 Each stage after the first needs a donor result dataset. The launcher passes it per
 chain as a fourth argument to `run_training`, substituting it into the config's `# arg:`
