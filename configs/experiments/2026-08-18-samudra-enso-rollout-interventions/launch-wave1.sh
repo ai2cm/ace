@@ -91,6 +91,14 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  for h in hybrid2 hybrid3 hybrid4; do
+    if [[ "$arm" == "$h" ]]; then
+      config="${CONFIG_DIR}/${h}-pretrain.yaml"
+      module="fme.ace.train"
+      clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+      mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+    fi
+  done
   if [[ "$arm" == "residfix" ]]; then
     config="${CONFIG_DIR}/residfix-pretrain.yaml"
     module="fme.ace.train"
