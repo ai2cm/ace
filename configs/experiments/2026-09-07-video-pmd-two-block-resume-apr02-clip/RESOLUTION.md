@@ -33,17 +33,24 @@ UNION: 8 steps, 2023-04-02 only.
 
 Rank 0's batch 92 did NOT complete in the ~68 min before the SIGABRT.
 
-## Fix applied
+## Fix applied — DONE 2026-09-08
 
 1. `video_inference.yaml` (batch_size 1, narrow subset, max_batches 1) —
-   regenerated only the Apr 2 clip into a scratch store, single-GPU.
-2. `merge_apr02_clip.py` — precondition updated to accept **all-zero OR
-   all-NaN** as the gap; copies the 8 frames into the main store in place
-   (`zarr mode="r+"`), never overwriting it; asserts the scratch clip is
-   itself non-empty, and does a final whole-store empty-frame scan.
-3. Re-ran `crps_eval` / `diurnal_cycle_eval` for two-block afterwards — the
-   pre-fix CRPS numbers were corrupted (Apr 2 = 1 of 12 scored days; a zero
-   field inflated PRMSL MSE to ~81000, winds ~2x).
+   regenerated only the Apr 2 clip into a scratch store, single-GPU
+   (job `01M1ZSE66PABVDNK7608QM3TS5`, ~76 min).
+2. `merge_apr02_clip.py` — per-channel idempotent: writes a channel if its
+   Apr 2 region is the gap (all-zero *or* NaN), skips it if it already
+   matches the scratch clip, aborts only on a real mismatch; PRATE-safe
+   emptiness check (precip is legitimately >90 % exact zeros); final
+   whole-store scan over all 5 channels. Ran in two passes
+   (`01M1ZY2A7...` wrote u10/v10/PRMSL then aborted on the old PRATE check;
+   `01M1ZY9WX...` finished PRATEsfc + T2m). Final scan: **all 5 channels,
+   no empty frames anywhere** — store complete.
+3. Re-ran `crps_eval` (`01M1ZYRSMMT8MYSFKWEQNR2K1S`) — corrected two-block
+   numbers now sane (PRMSL MSE 0.43 mb², was 81677). `diurnal_cycle_eval`
+   was unaffected (JJA doesn't touch Apr 2). Results in
+   `toy/two_block_vs_joint_gen.md`.
+4. Scratch `RESUME-2023-04-02-clip.zarr` deleted from weka.
 
 The TC / mid-latitude-cyclone analysis (`two_block_family_analysis.py`) was
 **not** affected — tracks 789 (May-Jun), 795 (Jun-Jul), 829 (Nov) and the
