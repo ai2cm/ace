@@ -89,5 +89,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBH
 # on this same commit, so the pair differs only in the prescription and neither
 # inherits a branch confound from the 401cc1c0 rollout above. results_dataset is
 # the finetune's second (post-preemption) dataset, as for the rows above.
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
