@@ -49,35 +49,51 @@ def main():
     zg_main = zarr.open_group(MAIN, mode="r+")
     zg_scr = zarr.open_group(SCRATCH, mode="r")
 
+    def looks_generated(a):
+        """A real generated clip: finite, and NOT all-zero. Precip is
+        legitimately >90% exact zeros, so don't use a nonzero-fraction test --
+        just require some spatial variance / a nonzero max."""
+        return (np.isfinite(a).all() and np.nanmax(np.abs(a)) > 1e-9
+                and float(np.nanstd(a)) > 0.0)
+
     for v in VARS:
         before = zg_main[v][t0:t0 + N_FRAMES]
-        is_gap = np.isnan(before) | (before == 0.0)
-        n_gap = int(is_gap.sum())
-        assert n_gap == before.size, (
-            f"{v}: target region is NOT the gap fill before write "
-            f"({before.size - n_gap}/{before.size} are real values) -- ABORTING, "
-            "the gap analysis is wrong")
         src = zg_scr[v][0:N_FRAMES]
-        assert np.isfinite(src).all(), f"{v}: scratch clip has non-finite values"
-        # scratch clip must not itself be zero-filled (i.e. it really generated)
-        assert (src != 0.0).mean() > 0.9, f"{v}: scratch clip looks empty (mostly zeros)"
         assert src.shape == before.shape, f"{v}: shape {src.shape} vs {before.shape}"
-        zg_main[v][t0:t0 + N_FRAMES] = src
-        after = zg_main[v][t0:t0 + N_FRAMES]
-        assert np.isfinite(after).all() and (after != 0.0).mean() > 0.9, \
-            f"{v}: region still empty after write"
-        print(f"  {v:32s} wrote {src.shape}  "
-              f"range [{np.nanmin(after):.3g}, {np.nanmax(after):.3g}]", flush=True)
+        assert looks_generated(src), f"{v}: scratch clip is empty/degenerate"
+        gap = np.isnan(before) | (before == 0.0)
+        if gap.all():
+            zg_main[v][t0:t0 + N_FRAMES] = src
+            after = zg_main[v][t0:t0 + N_FRAMES]
+            assert looks_generated(after), f"{v}: region still empty after write"
+            print(f"  {v:32s} WROTE  range [{np.nanmin(after):.3g}, {np.nanmax(after):.3g}]",
+                  flush=True)
+        elif np.allclose(before, src, equal_nan=True):
+            print(f"  {v:32s} already merged (matches scratch) -- skip", flush=True)
+        else:
+            raise AssertionError(
+                f"{v}: target region is neither the gap nor equal to the scratch "
+                f"clip ({int((~gap).sum())}/{before.size} real, "
+                f"max|diff|={np.nanmax(np.abs(before - src)):.3g}) -- ABORTING")
 
-    # final: whole-store gap scan on PRMSL to confirm no all-zero/NaN frames remain
-    prmsl = zg_main["PRMSL"][:]
-    flat = prmsl.reshape(prmsl.shape[0], -1)
-    bad = np.where(np.isnan(flat).any(axis=1) | (flat == 0.0).all(axis=1))[0]
-    if len(bad):
-        print(f"WARNING: {len(bad)} PRMSL frames still empty: "
-              f"{[str(main_times[i]) for i in bad[:10]]}", flush=True)
-    else:
-        print("PRMSL: no empty frames anywhere in the store -- gap filled.", flush=True)
+    # final: whole-store gap scan, all channels, confirm no all-zero/NaN frames
+    ok = True
+    for v in VARS:
+        arr = zg_main[v]
+        empty = []
+        for s in range(0, arr.shape[0], 32):
+            c = arr[s:s + 32].reshape(min(32, arr.shape[0] - s), -1)
+            for k in range(c.shape[0]):
+                if np.isnan(c[k]).any() or (c[k] == 0.0).all():
+                    empty.append(s + k)
+        if empty:
+            ok = False
+            print(f"WARNING {v}: {len(empty)} empty frames: "
+                  f"{[str(main_times[i]) for i in empty[:8]]}", flush=True)
+        else:
+            print(f"  {v}: no empty frames", flush=True)
+    print("ALL CHANNELS CLEAN -- gap filled." if ok else "STILL GAPS -- see above",
+          flush=True)
     print("DONE", flush=True)
 
 
