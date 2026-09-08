@@ -6,3 +6,71 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs1|01M1PSXC9P582
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs0|01M1PSXTHZZTM4XZM8302G7ZJG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs1|01M1PSY75DMF5W4RK4HR475E58|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ---------------------------------------------------------------------------
+# EVALUATION ROWS (status run_*), added 2026-09-07 once the wave finished.
+#
+# Two evaluations per run, both from best_inference_ckpt, which is the rule
+# both evaluation records require and is load-bearing here: rollout error is
+# best at the last epoch while best_val_loss is attained early, so best_ckpt
+# would be a different and worse model.
+#
+#   run_piC-200yr-var    evaluator-config-piC-200yr-var.yaml
+#   run_1pct-ic0001-130yr  evaluator-config-1pct-ic0001-130yr.yaml
+#
+# Both configs are copied into this directory BYTE-IDENTICAL to their
+# canonical source, which is what makes the arms comparable:
+#   piC  <- ocean_wide/evaluator-config-piC-200yr-var.yaml on
+#           exper/2026-08-25-variance-diagnosis (blob aee8da6aa) -- the very
+#           config the deterministic ocean_wide_ohc_clip-ft baseline ran as
+#           experiments/2026-08-25-ohc-clip-ft-piC-200yr-variance, and the L1
+#           arm ran after it.
+#   1pct <- configs/experiments/cm4_eval/ocean/evaluator-config-1pct-ic0001-130yr.yaml,
+#           the shared config every arm in the family has run.
+#
+# Why the piC "-var" flavour and not the shared piC-ic0151-200yr config: it is
+# the same evaluation (icx1-1deg-picontrol-200yr -- one IC at 0151-01-06,
+# 14598 steps, same stores), differing only in what is written to disk, so the
+# wandb metrics are directly comparable either way. It wins on two other
+# counts. It is what the baseline actually ran, so this is a like-for-like
+# match rather than a near-match. And it writes sst_monthly + ohc_monthly +
+# vo_monthly_rapid at ~4.5 GiB per run instead of the shared config's
+# save_monthly_files: true, which writes every channel at ~76 GiB per run --
+# while still producing the sst_monthly_{predictions,target}.nc pair that
+# band_variance_sst.py reads, so this task's pre-registered coast-distance and
+# boundary-current criterion can be computed later without a second 200-year
+# wave.
+#
+# save_monthly_files=false is overridden on the 1pct rows only, matching what
+# the baseline's own 1pct wave did (experiments/2026-08-26-ohc-clip-ft-1pct-130yr):
+# nothing has ever read those files and the comparison runs off the wandb
+# per-step and time-mean series.
+#
+# --min-runtime 3h, not the 1h the first variance wave used: that rollout takes
+# ~65 minutes and a 1h guarantee expired minutes before the last step, losing
+# two of three runs to preemption at step 14597 of 14598.
+#
+# results_dataset is pinned per row rather than resolved from the experiment at
+# launch. Three of these eight runs were preempted and their final result
+# dataset id does not share the experiment id's prefix, so the lookup is a
+# thing worth removing from the launch path; each pinned dataset was verified
+# to contain training_checkpoints/best_inference_ckpt.tar.
+#
+# Priority rs0 high / rs1 normal, as the training waves ran.
+# ---------------------------------------------------------------------------
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs0|01M1PSX047GCECZ42ZZB1RJVS6|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h||01M1PSX04QPBKVSGD79C4161FX|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs0|01M1PSX047GCECZ42ZZB1RJVS6|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M1PSX04QPBKVSGD79C4161FX|ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs1|01M1PSXC9P582RWTKFHFP6FBVF|run_piC-200yr-var|best_inference_ckpt|normal|--min-runtime 3h||01M1PSXC9WJNQVYRB5QG7WFBXR|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftdt|rs1|01M1PSXC9P582RWTKFHFP6FBVF|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 3h|data_writer.save_monthly_files=false|01M1PSXC9WJNQVYRB5QG7WFBXR|ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs0|01M1PSXTHZZTM4XZM8302G7ZJG|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h||01M1PVTRGKCH5WXNSK7YH7J8BQ|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs0|01M1PSXTHZZTM4XZM8302G7ZJG|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M1PVTRGKCH5WXNSK7YH7J8BQ|ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs1|01M1PSY75DMF5W4RK4HR475E58|run_piC-200yr-var|best_inference_ckpt|normal|--min-runtime 3h||01M1PSY75RPKAG4XZAWGK576RR|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftdt|rs1|01M1PSY75DMF5W4RK4HR475E58|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 3h|data_writer.save_monthly_files=false|01M1PSY75RPKAG4XZAWGK576RR|ai2/ace|jupiter|||30GiB
