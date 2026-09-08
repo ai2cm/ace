@@ -99,6 +99,13 @@ launch() {
       mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
     fi
   done
+  if [[ "$arm" == "hybridufsft" ]]; then
+    config="${CONFIG_DIR}/hybridufsft.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
+            --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
+  fi
   if [[ "$arm" == "residfix" ]]; then
     config="${CONFIG_DIR}/residfix-pretrain.yaml"
     module="fme.ace.train"
