@@ -1,3 +1,15 @@
+# ERA5 4deg 8-layer dataset: 6-hourly stats plus the daily (factor-4 time
+# coarsened) store and its stats. Run from this directory with
+#   ./compute_dataset.sh --time-coarsen --stats --config configs/era5-4deg-8layer-1940-2025.yaml
+# (never --dataset: the 6-hourly store is produced by scripts/era5). Each step
+# skips outputs that already exist, so the 6-hourly stats and their beaker
+# dataset are not recomputed; give the daily store, its stats directory and its
+# beaker dataset new dated names whenever the daily variable set changes.
+#
+# The daily store carries every variable of the 6-hourly store: instantaneous
+# fields are 00Z snapshots (snapshot_names), 6h-mean fluxes are averaged to
+# daily means (window_names), and time-invariant fields are copied
+# (constant_prefixes). Variables in none of the lists are silently dropped.
 runs:
   2026-08-13-era5-4deg-8layer-1940-2025: ""  # no real data source, config only for computing stats
 data_output_directory: gs://vcm-ml-intermediate
@@ -10,31 +22,53 @@ stats:
 time_coarsen:
   factor: 4
   data_output_directory: gs://vcm-ml-intermediate
-  stats_output_directory: gs://vcm-ml-intermediate/2026-08-13-era5-4deg-8layer-daily-stats-1990-2019
+  stats_output_directory: gs://vcm-ml-intermediate/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019
+  beaker_dataset: 2026-09-08-era5-4deg-8layer-daily-stats-1990-2019
   output_names:
-    2026-08-13-era5-4deg-8layer-1940-2025: 2026-08-13-era5-4deg-8layer-daily-1940-2025
+    2026-08-13-era5-4deg-8layer-1940-2025: 2026-09-08-era5-4deg-8layer-daily-1940-2025
   snapshot_names:
     - DPT2m
     - PRESsfc
+    - PRMSL
     - Q10
+    - Q100
+    - Q1000
     - Q200
+    - Q250
     - Q2m
+    - Q50
     - Q500
+    - Q700
     - Q850
     - TMP10
+    - TMP100
+    - TMP1000
     - TMP200
+    - TMP250
     - TMP2m
+    - TMP50
     - TMP500
+    - TMP700
     - TMP850
     - UGRD10
+    - UGRD100
+    - UGRD1000
     - UGRD10m
     - UGRD200
+    - UGRD250
+    - UGRD50
     - UGRD500
+    - UGRD700
     - UGRD850
     - VGRD10
+    - VGRD100
+    - VGRD1000
     - VGRD10m
     - VGRD200
+    - VGRD250
+    - VGRD50
     - VGRD500
+    - VGRD700
     - VGRD850
     - air_temperature_0
     - air_temperature_1
@@ -53,13 +87,16 @@ time_coarsen:
     - eastward_wind_6
     - eastward_wind_7
     - h10
+    - h100
     - h1000
     - h200
     - h250
     - h300
+    - h50
     - h500
     - h700
     - h850
+    - merged_sea_surface_and_skin_temperature
     - northward_wind_0
     - northward_wind_1
     - northward_wind_2
@@ -70,10 +107,16 @@ time_coarsen:
     - northward_wind_7
     - ocean_fraction
     - sea_ice_fraction
+    - sea_surface_temperature
+    - significant_height_of_combined_wind_waves_and_swell
     - soil_moisture_0
     - soil_moisture_1
     - soil_moisture_2
     - soil_moisture_3
+    - soil_temperature_0
+    - soil_temperature_1
+    - soil_temperature_2
+    - soil_temperature_3
     - specific_total_water_0
     - specific_total_water_1
     - specific_total_water_2
@@ -82,8 +125,13 @@ time_coarsen:
     - specific_total_water_5
     - specific_total_water_6
     - specific_total_water_7
+    - surface_snow_amount
+    - surface_snow_area_fraction
+    - surface_snow_thickness
     - surface_temperature
   window_names:
+    - DCLWRFsfc
+    - DCSWRFsfc
     - DLWRFsfc
     - DPT2m_mean
     - DSWRFsfc
@@ -94,6 +142,10 @@ time_coarsen:
     - Q2m_mean
     - SHTFLsfc
     - TMP2m_mean
+    - UCLWRFsfc
+    - UCLWRFtoa
+    - UCSWRFsfc
+    - UCSWRFtoa
     - UGRD10m_mean
     - ULWRFsfc
     - ULWRFtoa
@@ -101,7 +153,10 @@ time_coarsen:
     - USWRFtoa
     - VGRD10m_mean
     - WIND10m_mean
+    - eastward_surface_stress
     - global_mean_co2
+    - northward_surface_stress
+    - runoff_flux
     - surface_temperature_mean
     - tendency_of_total_water_path_due_to_advection
     - total_frozen_precipitation_rate
@@ -109,8 +164,16 @@ time_coarsen:
     - HGTsfc
     - ak_
     - bk_
+    - coarse_soil_type_fraction
+    - fine_soil_type_fraction
     - land_fraction
     - latitude
     - longitude
+    - medium_fine_soil_type_fraction
+    - medium_soil_type_fraction
+    - organic_soil_type_fraction
+    - tropical_organic_soil_type_fraction
+    - undefined_soil_type_fraction
+    - very_fine_soil_type_fraction
   input_time_slice:  # ensures coarsened data starts on 1940-01-03T00:00:00
     start: "1940-01-02T06:00:00"
