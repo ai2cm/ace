@@ -5,10 +5,11 @@ anything else. Run from a weka-mounted Beaker session.
 Safety rails:
   - matches frames by timestamp, not a hard-coded index
   - asserts the 8 timestamps are contiguous in the main store
-  - asserts the target region in the main store is currently ALL-NaN
-    (i.e. really is the gap) before writing -- aborts otherwise
+  - asserts the target region in the main store is currently the GAP FILL
+    -- all-zero OR all-NaN (the ZarrWriter fill value is 0.0, so an
+    unwritten clip reads back as zeros, not NaN) -- aborts otherwise
   - asserts lat/lon grids match between the two stores
-  - verifies the region is fully finite afterwards
+  - verifies the region is non-trivial afterwards
 """
 import numpy as np
 import xarray as xr
@@ -50,29 +51,33 @@ def main():
 
     for v in VARS:
         before = zg_main[v][t0:t0 + N_FRAMES]
-        n_nan = int(np.isnan(before).sum())
-        assert n_nan == before.size, (
-            f"{v}: target region is NOT all-NaN before write "
-            f"({before.size - n_nan}/{before.size} finite) -- ABORTING, "
+        is_gap = np.isnan(before) | (before == 0.0)
+        n_gap = int(is_gap.sum())
+        assert n_gap == before.size, (
+            f"{v}: target region is NOT the gap fill before write "
+            f"({before.size - n_gap}/{before.size} are real values) -- ABORTING, "
             "the gap analysis is wrong")
         src = zg_scr[v][0:N_FRAMES]
         assert np.isfinite(src).all(), f"{v}: scratch clip has non-finite values"
+        # scratch clip must not itself be zero-filled (i.e. it really generated)
+        assert (src != 0.0).mean() > 0.9, f"{v}: scratch clip looks empty (mostly zeros)"
         assert src.shape == before.shape, f"{v}: shape {src.shape} vs {before.shape}"
         zg_main[v][t0:t0 + N_FRAMES] = src
         after = zg_main[v][t0:t0 + N_FRAMES]
-        assert np.isfinite(after).all(), f"{v}: region still has NaN after write"
+        assert np.isfinite(after).all() and (after != 0.0).mean() > 0.9, \
+            f"{v}: region still empty after write"
         print(f"  {v:32s} wrote {src.shape}  "
               f"range [{np.nanmin(after):.3g}, {np.nanmax(after):.3g}]", flush=True)
 
-    # final: whole-store NaN scan on PRMSL to confirm no gaps remain
-    prmsl = zg_main["PRMSL"]
-    per_t_nan = np.isnan(prmsl[:]).reshape(prmsl.shape[0], -1).any(axis=1)
-    bad = np.where(per_t_nan)[0]
+    # final: whole-store gap scan on PRMSL to confirm no all-zero/NaN frames remain
+    prmsl = zg_main["PRMSL"][:]
+    flat = prmsl.reshape(prmsl.shape[0], -1)
+    bad = np.where(np.isnan(flat).any(axis=1) | (flat == 0.0).all(axis=1))[0]
     if len(bad):
-        print(f"WARNING: {len(bad)} time steps still have NaN in PRMSL: "
+        print(f"WARNING: {len(bad)} PRMSL frames still empty: "
               f"{[str(main_times[i]) for i in bad[:10]]}", flush=True)
     else:
-        print("PRMSL: no NaN anywhere in the store -- gap filled.", flush=True)
+        print("PRMSL: no empty frames anywhere in the store -- gap filled.", flush=True)
     print("DONE", flush=True)
 
 
