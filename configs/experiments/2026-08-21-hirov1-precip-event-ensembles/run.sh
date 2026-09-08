@@ -72,7 +72,7 @@ run_case() {
     gantry run \
         --name "$job_name" \
         --description "HiROv1 1000-member 3km ensemble for high 24h-accum precip event ${config_name}" \
-        --workspace ai2/climate-titan \
+        --workspace ai2/ace \
         --priority high \
         --min-runtime 1h \
         --cluster ai2/titan \
