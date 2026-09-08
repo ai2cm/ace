@@ -86,6 +86,13 @@ PATCHED_MODELS = {
         "hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr/"
         "test-2023-2024-ens4.zarr"
     ),
+    # Two-block coarse-endpoints (pinned coarse-temporal r + unpinned
+    # fine-detail d) -- see crps_eval.py's PATCHED_MODELS comment.
+    "two-block-flat": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-"
+        "coarse-endpoints-flat/test-2023-2024-ens4-global.zarr"
+    ),
     # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
     # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
     # epoch 41/200, preliminary/undertrained).

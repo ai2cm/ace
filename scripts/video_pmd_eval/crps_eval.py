@@ -98,6 +98,15 @@ KNOWN_MODELS = {
         "/climate-default/2026-06-25-temporal-diffusion/inference/"
         "video-pmd-5ch-flat-global-1degree-24to3-v1/test-2023-2024-ens32.zarr"
     ),
+    # Same model/data as 5ch-flat, but inferenced from best.ckpt (val-loss
+    # minimum ~epoch 160) instead of latest.ckpt (drifted up ~0.009 by epoch
+    # 200) -- training-matched checkpoint vs 5ch-kernel for the flat-vs-OU
+    # comparison in toy/stage1_ou_vs_flat_results.md. Inference experiment
+    # 01M1JWM7A4NJ6A63HQK40TCV4V (exit 0, 2026-09-03).
+    "5ch-flat-bestckpt": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-5ch-flat-global-1degree-24to3-v1/test-2023-2024-ens32-bestckpt.zarr"
+    ),
     "5ch-kernel": (
         "/climate-default/2026-06-25-temporal-diffusion/inference/"
         "video-pmd-5ch-per-channel-kernel-global-1degree-24to3-v1/"
@@ -316,6 +325,22 @@ PATCHED_MODELS = {
         "/climate-default/2026-06-25-temporal-diffusion/inference/"
         "hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr/"
         "test-2023-2024-ens4.zarr"
+    ),
+    # Two-block coarse-endpoints: same coarse_endpoints_only /
+    # endpoints_observed=false setting as st-singlestage-coarse-endpoints-flat,
+    # but the residual is split into a pinned coarse-temporal block r
+    # (brownian_bridge kernel) + an unpinned fine-detail block d (independent
+    # kernel) -- see idea/spatiotemoral/twoblock_theory.md and
+    # configs/experiments/2026-08-31-video-pmd-spatiotemporal-25km-100km-two-block-test-inference-global/.
+    # Checkpoint ~epoch 54/200 (manually stopped). Global patch-tiled
+    # inference (divide_generation, coarse_patch_extent [44,72]), ONE
+    # contiguous global zarr. Original run 01M1HFBRC65YMQ66YDPDHAZ8XX exited 1
+    # on a final-barrier NCCL timeout but the store is complete (verified
+    # full NaN scan, 2026-09-08).
+    "two-block-flat": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-"
+        "coarse-endpoints-flat/test-2023-2024-ens4-global.zarr"
     ),
 }
 # Every KNOWN_MODELS/PATCHED_MODELS label resolves to a pred spec (str path
