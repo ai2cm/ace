@@ -50,6 +50,7 @@ run_training() {
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace "$BEAKER_WORKSPACE" \
     --priority "$BEAKER_PRIORITY" \
+    --min-runtime 4h \
     "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
