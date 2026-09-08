@@ -3,13 +3,14 @@
 # found in the coarse (25km) central-US analysis. Five discrete events across three
 # cases; each gets its own job and its own output zarr.
 #
-# Why --preemptible with --priority urgent: non-preemptible jobs in this workspace
-# are capped at 2 GPUs, so --preemptible is required to get 4. Urgent priority means
-# actual preemption effectively does not happen once a job has started. That matters
-# because fme.downscaling.inference has no resume: ZarrWriter opens the store with
-# mode "w-", so a restarted job fails on the existing zarr rather than continuing.
-# Relaunching a case therefore requires removing its output directory from weka
-# first.
+# Why --priority high with --minRuntime 1h: non-preemptible jobs in this workspace
+# are capped at 2 GPUs, so getting 4 requires a preemptible-eligible priority.
+# --minRuntime 1h guarantees the scheduler will not preempt a job before it has run
+# for an hour. That matters because fme.downscaling.inference has no resume:
+# ZarrWriter opens the store with mode "w-", so a restarted job fails on the
+# existing zarr rather than continuing. Relaunching a case therefore requires
+# removing its output directory from weka first, so preemption after the
+# 1h-minimum window still risks a manual cleanup + relaunch.
 #
 # Why outputs go to weka rather than /results: each store is 7-9GB and beaker
 # results are too slow to read from an interactive session, which is where the
@@ -17,7 +18,7 @@
 #
 # Usage: ./run.sh <case> [--suffix <suffix>]
 #   case:     co-20210605 | wi-20210713 | scus-20210301 | scus-20220128
-#             | scus-20220208 | all
+#             | scus-20220208 | stx-20230506 | wa-20230126 | all
 #   --suffix: optional suffix appended to the job name
 
 set -e
@@ -40,7 +41,7 @@ SUBPATH_HIROV1=checkpoints
 usage() {
     echo "Usage: $0 <case> [--suffix <suffix>]"
     echo "  case:     co-20210605 | wi-20210713 | scus-20210301 | scus-20220128"
-    echo "            | scus-20220208 | all"
+    echo "            | scus-20220208 | stx-20230506 | wa-20230126 | all"
     echo "  --suffix: optional suffix appended to job name"
     exit 1
 }
@@ -53,11 +54,13 @@ config_for_case() {
         scus-20210301) echo "scus-frontal-20210301" ;;
         scus-20220128) echo "scus-frontal-20220128" ;;
         scus-20220208) echo "scus-frontal-20220208" ;;
+        stx-20230506)  echo "stx-convective-20230506" ;;
+        wa-20230126)   echo "wa-atmospheric-river-20230126" ;;
         *)             return 1 ;;
     esac
 }
 
-ALL_CASES="co-20210605 wi-20210713 scus-20210301 scus-20220128 scus-20220208"
+ALL_CASES="co-20210605 wi-20210713 scus-20210301 scus-20220128 scus-20220208 stx-20230506 wa-20230126"
 
 run_case() {
     local case_name="$1"
@@ -70,8 +73,8 @@ run_case() {
         --name "$job_name" \
         --description "HiROv1 1000-member 3km ensemble for high 24h-accum precip event ${config_name}" \
         --workspace ai2/climate-titan \
-        --priority urgent \
-        --preemptible \
+        --priority high \
+        --minRuntime 1h \
         --cluster ai2/titan \
         --beaker-image "$IMAGE" \
         --env WANDB_USERNAME="$BEAKER_USERNAME" \
