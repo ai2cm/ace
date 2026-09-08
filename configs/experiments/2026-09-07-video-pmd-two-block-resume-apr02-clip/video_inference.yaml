@@ -1,0 +1,138 @@
+# Targeted RE-RUN of the ONE tumbling clip missing from
+#   .../video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-coarse-endpoints-flat/
+#     test-2023-2024-ens4-global.zarr
+# after the original global job (experiment 01M1HFBRC65YMQ66YDPDHAZ8XX) died on
+# a final-barrier NCCL timeout with rank 0 one clip short: 367/368 daily clips
+# were written, rank 0's last clip -- the 2023-04-02 00:00 -> 2023-04-03 00:00
+# window (8 frames: Apr 2 00,03,...,21Z) -- never got written and reads back as
+# NaN. It falls on the middle day of the "spring (Apr 1-4)" eval window.
+#
+# This config is byte-identical to
+#   ../2026-08-31-video-pmd-spatiotemporal-25km-100km-two-block-test-inference-global/video_inference.yaml
+# EXCEPT:
+#   - output_path -> a small scratch store (NOT the main one; we never overwrite
+#     the main store -- a separate merge step copies this clip's 8-frame region
+#     into it via zarr mode="r+"). See merge_apr02_clip.py.
+#   - data.{fine,coarse}.subset -> 2023-04-02 .. 2023-04-04 so the first
+#     tumbling clip starts exactly at 2023-04-02 00:00 (a day boundary == a clip
+#     boundary in the original run) and is NOT the last clip (n_time ~17 > 9),
+#     so it writes 8 frames, matching the original tumbling-clip write.
+#   - max_batches: 1 -> generate only that first clip.
+#   - run single-GPU (see run.sh) -- no DDP, so the barrier bug that killed the
+#     original run cannot recur.
+#
+# The 4 ensemble members here are fresh noise draws (different RNG stream than
+# the original would have used for this clip); immaterial for CRPS/spread/
+# climatology, which treat members exchangeably.
+#
+# Checkpoint dataset: 01M100MWQDFSZHWAQW1ZTJZFJ4 (same as the original run;
+# epoch ~54/200, see the original yaml header for the caveat).
+checkpoint_path: /checkpoint/checkpoints/latest.ckpt
+experiment_dir: /results
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-coarse-endpoints-flat/RESUME-2023-04-02-clip.zarr
+n_ensemble: 4
+ensemble_chunk_size: 1
+use_ema: true
+overwrite: true
+max_batches: 1
+divide_generation: true
+coarse_patch_extent: [44, 72]
+coarse_horizontal_overlap: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-temporal-interp
+  name: video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-coarse-endpoints-flat-RESUME-apr02
+  entity: ai2cm
+data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-04-02"
+        stop_time: "2023-04-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-04-02"
+        stop_time: "2023-04-04"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  # Full global domain -- no manual region split needed with divide_generation.
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  endpoints_observed: false
+  coarse_endpoints_only: true
+  two_block: true
+  r_kernel: brownian_bridge
+  d_kernel: independent
+  r_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.3201
+    northward_wind_at_ten_meters: 0.4415
+    PRMSL: 0.1783
+    PRATEsfc: 0.6825
+    air_temperature_at_two_meters: 0.1229
+  d_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.1617
+    northward_wind_at_ten_meters: 0.1892
+    PRMSL: 0.0586
+    PRATEsfc: 0.4254
+    air_temperature_at_two_meters: 0.0529
+  log_transform_channels:
+    PRATEsfc: 86400.0
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
