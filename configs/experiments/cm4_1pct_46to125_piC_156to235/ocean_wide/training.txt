@@ -43,9 +43,34 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|50
 #
 # The 1e-4 row is not redundant with the existing MSE pretrain: it is L1 at the
 # recipe's lr, i.e. the control that isolates lr from the loss.
+#
+# READ OUT 2026-09-07, all three exit 0 at 15/15. lr is monotone: val_piC
+# channel_mean 0.4090 (3e-5) / 0.2892 (1e-4) / 0.2480 (3e-4) against the MSE
+# pretrain's 0.2483 at the same epoch. 3e-4 wins and the trend had not turned,
+# so the optimum is at or above the top of the bracket. Rows retired to trained.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-5|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.00003 max_epochs=15|4h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-5|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.00003 max_epochs=15|4h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr1e-4|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0001 max_epochs=15|4h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr1e-4|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0001 max_epochs=15|4h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-4|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003 max_epochs=15|4h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-4|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003 max_epochs=15|4h
+
+# ocean_wide_ohc_clip_mae -- the full L1 pretraining at the lr the sweep chose,
+# three seeds, 75 epochs. Identical to the ocean_wide_ohc_clip MSE pretraining
+# except stepper_training.loss.type=L1 and optimization.lr 1e-4 -> 3e-4.
+#
+# 3e-4 from the sweep rows above (research
+# tasks/2026-09-04-l1-lr-sweep-from-scratch): monotone in lr across 3e-5 / 1e-4
+# / 3e-4, with 3e-4 matching the MSE pretraining's validation at matched epoch
+# 15 (0.2480 vs 0.2483) where L1 at the recipe's own 1e-4 reads 0.2892. NOTE the
+# bracket was not closed at the top -- 3e-4 was the best measured, not a
+# demonstrated optimum.
+#
+# ~0.64 h/epoch at 4 steps from the 3e-4 sweep row, so ~48 h per seed;
+# min_runtime 4h with training auto-resume covering preemption, as the sweep used.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003|4h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003|4h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003|4h
