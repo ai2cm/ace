@@ -1,0 +1,50 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/ocean
+#
+# The 200-year piControl rollout with the target hfds_total_area PRESCRIBED in
+# place of the emulator's corrected surface flux, via
+# stepper_override.prescribed_prognostic_names. The surface energy flux
+# correction then returns the forcing value verbatim and the ocean heat content
+# correction scales thetao/sst against the target flux.
+#
+# The test this exists for: the imposed open-ocean flux computed by
+# _compute_ocean_net_surface_energy_flux delivers ~+0.14 W/m2 more heat than the
+# reference's own surface flux, which accounts for essentially all of the ocean
+# heat content drift these rollouts show. Feeding the reference flux instead
+# should remove the drift. If it does not, the flux is not the whole story.
+#
+# Read against the same arm's standard piC-ic0151-200yr rollout, which is the
+# matched control -- identical but for the prescription.
+experiment_dir: /results
+n_forward_steps: 14598
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+stepper_override:
+  prescribed_prognostic_names:
+  - hfds_total_area
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  log_histograms: true
+  log_nino34_index: true
+  log_ipo_index: true

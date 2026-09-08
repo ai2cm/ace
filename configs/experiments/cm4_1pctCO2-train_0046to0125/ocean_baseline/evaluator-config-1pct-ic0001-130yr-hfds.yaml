@@ -1,0 +1,36 @@
+# job_runner/evaluate.sh configs/experiments/cm4_1pctCO2-train_0046to0125 ocean_baseline
+# Full 130-year rollout (9488 5-day steps) from the first 1pctCO2 IC, with the
+# target hfds_total_area prescribed in place of the prediction.
+experiment_dir: /results
+n_forward_steps: 9488
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+stepper_override:
+  prescribed_prognostic_names:
+  - hfds_total_area
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0001-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  log_histograms: true
+  log_nino34_index: true
+  log_ipo_index: true

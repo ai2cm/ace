@@ -48,9 +48,24 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4
 
 # ocean_wide_ohc_clip-ft
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|training|best_inference_ckpt|normal|--min-runtime 8h
+# Prescribed-hfds test on the wide finetuned arm, plus its matched control.
+#
+# The imposed open-ocean flux from _compute_ocean_net_surface_energy_flux
+# delivers ~+0.14 W/m2 more heat than the reference's own surface flux, which
+# accounts for essentially all of the ocean heat drift these rollouts show.
+# The -hfds rows feed the reference flux instead; the plain rows are the same
+# rollout on the same commit without the prescription, so the pair differs in
+# one thing. Both use 30GiB shared memory (the prescribed run carries
+# hfds_total_area as forcing) and 3h min-runtime -- the 200-yr rollout takes
+# ~65 min and a 1h guarantee lost two of three jobs to preemption once already.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|ran_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|ran_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|ran_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -64,5 +79,15 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|01M1N34VDHEEDH5DFZYF
 # the finetune started -- the pretraining ended 09-06).
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+
+# The prescribed-hfds test on the retrained (uniform-increment) corrector: the
+# fourth cell of the corrector-form x prescribed-flux 2x2 the ohc_clip-ft rows
+# above cover for the scaled-temperature form. The -hfds row feeds CM4's own
+# hfds_total_area through the corrector; the plain row repeats the same rollout
+# on this same commit, so the pair differs only in the prescription and neither
+# inherits a branch confound from the 401cc1c0 rollout above. results_dataset is
+# the finetune's second (post-preemption) dataset, as for the rows above.
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter|||30GiB
