@@ -56,4 +56,13 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9E
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|01M1N34VDHEEDH5DFZYFJ29T0V|training|best_inference_ckpt|normal|--min-runtime 8h
 
+# The finetune's own training row, parked (status "training" is inert to both
+# evaluate.sh and inference.sh), plus the two rollouts armed. results_dataset is
+# pinned because the finetune was preempted and auto-resumed, so its experiment
+# carries two result datasets; 01M20ESHYFCWGPGVCC4ZKWN6DW is the second,
+# and it holds the finetune's own best_inference_ckpt (written 2026-09-08, after
+# the finetune started -- the pretraining ended 09-06).
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
