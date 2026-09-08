@@ -7,9 +7,15 @@ Unlike submit_fm_jobs.py, this does not filter by architecture (the ablation
 spans both nc-sfno and nc-swin-v2) or by version tag (the ablation configs are
 named by regime and arm, not by version).
 
+The generator writes every cell of the arch x regime x arm x conditioning x
+masking cross, which is more than is ever queued at once, so the filters below
+are the normal way to use this script rather than an occasional convenience.
+--masking defaults to the unmasked cells, matching the runs the ablation
+started with.
+
 Usage:
     python submit_norm_ablation_jobs.py [--arch ARCH] [--regime REGIME]
-                                        [--arm ARM]
+                                        [--arm ARM] [--masking MASKING]
                                         [--conditional | --no-conditional]
                                         [--include-degenerate]
                                         [--dry-run]
@@ -27,11 +33,17 @@ from generate_norm_ablation_configs import (
     ARCH_SOURCES,
     ARMS,
     CONFIG_PREFIX,
+    MASKINGS,
     REGIME_SOURCES,
     all_cells,
     config_name,
     degenerate_reason,
 )
+
+# --masking takes the unmasked cells by name rather than by the generator's
+# empty string, which is unusable on a command line.
+UNMASKED = "none"
+MASKING_CHOICES = [UNMASKED] + [name for name in MASKINGS if name]
 
 HERE = pathlib.Path(__file__).parent
 RUN_CONFIGS_DIR = HERE / "run_configs"
@@ -49,13 +61,16 @@ def config_to_job_name(config_filename: str) -> str:
 
 def selected_configs(args: argparse.Namespace) -> list[str]:
     """Every non-degenerate cell matching the filters, in a stable order."""
+    selected_masking = "" if args.masking == UNMASKED else args.masking
     names = []
-    for arch, regime, arm, conditional in all_cells():
+    for arch, regime, arm, conditional, masking in all_cells():
         if args.arch and arch != args.arch:
             continue
         if args.regime and regime != args.regime:
             continue
         if args.arm and arm != args.arm:
+            continue
+        if masking != selected_masking:
             continue
         if args.conditional is not None and conditional != args.conditional:
             continue
@@ -64,7 +79,7 @@ def selected_configs(args: argparse.Namespace) -> list[str]:
             and degenerate_reason(regime, arm, conditional) is not None
         ):
             continue
-        names.append(config_name(arch, regime, arm, conditional))
+        names.append(config_name(arch, regime, arm, conditional, masking))
     return names
 
 
@@ -75,6 +90,16 @@ def main() -> None:
         "--regime", choices=sorted(REGIME_SOURCES), help="Only this data regime."
     )
     parser.add_argument("--arm", choices=sorted(ARMS), help="Only this grouping arm.")
+    parser.add_argument(
+        "--masking",
+        choices=MASKING_CHOICES,
+        default=UNMASKED,
+        help=(
+            "Which masking variant to submit (default: %(default)s, the cells "
+            "without synthetic input masking). One variant per invocation: the "
+            "masked and unmasked cells are separate training runs."
+        ),
+    )
     parser.add_argument(
         "--include-degenerate",
         action="store_true",

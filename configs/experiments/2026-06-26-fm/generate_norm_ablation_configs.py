@@ -23,12 +23,28 @@ module additionally consumes them through its adaLN/CLN layers, giving the
 model an explicit source signal rather than only an aligned input space. Both
 uses are independent, hence the cross.
 
+A third axis crosses the other two: synthetic input masking (see MASKINGS).
+A masked cell drops a uniformly-drawn count of its input channels every
+training step. It is a candidate mechanism for the same generalization the
+grouping arms target -- a model that cannot rely on any particular channel
+being present has less opportunity to key on the ones that identify the
+source -- so the arms and masking are compared against each other, and the
+cross lets them be attributed separately.
+
 Cells that would train a model identical to a cheaper one are skipped; see
-degenerate_reason. That leaves 11 configs per architecture, 22 in total:
+degenerate_reason. That leaves 11 unmasked configs per architecture, 22 in
+total:
 
     c96 regime   A1 (== A2), A3, each off/on            -> 4
     era5 regime  A1 (== A2 == A3), conditioning a no-op -> 1
     fm regime    A1, A2, A3, each off/on                -> 6
+
+Masking multiplies that by the number of MASKINGS entries plus one for the
+unmasked cells: 22 unmasked plus 22 mask10, 44 in total. Nothing collapses
+under the masking axis -- masking changes the training distribution in every
+cell -- so it adds no new degenerate cases. Writing a config is cheap and
+submission is filtered separately, so every cell of the cross is written
+whether or not it is queued for training.
 
 Each config is composed from two base configs: the regime source supplies the
 datasets, validation and inference entries, and the architecture source
@@ -119,6 +135,31 @@ ARMS = {
         "ramped": ["ramped"],
         "som": ["som"],
         "era5": ["era5"],
+    },
+}
+
+# Masking variants: name -> the step-config keys it sets. The empty name is the
+# unmasked cell and sets nothing, so those configs are byte-identical to what
+# they were before this axis existed.
+#
+# `max_masked_vars: 10` draws k ~ U[0, 10] channels to drop each training step,
+# out of the 45 packed input channels (44 in_names plus the shared global mean
+# removal sentinel). Every channel is in the default pool: no variable is
+# carved out, so the pinned-variable list of the normalization arms has no
+# counterpart here. Masking is training-only; validation and inference batches
+# are unmasked (SingleModuleStep._draw_input_dropout_mask returns None in eval
+# mode).
+#
+# `include_channel_mask_inputs` appends a per-channel presence indicator, which
+# doubles the module's input channel count. Without it a dropped channel (zero
+# in normalized space) is indistinguishable from one that happens to sit at its
+# climatological mean. It rides with the masking axis rather than being set
+# everywhere so the unmasked cells stay identical to the runs already trained.
+MASKINGS: dict[str, dict[str, Any]] = {
+    "": {},
+    "mask10": {
+        "input_dropout": {"default": {"max_masked_vars": 10}},
+        "include_channel_mask_inputs": True,
     },
 }
 
@@ -295,14 +336,19 @@ def groups_for_cell(regime: str, arm: str) -> dict[str, list[str]]:
     return groups
 
 
-def all_cells() -> list[tuple[str, str, str, bool]]:
-    """Every (arch, regime, arm, conditional) cell, in a stable order."""
+def all_cells() -> list[tuple[str, str, str, bool, str]]:
+    """Every (arch, regime, arm, conditional, masking) cell, in a stable order.
+
+    Masking is the outermost varying key after the arm/conditioning pair so the
+    unmasked cells keep the order they had before the axis was added.
+    """
     return [
-        (arch, regime, arm, conditional)
+        (arch, regime, arm, conditional, masking)
         for arch in ARCH_SOURCES
         for regime in REGIME_SOURCES
         for arm in ARMS
         for conditional in (False, True)
+        for masking in MASKINGS
     ]
 
 
@@ -317,6 +363,10 @@ def degenerate_reason(regime: str, arm: str, conditional: bool) -> str | None:
     - Conditioning on a single label feeds every sample the same constant
       one-hot, and the resulting constant scale and shift are absorbed by the
       normalization layers' own affine parameters.
+
+    Masking is not a parameter here: it changes the training distribution in
+    every cell, so it collapses nothing and a masked cell is degenerate exactly
+    when its unmasked twin is.
     """
     if arm != "a1" and len(groups_for_cell(regime, arm)) < 2:
         return "reduces to the A1 control for this regime"
@@ -325,7 +375,9 @@ def degenerate_reason(regime: str, arm: str, conditional: bool) -> str | None:
     return None
 
 
-def build_config(arch: str, regime: str, arm: str, conditional: bool) -> dict:
+def build_config(
+    arch: str, regime: str, arm: str, conditional: bool, masking: str = ""
+) -> dict:
     config = copy.deepcopy(load_base(REGIME_SOURCES[regime]))
     arch_base = load_base(ARCH_SOURCES[arch])
 
@@ -353,12 +405,21 @@ def build_config(arch: str, regime: str, arm: str, conditional: bool) -> dict:
     # they additionally drive the module's adaLN/CLN conditioning.
     if conditional:
         step_config["builder"]["conditional"] = True
+    step_config.update(copy.deepcopy(MASKINGS[masking]))
     return config
 
 
-def config_name(arch: str, regime: str, arm: str, conditional: bool) -> str:
-    suffix = "-cond" if conditional else ""
-    return f"{CONFIG_PREFIX}{arch}-{regime}-{arm}{suffix}.yaml"
+def config_name(
+    arch: str, regime: str, arm: str, conditional: bool, masking: str = ""
+) -> str:
+    """Filename for one cell.
+
+    The masking tag sits between the arm and the conditioning suffix, so a
+    cell's name still ends in `-cond` exactly when it conditions.
+    """
+    mask_suffix = f"-{masking}" if masking else ""
+    cond_suffix = "-cond" if conditional else ""
+    return f"{CONFIG_PREFIX}{arch}-{regime}-{arm}{mask_suffix}{cond_suffix}.yaml"
 
 
 def main() -> None:
@@ -377,13 +438,13 @@ def main() -> None:
     RUN_CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     skipped: list[tuple[str, str]] = []
-    for arch, regime, arm, conditional in all_cells():
-        name = config_name(arch, regime, arm, conditional)
+    for arch, regime, arm, conditional, masking in all_cells():
+        name = config_name(arch, regime, arm, conditional, masking)
         reason = degenerate_reason(regime, arm, conditional)
         if reason is not None and not args.include_degenerate:
             skipped.append((name, reason))
             continue
-        config = build_config(arch, regime, arm, conditional)
+        config = build_config(arch, regime, arm, conditional, masking)
         out_path = RUN_CONFIGS_DIR / name
         with open(out_path, "w") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)

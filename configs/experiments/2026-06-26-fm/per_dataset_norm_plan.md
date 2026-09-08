@@ -37,6 +37,25 @@ mechanisms can be attributed separately.
 
 **Data regime** — c96-only, era5-only, fm (both).
 
+**Input masking** — off / `mask10`. A third mechanism, independent of the
+labels: with `input_dropout.default.max_masked_vars: 10` the step drops
+`k ~ U[0, 10]` of its 45 packed input channels (44 `in_names` plus the shared
+GMR sentinel) on every training step, and `include_channel_mask_inputs: true`
+appends a per-channel presence indicator so the network can tell a dropped
+channel from one sitting at its climatological mean.
+
+Masking is a candidate answer to the same question the arms ask, by a different
+route: a model that cannot count on any particular channel being present has
+less opportunity to key on the ones that identify the source. It is crossed
+with the arms so the two can be compared and, later, combined.
+
+Two properties of the mechanism matter when reading results. A dropped channel
+is set to **zero in normalized space**, which under A1 is the pooled
+climatological mean and under A2/A3 is the *group's* mean — so masking and the
+grouping arms interact by construction, not only statistically. And masking is
+**training-only**: `SingleModuleStep._draw_input_dropout_mask` returns `None` in
+eval mode, so validation and every inference entry see the full input.
+
 ## Cell grid
 
 Each config is composed from two base configs: the **regime source** supplies
@@ -59,7 +78,7 @@ and `in_names` is the same 44-name set in all three (swin orders
 `global_mean_co2` last). `train_aggregator` and `ema_checkpoint_save_epochs`,
 which the swin base omits, are applied uniformly to all cells.
 
-### 22 configs
+### 22 unmasked configs, 44 in total
 
 Cells that would train a model identical to a cheaper one are skipped. Two
 independent collapses, both from a regime having too few labels for an axis to
@@ -76,8 +95,28 @@ vary anything:
 | era5 | A1 (A2 ≡ A3 ≡ A1; conditioning a no-op) | **1** |
 | fm | A1, A2, A3, each off/on | **6** |
 
-11 per architecture, **22 total**. The generator logs the 14 it skips with the
-reason. `--include-degenerate` writes them anyway, and the same flag on
+11 per architecture, **22 total** unmasked. The masking axis multiplies that
+by the number of `MASKINGS` entries plus one for the unmasked cells: nothing
+collapses under it (masking changes the training distribution in every cell),
+so it adds 22 `mask10` twins for **44 configs written**, and the generator logs
+28 skipped rather than 14.
+
+Written is not submitted. `submit_norm_ablation_jobs.py --masking` takes one
+variant per invocation and defaults to the unmasked cells, so the 22 masked
+configs sit on disk until they are asked for. As of the first masked
+submission, four are queued:
+
+| arch | regime | arm | cond | masking |
+|---|---|---|---|---|
+| nc-sfno | fm | A1 | off | mask10 |
+| nc-sfno | fm | A1 | on | mask10 |
+| nc-swin-v2 | fm | A1 | off | mask10 |
+| nc-swin-v2 | fm | A1 | on | mask10 |
+
+A1 first because it is the cell where masking has to stand on its own: if it
+lands between A1 and A3, the `mask10` twins of A2 and A3 answer whether the two
+mechanisms compose or substitute, and they are already generated. `fm` because
+it is the only regime holding the two sources whose alignment is at issue. `--include-degenerate` writes them anyway, and the same flag on
 `submit_norm_ablation_jobs.py` submits them (only useful as a seed-variance
 estimate, and only if the seeds are then changed). A degenerate arm has one
 group covering the regime's whole label set, so that group reads the regime's
@@ -187,8 +226,8 @@ an implicit choice would silently normalize against the wrong distribution.
 never saw its network inputs on the pooled scale, so pooled is not a safe
 default — it is simply a fourth, untrained distribution.
 
-**Post-hoc eval and inference configs must set labels.** The 22 training
-configs label every loader, so `default_group` is unreachable during the runs
+**Post-hoc eval and inference configs must set labels.** All 44 generated
+training configs label every loader, so `default_group` is unreachable during the runs
 themselves. It only becomes reachable later, when a checkpoint is evaluated
 against a config whose datasets carry no `labels:`. There, the two grouped arms
 behave differently:
@@ -281,9 +320,13 @@ done
 cd ../../configs/experiments/2026-06-26-fm
 python generate_norm_ablation_configs.py
 
-# 5. Training
+# 5. Training (unmasked cells; --masking defaults to these)
 python submit_norm_ablation_jobs.py --dry-run   # inspect first
 python submit_norm_ablation_jobs.py
+
+# 6. Training, masked cells. One masking variant per invocation.
+python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1 --dry-run
+python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1
 ```
 
 ### Verifying the statistics
@@ -323,13 +366,26 @@ in the job logs:
   selection is regime-matched and comparable to prior runs in the project. The
   `long_46year` / `long_43year_ensemble_varying_co2` entries already exist at
   weight 0.0 and run as diagnostics.
-- **No primary metric is pre-registered.** With 22 runs, ~40 variables and
-  multiple lead times, something will look better by chance; pick the decision
-  metric before reading results.
+- **No primary metric is pre-registered.** With 22 runs (26 once the first
+  masked cells land), ~40 variables and multiple lead times, something will
+  look better by chance; pick the decision metric before reading results.
 - **YAML anchors are expanded** by the `safe_load`/`dump` round-trip, so the
   generated configs repeat the `inference_variables` block. Cosmetic; the
   cooldown generator does the same.
 - **Fine-tuning (c96 → ERA5) is not implemented**, as planned.
+- **A masked cell is not weight-shaped like its unmasked twin.**
+  `include_channel_mask_inputs` doubles the module's input channels (45 → 90),
+  so a `mask10` run differs from its baseline in parameter count as well as in
+  training distribution. The comparison is behavioral, not a weight diff, and
+  no masked run can warm-start from an unmasked checkpoint. Setting the flag
+  everywhere would fix that but would change the 22 configs already trained.
+- **Masking is uniform over all 45 channels.** No counterpart to the pinned
+  variable list: `global_mean_co2`, the statics and `DSWRFtoa` are all in the
+  default pool, matching `nc-sfno-fm-random-v2-mask10`. Dropping
+  `global_mean_co2` teaches "unknown CO2 → pooled-mean forcing" on a stream
+  that spans 1x/2x/4x, which is the one channel whose masked value is
+  physically wrong rather than merely absent. Left in for comparability with
+  the existing mask10 runs; a `rate: 0` override group would carve it out.
 
 ## Deviations from the original plan
 
@@ -418,6 +474,13 @@ its own training data. The new configs list every store explicitly. Three runs
 rather than one, because the regimes' store lists do not nest (the fm regime's
 `era5` group covers different time windows than the era5 regime's own data).
 `pooled_stats_0` is left untouched.
+
+**Input masking added as a third axis.** Not in the plan at all; added after
+the first 22 runs, to ask whether synthetic input dropout buys the same
+out-of-sample generalization the grouping arms were built for, and whether the
+two compose. Modelled as an axis (`MASKINGS`) rather than as a fourth arm
+because it is not a grouping strategy and has to be able to cross with A2 and
+A3. The generator writes every cell of the cross; submission is filtered.
 
 **Not deviations.** Pinned variable list, pooled GMR, pooled loss/residual
 normalizer, and deferring the c96 → ERA5 fine-tuning arm are all as planned.
