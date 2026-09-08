@@ -1,10 +1,16 @@
 # ERA5 4deg 8-layer dataset: 6-hourly stats plus the daily (factor-4 time
 # coarsened) store and its stats. Run from this directory with
 #   ./compute_dataset.sh --time-coarsen --stats --config configs/era5-4deg-8layer-1940-2025.yaml
-# (never --dataset: the 6-hourly store is produced by scripts/era5). Each step
-# skips outputs that already exist, so the 6-hourly stats and their beaker
-# dataset are not recomputed; give the daily store, its stats directory and its
-# beaker dataset new dated names whenever the daily variable set changes.
+# (never --dataset: the 6-hourly store is produced by scripts/era5). The stats,
+# combine-stats and beaker-upload steps skip outputs that already exist, so the
+# 6-hourly stats and their beaker dataset are not recomputed. The time-coarsen
+# step does not skip (its check is a local-path test that is always false on
+# gs:// paths) and rewrites its output, so give the daily store, its stats
+# directory and its beaker dataset new dated names whenever the daily variable
+# set changes; the rename is what protects the previous daily store.
+# Beaker datasets are created by the argo pod's account (andrep), so training
+# configs reference andrep/<beaker_dataset>. The daily store is written as a
+# bare <output_name>.zarr at the bucket root (data_path is its parent).
 #
 # The daily store carries every variable of the 6-hourly store: instantaneous
 # fields are 00Z snapshots (snapshot_names), 6h-mean fluxes are averaged to
@@ -20,6 +26,8 @@ stats:
   end_date: "2019-12-31"
   data_type: ERA5
 time_coarsen:
+  # No chunking/sharding block: the defaults (time chunk 1, time shard 360)
+  # are what produced the existing 4deg daily store.
   factor: 4
   data_output_directory: gs://vcm-ml-intermediate
   stats_output_directory: gs://vcm-ml-intermediate/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019
