@@ -62,3 +62,14 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|01M
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|01M0TSBVYP97KP2MQQMMZXKEZZ|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Arm E (per-channel fill with thetao_ back at the channel mean, so all
+# temperature carries its own climatology and sst/thetao_0 are filled
+# consistently) finished 75 epochs 2026-09-05, exit 0 on 2 jobs, selected
+# epoch 74. Both rollouts, shared cm4_eval ocean configs. Read against Arm D
+# (..._zerodeep), which is identical except thetao_ at 0.0: the question is
+# whether Arm D's sst regression is the sst/thetao_0 fill inconsistency.
+# In-training it is not -- Arm E's 20-yr sst is 0.1221/0.1214 against Arm D's
+# 0.1203/0.1208 -- so these rollouts are what decide it.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
