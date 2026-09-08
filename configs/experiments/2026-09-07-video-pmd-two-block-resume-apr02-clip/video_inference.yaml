@@ -17,6 +17,9 @@
 #     tumbling clip starts exactly at 2023-04-02 00:00 (a day boundary == a clip
 #     boundary in the original run) and is NOT the last clip (n_time ~17 > 9),
 #     so it writes 8 frames, matching the original tumbling-clip write.
+#   - batch_size: 1 -> the loader hard-codes drop_last=True, and with the
+#     default per-day stride the Apr 2..Apr 4 window yields only 2 tumbling
+#     clips, so batch_size 4 (original) would drop both and produce 0 batches.
 #   - max_batches: 1 -> generate only that first clip.
 #   - run single-GPU (see run.sh) -- no DDP, so the barrier bug that killed the
 #     original run cannot recur.
@@ -61,8 +64,8 @@ data:
       subset:
         start_time: "2023-04-02"
         stop_time: "2023-04-04"
-  batch_size: 4
-  num_data_workers: 2
+  batch_size: 1
+  num_data_workers: 0
   strict_ensemble: false
   # Full global domain -- no manual region split needed with divide_generation.
   lat_extent:
