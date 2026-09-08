@@ -71,5 +71,13 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meant
 # whether Arm D's sst regression is the sst/thetao_0 fill inconsistency.
 # In-training it is not -- Arm E's 20-yr sst is 0.1221/0.1214 against Arm D's
 # 0.1203/0.1208 -- so these rollouts are what decide it.
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+#
+# NOTE the group name abbreviates zerodeep -> zd for these two rows only. The
+# full arm name gives a 132-character beaker job name once evaluate.sh appends
+# -eval_best_inference_ckpt-1pct-ic0001-130yr-rs0, and beaker's limit is 128;
+# the first launch attempt failed on exactly that. The group is cosmetic (job
+# name, WANDB_NAME, WANDB_RUN_GROUP) -- the checkpoint is located by the
+# experiment id in field 3 -- so shortening it changes nothing functional. The
+# training rows keep the full name.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zd_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zd_meanthetao|rs0|01M1M2GYZAWE43SG62BDEAEW0M|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
