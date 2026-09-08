@@ -1,4 +1,5 @@
 experiment_dir: /results
+allow_incompatible_dataset: true
 checkpoint_path: /ckpt.tar
 n_forward_steps: 146
 forward_steps_in_memory: 40
