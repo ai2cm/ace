@@ -878,3 +878,29 @@ def test_optimization_config_passes_max_grad_norm():
         nn.ModuleList([model]), max_epochs=1
     )
     assert opt._max_grad_norm == 1.5
+
+
+def test_optimization_config_float32_matmul_precision_default_is_untouched():
+    """With the default (None) the process-wide matmul precision is left alone."""
+    original = torch.get_float32_matmul_precision()
+    model = nn.Linear(2, 2).to(fme.get_device())
+    OptimizationConfig().build(torch.nn.ModuleList([model]), max_epochs=1)
+    assert torch.get_float32_matmul_precision() == original
+
+
+@pytest.mark.parametrize("precision", ["highest", "high", "medium"])
+def test_optimization_config_sets_float32_matmul_precision(
+    precision: Literal["highest", "high", "medium"],
+):
+    """Building with float32_matmul_precision applies the torch setting and
+    round-trips through get_state/from_state."""
+    original = torch.get_float32_matmul_precision()
+    try:
+        model = nn.Linear(2, 2).to(fme.get_device())
+        config = OptimizationConfig(float32_matmul_precision=precision)
+        config.build(torch.nn.ModuleList([model]), max_epochs=1)
+        assert torch.get_float32_matmul_precision() == precision
+        reloaded = OptimizationConfig.from_state(config.get_state())
+        assert reloaded.float32_matmul_precision == precision
+    finally:
+        torch.set_float32_matmul_precision(original)

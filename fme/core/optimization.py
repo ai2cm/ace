@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import itertools
+import logging
 import warnings
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Literal, TypeAlias
@@ -318,6 +319,16 @@ class OptimizationConfig:
             ``betas``, ...) and scheduler are kept; only the running state is
             transferred. Intended for non-resuming jobs; preemption resume in
             the Trainer overrides this state via ``Optimization.load_state``.
+        float32_matmul_precision: If set, passed to
+            ``torch.set_float32_matmul_precision`` when the optimization is
+            built. ``"high"`` enables TensorFloat-32 for float32 matrix
+            multiplies (``nn.Linear``, ``torch.matmul``) on Ampere and newer
+            GPUs, giving tensor-core throughput at the cost of rounding the
+            matmul inputs to a 10-bit mantissa; accumulation stays in
+            float32. Convolutions already use TensorFloat-32 by default in
+            PyTorch, so this mostly matters for transformer-style models.
+            ``None`` (default) leaves the process-wide PyTorch setting
+            untouched. Has no effect when automatic mixed precision is enabled.
     """
 
     optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
@@ -333,6 +344,7 @@ class OptimizationConfig:
         default_factory=lambda: CheckpointConfig()
     )
     resume_optimizer_ckpt_path: str | None = None
+    float32_matmul_precision: Literal["highest", "high", "medium"] | None = None
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -349,6 +361,12 @@ class OptimizationConfig:
         return self.scheduler.type is not None
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
+        if self.float32_matmul_precision is not None:
+            logging.info(
+                "Setting torch float32 matmul precision to "
+                f"'{self.float32_matmul_precision}'"
+            )
+            torch.set_float32_matmul_precision(self.float32_matmul_precision)
         parameters = itertools.chain(*[module.parameters() for module in modules])
         optimizer = _build_optimizer(
             self.optimizer_type, parameters, self.lr, self.kwargs
