@@ -3,15 +3,25 @@
 Free-running inference configs are written to ``run_configs/``, one per
 (forcing grid, constant SST perturbation level) pair. The forcing grids are
 the two native training datasets (``era5`` and ``c96``) and the perturbation
-levels are p2k / p4k. Each config mounts its checkpoint at ``/ckpt.tar``
+levels are p0k / p2k / p4k. Each config mounts its checkpoint at ``/ckpt.tar``
 (supplied per-run by submit_sst_jobs.py) and runs a prognostic forecast with
 the SST forcing shifted by a constant amplitude.
 
 The configs are run-agnostic: the per-run checkpoint dataset is provided at
 submit time, so the same configs are reused across every training run. Which
-grids a given run is submitted against is decided by ``run_grids``: C96-trained
-runs (nc-sfno-c96) only run on C96, ERA5-trained runs (nc-sfno-vN) only on
-ERA5, and FM runs (nc-sfno-fm) on both. The configs are consumed by
+grids a given run is submitted against is decided by ``run_grids`` from the
+training regime in the run name: C96-trained runs (``*-c96-*``) only run on
+C96, ERA5-trained runs (``*-era5-*`` and the hand-written ``nc-sfno-vN``) only
+on ERA5, and FM runs (``*-fm-*``) on both. Source configs are the hand-written
+runs in base_configs and the generated norm-ablation cells in run_configs.
+
+Each config carries the label of its forcing dataset (``era5`` / ``amip``) as
+``labels`` on the InferenceConfig, which sets it on both the initial condition
+and the forcing windows. The norm-ablation A2/A3 checkpoints resolve their
+per-group normalization from these labels; without them, the unconditional
+cells would silently normalize against ``default_group`` and the ``-cond``
+cells would refuse to run. A1 and the hand-written runs have no grouped
+normalization and ignore the labels. The configs are consumed by
 ``python -m fme.ace.inference`` (via run-ace-inference.sh), not by the
 evaluator suite.
 """
@@ -22,6 +32,8 @@ from typing import NamedTuple
 
 import yaml
 from generate_eval_configs import (
+    ARCHITECTURES,
+    BASE_CONFIGS_DIR,
     RUN_CONFIGS_DIR,
     TRAINING_RESULT_DATASETS,
     WANDB_ENTITY,
@@ -48,16 +60,21 @@ class DatasetSpec(NamedTuple):
     data_path: str
     file_pattern: str
     n_forward_steps: int
+    label: str
 
 
 # The two native forcing datasets of the FM training runs. ``n_forward_steps``
 # matches the corresponding "long" inline-inference entry in the training
 # configs (long_46year for ERA5, long_43year for the C96 AMIP ensemble).
+# ``label`` is the dataset label the norm-ablation training configs give the
+# same dataset (generate_norm_ablation_configs.py), so a grouped-normalization
+# checkpoint resolves the group it was trained with.
 DATASETS = {
     "era5": DatasetSpec(
         data_path="/climate-default",
         file_pattern="2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr",
         n_forward_steps=16794,
+        label="era5",
     ),
     "c96": DatasetSpec(
         data_path=(
@@ -67,6 +84,7 @@ DATASETS = {
         ),
         file_pattern="ic_0001.zarr",
         n_forward_steps=15683,
+        label="amip",
     ),
 }
 
@@ -87,21 +105,37 @@ def run_grids(run_name: str) -> tuple[str, ...]:
     """Forcing grids a training run should produce SST-perturbation results
     on: C96-trained runs only C96, ERA5-trained runs only ERA5, FM runs
     (trained on both) both.
+
+    The regime is the segment after the architecture tag in the run name
+    (``nc-sfno-c96-a1`` -> ``c96``, ``nc-swin-v2-fm-a2-cond`` -> ``fm``), so
+    the rule is the same for every architecture. The hand-written ERA5 runs
+    (``nc-sfno-v2``) have no regime segment and fall through to ERA5.
     """
     suffix = run_name.removeprefix(WANDB_PREFIX)
-    if suffix.startswith("nc-sfno-c96"):
+    for arch in ARCHITECTURES:
+        if suffix.startswith(f"{arch}-"):
+            regime = suffix.removeprefix(f"{arch}-").split("-", 1)[0]
+            break
+    else:
+        regime = ""
+    if regime == "c96":
         return ("c96",)
-    if suffix.startswith("nc-sfno-fm"):
+    if regime == "fm":
         return ("era5", "c96")
     return ("era5",)
 
 
 def sst_runs(version: str | None = None) -> dict[str, tuple[str, ...]]:
     """Primary training run name -> forcing grids to perturb on, for every
-    base config with a recorded training result dataset.
+    base or norm-ablation training config with a recorded training result
+    dataset.
     """
     runs: dict[str, tuple[str, ...]] = {}
-    for source_path in discover_source_configs(version):
+    for source_path in discover_source_configs(
+        version,
+        architectures=ARCHITECTURES,
+        source_dirs=(BASE_CONFIGS_DIR, RUN_CONFIGS_DIR),
+    ):
         run_name = source_config_to_run_name(source_path.name)
         if run_name not in TRAINING_RESULT_DATASETS:
             # No training result dataset recorded for this run yet; skip
@@ -119,9 +153,17 @@ def _build_inference_config(spec: DatasetSpec, amplitude: float) -> dict:
         "experiment_dir": "/results",
         "n_forward_steps": spec.n_forward_steps,
         "forward_steps_in_memory": FORWARD_STEPS_IN_MEMORY,
+        # Sets the label on the initial condition and every forcing window;
+        # see the module docstring for why the grouped-normalization arms
+        # need it. Putting ``labels`` on the forcing dataset alone would leave
+        # the initial condition unlabeled and fail the stepper's IC/forcing
+        # label agreement check.
+        "labels": [spec.label],
+        # Daily and monthly netCDF output, so the response maps can be built
+        # from the data rather than decoded from the logged wandb images.
         "data_writer": {
-            "save_monthly_files": False,
-            "save_prediction_files": False,
+            "save_monthly_files": True,
+            "save_prediction_files": True,
         },
         "initial_condition": {
             "path": f"{spec.data_path}/{spec.file_pattern}",
