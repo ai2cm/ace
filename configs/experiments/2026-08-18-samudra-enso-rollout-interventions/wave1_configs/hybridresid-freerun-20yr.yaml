@@ -40,7 +40,7 @@ aggregator:
   log_histograms: false
 logging:
   log_to_screen: true
-  log_to_wandb: false
+  log_to_wandb: true
   log_to_file: true
   project: ace-samudra-cm4
   entity: ai2cm
