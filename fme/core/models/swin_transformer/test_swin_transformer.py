@@ -16,6 +16,7 @@ def _build_net(
     img_shape: tuple[int, int],
     context_config: ContextConfig | None = None,
     use_skip: bool = True,
+    skip_projection: bool = False,
 ) -> SwinTransformerNet:
     return SwinTransformerNet(
         in_chans=in_chans,
@@ -29,6 +30,7 @@ def _build_net(
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
+        skip_projection=skip_projection,
     )
 
 
@@ -119,6 +121,54 @@ def test_no_skip():
     x = torch.randn(n, in_chans, *img_shape, device=device)
     out = net(x)
     assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_skip_projection_runs_decoder_at_embed_dim():
+    """With skip_projection the decoder stage has embed_dim channels, the
+    projection gets gradients, and the output shape is unchanged."""
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape, skip_projection=True).to(device)
+    assert net.skip_proj is not None
+    assert net.layer4.blocks[0].dim == 32
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    assert net.skip_proj.weight.grad is not None
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_skip_projection_has_fewer_parameters_than_concat_decoder():
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n_params_concat = sum(
+        p.numel() for p in _build_net(in_chans, out_chans, img_shape).parameters()
+    )
+    n_params_proj = sum(
+        p.numel()
+        for p in _build_net(
+            in_chans, out_chans, img_shape, skip_projection=True
+        ).parameters()
+    )
+    assert n_params_proj < n_params_concat
+
+
+def test_skip_projection_default_keeps_state_dict_keys():
+    """Default skip_projection=False must not add parameters, so existing
+    checkpoints keep loading."""
+    net = _build_net(5, 3, (16, 32))
+    assert net.skip_proj is None
+    assert not any("skip_proj" in k for k in net.state_dict())
+
+
+def test_skip_projection_ignored_without_skip():
+    net = _build_net(5, 3, (16, 32), use_skip=False, skip_projection=True)
+    assert net.skip_proj is None
+    assert net.layer4.blocks[0].dim == 32
 
 
 def test_column_mixer():

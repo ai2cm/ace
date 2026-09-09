@@ -75,6 +75,12 @@ class SwinTransformerNet(nn.Module):
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        skip_projection: When True (and ``use_skip``), project the concatenated
+            ``2 * embed_dim`` skip back to ``embed_dim`` with a linear layer so
+            the decoder stage runs at ``embed_dim`` channels rather than
+            ``2 * embed_dim``. The decoder runs on the full-resolution grid, so
+            this removes roughly a quarter of the network's FLOPs at the cost
+            of decoder width. Ignored when ``use_skip`` is False.
         context_config: Conditioning configuration.  In ``"adaln"`` mode,
             scalar and label conditioning are applied as independent additive
             AdaLN projections; ``None`` (or both 0) disables AdaLN.  In
@@ -103,6 +109,7 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
         padding_conf: dict | None = None,
+        skip_projection: bool = False,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -111,6 +118,7 @@ class SwinTransformerNet(nn.Module):
         self.out_chans = out_chans
         self.img_shape = img_shape
         self.use_skip = use_skip
+        self.skip_projection = skip_projection and use_skip
         self.window_size = window_size
         self.conditioning = conditioning
 
@@ -226,7 +234,14 @@ class SwinTransformerNet(nn.Module):
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
-        decoder_dim = 2 * embed_dim if use_skip else embed_dim
+        if self.skip_projection:
+            self.skip_proj: nn.Module | None = nn.Linear(
+                2 * embed_dim, embed_dim, bias=False
+            )
+            decoder_dim = embed_dim
+        else:
+            self.skip_proj = None
+            decoder_dim = 2 * embed_dim if use_skip else embed_dim
         self.layer4 = BasicLayer(
             decoder_dim,
             (Hp, Wp),
@@ -302,6 +317,8 @@ class SwinTransformerNet(nn.Module):
         x = self.upsample(x)
         if self.use_skip:
             x = torch.cat([x, skip], dim=-1)
+            if self.skip_proj is not None:
+                x = self.skip_proj(x)
         x = self.layer4(x, cond_scalar, cond_labels, context=ctx_full)
 
         x = self.final_linear(x)  # (B, Hp, Wp, embed_dim)

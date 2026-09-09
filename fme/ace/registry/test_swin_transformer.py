@@ -260,6 +260,24 @@ def test_nc_swin_transformer_noise_divergence():
 _PAD_CONF = {"activate": True, "mode": "earth", "pad_lat": [2, 1], "pad_lon": [2, 2]}
 
 
+@pytest.mark.parametrize("builder", [_builder, _nc_builder])
+def test_swin_transformer_skip_projection_builds_and_runs(builder):
+    module = (
+        builder(skip_projection=True)
+        .build(5, 3, _get_dataset_info())
+        .to(fme.get_device())
+    )
+    assert any("skip_proj" in k for k in module.state_dict())
+    x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, 3, *IMG_SHAPE)
+
+
+@pytest.mark.parametrize("builder", [_builder, _nc_builder])
+def test_swin_transformer_skip_projection_requires_use_skip(builder):
+    with pytest.raises(ValueError, match="requires use_skip"):
+        builder(use_skip=False, skip_projection=True)
+
+
 def test_swin_transformer_earth_padding():
     module = (
         _builder(padding_conf=_PAD_CONF)
