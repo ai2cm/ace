@@ -77,7 +77,7 @@ launch() {
     # coupled FT of the hybrid (thetao-residual) pretrain: the residfixft
     # recipe with the hybrid checkpoint; step config (residual names, loss
     # units) rides in with the checkpoint.
-    config="${CONFIG_DIR}/residfixft.yaml"
+    config="${CONFIG_DIR}/hybridresidft.yaml"
     mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar"
             --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
@@ -162,6 +162,7 @@ launch() {
     "${clusters[@]}" \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
+    --env FME_COLLECTIVE_TIMEOUT_MINUTES=120 \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
