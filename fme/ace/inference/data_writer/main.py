@@ -224,6 +224,7 @@ class DataWriterConfig:
                         path=experiment_dir,
                         label="monthly_mean_predictions",
                         initial_condition_times=initial_condition_times,
+                        timestep=timestep,
                         save_names=self.names,
                         variable_metadata=variable_metadata,
                         coords=coords,
