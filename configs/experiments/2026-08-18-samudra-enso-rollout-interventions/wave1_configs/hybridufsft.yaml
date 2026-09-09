@@ -18,8 +18,6 @@ inference:
       data_path: gs://vcm-ml-intermediate
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
-      fill_nans:
-        value: 0.0
     num_data_workers: 4
   aggregator:
     log_histograms: false
@@ -38,15 +36,11 @@ train_loader:
     - data_path: gs://vcm-ml-intermediate
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
-      fill_nans:
-        value: 0.0
       subset:
         stop_time: '2001-12-27T09:00:00'
     - data_path: gs://vcm-ml-intermediate
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
-      fill_nans:
-        value: 0.0
       subset:
         start_time: '2012-01-04T09:00:00'
         stop_time: '2021-12-27T09:00:00'
@@ -58,8 +52,6 @@ validation:
       data_path: gs://vcm-ml-intermediate
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
-      fill_nans:
-        value: 0.0
       subset:
         start_time: '2022-01-01T09:00:00'
 optimization:
