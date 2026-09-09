@@ -10,10 +10,6 @@ WANDB_PROJECT=${WANDB_PROJECT:-FM}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/saturn ai2/jupiter ai2/ceres"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
-# Opt the job in to scripts/beaker_balancer/balance.py, which may lower its
-# priority to keep the team inside its urgent allocation. Unset means the
-# balancer leaves the job alone entirely.
-CM_PRIORITY=${CM_PRIORITY:-}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=2
 
@@ -38,11 +34,6 @@ run_training() {
     cluster_args+=(--cluster "$cluster")
   done
 
-  local cm_priority_args=()
-  if [[ -n "$CM_PRIORITY" ]]; then
-    cm_priority_args+=(--env "CM_PRIORITY=$CM_PRIORITY")
-  fi
-
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
@@ -58,7 +49,6 @@ run_training() {
     --env WANDB_RUN_GROUP="$job_group" \
     --env WANDB_PROJECT="$WANDB_PROJECT" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    "${cm_priority_args[@]}" \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus $N_GPUS \

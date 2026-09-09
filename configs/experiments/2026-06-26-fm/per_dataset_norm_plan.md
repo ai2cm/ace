@@ -333,7 +333,7 @@ python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1
 #    configs and the fme change alike -- to be pushed: gantry clones HEAD.
 python generate_norm_ablation_finetune_configs.py
 python submit_norm_ablation_finetune_jobs.py --dry-run
-python submit_norm_ablation_finetune_jobs.py --cm-priority normal
+python submit_norm_ablation_finetune_jobs.py
 ```
 
 ### Verifying the statistics
