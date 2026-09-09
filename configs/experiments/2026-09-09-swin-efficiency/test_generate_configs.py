@@ -9,9 +9,13 @@ import pathlib
 
 import dacite
 import pytest
+import torch
 import yaml
 
 from fme.ace.train.train_config import TrainConfig
+from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
+from fme.core.registry import ModuleSelector
 
 HERE = pathlib.Path(__file__).parent
 RUN_DIR = HERE / "run_configs"
@@ -57,3 +61,42 @@ def test_swin_fast_config_enables_compile_and_skip_projection():
     step_config = generate_configs.generate(name)["stepper"]["step"]["config"]
     assert step_config["compile"] is True
     assert step_config["builder"]["config"]["skip_projection"] is True
+
+
+# Channel counts of the base config: 45 inputs plus the appended global-mean
+# input, 50 outputs plus the shared global-mean channel.
+N_IN_CHANNELS = 46
+N_OUT_CHANNELS = 51
+# Rough per-million bounds for the scaled-down variants (see README).
+EXPECTED_PARAM_RANGES_M = {
+    "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast-compute-matched.yaml": (
+        30,
+        40,
+    ),
+    "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast-param-matched.yaml": (
+        10,
+        15,
+    ),
+    "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast-mid.yaml": (42, 52),
+}
+
+
+def _dataset_info_4deg() -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.linspace(-88.0, 88.0, 45), lon=torch.linspace(0.0, 356.0, 90)
+        ),
+        all_labels={"amip", "ramped", "som", "era5"},
+    )
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED_PARAM_RANGES_M))
+def test_scaled_down_swin_variants_have_expected_parameter_counts(name: str):
+    builder = generate_configs.generate(name)["stepper"]["step"]["config"]["builder"]
+    module = ModuleSelector(type=builder["type"], config=builder["config"]).build(
+        N_IN_CHANNELS, N_OUT_CHANNELS, _dataset_info_4deg()
+    )
+    n_params_m = sum(p.numel() for p in module.torch_module.parameters()) / 1e6
+    low, high = EXPECTED_PARAM_RANGES_M[name]
+    assert low <= n_params_m <= high, n_params_m
+    assert module.torch_module.conditional_model.skip_proj is not None

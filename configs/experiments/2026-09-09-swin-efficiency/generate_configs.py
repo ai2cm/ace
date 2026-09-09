@@ -13,6 +13,19 @@ were run in August 2026 (``base_configs/``), this writes variants to
 The SFNO variant only receives the TensorFloat-32 and inference changes so
 that it can serve as a like-for-like baseline.
 
+Three further Swin variants scale the architecture down from the 265M-parameter
+base towards the 14M-parameter, ~100 GFLOP/sample SFNO:
+
+* ``compute-matched``: ``embed_dim=192, depth_multiplier=1`` (about 34M
+  parameters, about 100 GFLOP/sample, the same FLOPs as SFNO),
+* ``param-matched``: ``embed_dim=128, depth_multiplier=1, mlp_ratio=8/3``
+  (about 12M parameters, about 37 GFLOP/sample),
+* ``mid``: ``embed_dim=256, depth_multiplier=1, mlp_ratio=8/3`` (about 47M
+  parameters, about 137 GFLOP/sample).
+
+``mlp_ratio=8/3`` is the usual SwiGLU convention; the base config's SwiGLU with
+``mlp_ratio=4`` carries 1.5x the MLP parameters of a GELU MLP at ratio 4.
+
 Run ``python generate_configs.py`` from this directory to regenerate.
 """
 
@@ -76,10 +89,37 @@ SWIN_FAST: list[Modification] = [
 ]
 SFNO_FAST: list[Modification] = [_enable_tf32, _trim_inference]
 
+SWIGLU_MLP_RATIO = 8 / 3
+
+SWIN_COMPUTE_MATCHED: list[Modification] = [
+    *SWIN_FAST,
+    _set_builder_options(embed_dim=192, depth_multiplier=1, num_heads=[3, 6, 6, 3]),
+]
+SWIN_PARAM_MATCHED: list[Modification] = [
+    *SWIN_FAST,
+    _set_builder_options(embed_dim=128, depth_multiplier=1, mlp_ratio=SWIGLU_MLP_RATIO),
+]
+SWIN_MID: list[Modification] = [
+    *SWIN_FAST,
+    _set_builder_options(embed_dim=256, depth_multiplier=1, mlp_ratio=SWIGLU_MLP_RATIO),
+]
+
 # name -> (base file, list of modifications applied in order)
 VARIANTS: dict[str, tuple[str, list[Modification]]] = {
     "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast.yaml": (SWIN_BASE, SWIN_FAST),
     "ace-train-config-4deg-AIMIP-nc-sfno-fm-a1-fast.yaml": (SFNO_BASE, SFNO_FAST),
+    "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast-compute-matched.yaml": (
+        SWIN_BASE,
+        SWIN_COMPUTE_MATCHED,
+    ),
+    "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast-param-matched.yaml": (
+        SWIN_BASE,
+        SWIN_PARAM_MATCHED,
+    ),
+    "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-a1-fast-mid.yaml": (
+        SWIN_BASE,
+        SWIN_MID,
+    ),
 }
 
 
