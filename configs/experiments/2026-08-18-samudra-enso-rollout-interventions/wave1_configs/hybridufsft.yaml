@@ -20,7 +20,8 @@ inference:
       engine: zarr
     num_data_workers: 4
   aggregator:
-    log_histograms: false
+    histogram:
+      enabled: false
     enso_coefficient:
       enabled: false
 logging:
