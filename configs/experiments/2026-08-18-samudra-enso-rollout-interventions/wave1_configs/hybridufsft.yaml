@@ -72,6 +72,8 @@ stepper_training:
   n_forward_steps: 4
   loss:
     type: MSE
+  parameter_init:
+    weights_path: /base_ckpt.tar
 stepper:
   input_masking:
     mask_value: 0
@@ -365,6 +367,4 @@ stepper:
       - thetao_16
       - thetao_17
       - thetao_18
-      parameter_init:
-        weights_path: /base_ckpt.tar
 seed: 1
