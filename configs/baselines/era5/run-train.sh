@@ -95,7 +95,6 @@ run_training() {
     --workspace ai2/ace \
     --priority high \
     --cluster ai2/jupiter \
-    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -119,23 +118,23 @@ run_training() {
 run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-pretrain-rs0" \
-  4
+  8
 
 # Fine-tune: 3-step BPTT (full backprop through rollout), 40 epochs, 4 GPUs
 run_training \
   "ace-train-config-ft3-bptt-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-ft3-bptt-rs0" \
-  4
+  8
 
 # Fine-tune: 3-step detached (gradient accumulation, no BPTT), 40 epochs, 4 GPUs
 run_training \
   "ace-train-config-ft3-detached-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-ft3-detached-rs0" \
-  4
+  8
 
 # Resume pretrain to 120 epochs (continues wandb gjsqlvsf), 4 GPUs
 # Job name = original run name so wandb display name is preserved.
 run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-resume120.yaml" \
   "1deg-daily-no-corr-mean-pretrain-rs0" \
-  4
+  8

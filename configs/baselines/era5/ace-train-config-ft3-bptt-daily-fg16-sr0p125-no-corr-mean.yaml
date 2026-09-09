@@ -20,7 +20,8 @@ max_epochs: 40
 ema:
   decay: 0.999
 inference:
-  - n_forward_steps: 1825
+  - name: inference
+    n_forward_steps: 1825
     forward_steps_in_memory: 40
     loader:
       start_indices:
@@ -43,6 +44,39 @@ inference:
           engine: zarr
       num_data_workers: 4
     aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+        - step: 5
+          target: norm
+      ensembles:
+        - step: 5
+      histogram:
+        enabled: true
+      time_mean_reference_data: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/time-mean.nc
+  - name: long_81year
+    weight: 0.0
+    epochs:
+      start: 4
+      step: 5
+    n_forward_steps: 29565
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+          - '1940-01-03T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default/
+          file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+          engine: zarr
+        - data_path: /climate-default/
+          file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      step_means: []
+      ensembles: []
       histogram:
         enabled: true
       time_mean_reference_data: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/time-mean.nc
