@@ -37,7 +37,7 @@ segment directories:
 Manual segmented inference
 ==========================
 
-The segmented run API assumes that the configuration, modulo the initial
+The segmented run API requires that the configuration, modulo the initial
 conditions and experiment subdirectory, will be held constant between segments.
 It can sometimes be helpful to have finer grained control, for example if you
 would like to run segments of different lengths and/or run segments with
