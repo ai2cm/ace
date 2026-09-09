@@ -139,7 +139,32 @@ class WindowAttention2D(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.softmax = nn.Softmax(dim=-1)
+
+    def _position_bias(self, lat_mean: torch.Tensor | None) -> torch.Tensor:
+        """Continuous position bias.
+
+        Returns ``(num_heads, N, N)`` when ``lat_mean`` is None, otherwise
+        ``(nW, num_heads, N, N)`` with longitude offsets scaled by ``cos(lat)``
+        per spatial window.
+        """
+        N = self.window_size[0] * self.window_size[1]
+        if lat_mean is None:
+            bias = 16.0 * torch.sigmoid(
+                self.cpb_mlp(self.relative_coords_log)
+            )  # (N*N, num_heads)
+            return bias.permute(1, 0).reshape(self.num_heads, N, N)
+        nW = lat_mean.shape[0]
+        lat_rad = lat_mean * (math.pi / 180.0)  # (nW,)
+        h_coords = self.relative_coords_base[:, 0]  # (N*N,)
+        w_coords = self.relative_coords_base[:, 1].unsqueeze(0) * torch.cos(
+            lat_rad
+        ).unsqueeze(1)  # (nW, N*N)
+        coords = torch.stack(
+            [h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1
+        )  # (nW, N*N, 2)
+        coords_log = torch.sign(coords) * torch.log(1.0 + coords.abs())
+        bias = 16.0 * torch.sigmoid(self.cpb_mlp(coords_log))  # (nW, N*N, num_heads)
+        return bias.permute(0, 2, 1).reshape(nW, self.num_heads, N, N)
 
     def forward(
         self,
@@ -148,6 +173,14 @@ class WindowAttention2D(nn.Module):
         lat_mean: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Apply windowed attention.
+
+        Cosine attention (Swin V2): queries and keys are L2-normalized and the
+        logits divided by the learned per-head temperature ``tau``, then the
+        position bias and optional shift mask are added before the softmax.
+        The softmax and value aggregation run through
+        ``F.scaled_dot_product_attention`` with the bias passed as an additive
+        float mask, which is the same function as materializing the logits
+        explicitly.
 
         Args:
             x: Tokens of shape ``(num_windows * B, N, C)`` where
@@ -165,45 +198,38 @@ class WindowAttention2D(nn.Module):
             .permute(2, 0, 3, 1, 4)
         )
         q, k, v = qkv[0], qkv[1], qkv[2]
-        norm_q = torch.norm(q, dim=-1, keepdim=True)
-        norm_k = torch.norm(k, dim=-1, keepdim=True).transpose(-2, -1)
-        attn = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
-        attn = attn / self.tau.clamp(min=0.01)
+        # Normalizing q and k separately (each norm clamped at 1e-6) matches
+        # dividing q.k by the clamped product of norms except when a norm is
+        # below the clamp, which does not occur for trained weights.
+        q = F.normalize(q, dim=-1, eps=1e-6) / self.tau.clamp(min=0.01)
+        k = F.normalize(k, dim=-1, eps=1e-6)
 
-        if lat_mean is None:
-            bias = 16.0 * torch.sigmoid(
-                self.cpb_mlp(self.relative_coords_log)
-            )  # (N*N, num_heads)
-            bias = bias.permute(1, 0).reshape(self.num_heads, N, N)
-            attn = attn + bias.unsqueeze(0)
+        bias = self._position_bias(lat_mean)
+        attn_bias: torch.Tensor
+        if bias.dim() == 3:
+            attn_bias = bias.unsqueeze(0)  # (1, num_heads, N, N)
         else:
-            nW = lat_mean.shape[0]
-            lat_rad = lat_mean * (math.pi / 180.0)  # (nW,)
-            h_coords = self.relative_coords_base[:, 0]  # (N*N,)
-            w_coords = self.relative_coords_base[:, 1].unsqueeze(0) * torch.cos(
-                lat_rad
-            ).unsqueeze(1)  # (nW, N*N)
-            coords = torch.stack(
-                [h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1
-            )  # (nW, N*N, 2)
-            coords_log = torch.sign(coords) * torch.log(1.0 + coords.abs())
-            bias = 16.0 * torch.sigmoid(
-                self.cpb_mlp(coords_log)
-            )  # (nW, N*N, num_heads)
-            bias = bias.permute(0, 2, 1).reshape(nW, self.num_heads, N, N)
-            attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + bias.unsqueeze(0)
-            attn = attn.view(B_, self.num_heads, N, N)
-
+            attn_bias = bias.unsqueeze(0)  # (1, nW, num_heads, N, N)
         if mask is not None:
             nW = mask.shape[0]
-            attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(
-                1
-            ).unsqueeze(0)
-            attn = attn.view(-1, self.num_heads, N, N)
-        attn = self.softmax(attn)
-        attn = self.attn_drop(attn)
+            if attn_bias.dim() == 4:
+                attn_bias = attn_bias.unsqueeze(1)  # (1, 1, num_heads, N, N)
+            attn_bias = attn_bias + mask.unsqueeze(1).unsqueeze(0)  # (1,nW,h,N,N)
+        if attn_bias.dim() == 5:
+            nW = attn_bias.shape[1]
+            attn_bias = attn_bias.expand(B_ // nW, nW, self.num_heads, N, N).reshape(
+                B_, self.num_heads, N, N
+            )
 
-        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=attn_bias,
+            dropout_p=self.attn_drop.p if self.training else 0.0,
+            scale=1.0,
+        )
+        x = x.transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
