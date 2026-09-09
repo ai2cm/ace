@@ -11,6 +11,7 @@ from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     CorrectionSequence,
     CorrectorABC,
+    CorrectorConfigABC,
     EpochScheduledCorrector,
 )
 from fme.core.corrector.state import CorrectorState
@@ -24,8 +25,13 @@ def _get_dataset_info() -> DatasetInfo:
     return DatasetInfo(
         vertical_coordinate=NullVerticalCoordinate(),
         gridded_operations=LatLonOperations(area_weights=torch.ones(2, 2)),
+        img_shape=(2, 2),
         timestep=datetime.timedelta(hours=6),
     )
+
+
+def _get_corrector(config: CorrectorConfigABC) -> CorrectorABC:
+    return config.get_corrector(_get_dataset_info())
 
 
 def test_corrector_disabled_epochs_must_be_non_negative():
@@ -42,12 +48,12 @@ def test_corrector_disabled_epochs_must_be_non_negative():
     ],
 )
 def test_corrector_configs_wrap_when_disabled_epochs_set(config):
-    corrector = config.get_corrector(_get_dataset_info())
+    corrector = _get_corrector(config)
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
 def test_corrector_not_wrapped_when_disabled_epochs_zero():
-    corrector = AtmosphereCorrectorConfig().get_corrector(_get_dataset_info())
+    corrector = _get_corrector(AtmosphereCorrectorConfig())
     assert not isinstance(corrector, EpochScheduledCorrector)
     # the bare corrector inherits the base no-op lifecycle methods
     assert corrector.train(False) is corrector
@@ -72,14 +78,12 @@ def test_corrector_selector_disabled_epochs_set_on_wrapped_config():
         type="atmosphere_corrector",
         config={"corrector_disabled_epochs": 1},
     )
-    corrector = selector.get_corrector(_get_dataset_info())
+    corrector = _get_corrector(selector)
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
 def test_scheduled_corrector_requires_state_when_disabled_epochs_configured():
-    corrector = AtmosphereCorrectorConfig(corrector_disabled_epochs=1).get_corrector(
-        _get_dataset_info()
-    )
+    corrector = _get_corrector(AtmosphereCorrectorConfig(corrector_disabled_epochs=1))
     with pytest.raises(ValueError, match="corrector_disabled"):
         corrector.load_state({})
 

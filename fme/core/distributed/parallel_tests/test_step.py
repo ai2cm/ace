@@ -13,7 +13,7 @@ import pathlib
 import tempfile
 import unittest
 import unittest.mock
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 import numpy as np
 import pytest
@@ -228,7 +228,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, int], n_samples: int
+    names: Collection[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()

@@ -19,7 +19,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.histogram import ComparedDynamicTailsHistograms
 from fme.core.tensor_dict_accumulator import TensorDictAccumulator
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.adapters import ComparedDynamicTailsHistogramsAdapter
 from fme.downscaling.data import PairedBatchData
@@ -54,6 +54,11 @@ def _tensor_mapping_to_numpy(data: TensorMapping) -> TensorMapping:
 class LossVsNoiseAggregator:
     """
     Aggregates binned diffusion losses as a function of sampled noise level.
+
+    Every (sample, channel) pair is its own independent point, binned at its
+    own noise level. With shared (non-channelwise) sigma, that's the same
+    sigma value for every channel of a sample, so the "all_channels" total is
+    a per-(sample, channel) mean, not a per-sample sum.
     """
 
     def __init__(
@@ -104,35 +109,46 @@ class LossVsNoiseAggregator:
         if outputs.sigma is None or not outputs.per_sample_channel_loss:
             return
 
-        sigma = outputs.sigma.detach().flatten()
+        sigma = outputs.sigma.detach()
         if torch.any(sigma <= 0):
             raise ValueError("Sigma must be strictly positive for log10 binning")
-        log_sigma = torch.log10(sigma)
-        in_range = (log_sigma >= self._log10_sigma_min) & (
-            log_sigma <= self._log10_sigma_max
-        )
-        if not torch.any(in_range):
-            return
-        # Indices in [0, n_bins-1] for values within the configured sigma range.
-        bin_indices = torch.bucketize(log_sigma[in_range], self._inner_edges)
+        if sigma.dim() not in (1, 2):
+            raise ValueError(
+                "Expected sigma to have shape (batch,) or (batch, channel)"
+            )
 
-        per_channel: TensorDict = {}
-        for name, loss in outputs.per_sample_channel_loss.items():
+        for i, (name, loss) in enumerate(outputs.per_sample_channel_loss.items()):
+            # Register every channel up front so all DDP ranks issue matching
+            # collectives in _get, even if this rank has no in-range samples.
+            if name not in self._channel_sum:
+                self._channel_sum[name] = torch.zeros(
+                    self._n_bins, dtype=torch.float32, device=get_device()
+                )
+                self._channel_count[name] = torch.zeros(
+                    self._n_bins, dtype=torch.int64, device=get_device()
+                )
+            channel_sigma = (
+                sigma.flatten() if sigma.dim() == 1 else sigma[:, i].flatten()
+            )
             channel_loss = loss.detach().flatten()
-            if channel_loss.shape != sigma.shape:
+            if channel_loss.shape != channel_sigma.shape:
                 raise ValueError(
                     "Expected per-sample channel losses and sigma to share batch shape"
                 )
-            per_channel[name] = channel_loss[in_range]
-
-        stacked = torch.stack(list(per_channel.values()), dim=-1)
-        total_loss = torch.mean(stacked, dim=-1)
-        self._total_sum.scatter_add_(0, bin_indices, total_loss)
-        self._total_count.scatter_add_(
-            0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
-        )
-        for name, values in per_channel.items():
-            self._accumulate(values=values, bin_indices=bin_indices, name=name)
+            log_sigma = torch.log10(channel_sigma)
+            in_range = (log_sigma >= self._log10_sigma_min) & (
+                log_sigma <= self._log10_sigma_max
+            )
+            if torch.any(in_range):
+                # Indices in [0, n_bins-1] for values within the sigma range.
+                bin_indices = torch.bucketize(log_sigma[in_range], self._inner_edges)
+                self._accumulate(
+                    values=channel_loss[in_range], bin_indices=bin_indices, name=name
+                )
+                self._total_sum.scatter_add_(0, bin_indices, channel_loss[in_range])
+                self._total_count.scatter_add_(
+                    0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
+                )
 
     def _plot_binned(self, y_values: np.ndarray, counts: np.ndarray, title: str) -> Any:
         wandb = WandB.get_instance()
