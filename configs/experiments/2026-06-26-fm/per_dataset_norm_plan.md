@@ -328,12 +328,20 @@ python submit_norm_ablation_jobs.py
 python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1 --dry-run
 python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1
 
-# 7. ERA5 fine-tuning of the finished nc-sfno fm cells. Requires the source
-#    runs to have finished (update_beaker_map.py), and requires this branch --
-#    configs and the fme change alike -- to be pushed: gantry clones HEAD.
+# 7. ERA5 fine-tuning. Requires the source runs to have finished
+#    (update_beaker_map.py), and requires this branch -- configs and the fme
+#    change alike -- to be pushed: gantry clones HEAD. The generator writes
+#    both regimes; --regime is required on submission so a bare re-run cannot
+#    resubmit a regime whose jobs are already going.
 python generate_norm_ablation_finetune_configs.py
-python submit_norm_ablation_finetune_jobs.py --dry-run
-python submit_norm_ablation_finetune_jobs.py
+
+#    fm cells (specialization), 6 runs:
+python submit_norm_ablation_finetune_jobs.py --regime fm --dry-run
+python submit_norm_ablation_finetune_jobs.py --regime fm
+
+#    c96 cells (transfer), 4 runs:
+python submit_norm_ablation_finetune_jobs.py --regime c96 --dry-run
+python submit_norm_ablation_finetune_jobs.py --regime c96
 ```
 
 ### Verifying the statistics
@@ -361,11 +369,19 @@ in the job logs:
 
 ## ERA5 fine-tuning
 
-Six 10-epoch runs, one per `nc-sfno` fm cell (A1/A2/A3 × conditioning),
-warm-started from each source run's last-epoch checkpoint and continued on ERA5
-alone. Written by `generate_norm_ablation_finetune_configs.py`, submitted by
-`submit_norm_ablation_finetune_jobs.py` into wandb group
+Ten 10-epoch runs, warm-started from each source run's last-epoch checkpoint and
+continued on ERA5 alone: six `nc-sfno` fm cells (A1/A2/A3 × conditioning) and
+four `nc-sfno` c96 cells (A1/A3 × conditioning; A2 ≡ A1 there, so no source run
+exists). Written by `generate_norm_ablation_finetune_configs.py`, submitted by
+`submit_norm_ablation_finetune_jobs.py --regime {fm,c96}` into wandb group
 `ace2-fm-norm-ablation-finetune-2026-06-26`.
+
+Both regimes read the *same* ERA5 data — the fm base's two train members, its
+1994/2014 validation, and its five ERA5 inference entries — at the same 10
+epochs and the same 1e-5, so the two sets differ only in the regime their
+weights came from.
+
+### fm: specialization
 
 **What it asks.** Not transfer — every source model already saw ERA5 in the
 mixture — but *specialization*: does the arm a model was pretrained under leave
@@ -437,6 +453,77 @@ Cost is dominated by inference, not training: ERA5-only takes an epoch from ~163
 dataset-years to ~73, while the 13-entry suite (~81k forward steps) runs 11
 times rather than the base run's 15 in 150 epochs.
 
+### c96: transfer
+
+The c96 cells never saw ERA5 at all — the ablation's own figures log NaN for
+every ERA5 inference entry on those four runs. Fine-tuning them asks a different
+question from the fm arm: not whether a pretraining arm leaves a model better
+positioned to specialize, but how far C96-only pretraining under A1 vs A3
+*transfers*. `evaluate_before_training: true` therefore carries more weight here
+than it does for fm — the epoch-0 point is a genuine zero-shot ERA5 measurement
+for a model that has never seen the data, and is arguably the headline number.
+
+**The transformation.** Same as the fm cells for `parameter_init`,
+`max_epochs`/`lr`, the scheduler, `ema_checkpoint_save_epochs`,
+`inference[].epochs`, the weight zeroing and `evaluate_before_training`. The
+loader step differs, because a c96 config has no ERA5 to restrict *to*:
+
+| field | value |
+|---|---|
+| `train_loader` dataset | replaced by the fm base's 2 ERA5 members |
+| `validation` dataset | replaced by the fm base's 1994 + 2014 ERA5 members |
+| `inference` | the fm base's 5 ERA5 entries prepended, giving 13 |
+| every spliced ERA5 loader | relabeled `amip` (below) |
+
+The ERA5 entries are spliced verbatim rather than rebuilt: their aggregator
+variable lists already omit `total_water_path`, the one SHiELD diagnostic the
+c96 entries carry and the ERA5 store does not. That is the *only* difference
+between the two bases' C96 inference entries. Checkpoint selection lands on the
+ERA5 `10year` entry, whose initial conditions start 2015-01-01 — outside both
+fine-tune train windows, so out-of-sample.
+
+**ERA5 is labeled `amip`.** The c96 vocabulary is `{amip, ramped, som}` and
+`GroupedNormalizer._resolve_group_index` raises on a label with no group, so
+ERA5 has to be either given a label the vocabulary already holds or added to it.
+It is labeled `amip`, in every loader of all four configs including the two A1
+cells where labels are inert. Three things this buys:
+
+- **The normalization block is untouched.** ERA5 is normalized by constants the
+  model was pretrained with — the same continuity rule the fm cells rely on,
+  applied to the only group c96 has for the job.
+- **No silent weight misalignment.** `overwrite_weights` matches
+  label-dependent weights positionally against *sorted* labels and slices when
+  the target is larger, so a fourth label named `era5` would sort to
+  `[amip, era5, ramped, som]` and quietly copy the checkpoint's `ramped` column
+  into `era5` and `som` into `ramped`. Avoiding that needs either an fme change
+  (match columns by name) or a label chosen to sort last.
+- **A1 and A3 differ only in pretraining.** A1 has no `grouped` block, so giving
+  A3 an ERA5 group while A1 stayed on the pooled constants would confound the
+  fine-tune input scale with the pretraining difference under test.
+
+`amip` specifically because it is both the group these configs already fall back
+to (`default_group`) and the C96 stream closest to ERA5 physically — prescribed
+observed SSTs over 1979-2008.
+
+The cost is real and should be stated when the results are read. ERA5's
+`specific_total_water_0` lands ~5σ off the `amip` mean it is now normalized
+against (that offset is the whole reason the ablation exists), and the two
+conditional cells are fed a constant `amip` one-hot for data that is not AMIP.
+Unlike the fm arm's constant one-hot, this one is not merely uninformative — it
+is wrong. That is accepted: it is uniform across all four cells, so it cannot
+explain a difference *between* them.
+
+**Reading the results.** As with fm, the loss, global mean removal and every
+`*_norm` metric stay on the c96-pooled constants. They are therefore comparable
+to the four c96 base runs but *not* to the fm fine-tunes, which sit on
+fm-pooled constants, nor to the `era5-a1` specialist. Compare across regimes on
+native-unit metrics (`time_mean/rmse/<field>`, `time_mean/bias/<field>`) only.
+
+At 1e-5 over 10 epochs these may barely move from their zero-shot point. That is
+itself the transfer result, and it is measured under the same LR and epoch
+budget the six fm runs used; a higher-LR follow-up is cheap if the trajectory
+looks flat.
+
 ## Caveats
 
 - **No A1 control reproduces its base run's normalization.** Every regime
@@ -457,10 +544,16 @@ times rather than the base run's 15 in 150 epochs.
 - **YAML anchors are expanded** by the `safe_load`/`dump` round-trip, so the
   generated configs repeat the `inference_variables` block. Cosmetic; the
   cooldown generator does the same.
-- **Fine-tuning is implemented for the fm regime only** (see ERA5
-  fine-tuning below). The c96 → ERA5 arm the original plan named is still
-  not implemented, and is a different experiment: those cells have never
-  seen ERA5, and A3 has no `era5` group to bind to.
+- **The two fine-tuning arms are not comparable on normalized metrics.** The
+  fm cells normalize against `norm_ablation_0/fm`, the c96 cells against
+  `norm_ablation_0/c96`, so `loss` and every `*_norm` metric are in different
+  units across the two. Only native-unit metrics compare.
+- **The c96 fine-tunes label ERA5 as `amip`** (see ERA5 fine-tuning above),
+  which is factually wrong and puts ERA5 ~5σ off the mean it normalizes
+  against. Uniform across all four cells, so it cannot explain a difference
+  between them, but it does mean a c96 fine-tune's absolute ERA5 numbers are
+  not a fair estimate of what a c96 model could reach with ERA5-appropriate
+  constants.
 - **A masked cell is not weight-shaped like its unmasked twin.**
   `include_channel_mask_inputs` doubles the module's input channels (45 → 90),
   so a `mask10` run differs from its baseline in parameter count as well as in
@@ -571,4 +664,8 @@ because it is not a grouping strategy and has to be able to cross with A2 and
 A3. The generator writes every cell of the cross; submission is filtered.
 
 **Not deviations.** Pinned variable list, pooled GMR, pooled loss/residual
-normalizer, and deferring the c96 → ERA5 fine-tuning arm are all as planned.
+normalizer are all as planned. The c96 → ERA5 fine-tuning arm the plan named
+was deferred once and is now implemented, with the one substitution recorded
+under "c96: transfer": ERA5 is labeled `amip` rather than given a group of its
+own, because the c96 regime has no `era5` group and adding one would confound
+the arm comparison it exists to make.

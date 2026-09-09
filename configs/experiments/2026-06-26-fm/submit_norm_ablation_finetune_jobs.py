@@ -10,8 +10,12 @@ an uncommitted config never reaches the job as written. The same applies to the
 (`parameter_init.override_labels_from_weights`) -- if it is not pushed, the
 conditional cells fail at startup on a label-shape mismatch.
 
+`--regime` is required rather than defaulting: the two regimes' cells are
+submitted at different times, and defaulting would make a bare re-run resubmit
+six GPU jobs that are already done.
+
 Usage:
-    python submit_norm_ablation_finetune_jobs.py [--arm ARM]
+    python submit_norm_ablation_finetune_jobs.py --regime {fm,c96} [--arm ARM]
                                         [--conditional | --no-conditional]
                                         [--dry-run]
                                         [--beaker-workspace WORKSPACE]
@@ -26,6 +30,7 @@ from _submit_common import add_beaker_args, check_configs_at_head, submit_job
 from generate_norm_ablation_configs import ARMS, CONFIG_PREFIX
 from generate_norm_ablation_finetune_configs import (
     FINETUNE_SUFFIX,
+    REGIMES,
     source_cells,
     source_config_name,
 )
@@ -46,24 +51,35 @@ def config_to_job_name(config_filename: str) -> str:
     return f"ace2-fm-{stem.removeprefix(CONFIG_PREFIX)}"
 
 
-def finetune_config_name(arm: str, conditional: bool) -> str:
-    stem = pathlib.Path(source_config_name(arm, conditional)).stem
+def finetune_config_name(regime: str, arm: str, conditional: bool) -> str:
+    stem = pathlib.Path(source_config_name(regime, arm, conditional)).stem
     return f"{stem}{FINETUNE_SUFFIX}.yaml"
 
 
 def selected_configs(args: argparse.Namespace) -> list[str]:
     names = []
-    for arm, conditional in source_cells():
+    for arm, conditional in source_cells(args.regime):
         if args.arm and arm != args.arm:
             continue
         if args.conditional is not None and conditional != args.conditional:
             continue
-        names.append(finetune_config_name(arm, conditional))
+        names.append(finetune_config_name(args.regime, arm, conditional))
     return names
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--regime",
+        choices=REGIMES,
+        required=True,
+        help=(
+            "Which regime's cells to submit. `fm` fine-tunes the joint-training "
+            "cells (specialization); `c96` fine-tunes the C96-only cells "
+            "(transfer). Required, so a bare re-run cannot resubmit a regime "
+            "whose jobs are already running."
+        ),
+    )
     parser.add_argument("--arm", choices=sorted(ARMS), help="Only this grouping arm.")
     conditioning = parser.add_mutually_exclusive_group()
     conditioning.add_argument(
