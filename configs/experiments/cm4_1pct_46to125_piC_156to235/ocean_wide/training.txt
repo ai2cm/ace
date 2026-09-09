@@ -39,4 +39,26 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|50
 # the amplitude unconstrained by a post-corrector loss, and the additive form
 # has no such invariance.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
+
+# ocean_wide_uniformdt_hybridresid_clip -- Troy's hybrid-residual stepper
+# (ace #1487) on our uniform-dT recipe, with sst residual as well as thetao_*.
+#
+# residual_prediction restricts the residual path to the named prognostics and
+# leaves the other 67 channels full-field; residual_normalized_prediction makes
+# the network emit those tendencies in normalization.residual units, so a unit
+# output is one tendency std. Per #1487 the loss normalizer follows the same
+# per-variable convention, which is where the reweighting comes from -- hence NO
+# stepper_training.loss.weights on this row: the normalizer replaces them.
+#
+# The reweighting this implies on our stats is (full-field std / residual std)^2
+# per channel: 666x for sst, 729x at thetao_0, 4048x at thetao_12 and 154914x at
+# thetao_18 -- bottom-heavy, spanning 212x across the column, against a flat 64x
+# in the tw8 arm. Troy's dataset spans 74x with a 28948x maximum, so ours is the
+# more aggressive version of the same shape. See the task for the discussion.
+#
+# Everything else matches ocean_wide_uniformdt_clip exactly: same shared
+# train-config.yaml, same uniform_temperature corrector, same max_grad_norm,
+# same 4-step unroll, same 75 epochs, no precorrector_optimization and no
+# corrector regularization.
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_hybridresid_clip|rs0|hold|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[sst,thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
