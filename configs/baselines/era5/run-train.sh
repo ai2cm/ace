@@ -60,6 +60,7 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local N_GPUS="${3:-1}"
+  local CLUSTER="${4:-ai2/jupiter}"   # 1° runs: exactly one cluster (jupiter@8, or titan@8 for BPTT)
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   should_run "$config_filename" "$job_name" || { echo "skip (filter): $job_name"; return 0; }
@@ -94,7 +95,7 @@ run_training() {
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority high \
-    --cluster ai2/jupiter \
+    --cluster "$CLUSTER" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -114,25 +115,27 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-# Pretrain: 1-step, 40 epochs, 4 GPUs
+# Pretrain: 1-step, 40 epochs, 8 GPUs on jupiter
 run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-pretrain-rs0" \
   8
 
-# Fine-tune: 3-step BPTT (full backprop through rollout), 40 epochs, 4 GPUs
+# Fine-tune: 3-step BPTT (full backprop through rollout), 40 epochs. Multi-step
+# BPTT at 1° goes to titan with 8 GPUs (OOM on titan@4; jupiter@8 holds less
+# total memory than titan@4).
 run_training \
   "ace-train-config-ft3-bptt-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-ft3-bptt-rs0" \
-  8
+  8 ai2/titan
 
-# Fine-tune: 3-step detached (gradient accumulation, no BPTT), 40 epochs, 4 GPUs
+# Fine-tune: 3-step detached (gradient accumulation, no BPTT), 40 epochs, 8 GPUs on jupiter
 run_training \
   "ace-train-config-ft3-detached-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-ft3-detached-rs0" \
   8
 
-# Resume pretrain to 120 epochs (continues wandb gjsqlvsf), 4 GPUs
+# Resume pretrain to 120 epochs (continues wandb gjsqlvsf), 8 GPUs on jupiter
 # Job name = original run name so wandb display name is preserved.
 run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-resume120.yaml" \
