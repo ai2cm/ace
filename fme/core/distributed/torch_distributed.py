@@ -53,19 +53,22 @@ class TorchDistributed(DistributedBackend):
         # on the main thread at its next sync of that work, so the watchdog
         # is downgraded to logging. Read once, at process group construction.
         os.environ.setdefault("TORCH_NCCL_RETHROW_CUDA_ERRORS", "0")
+        timeout = timedelta(
+            minutes=int(os.environ.get("FME_COLLECTIVE_TIMEOUT_MINUTES", "30"))
+        )
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if not torch.distributed.is_initialized():
                 if using_gpu():
                     torch.distributed.init_process_group(
                         backend="nccl",
                         init_method="env://",
-                        timeout=timedelta(minutes=30),
+                        timeout=timeout,
                     )
                 else:
                     torch.distributed.init_process_group(
                         backend="gloo",
                         init_method="env://",
-                        timeout=timedelta(minutes=30),
+                        timeout=timeout,
                     )
             self.world_size = torch.distributed.get_world_size()
             local_rank = int(os.environ["LOCAL_RANK"])
@@ -83,7 +86,7 @@ class TorchDistributed(DistributedBackend):
                 init_method=f"file://{shared_dist_file}",
                 rank=self.rank,
                 world_size=self.world_size,
-                timeout=timedelta(minutes=30),
+                timeout=timeout,
             )
             if using_gpu():
                 # this assumes one GPU per process in the SLURM setting
