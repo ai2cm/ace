@@ -74,8 +74,9 @@ run_case() {
         --description "HiROv1 1000-member 3km ensemble for high 24h-accum precip event ${config_name}" \
         --workspace ai2/ace \
         --priority high \
-        --min-runtime 40m \
+        --min-runtime 1h \
         --cluster ai2/titan \
+        --cluster ai2/jupiter \
         --beaker-image "$IMAGE" \
         --env WANDB_USERNAME="$BEAKER_USERNAME" \
         --env WANDB_NAME="$job_name" \
