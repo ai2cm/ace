@@ -327,6 +327,13 @@ python submit_norm_ablation_jobs.py
 # 6. Training, masked cells. One masking variant per invocation.
 python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1 --dry-run
 python submit_norm_ablation_jobs.py --masking mask10 --regime fm --arm a1
+
+# 7. ERA5 fine-tuning of the finished nc-sfno fm cells. Requires the source
+#    runs to have finished (update_beaker_map.py), and requires this branch --
+#    configs and the fme change alike -- to be pushed: gantry clones HEAD.
+python generate_norm_ablation_finetune_configs.py
+python submit_norm_ablation_finetune_jobs.py --dry-run
+python submit_norm_ablation_finetune_jobs.py --cm-priority normal
 ```
 
 ### Verifying the statistics
@@ -352,6 +359,84 @@ in the job logs:
 `submit_norm_ablation_jobs.py` filters with `--arch`, `--regime`, `--arm`, and
 `--conditional` / `--no-conditional`. `submit_fm_jobs.py` is untouched.
 
+## ERA5 fine-tuning
+
+Six 10-epoch runs, one per `nc-sfno` fm cell (A1/A2/A3 × conditioning),
+warm-started from each source run's last-epoch checkpoint and continued on ERA5
+alone. Written by `generate_norm_ablation_finetune_configs.py`, submitted by
+`submit_norm_ablation_finetune_jobs.py` into wandb group
+`ace2-fm-norm-ablation-finetune-2026-06-26`.
+
+**What it asks.** Not transfer — every source model already saw ERA5 in the
+mixture — but *specialization*: does the arm a model was pretrained under leave
+it better positioned to be specialized onto ERA5. The fine-tuning phase itself
+differentiates nothing. With only `era5` in the train_loader, A2 and A3 both
+bind their `era5` group, which is the same `groups/era5/` directory in both, and
+the conditional cells see a constant one-hot. Any difference between the six is
+entirely a difference between the weights they start from.
+
+That constant one-hot is not the `degenerate_reason` collapse: those CLN weights
+were trained with all four labels varying, so it selects an already-learned
+column rather than a constant a fresh affine could absorb.
+
+**The transformation.** Each config is its source with:
+
+| field | value |
+|---|---|
+| `# arg:` header | `--dataset <ID>:/checkpoints`, from `wandb_to_beaker_map.json` |
+| `parameter_init` | `/checkpoints/training_checkpoints/ckpt.tar`, both overrides on |
+| `train_loader` concat | the 2 ERA5 members; the 10 c96 members dropped |
+| `max_epochs` / `lr` | 10 / 1e-5, single `PolynomialLR(power 0.5)`, no warmup |
+| `ema_checkpoint_save_epochs` | `{start: 1, step: 1}` |
+| `inference[].epochs` | removed, so all 13 entries run every epoch |
+| non-ERA5 `inference[].weight` | `0.0` |
+| `evaluate_before_training` | `true` |
+
+**Three things are load-bearing.**
+
+*Statistics are copied verbatim* — every path still points at
+`norm_ablation_0/fm/`. `parameter_init` loads module weights only and the
+normalizer is rebuilt from the YAML with **nothing checking the two agree**, so
+re-deriving statistics from the ERA5-only data would silently retrain on a
+shifted input space. It would also collapse the experiment: all three arms would
+read one identical set of constants. Copying them verbatim means ERA5 samples
+get exactly the constants they got in pretraining — pooled under A1, the `era5`
+group under A2/A3 — so the input scale is continuous across the warm start.
+
+*The label vocabulary comes from the checkpoint.* `DatasetInfo.all_labels` is
+built from the train loader alone, so an ERA5-only loader shrinks it from four
+labels to one. That sizes a conditional module's label-dependent weights (CLN
+`W_scale_labels` / `W_bias_labels`, `label_pos_embed`) narrower than the
+checkpoint's and `overwrite_weights` refuses to load them; and since that path
+matches weights positionally against sorted labels, a surviving label would land
+in another's column. It also matters for the unconditional cells, whose modules
+build through `without_labels()` but whose checkpoints would otherwise record a
+different vocabulary than their siblings'. Fixed by
+`parameter_init.override_labels_from_weights`, added for this and mirroring the
+existing `override_vertical_coordinate_from_weights` — which is set for the same
+reason, so the coordinate is not re-derived from the restricted loader.
+
+*Checkpoint selection moves onto ERA5.* Both `10year` (ERA5) and
+`10year_insample_ensemble_varying_co2` (C96) carry weight 1.0 in the source
+configs, so `best_inference_ckpt` would be selected half on the data the
+fine-tune has just stopped training on. The C96 entries stay in the suite as
+weight-0 forgetting diagnostics, and still normalize correctly: the `grouped`
+config retains all its groups regardless of what is in the train set, so
+`amip`/`ramped`/`som` resolve to the `c96` group as before.
+
+**Reading the results.** The loss, global mean removal and every `*_norm` metric
+stay on the fm-pooled constants, so those remain comparable to the base runs and
+to the existing figures. They are *not* comparable to the `era5-a1` specialist,
+which trained under `norm_ablation_0/era5`: fm-pooled
+`specific_total_water_0` σ is inflated by the between-source term, so q0 errors
+carry less loss weight here. Compare against the specialist on native-unit
+metrics (`time_mean/rmse/<field>`, `time_mean/bias/<field>`), not on `loss` or
+`*_norm`.
+
+Cost is dominated by inference, not training: ERA5-only takes an epoch from ~163
+dataset-years to ~73, while the 13-entry suite (~81k forward steps) runs 11
+times rather than the base run's 15 in 150 epochs.
+
 ## Caveats
 
 - **No A1 control reproduces its base run's normalization.** Every regime
@@ -372,7 +457,10 @@ in the job logs:
 - **YAML anchors are expanded** by the `safe_load`/`dump` round-trip, so the
   generated configs repeat the `inference_variables` block. Cosmetic; the
   cooldown generator does the same.
-- **Fine-tuning (c96 → ERA5) is not implemented**, as planned.
+- **Fine-tuning is implemented for the fm regime only** (see ERA5
+  fine-tuning below). The c96 → ERA5 arm the original plan named is still
+  not implemented, and is a different experiment: those cells have never
+  seen ERA5, and A3 has no `era5` group to bind to.
 - **A masked cell is not weight-shaped like its unmasked twin.**
   `include_channel_mask_inputs` doubles the module's input channels (45 → 90),
   so a `mask10` run differs from its baseline in parameter count as well as in
