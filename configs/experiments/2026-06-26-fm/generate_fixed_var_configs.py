@@ -48,7 +48,9 @@ swapped ``HGTsfc`` suite reaches the orography experiment's grid swap by a
 different route and cross-checks it.
 
 Generated for the FM (multi-dataset) runs only; the single-dataset runs are not
-part of this experiment.
+part of this experiment. Source training configs are read from both
+base_configs (the hand-written FM runs) and run_configs (the generated
+norm-ablation cells).
 """
 
 import argparse
@@ -251,10 +253,14 @@ def select_source_configs(
 ) -> list[pathlib.Path]:
     """Discovered source configs, optionally narrowed to named base configs.
 
-    A base config may be named by filename, stem, or the run-name suffix that
-    remains once CONFIG_PREFIX is stripped.
+    Training configs are read from both base_configs (the hand-written FM
+    runs) and run_configs (the generated norm-ablation cells), as
+    generate_eval_configs.py does. A base config may be named by filename,
+    stem, or the run-name suffix that remains once CONFIG_PREFIX is stripped.
     """
-    source_configs = discover_source_configs(version)
+    source_configs = discover_source_configs(
+        version, source_dirs=(BASE_CONFIGS_DIR, RUN_CONFIGS_DIR)
+    )
     if base_configs is None:
         return source_configs
     by_name: dict[str, pathlib.Path] = {}
@@ -266,8 +272,9 @@ def select_source_configs(
         stem = pathlib.Path(name).stem
         if stem not in by_name:
             raise ValueError(
-                f"Base config {name!r} not found in {BASE_CONFIGS_DIR} among the "
-                "configs selected by --version; available: "
+                f"Base config {name!r} not found in {BASE_CONFIGS_DIR} or "
+                f"{RUN_CONFIGS_DIR} among the configs selected by --version; "
+                "available: "
                 f"{sorted(p.stem for p in source_configs)}."
             )
         selected.append(by_name[stem])
