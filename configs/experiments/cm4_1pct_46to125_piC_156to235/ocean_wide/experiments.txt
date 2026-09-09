@@ -64,5 +64,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|01M1N34VDHEEDH5DFZYF
 # the finetune started -- the pretraining ended 09-06).
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter

@@ -39,4 +39,14 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|50
 # the amplitude unconstrained by a post-corrector loss, and the additive form
 # has no such invariance.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
+
+# ocean_wide_uniformdt_tw8_clip -- the uniformdt recipe with temperature and SST
+# upweighted 8x in the loss. VariableWeightingLoss multiplies the fields, so an
+# MSE channel's loss scales as w^2: this puts thetao+sst at 34.1% of the
+# 87-channel loss (from 0.80%) and drops uo+vo to 56.4% (from 84.9%), matching
+# the 36% temperature share of Troy's hybrid-residual arm by the other route.
+# Weights are flat across levels on purpose; precorrector_optimization and
+# corrector regularization are deliberately absent. One variable off the
+# ocean_wide_uniformdt_clip row above.
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.weights.thetao_0=8.0 stepper_training.loss.weights.thetao_1=8.0 stepper_training.loss.weights.thetao_2=8.0 stepper_training.loss.weights.thetao_3=8.0 stepper_training.loss.weights.thetao_4=8.0 stepper_training.loss.weights.thetao_5=8.0 stepper_training.loss.weights.thetao_6=8.0 stepper_training.loss.weights.thetao_7=8.0 stepper_training.loss.weights.thetao_8=8.0 stepper_training.loss.weights.thetao_9=8.0 stepper_training.loss.weights.thetao_10=8.0 stepper_training.loss.weights.thetao_11=8.0 stepper_training.loss.weights.thetao_12=8.0 stepper_training.loss.weights.thetao_13=8.0 stepper_training.loss.weights.thetao_14=8.0 stepper_training.loss.weights.thetao_15=8.0 stepper_training.loss.weights.thetao_16=8.0 stepper_training.loss.weights.thetao_17=8.0 stepper_training.loss.weights.thetao_18=8.0 stepper_training.loss.weights.sst=8.0|3h
