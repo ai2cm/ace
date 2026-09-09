@@ -325,6 +325,67 @@ def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
     np.testing.assert_array_equal(read_all["var"][:2], 0.0)
 
 
+def _create_multi_var_store(path, names, n_times=4):
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+    _initialize_zarr(
+        path=path,
+        vars=names,
+        dim_sizes=(n_times, NLAT, NLON),
+        chunks={"time": 1, "lat": NLAT, "lon": NLON},
+        shards=None,
+        dim_names=("time", "lat", "lon"),
+        coords={"time": times},
+        dtype="f4",
+    )
+
+
+def test_insert_into_zarr_writes_many_variables(tmp_path):
+    """Every variable's slice lands correctly when they are written together."""
+    names = [f"var{i}" for i in range(5)]
+    path = os.path.join(tmp_path, "test.zarr")
+    _create_multi_var_store(path, names)
+
+    expected = {name: np.random.rand(2, NLAT, NLON).astype("f4") for name in names}
+    _insert_into_zarr(path, expected, {0: slice(1, 3)}, overwrite_check=True)
+
+    ds = xr.open_zarr(path)
+    for name in names:
+        np.testing.assert_allclose(ds[name].values[1:3], expected[name], rtol=1e-6)
+        # the untouched slices keep the fill value
+        np.testing.assert_array_equal(ds[name].values[0], 0.0)
+        np.testing.assert_array_equal(ds[name].values[3], 0.0)
+
+
+def test_insert_into_zarr_overwrite_conflict_writes_nothing(tmp_path):
+    """A conflict on one variable must not leave the others partially written.
+
+    The occupied variable is the last one inserted, so an implementation that
+    checks and writes one variable at a time would write the earlier variables
+    before reaching the conflict.
+    """
+    names = ["var0", "var1", "var2"]
+    path = os.path.join(tmp_path, "test.zarr")
+    _create_multi_var_store(path, names)
+    slices = {0: slice(0, 2)}
+
+    occupied = np.random.rand(2, NLAT, NLON).astype("f4") + 1.0
+    _insert_into_zarr(path, {names[-1]: occupied}, slices, overwrite_check=False)
+
+    retry = {name: np.full((2, NLAT, NLON), 5.0, dtype="f4") for name in names}
+    with pytest.raises(RuntimeError, match="Attempting to overwrite"):
+        _insert_into_zarr(path, retry, slices, overwrite_check=True)
+
+    ds = xr.open_zarr(path)
+    np.testing.assert_allclose(ds[names[-1]].values[0:2], occupied, rtol=1e-6)
+    for name in names[:-1]:
+        np.testing.assert_array_equal(ds[name].values[0:2], 0.0)
+
+
 def test_ZarrWriter_records_storage_timings(tmp_path):
     path = os.path.join(tmp_path, "test.zarr")
     writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
