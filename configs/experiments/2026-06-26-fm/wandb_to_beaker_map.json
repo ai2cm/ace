@@ -78,5 +78,12 @@
   "ace2-fm-nc-swin-v2-fm-a2": "01M1Z67YYVDTW2QBXCRNJRQVV0",
   "ace2-fm-nc-swin-v2-fm-a2-cond": "01M1R58KN89QQ8RWV2THBRASXM",
   "ace2-fm-nc-swin-v2-fm-a3": "01M1Z6D4T592HHYQEQ5WW73DE2",
-  "ace2-fm-nc-swin-v2-fm-a3-cond": "01M1PVGT0BXXA9G9G0P6A6B046"
+  "ace2-fm-nc-swin-v2-fm-a3-cond": "01M1PVGT0BXXA9G9G0P6A6B046",
+  "ace2-fm-nc-sfno-fm-a1-cond-finetune": "01M23CBN8HX32GPNY8MW2YJ1DM",
+  "ace2-fm-nc-sfno-fm-a1-finetune": "01M23CBMQD3N96HQHJMEEG500K",
+  "ace2-fm-nc-sfno-fm-a2-cond-finetune": "01M21R6G257FZX6GFCGF00646W",
+  "ace2-fm-nc-sfno-fm-a2-finetune": "01M21R677JQRR7WQG0RA7QN8SB",
+  "ace2-fm-nc-sfno-fm-a3-cond-finetune": "01M21R70X660T782HVW3KJWHRE",
+  "ace2-fm-nc-sfno-fm-a3-finetune": "01M21R6RH103Q3RAQ7A21Q0MPN",
+  "ace2-fm-nc-swin-v2-fm-a1-cond": "01M23EY2C410DGNTK653SA5EBX"
 }
