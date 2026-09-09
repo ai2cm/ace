@@ -10,13 +10,13 @@ Segmented inference
 To complete a long inference run on a computing system with a wall clock
 limit, it may be necessary to chain multiple smaller segments together.
 This can be done automatically by specifying a value for the ``--segments``
-parameter in the ``fme.ace.inference`` entrypoint.
+parameter in the ``fme.ace.inference`` entrypoint:
 
 .. code-block:: bash
 
     python -m fme.ace.inference config-inference.yaml --segments 3
 
-Specifying a value ``n`` will result in ``n`` segments being run with
+The above example will result in three segments being run with
 ``n_forward_steps`` each. Output from each segment will be stored in
 subdirectories under the ``experiment_dir``, labeled by the segment start
 time of the first (or only) ensemble member. If a segment directory already
@@ -41,8 +41,8 @@ The segmented run API assumes that the configuration, modulo the initial
 conditions and experiment subdirectory, will be held constant between segments.
 It can sometimes be helpful to have finer grained control, for example if you
 would like to run segments of different lengths and/or run segments with
-different data writer configurations. In these sorts of cases it is relatively
-straightforward to write a shell script to run the segments manually.
+different data writer configurations. In these sorts of cases, one can write a
+shell script to run the segments manually.
 
 As an illustration, say you would like to run a 71-year AMIP simulation starting
 from 1940-01-01T00:00:00, but split off the final 10 years as a separate run to
@@ -69,8 +69,6 @@ out from training.
     "
     python -m fme.ace.inference config-inference.yaml --override $override
 
-While we did not illustrate it here to keep the example simple, this strategy
-can be used as an alternative to using the ``time_selection`` feature of the
-:class:`fme.ace.FileWriterConfig` if you would like to write your data to zarr,
-since the ``time_selection`` feature is only currently supported for the netCDF
-writer.
+By adjusting the :class:`~fme.ace.DataWriterConfig`, this strategy can be used
+to customize the frequency or other aspects of the output saved from each run
+segment.
