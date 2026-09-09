@@ -5,7 +5,6 @@ set -e
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT
 
-N_GPUS=0
 BEAKER_IMAGE=spencerc/hf-cli-gantry
 JOB_NAME=hf-sync-example
 
@@ -21,7 +20,7 @@ gantry run \
     --priority high \
     --cluster ai2/phobos \
     --env-secret HF_TOKEN=hugging-face-token \
-    --gpus "${N_GPUS}" \
+    --gpus 0 \
     --shared-memory 64GiB \
     --min-runtime 8h \
     --no-python \
