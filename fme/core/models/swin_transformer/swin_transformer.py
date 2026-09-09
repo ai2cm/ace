@@ -292,7 +292,9 @@ class SwinTransformerNet(nn.Module):
             if self.embed_dim_labels > 0:
                 cond_labels = context.labels  # may be None; BasicLayer skips when None
 
-        # CLN conditioning: pad and subsample noise to match U-Net resolutions.
+        # CLN conditioning: pad and subsample noise to match U-Net resolutions,
+        # then move it to channels-last once so every block's CLN can consume
+        # it without transposing activations.
         ctx_full: Context | None = context
         ctx_half: Context | None = context
         if self.conditioning == "cln" and self.embed_dim_noise > 0:
@@ -300,12 +302,18 @@ class SwinTransformerNet(nn.Module):
                 raise ValueError(
                     "context.noise is required for a cln-conditioned SwinTransformerNet"
                 )
+            if context.embedding_pos is not None:
+                raise ValueError(
+                    "embedding_pos is not supported by a cln-conditioned "
+                    "SwinTransformerNet"
+                )
             noise = context.noise  # (B, embed_dim_noise, H, W)
             if self.use_padding:
                 noise = self.padding_opt.pad(noise)
             if pad_h > 0 or pad_w > 0:
                 noise = F.pad(noise, (0, pad_w, 0, pad_h))
-            noise_half = noise[..., ::2, ::2]
+            noise = noise.permute(0, 2, 3, 1)  # (B, Hp, Wp, embed_dim_noise)
+            noise_half = noise[:, ::2, ::2, :]
             ctx_full = dataclasses.replace(context, noise=noise)
             ctx_half = dataclasses.replace(context, noise=noise_half)
 

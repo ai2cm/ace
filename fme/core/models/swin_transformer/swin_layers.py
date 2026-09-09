@@ -334,7 +334,9 @@ class SwinTransformerBlock(nn.Module):
         conditioning: ``"adaln"`` (default) for native AdaLN, or ``"cln"`` for
             ``ConditionalLayerNorm``-based noise conditioning.
         context_config: Required when ``conditioning="cln"``; passed to each
-            ``ConditionalLayerNorm``.
+            ``ConditionalLayerNorm``. In ``"cln"`` mode the ``context`` passed to
+            ``forward`` must carry channels-last noise of shape
+            ``(B, H, W, embed_dim_noise)`` matching this block's resolution.
     """
 
     def __init__(
@@ -446,13 +448,13 @@ class SwinTransformerBlock(nn.Module):
                 h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
             # ColumnMixer folded in (no own residual).
             h = h + self.column_mixer(h)
-            # CLN is channels-first; Swin is channels-last → transpose around norm.
-            h_norm = self.norm1(h.permute(0, 3, 1, 2), context).permute(0, 2, 3, 1)
+            # Swin activations are channels-last; use the CLN path that
+            # consumes channels-last activations and noise directly so no
+            # transposes are needed around the norms.
+            h_norm = self.norm1.forward_channels_last(h, context)
             x = shortcut + self.drop_path(h_norm)
             shortcut = x
-            y_norm = self.norm2(self.mlp(x).permute(0, 3, 1, 2), context).permute(
-                0, 2, 3, 1
-            )
+            y_norm = self.norm2.forward_channels_last(self.mlp(x), context)
             x = shortcut + self.drop_path(y_norm)
         else:
             shortcut = x
