@@ -1,6 +1,8 @@
 # arg: --dataset 01M21CHK3XT6M4VSV1GE7W1G27:/weights
 #
-# 3-step BPTT fine-tune of the no-energy-corrector + *_mean pretrain.
+# 3-step DETACHED fine-tune of the no-energy-corrector + *_mean pretrain.
+# use_gradient_accumulation=true detaches gradients between steps, so each
+# step's loss is independent (no backprop through the rollout).
 # Donor: the pretrain from ace-train-config-1-step-pretrain-daily-fg16-sr0p125-
 # no-corr-mean.yaml (dataset id TBD after pretrain finishes).
 # Architecture, normalization and the corrector come from the donor checkpoint
@@ -11,7 +13,6 @@
 # weka at /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/.
 #
 # Key difference from pretrain: n_forward_steps=3, optimize_last_step_only=false,
-# use_gradient_accumulation=false (BPTT keeps the graph across the rollout).
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -112,7 +113,7 @@ validation:
           start_time: '1996-01-01'
           stop_time: '1997-12-31'
 optimization:
-  use_gradient_accumulation: false
+  use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: AdamW

@@ -121,11 +121,14 @@ run_training \
   "1deg-daily-no-corr-mean-pretrain-rs0" \
   4
 
-# Fine-tune: 3-step BPTT, 40 epochs, 4 GPUs
-# Needs --dataset <pretrain-ckpt-dataset-id>:/weights — fill in the # arg:
-# header in the fine-tune config after the pretrain finishes, then:
-#   ./run-train.sh ft3
+# Fine-tune: 3-step BPTT (full backprop through rollout), 40 epochs, 4 GPUs
 run_training \
   "ace-train-config-ft3-bptt-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-ft3-bptt-rs0" \
+  4
+
+# Fine-tune: 3-step detached (gradient accumulation, no BPTT), 40 epochs, 4 GPUs
+run_training \
+  "ace-train-config-ft3-detached-daily-fg16-sr0p125-no-corr-mean.yaml" \
+  "1deg-daily-no-corr-mean-ft3-detached-rs0" \
   4
