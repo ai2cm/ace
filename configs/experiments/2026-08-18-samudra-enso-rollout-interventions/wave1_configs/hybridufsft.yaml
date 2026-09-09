@@ -5,13 +5,15 @@ ema:
   decay: 0.999
 max_epochs: 40
 inference:
-  n_forward_steps: 700
+  n_forward_steps: 630
   forward_steps_in_memory: 40
   loader:
     start_indices:
       times:
       - '2012-01-04T09:00:00'
       - '2013-01-03T09:00:00'
+      - '2014-01-03T09:00:00'
+      - '2015-01-03T09:00:00'
     dataset:
       data_path: gs://vcm-ml-intermediate
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
