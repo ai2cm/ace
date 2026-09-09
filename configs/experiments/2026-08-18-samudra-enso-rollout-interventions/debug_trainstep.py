@@ -1,8 +1,7 @@
-"""Run one hybridufsft training step with NaN introspection.
+"""Walk one hybridufsft training window step by step and name the first NaN.
 
-Single process (world size 1), batch size 1: report NaN fractions in the
-loaded batch, then run train_on_batch without loss validation and print
-every per-channel loss so the NaN-carrying variables are named.
+Single process, batch 1: NaN-audit the batch, the loss-normalizer scales,
+and each of the four predicted steps' outputs per variable.
 """
 
 import sys
@@ -18,24 +17,63 @@ c = yaml.safe_load(open(sys.argv[1]))
 c["train_loader"]["batch_size"] = 1
 c["train_loader"]["num_data_workers"] = 0
 cfg = dacite.from_dict(TrainConfig, c, config=dacite.Config(strict=True))
-print("building train data...", flush=True)
 train_data = cfg._get_train_data()
-stepper = cfg._get_stepper(dataset_info=train_data.dataset_info)
-print("pulling one batch...", flush=True)
+ts = cfg._get_stepper(dataset_info=train_data.dataset_info)
 batch = next(iter(train_data.loader))
-bad = {
-    k: round(float(torch.isnan(v).float().mean()), 4)
-    for k, v in dict(batch.data).items()
-    if torch.is_tensor(v) and torch.isnan(v).any()
-}
-print("batch NaN fractions:", bad if bad else "none", flush=True)
-try:
-    out = stepper.train_on_batch(batch, NullOptimization())
-    metrics = getattr(out, "metrics", {}) or {}
-    nan_metrics = {k: v for k, v in metrics.items() if v != v}
-    fin = {k: round(float(v), 4) for k, v in metrics.items() if v == v}
-    print("NaN metrics:", sorted(nan_metrics)[:40], flush=True)
-    print("sample finite metrics:", dict(list(fin.items())[:10]), flush=True)
-except Exception as e:
-    print("train_on_batch raised:", type(e).__name__, str(e)[:300], flush=True)
-    raise
+data = batch
+
+
+def nanreport(td, label, top=8):
+    bad = {}
+    for k, v in dict(td).items():
+        if torch.is_tensor(v) and torch.isnan(v).any():
+            bad[k] = round(float(torch.isnan(v).float().mean()), 4)
+    print(
+        label,
+        "->",
+        dict(sorted(bad.items(), key=lambda kv: -kv[1])[:top]) if bad else "no NaN",
+        flush=True,
+    )
+
+
+nanreport(data.data, "batch")
+
+# loss normalizer scales audit
+for attr in ("loss_normalizer", "_loss_normalizer"):
+    ln = getattr(ts, attr, None)
+    if ln is not None:
+        stds = {k: float(v) for k, v in ln.stds.items()}
+        weird = {k: v for k, v in stds.items() if not (v == v) or v <= 0}
+        print(
+            "loss normalizer stds <=0 or NaN:", weird if weird else "none", flush=True
+        )
+        print(
+            "smallest stds:",
+            dict(sorted(stds.items(), key=lambda kv: kv[1])[:5]),
+            flush=True,
+        )
+        break
+
+stepper = ts._stepper
+prognostic_names = (
+    ts._prognostic_names
+    if hasattr(ts, "_prognostic_names")
+    else stepper.prognostic_names
+)
+input_data = data.get_start(prognostic_names, 1).as_batch_data()
+nanreport(input_data.data, "initial condition")
+gen = stepper.predict_generator(
+    input_data.data,
+    data.data,
+    4,
+    NullOptimization(),
+    labels=input_data.labels,
+    data_mask=data.data_mask,
+    stepper_state=input_data.stepper_state,
+)
+for step in range(4):
+    out = next(gen)
+    nanreport(out.output, f"step {step} output")
+    deltas = dict(out.corrector_diagnostics.delta)
+    if deltas:
+        nanreport(deltas, f"step {step} corrector deltas")
