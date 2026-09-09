@@ -4,6 +4,46 @@
 Advanced inference
 ==================
 
+Data writer configuration
+=========================
+
+This section provides an example of how to use the
+:class:`fme.ace.DataWriterConfig` section of the inference configuration.
+The data writer configuration is used to specify how the output from an
+inference run is saved to disk. For flexibility, it is recommended to use
+the ``files`` section, which allows for different output files to be written
+with different frequencies and different variables. For example, the following
+configuration will write the monthly means of the
+``PRATEsfc`` and ``TMP2m`` variables to a netCDF file called ``monthly_means.nc``, while also
+writing the daily mean (assuming a 6-hour time step model) values of the ``total_water_path``
+variable to a zarr dataset called ``daily_mean.zarr``:
+
+.. literalinclude:: data-writer-example.yaml
+   :language: yaml
+   :caption: Example ACE Data Writer Configuration
+
+.. testcode::
+   :hide:
+
+   from fme.ace import DataWriterConfig
+   import yaml
+   import dacite
+
+   with open('data-writer-example.yaml', 'r') as f:
+      config_dict = yaml.safe_load(f)
+
+   config = dacite.from_dict(
+      DataWriterConfig,
+      data=config_dict,
+      config=dacite.Config(strict=True)
+   )
+   print("Loaded successfully")
+
+.. testoutput::
+   :hide:
+
+   Loaded successfully
+
 Segmented inference
 ===================
 
