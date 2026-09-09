@@ -12,6 +12,9 @@ ENV PATH="/root/.local/bin:$PATH"
 # uploads; HF_XET_SHARD_CACHE_SIZE_LIMIT=40GiB is larger than the default 16GB,
 # which also facilitates performance. See documentation here for more details:
 # https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables
+
+# Running without both results in roughly 10x slower peak upload throughput for
+# the same store on ai2/phobos.
 ENV HF_XET_HIGH_PERFORMANCE=1
 ENV HF_XET_SHARD_CACHE_SIZE_LIMIT=40GiB
 
