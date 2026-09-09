@@ -18,7 +18,11 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudge
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+    StandardNormalizer,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
@@ -36,6 +40,7 @@ from fme.core.step.single_module import (
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
+    step_with_adjustments,
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
@@ -2293,11 +2298,6 @@ def test_multi_call_step_forwards_train_eval():
 def test_step_with_adjustments_hybrid_residual_names():
     """residual_names restricts the residual add to a subset of prognostics:
     listed names step as input + output, the rest are full-field."""
-    import torch
-
-    from fme.core.normalizer import StandardNormalizer
-    from fme.core.step.single_module import step_with_adjustments
-
     names = ["a", "b"]
     normalizer = StandardNormalizer(
         means={n: torch.tensor(0.0) for n in names},
@@ -2335,3 +2335,50 @@ def test_step_with_adjustments_hybrid_residual_names():
         prognostic_names=frozenset(names),
     ).output
     torch.testing.assert_close(out_all["b"], torch.full((1, 4, 4), 2.5))
+
+
+def _residual_names_config(**kwargs) -> SingleModuleStepConfig:
+    """A minimal single-module config; `a` is prognostic and `b` diagnostic."""
+    return SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": nn.Identity()}),
+        in_names=["a"],
+        out_names=["a", "b"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(
+                means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}
+            ),
+        ),
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(
+    "name, match",
+    [
+        pytest.param("b", "not a prognostic", id="diagnostic_name"),
+        pytest.param("typo", "not a prognostic", id="unknown_name"),
+    ],
+)
+def test_residual_prediction_names_must_be_prognostic(name, match):
+    """A non-prognostic name has no input to add the residual to, so it must be
+    rejected at config time rather than raising deep inside the step."""
+    with pytest.raises(ValueError, match=match):
+        _residual_names_config(
+            residual_prediction=True, residual_prediction_names=[name]
+        )
+
+
+def test_residual_prediction_names_requires_residual_prediction():
+    with pytest.raises(ValueError, match="requires residual_prediction"):
+        _residual_names_config(residual_prediction_names=["a"])
+
+
+def test_single_module_step_config_loads_state_without_residual_keys():
+    """A checkpoint written before the residual options existed must still load,
+    falling back to the previous all-prognostic full-field-normalized behavior."""
+    state = _residual_names_config(residual_prediction=True).get_state()
+    for key in ("residual_prediction_names", "residual_normalized_prediction"):
+        del state[key]
+    config = SingleModuleStepConfig.from_state(state)
+    assert config.residual_prediction_names is None
+    assert config.residual_normalized_prediction is False

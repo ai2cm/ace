@@ -66,7 +66,8 @@ class SingleModuleStepConfig(StepConfigABC):
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
         residual_prediction_names: When set, restrict residual prediction to
-            these prognostic names; the remaining prognostics are predicted
+            these prognostic names (each must be in both ``in_names`` and
+            ``out_names``); the remaining prognostics are predicted
             full-field. Enables hybrid steppers (e.g. temperature stepped as a
             tendency while velocities, salinity and ice are full-field).
             Requires ``residual_prediction``. Default (None) applies residual
@@ -115,8 +116,18 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        if self.residual_prediction_names is not None and not self.residual_prediction:
-            raise ValueError("residual_prediction_names requires residual_prediction")
+        if self.residual_prediction_names is not None:
+            if not self.residual_prediction:
+                raise ValueError(
+                    "residual_prediction_names requires residual_prediction"
+                )
+            for name in self.residual_prediction_names:
+                if name not in self.prognostic_names:
+                    raise ValueError(
+                        f"residual_prediction_name '{name}' is not a prognostic "
+                        "variable (it must be in both in_names and out_names); "
+                        f"prognostic names are {sorted(self.prognostic_names)}"
+                    )
         if self.residual_normalized_prediction:
             if not self.residual_prediction:
                 raise ValueError(
@@ -175,14 +186,10 @@ class SingleModuleStepConfig(StepConfigABC):
         # stepped as residuals are scored in tendency-std units, full-field
         # names in full-field-std units. Scoring a full-field state error in
         # tendency units inflates it by (field_std / tendency_std)^2.
-        residual_scaled = (
-            self.residual_prediction_names
-            if self.residual_prediction_names is not None
-            else self.prognostic_names
-        )
         return self.normalization.get_loss_normalizer(
             names=sorted(self._normalize_names) + extra_names,
-            residual_scaled_names=sorted(residual_scaled) + extra_residual_scaled_names,
+            residual_scaled_names=sorted(self.residual_names)
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -191,6 +198,17 @@ class SingleModuleStepConfig(StepConfigABC):
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+    @property
+    def residual_names(self) -> frozenset[str]:
+        """Prognostic names stepped as residuals; the rest are full-field.
+
+        ``residual_prediction_names`` unset means every prognostic, which is
+        the only behavior available before that option existed.
+        """
+        if self.residual_prediction_names is None:
+            return self.prognostic_names
+        return frozenset(self.residual_prediction_names)
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -287,13 +305,7 @@ class SingleModuleStepConfig(StepConfigABC):
         if self.residual_normalized_prediction:
             assert self.normalization.residual is not None
             residual_normalizer: StandardNormalizer | None = (
-                self.normalization.residual.build(
-                    names=sorted(
-                        self.residual_prediction_names
-                        if self.residual_prediction_names is not None
-                        else self.prognostic_names
-                    )
-                )
+                self.normalization.residual.build(names=sorted(self.residual_names))
             )
         else:
             residual_normalizer = None
@@ -344,17 +356,6 @@ class SingleModuleStep(StepABC):
                 mean tendency is learned through the network output.
         """
         super().__init__()
-        if residual_normalizer is not None:
-            self._residual_transform: TensorDict | None = {
-                name: residual_normalizer.stds[name] / normalizer.stds[name]
-                for name in (
-                    config.residual_prediction_names
-                    if config.residual_prediction_names is not None
-                    else config.prognostic_names
-                )
-            }
-        else:
-            self._residual_transform = None
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(
@@ -383,6 +384,13 @@ class SingleModuleStep(StepABC):
         self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
+        if residual_normalizer is not None:
+            self._residual_transform: TensorDict | None = {
+                name: residual_normalizer.stds[name] / normalizer.stds[name]
+                for name in config.residual_names
+            }
+        else:
+            self._residual_transform = None
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, dataset_info.timestep
@@ -524,7 +532,7 @@ class SingleModuleStep(StepABC):
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
-            residual_names=self._config.residual_prediction_names,
+            residual_names=sorted(self._config.residual_names),
             residual_transform=self._residual_transform,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,

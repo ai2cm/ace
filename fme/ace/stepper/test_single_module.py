@@ -3655,6 +3655,79 @@ def test_step_residual_normalized_prediction():
         torch.testing.assert_close(output[n], expected)
 
 
+def test_step_hybrid_residual_normalized_prediction():
+    """The production case: one prognostic stepped as a residual-normalized
+    tendency while the other is predicted full-field, in the same step."""
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means=field_means, stds=field_stds),
+                        residual=NormalizationConfig(
+                            means={n: 0.0 for n in names}, stds=res_stds
+                        ),
+                    ),
+                    residual_prediction=True,
+                    residual_prediction_names=["a"],
+                    residual_normalized_prediction=True,
+                )
+            ),
+        ),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        if n == "a":
+            expected = input_data[n] + res_stds[n] * network_output
+        else:
+            expected = network_output * field_stds[n] + field_means[n]
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
+    """Residual-stepped names are scored in tendency-std units and full-field
+    names in full-field-std units; scoring a full-field state error in tendency
+    units would inflate it by (field_std / tendency_std)^2."""
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=res_stds),
+        ),
+        residual_prediction=True,
+        residual_prediction_names=["a"],
+    )
+    stds = config.get_loss_normalizer().stds
+    assert stds["a"].item() == pytest.approx(res_stds["a"])
+    assert stds["b"].item() == pytest.approx(field_stds["b"])
+
+
 def test_residual_normalized_prediction_requires_residual_block():
     class AddOne(torch.nn.Module):
         def forward(self, x):
