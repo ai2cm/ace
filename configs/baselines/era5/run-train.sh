@@ -132,3 +132,10 @@ run_training \
   "ace-train-config-ft3-detached-daily-fg16-sr0p125-no-corr-mean.yaml" \
   "1deg-daily-no-corr-mean-ft3-detached-rs0" \
   4
+
+# Resume pretrain to 120 epochs (continues wandb gjsqlvsf), 4 GPUs
+# Job name = original run name so wandb display name is preserved.
+run_training \
+  "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-resume120.yaml" \
+  "1deg-daily-no-corr-mean-pretrain-rs0" \
+  4
