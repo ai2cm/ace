@@ -73,6 +73,16 @@ launch() {
             --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
             --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "hybridresidft" ]]; then
+    # coupled FT of the hybrid (thetao-residual) pretrain: the residfixft
+    # recipe with the hybrid checkpoint; step config (residual names, loss
+    # units) rides in with the checkpoint.
+    config="${CONFIG_DIR}/residfixft.yaml"
+    mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
+            --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar"
+            --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
+            --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "residfixft" ]]; then
     mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
             --dataset "${RESIDFIX_SNAPSHOT_DATASET}:best_ckpt.tar:/ocean_ckpt.tar"
