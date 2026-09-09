@@ -106,6 +106,11 @@ class EnsoCoefficientEvaluatorAggregator:
         n_samples = len(self._sample_index_series)
         self._target_covariances: list[TensorDict] = [{} for _ in range(n_samples)]
         self._gen_covariances: list[TensorDict] = [{} for _ in range(n_samples)]
+        # spatial shape of each variable, tracked on every process regardless of
+        # whether any of its samples overlap the reference index, so that a
+        # process without data can still take part in the cross-process reduction
+        self._target_shapes: dict[str, torch.Size] = {}
+        self._gen_shapes: dict[str, torch.Size] = {}
         self._index_variance: list[torch.Tensor] = [
             torch.tensor(0.0, dtype=torch.float32, device=get_device())
             for _ in range(n_samples)
@@ -133,6 +138,12 @@ class EnsoCoefficientEvaluatorAggregator:
         assert time.sizes["sample"] == len(
             self._sample_index_series
         ), "number of index series must match number of samples"
+        for shapes, batch_data in (
+            (self._target_shapes, target_data),
+            (self._gen_shapes, gen_data),
+        ):
+            for name, tensor in batch_data.items():
+                shapes[name] = tensor.shape[2:]
         for i_sample, sample_index_series in enumerate(self._sample_index_series):
             if sample_index_series is not None:
                 sample_index_series_window = sample_index_series.sel(
@@ -188,59 +199,16 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _get_coefficients(self) -> tuple[TensorDict | None, TensorDict | None]:
         dist = Distributed.get_instance()
-        target_coefficients = self._compute_coefficients("target")
-        gen_coefficients = self._compute_coefficients("gen")
-        # average coefficients across samples
-        target_coefficients_all, gen_coefficients_all = {}, {}
-        target_names = set(
-            [
-                name
-                for target_coefficient in target_coefficients
-                for name in target_coefficient.keys()
-            ]
+        # Every process must make the same collective calls in the same order,
+        # including processes whose samples do not overlap the reference index.
+        # Whether a process has data is data-dependent, so making participation
+        # conditional on it would hang the processes that do have data.
+        reduced_target_coefficients = reduce_sample_coefficients(
+            dist, self._compute_coefficients("target"), self._target_shapes
         )
-        for name in target_names:
-            target_coefficients_all[name] = (
-                torch.stack(
-                    [
-                        target_coefficient[name]
-                        for target_coefficient in target_coefficients
-                        if name in target_coefficient
-                    ],
-                    dim=0,
-                )
-                .mean(dim=0)
-                .to(device=get_device())
-            )
-        gen_names = set(
-            [
-                name
-                for gen_coefficient in gen_coefficients
-                for name in gen_coefficient.keys()
-            ]
+        reduced_gen_coefficients = reduce_sample_coefficients(
+            dist, self._compute_coefficients("gen"), self._gen_shapes
         )
-        for name in gen_names:
-            gen_coefficients_all[name] = (
-                torch.stack(
-                    [
-                        gen_coefficient[name]
-                        for gen_coefficient in gen_coefficients
-                        if name in gen_coefficient
-                    ],
-                    dim=0,
-                )
-                .mean(dim=0)
-                .to(device=get_device())
-            )
-        # average coefficients across processes
-        if target_coefficients_all:
-            reduced_target_coefficients = reduce_data(dist, target_coefficients_all)
-        else:
-            reduced_target_coefficients = None
-        if gen_coefficients_all:
-            reduced_gen_coefficients = reduce_data(dist, gen_coefficients_all)
-        else:
-            reduced_gen_coefficients = None
         return reduced_target_coefficients, reduced_gen_coefficients
 
     @torch.no_grad()
@@ -437,28 +405,63 @@ def data_index_covariance(
     return (data * index_values_broadcast).sum(dim=index_dim)
 
 
-def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict | None:
-    """Reduce tensor dicts across distributed processes by taking the mean.
+def reduce_sample_coefficients(
+    dist: Distributed,
+    sample_coefficients: list[TensorDict],
+    shapes: Mapping[str, torch.Size],
+) -> TensorDict | None:
+    """Average per-sample coefficients over the samples of all processes.
+
+    Samples whose inference period does not overlap the reference index
+    contribute no coefficients, and a process may have no contributing samples
+    at all. Every process still takes part in the collectives below, and the
+    mean is weighted by each process's number of contributing samples so that
+    the processes without data neither deadlock nor bias the result.
 
     Args:
         dist: Distributed instance.
-        rank_tensor_dict: Tensor dict to reduce.
+        sample_coefficients: Coefficients for each sample, empty for samples
+            that do not overlap the reference index.
+        shapes: Spatial shape of each variable, known on every process.
 
     Returns:
-        Reduced tensor dict.
+        Mean coefficients on the root process, or None if this is not the root
+        process or if no sample on any process had coefficients.
     """
-    if dist.is_distributed():
-        # sort for determinism
-        names = sorted(list(rank_tensor_dict.keys()))
-        rank_tensor = torch.stack([rank_tensor_dict[name] for name in names], dim=0)
-        reduced_tensor = dist.reduce_mean(rank_tensor)
-        gathered_tensor_dict = {name: reduced_tensor[i] for i, name in enumerate(names)}
-    else:
-        gathered_tensor_dict = rank_tensor_dict
-    if dist.is_root():
-        return gathered_tensor_dict
-    else:
+    # sort for determinism: every process must stack its variables in the same
+    # order for the collectives below to line up across processes
+    names = sorted(shapes)
+    if not names:
+        # no batches have been recorded, which is true on all processes
         return None
+    device = get_device()
+    summed = torch.stack(
+        [
+            torch.zeros(shapes[name], dtype=torch.float32, device=device)
+            for name in names
+        ],
+        dim=0,
+    )
+    counts = torch.zeros(len(names), dtype=torch.float32, device=device)
+    for coefficients in sample_coefficients:
+        for i, name in enumerate(names):
+            if name in coefficients:
+                summed[i] += coefficients[name]
+                counts[i] += 1
+    if dist.is_distributed():
+        summed = dist.reduce_sum(summed)
+        counts = dist.reduce_sum(counts)
+    if not dist.is_root():
+        return None
+    reduced = {
+        name: summed[i] / counts[i]
+        for i, name in enumerate(names)
+        if counts[i].item() > 0
+    }
+    if not reduced:
+        # no sample on any process overlapped the reference index
+        return None
+    return reduced
 
 
 @dataclasses.dataclass
