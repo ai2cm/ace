@@ -21,6 +21,8 @@ inference:
     num_data_workers: 4
   aggregator:
     log_histograms: false
+    enso_coefficient:
+      enabled: false
 logging:
   log_to_screen: true
   log_to_wandb: true
