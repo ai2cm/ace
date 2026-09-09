@@ -121,6 +121,15 @@ class ParameterInitializationConfig:
             stepper with the vertical coordinate loaded from weights_path's
             checkpoint instead of the one derived from the training dataset.
             Requires weights_path to be set. Default False.
+        override_labels_from_weights: if True, build the training stepper with
+            the dataset labels loaded from weights_path's checkpoint instead of
+            those derived from the training dataset. Needed when fine-tuning on
+            a subset of the sources the checkpoint was trained on: the training
+            data would otherwise supply a smaller label vocabulary than the
+            checkpoint's label-dependent weights were sized for, which fails to
+            load, and which would silently mis-align the labels that do load
+            (weights are matched positionally against sorted labels). Requires
+            weights_path to be set. Default False.
     """
 
     weights_path: str | None = None
@@ -130,12 +139,17 @@ class ParameterInitializationConfig:
     exclude_parameters: list[str] | None = None
     frozen_parameters: FrozenParameterConfig | None = None
     override_vertical_coordinate_from_weights: bool = False
+    override_labels_from_weights: bool = False
 
     def __post_init__(self):
         if self.override_vertical_coordinate_from_weights and self.weights_path is None:
             raise ValueError(
                 "override_vertical_coordinate_from_weights requires weights_path "
                 "to be set"
+            )
+        if self.override_labels_from_weights and self.weights_path is None:
+            raise ValueError(
+                "override_labels_from_weights requires weights_path to be set"
             )
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
             if len(self.parameters) > 0:

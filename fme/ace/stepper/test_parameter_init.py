@@ -10,13 +10,18 @@ import numpy as np
 import pytest
 import torch
 
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.stepper import Stepper, StepperConfig
 from fme.ace.stepper.parameter_init import (
     FrozenParameterConfig,
     ParameterClassification,
     ParameterInitializationConfig,
 )
-from fme.ace.stepper.single_module import TrainStepperConfig, load_weights_and_history
+from fme.ace.stepper.single_module import (
+    TrainStepperConfig,
+    load_labels,
+    load_weights_and_history,
+)
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -167,6 +172,116 @@ def test_override_vertical_coordinate_from_weights(tmpdir, override):
         checkpoint_stepper.modules[0].state_dict(),
         allow_larger=False,
     )
+
+
+def _dataset_info_with_labels(
+    all_labels: set[str],
+    img_shape=(16, 32),
+) -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0], device=get_device()),
+            lon=torch.zeros(img_shape[1], device=get_device()),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7).float(), bk=torch.arange(7).float()
+        ),
+        timestep=TIMESTEP,
+        all_labels=all_labels,
+    )
+
+
+def _get_conditional_stepper_config() -> StepperConfig:
+    """A stepper whose module sizes label-dependent weights from the dataset."""
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="NoiseConditionedSFNO",
+                        config=dataclasses.asdict(
+                            NoiseConditionedSFNOBuilder(
+                                embed_dim=4,
+                                noise_embed_dim=4,
+                                noise_type="isotropic",
+                                filter_type="linear",
+                                filter_num_groups=2,
+                                context_pos_embed_dim=2,
+                                pos_embed=False,
+                                num_layers=2,
+                                affine_norms=True,
+                            )
+                        ),
+                        conditional=True,
+                    ),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": np.random.randn(1).item()},
+                            stds={"x": np.random.randn(1).item()},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("override", [True, False])
+def test_override_labels_from_weights(tmpdir, override):
+    """Fine-tuning a conditional checkpoint on a subset of the sources it was
+    trained on keeps the checkpoint's label vocabulary only with the override.
+
+    Without it the training data supplies a smaller vocabulary, the module's
+    label-dependent weights are built narrower than the checkpoint's, and the
+    load fails.
+    """
+    stepper_config = _get_conditional_stepper_config()
+    checkpoint_stepper = stepper_config.get_stepper(
+        dataset_info=_dataset_info_with_labels({"c96", "era5"})
+    )
+    weights_path = str(tmpdir / "weights.ckpt")
+    torch.save({"stepper": checkpoint_stepper.get_state()}, weights_path)
+
+    train_stepper_config = TrainStepperConfig(
+        parameter_init=ParameterInitializationConfig(
+            weights_path=weights_path,
+            override_labels_from_weights=override,
+        ),
+    )
+    # the fine-tuning dataset holds only one of the checkpoint's two sources
+    dataset_info = _dataset_info_with_labels({"era5"})
+
+    if not override:
+        with pytest.raises(ValueError, match="greater than loaded parameter size"):
+            train_stepper_config.get_train_stepper(stepper_config, dataset_info)
+        return
+
+    train_stepper = train_stepper_config.get_train_stepper(stepper_config, dataset_info)
+    assert train_stepper._stepper.training_dataset_info.all_labels == {"c96", "era5"}
+    assert len(train_stepper.modules) == 1
+    assert_same_state(
+        train_stepper.modules[0].state_dict(),
+        checkpoint_stepper.modules[0].state_dict(),
+        allow_larger=False,
+    )
+
+
+def test_override_labels_requires_weights_path():
+    with pytest.raises(ValueError, match="weights_path"):
+        ParameterInitializationConfig(
+            override_labels_from_weights=True,
+            weights_path=None,
+        )
+
+
+def test_load_labels_rejects_checkpoint_without_dataset_info(tmpdir):
+    weights_path = str(tmpdir / "legacy.ckpt")
+    torch.save({"stepper": {}}, weights_path)
+    with pytest.raises(ValueError, match="dataset_info"):
+        load_labels(weights_path)
 
 
 def test_override_vertical_coordinate_requires_weights_path():

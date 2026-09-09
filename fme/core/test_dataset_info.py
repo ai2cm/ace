@@ -455,6 +455,30 @@ def test_update_vertical_coordinate_replaces_only_coordinate():
     assert dataset_info.vertical_coordinate == original_vc
 
 
+def test_update_labels_replaces_only_labels():
+    coords = LatLonCoordinates(lat=torch.arange(-4, 4), lon=torch.arange(16))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7).float(), bk=torch.arange(7).float()
+    )
+    variable_metadata = {"x": VariableMetadata(units="m", long_name="x")}
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=coords,
+        vertical_coordinate=vertical_coordinate,
+        variable_metadata=variable_metadata,
+        timestep=datetime.timedelta(hours=6),
+        all_labels={"era5"},
+    )
+    updated = dataset_info.update_labels({"c96", "era5"})
+    assert updated.all_labels == {"c96", "era5"}
+    # all other fields preserved
+    assert updated.horizontal_coordinates == coords
+    assert updated.vertical_coordinate == vertical_coordinate
+    assert updated.variable_metadata == variable_metadata
+    assert updated.timestep == dataset_info.timestep
+    # original is unchanged
+    assert dataset_info.all_labels == {"era5"}
+
+
 def _make_hybrid_sigma_pressure_coordinate():
     return HybridSigmaPressureCoordinate(ak=torch.arange(10), bk=torch.arange(10))
 

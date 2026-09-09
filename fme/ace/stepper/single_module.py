@@ -97,6 +97,24 @@ def load_vertical_coordinate(path: str) -> VerticalCoordinate:
     return get_serialized_stepper_vertical_coordinate(checkpoint["stepper"])
 
 
+def load_labels(path: str) -> set[str]:
+    """
+    Load only the dataset labels from a Stepper checkpoint.
+
+    Loads the checkpoint the same way load_stepper does but avoids building a
+    full Stepper, returning just the label vocabulary the checkpoint was
+    trained with.
+    """
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    state = checkpoint["stepper"]
+    if "dataset_info" not in state:
+        raise ValueError(
+            f"Checkpoint at {path} has no serialized dataset_info, so the "
+            "labels it was trained with cannot be recovered."
+        )
+    return DatasetInfo.from_state(state["dataset_info"]).all_labels
+
+
 @dataclasses.dataclass
 class SingleModuleStepperConfig:
     """
@@ -1523,6 +1541,7 @@ class TrainStepperConfig:
         load_vertical_coordinate_fn: Callable[
             [str], VerticalCoordinate
         ] = load_vertical_coordinate,
+        load_labels_fn: Callable[[str], set[str]] = load_labels,
     ) -> "TrainStepper":
         """
         Build a TrainStepper from this configuration and a StepperConfig.
@@ -1541,6 +1560,9 @@ class TrainStepperConfig:
             load_vertical_coordinate_fn: Function for loading the vertical
                 coordinate from a checkpoint, used when
                 parameter_init.override_vertical_coordinate_from_weights is set.
+            load_labels_fn: Function for loading the dataset labels from a
+                checkpoint, used when
+                parameter_init.override_labels_from_weights is set.
 
         Returns:
             A TrainStepper wrapping the built stepper with training
@@ -1557,6 +1579,12 @@ class TrainStepperConfig:
                 self.parameter_init.weights_path
             )
             dataset_info = dataset_info.update_vertical_coordinate(vertical_coordinate)
+        if self.parameter_init.override_labels_from_weights:
+            # weights_path is guaranteed non-None by ParameterInitializationConfig
+            # validation when this flag is set.
+            assert self.parameter_init.weights_path is not None
+            labels = load_labels_fn(self.parameter_init.weights_path)
+            dataset_info = dataset_info.update_labels(labels)
         stepper = stepper_config.get_stepper(
             dataset_info=dataset_info,
             parameter_initializer=parameter_initializer,

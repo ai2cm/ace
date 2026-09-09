@@ -284,6 +284,26 @@ class DatasetInfo:
             all_labels=set(),
         )
 
+    def update_labels(self, new_labels: set[str]) -> "DatasetInfo":
+        """
+        Return a new DatasetInfo with the dataset labels replaced.
+
+        Used when the label vocabulary must come from somewhere other than the
+        training data, e.g. fine-tuning a checkpoint on a subset of the sources
+        it was trained on: the data supplies fewer labels than the checkpoint's
+        label-dependent weights were sized for.
+        """
+        return DatasetInfo(
+            horizontal_coordinates=self._horizontal_coordinates,
+            vertical_coordinate=self._vertical_coordinate,
+            spatial_mask_provider=self._spatial_mask_provider,
+            timestep=self._timestep,
+            variable_metadata=self._variable_metadata,
+            gridded_operations=self._gridded_operations,
+            img_shape=self._img_shape,
+            all_labels=new_labels,
+        )
+
     def update_vertical_coordinate(
         self, new_vertical_coordinate: VerticalCoordinate | None
     ) -> "DatasetInfo":
