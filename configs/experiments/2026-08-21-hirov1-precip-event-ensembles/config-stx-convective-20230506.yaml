@@ -49,7 +49,7 @@ outputs:
   # remainder. With the ensemble dim consuming the whole per-GPU budget, each work
   # item is (1 time, 25 ensemble); 6 times x 40 slices = 240 items, divisible by
   # the 4 ranks, so no padding items are generated.
-  max_samples_per_gpu: 50
+  max_samples_per_gpu: 25
   # lat/lon are omitted from both, so they default to the full 512x512 extent of
   # the store: one shard per work item (26MB, written by exactly one rank) holding
   # five 5.2MB chunks. Shards are set explicitly rather than left to the default,
@@ -60,7 +60,7 @@ outputs:
     ensemble: 5
   zarr_shards:
     time: 1
-    ensemble: 50
+    ensemble: 25
   time_range:
     # TimeSlice stop_time is inclusive.
     start_time: "2023-05-05T12:00:00"
