@@ -286,3 +286,35 @@ def test_latest_module_backwards_compatibility(selector_name: str):
         "to remove this error. In either case update the checkpoint "
         "(and configuration) as its own isolated commit."
     )
+
+
+class _LinearNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.nn.functional.gelu(self.linear(x))
+
+
+def test_module_compile_matches_uncompiled_and_keeps_state():
+    """compile() changes only the forward callable: same outputs, same
+    state-dict keys, same underlying torch module; wrapping preserves it."""
+    torch.manual_seed(0)
+    net = _LinearNet().to(fme.get_device())
+    module = Module(net, label_encoding=None)
+    compiled = module.compile()
+    assert not module.is_compiled
+    assert compiled.is_compiled
+    assert compiled.torch_module is module.torch_module
+    assert compiled.get_state().keys() == module.get_state().keys()
+
+    x = torch.randn(3, 4, device=fme.get_device())
+    torch.testing.assert_close(compiled(x), module(x))
+
+    wrapped = compiled.wrap_module(lambda m: m)
+    assert wrapped.is_compiled
+    torch.testing.assert_close(wrapped(x), module(x))
+
+    with pytest.raises(RuntimeError, match="before Module.compile"):
+        compiled.to(fme.get_device())
