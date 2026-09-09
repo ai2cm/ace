@@ -4,7 +4,7 @@ import torch
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
-from .swin_layers import ColumnMixer, WindowAttention2D
+from .swin_layers import ColumnMixer, WindowAttention2D, window_partition_2d
 from .swin_transformer import SwinTransformerNet
 
 _EMBED_DIM_NOISE = 8
@@ -513,3 +513,86 @@ def test_earth_padding_cln_forward():
         3,
         *img_shape,
     )
+
+
+def _reference_window_attention(
+    attn: WindowAttention2D,
+    x: torch.Tensor,
+    mask: torch.Tensor | None,
+    lat_mean: torch.Tensor | None,
+) -> torch.Tensor:
+    """Explicit-logits cosine attention, as implemented before the switch to
+    ``F.scaled_dot_product_attention``. Shares parameters with ``attn``."""
+    B_, N, C = x.shape
+    qkv = (
+        attn.qkv(x)
+        .reshape(B_, N, 3, attn.num_heads, C // attn.num_heads)
+        .permute(2, 0, 3, 1, 4)
+    )
+    q, k, v = qkv[0], qkv[1], qkv[2]
+    norm_q = torch.norm(q, dim=-1, keepdim=True)
+    norm_k = torch.norm(k, dim=-1, keepdim=True).transpose(-2, -1)
+    logits = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
+    logits = logits / attn.tau.clamp(min=0.01)
+    if lat_mean is None:
+        bias = 16.0 * torch.sigmoid(attn.cpb_mlp(attn.relative_coords_log))
+        bias = bias.permute(1, 0).reshape(attn.num_heads, N, N)
+        logits = logits + bias.unsqueeze(0)
+    else:
+        nW = lat_mean.shape[0]
+        lat_rad = lat_mean * (torch.pi / 180.0)
+        h_coords = attn.relative_coords_base[:, 0]
+        w_coords = attn.relative_coords_base[:, 1].unsqueeze(0) * torch.cos(
+            lat_rad
+        ).unsqueeze(1)
+        coords = torch.stack([h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1)
+        coords_log = torch.sign(coords) * torch.log(1.0 + coords.abs())
+        bias = 16.0 * torch.sigmoid(attn.cpb_mlp(coords_log))
+        bias = bias.permute(0, 2, 1).reshape(nW, attn.num_heads, N, N)
+        logits = logits.view(B_ // nW, nW, attn.num_heads, N, N) + bias.unsqueeze(0)
+        logits = logits.view(B_, attn.num_heads, N, N)
+    if mask is not None:
+        nW = mask.shape[0]
+        logits = logits.view(B_ // nW, nW, attn.num_heads, N, N) + mask.unsqueeze(
+            1
+        ).unsqueeze(0)
+        logits = logits.view(-1, attn.num_heads, N, N)
+    probs = torch.softmax(logits, dim=-1)
+    out = (probs @ v).transpose(1, 2).reshape(B_, N, C)
+    return attn.proj(out)
+
+
+@pytest.mark.parametrize("use_mask", [False, True])
+@pytest.mark.parametrize("use_lat", [False, True])
+def test_window_attention_matches_explicit_logits(use_mask: bool, use_lat: bool):
+    """SDPA-based attention equals the explicit softmax(QK^T + bias) V
+    formulation for outputs and parameter gradients."""
+    device = get_device()
+    torch.manual_seed(0)
+    dim, num_heads, window_size = 16, 4, (4, 4)
+    H, W, B = 8, 16, 2
+    nW = (H // window_size[0]) * (W // window_size[1])
+    attn = WindowAttention2D(dim, window_size, num_heads).to(device).double()
+    with torch.no_grad():
+        for param in attn.parameters():
+            param.normal_()
+        attn.tau.abs_().add_(0.1)
+    x = torch.randn(B, H, W, dim, device=device, dtype=torch.float64)
+    x = window_partition_2d(x, *window_size).view(-1, 16, dim).requires_grad_(True)
+    mask = None
+    if use_mask:
+        mask = torch.zeros(nW, 16, 16, device=device, dtype=torch.float64)
+        mask[:, :8, 8:] = -100.0
+        mask[:, 8:, :8] = -100.0
+    lat_mean = (
+        torch.linspace(-60.0, 60.0, nW, device=device, dtype=torch.float64)
+        if use_lat
+        else None
+    )
+    out = attn(x, mask=mask, lat_mean=lat_mean)
+    grads = torch.autograd.grad(out.square().sum(), [x, *attn.parameters()])
+    ref = _reference_window_attention(attn, x, mask, lat_mean)
+    ref_grads = torch.autograd.grad(ref.square().sum(), [x, *attn.parameters()])
+    torch.testing.assert_close(out, ref, atol=1e-10, rtol=1e-10)
+    for g, g_ref in zip(grads, ref_grads):
+        torch.testing.assert_close(g, g_ref, atol=1e-8, rtol=1e-8)
