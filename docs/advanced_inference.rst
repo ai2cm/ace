@@ -69,6 +69,6 @@ out from training.
     "
     python -m fme.ace.inference config-inference.yaml --override $override
 
-By adjusting the :class:`~fme.ace.DataWriterConfig`, this strategy can be used
-to customize the frequency or other aspects of the output saved from each run
-segment.
+By adjusting the :class:`~fme.ace.DataWriterConfig` section of the inference config,
+this strategy can be used to customize the frequency or other aspects of the output
+saved from each run segment.
