@@ -319,6 +319,80 @@ class ConditionalLayerNorm(nn.Module):
             return_value = x_norm * scale + bias
         return return_value
 
+    def forward_channels_last(self, x: torch.Tensor, context: Context) -> torch.Tensor:
+        """
+        Channels-last variant of ``forward`` for callers whose activations are
+        laid out as (batch_size, height, width, channels).
+
+        Computes exactly the same function as ``forward`` (per-pixel layer norm
+        over channels, then conditional scale and bias) without transposing the
+        activations. The spatial conditioning fields in ``context``
+        (``noise`` and ``embedding_pos``) must also be channels-last, i.e.
+        (batch_size, height, width, embed_dim); the 1x1 convolutions that
+        project them are applied as linear layers on the same weights, so the
+        state dict is unchanged.
+
+        Args:
+            x: The input tensor to normalize, of shape
+                (batch_size, height, width, channels).
+            context: The context to condition on, with channels-last
+                spatial fields.
+
+        Returns:
+            The normalized tensor, of shape (batch_size, height, width, channels).
+        """
+        if self._global_layer_norm:
+            raise NotImplementedError(
+                "forward_channels_last only supports per-pixel layer norm "
+                "(global_layer_norm=False)"
+            )
+        if context.labels is None and (
+            self.W_scale_labels is not None or self.W_bias_labels is not None
+        ):
+            raise ValueError("labels must be provided")
+        C = self.n_channels
+        # Batch-wide (non-spatial) terms broadcast over (B, 1, 1, C).
+        if self.W_scale is not None:
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar must be provided")
+            scale: torch.Tensor = self.W_scale(context.embedding_scalar)[
+                :, None, None, :
+            ]
+        else:
+            scale = torch.ones(x.shape[0], 1, 1, C, device=x.device, dtype=x.dtype)
+        if self.W_bias is not None:
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar must be provided")
+            bias: torch.Tensor = self.W_bias(context.embedding_scalar)[:, None, None, :]
+        else:
+            bias = torch.zeros(x.shape[0], 1, 1, C, device=x.device, dtype=x.dtype)
+        if self.W_scale_labels is not None:
+            scale = scale + self.W_scale_labels(context.labels)[:, None, None, :]
+        if self.W_bias_labels is not None:
+            bias = bias + self.W_bias_labels(context.labels)[:, None, None, :]
+        # Spatial terms: 1x1 conv weights (C, D, 1, 1) applied as (C, D) linear
+        # maps on channels-last fields (B, H, W, D).
+        if self.W_scale_2d is not None or self.W_bias_2d is not None:
+            if context.noise is None:
+                raise ValueError("embedding_2d must be provided")
+            noise = context.noise
+            if self.W_scale_2d is not None:
+                scale = scale + F.linear(noise, self.W_scale_2d.weight.view(C, -1))
+            if self.W_bias_2d is not None:
+                bias = bias + F.linear(noise, self.W_bias_2d.weight.view(C, -1))
+        if self.W_scale_pos is not None or self.W_bias_pos is not None:
+            if context.embedding_pos is None:
+                raise ValueError("embedding_pos must be provided")
+            pos = context.embedding_pos
+            if self.W_scale_pos is not None:
+                scale = scale + F.linear(pos, self.W_scale_pos.weight.view(C, -1))
+            if self.W_bias_pos is not None:
+                bias = bias + F.linear(pos, self.W_bias_pos.weight.view(C, -1))
+        x_norm = F.layer_norm(
+            x, (C,), weight=self.norm.weight, bias=self.norm.bias, eps=self.epsilon
+        )
+        return x_norm * scale + bias
+
 
 @torch.jit.script
 def drop_path(
