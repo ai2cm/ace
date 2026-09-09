@@ -1,19 +1,24 @@
 """Submit SST-perturbation inference jobs for the FM checkpoints.
 
 For each primary training run with a result dataset in
-wandb_to_beaker_map.json, submits one free-running inference job per
+wandb_to_beaker_map.json (hand-written base configs and generated
+norm-ablation cells alike), submits one free-running inference job per
 (forcing grid, SST perturbation level) pair the run applies to: C96-trained
-runs (nc-sfno-c96) only run on C96, ERA5-trained runs (nc-sfno-vN) only on
-ERA5, and FM runs (nc-sfno-fm) on both (see generate_sst_configs.run_grids).
+runs (*-c96-*) only run on C96, ERA5-trained runs (*-era5-*, nc-sfno-vN) only
+on ERA5, and FM runs (*-fm-*) on both (see generate_sst_configs.run_grids).
 Each job mounts that run's best_inference_ckpt.tar at /ckpt.tar and runs the
 matching run-agnostic config from run_configs/ (produced by
 generate_sst_configs.py) via run-ace-inference.sh.
 
+Gantry clones the repository at HEAD, so the configs must be committed and
+pushed before submitting; this is checked unless --dry-run is given.
+
 Usage:
     python submit_sst_jobs.py [--dry-run] [--run RUN [RUN ...]]
-                              [--perturbation {p2k,p4k} ...]
+                              [--perturbation {p0k,p2k,p4k} ...]
                               [--forcing-grid {era5,c96} ...]
                               [--version {v1,v2,v3}]
+                              [--skip-if-in-wandb]
                               [--beaker-workspace WORKSPACE]
                               [--beaker-cluster CLUSTER [CLUSTER ...]]
                               [--beaker-priority PRIORITY]
@@ -24,9 +29,14 @@ import pathlib
 import subprocess
 import sys
 
-from _submit_common import add_beaker_args, submit_job
+from _submit_common import add_beaker_args, check_configs_at_head, submit_job
 from _version_select import add_version_arg
-from generate_eval_configs import TRAINING_RESULT_DATASETS, WANDB_PROJECT
+from generate_eval_configs import (
+    TRAINING_RESULT_DATASETS,
+    WANDB_ENTITY,
+    WANDB_PROJECT,
+    fetch_wandb_finished_summaries,
+)
 from generate_sst_configs import (
     DATASETS,
     RUN_CONFIGS_DIR,
@@ -85,11 +95,19 @@ def main() -> None:
             "Restrict to these forcing grids (default: each run's native " "grid(s))."
         ),
     )
+    parser.add_argument(
+        "--skip-if-in-wandb",
+        action="store_true",
+        help=(
+            "Skip each job whose name already has a finished run in wandb, so "
+            "a resubmission only fills in what is missing."
+        ),
+    )
     add_beaker_args(
         parser,
-        default_workspace="ai2/climate-titan",
-        default_cluster=["ai2/titan"],
-        default_priority="urgent",
+        default_workspace="ai2/ace",
+        default_cluster=["ai2/titan", "ai2/jupiter"],
+        default_priority="normal",
     )
     args = parser.parse_args()
 
@@ -112,6 +130,21 @@ def main() -> None:
             for level in levels:
                 jobs.append((run_name, grid, level, sst_config_filename(grid, level)))
 
+    if args.skip_if_in_wandb:
+        print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
+        finished = set(fetch_wandb_finished_summaries())
+        pending = []
+        for job in jobs:
+            run_name, grid, level, _ = job
+            if sst_job_name(run_name, grid, level) in finished:
+                print(
+                    f"Skipping (already finished in wandb): {run_name} {grid} {level}"
+                )
+            else:
+                pending.append(job)
+        print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
+        jobs = pending
+
     needed_configs = sorted({config_filename for *_, config_filename in jobs})
     for config_filename in needed_configs:
         if not (RUN_CONFIGS_DIR / config_filename).exists():
@@ -120,6 +153,7 @@ def main() -> None:
             )
 
     if not args.dry_run:
+        check_configs_at_head([RUN_CONFIGS_DIR / name for name in needed_configs])
         validate_configs(needed_configs)
 
     for run_name, grid, level, config_filename in jobs:
