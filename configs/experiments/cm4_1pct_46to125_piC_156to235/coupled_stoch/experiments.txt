@@ -2,3 +2,5 @@
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0||training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0||training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0||training|best_inference_ckpt|normal|--min-runtime 8h
