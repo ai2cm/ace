@@ -313,11 +313,8 @@ stepper:
                 - 1
                 - 1
                 - 1
-              norm: layer
-              checkpoint_strategy: all
+              norm: instance
               zonally_periodic_upsample: true
-              conditioned_blocks: all_blocks
-              noise_embed_dim: 32
           normalization:
             network:
               global_means_path: /ocean_stats/centering.nc
@@ -325,8 +322,6 @@ stepper:
           corrector:
             type: ocean_corrector
             config:
-              ocean_heat_content_correction:
-                method: scaled_temperature
               surface_energy_flux_correction:
                 method: prescribed
               force_positive_names:
@@ -359,6 +354,8 @@ stepper:
                   - sfdsi
                   - UI
                   - VI
+              ocean_heat_content_correction:
+                method: scaled_temperature
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
