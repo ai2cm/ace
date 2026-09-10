@@ -1,0 +1,237 @@
+# Stage 2: spatiotemporal video PMD, TWO-BLOCK mode, HiRO-ACE PATCH SIZE
+# (2026-09-10).
+#
+# Byte-for-byte identical to
+# ../2026-08-26-video-pmd-spatiotemporal-25km-100km-two-block/video_train.yaml
+# (the fixed-kernel / "-flat" two-block run: r = pinned coarse-temporal
+# residual with a brownian_bridge kernel, d = unpinned fine-detail residual
+# with an independent/flat kernel) EXCEPT for the training patch size:
+#
+#     coarse_patch_extent_lat/lon: 44 / 72   ->   16 / 16
+#
+# i.e. the same coarse patch extent HiRO-ACE trains on
+# (../2026-08-13-hiro-downscaling-25km-100km-5ch-extend-400/train.yaml and
+# ../2026-07-28-hiro-downscaling-25km-100km-5ch/train.yaml, both
+# coarse_patch_extent_lat/lon: 16). The 44x72 two-block runs tile the
+# -88..88 x 0..360 coarse (100km) grid into exactly 4 x 5 = 20 patches;
+# this run tiles it into ceil(lat/16) x ceil(360/16) ~= 11 x 23 ~= 250
+# smaller patches (fine patch 64x64 instead of 176x288). Boundary patches
+# are shifted back to full width by get_patches (drop_partial_patches=False
+# in video_train.py), so the count is deterministic per offset draw and
+# DDP-safe -- same guarantee the 20-patch runs rely on.
+#
+# Purpose: isolate the effect of patch size alone, so the two-block model
+# is trained on the same spatial context window as the HiRO-ACE baseline it
+# is being compared against -- removing "different receptive field / patch
+# statistics" as a confound in the two-block-vs-HiRO comparison.
+#
+# The KERNEL stays FLAT here (r_kernel: brownian_bridge, d_kernel:
+# independent), NOT the learnable/conditional-kernel variant
+# (../2026-08-26-video-pmd-spatiotemporal-25km-100km-two-block-conditional-kernel/,
+# VideoDiffusionModelConfig.two_block_conditional_kernel). This is the
+# fixed-kernel design.
+#
+# Per-epoch compute is ~unchanged vs. the 20-patch run: the globe is still
+# covered once per epoch, just carved into ~12x more, ~12x smaller tiles.
+# max_epochs kept at 200. FRESH start, not resumed (different patch regime;
+# nothing to resume from).
+#
+# BATCH SIZE raised 4 -> 16 (global; 4 per GPU on 4x B200) vs. the 20-patch
+# runs' batch_size 4 (1 per GPU). The fine tile is now 64x64x9 instead of
+# 176x288x9 -- ~12x less activation memory per sample -- so 4/GPU fits
+# comfortably on a 180GB B200 with headroom to spare. This is a DELIBERATE
+# second difference from the 20-patch runs (not just patch size): fewer,
+# larger optimizer steps per epoch. lr kept at 1e-4 (not linearly scaled)
+# -- larger batch + same lr is the conservative choice; revisit if the loss
+# curve looks under-optimized vs. the 20-patch run at matched epochs.
+#
+# r_sigma_data_by_channel / d_sigma_data_by_channel are the same global-grid
+# calibration as the 20-patch run
+# (scripts/video_pmd_eval/residual_calibration_diagnostic.py, 2026-08-26) --
+# residual std is a per-pixel quantity, so it does not depend on patch size.
+#
+# Same known store-consistency caveat as the 20-patch run: coarse_clip and
+# fine_clip are independently-sourced stores, ||x_c - D(x_f)|| is 9-28% of
+# r_std / 26-56% of d_std per channel -- an irreducible bias in the
+# assembled output relative to fine truth, not model error. See the
+# 20-patch config's header comment and idea/spatiotemoral/twoblock_theory.md
+# for the full reasoning.
+#
+# Data: 2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr on weka
+# (/climate-default/2026-06-25-temporal-diffusion), same store/split as
+# every other spatiotemporal config in this family. downscale_factor = 4.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-two-block-5ch-coarse-endpoints-flat-hiro-patch
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+# HiRO-ACE patch size (see header). 20-patch runs use 44 / 72.
+coarse_patch_extent_lat: 16
+coarse_patch_extent_lon: 16
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 16  # global across ranks (4 GPUs x 4 samples/GPU); 20-patch runs use 4
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 16
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 16
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  # Two-block mode, FIXED (flat) kernel -- see the header comment above and
+  # VideoDiffusionModelConfig.two_block's docstring in
+  # fme/downscaling/video_models.py.
+  endpoints_observed: false
+  coarse_endpoints_only: true
+  two_block: true
+  r_kernel: brownian_bridge
+  d_kernel: independent
+  # temporal_noise_correlation must stay at its "independent" default (not
+  # set here) -- two_block uses r_kernel/d_kernel instead (validated in
+  # __post_init__).
+  # Calibrated from scripts/video_pmd_eval/residual_calibration_diagnostic.py
+  # (2026-08-26, real weka data, global grid) -- same numbers as the
+  # 20-patch two-block run; residual std is per-pixel, patch-size
+  # independent.
+  r_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.3201
+    northward_wind_at_ten_meters: 0.4415
+    PRMSL: 0.1783
+    PRATEsfc: 0.6825
+    air_temperature_at_two_meters: 0.1229
+  d_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.1617
+    northward_wind_at_ten_meters: 0.1892
+    PRMSL: 0.0586
+    PRATEsfc: 0.4254
+    air_temperature_at_two_meters: 0.0529
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # fine (25km), train-only, global domain -- toy/compute_norm_stats_25km.py
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074   # log1p(PRATEsfc * 86400) space, matching log_transform_channels
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:  # coarse (100km), train-only, global domain -- reused verbatim
+    # from the stage-1 config: verified 2026-07-24 that the 100km store is
+    # byte-identical to the dataset those stats were computed from.
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
