@@ -1,0 +1,37 @@
+# 6-hourly 1-degree sea-surface store for one member of the CM4-like-AM4
+# random-CO2 ensemble. `{member}` is filled from --member (see
+# pipeline/config.py); the nine members are listed in the Makefile.
+target_grid: F90
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F90
+output:
+  path: gs://vcm-ml-intermediate/2026-08-17-cm4-like-am4-random-co2-sea-surface-1deg/{member}.zarr
+  time_chunk_size: 1
+  time_shard_size: 365
+# The source store is its own mask reference: both its variables are NaN on
+# exactly the land cells, so the first timestep's NaN pattern is the 2D
+# tracer wetmask.
+wetmask:
+  store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-like-AM4-random-CO2-data-on-ocean-grid/zarrs/{member}/ice_6hourly_snap.zarr
+  variable: SST
+# Ice-model true snapshots at their native 6-hourly cadence, unsubsampled.
+stream:
+  name: ice_snapshot
+  store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-like-AM4-random-CO2-data-on-ocean-grid/zarrs/{member}/ice_6hourly_snap.zarr
+  variables:
+    - SST
+    - sea_ice_fraction
+  dim_renaming:
+    xT: xh
+    yT: yh
+  # The source sea_ice_fraction is ice area per native cell area, and native
+  # tracer cells are wholly wet or wholly dry, so on the source grid the
+  # full-cell and ocean-relative quantities coincide. They separate on the
+  # target grid: the full-cell regrid keeps the source name, the normalized
+  # one is renamed.
+  renaming:
+    sea_ice_fraction: ocean_sea_ice_fraction
+  full_cell_variables:
+    - sea_ice_fraction
+  postprocess:
+    - kelvin_sst
+    - sea_ice_fraction_consistency
