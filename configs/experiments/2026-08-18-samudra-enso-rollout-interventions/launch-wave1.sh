@@ -116,6 +116,14 @@ launch() {
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "hybridsstres" ]]; then
+    # single-variable attribution test: hybridresid with sst ADDED to the
+    # residual set; everything else byte-identical to hybridresid-pretrain.
+    config="${CONFIG_DIR}/hybridsstres-pretrain.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "residfix" ]]; then
     config="${CONFIG_DIR}/residfix-pretrain.yaml"
     module="fme.ace.train"
