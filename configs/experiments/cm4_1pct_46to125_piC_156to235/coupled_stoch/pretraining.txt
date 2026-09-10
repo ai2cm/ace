@@ -36,21 +36,39 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm
 # second seed held back for now (rssferbq, best_inference_error 0.09045)
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm4|rssferbq|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
 
-# --- Arm B: Samudra-MAE made stochastic at the coupled stage (Chris's design) ---
-# The MAE pretrain is deterministic (noise_embed_dim absent) so noise
-# conditioning has to be switched on here. Its FiLM layers are zero-init, so
-# the run starts EXACTLY at the deterministic MAE model and learns to use noise
-# during coupled finetuning -- which is the "less of a shock" argument holding
-# literally at the weight level.
-# CAVEAT, needs elynn's call: this checkpoint is norm=instance (James's whole
-# lineage is), while the stochastic arm is norm=layer. ConvNeXtBlock's own
-# docstring calls `layer` "the principled choice" for FiLM conditioning and
-# says that after `instance` norm the block "cannot modulate how strongly it is
-# conditioned". `instance` "remains permitted, because ranking the two is an
-# open experimental question". Staged as instance to match the checkpoint; the
-# clean alternative is a fresh layer-norm MAE pretrain (75 epochs).
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
+# --- Arm B: Samudra-MAE, forcing-only stochasticity (Chris's design) ---
+# The ocean stays a DETERMINISTIC Samudra. The two ensemble members differ
+# because the frozen stochastic ACE2S hands the ocean two different forcings,
+# so EnsembleLoss's internal (spread) term is non-zero without any noise
+# injected into Samudra itself. This is exactly James's owc_a2s setup, so the
+# row below is a strict ONE-VARIABLE fork of cghk183p: only the ocean init
+# changes, MSE-pretrained -> MAE-pretrained.
+#
+# Why an MAE pretrain is the right initialization for this loss: CRPS at one
+# member IS MAE, so EnsembleLoss is MAE plus a spread term. An MAE pretrain is
+# the deterministic limit of the coupled loss, and coupled FT then only
+# switches the spread term on -- where an MSE pretrain has to change loss
+# family. That is Chris's "less of a shock", and it needs no architecture
+# change and no norm change (instance, as in James's lineage).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
 
 # other two MAE seeds held back
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-cm4|0czxry0l|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-cm4|0czxry0l|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+
+# --- Arm C (HELD): Samudra-MAE with direct noise injection ---
+# The other half of the question: does the MAE lineage also want an
+# ocean-INTERNAL noise source, on top of the forcing spread Arm B already has?
+# Arm A already tests noise injection on the CRPS-pretrained lineage, so this
+# is the second noise-injection arm and differs from it only in pretraining
+# loss -- the third question, not the first.
+#
+# DO NOT launch this row against ouivl7ev as written. That checkpoint is
+# norm=instance, and FiLM conditioning after an instance norm is the
+# configuration the round-2 stochastic arms deliberately moved away from (see
+# experiments/2026-08-28-layernorm-samudra-smoke): the conditioning magnitude
+# becomes a learned constant identical for every sample, so the block cannot
+# modulate how strongly it is conditioned. Reading this arm honestly needs a
+# layer-norm MAE pretrain first (1 seed, 75 epochs, ~52 h on ouivl7ev's
+# footprint); then point this row at that checkpoint and drop the norm caveat.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
