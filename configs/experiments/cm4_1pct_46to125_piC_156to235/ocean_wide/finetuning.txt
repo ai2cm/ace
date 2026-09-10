@@ -39,8 +39,42 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw90
 # min_runtime 3h (column 15, empty results_dataset in column 14): beaker has
 # required a minimum runtime since 2026-08-28 and the runner defaults it to 0.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs0|ace-samudra-cm4|7w9qf9aj|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs0|ace-samudra-cm4|7w9qf9aj|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|ace-samudra-cm4|07fcva1p|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|ace-samudra-cm4|07fcva1p|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|ace-samudra-cm4|pjxiw906|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|ace-samudra-cm4|pjxiw906|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
+
+# ocean_wide_ohc_clip_mae_pt-ft -- stage 2 of research
+# tasks/2026-09-07-samudra-mae-full-two-stage: the 8-step finetune of the FULL
+# L1 pretraining (group ocean_wide_ohc_clip_mae, wandb xxwzrty6 / 0czxry0l /
+# ouivl7ev, all three exit 0 at 75/75 on 2026-09-09..10). Distinct group from
+# the ocean_wide_ohc_clip_mae-ft rows above, which are arm 2 -- an L1 finetune
+# of the MSE pretraining -- and are retired.
+#
+# Same finetune-config-template.yaml, same 10 epochs at n_forward_steps 8, same
+# footprint as the MSE ocean_wide_ohc_clip-ft rows, so the two arms differ only
+# in the loss and the lr, each seed resuming its own pretraining's best_ckpt
+# (best_val_loss is attained at the final epoch in all six pretrainings, so
+# best_ckpt is the epoch-75 model in both arms and checkpoint selection is not
+# part of the treatment).
+#
+# lr: the template's optimization block is train-config.yaml's and is NOT
+# covered by create_finetune_config.sh's stepper merge, so it would silently
+# revert to the recipe's 1e-4. optimization.lr=0.0003 is restated to carry the
+# pretraining's lr forward -- the same inherit-your-own-pretraining-lr rule the
+# MSE arm followed. The lr1e-4 row below is the control for that choice: the
+# investigation's 2026-09-04 entry argues the L1/MSE gradient ratio is flat and
+# ~4.8x through the finetune where it ran 1.7 -> 4.8x through pretraining, so
+# the finetune stage may want a lower lr than the pretrain sweep chose. One
+# seed, everything else identical.
+#
+# min_runtime 3h (column 15, empty results_dataset in column 14).
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs0|ace-samudra-cm4|xxwzrty6|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs1|ace-samudra-cm4|0czxry0l|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs2|ace-samudra-cm4|ouivl7ev|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0003||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt_lr1e-4-ft|rs0|ace-samudra-cm4|xxwzrty6|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1 optimization.lr=0.0001||3h
