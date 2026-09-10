@@ -94,6 +94,15 @@ class OptimizationABC(abc.ABC):
         """
         ...
 
+    @property
+    def last_grad_norm(self) -> float | None:
+        """The total gradient norm before clipping at the last ``step_weights``.
+
+        ``None`` when gradient clipping is not configured, since the norm is a
+        by-product of the clipping call and is not otherwise computed.
+        """
+        return None
+
     @abc.abstractmethod
     def get_state(self):
         """
