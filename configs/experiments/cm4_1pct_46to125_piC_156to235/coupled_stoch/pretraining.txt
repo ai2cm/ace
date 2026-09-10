@@ -1,0 +1,49 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# Our two coupled arms, both forked from James's `owc_a2s` recipe
+# (cm4_1pct_46to125_piC_156to235/coupled) and identical to it in every
+# training knob: atmosphere frozen (ACE2S j0ng1tw3, loss_weight 0), 8 epochs,
+# lr 7e-5, bs 8, n_coupled_steps 4, n_ensemble 2, ocean EnsembleLoss.
+# The ONE thing changed is the ocean initialization, and in both arms the
+# ocean is made stochastic (noise-conditioned Samudra, ace#1464).
+#
+# The ocean stepper block is NOT specified here: create_coupled_train_config.sh
+# fetches it from the ocean checkpoint's own config.yaml and merges it into the
+# template. So the stochastic arm inherits its noise conditioning for free,
+# and the MAE arm has to add it via --override.
+#
+# ocean codes:
+# - lt0   = stage-2 long-tail all_blocks rs0 (jshu3e8a), the variance-best
+#           stochastic arm: 0.783 global / ~0.80 boundary-current interannual
+#           SST variance vs the deterministic 0.631 / 0.465-0.545.
+#           best_inference_error 0.08905, ahead of rs1's 0.09045.
+# - mae2  = L1 lr-3e-4 from-scratch pretrain rs2 (ouivl7ev),
+#           best_inference_error 0.12280, best of the three seeds
+#           (rs0 0.12396, rs1 0.12465). Matches `owc`'s no-8-step-FT lineage.
+
+# --- Arm A: stochastic Samudra (long-tail all_blocks rs0) ---
+# Inherits norm=layer, noise_embed_dim=32, conditioned_blocks=all_blocks from
+# the checkpoint config. No override needed.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+
+# second seed held back for now (rssferbq, best_inference_error 0.09045)
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm4|rssferbq|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+
+# --- Arm B: Samudra-MAE made stochastic at the coupled stage (Chris's design) ---
+# The MAE pretrain is deterministic (noise_embed_dim absent) so noise
+# conditioning has to be switched on here. Its FiLM layers are zero-init, so
+# the run starts EXACTLY at the deterministic MAE model and learns to use noise
+# during coupled finetuning -- which is the "less of a shock" argument holding
+# literally at the weight level.
+# CAVEAT, needs elynn's call: this checkpoint is norm=instance (James's whole
+# lineage is), while the stochastic arm is norm=layer. ConvNeXtBlock's own
+# docstring calls `layer` "the principled choice" for FiLM conditioning and
+# says that after `instance` norm the block "cannot modulate how strongly it is
+# conditioned". `instance` "remains permitted, because ranking the two is an
+# open experimental question". Staged as instance to match the checkpoint; the
+# clean alternative is a fresh layer-norm MAE pretrain (75 epochs).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
+
+# other two MAE seeds held back
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-cm4|0czxry0l|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h

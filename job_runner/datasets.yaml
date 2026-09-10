@@ -1,0 +1,28 @@
+# .zarr datasets referenced in configs
+
+# cm4_1pctCO2
+
+cm4_1pctCO2:
+  atmos: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+  coupled_atmos: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
+  ocean: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+  coupled_ocean: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+  coupled_sea_ice: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+
+# cm4_piControl
+
+cm4_piControl:
+  atmos: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+  ocean: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
+  coupled_atmos: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
+  coupled_ocean: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+  coupled_sea_ice: 2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-sea_ice.zarr
+
+# you can modify the following template to add your dataset:
+
+template:
+  atmos: atmos.zarr
+  ocean: ocean.zarr
+  coupled_atmos: coupled_atmos.zarr
+  coupled_ocean: coupled_ocean.zarr
+  coupled_sea_ice: coupled_sea_ice.zarr
