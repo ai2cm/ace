@@ -4,8 +4,11 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 #   job_runner/coupled_train.sh \
 #     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_stoch . \
 #     --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
-# Dry-run verified 2026-09-10: 2 train rows resolve their ocean + atmosphere
+# Dry-run verified 2026-09-10: 3 train rows resolve their ocean + atmosphere
 # checkpoints, 4 GPUs on b200 each.
+# NOTE the min_runtime column here is a BARE duration ('8h'), unlike
+# evaluate.sh's experiments.txt which wants the whole '--min-runtime 8h'.
+# Passing the flag form makes gantry die on 'invalid duration string'.
 
 # Our two coupled arms, both forked from James's `owc_a2s` recipe
 # (cm4_1pct_46to125_piC_156to235/coupled) and identical to it in every
@@ -31,10 +34,10 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # --- Arm A: stochastic Samudra (long-tail all_blocks rs0) ---
 # Inherits norm=layer, noise_embed_dim=32, conditioned_blocks=all_blocks from
 # the checkpoint config. No override needed.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|8h
 
 # second seed held back for now (rssferbq, best_inference_error 0.09045)
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm4|rssferbq|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm4|rssferbq|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|8h
 
 # --- Arm B: Samudra-MAE, forcing-only stochasticity (Chris's design) ---
 # The ocean stays a DETERMINISTIC Samudra. The two ensemble members differ
@@ -50,11 +53,11 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm
 # switches the spread term on -- where an MSE pretrain has to change loss
 # family. That is Chris's "less of a shock", and it needs no architecture
 # change and no norm change (instance, as in James's lineage).
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|8h
 
 # other two MAE seeds held back
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-cm4|0czxry0l|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-cm4|0czxry0l|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|8h
 
 # --- Arm C: Samudra-MAE with direct noise injection ---
 # The other half of the question: does the MAE lineage also want an
@@ -73,4 +76,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-c
 # handicapped the conditioning"; a STRONG result is informative either way.
 # Settling the weak case would need a layer-norm MAE pretrain (1 seed, 75
 # epochs, ~52 h) and a rerun against it.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|8h
