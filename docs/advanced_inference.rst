@@ -13,10 +13,10 @@ The data writer configuration is used to specify how the output from an
 inference run is saved to disk. For flexibility, it is recommended to use
 the ``files`` section, which allows for different output files to be written
 with different frequencies and different variables. For example, the following
-configuration will write the monthly means of the
-``PRATEsfc`` and ``TMP2m`` variables to a netCDF file called ``monthly_means.nc``, while also
-writing the daily mean (assuming a 6-hour time step model) values of the ``total_water_path``
-variable to a zarr dataset called ``daily_mean.zarr``:
+configuration will write the monthly means of all available variables to a
+netCDF file called ``monthly_means.nc``, while also writing the daily mean
+(assuming a 6-hour time step model) values of the ``total_water_path``
+and ``TMP2m`` variables to a zarr dataset called ``daily_mean.zarr``:
 
 .. literalinclude:: data-writer-example.yaml
    :language: yaml
