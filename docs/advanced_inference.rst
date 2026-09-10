@@ -59,8 +59,9 @@ parameter in the ``fme.ace.inference`` entrypoint:
 The above example will result in three segments being run with
 ``n_forward_steps`` each. Output from each segment will be stored in
 subdirectories under the ``experiment_dir``, labeled by the segment start
-time of the first (or only) ensemble member. If a segment directory already
-exists, it will be skipped.
+time of the first (or only) ensemble member. If a segment directory with a
+restart file already exists, it will be skipped, and the run will resume
+starting with the first incomplete segment.
 
 For example, running inference with the example configuration defined in the
 :ref:`example-yaml-configuration` on the
