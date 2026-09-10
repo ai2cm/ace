@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Literal
@@ -7,6 +8,7 @@ import fsspec
 import numpy as np
 import xarray as xr
 import zarr
+from zarr.core.sync import sync
 
 from fme.core.distributed import Distributed
 from fme.core.timing import GlobalTimer
@@ -21,11 +23,11 @@ def _encode_cftime_times(times, calendar="julian"):
     return cftime.date2num(times, units=DATETIME_ENCODING_UNITS, calendar=calendar)
 
 
-def _check_for_overwrite(arr, insert_slices_tuple):
+async def _check_for_overwrite(arr, insert_slices_tuple):
     # Loads the slice of zarr array
-    existing = arr[insert_slices_tuple]
+    existing = await arr.getitem(insert_slices_tuple)
 
-    fill_value = arr.fill_value
+    fill_value = arr.metadata.fill_value
 
     if fill_value is None:
         # If no fill_value, assume all entries are valid → forbid any overwrite
@@ -61,25 +63,72 @@ def _check_data_size_fits_slice(data: np.ndarray, insert_slices: Mapping[int, sl
             )
 
 
+async def _insert_into_zarr_async(
+    path: str,
+    data: Mapping[str, np.ndarray],
+    insert_slices: Mapping[int, slice],
+    overwrite_check: bool,
+):
+    """Write every variable's slice concurrently.
+
+    Overwrite checks all complete before any write starts, so a conflict
+    leaves the store untouched.
+    """
+    names = list(data)
+    group = await zarr.api.asynchronous.open_group(store=path, mode="r+")
+    arrays = await asyncio.gather(*(group.getitem(name) for name in names))
+    slices_tuples = []
+    for name in names:
+        var_data = data[name]
+        _check_data_size_fits_slice(var_data, insert_slices)
+        slices_tuples.append(
+            tuple(
+                insert_slices.get(dim_index, slice(None, None))
+                for dim_index in range(len(var_data.shape))
+            )
+        )
+    if overwrite_check:
+        await asyncio.gather(
+            *(
+                _check_for_overwrite(arr, slices_tuple)
+                for arr, slices_tuple in zip(arrays, slices_tuples)
+            )
+        )
+    await asyncio.gather(
+        *(
+            arr.setitem(slices_tuple, data[name])
+            for name, arr, slices_tuple in zip(names, arrays, slices_tuples)
+        )
+    )
+
+
 def _insert_into_zarr(
     path: str,
     data: Mapping[str, np.ndarray],
     insert_slices: Mapping[int, slice],
     overwrite_check: bool = True,
 ):
-    root = zarr.open_group(path, mode="r+")
-    for var_name, var_data in data.items():
-        n_dims = len(var_data.shape)
-        # Array data is not loaded until index or slice is referenced
-        zarr_array = root[var_name]
-        insert_slices_tuple = tuple(
+    sync(_insert_into_zarr_async(path, data, insert_slices, overwrite_check))
+
+
+async def _read_from_zarr_async(
+    path: str,
+    names: Sequence[str],
+    insert_slices: Mapping[int, slice],
+) -> dict[str, np.ndarray]:
+    group = await zarr.api.asynchronous.open_group(store=path, mode="r")
+    arrays = await asyncio.gather(*(group.getitem(name) for name in names))
+    read_slices = [
+        tuple(
             insert_slices.get(dim_index, slice(None, None))
-            for dim_index in range(n_dims)
+            for dim_index in range(len(arr.shape))
         )
-        _check_data_size_fits_slice(var_data, insert_slices)
-        if overwrite_check:
-            _check_for_overwrite(zarr_array, insert_slices_tuple)
-        zarr_array[insert_slices_tuple] = var_data
+        for arr in arrays
+    ]
+    values = await asyncio.gather(
+        *(arr.getitem(slices_tuple) for arr, slices_tuple in zip(arrays, read_slices))
+    )
+    return dict(zip(names, values))
 
 
 def _read_from_zarr(
@@ -87,16 +136,7 @@ def _read_from_zarr(
     names: Sequence[str],
     insert_slices: Mapping[int, slice],
 ) -> dict[str, np.ndarray]:
-    root = zarr.open_group(path, mode="r")
-    data = {}
-    for var_name in names:
-        zarr_array = root[var_name]
-        read_slices = tuple(
-            insert_slices.get(dim_index, slice(None, None))
-            for dim_index in range(len(zarr_array.shape))
-        )
-        data[var_name] = zarr_array[read_slices]
-    return data
+    return sync(_read_from_zarr_async(path, names, insert_slices))
 
 
 def _initialize_zarr(
