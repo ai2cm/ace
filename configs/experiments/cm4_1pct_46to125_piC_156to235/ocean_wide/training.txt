@@ -62,3 +62,22 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|trained|high|jupiter
 # same 4-step unroll, same 75 epochs, no precorrector_optimization and no
 # corrector regularization.
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_hybridresid_clip|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[sst,thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
+
+# ocean_wide_uniformdt_hybridresid_noclip -- the diagnostic retry of the arm
+# cancelled at epoch 21, whose free-running rollout degraded 0.5011 (ep10) ->
+# 1.5874 (ep21) while the baseline improved to 0.0905.
+#
+# Troy's hybrid and full-residual runs both set max_grad_norm: None; ours ran
+# 1.0, and that is the ONLY optimizer-level difference from his setup (same
+# AdamW, lr 1e-4, weight_decay 0.01, no scheduler, no AMP, same EMA). With the
+# residual normalizer multiplying temperature-channel losses by 666-154914x, a
+# clip at 1.0 plausibly binds every step, which turns the update into the
+# unit-norm direction set by whichever channels dominate -- the deep levels.
+#
+# max_grad_norm is 1e9 rather than null on purpose: clip_grad_norm_ computes the
+# pre-clip norm as a by-product, and ace #1482 logs it as `grad_norm`, but only
+# when clipping is configured. 1e9 is far above any plausible norm, so no
+# clipping occurs while the norm is still measured -- and it tells us
+# retroactively whether 1.0 was binding in the cancelled run. Self-validating:
+# if the logged grad_norm ever approaches 1e9 the run was clipped after all.
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_hybridresid_noclip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1e9 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[sst,thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
