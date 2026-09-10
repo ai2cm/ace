@@ -2,6 +2,11 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 
 # status "pretraining" = pretraining still running; fill wandb_id and flip the
 # selected seed(s) to "train" after checkpoint selection
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|train|high|b200|4|400GiB|3|ai2/ace|seed=0
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|trained|high|b200|4|400GiB|3|ai2/ace|seed=0
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs1|ace2-cm4-atmos-noLSM||best_ckpt|pretraining|high|b200|4|400GiB|3|ai2/ace|seed=1
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|train|high|b200|4|400GiB|3|ai2/ace|seed=2
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|trained|high|b200|4|400GiB|3|ai2/ace|seed=2
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|train|high|b200|4|400GiB|3|ai2/ace|seed=2 stepper_training.corrector_loss.precorrector_optimization.names_and_prefixes='[PRATEsfc]'||4h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate_adv|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|train|high|b200|4|400GiB|3|ai2/ace|seed=2 stepper_training.corrector_loss.precorrector_optimization.names_and_prefixes='[PRATEsfc,tendency_of_total_water_path_due_to_advection]'||4h
