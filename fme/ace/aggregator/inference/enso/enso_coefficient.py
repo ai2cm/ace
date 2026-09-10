@@ -109,8 +109,8 @@ class EnsoCoefficientEvaluatorAggregator:
         # spatial shape of each variable, tracked on every process regardless of
         # whether any of its samples overlap the reference index, so that a
         # process without data can still take part in the cross-process reduction
-        self._target_shapes: dict[str, torch.Size] = {}
-        self._gen_shapes: dict[str, torch.Size] = {}
+        self._target_spatial_shapes: dict[str, torch.Size] = {}
+        self._gen_spatial_shapes: dict[str, torch.Size] = {}
         self._index_variance: list[torch.Tensor] = [
             torch.tensor(0.0, dtype=torch.float32, device=get_device())
             for _ in range(n_samples)
@@ -138,12 +138,12 @@ class EnsoCoefficientEvaluatorAggregator:
         assert time.sizes["sample"] == len(
             self._sample_index_series
         ), "number of index series must match number of samples"
-        for shapes, batch_data in (
-            (self._target_shapes, target_data),
-            (self._gen_shapes, gen_data),
+        for spatial_shapes, batch_data in (
+            (self._target_spatial_shapes, target_data),
+            (self._gen_spatial_shapes, gen_data),
         ):
             for name, tensor in batch_data.items():
-                shapes[name] = tensor.shape[2:]
+                spatial_shapes[name] = tensor.shape[2:]
         for i_sample, sample_index_series in enumerate(self._sample_index_series):
             if sample_index_series is not None:
                 sample_index_series_window = sample_index_series.sel(
@@ -199,15 +199,11 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _get_coefficients(self) -> tuple[TensorDict | None, TensorDict | None]:
         dist = Distributed.get_instance()
-        # Every process must make the same collective calls in the same order,
-        # including processes whose samples do not overlap the reference index.
-        # Whether a process has data is data-dependent, so making participation
-        # conditional on it would hang the processes that do have data.
         reduced_target_coefficients = reduce_sample_coefficients(
-            dist, self._compute_coefficients("target"), self._target_shapes
+            dist, self._compute_coefficients("target"), self._target_spatial_shapes
         )
         reduced_gen_coefficients = reduce_sample_coefficients(
-            dist, self._compute_coefficients("gen"), self._gen_shapes
+            dist, self._compute_coefficients("gen"), self._gen_spatial_shapes
         )
         return reduced_target_coefficients, reduced_gen_coefficients
 
@@ -408,7 +404,7 @@ def data_index_covariance(
 def reduce_sample_coefficients(
     dist: Distributed,
     sample_coefficients: list[TensorDict],
-    shapes: Mapping[str, torch.Size],
+    spatial_shapes: Mapping[str, torch.Size],
 ) -> TensorDict | None:
     """Average per-sample coefficients over the samples of all processes.
 
@@ -422,7 +418,7 @@ def reduce_sample_coefficients(
         dist: Distributed instance.
         sample_coefficients: Coefficients for each sample, empty for samples
             that do not overlap the reference index.
-        shapes: Spatial shape of each variable, known on every process.
+        spatial_shapes: Spatial shape of each variable, known on every process.
 
     Returns:
         Mean coefficients on the root process, or None if this is not the root
@@ -430,14 +426,14 @@ def reduce_sample_coefficients(
     """
     # sort for determinism: every process must stack its variables in the same
     # order for the collectives below to line up across processes
-    names = sorted(shapes)
+    names = sorted(spatial_shapes)
     if not names:
         # no batches have been recorded, which is true on all processes
         return None
     device = get_device()
     summed = torch.stack(
         [
-            torch.zeros(shapes[name], dtype=torch.float32, device=device)
+            torch.zeros(spatial_shapes[name], dtype=torch.float32, device=device)
             for name in names
         ],
         dim=0,

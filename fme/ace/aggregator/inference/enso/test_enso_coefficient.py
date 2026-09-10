@@ -344,7 +344,7 @@ def test_reduce_sample_coefficients_weights_by_sample_count():
     processes, so that a process with more of them carries more weight and
     samples without index overlap do not dilute the mean toward zero.
     """
-    shapes = {"a": torch.Size([2, 2]), "b": torch.Size([2, 2])}
+    spatial_shapes = {"a": torch.Size([2, 2]), "b": torch.Size([2, 2])}
     ones = torch.ones([2, 2], device=get_device())
     # this process: two samples overlapping the index, and one that does not
     sample_coefficients = [
@@ -359,7 +359,7 @@ def test_reduce_sample_coefficients_weights_by_sample_count():
     ]
     with _mock_distributed_singleton(_FakeDistributed(contributions)):
         reduced = reduce_sample_coefficients(
-            Distributed.get_instance(), sample_coefficients, shapes
+            Distributed.get_instance(), sample_coefficients, spatial_shapes
         )
     assert reduced is not None
     # (1.0 + 3.0 + 8.0) / 3 samples, not the (2.0 + 8.0) / 2 process-mean
@@ -372,13 +372,13 @@ def test_reduce_sample_coefficients_none_when_no_process_has_samples():
     """When no sample on any process overlaps the reference index, every
     process reports no coefficients rather than a mean of zeros.
     """
-    shapes = {"a": torch.Size([2, 2]), "b": torch.Size([2, 2])}
+    spatial_shapes = {"a": torch.Size([2, 2]), "b": torch.Size([2, 2])}
     contributions = [
         torch.zeros([2, 2, 2], device=get_device()),
         torch.tensor([0.0, 0.0], device=get_device()),
     ]
     with _mock_distributed_singleton(_FakeDistributed(contributions)):
         reduced = reduce_sample_coefficients(
-            Distributed.get_instance(), [{}, {}], shapes
+            Distributed.get_instance(), [{}, {}], spatial_shapes
         )
     assert reduced is None
