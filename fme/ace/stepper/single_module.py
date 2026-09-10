@@ -32,6 +32,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -1683,6 +1684,12 @@ class TrainStepper(
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
+        grad_norm = optimization.last_grad_norm
+        if grad_norm is not None:
+            # device matters: MetricsAggregator all_reduces every metric at the
+            # end of the epoch, and NCCL has no CPU backend, so a CPU tensor
+            # among the device-resident metrics aborts distributed training.
+            metrics["grad_norm"] = torch.tensor(grad_norm, device=get_device())
 
         gen_data = process_ensemble_prediction_generator_list(output_list)
 
