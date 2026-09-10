@@ -32,7 +32,7 @@ JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-hiro-patch"
 CONFIG_FILENAME="video_train.yaml"
 WORKSPACE="ai2/ace"
 CLUSTER="ai2/titan"
-N_GPUS=4                                   # config batch_size (16) must stay divisible by this
+N_GPUS=4                                   # config batch_size (64) must stay divisible by this
 WANDB_SECRET="wandb-api-key-ai2cm-sa"      # beaker secret name in WORKSPACE holding the W&B key
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +44,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run --allow-dirty \
     --name "$JOB_NAME" \
-    --description 'Spatiotemporal video PMD, TWO-BLOCK mode (fixed/flat kernel: r brownian_bridge, d independent), trained at the HiRO-ACE coarse patch size 16x16 instead of 44x72 -- removes patch-size as a confound in the two-block-vs-HiRO comparison. Batch size raised 4->16 (smaller tiles free up B200 memory). Same data, channels, backbone, and 200-epoch budget as the 20-patch two-block run. 5 channels, global, patch-trained. 4x B200 DDP on titan (weka). Fresh run.' \
+    --description 'Spatiotemporal video PMD, TWO-BLOCK mode (fixed/flat kernel: r brownian_bridge, d independent), trained at the HiRO-ACE coarse patch size 16x16 instead of 44x72 -- removes patch-size as a confound in the two-block-vs-HiRO comparison. Batch size 64 (first run at bs 16 used only ~9% of B200 memory). Same data, channels, backbone, and 200-epoch budget as the 20-patch two-block run. 5 channels, global, patch-trained. 4x B200 DDP on titan (weka). Fresh run.' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
