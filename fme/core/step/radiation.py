@@ -21,7 +21,7 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import CorrectorConfig, StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -238,6 +238,13 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def replace_ocean(self, ocean: OceanConfig | None):
         self.ocean = ocean
+
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        """Replace the corrector configuration with a new one."""
+        self.corrector = corrector
+
+    def get_corrector_config(self) -> CorrectorConfig:
+        return self.corrector
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean

@@ -14,7 +14,7 @@ from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
-from .step import StepABC, StepConfigABC, StepSelector
+from .step import CorrectorConfig, StepABC, StepConfigABC, StepSelector
 
 
 class MockStep(StepABC):
@@ -116,6 +116,12 @@ class MockStepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return None
+
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        raise NotImplementedError()
+
+    def get_corrector_config(self) -> CorrectorConfig:
+        raise NotImplementedError()
 
     def get_loss_normalizer(
         self,

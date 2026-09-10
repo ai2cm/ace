@@ -62,6 +62,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrector
 from fme.core.corrector.loss_config import (
     CorrectorLossConfig,
     CorrectorRegularizationConfig,
@@ -2144,6 +2145,36 @@ def validate_stepper_prescribed_prognostic_names(
     prescribed_prognostic_names."""
     config = _get_inner_single_module_config(stepper)
     assert config.prescribed_prognostic_names == expected
+
+
+def test_load_stepper_with_corrector_override(tmp_path: pathlib.Path):
+    """StepperOverrideConfig(corrector=...) replaces the serialized corrector in
+    both the config-only and the full-stepper load paths, keeping weights."""
+    in_names = ["a", "b"]
+    out_names = ["a", "b"]
+    stepper_path = tmp_path / "stepper"
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=[3, 4, 8],
+    )
+    saved = _get_inner_single_module_config(load_stepper(stepper_path)).corrector
+    assert saved == AtmosphereCorrectorConfig()
+
+    override = StepperOverrideConfig(
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"])
+    )
+    config = load_stepper_config_with_override(stepper_path, override)
+    assert config.get_corrector_config() == override.corrector
+
+    stepper = load_stepper(stepper_path, override)
+    assert _get_inner_single_module_config(stepper).corrector == override.corrector
+    assert stepper.config.get_corrector_config() == override.corrector
+    inner_step = stepper._step_obj._wrapped_step  # type: ignore[attr-defined]
+    assert isinstance(inner_step._corrector, AtmosphereCorrector)
 
 
 @pytest.mark.medium_duration

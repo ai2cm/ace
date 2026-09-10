@@ -740,6 +740,14 @@ class StepperConfig:
     def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
 
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        self.step.replace_corrector(corrector)
+
+    def get_corrector_config(self) -> AtmosphereCorrectorConfig | CorrectorSelector:
+        return self.step.get_corrector_config()
+
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint).
 
@@ -1041,6 +1049,25 @@ class Stepper:
             ocean: The new ocean model configuration or None.
         """
         self._config.replace_ocean(ocean)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        """
+        Replace the corrector with one built from a new configuration.
+
+        The step module is rebuilt from the updated config and reloaded from
+        the current step state, so network weights are unchanged.
+
+        Args:
+            corrector: The new corrector configuration.
+        """
+        self._config.replace_corrector(corrector)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
         )
@@ -1947,12 +1974,16 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        corrector: Corrector configuration to override that used in producing a
+            serialized stepper. Replaces the whole corrector configuration, so
+            every option to keep must be restated.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    corrector: Literal["keep"] | AtmosphereCorrectorConfig | CorrectorSelector = "keep"
 
 
 def load_stepper_config(
@@ -2045,6 +2076,12 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with a new "
+            "corrector configuration."
+        )
+        stepper.replace_corrector(override_config.corrector)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2084,3 +2121,9 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with a new "
+            "corrector configuration."
+        )
+        stepper_config.replace_corrector(override_config.corrector)

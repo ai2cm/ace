@@ -7,10 +7,14 @@ import dacite
 import torch
 from torch import nn
 
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry import CorrectorSelector
 from fme.core.registry.registry import Registry
+
+CorrectorConfig = AtmosphereCorrectorConfig | CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -106,6 +110,14 @@ class StepConfigABC(abc.ABC):
     @abc.abstractmethod
     def get_ocean(self) -> OceanConfig | None:
         pass
+
+    @abc.abstractmethod
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        """Replace the corrector configuration (e.g. when loading from checkpoint)."""
+
+    @abc.abstractmethod
+    def get_corrector_config(self) -> CorrectorConfig:
+        """The corrector configuration, the getter half of ``replace_corrector``."""
 
     @abc.abstractmethod
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
@@ -222,6 +234,13 @@ class StepSelector(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
+
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        self._step_config_instance.replace_corrector(corrector)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
+    def get_corrector_config(self) -> CorrectorConfig:
+        return self._step_config_instance.get_corrector_config()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)

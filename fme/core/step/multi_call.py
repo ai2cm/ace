@@ -13,7 +13,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import CorrectorConfig, StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -197,6 +197,12 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.wrapped_step.get_ocean()
+
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        self.wrapped_step.replace_corrector(corrector)
+
+    def get_corrector_config(self) -> CorrectorConfig:
+        return self.wrapped_step.get_corrector_config()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self.wrapped_step.replace_prescribed_prognostic_names(names)

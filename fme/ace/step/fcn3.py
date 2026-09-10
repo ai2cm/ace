@@ -25,7 +25,7 @@ from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import CorrectorConfig, StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -294,6 +294,13 @@ class FCN3StepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
+
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        """Replace the corrector configuration with a new one."""
+        self.corrector = corrector
+
+    def get_corrector_config(self) -> CorrectorConfig:
+        return self.corrector
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""

@@ -26,7 +26,7 @@ from fme.core.step.secondary_decoder import (
     SecondaryDecoderConfig,
 )
 from fme.core.step.single_module import step_with_adjustments
-from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.step.step import CorrectorConfig, StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -220,6 +220,13 @@ class SecondaryModuleStepConfig(StepConfigABC):
             ocean: The new ocean model configuration or None.
         """
         self.ocean = ocean
+
+    def replace_corrector(self, corrector: CorrectorConfig) -> None:
+        """Replace the corrector configuration with a new one."""
+        self.corrector = corrector
+
+    def get_corrector_config(self) -> CorrectorConfig:
+        return self.corrector
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
