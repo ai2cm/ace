@@ -116,6 +116,38 @@ def test_time_mean_aggregator_constant_offset():
     np.testing.assert_allclose(ds["correction_map-a"].values, -3.0)
 
 
+def test_signed_correction_mean_carries_sign_and_value():
+    # a delta of known negative sign: the signed mean carries it, the
+    # magnitude does not, in both the time-mean scalar and the per-step series
+    n_time = 3
+    ops = get_ops()
+    delta = {"a": constant_tensor(-0.25, n_time=n_time)}
+
+    time_mean = CorrectionDeltaTimeMeanAggregator(ops)
+    time_mean.record_batch(delta)
+    logs = time_mean.get_logs(label="")
+    assert logs["correction_mean/a"] == pytest.approx(-0.25)
+    assert logs["correction_magnitude/a"] == pytest.approx(0.25)
+
+    series = CorrectionDeltaMeanAggregator(ops, n_timesteps=n_time)
+    series.record_batch(delta, i_time_start=0)
+    ds = series.get_dataset()
+    np.testing.assert_allclose(ds["weighted_correction_mean-a"].values, -0.25)
+    np.testing.assert_allclose(ds["weighted_correction_magnitude-a"].values, 0.25)
+
+
+def test_signed_correction_mean_cancels_where_magnitude_does_not():
+    # a delta of alternating sign across cells has zero signed mean but a
+    # non-zero magnitude under uniform area weights
+    delta = constant_tensor(1.0)
+    delta[..., ::2] = -1.0
+    agg = CorrectionDeltaTimeMeanAggregator(get_ops())
+    agg.record_batch({"a": delta})
+    logs = agg.get_logs(label="")
+    assert logs["correction_mean/a"] == pytest.approx(0.0)
+    assert logs["correction_magnitude/a"] == pytest.approx(1.0)
+
+
 def test_time_mean_aggregator_masked_cells_do_not_poison_scalars():
     mask = torch.ones(NY, NX)
     mask[1, 1] = 0
@@ -300,12 +332,14 @@ def test_evaluator_aggregator_logs_correction_metrics(tmp_path):
 
     summary = agg.get_summary_logs()
     assert summary["time_mean_norm/correction_magnitude/a"] == pytest.approx(0.5)
+    assert summary["time_mean_norm/correction_mean/a"] == pytest.approx(0.5)
     assert "time_mean_norm/correction_magnitude/b" not in summary
     # existing metrics are unaffected
     assert "time_mean_norm/rmse/a" in summary
 
     series_keys = {key for log in inference_logs for key in log}
     assert "mean_norm/weighted_correction_magnitude/a" in series_keys
+    assert "mean_norm/weighted_correction_mean/a" in series_keys
     assert "mean_norm/weighted_correction_std/a" in series_keys
     assert "mean_norm/weighted_correction_magnitude/b" not in series_keys
     # the existing mean_norm series is still reported

@@ -101,9 +101,10 @@ class StepDiagnosticsMetricConfig:
 
     Parameters:
         correction_scalars: Whether to log the correction scalar metrics:
-            the time-mean ``correction_magnitude`` per variable, and (where
-            per-step time series are enabled) the per-step
-            ``weighted_correction_magnitude`` and ``weighted_correction_std``
+            the time-mean ``correction_magnitude`` and signed
+            ``correction_mean`` per variable, and (where per-step time series
+            are enabled) the per-step ``weighted_correction_magnitude``,
+            ``weighted_correction_mean`` and ``weighted_correction_std``
             series.
         correction_maps: Whether to log the signed time-mean normalized
             correction map image per variable.
@@ -350,6 +351,12 @@ class CorrectionDeltaTimeMeanAggregator:
                     .cpu()
                     .numpy()
                 )
+                # signed: the area-weighted mean of the time-mean delta, the
+                # global offset the corrector adds (e.g. the budget rescale
+                # on precipitation), which the magnitude alone cannot show
+                logs[f"correction_mean/{name}"] = float(
+                    self._ops.area_weighted_mean(signed[name], name=name).cpu().numpy()
+                )
             if self._record_maps:
                 logs[f"correction_map/{name}"] = plot_paneled_data(
                     [[signed[name].cpu().numpy()]],
@@ -383,8 +390,10 @@ class CorrectionDeltaMeanAggregator:
     """Granular sub-aggregator: per-forecast-step area-weighted series of the
     normalized correction, mirroring the ``mean_norm`` per-step structure:
     for each corrector-modified variable it tracks the area-weighted global
-    mean of the correction magnitude (``weighted_correction_magnitude``) and
-    the area-weighted spatial standard deviation of the signed correction
+    mean of the correction magnitude (``weighted_correction_magnitude``), the
+    area-weighted global mean of the signed correction
+    (``weighted_correction_mean``, mirroring ``weighted_mean_gen``) and the
+    area-weighted spatial standard deviation of the signed correction
     (``weighted_correction_std``, mirroring ``weighted_std_gen``). Silent
     (empty logs and dataset) until non-empty data is recorded.
     """
@@ -406,6 +415,13 @@ class CorrectionDeltaMeanAggregator:
                 device=device,
                 compute_metric=lambda tensors: self._ops.area_weighted_mean_dict(
                     {name: tensors[name].abs() for name in tensors}
+                ),
+                n_timesteps=n_timesteps,
+            ),
+            "weighted_correction_mean": AreaWeightedSingleTargetReducedMetric(
+                device=device,
+                compute_metric=lambda tensors: self._ops.area_weighted_mean_dict(
+                    tensors
                 ),
                 n_timesteps=n_timesteps,
             ),
