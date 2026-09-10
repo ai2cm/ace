@@ -41,12 +41,22 @@
 # 176x288x9 (~12x less activation memory per sample). A first run at bs 16
 # (wandb m5ew390r) sat at ~8.7% GPU memory (15.6 / 179 GiB) and ~11% SM
 # utilization -- badly under-fed, dominated by per-step / DDP-allreduce
-# overhead on the tiny tiles. bs 64 lands around ~60-70 GiB and cuts the
+# overhead on the tiny tiles. bs 64 -> GPU step batch of 16 (local) 64x64
+# patches, still a modest fraction of B200 memory, but cuts the
 # optimizer-step count 4x. This is a DELIBERATE second difference from the
 # 20-patch runs (not just patch size): fewer, larger steps per epoch.
 # lr kept at 1e-4 -- HiRO-ACE itself trains at bs 48 / lr 1e-4 on this same
-# data, so this is in-family, not an untested regime. num_data_workers
-# raised 2 -> 8 to keep the loader ahead of the bigger batches.
+# data, so this is in-family, not an untested regime.
+#
+# HOST/SHM NOTE: the video loader reads FULL-GLOBE windows per raw batch and
+# carves patches in-process (patched_batch_gen_from_paired_video_loader), so
+# the DataLoader's /dev/shm footprint scales with batch_size x
+# num_data_workers x prefetch, NOT with the tiny patch size. A first bs-64
+# attempt with num_data_workers 8 at --shared-memory 64GiB died with
+# "Unexpected bus error ... insufficient shared memory (shm)" /
+# "DataLoader worker exited unexpectedly" (wandb f9mij3xl). Fixed by
+# num_data_workers 4 (kept modest -- each worker already moves a full globe)
+# and run.sh --shared-memory 400GiB (titan nodes have 2.2TiB RAM).
 #
 # r_sigma_data_by_channel / d_sigma_data_by_channel are the same global-grid
 # calibration as the 20-patch run
@@ -103,7 +113,7 @@ train_data:
         start_time: "2013-01-02"
         stop_time: "2021-12-31"
   batch_size: 64  # global across ranks (4 GPUs x 16 samples/GPU); 20-patch runs use 4
-  num_data_workers: 8
+  num_data_workers: 4
   strict_ensemble: false
   lat_extent:
     start: -88
@@ -128,7 +138,7 @@ validation_data:
         start_time: "2022-01-01"
         stop_time: "2022-12-31"
   batch_size: 64
-  num_data_workers: 8
+  num_data_workers: 4
   strict_ensemble: false
   lat_extent:
     start: -88
@@ -153,7 +163,7 @@ test_data:
         start_time: "2023-01-01"
         stop_time: "2024-01-04"
   batch_size: 64
-  num_data_workers: 8
+  num_data_workers: 4
   strict_ensemble: false
   lat_extent:
     start: -88

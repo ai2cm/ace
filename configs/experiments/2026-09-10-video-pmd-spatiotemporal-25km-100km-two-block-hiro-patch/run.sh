@@ -21,6 +21,13 @@
 # the ai2cm entity set in video_train.yaml). Titan is all 8x B200 nodes, so
 # --gpus 4 gets 4x B200.
 #
+# --shared-memory is 400GiB, not the 64GiB the other PMD configs use: the
+# video loader reads full-globe windows per raw batch and patches them
+# in-process, so /dev/shm scales with batch_size (64) x num_data_workers
+# (4) x prefetch. bs 64 + 8 workers at 64GiB shm crashed with "Unexpected
+# bus error ... insufficient shared memory" (wandb f9mij3xl). Titan nodes
+# have 2.2TiB RAM, so 400GiB for a 4-GPU job is comfortable.
+#
 # Prereqs:
 #   pip install beaker-gantry
 #   also commit + push your code: gantry runs your pushed git commit.
@@ -50,7 +57,7 @@ gantry run --allow-dirty \
     --cluster "$CLUSTER" \
     --beaker-image "$DEPS_ONLY_IMAGE" \
     --gpus "$N_GPUS" \
-    --shared-memory 64GiB \
+    --shared-memory 400GiB \
     --budget ai2/atec-climate \
     --weka climate-default:/climate-default \
     --env-secret WANDB_API_KEY="$WANDB_SECRET" \
