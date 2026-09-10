@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from fme import get_device
 from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.distributed import Distributed
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
 
@@ -438,6 +439,138 @@ def test_regional_index_aggregator(variable_name):
     metric_name = f"test/{variable_name}_nino34_index_power_1_16yr"
     assert metric_name in logs
     assert isinstance(logs[metric_name], float)
+
+
+def _make_paired_agg(lat, lon):
+    lat_lon_coordinates = LatLonCoordinates(lat=lat, lon=lon)
+    region = LatLonRegion(
+        lat=lat_lon_coordinates.lat,
+        lon=lat_lon_coordinates.lon,
+        lat_bounds=(4.5, 6.5),
+        lon_bounds=(9.5, 11.5),
+    )
+    ops = lat_lon_coordinates.get_gridded_operations()
+    return PairedRegionalIndexAggregator(
+        target_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=ops.regional_area_weighted_mean,
+        ),
+        prediction_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=ops.regional_area_weighted_mean,
+        ),
+    )
+
+
+def _make_staggered_times(start_years, n_times):
+    """Per-sample time windows starting Jan 1 of each given year, so calendar
+    months stay aligned across samples while absolute years differ."""
+    arrays = []
+    for year in start_years:
+        start = cftime.datetime(year, 1, 1, calendar="noleap")
+        arrays.append(
+            xr.DataArray(
+                data=xr.date_range(
+                    start=start, periods=n_times, freq="6h", use_cftime=True
+                ).values,
+                dims=("time",),
+            )
+        )
+    return xr.concat(arrays, dim="sample")
+
+
+# six samples of two years each, no overlap: every calendar month's
+# climatology bin draws on 12 distinct years, above the ACC guard threshold
+_WIDE_START_YEARS = (2000, 2003, 2006, 2009, 2012, 2015)
+
+
+def _record_slow_oscillation(sign, start_years=_WIDE_START_YEARS):
+    """Build a paired aggregator and record two years per sample of a
+    spatially-uniform slow oscillation with sample-dependent amplitude, so
+    cross-sample variance exists at every lead month; the prediction is
+    sign * target. Each sample starts Jan 1 of its own start year."""
+    n_lat, n_lon = 10, 20
+    n_sample = len(start_years)
+    n_times = 365 * 4 * 2  # two years at 6-hourly (noleap)
+    time = _make_staggered_times(start_years, n_times)
+    hours = torch.arange(n_times, dtype=torch.float32) * 6
+    signal = torch.sin(2 * torch.pi * hours / (24 * 365 * 1.7))
+    amp = torch.linspace(0.5, 2.5, n_sample)[:, None]
+    series = amp * signal[None, :]
+    field = series[:, :, None, None].expand(n_sample, n_times, n_lat, n_lon)
+    coords = {
+        "lat": torch.arange(n_lat, dtype=torch.float32),
+        "lon": torch.arange(n_lon, dtype=torch.float32),
+    }
+    agg = _make_paired_agg(coords["lat"], coords["lon"])
+    agg.record_batch(
+        InferenceBatchData(
+            prediction={"sst": sign * field.clone(), **coords},
+            prediction_norm={},
+            target={"sst": field.clone(), **coords},
+            target_norm=None,
+            time=time,
+            i_time_start=0,
+        )
+    )
+    return agg
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_paired_aggregator_acc_by_lead(sign):
+    """Prediction equal to (or the negative of) the target must score an
+    anomaly correlation of +1 (or -1) at every lead."""
+    agg = _record_slow_oscillation(sign)
+    logs = agg._get_acc_logs()
+    for k in (3, 6, 9, 12):
+        assert logs[f"sst_nino34_acc_lead{k}"] == pytest.approx(sign, abs=1e-3)
+        assert logs[f"sst_nino34_target_anom_std_lead{k}"] > 0.0
+    assert logs["sst_nino34_acc_mean_lead1_12"] == pytest.approx(sign, abs=1e-3)
+    assert logs["sst_nino34_acc_min_years_per_month"] == float(
+        2 * len(_WIDE_START_YEARS)
+    )
+
+
+def test_paired_aggregator_acc_narrow_ic_span_yields_nan():
+    """With every initial condition in the same year, the in-window
+    climatology and across-sample anomaly variance are degenerate, so the
+    ACC metrics must be NaN while the diagnostics still report the regime."""
+    agg = _record_slow_oscillation(1.0, start_years=(2000, 2000, 2000, 2000))
+    logs = agg._get_acc_logs()
+    # each sample covers 2000-2001, so every calendar month sees 2 years
+    assert logs["sst_nino34_acc_min_years_per_month"] == 2.0
+    for k in (3, 6, 9, 12):
+        assert np.isnan(logs[f"sst_nino34_acc_lead{k}"])
+        assert np.isfinite(logs[f"sst_nino34_target_anom_std_lead{k}"])
+    assert np.isnan(logs["sst_nino34_acc_mean_lead1_12"])
+
+
+class _FakeDeviceTensor(torch.Tensor):
+    """Simulates a non-CPU tensor: .numpy() raises unless .cpu() is called
+    first, matching the behavior of CUDA tensors returned by NCCL gathers."""
+
+    def numpy(self, *args, **kwargs):
+        raise TypeError(
+            "can't convert fake device tensor to numpy; call Tensor.cpu() first"
+        )
+
+    def cpu(self, *args, **kwargs):
+        return super().cpu(*args, **kwargs).as_subclass(torch.Tensor)
+
+
+def test_paired_aggregator_acc_gathered_tensors_not_cpu_backed(monkeypatch):
+    """Regression test: gather_irregular returns device tensors under NCCL,
+    so _get_acc_logs must move gathered tensors to CPU before numpy
+    conversion."""
+
+    def fake_gather_irregular(self, tensor):
+        return [tensor.as_subclass(_FakeDeviceTensor)]
+
+    monkeypatch.setattr(Distributed, "gather_irregular", fake_gather_irregular)
+    agg = _record_slow_oscillation(1.0)
+    logs = agg._get_acc_logs()
+    for k in (3, 6, 9, 12):
+        assert logs[f"sst_nino34_acc_lead{k}"] == pytest.approx(1.0, abs=1e-3)
 
 
 @pytest.mark.parametrize(
