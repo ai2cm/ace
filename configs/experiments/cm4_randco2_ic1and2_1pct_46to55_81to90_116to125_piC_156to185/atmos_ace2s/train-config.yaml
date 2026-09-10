@@ -1,5 +1,5 @@
-# job_runner/uncoupled_train.sh configs/experiments/cm4_randco2_ic1and2_1pct_46to125_piC_156to235/atmos_ace2s . \
-#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+# job_runner/uncoupled_train.sh configs/experiments/cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185/atmos_ace2s .
+# --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
