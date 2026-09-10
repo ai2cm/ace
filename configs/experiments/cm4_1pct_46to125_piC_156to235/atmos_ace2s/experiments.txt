@@ -35,3 +35,5 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|trai
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GP9GNE4ZMZ5SDN3A2AK24R|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate|rs2|01M2542S4P1SS4FGB1YSQFZQ8K|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate_adv|rs2|01M25438RJNJ3GAP51GQSFD3C2|training|best_inference_ckpt|normal|--min-runtime 8h
