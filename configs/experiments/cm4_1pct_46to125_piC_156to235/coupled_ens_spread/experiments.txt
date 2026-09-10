@@ -1,0 +1,28 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# 5-member ensembles from one IC: each row is one member, distinguished only
+# by `seed`. results_dataset is pinned explicitly rather than left to the
+# script's `jobs[-1].result` lookup, because owc8 and mse both have failed
+# retry jobs in their history.
+
+# cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0-s0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=0|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0-s10|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=10|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0-s20|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=20|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0-s30|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=30|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0-s40|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=40|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter|||20GiB
+
+# cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0-s0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=0|01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0-s10|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=10|01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0-s20|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=20|01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0-s30|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=30|01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0-s40|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=40|01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter|||20GiB
+
+# cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0-s0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=0|01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0-s10|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=10|01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0-s20|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=20|01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0-s30|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=30|01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0-s40|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-60yr-ens|best_ckpt|normal|--min-runtime 3h|seed=40|01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter|||20GiB
+

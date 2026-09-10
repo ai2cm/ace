@@ -1,0 +1,51 @@
+# job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_ens_spread .
+#
+# Ensemble-spread evaluation of the coupled ocean-only finetunes. The coupled
+# evaluator has no n_ensemble_per_ic, so the ensemble is built as N
+# single-member runs at distinct `seed` values (atmosphere takes `seed`, ocean
+# `seed + 1`), combined offline. Seed is set per row in experiments.txt.
+#
+# 60 yr rather than the 200 yr of the single-member evals: forcing-induced
+# ocean spread saturates well inside that, and 5 members x 3 arms is the
+# budget that buys.
+experiment_dir: /results
+n_coupled_steps: 4380  # 60 noleap years at the 5-day ocean step
+coupled_steps_in_memory: 20  # must divide n_coupled_steps
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true  # sst only: the spatial spread map is the point
+    names:
+      - sst
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
