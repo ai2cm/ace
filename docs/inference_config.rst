@@ -118,8 +118,8 @@ The sub-configurations are:
 
    .. _initial-condition-examples:
 
-:class:`fme.ace.InitialConditionConfig` Examples
--------------------------------------------------
+Initial condition configuration examples
+----------------------------------------
 
 The ``start_indices`` attribute can be used to specify which initial conditions
 to use when multiple are present in the dataset (instead of using all available).

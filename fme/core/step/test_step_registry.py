@@ -92,20 +92,20 @@ class MockStepConfig(StepConfigABC):
         return []
 
     @property
-    def input_names(self) -> list[str]:
-        return self.in_names
+    def input_names(self) -> frozenset[str]:
+        return frozenset(self.in_names)
 
     @property
-    def output_names(self) -> list[str]:
-        return self.out_names
+    def output_names(self) -> frozenset[str]:
+        return frozenset(self.out_names)
 
     @property
-    def next_step_input_names(self):
+    def next_step_input_names(self) -> frozenset[str]:
         raise NotImplementedError()
 
     @property
     def loss_names(self) -> list[str]:
-        return self.out_names
+        return sorted(self.out_names)
 
     @property
     def n_ic_timesteps(self) -> int:

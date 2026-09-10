@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import cftime
@@ -79,6 +79,23 @@ def _insert_into_zarr(
         if overwrite_check:
             _check_for_overwrite(zarr_array, insert_slices_tuple)
         zarr_array[insert_slices_tuple] = var_data
+
+
+def _read_from_zarr(
+    path: str,
+    names: Sequence[str],
+    insert_slices: Mapping[int, slice],
+) -> dict[str, np.ndarray]:
+    root = zarr.open_group(path, mode="r")
+    data = {}
+    for var_name in names:
+        zarr_array = root[var_name]
+        read_slices = tuple(
+            insert_slices.get(dim_index, slice(None, None))
+            for dim_index in range(len(zarr_array.shape))
+        )
+        data[var_name] = zarr_array[read_slices]
+    return data
 
 
 def _initialize_zarr(
@@ -334,6 +351,36 @@ class ZarrWriter:
         _insert_into_zarr(
             self._path, write_data, indexed_position_slices, self._overwrite_check
         )
+
+    def read_batch(
+        self, names: Sequence[str], position_slices: Mapping[str, slice]
+    ) -> dict[str, np.ndarray]:
+        """
+        Reads a slice of the store back.
+
+        For writers that fold each batch into the values already on disk, such
+        as a running mean, rather than writing each position once.
+
+        Args:
+            names: Names of the arrays to read. These may be data variables or
+                non-dimension coordinates.
+            position_slices: Mapping of dimension name to the slice along that
+                dimension axis to read. Dimensions omitted are read whole.
+
+        Returns:
+            Mapping of name to the values read.
+
+        Raises:
+            RuntimeError: If the store has not been initialized yet.
+        """
+        if not self._store_initialized:
+            raise RuntimeError(
+                "Cannot read from the zarr store before it is initialized."
+            )
+        indexed_position_slices = {
+            self._dims.index(dim): position_slices[dim] for dim in position_slices
+        }
+        return _read_from_zarr(self._path, names, indexed_position_slices)
 
     def initialize_store(
         self, data_dtype: np.dtype | str, data_vars: list[str] | None = None

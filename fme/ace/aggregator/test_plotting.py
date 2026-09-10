@@ -1,8 +1,13 @@
+from datetime import datetime
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from .plotting import (
     _stitch_data_panels,
+    clamp_date_axis,
     fold_healpix_data,
     get_cmap_limits,
     plot_imshow,
@@ -110,3 +115,26 @@ def test_plot_paneled_data(shape, img_shape):
     fig = plot_paneled_data(data, diverging=True)
     assert fig.image is not None
     assert np.array_equal(fig.image.size, img_shape)
+
+
+def test_clamp_date_axis_allows_a_140_year_series_starting_at_year_0001():
+    """Regression: a long rollout starting at year 0001 must still draw.
+
+    Matplotlib rejects dates before year 0001, and autoscale pads the x limits
+    ~5% beyond the data -- 7 years on a 140-year series, which on a series
+    starting in year 0001 lands at year -6 and raises when the figure is drawn.
+    """
+    times = [datetime(year, 1, 15) for year in range(1, 141)]
+    values = np.arange(len(times), dtype=float)
+
+    fig, ax = plt.subplots(1, 1)
+    try:
+        ax.plot(times, values)
+        clamp_date_axis(ax)
+        # the failure is raised when the date locator runs, i.e. at draw time
+        fig.canvas.draw()
+        left, right = ax.get_xlim()
+        assert left == mdates.date2num(times[0])
+        assert right == mdates.date2num(times[-1])
+    finally:
+        plt.close(fig)

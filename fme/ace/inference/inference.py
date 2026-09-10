@@ -35,28 +35,17 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import (
-    exists,
-    is_local,
-    makedirs,
-    open_dataset_via_inter_filesystem_copy,
-)
+from fme.core.cloud import is_local, makedirs, open_dataset_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
-from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
-from fme.core.wandb import WandB
 
 from .evaluator import resolve_variable_metadata
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
-
-# Truncated to hour precision: segment start times in existing runs have always
-# been at least 6h apart, so finer precision would just add visual noise. We can
-# reconsider if this changes.
-SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
 
 
 @dataclasses.dataclass
@@ -471,9 +460,8 @@ def run_inference_from_config(config: InferenceConfig):
 def _get_initialization_time_and_timestep(
     config: InferenceConfig,
 ) -> tuple[cftime.datetime, datetime.timedelta]:
-    # Loading the stepper is expensive, but it is necessary to get the timestep
-    # and prognostic names. We only call this function once before the
-    # segmented loop starts to minimize the overhead.
+    # Loading the stepper is expensive, so this is called once per run; it gives
+    # the timestep and the prognostic names.
     stepper = config.load_stepper()
     initial_condition = get_initial_condition(
         config.initial_condition.get_dataset(),
@@ -486,92 +474,39 @@ def _get_initialization_time_and_timestep(
     return initialization_time, stepper.training_dataset_info.timestep
 
 
-def _get_segment_label(
-    initialization_time: cftime.datetime,
-    timestep: datetime.timedelta,
-    segment: int,
-    n_forward_steps: int,
-) -> str:
-    segment_length = n_forward_steps * timestep
-    current_start_time = initialization_time + segment * segment_length
-    current_label = current_start_time.strftime(SEGMENT_LABEL_FORMAT)
-
-    if segment > 0:
-        previous_start_time = initialization_time + (segment - 1) * segment_length
-        previous_label = previous_start_time.strftime(SEGMENT_LABEL_FORMAT)
-        if previous_label == current_label:
-            raise ValueError(
-                f"Consecutive segments have the same label ({previous_label!r} "
-                f"and {current_label!r}), meaning the current segment would "
-                f"overwrite the previous segment. Please open an issue on "
-                f"GitHub if having greater temporal precision in segmented run "
-                f"directory labels is an important use-case for you."
-            )
-
-    return current_label
-
-
 def run_segmented_inference(config: InferenceConfig, segments: int):
-    """Run inference in multiple segments.
+    """Run inference in multiple segments, each resumable after preemption.
 
     Args:
-        config: inference configuration to be used for each individual segment. The
-            provided initial condition configuration will only be used for the first
-            segment.
-        segments: total number of segments desired. Only missing segments will be run.
-
-    Note:
-        This is useful when running very long simulations or when saving a large
-        amount of output data to disk. The simulation outputs will be split across
-        multiple folders, each corresponding to one of the segments and labeled by
-        the start time of its first (or only) ensemble member.
+        config: Configuration for each segment. Its initial condition is used
+            only for the first segment; later segments start from the previous
+            segment's restart file.
+        segments: Total number of segments; only missing ones are run.
     """
-    if config.n_ensemble_per_ic > 1:
-        raise ValueError(
-            "Ensemble inference (n_ensemble_per_ic > 1) is not supported with "
-            "segmented inference. A segment's restart already carries the "
-            "broadcasted ensemble as its sample dimension, so later segments "
-            "cannot re-broadcast it consistently. Run with n_ensemble_per_ic=1, "
-            "or run a single non-segmented inference for ensemble runs."
-        )
-    # Configure top-level logging without a wandb run; each segment owns its run.
-    top_level_logging = dataclasses.replace(config.logging, log_to_wandb=False)
-    top_level_logging.configure_logging(
-        config.experiment_dir,
-        "inference_out.log",
-        config=dataclasses.asdict(config),
-        resumable=False,
-    )
-    logging.info(
-        f"Starting segmented inference with {segments} segments. "
-        f"Saving to {config.experiment_dir}."
-    )
     config_copy = copy.deepcopy(config)
-    original_wandb_name = os.environ.get("WANDB_NAME")
 
-    initialization_time, timestep = _get_initialization_time_and_timestep(config)
-    n_forward_steps = config.n_forward_steps
+    def _get_restart_paths(segment_dir: str) -> Sequence[str]:
+        return [os.path.join(segment_dir, "restart.nc")]
 
-    for segment in range(segments):
-        segment_label = _get_segment_label(
-            initialization_time,
-            timestep,
-            segment,
-            n_forward_steps,
-        )
-        segment_dir = os.path.join(config.experiment_dir, segment_label)
-        restart_path = os.path.join(segment_dir, "restart.nc")
-        if exists(restart_path):
-            logging.info(f"Skipping segment {segment} because it has already been run.")
-        else:
-            logging.info(f"Running segment {segment}.")
-            config_copy.experiment_dir = segment_dir
-            if original_wandb_name is not None:
-                os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
-            with GlobalTimer():
-                run_inference_from_config(config_copy)
-            # Finish this segment's run so the next segment starts a fresh one.
-            WandB.get_instance().finish()
+    def _run_segment(segment_dir: str) -> None:
+        config_copy.experiment_dir = segment_dir
+        run_inference_from_config(config_copy)
+
+    def _set_initial_condition(restart_paths: Sequence[str]) -> None:
+        (restart_path,) = restart_paths
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )
+
+    run_segments(
+        segments=segments,
+        experiment_dir=config.experiment_dir,
+        logging_config=config.logging,
+        logging_config_dict=dataclasses.asdict(config),
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
+        n_steps_per_segment=config.n_forward_steps,
+        get_initialization=lambda: _get_initialization_time_and_timestep(config),
+        get_restart_paths=_get_restart_paths,
+        run_segment=_run_segment,
+        set_initial_condition=_set_initial_condition,
+    )

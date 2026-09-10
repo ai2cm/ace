@@ -105,8 +105,8 @@ The top-level configuration is the :class:`fme.coupled.InferenceConfig` class.
    :show-inheritance:
    :noindex:
 
-Information for :class:`fme.coupled.CoupledInitialConditionConfig`
-------------------------------------------------------------------
+Initial condition configuration
+-------------------------------
 
 Initial condition configuration is similar to standalone ACE as documented in :ref:`inference config <inference-config>`,
 but in coupled configuration, `start_indices` correspond to the **ocean** initial condition file

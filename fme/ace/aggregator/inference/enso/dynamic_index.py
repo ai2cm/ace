@@ -15,7 +15,7 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict
 
-from ...plotting import plot_mean_and_samples
+from ...plotting import clamp_date_axis, plot_mean_and_samples
 from ..build_context import MetricBuildContext, MetricNotSupportedError
 from ..data import InferenceBatchData, MetricBuildResult
 from ..utils import (
@@ -177,6 +177,7 @@ class RegionalIndexAggregator:
                 ax.set_title("Nino3.4 Index")
                 ax.set_ylabel("K")
                 ax.legend()
+                clamp_date_axis(ax)
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index"] = fig
                 logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
@@ -272,6 +273,7 @@ class PairedRegionalIndexAggregator:
                 ax.set_title("Nino3.4 Index")
                 ax.set_ylabel("K")
                 ax.legend()
+                clamp_date_axis(ax)
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index"] = fig
                 logs[f"{sst_name}_nino34_index_std"] = _compute_sample_mean_std(
