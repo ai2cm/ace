@@ -31,7 +31,7 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # --- Arm A: stochastic Samudra (long-tail all_blocks rs0) ---
 # Inherits norm=layer, noise_embed_dim=32, conditioned_blocks=all_blocks from
 # the checkpoint config. No override needed.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
 
 # second seed held back for now (rssferbq, best_inference_error 0.09045)
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm4|rssferbq|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
@@ -50,25 +50,27 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm
 # switches the spread term on -- where an MSE pretrain has to change loss
 # family. That is Chris's "less of a shock", and it needs no architecture
 # change and no norm change (instance, as in James's lineage).
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
 
 # other two MAE seeds held back
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-cm4|0czxry0l|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|--min-runtime 8h
 
-# --- Arm C (HELD): Samudra-MAE with direct noise injection ---
+# --- Arm C: Samudra-MAE with direct noise injection ---
 # The other half of the question: does the MAE lineage also want an
 # ocean-INTERNAL noise source, on top of the forcing spread Arm B already has?
 # Arm A already tests noise injection on the CRPS-pretrained lineage, so this
 # is the second noise-injection arm and differs from it only in pretraining
 # loss -- the third question, not the first.
 #
-# DO NOT launch this row against ouivl7ev as written. That checkpoint is
+# READING CAVEAT (elynn's call 2026-09-10 to run it anyway): ouivl7ev is
 # norm=instance, and FiLM conditioning after an instance norm is the
 # configuration the round-2 stochastic arms deliberately moved away from (see
 # experiments/2026-08-28-layernorm-samudra-smoke): the conditioning magnitude
 # becomes a learned constant identical for every sample, so the block cannot
-# modulate how strongly it is conditioned. Reading this arm honestly needs a
-# layer-norm MAE pretrain first (1 seed, 75 epochs, ~52 h on ouivl7ev's
-# footprint); then point this row at that checkpoint and drop the norm caveat.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
+# modulate how strongly it is conditioned. So a WEAK result here does not
+# separate "noise injection does not help the MAE lineage" from "instance norm
+# handicapped the conditioning"; a STRONG result is informative either way.
+# Settling the weak case would need a layer-norm MAE pretrain (1 seed, 75
+# epochs, ~52 h) and a rerun against it.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|--min-runtime 8h
