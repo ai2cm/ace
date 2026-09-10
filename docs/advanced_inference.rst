@@ -106,7 +106,7 @@ out from training.
         experiment_dir=segment_20010101T00 \
         n_forward_steps=13148 \
         initial_condition.path=segment_19400101T00/restart.nc \
-        initial_condition.start_indices.n_initial_conditions=1 \
+        initial_condition.start_indices=null \
     "
     python -m fme.ace.inference config-inference.yaml --override $override
 
