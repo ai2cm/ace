@@ -1832,7 +1832,6 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
 def _make_single_module_step(
     input_dropout: VariableMaskingConfig | None,
     include_channel_mask_inputs: bool = False,
-    input_dropout_optimized_steps_only: bool = False,
 ) -> SingleModuleStep:
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
@@ -1852,7 +1851,6 @@ def _make_single_module_step(
                 normalization=normalization,
                 include_channel_mask_inputs=include_channel_mask_inputs,
                 input_dropout=input_dropout,
-                input_dropout_optimized_steps_only=input_dropout_optimized_steps_only,
             )
         ),
     )
@@ -1891,19 +1889,17 @@ def _capture_packed_step_input(
     return captured[0]
 
 
-@pytest.mark.parametrize("optimized_steps_only", [True, False])
-def test_input_dropout_optimized_steps_only_gates_on_grad(optimized_steps_only: bool):
-    """input_dropout_optimized_steps_only leaves no_grad steps unmasked.
+def test_input_dropout_skipped_when_grad_disabled():
+    """Input dropout applies only when gradients are enabled.
 
-    A non-optimized rollout step runs under torch.no_grad(). A rate-1.0
-    Bernoulli default drops every input channel, so the presence indicators
-    are deterministic: grad-enabled steps always see 0.0, while no_grad steps
-    see 1.0 only when the flag is set.
+    The training loops run non-optimized rollout steps under torch.no_grad().
+    A rate-1.0 Bernoulli default drops every input channel, so the presence
+    indicators are deterministic: a grad-enabled step sees 0.0, a no_grad
+    step sees 1.0.
     """
     step = _make_single_module_step(
         VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0)),
         include_channel_mask_inputs=True,
-        input_dropout_optimized_steps_only=optimized_steps_only,
     )
     step.module.torch_module.train()
     n_channels = len(step.in_packer.names)
@@ -1912,13 +1908,7 @@ def test_input_dropout_optimized_steps_only_gates_on_grad(optimized_steps_only: 
     assert (grad_packed[:, n_channels:] == 0.0).all()
 
     no_grad_packed = _capture_packed_step_input(step, grad_enabled=False)
-    expected = 1.0 if optimized_steps_only else 0.0
-    assert (no_grad_packed[:, n_channels:] == expected).all()
-
-
-def test_input_dropout_optimized_steps_only_without_dropout_raises():
-    with pytest.raises(ValueError, match="requires input_dropout"):
-        _make_single_module_step(None, input_dropout_optimized_steps_only=True)
+    assert (no_grad_packed[:, n_channels:] == 1.0).all()
 
 
 def _make_gmr_input_dropout_step(

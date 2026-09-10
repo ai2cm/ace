@@ -75,20 +75,13 @@ class SingleModuleStepConfig(StepConfigABC):
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
         input_dropout: Optional training-time input channel dropout. When set,
-            a random subset of input channels is zeroed during training, with
-            the same mask broadcast across the whole batch. Disabled during
-            inference (eval mode).
-        input_dropout_optimized_steps_only: When True, ``input_dropout`` is
-            applied only on forward steps that are being optimized, leaving
-            non-optimized rollout steps unmasked. Gated on gradients being
-            enabled, which is how the training loss loops mark an optimized
-            step, so any train-mode call made under ``torch.no_grad`` also
-            skips dropout. Which steps that excludes depends on the training
-            loop: with ``optimize_last_step_only`` it is every step but the
-            last, while in the coupled trainer a realm whose ``loss_weight``
-            is 0.0 has no optimized steps at all and so receives no input
-            dropout for the entire run. Requires ``input_dropout``. Defaults
-            to False (all training steps masked).
+            a random subset of input channels is zeroed on each optimized
+            training step, with the same mask broadcast across the whole
+            batch. Applied only when gradients are enabled, so non-optimized
+            rollout steps (e.g. all but the last under
+            ``optimize_last_step_only``, or the trailing steps under
+            ``evaluate_all_steps``) run unmasked, as does inference
+            (eval mode).
     """
 
     builder: ModuleSelector
@@ -106,15 +99,9 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
-    input_dropout_optimized_steps_only: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        if self.input_dropout_optimized_steps_only and self.input_dropout is None:
-            raise ValueError(
-                "input_dropout_optimized_steps_only requires input_dropout to be "
-                "set, but it is None."
-            )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -483,18 +470,17 @@ class SingleModuleStep(StepABC):
         Each ``step`` samples independently; the mask has no lifetime beyond
         the call. Returns ``None`` (no dropout) when input dropout is
         unconfigured or the module is in eval mode, so inference and
-        validation batches stay inert. Also returns ``None`` when
-        ``input_dropout_optimized_steps_only`` is set and gradients are
-        disabled, so non-optimized rollout steps stay unmasked.
+        validation batches stay inert. Also returns ``None`` when gradients
+        are disabled: the training loops run non-optimized rollout steps
+        under ``torch.no_grad()``, and those steps only exist to produce the
+        trajectory fed to the optimized step, so masking them would perturb
+        that trajectory in a way inference never sees.
         """
         if self._input_masking is None:
             return None
         if not self.module.torch_module.training:
             return None
-        if (
-            self._config.input_dropout_optimized_steps_only
-            and not torch.is_grad_enabled()
-        ):
+        if not torch.is_grad_enabled():
             return None
         names = self.in_packer.names
         mask = self._input_masking.sample_mask(get_device())

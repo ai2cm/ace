@@ -559,9 +559,7 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
         assert tensor.shape[2] == 3
 
 
-def _atmosphere_dropout_applied_per_step(
-    optimized_steps_only: bool,
-) -> list[bool]:
+def _atmosphere_dropout_applied_per_step() -> list[bool]:
     """Train one coupled batch; report whether dropout hit each atmosphere step.
 
     A rate-1.0 Bernoulli default drops every atmosphere input channel, so the
@@ -597,7 +595,6 @@ def _atmosphere_dropout_applied_per_step(
         atmosphere_input_dropout=VariableMaskingConfig(
             default=BernoulliMaskingConfig(rate=1.0)
         ),
-        atmosphere_input_dropout_optimized_steps_only=optimized_steps_only,
     )
     # modules is [*atmosphere.modules, *ocean.modules], so index 0 is the
     # atmosphere network that input_dropout is configured on.
@@ -623,19 +620,14 @@ def _atmosphere_dropout_applied_per_step(
     return [bool((packed == 0.0).all()) for packed in captured]
 
 
-@pytest.mark.parametrize("optimized_steps_only", [True, False])
-def test_coupled_input_dropout_optimized_steps_only(optimized_steps_only: bool):
-    """The coupled loop honors input_dropout_optimized_steps_only.
+def test_coupled_input_dropout_masks_only_optimized_steps():
+    """The coupled loop applies input dropout only on optimized steps.
 
-    The flag is implemented purely as a grad-state gate in the step, so the
-    coupled trainer inherits it only because it pulls each forward step from
-    the generator inside that step's grad context. This pins that: with
-    atmosphere optimize_last_step_only, the three non-optimized atmosphere
-    steps stay unmasked under the flag and only the last is masked, while the
-    default masks all four.
+    The gate is purely grad-state in the step, so the coupled trainer inherits
+    it only because it pulls each forward step from the generator inside that
+    step's grad context. This pins that: with atmosphere
+    optimize_last_step_only, the three non-optimized atmosphere steps stay
+    unmasked and only the last is masked.
     """
-    applied = _atmosphere_dropout_applied_per_step(optimized_steps_only)
-    if optimized_steps_only:
-        assert applied == [False, False, False, True]
-    else:
-        assert applied == [True, True, True, True]
+    applied = _atmosphere_dropout_applied_per_step()
+    assert applied == [False, False, False, True]

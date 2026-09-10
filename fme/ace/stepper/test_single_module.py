@@ -5,7 +5,6 @@ import os
 import pathlib
 import unittest
 import unittest.mock
-import warnings
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
 from typing import Literal
@@ -1286,7 +1285,6 @@ def _input_dropout_stepper_config(
     in_names: list[str],
     out_names: list[str],
     input_dropout: VariableMaskingConfig,
-    input_dropout_optimized_steps_only: bool = False,
 ) -> StepperConfig:
     return StepperConfig(
         step=StepSelector(
@@ -1301,9 +1299,6 @@ def _input_dropout_stepper_config(
                     normalization=trivial_network_and_loss_normalization(in_names),
                     include_channel_mask_inputs=True,
                     input_dropout=input_dropout,
-                    input_dropout_optimized_steps_only=(
-                        input_dropout_optimized_steps_only
-                    ),
                 )
             ),
         ),
@@ -1410,7 +1405,6 @@ def test_input_dropout_mask_sampled_per_forward_step():
 
 
 def _rollout_dropout_indicators(
-    optimized_steps_only: bool,
     optimize_last_step_only: bool,
     n_steps: int = 3,
 ) -> list[float]:
@@ -1429,7 +1423,6 @@ def _rollout_dropout_indicators(
                 )
             ]
         ),
-        input_dropout_optimized_steps_only=optimized_steps_only,
     )
     stepper = _get_train_stepper(
         config,
@@ -1464,64 +1457,20 @@ def _rollout_dropout_indicators(
     return indicators
 
 
-def _inert_dropout_warnings(
-    recorded: Iterable[warnings.WarningMessage],
-) -> list[str]:
-    """Recorded warnings about an input-dropout schedule that cannot take effect."""
-    return [
-        str(w.message)
-        for w in recorded
-        if "input_dropout_optimized_steps_only is set" in str(w.message)
-    ]
+def test_input_dropout_masks_only_optimized_step_with_last_step_only():
+    """Under optimize_last_step_only, only the final step is masked.
 
-
-@pytest.mark.parametrize("optimized_steps_only", [True, False])
-def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
-    optimized_steps_only: bool,
-):
-    """input_dropout_optimized_steps_only leaves non-optimized steps unmasked.
-
-    With optimize_last_step_only the training loop runs every step but the last
-    under no_grad, so with the flag set the two non-optimized steps see "a"
-    present (1.0) and only the final optimized step sees it dropped (0.0),
-    while the default masks every step. The schedule takes effect either way,
-    so no inert-schedule warning is emitted.
+    The training loop runs every step but the last under no_grad, so the two
+    non-optimized steps see "a" present (1.0) and only the final optimized
+    step sees it dropped (0.0).
     """
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        indicators = _rollout_dropout_indicators(
-            optimized_steps_only=optimized_steps_only,
-            optimize_last_step_only=True,
-        )
-    assert not _inert_dropout_warnings(recorded)
-    expected = [1.0, 1.0, 0.0] if optimized_steps_only else [0.0, 0.0, 0.0]
-    assert indicators == expected
+    indicators = _rollout_dropout_indicators(optimize_last_step_only=True)
+    assert indicators == [1.0, 1.0, 0.0]
 
 
-def test_input_dropout_optimized_steps_only_warns_without_last_step_only():
-    """Without optimize_last_step_only the flag is inert, and that is warned.
-
-    The rollout is exactly as long as the sampled loss length here, so no step
-    runs under no_grad and every step is still masked. Building the train
-    stepper warns rather than silently ignoring the setting.
-    """
-    with pytest.warns(UserWarning, match="every forward step of this rollout"):
-        indicators = _rollout_dropout_indicators(
-            optimized_steps_only=True,
-            optimize_last_step_only=False,
-        )
-    assert indicators == [0.0, 0.0, 0.0]
-
-
-def test_input_dropout_masks_every_step_without_optimized_steps_only():
-    """Plain input_dropout masks every step and has no schedule to warn about."""
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        indicators = _rollout_dropout_indicators(
-            optimized_steps_only=False,
-            optimize_last_step_only=False,
-        )
-    assert not _inert_dropout_warnings(recorded)
+def test_input_dropout_masks_every_optimized_step():
+    """Without optimize_last_step_only every rollout step is optimized and masked."""
+    indicators = _rollout_dropout_indicators(optimize_last_step_only=False)
     assert indicators == [0.0, 0.0, 0.0]
 
 
