@@ -78,7 +78,7 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs0|01M1MTATMCQBVZJ5B5G
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|01M1MTB5Q2WA4DXGSQ0BEH6HBZ|ran_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|01M1MTBHSTNQBBW548Q4K19J0M|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|01M1MTBHSTNQBBW548Q4K19J0M|ran_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_lr3e-5|rs0|01M1PVTNJYZQAHYFE36WFDVBZG|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -105,3 +105,73 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs1|01M26HXTJP12DXBZ
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs2|01M26HY6BBEZ6SH1T8C89EGP4E|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt_lr1e-4-ft|rs0|01M26HYHN9866J8B6CE59M4D8Y|training|best_inference_ckpt|normal|--min-runtime 8h
+
+
+# ---------------------------------------------------------------------------
+# Samudra-MAE two-stage evaluation waves (research
+# investigations/2026-09-03-ocean-loss-crps-vs-mae-samudrace, arm 3;
+# research tasks/2026-09-07-samudra-mae-full-two-stage).
+#
+# Two protocols per model, and they live in different directories, so this
+# takes two evaluate.sh invocations:
+#
+#   run_piC-200yr-var     -> ./evaluator-config-piC-200yr-var.yaml
+#                            (default config dir; no --config-dir)
+#   run_1pct-ic0001-130yr -> configs/experiments/cm4_eval/ocean/
+#                            (needs --config-dir configs/experiments/cm4_eval/ocean)
+#
+# A row whose config is absent from the active --config-dir is reported and
+# skipped, so the two waves do not collide -- but arm the intended set and
+# check the --dry-run job count anyway.
+#
+# Why piC-200yr-var rather than cm4_eval's piC-ic0151-200yr: the two are the
+# same 14598-step rollout and differ only in what is written. The -var config
+# additionally writes sst_monthly / ohc_monthly / vo_monthly_rapid (~4.5 GiB),
+# which is what the band-variance reduction needs, and band variance is this
+# investigation's deciding measurement. Using it puts these models on exactly
+# the rollout the MSE -ft seeds and the arm-2 L1 -ft seeds already ran, so one
+# reduction script covers every arm. The cm4_eval twin would give the ENSO/IPO
+# figures but no gridded sst, and could not be reduced alongside them.
+#
+# min_runtime: 3h for the piControl rollout (~65 min; the MSE wave's 1h expired
+# minutes short of the last step and lost two of three runs -- see research
+# experiments/2026-08-25-ohc-clip-ft-piC-200yr-variance), 2h for the shorter
+# 9488-step ramp.
+# ---------------------------------------------------------------------------
+
+# Stage 1 -- the 75-epoch L1 pretraining, NO 8-step finetune
+# (research experiments/2026-09-07-l1-pretrain-lr3e-4). This is the checkpoint
+# the coupled mae2_a2s / mae2n_a2s arms initialize their ocean from (rs2), so
+# these rollouts are the uncoupled reference for those arms. All three seeds,
+# for the seed spread every other arm in this family is read with.
+# The 1pct-130yr leg is the identical rollout the three MSE ocean_wide_ohc_clip
+# pretrained seeds ran on 2026-08-25, so that leg is a paired, one-variable
+# comparison. There is no MSE pretrained piControl rollout, so the piC leg is
+# read against the -ft rollouts instead.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs0|01M1ZFWPFZFM3QK02SXAKMA5JD|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs1|01M1ZFWZCHETM6X75178NQG948|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|01M1ZFX8JCFRTXXJBFDJ07DA3F|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs0|01M1ZFWPFZFM3QK02SXAKMA5JD|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs1|01M1ZFWZCHETM6X75178NQG948|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|01M1ZFX8JCFRTXXJBFDJ07DA3F|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+
+# Stage 2 -- the 8-step L1 finetune
+# (research experiments/2026-09-10-mae-pretrain-multistep-finetune), incl. the
+# one-seed lr1e-4 control. Parked at hold_ while the four jobs finish their 10
+# epochs; arm to run_ once each training result dataset is committed, since
+# mounting best_inference_ckpt.tar from a still-uploading dataset is the failure
+# the arm-2 wave had to hold rs2 for.
+# results_dataset is left empty so evaluate.sh resolves each job's LAST attempt
+# from beaker -- correct under autoResume, which these four carry.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs0|01M26HXDVRB22RK8Q9KBXB0V74|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs1|01M26HXTJP12DXBZX1CBZ3NE9Y|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs2|01M26HY6BBEZ6SH1T8C89EGP4E|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt_lr1e-4-ft|rs0|01M26HYHN9866J8B6CE59M4D8Y|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs0|01M26HXDVRB22RK8Q9KBXB0V74|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs1|01M26HXTJP12DXBZX1CBZ3NE9Y|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs2|01M26HY6BBEZ6SH1T8C89EGP4E|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt_lr1e-4-ft|rs0|01M26HYHN9866J8B6CE59M4D8Y|hold_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
