@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import gc
+import logging
 import os
 import pathlib
 import unittest
@@ -21,6 +22,7 @@ from fme.ace.aggregator import OneStepAggregatorConfig
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
+    PlusOne,
     save_plus_one_stepper,
     validate_stepper_config,
     validate_stepper_multi_call,
@@ -40,6 +42,7 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    _ParsedStepperState,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -1857,6 +1860,40 @@ def test_predict_with_prescribed_prognostic(
         torch.testing.assert_close(
             output.data[name], forcing_data.data[name][:, 1 : n_steps + 1]
         )
+
+
+def test_parsed_stepper_state_ensemble_warns_on_differing_stepper_config(caplog):
+    def get_parsed_state(derived_forcings: DerivedForcingsConfig):
+        config = StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="prebuilt", config={"module": PlusOne()}
+                        ),
+                        in_names=["a"],
+                        out_names=["a"],
+                        normalization=trivial_network_and_loss_normalization(["a"]),
+                    )
+                ),
+            ),
+            derived_forcings=derived_forcings,
+        )
+        stepper = config.get_stepper(get_dataset_info())
+        return _ParsedStepperState.from_state(stepper.get_state())
+
+    first = get_parsed_state(DerivedForcingsConfig())
+    second = get_parsed_state(
+        DerivedForcingsConfig(
+            insolation=InsolationConfig("DSWRFtoa", ValueConfig(1361.0))
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        parsed = _ParsedStepperState.ensemble([first, second], [0.5, 0.5])
+    assert "member 1 has a different derived_forcings" in caplog.text
+    assert parsed.config.derived_forcings == first.config.derived_forcings
+    assert parsed.config.step.type == "ensemble"
 
 
 def test_prescribed_prognostic_config_validation_raises():

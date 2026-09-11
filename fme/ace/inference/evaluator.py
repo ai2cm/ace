@@ -261,7 +261,8 @@ class InferenceEvaluatorConfig:
             self.forward_steps_in_memory,
             self.n_forward_steps,
         )
-        # checkpoint_path is a dacite union; this is the one place it is resolved.
+        # checkpoint_path is a dacite union, resolved by isinstance here and in
+        # load_stepper / load_stepper_config below.
         if isinstance(self.checkpoint_path, str):
             if self.checkpoint_weights is not None:
                 raise ValueError(
