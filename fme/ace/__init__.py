@@ -57,6 +57,7 @@ from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
     InferenceEvaluatorConfig,
     ValidationConfig,
+    WeightedCheckpointPath,
     run_evaluator_from_config,
 )
 from fme.ace.inference.inference import (

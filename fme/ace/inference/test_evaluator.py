@@ -30,6 +30,7 @@ from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
     ValidationConfig,
+    WeightedCheckpointPath,
     main,
     resolve_variable_metadata,
 )
@@ -419,12 +420,11 @@ def test_load_stepper_ensemble_rejects_incompatible_dataset_info(
         load_stepper_ensemble(paths, [0.5, 0.5])
 
 
-def _get_evaluator_config_dict(checkpoint_path, checkpoint_weights) -> dict:
+def _get_evaluator_config_dict(checkpoint_path) -> dict:
     return dict(
         experiment_dir="./some_dir",
         n_forward_steps=2,
         checkpoint_path=checkpoint_path,
-        checkpoint_weights=checkpoint_weights,
         logging=LoggingConfig(),
         loader=InferenceDataLoaderConfig(
             dataset=XarrayDataConfig(data_path="./some_data"),
@@ -437,40 +437,38 @@ def _get_evaluator_config_dict(checkpoint_path, checkpoint_weights) -> dict:
 
 
 @pytest.mark.parametrize(
-    "checkpoint_path, checkpoint_weights, expected_weights",
+    "checkpoint_path, expected",
     [
-        pytest.param("./a", None, None, id="single"),
-        pytest.param(["./a", "./b"], None, [0.5, 0.5], id="list_default_weights"),
-        pytest.param(["./a", "./b"], [1.0, -0.5], [1.0, -0.5], id="list_weights"),
+        pytest.param("./a", "./a", id="single"),
+        pytest.param(
+            [{"path": "./a", "weight": 1.0}, {"path": "./b", "weight": -0.5}],
+            [WeightedCheckpointPath("./a", 1.0), WeightedCheckpointPath("./b", -0.5)],
+            id="weighted_list",
+        ),
     ],
 )
-def test_evaluator_config_checkpoint_weights(
-    checkpoint_path, checkpoint_weights, expected_weights
-):
+def test_evaluator_config_checkpoint_path(checkpoint_path, expected):
     config = dacite.from_dict(
         data_class=InferenceEvaluatorConfig,
-        data=_get_evaluator_config_dict(checkpoint_path, checkpoint_weights),
+        data=_get_evaluator_config_dict(checkpoint_path),
         config=dacite.Config(strict=True),
     )
-    assert config.checkpoint_path == checkpoint_path
-    assert config.checkpoint_weights == expected_weights
+    assert config.checkpoint_path == expected
 
 
 @pytest.mark.parametrize(
-    "checkpoint_path, checkpoint_weights",
+    "checkpoint_path",
     [
-        pytest.param("./a", [1.0], id="weights_with_single_path"),
-        pytest.param(["./a", "./b"], [1.0], id="weight_count_mismatch"),
-        pytest.param([], None, id="empty_list"),
+        pytest.param([], id="empty_list"),
+        pytest.param(["./a", "./b"], id="unweighted_list"),
+        pytest.param([{"path": "./a"}], id="missing_weight"),
     ],
 )
-def test_evaluator_config_rejects_bad_checkpoint_weights(
-    checkpoint_path, checkpoint_weights
-):
-    with pytest.raises(ValueError):
+def test_evaluator_config_rejects_bad_checkpoint_path(checkpoint_path):
+    with pytest.raises((ValueError, dacite.DaciteError)):
         dacite.from_dict(
             data_class=InferenceEvaluatorConfig,
-            data=_get_evaluator_config_dict(checkpoint_path, checkpoint_weights),
+            data=_get_evaluator_config_dict(checkpoint_path),
             config=dacite.Config(strict=True),
         )
 
@@ -561,9 +559,14 @@ def inference_helper(
     allow_incompatible_dataset_info: bool = True,  # stepper checkpoint has arbitrary info  # noqa: E501
     checkpoint_weights: list[float] | None = None,
 ):
-    checkpoint_path: str | list[str]
+    checkpoint_path: str | list[WeightedCheckpointPath]
     if isinstance(stepper_path, list):
-        checkpoint_path = [str(path) for path in stepper_path]
+        if checkpoint_weights is None:
+            checkpoint_weights = [1.0 / len(stepper_path)] * len(stepper_path)
+        checkpoint_path = [
+            WeightedCheckpointPath(str(path), weight)
+            for path, weight in zip(stepper_path, checkpoint_weights)
+        ]
     else:
         checkpoint_path = str(stepper_path)
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
@@ -600,7 +603,6 @@ def inference_helper(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=checkpoint_path,
-        checkpoint_weights=checkpoint_weights,
         logging=LoggingConfig(
             log_to_screen=True,
             log_to_file=False,
