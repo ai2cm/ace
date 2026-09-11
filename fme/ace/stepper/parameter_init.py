@@ -9,7 +9,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.training_history import TrainingHistory
-from fme.core.weight_ops import overwrite_weights
+from fme.core.weight_ops import overwrite_weights, prefix_submodule
 from fme.core.wildcard import apply_by_exclude, apply_by_include, wildcard_match
 
 Weights = list[Mapping[str, Any]]
@@ -106,6 +106,19 @@ class ParameterInitializationConfig:
     Parameters:
         weights_path: path to a Stepper checkpoint
             containing weights to load
+        weights_submodule: dotted name of the submodule of the module being
+            initialized that the checkpoint's module corresponds to. Use it
+            when the destination wraps the checkpoint's architecture, so the
+            checkpoint's parameters live one level down: initializing a
+            noise-conditioned module from a deterministic checkpoint of the
+            same network needs ``conditional_model``, since
+            ``NoiseConditionedModel`` holds the wrapped network under that
+            name. Every loaded parameter name is prefixed with it before being
+            matched against the destination, so ``parameters`` exclude and
+            frozen patterns are written against destination names either way.
+            Parameters the destination has and the checkpoint does not (the
+            zero-initialized conditioning layers, for instance) keep their
+            initialized values.
         parameters: list of ParameterClassification objects, each specifying
             whether parameters are excluded from initialization or frozen.
             By default modules are unfrozen and all parameters are included.
@@ -120,6 +133,7 @@ class ParameterInitializationConfig:
     """
 
     weights_path: str | None = None
+    weights_submodule: str | None = None
     parameters: list[ParameterClassification] = dataclasses.field(default_factory=list)
     alpha: float = 0.0
     beta: float = 0.0
@@ -127,6 +141,17 @@ class ParameterInitializationConfig:
     frozen_parameters: FrozenParameterConfig | None = None
 
     def __post_init__(self):
+        if self.weights_submodule is not None:
+            if self.weights_path is None:
+                raise ValueError(
+                    "weights_submodule has no effect without weights_path; "
+                    "it renames the parameters loaded from that checkpoint."
+                )
+            if not self.weights_submodule or self.weights_submodule.endswith("."):
+                raise ValueError(
+                    "weights_submodule must be a dotted submodule name without a "
+                    f"trailing '.', got {self.weights_submodule!r}"
+                )
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
             if len(self.parameters) > 0:
                 raise ValueError(
@@ -154,6 +179,15 @@ class ParameterInitializationConfig:
         return ParameterInitializer(
             config=self, load_weights_and_history=load_weights_and_history
         )
+
+
+def _maybe_prefixed(
+    state_dict: Mapping[str, Any], submodule: str | None
+) -> Mapping[str, Any]:
+    """``prefix_submodule`` when a submodule is configured, else a passthrough."""
+    if submodule is None:
+        return state_dict
+    return prefix_submodule(state_dict, submodule)
 
 
 def null_weights_and_history(*_) -> StepperWeightsAndHistory:
@@ -211,7 +245,7 @@ class ParameterInitializer:
                 modules, self.base_weights, filled_parameters
             ):
                 overwrite_weights(
-                    state_dict,
+                    _maybe_prefixed(state_dict, self.config.weights_submodule),
                     module,
                     exclude_parameters=classification.exclude,
                 )

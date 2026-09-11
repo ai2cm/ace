@@ -77,6 +77,9 @@ class CopyWeightsConfig:
         return module
 
 
+_WRAPPER_PREFIX = "module."
+
+
 def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
     """
     Remove the leading "module." from the keys of a state dict.
@@ -86,9 +89,34 @@ def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
     "module." to the keys of the state dict.
     """
     return {
-        k[len("module.") :] if k.startswith("module.") else k: v
+        k[len(_WRAPPER_PREFIX) :] if k.startswith(_WRAPPER_PREFIX) else k: v
         for k, v in state_dict.items()
     }
+
+
+def prefix_submodule(
+    state_dict: Mapping[str, Any], submodule: str
+) -> Mapping[str, Any]:
+    """
+    Rename a state dict onto a submodule of the module it will be loaded into.
+
+    Used when the destination module wraps the architecture the state dict came
+    from, so every parameter lives one level deeper: loading a deterministic
+    checkpoint into a ``NoiseConditionedModel`` of the same network needs
+    ``submodule="conditional_model"``.
+
+    The leading "module." that ``strip_leading_module`` describes names the
+    DistributedDataParallel or DummyWrapper layer rather than a submodule of
+    the network, so the new name is inserted after it and not before it.
+    """
+    renamed = {}
+    for name, value in state_dict.items():
+        if name.startswith(_WRAPPER_PREFIX):
+            inner = name[len(_WRAPPER_PREFIX) :]
+            renamed[f"{_WRAPPER_PREFIX}{submodule}.{inner}"] = value
+        else:
+            renamed[f"{submodule}.{name}"] = value
+    return renamed
 
 
 def overwrite_weights(
@@ -117,11 +145,7 @@ def overwrite_weights(
     from_names = set(from_state.keys())
     to_names = set(to_module.state_dict().keys())
     if not from_names.issubset(to_names):
-        missing_parameters = from_names - to_names
-        raise ValueError(
-            f"Dest module is missing parameters {missing_parameters}, "
-            "which is not allowed"
-        )
+        raise ValueError(_missing_parameters_message(from_names, to_names))
     for name in from_names:
         if any(wildcard_match(pattern, name) for pattern in exclude_parameters):
             continue
@@ -130,6 +154,41 @@ def overwrite_weights(
             overwrite_weight_initial_slice(to_module, name, from_param)
         except AttributeError:  # if state is not a parameter
             pass
+
+
+def _missing_parameters_message(from_names: set[str], to_names: set[str]) -> str:
+    """Explain a failed source-is-subset-of-dest check, with a fix if there is one.
+
+    Only called on the failure path, so the extra work costs nothing in the
+    normal case.
+    """
+    missing = from_names - to_names
+    lines = [
+        f"Dest module is missing {len(missing)} of the source's "
+        f"{len(from_names)} parameters, which is not allowed.",
+    ]
+    # Candidate submodules are compared inside the DDP/DummyWrapper layer, since
+    # that leading "module." is not a submodule of the network (see
+    # strip_leading_module) and prefix_submodule inserts after it.
+    inner_from = set(strip_leading_module(dict.fromkeys(from_names)))
+    inner_to = set(strip_leading_module(dict.fromkeys(to_names)))
+    prefixes = {name.split(".", 1)[0] for name in inner_to if "." in name}
+    fixes = sorted(
+        prefix
+        for prefix in prefixes
+        if {f"{prefix}.{name}" for name in inner_from}.issubset(inner_to)
+    )
+    if fixes:
+        lines.append(
+            "The destination appears to wrap the source: prefixing every source "
+            f"name with {' or '.join(repr(f + '.') for f in fixes)} makes them "
+            "match. If the destination wraps the checkpoint's architecture (for "
+            "example a NoiseConditionedModel built from a deterministic "
+            "checkpoint), set ParameterInitializationConfig.weights_submodule to "
+            f"{fixes[0]!r}."
+        )
+    lines.append(f"Missing: {sorted(missing)}")
+    return " ".join(lines)
 
 
 def overwrite_weight_initial_slice(module, name, from_param):
