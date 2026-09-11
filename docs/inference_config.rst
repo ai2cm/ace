@@ -38,6 +38,8 @@ While netCDFs files are specified in the example, zarr stores are also compatibl
 specifying the parent folder containing the zarr store directory as the ``path``, setting ``engine`` to "zarr", and setting ``file_pattern`` to "<zarr_store_name>.zarr"
 in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for more information.
 
+.. _example-yaml-configuration:
+
 Example YAML Configuration
 ---------------------------
 
@@ -118,8 +120,8 @@ The sub-configurations are:
 
    .. _initial-condition-examples:
 
-:class:`fme.ace.InitialConditionConfig` Examples
--------------------------------------------------
+Initial condition configuration examples
+----------------------------------------
 
 The ``start_indices`` attribute can be used to specify which initial conditions
 to use when multiple are present in the dataset (instead of using all available).

@@ -308,6 +308,28 @@ def test_ZarrWriter_can_overwrite(tmp_path):
     assert np.all(ds["var"][:2] == 0.0)
 
 
+def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
+    """A read-modify-write writer must see back exactly what it wrote."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    batch_data = {"var": np.random.rand(2, NLAT, NLON)}
+    writer.record_batch(data=batch_data, position_slices={"time": slice(2, 4)})
+
+    read = writer.read_batch(["var"], position_slices={"time": slice(2, 4)})
+    np.testing.assert_allclose(read["var"], batch_data["var"], rtol=1e-6)
+    # the untouched slice is still the fill value, and reads whole when the
+    # dimension is omitted
+    read_all = writer.read_batch(["var"], position_slices={})
+    assert read_all["var"].shape == (4, NLAT, NLON)
+    np.testing.assert_array_equal(read_all["var"][:2], 0.0)
+
+
+def test_ZarrWriter_read_batch_before_initialization_errors(tmp_path):
+    writer = _create_writer(os.path.join(tmp_path, "test.zarr"), n_times=4, chunks={})
+    with pytest.raises(RuntimeError, match="before it is initialized"):
+        writer.read_batch(["var"], position_slices={"time": slice(0, 2)})
+
+
 def test_ZarrWriter_allow_existing(tmp_path):
     path = os.path.join(tmp_path, "test.zarr")
     batch_data = {

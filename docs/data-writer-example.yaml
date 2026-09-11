@@ -1,0 +1,15 @@
+save_prediction_files: false
+save_monthly_files: false
+files:
+  - label: "monthly_mean"
+    time_coarsen:
+      method: "monthly_mean"
+    format:
+      name: "netcdf"
+  - label: "daily_mean"
+    names: ["total_water_path", "TMP2m"]
+    time_coarsen:
+      method: "block_mean"
+      coarsen_factor: 4
+    format:
+      name: "zarr"
