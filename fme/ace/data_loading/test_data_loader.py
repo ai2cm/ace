@@ -397,6 +397,65 @@ def test_xarray_loader_labels(tmp_path, tmp_path_factory):
         raise AssertionError("Did not see unlabelled data in batches")
 
 
+def _labelled_loader_config(tmp_path, tmp_path_factory, label_dropout_rate):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(other_path, filename="other_source.nc")
+    return DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(
+                    data_path=tmp_path, file_pattern="data*.nc", labels=["labelled"]
+                ),
+                XarrayDataConfig(
+                    data_path=other_path,
+                    file_pattern="other_source*.nc",
+                    n_repeats=1,
+                    labels=[],
+                ),
+            ]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        label_dropout_rate=label_dropout_rate,
+    )
+
+
+def test_xarray_loader_label_dropout_train_withholds_all_labels(
+    tmp_path, tmp_path_factory
+):
+    """With label_dropout_rate=1.0 the training loader emits only zeroed labels."""
+    config = _labelled_loader_config(tmp_path, tmp_path_factory, label_dropout_rate=1.0)
+    requirements = DataRequirements(["foo"], 2)
+    torch.manual_seed(0)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    for batch in data.loader:
+        assert batch.labels is not None
+        assert batch.labels.names == ["labelled"]
+        assert torch.sum(batch.labels.tensor) == 0
+
+
+def test_xarray_loader_label_dropout_disabled_on_validation(tmp_path, tmp_path_factory):
+    """label_dropout_rate is ignored on the validation path (train=False)."""
+    config = _labelled_loader_config(tmp_path, tmp_path_factory, label_dropout_rate=1.0)
+    requirements = DataRequirements(["foo"], 2)
+    torch.manual_seed(0)
+    data = get_gridded_data(config, False, requirements)  # type: ignore
+    seen_labelled = False
+    for batch in data.loader:
+        assert batch.labels is not None
+        if torch.sum(batch.labels.tensor) > 0:
+            seen_labelled = True
+    assert seen_labelled, "validation labels must be preserved despite dropout rate"
+
+
+def test_data_loader_config_rejects_label_dropout_out_of_range(
+    tmp_path, tmp_path_factory
+):
+    with pytest.raises(ValueError, match="label_dropout_rate must be in"):
+        _labelled_loader_config(tmp_path, tmp_path_factory, label_dropout_rate=1.5)
+
+
 def test_xarray_loader_using_merged_dataset_errors_if_different_time(
     tmp_path, tmp_path_factory
 ):
