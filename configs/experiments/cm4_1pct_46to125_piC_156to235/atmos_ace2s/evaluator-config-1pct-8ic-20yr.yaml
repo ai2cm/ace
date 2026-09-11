@@ -4,7 +4,7 @@
 # of experiments.txt overrides it through `stepper_override.corrector`.
 experiment_dir: /results
 n_forward_steps: 29200
-forward_steps_in_memory: 40
+forward_steps_in_memory: 80
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 1
 logging:
@@ -35,10 +35,14 @@ loader:
   num_data_workers: 4
 aggregator:
   zonal_mean:
-    zonal_mean_max_size: 4096
+    enabled: false
+  power_spectrum:
+     enabled: false
+  enso_coefficient:
+    enabled: false
   step_diagnostics:
     correction_scalars: true
     correction_maps: false
 data_writer:
   save_prediction_files: false
-  save_monthly_files: true
+  save_monthly_files: false
