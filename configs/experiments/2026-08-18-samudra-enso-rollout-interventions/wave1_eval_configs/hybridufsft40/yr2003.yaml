@@ -1,0 +1,37 @@
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_forward_steps: 128
+forward_steps_in_memory: 8
+loader:
+  num_data_workers: 2
+  dataset:
+    data_path: gs://vcm-ml-intermediate
+    file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+    engine: zarr
+  start_indices:
+    times:
+      - '2003-01-01T09:00:00'
+      - '2003-02-05T09:00:00'
+      - '2003-03-02T09:00:00'
+      - '2003-04-01T09:00:00'
+      - '2003-05-01T09:00:00'
+      - '2003-06-05T09:00:00'
+      - '2003-07-05T09:00:00'
+      - '2003-08-04T09:00:00'
+      - '2003-09-03T09:00:00'
+      - '2003-10-03T09:00:00'
+      - '2003-11-02T09:00:00'
+      - '2003-12-02T09:00:00'
+data_writer:
+  save_prediction_files: true
+  names:
+  - sst
+  - thetao_0
+aggregator:
+  log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
