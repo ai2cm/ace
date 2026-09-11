@@ -5,6 +5,7 @@ import numpy as np
 import xarray as xr
 from matplotlib.colors import Colormap
 from matplotlib.figure import Figure
+from matplotlib.ticker import NullLocator
 
 from fme.core.wandb import Image, WandB
 
@@ -231,3 +232,65 @@ def plot_mean_and_samples(
                 linestyle="-.",
                 marker="x",
             )
+
+
+PERIOD_AXIS_TICKS_YEARS = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0)
+
+
+def plot_power_spectrum_by_period(
+    ax: Any,
+    freqs_per_year: np.ndarray,
+    power_by_sample: np.ndarray,
+    mean_label: str,
+    color: str = "cornflowerblue",
+    plot_samples: bool = True,
+):
+    """Plot a variance-preserving power spectrum against period.
+
+    The power spectral density is converted to power per octave, ``ln(2) * f *
+    psd(f)``, so that area under the curve is proportional to variance on the
+    logarithmic period axis used by :func:`format_period_axis`. Each sample is
+    drawn as a faint line and their mean as a heavy one.
+
+    Args:
+        ax: The axes to plot on.
+        freqs_per_year: Frequencies in cycles per year.
+        power_by_sample: Power spectral density of shape (sample, frequency).
+        mean_label: Legend label for the sample-mean line.
+        color: Color for all lines.
+        plot_samples: Whether to draw the individual samples.
+    """
+    resolved = freqs_per_year > 0.0
+    periods = 1.0 / freqs_per_year[resolved]
+    power_per_octave = (
+        power_by_sample[:, resolved] * freqs_per_year[resolved] * np.log(2.0)
+    )
+    if plot_samples:
+        for sample_power in power_per_octave:
+            ax.plot(periods, sample_power, color=color, alpha=0.35, linewidth=0.75)
+    ax.plot(
+        periods,
+        power_per_octave.mean(axis=0),
+        color=color,
+        label=mean_label,
+        linewidth=2.0,
+    )
+
+
+def format_period_axis(
+    ax: Any,
+    max_period_years: float,
+    min_period_years: float = 0.5,
+):
+    """Format an axes' x axis as a period in years on a base-2 log scale."""
+    max_period_years = max(max_period_years, 2 * min_period_years)
+    ax.set_xscale("log", base=2)
+    ax.set_xlim(min_period_years, max_period_years)
+    ticks = [
+        tick
+        for tick in PERIOD_AXIS_TICKS_YEARS
+        if min_period_years <= tick <= max_period_years
+    ]
+    ax.set_xticks(ticks, labels=[f"{tick:.1f}" for tick in ticks])
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.set_xlabel("Period [years]")

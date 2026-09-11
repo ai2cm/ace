@@ -15,14 +15,19 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict
 
-from ...plotting import clamp_date_axis, plot_mean_and_samples
+from ...plotting import (
+    clamp_date_axis,
+    format_period_axis,
+    plot_mean_and_samples,
+    plot_power_spectrum_by_period,
+)
 from ..build_context import MetricBuildContext, MetricNotSupportedError
 from ..data import InferenceBatchData, MetricBuildResult
 from ..utils import (
     SAMPLE_DIM,
     TIME_DIM,
     LatLonRegion,
-    _calculate_sample_average_power_spectrum,
+    _calculate_power_spectrum_by_sample,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
     compute_psd_band_power,
@@ -31,6 +36,15 @@ from ..utils import (
 )
 
 SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
+MAX_PLOTTED_PERIOD_YEARS = 16.0
+
+
+def _max_plotted_period(freqs_per_year: np.ndarray) -> float:
+    """The longest period to show, capped at the period ENSO spectra are cut at."""
+    resolved = freqs_per_year[freqs_per_year > 0.0]
+    if resolved.size == 0:
+        return MAX_PLOTTED_PERIOD_YEARS
+    return min(MAX_PLOTTED_PERIOD_YEARS, float(1.0 / resolved.min()))
 
 
 class RegionalIndexAggregator:
@@ -188,15 +202,17 @@ class RegionalIndexAggregator:
                 sst_name in indices
                 and indices[sst_name].dropna("time").sizes["time"] > 1
             ):
-                freq, power_spectrum = _calculate_sample_average_power_spectrum(
+                freq, power_by_sample = _calculate_power_spectrum_by_sample(
                     indices[sst_name]
                 )
+                power_spectrum = power_by_sample.mean(axis=SAMPLE_DIM)
                 fig, ax = plt.subplots(1, 1)
-                ax.plot(freq, power_spectrum, label="predicted ensemble mean")
+                plot_power_spectrum_by_period(
+                    ax, freq, power_by_sample, "predicted ensemble mean"
+                )
                 ax.set_title("Power Spectrum of Nino3.4 Index")
-                ax.set_xlabel("Frequency [cycles/year]")
-                ax.set_ylabel("Power [K**2]")
-                ax.set(yscale="log")
+                ax.set_ylabel("Power [K$^2$/octave]")
+                format_period_axis(ax, max_period_years=_max_plotted_period(freq))
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
@@ -288,26 +304,35 @@ class PairedRegionalIndexAggregator:
                 sst_name in prediction_indices
                 and prediction_indices[sst_name].notnull().any().item()
             ):
-                pred_freq, prediction_power_spectrum = (
-                    _calculate_sample_average_power_spectrum(
-                        prediction_indices[sst_name]
-                    )
+                pred_freq, prediction_power_by_sample = (
+                    _calculate_power_spectrum_by_sample(prediction_indices[sst_name])
                 )
-                target_freq, target_power_spectrum = (
-                    _calculate_sample_average_power_spectrum(target_indices[sst_name])
+                target_freq, target_power_by_sample = (
+                    _calculate_power_spectrum_by_sample(target_indices[sst_name])
                 )
+                prediction_power_spectrum = prediction_power_by_sample.mean(
+                    axis=SAMPLE_DIM
+                )
+                target_power_spectrum = target_power_by_sample.mean(axis=SAMPLE_DIM)
                 fig, ax = plt.subplots(1, 1)
-                ax.plot(
-                    pred_freq,
-                    prediction_power_spectrum,
-                    label="predicted ensemble mean",
+                plot_power_spectrum_by_period(
+                    ax, target_freq, target_power_by_sample, "target", color="black"
                 )
-                ax.plot(
-                    target_freq, target_power_spectrum, label="target", color="orange"
+                plot_power_spectrum_by_period(
+                    ax,
+                    pred_freq,
+                    prediction_power_by_sample,
+                    "predicted ensemble mean",
                 )
                 ax.set_title("Power Spectrum of Nino3.4 Index")
-                ax.set_xlabel("Frequency [cycles/year]")
-                ax.set(yscale="log")
+                ax.set_ylabel("Power [K$^2$/octave]")
+                format_period_axis(
+                    ax,
+                    max_period_years=max(
+                        _max_plotted_period(pred_freq),
+                        _max_plotted_period(target_freq),
+                    ),
+                )
                 ax.legend()
                 fig.tight_layout()
                 logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
