@@ -134,6 +134,16 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "hybridswap" ]]; then
+    # anchor-swap diagnostic (25 epochs): thetao_0 full-field, sst residual —
+    # mirror image of the hybrid recipe. Tests whether ONE absolute-valued
+    # surface thermal field (either copy) is what pins rollout ENSO amplitude,
+    # vs sst being special. Prediction if anchor hypothesis holds: healthy.
+    config="${CONFIG_DIR}/hybridswap-pretrain.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "residfix" ]]; then
     config="${CONFIG_DIR}/residfix-pretrain.yaml"
     module="fme.ace.train"
