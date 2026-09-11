@@ -1862,6 +1862,45 @@ def test_predict_with_prescribed_prognostic(
         )
 
 
+def test_stepper_from_state_loads_legacy_checkpoint_format():
+    """Checkpoints predating StepperConfig store a SingleModuleStepperConfig
+    plus the module, normalizers, and grid (area + img_shape) at the top level."""
+    names = ["a"]
+    img_shape = (4, 8)
+    legacy_config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
+        in_names=names,
+        out_names=names,
+        normalization=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+    )
+    legacy_state = {
+        "config": dataclasses.asdict(legacy_config),
+        "module": {},  # PlusOne has no parameters
+        "normalizer": {"means": {"a": 2.0}, "stds": {"a": 5.0}},
+        "loss_normalizer": {"means": {"a": 1.0}, "stds": {"a": 7.0}},
+        "sigma_coordinates": {
+            "ak": torch.tensor([0.0, 0.0]),
+            "bk": torch.tensor([0.0, 1.0]),
+        },
+        "area": torch.ones(*img_shape),
+        "img_shape": img_shape,
+    }
+    stepper = Stepper.from_state(legacy_state)
+    assert stepper.config.step.type == "multi_call"
+    assert stepper.config.input_names == frozenset(names)
+    normalizer = stepper._step_obj.normalizer
+    torch.testing.assert_close(normalizer.means["a"].cpu(), torch.tensor(2.0))
+    torch.testing.assert_close(normalizer.stds["a"].cpu(), torch.tensor(5.0))
+    loss_normalizer = stepper.config.get_loss_normalizer()
+    torch.testing.assert_close(loss_normalizer.stds["a"].cpu(), torch.tensor(7.0))
+    x = torch.rand(2, *img_shape, device=get_device())
+    output = stepper.step(
+        StepArgs(input={"a": x}, next_step_input_data={}, labels=None)
+    ).output
+    # PlusOne acts in normalized space: ((x - 2) / 5 + 1) * 5 + 2 == x + 5
+    torch.testing.assert_close(output["a"], x + 5)
+
+
 def test_parsed_stepper_state_ensemble_warns_on_differing_stepper_config(caplog):
     def get_parsed_state(derived_forcings: DerivedForcingsConfig):
         config = StepperConfig(
