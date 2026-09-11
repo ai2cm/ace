@@ -1891,7 +1891,7 @@ def test_stepper_from_state_loads_legacy_checkpoint_format():
     normalizer = stepper._step_obj.normalizer
     torch.testing.assert_close(normalizer.means["a"].cpu(), torch.tensor(2.0))
     torch.testing.assert_close(normalizer.stds["a"].cpu(), torch.tensor(5.0))
-    loss_normalizer = stepper.config.get_loss_normalizer()
+    loss_normalizer = stepper.config.step.get_loss_normalizer()
     torch.testing.assert_close(loss_normalizer.stds["a"].cpu(), torch.tensor(7.0))
     x = torch.rand(2, *img_shape, device=get_device())
     output = stepper.step(
