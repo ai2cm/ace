@@ -517,6 +517,67 @@ run_gantry_training_job_with_dry_run() {
     fi
 }
 
+# Submission bookkeeping, used to report what made it to beaker if one of the
+# submissions in a loop fails.
+SUBMITTED_JOB_NAMES=()
+SUBMITTED_EXPERIMENT_IDS=()
+
+# Report the jobs submitted so far. With a FAILED_JOB_NAME, reports it as the
+# submission that stopped the loop.
+# Args: [FAILED_JOB_NAME]
+print_submission_report() {
+    local FAILED_JOB_NAME="${1:-}"
+    local i
+
+    echo
+    echo "----------------------------------------"
+    if [[ -n "$FAILED_JOB_NAME" ]]; then
+        echo "SUBMISSION FAILED"
+    else
+        echo "SUBMITTED"
+    fi
+    echo "----------------------------------------"
+    if [[ ${#SUBMITTED_JOB_NAMES[@]} -eq 0 ]]; then
+        echo "Submitted: none"
+    else
+        echo "Submitted (${#SUBMITTED_JOB_NAMES[@]}):"
+        for i in "${!SUBMITTED_JOB_NAMES[@]}"; do
+            printf "  - %-60s %s\n" "${SUBMITTED_JOB_NAMES[$i]}" "${SUBMITTED_EXPERIMENT_IDS[$i]}"
+        done
+    fi
+    if [[ -n "$FAILED_JOB_NAME" ]]; then
+        echo "Failed: ${FAILED_JOB_NAME}"
+        echo "  no beaker experiment ID returned; nothing appended to experiments.txt"
+        echo "Any remaining jobs in the input file were not submitted."
+    fi
+    echo "----------------------------------------"
+}
+
+# Print the end-of-run submission report; dry runs get print_dry_run_summary
+# instead.
+print_submission_summary() {
+    if [[ "$DRY_RUN" != "true" ]]; then
+        print_submission_report
+    fi
+}
+
+# Guard against a failed beaker submission: gantry's exit status is masked by the
+# pipeline that extracts the experiment ID, so an empty ID is the failure signal.
+# Records the submission on success; reports and exits 1 on failure.
+# Args: EXPERIMENT_ID, JOB_NAME
+require_experiment_id() {
+    local EXPERIMENT_ID="$1"
+    local JOB_NAME="$2"
+
+    if [[ -z "$EXPERIMENT_ID" ]]; then
+        print_submission_report "$JOB_NAME"
+        exit 1
+    fi
+
+    SUBMITTED_JOB_NAMES+=("$JOB_NAME")
+    SUBMITTED_EXPERIMENT_IDS+=("$EXPERIMENT_ID")
+}
+
 # Wrapper for git operations that respects dry-run mode
 git_commit_and_push_with_dry_run() {
     if [[ "$DRY_RUN" != "true" ]]; then

@@ -163,11 +163,15 @@ while read FINETUNING; do
     # Run the job (use relative path for CONFIG_PATH)
     CONFIG_PATH="$CONFIG_PATH_REL" MIN_RUNTIME="$MIN_RUNTIME" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run uncoupled fine-tuning: ${JOB_GROUP}")
 
+    # Stop the loop if beaker did not return an experiment ID
+    require_experiment_id "$EXPERIMENT_ID" "$JOB_NAME"
+
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
         "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 
-# Print dry-run summary
+# Print submission and dry-run summaries
+print_submission_summary
 print_dry_run_summary "$TOTAL_JOBS" "$PROCESSED_JOBS" "$SKIPPED_JOBS"
