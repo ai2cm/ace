@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import datetime
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import numpy as np
@@ -465,3 +466,198 @@ def test_parameter_init_weights_loaded_once(tmpdir):
     )
     # the weights should not be loaded again
     mock_load_weights_and_history.assert_called_once()
+
+
+def _samudra_stepper_config(noise_embed_dim: int = 0) -> StepperConfig:
+    """A small Samudra stepper, deterministic or noise-conditioned.
+
+    Above zero ``noise_embed_dim`` the builder returns a NoiseConditionedModel
+    wrapping the Samudra, so the network's parameters move under
+    ``conditional_model`` and a further zero-initialized FiLM layer appears in
+    each conditioned block.
+    """
+    builder_config: dict[str, Any] = {
+        "ch_width": [8, 12],
+        "dilation": [1, 2],
+        "n_layers": [1, 1],
+    }
+    if noise_embed_dim > 0:
+        builder_config["noise_embed_dim"] = noise_embed_dim
+        builder_config["conditioned_blocks"] = "all_blocks"
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="Samudra", config=builder_config),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": 0.0},
+                            stds={"x": 1.0},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def test_weights_submodule_loads_deterministic_checkpoint_into_wrapped_module(
+    tmpdir,
+):
+    """A noise-conditioned module initialized from a deterministic checkpoint
+    must reproduce that checkpoint's predictions exactly.
+
+    This is what makes "pretrain deterministic, then finetune stochastic" a
+    continuation rather than a restart: the conditioning layers are
+    zero-initialized, so the wrapped model at initialization *is* the
+    deterministic model. Asserting the parameter names matched is weaker --
+    it would pass even if the weights landed on the wrong tensors.
+    """
+    dataset_info = get_dataset_info()
+    deterministic = _samudra_stepper_config().get_stepper(dataset_info=dataset_info)
+    torch.save({"stepper": deterministic.get_state()}, str(tmpdir / "weights.ckpt"))
+
+    initializer = ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+        weights_submodule="conditional_model",
+    ).build(load_weights_and_history)
+    conditioned = _samudra_stepper_config(noise_embed_dim=6).get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=initializer,
+    )
+
+    # modules[0] is the DDP/DummyWrapper layer; .module is the network
+    loaded = conditioned.modules[0]
+    source = deterministic.modules[0]
+    loaded_network = loaded.module
+    # the wrapped network carries the checkpoint's weights verbatim. Its own
+    # state dict is a superset, because the conditioning layers live inside the
+    # ConvNeXt blocks and so appear under conditional_model too.
+    loaded_state = loaded_network.conditional_model.state_dict()
+    source_state = source.module.state_dict()
+    assert set(source_state).issubset(loaded_state)
+    for name, value in source_state.items():
+        assert torch.equal(loaded_state[name], value), name
+    # and the extra conditioning parameters are still at their zero init
+    film_scales = [
+        parameter
+        for name, parameter in loaded.named_parameters()
+        if "noise_conditioning" in name and "W_scale" in name
+    ]
+    assert len(film_scales) > 0
+    for parameter in film_scales:
+        assert torch.count_nonzero(parameter) == 0
+
+    torch.manual_seed(0)
+    x = torch.randn(2, 1, 16, 32, device=get_device())
+    loaded.eval()
+    source.eval()
+    with torch.no_grad():
+        assert torch.equal(loaded(x), source(x))
+        # the conditioning is inert, not merely unlucky: the wrapper draws
+        # fresh noise on every call, and the zero-initialized FiLM scales mean
+        # that draw cannot reach the output.
+        assert torch.equal(loaded(x), loaded(x))
+
+
+def test_weights_submodule_omitted_raises_naming_the_fix(tmpdir):
+    """Without weights_submodule the load fails, and the error says what to set."""
+    dataset_info = get_dataset_info()
+    deterministic = _samudra_stepper_config().get_stepper(dataset_info=dataset_info)
+    torch.save({"stepper": deterministic.get_state()}, str(tmpdir / "weights.ckpt"))
+
+    initializer = ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+    ).build(load_weights_and_history)
+    with pytest.raises(ValueError, match="conditional_model"):
+        _samudra_stepper_config(noise_embed_dim=6).get_stepper(
+            dataset_info=dataset_info,
+            parameter_initializer=initializer,
+        )
+
+
+def test_weights_submodule_excludes_match_destination_names(tmpdir):
+    """Exclude patterns are written against destination names, prefix included."""
+    dataset_info = get_dataset_info()
+    deterministic = _samudra_stepper_config().get_stepper(dataset_info=dataset_info)
+    torch.save({"stepper": deterministic.get_state()}, str(tmpdir / "weights.ckpt"))
+
+    excluded = "module.conditional_model.layers.0.convblock.0.weight"
+    initializer = ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+        weights_submodule="conditional_model",
+        parameters=[ParameterClassification(exclude=[excluded])],
+    ).build(load_weights_and_history)
+    conditioned = _samudra_stepper_config(noise_embed_dim=6).get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=initializer,
+    )
+
+    loaded_state = conditioned.modules[0].state_dict()
+    source_state = deterministic.modules[0].state_dict()
+    assert not torch.equal(
+        loaded_state[excluded],
+        source_state["module.layers.0.convblock.0.weight"],
+    )
+    kept = "module.conditional_model.layers.0.convblock.0.bias"
+    assert torch.equal(
+        loaded_state[kept], source_state["module.layers.0.convblock.0.bias"]
+    )
+
+
+@pytest.mark.parametrize(
+    "submodule",
+    ["conditional_model.", ".conditional_model", "", "a..b"],
+    ids=["trailing_dot", "leading_dot", "empty", "doubled_dot"],
+)
+def test_weights_submodule_rejects_empty_segments(submodule):
+    with pytest.raises(ValueError, match="empty segments"):
+        ParameterInitializationConfig(
+            weights_path="p.ckpt", weights_submodule=submodule
+        )
+
+
+def test_weights_submodule_without_loaded_weights_raises_at_apply():
+    """The precondition is that weights were loaded, not that weights_path was set.
+
+    The coupled stepper loads component weights from
+    CoupledParameterInitConfig.checkpoint_path, which requires the component's
+    weights_path to be None, so this cannot be checked in __post_init__.
+    """
+    config = ParameterInitializationConfig(weights_submodule="conditional_model")
+    initializer = config.build(load_weights_and_history)
+    with pytest.raises(ValueError, match="no weights were loaded"):
+        initializer.apply_weights([torch.nn.Linear(2, 2)])
+
+
+def test_weights_submodule_applies_to_the_l2_sp_regularizer(tmpdir):
+    """alpha/beta pair each parameter with the base value it was initialized from.
+
+    The regularizer looks up base weights by name in the destination module, so
+    it needs the same renaming apply_weights used; without it every name misses
+    and construction fails.
+    """
+    dataset_info = get_dataset_info()
+    deterministic = _samudra_stepper_config().get_stepper(dataset_info=dataset_info)
+    torch.save({"stepper": deterministic.get_state()}, str(tmpdir / "weights.ckpt"))
+
+    initializer = ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+        weights_submodule="conditional_model",
+        alpha=1.0,
+    ).build(load_weights_and_history)
+    conditioned = _samudra_stepper_config(noise_embed_dim=6).get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=initializer,
+    )
+    regularizer = initializer.get_l2_sp_tuning_regularizer(conditioned.modules)
+    # at initialization the weights are exactly the base weights, so the
+    # keep-close-to-base term is zero; it grows once they move.
+    assert torch.equal(regularizer(), torch.zeros((), device=get_device()))
+    with torch.no_grad():
+        for parameter in conditioned.modules[0].parameters():
+            parameter.add_(1.0)
+    assert regularizer() > 0.0
