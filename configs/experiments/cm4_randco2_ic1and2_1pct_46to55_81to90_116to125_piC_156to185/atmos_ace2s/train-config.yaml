@@ -9,6 +9,8 @@ ema:
 inference:
   - name: inference_1pct
     weight: 1.0
+    epochs:
+      step: 2
     n_forward_steps: 29200 # exactly 20 noleap years
     forward_steps_in_memory: 40
     loader:
@@ -37,6 +39,8 @@ inference:
       log_histograms: false
   - name: inference_piC
     weight: 1.0
+    epochs:
+      step: 2
     n_forward_steps: 29200 # exactly 20 noleap years
     forward_steps_in_memory: 40
     loader:
