@@ -20,6 +20,7 @@ from fme.ace.inference.data_writer.utils import (
 )
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.timing import GlobalTimer
 from fme.core.writer import DATETIME_ENCODING_UNITS, TIMEDELTA_ENCODING_UNITS
 
 LEAD_TIME_DIM = "time"
@@ -202,6 +203,7 @@ class RawDataWriter:
             dims = (IC_DIM, LEAD_TIME_DIM, *_ordered_names)
             self._dataset_dims_created = True
 
+        timer = GlobalTimer.get_instance()
         save_names = self._get_variable_names_to_save(data.keys())
         current_lead_time_size = self.dataset.dimensions[LEAD_TIME_DIM].size
         for variable_name in save_names:
@@ -224,33 +226,37 @@ class RawDataWriter:
 
             data_numpy = data[variable_name].detach().cpu().numpy()
             # Append the data to the variables
-            self.dataset.variables[variable_name][
-                :,
-                current_lead_time_size : current_lead_time_size + data_numpy.shape[1],
-                :,
-            ] = data_numpy
+            with timer.context("storage_write"):
+                self.dataset.variables[variable_name][
+                    :,
+                    current_lead_time_size : current_lead_time_size
+                    + data_numpy.shape[1],
+                    :,
+                ] = data_numpy
 
         lead_time_microseconds = get_batch_lead_time_microseconds(
             self.initial_condition_times,
             batch_time.values,
         )
-        self.dataset.variables[LEAD_TIME_DIM][
-            current_lead_time_size : current_lead_time_size
-            + lead_time_microseconds.shape[0]
-        ] = lead_time_microseconds
+        with timer.context("storage_write"):
+            self.dataset.variables[LEAD_TIME_DIM][
+                current_lead_time_size : current_lead_time_size
+                + lead_time_microseconds.shape[0]
+            ] = lead_time_microseconds
 
         valid_times_numeric: np.ndarray = cftime.date2num(
             batch_time.values,
             units=self.dataset.variables[VALID_TIME].units,
             calendar=self.dataset.variables[VALID_TIME].calendar,
         )
-        self.dataset.variables[VALID_TIME][
-            :,
-            current_lead_time_size : current_lead_time_size
-            + lead_time_microseconds.shape[0],
-        ] = valid_times_numeric
+        with timer.context("storage_write"):
+            self.dataset.variables[VALID_TIME][
+                :,
+                current_lead_time_size : current_lead_time_size
+                + lead_time_microseconds.shape[0],
+            ] = valid_times_numeric
 
-        self.dataset.sync()  # Flush the data to disk
+            self.dataset.sync()  # Flush the data to disk
 
     def flush(self):
         """

@@ -31,6 +31,7 @@ from fme.ace.inference.data_writer.utils import (
 )
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.timing import GlobalTimer
 from fme.core.writer import DATETIME_ENCODING_UNITS
 
 
@@ -239,6 +240,7 @@ class MonthlyDataWriter:
             dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, *_ordered_names)
             self._dataset_dims_created = True
 
+        timer = GlobalTimer.get_instance()
         save_names = self._get_variable_names_to_save(data.keys())
         months = self._month_indexer.month_indices(batch_time)
         month_min = np.min(months)
@@ -247,13 +249,15 @@ class MonthlyDataWriter:
         old_size = self.dataset.variables[LEAD_TIME_DIM].size
         new_size = month_min + month_range
 
-        self._extend_lead_time(old_size, new_size)
-        self._extend_valid_time(old_size, new_size)
-        self._extend_variable(COUNTS, old_size, new_size, initial_value=0)
+        with timer.context("storage_write"):
+            self._extend_lead_time(old_size, new_size)
+            self._extend_valid_time(old_size, new_size)
+            self._extend_variable(COUNTS, old_size, new_size, initial_value=0)
 
-        count_data = self.dataset.variables[COUNTS][
-            :, month_min : month_min + month_range
-        ]
+        with timer.context("storage_read"):
+            count_data = self.dataset.variables[COUNTS][
+                :, month_min : month_min + month_range
+            ]
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -278,26 +282,31 @@ class MonthlyDataWriter:
             # Have to extract the data and write it back as `.at` does not play nicely
             # with netCDF4
             # We pull just the month subset we need for speed reasons
-            self._extend_variable(variable_name, old_size, new_size, initial_value=0.0)
-            month_data = self.dataset.variables[variable_name][
-                :, month_min : month_min + month_range
-            ]
+            with timer.context("storage_write"):
+                self._extend_variable(
+                    variable_name, old_size, new_size, initial_value=0.0
+                )
+            with timer.context("storage_read"):
+                month_data = self.dataset.variables[variable_name][
+                    :, month_min : month_min + month_range
+                ]
             add_data(
                 target=month_data,
                 target_start_counts=count_data,
                 source=array,
                 months_elapsed=months - month_min,
             )
-            self.dataset.variables[variable_name][
-                :, month_min : month_min + month_range
-            ] = month_data
+            with timer.context("storage_write"):
+                self.dataset.variables[variable_name][
+                    :, month_min : month_min + month_range
+                ] = month_data
         # counts must be added after data, as we use the base counts when updating means
-        for i_sample in range(n_samples_data):
-            self.dataset.variables[COUNTS][i_sample] += np.bincount(
-                months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
-            )
-
-        self.dataset.sync()
+        with timer.context("storage_write"):
+            for i_sample in range(n_samples_data):
+                self.dataset.variables[COUNTS][i_sample] += np.bincount(
+                    months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
+                )
+            self.dataset.sync()
 
     def flush(self):
         """
