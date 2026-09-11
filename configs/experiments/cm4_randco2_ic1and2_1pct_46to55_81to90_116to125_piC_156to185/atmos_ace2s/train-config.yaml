@@ -3,7 +3,7 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 11 # 190 yr x 1460/yr / bs 8 = 34,675 iter/epoch -> ~381,425 iterations
+max_epochs: 23 # 190 yr x 1460/yr / bs 8 = 16425 iter/epoch -> ~377,775 iterations
 ema:
   decay: 0.999
 inference:
@@ -294,7 +294,7 @@ optimization:
     kwargs:
       start_factor: 0.01
       end_factor: 1.0
-      total_iters: 34675  # ~1 epoch
+      total_iters: 16425  # ~1 epoch
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
