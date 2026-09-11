@@ -116,6 +116,16 @@ launch() {
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "hybridufsft-ext" ]]; then
+    # continuation of hybridufsft-199b: 80 more epochs (120 total), constant LR,
+    # seeded from the epoch-40 final training checkpoint. UFSFT_PREV_CKPT_DATASET
+    # must be set to the 199b results dataset id at launch time.
+    config="${CONFIG_DIR}/hybridufsft-ext.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
+            --dataset "${UFSFT_PREV_CKPT_DATASET:?set to 199b results dataset}:training_checkpoints/ckpt.tar:/prev_ckpt.tar")
+  fi
   if [[ "$arm" == "hybridsstres" ]]; then
     # single-variable attribution test: hybridresid with sst ADDED to the
     # residual set; everything else byte-identical to hybridresid-pretrain.
