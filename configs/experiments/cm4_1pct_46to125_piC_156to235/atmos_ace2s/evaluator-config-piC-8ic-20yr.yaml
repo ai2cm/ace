@@ -4,7 +4,7 @@
 # of experiments.txt overrides it through `stepper_override.corrector`.
 experiment_dir: /results
 n_forward_steps: 29200
-forward_steps_in_memory: 80
+forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 1
 logging:
