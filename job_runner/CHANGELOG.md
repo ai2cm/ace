@@ -41,6 +41,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
   evaluation silently skipped the component checkpoint mounts and fell back to
   an empty cluster and shared memory. Header corrected in all three template
   branches, and in README.md.
+- [ISSUE] Catch failed beaker submission and avoid adding rows with empty
+  experiment ID in `experiments.txt`
 
 ## [0.0.1] - 2025-11-06
 
@@ -80,7 +82,5 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] `train.sh` and `finetune.sh` with `--coupled` flag
 - [FEAT] Keyword-based job specification in `*.txt` files
 - [FEAT] Automated `run_` to `ran_` in `experiments.txt`
-- [ISSUE] Catch failed beaker submission and avoid adding rows with empty
-  experiment ID in `experiments.txt`
 - [FEAT] Document `*.txt` headers in each launcher script `--help`.
 - [FEAT] `--dry-run` skip header / comments / whitespace
