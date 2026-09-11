@@ -179,6 +179,40 @@ def test_prefix_submodule_without_wrapper_prefix():
     assert list(renamed) == ["wrapped.layers.0.weight"]
 
 
+def test_prefix_submodule_accepts_a_dotted_submodule_name():
+    """A submodule more than one level down is named by its dotted path."""
+    renamed = prefix_submodule(
+        {
+            "module.layers.0.weight": torch.zeros(1),
+            "layers.0.bias": torch.zeros(1),
+        },
+        "outer.inner",
+    )
+    assert set(renamed) == {
+        "module.outer.inner.layers.0.weight",
+        "outer.inner.layers.0.bias",
+    }
+
+
+def test_missing_parameters_message_lists_every_candidate_submodule():
+    """Two submodules can satisfy the subset test, so neither is presented as
+    the answer."""
+
+    class Inner(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(2, 2)
+
+    class TwoWayWrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.first = Inner()
+            self.second = Inner()
+
+    with pytest.raises(ValueError, match="'first' or 'second'"):
+        overwrite_weights(Inner().state_dict(), TwoWayWrapper())
+
+
 def test_overwrite_weights_error_names_the_submodule_that_would_fix_it():
     class Inner(torch.nn.Module):
         def __init__(self):

@@ -553,8 +553,14 @@ def test_weights_submodule_loads_deterministic_checkpoint_into_wrapped_module(
 
     torch.manual_seed(0)
     x = torch.randn(2, 1, 16, 32, device=get_device())
+    loaded.eval()
+    source.eval()
     with torch.no_grad():
         assert torch.equal(loaded(x), source(x))
+        # the conditioning is inert, not merely unlucky: the wrapper draws
+        # fresh noise on every call, and the zero-initialized FiLM scales mean
+        # that draw cannot reach the output.
+        assert torch.equal(loaded(x), loaded(x))
 
 
 def test_weights_submodule_omitted_raises_naming_the_fix(tmpdir):
@@ -603,25 +609,55 @@ def test_weights_submodule_excludes_match_destination_names(tmpdir):
 
 
 @pytest.mark.parametrize(
-    "config, message",
-    [
-        pytest.param(
-            {"weights_submodule": "conditional_model"},
-            "no effect without weights_path",
-            id="no_weights_path",
-        ),
-        pytest.param(
-            {"weights_path": "p.ckpt", "weights_submodule": "conditional_model."},
-            "without a trailing",
-            id="trailing_dot",
-        ),
-        pytest.param(
-            {"weights_path": "p.ckpt", "weights_submodule": ""},
-            "without a trailing",
-            id="empty",
-        ),
-    ],
+    "submodule",
+    ["conditional_model.", ".conditional_model", "", "a..b"],
+    ids=["trailing_dot", "leading_dot", "empty", "doubled_dot"],
 )
-def test_weights_submodule_config_validation(config, message):
-    with pytest.raises(ValueError, match=message):
-        ParameterInitializationConfig(**config)
+def test_weights_submodule_rejects_empty_segments(submodule):
+    with pytest.raises(ValueError, match="empty segments"):
+        ParameterInitializationConfig(
+            weights_path="p.ckpt", weights_submodule=submodule
+        )
+
+
+def test_weights_submodule_without_loaded_weights_raises_at_apply():
+    """The precondition is that weights were loaded, not that weights_path was set.
+
+    The coupled stepper loads component weights from
+    CoupledParameterInitConfig.checkpoint_path, which requires the component's
+    weights_path to be None, so this cannot be checked in __post_init__.
+    """
+    config = ParameterInitializationConfig(weights_submodule="conditional_model")
+    initializer = config.build(load_weights_and_history)
+    with pytest.raises(ValueError, match="no weights were loaded"):
+        initializer.apply_weights([torch.nn.Linear(2, 2)])
+
+
+def test_weights_submodule_applies_to_the_l2_sp_regularizer(tmpdir):
+    """alpha/beta pair each parameter with the base value it was initialized from.
+
+    The regularizer looks up base weights by name in the destination module, so
+    it needs the same renaming apply_weights used; without it every name misses
+    and construction fails.
+    """
+    dataset_info = get_dataset_info()
+    deterministic = _samudra_stepper_config().get_stepper(dataset_info=dataset_info)
+    torch.save({"stepper": deterministic.get_state()}, str(tmpdir / "weights.ckpt"))
+
+    initializer = ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+        weights_submodule="conditional_model",
+        alpha=1.0,
+    ).build(load_weights_and_history)
+    conditioned = _samudra_stepper_config(noise_embed_dim=6).get_stepper(
+        dataset_info=dataset_info,
+        parameter_initializer=initializer,
+    )
+    regularizer = initializer.get_l2_sp_tuning_regularizer(conditioned.modules)
+    # at initialization the weights are exactly the base weights, so the
+    # keep-close-to-base term is zero; it grows once they move.
+    assert torch.equal(regularizer(), torch.zeros((), device=get_device()))
+    with torch.no_grad():
+        for parameter in conditioned.modules[0].parameters():
+            parameter.add_(1.0)
+    assert regularizer() > 0.0
