@@ -9,9 +9,11 @@ from .plotting import (
     _stitch_data_panels,
     clamp_date_axis,
     fold_healpix_data,
+    format_period_axis,
     get_cmap_limits,
     plot_imshow,
     plot_paneled_data,
+    plot_power_spectrum_by_period,
 )
 
 
@@ -136,5 +138,49 @@ def test_clamp_date_axis_allows_a_140_year_series_starting_at_year_0001():
         left, right = ax.get_xlim()
         assert left == mdates.date2num(times[0])
         assert right == mdates.date2num(times[-1])
+    finally:
+        plt.close(fig)
+
+
+def test_plot_power_spectrum_by_period_draws_mean_and_samples():
+    """A line per sample plus a heavy sample-mean line, at power per octave."""
+    freqs_per_year = np.array([0.0, 0.25, 0.5, 1.0])
+    power_by_sample = np.array([[10.0, 4.0, 2.0, 1.0], [20.0, 8.0, 6.0, 3.0]])
+
+    fig, ax = plt.subplots(1, 1)
+    try:
+        plot_power_spectrum_by_period(ax, freqs_per_year, power_by_sample, "mean")
+        assert len(ax.lines) == 3  # two samples and their mean
+        mean_line = ax.lines[-1]
+        assert mean_line.get_label() == "mean"
+        # the zero frequency has no finite period and is dropped
+        np.testing.assert_allclose(mean_line.get_xdata(), [4.0, 2.0, 1.0])
+        expected = np.array([6.0, 4.0, 2.0]) * np.array([0.25, 0.5, 1.0]) * np.log(2.0)
+        np.testing.assert_allclose(mean_line.get_ydata(), expected)
+    finally:
+        plt.close(fig)
+
+
+def test_format_period_axis_labels_octaves():
+    fig, ax = plt.subplots(1, 1)
+    try:
+        format_period_axis(ax, max_period_years=16.0)
+        fig.canvas.draw()
+        assert ax.get_xscale() == "log"
+        assert ax.get_xlim() == (0.5, 16.0)
+        labels = [tick.get_text() for tick in ax.get_xticklabels()]
+        assert labels == ["0.5", "1.0", "2.0", "4.0", "8.0", "16.0"]
+    finally:
+        plt.close(fig)
+
+
+def test_format_period_axis_drops_ticks_beyond_a_short_record():
+    fig, ax = plt.subplots(1, 1)
+    try:
+        format_period_axis(ax, max_period_years=3.0)
+        fig.canvas.draw()
+        assert ax.get_xlim() == (0.5, 3.0)
+        labels = [tick.get_text() for tick in ax.get_xticklabels()]
+        assert labels == ["0.5", "1.0", "2.0"]
     finally:
         plt.close(fig)
