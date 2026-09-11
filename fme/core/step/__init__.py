@@ -1,3 +1,4 @@
+from .ensemble import EnsembleStep, EnsembleStepConfig
 from .multi_call import MultiCallStep, MultiCallStepConfig
 from .output import StepOutput
 from .radiation import SeparateRadiationStep, SeparateRadiationStepConfig

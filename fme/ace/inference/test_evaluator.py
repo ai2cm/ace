@@ -30,11 +30,17 @@ from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
     ValidationConfig,
+    WeightedCheckpointPath,
     main,
     resolve_variable_metadata,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import Stepper, TrainOutput
+from fme.ace.stepper import (
+    Stepper,
+    TrainOutput,
+    load_stepper_ensemble,
+    load_stepper_ensemble_config,
+)
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
@@ -51,12 +57,14 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, IncompatibleDatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device, using_gpu
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
+from fme.core.step.args import StepArgs
+from fme.core.step.ensemble import EnsembleStep
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepSelector
@@ -85,7 +93,11 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    module: torch.nn.Module | None = None,
+    residual_prediction: bool = False,
 ):
+    if module is None:
+        module = PlusOne()
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
     else:
@@ -118,10 +130,11 @@ def save_plus_one_stepper(
                             config=dataclasses.asdict(
                                 SingleModuleStepConfig(
                                     builder=ModuleSelector(
-                                        type="prebuilt", config={"module": PlusOne()}
+                                        type="prebuilt", config={"module": module}
                                     ),
                                     in_names=in_names,
                                     out_names=out_names,
+                                    residual_prediction=residual_prediction,
                                     normalization=NetworkAndLossNormalizationConfig(
                                         network=NormalizationConfig(
                                             means={name: mean for name in all_names},
@@ -276,6 +289,190 @@ def test_inference_plus_one_model(
     )
 
 
+def test_inference_checkpoint_ensemble(tmp_path: pathlib.Path):
+    """Two plus-one checkpoints, equally weighted by default, still predict +1."""
+    in_names = ["var"]
+    out_names = ["var"]
+    n_forward_steps = 3
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    stepper_paths = [tmp_path / "stepper_a", tmp_path / "stepper_b"]
+    for path in stepper_paths:
+        save_plus_one_stepper(
+            path,
+            in_names,
+            out_names,
+            mean=0.0,
+            std=1.0,
+            data_shape=dim_sizes.shape_nd,
+            timestep=datetime.timedelta(days=20),
+        )
+    inference_helper(
+        tmp_path,
+        in_names,
+        out_names,
+        use_prediction_data=False,
+        dim_sizes=dim_sizes,
+        n_forward_steps=n_forward_steps,
+        stepper_path=stepper_paths,
+        save_monthly_files=False,  # requires timestep == 6h
+        timestep=datetime.timedelta(days=20),
+    )
+
+
+def _save_ensemble_member_checkpoints(
+    tmp_path: pathlib.Path,
+    out_names_b: list[str] | None = None,
+    timestep_b: datetime.timedelta = TIMESTEP,
+) -> list[pathlib.Path]:
+    """Save a non-residual plus-one checkpoint and a residual plus-one checkpoint.
+
+    Member A predicts ``x + 1``; member B predicts ``x + (x + 1)``. The second
+    member's output names and timestep can be varied to make it incompatible.
+    """
+    names = ["var"]
+    data_shape = [1, 4, 8]
+    path_a = tmp_path / "stepper_a"
+    path_b = tmp_path / "stepper_b"
+    save_plus_one_stepper(
+        path_a, names, names, mean=0.0, std=1.0, data_shape=data_shape
+    )
+    save_plus_one_stepper(
+        path_b,
+        names,
+        names if out_names_b is None else out_names_b,
+        mean=0.0,
+        std=1.0,
+        data_shape=data_shape,
+        residual_prediction=True,
+        timestep=timestep_b,
+    )
+    return [path_a, path_b]
+
+
+def test_load_stepper_ensemble_mixes_residual_and_non_residual(
+    tmp_path: pathlib.Path,
+):
+    paths = _save_ensemble_member_checkpoints(tmp_path)
+    weights = [0.25, 0.75]
+    stepper = load_stepper_ensemble(paths, weights)
+    assert isinstance(stepper._step_obj, EnsembleStep)
+    assert stepper.config.step.type == "ensemble"
+    x = torch.rand(2, 4, 8, device=get_device())
+    output = stepper.step(
+        StepArgs(input={"var": x}, next_step_input_data={}, labels=None)
+    ).output
+    torch.testing.assert_close(output["var"], 0.25 * (x + 1) + 0.75 * (2 * x + 1))
+
+    # the ensemble stepper round-trips through its own serialized state
+    reloaded = Stepper.from_state(stepper.get_state())
+    reloaded_output = reloaded.step(
+        StepArgs(input={"var": x}, next_step_input_data={}, labels=None)
+    ).output
+    torch.testing.assert_close(reloaded_output["var"], output["var"])
+
+    stepper_config = load_stepper_ensemble_config(paths, weights)
+    assert stepper_config.step.type == "ensemble"
+    assert stepper_config.step.config["weights"] == weights
+    assert stepper_config.input_names == frozenset(["var"])
+    assert stepper_config.output_names == frozenset(["var"])
+
+
+def test_load_stepper_ensemble_applies_override_to_every_member(
+    tmp_path: pathlib.Path,
+):
+    paths = _save_ensemble_member_checkpoints(tmp_path)
+    override = StepperOverrideConfig(prescribed_prognostic_names=["var"])
+    stepper = load_stepper_ensemble(paths, [0.5, 0.5], override)
+    assert stepper.get_prescribed_prognostic_names() == ["var"]
+    assert isinstance(stepper._step_obj, EnsembleStep)
+    for member in stepper._step_obj._members:
+        assert member.config.get_prescribed_prognostic_names() == ["var"]
+    stepper_config = load_stepper_ensemble_config(paths, [0.5, 0.5], override)
+    assert stepper_config.get_prescribed_prognostic_names() == ["var"]
+
+
+def test_load_stepper_ensemble_rejects_weight_count_mismatch(tmp_path: pathlib.Path):
+    paths = _save_ensemble_member_checkpoints(tmp_path)
+    with pytest.raises(ValueError, match="weights"):
+        load_stepper_ensemble(paths, [1.0])
+
+
+def test_load_stepper_ensemble_rejects_disagreeing_output_names(
+    tmp_path: pathlib.Path,
+):
+    paths = _save_ensemble_member_checkpoints(tmp_path, out_names_b=["var", "extra"])
+    with pytest.raises(ValueError, match="member 1 .* output_names"):
+        load_stepper_ensemble(paths, [0.5, 0.5])
+
+
+def test_load_stepper_ensemble_rejects_incompatible_dataset_info(
+    tmp_path: pathlib.Path,
+):
+    paths = _save_ensemble_member_checkpoints(
+        tmp_path, timestep_b=datetime.timedelta(days=1)
+    )
+    with pytest.raises(IncompatibleDatasetInfo, match="member 1"):
+        load_stepper_ensemble(paths, [0.5, 0.5])
+
+
+def _get_evaluator_config_dict(checkpoint_path) -> dict:
+    return dict(
+        experiment_dir="./some_dir",
+        n_forward_steps=2,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(),
+        loader=InferenceDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path="./some_data"),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=1, interval=1
+            ),
+        ),
+        forward_steps_in_memory=1,
+    )
+
+
+@pytest.mark.parametrize(
+    "checkpoint_path, expected",
+    [
+        pytest.param("./a", "./a", id="single"),
+        pytest.param(
+            [{"path": "./a", "weight": 1.0}, {"path": "./b", "weight": -0.5}],
+            [WeightedCheckpointPath("./a", 1.0), WeightedCheckpointPath("./b", -0.5)],
+            id="weighted_list",
+        ),
+    ],
+)
+def test_evaluator_config_checkpoint_path(checkpoint_path, expected):
+    config = dacite.from_dict(
+        data_class=InferenceEvaluatorConfig,
+        data=_get_evaluator_config_dict(checkpoint_path),
+        config=dacite.Config(strict=True),
+    )
+    assert config.checkpoint_path == expected
+
+
+@pytest.mark.parametrize(
+    "checkpoint_path",
+    [
+        pytest.param([], id="empty_list"),
+        pytest.param(["./a", "./b"], id="unweighted_list"),
+        pytest.param([{"path": "./a"}], id="missing_weight"),
+    ],
+)
+def test_evaluator_config_rejects_bad_checkpoint_path(checkpoint_path):
+    with pytest.raises((ValueError, dacite.DaciteError)):
+        dacite.from_dict(
+            data_class=InferenceEvaluatorConfig,
+            data=_get_evaluator_config_dict(checkpoint_path),
+            config=dacite.Config(strict=True),
+        )
+
+
 @pytest.mark.parametrize("n_forward_steps", [2, int(30 / 20 * 36)])
 def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: int):
     """Validates default aggregator config with default metrics end-to-end."""
@@ -355,12 +552,23 @@ def inference_helper(
     use_prediction_data,
     dim_sizes: DimSizes,
     n_forward_steps,
-    stepper_path,
+    stepper_path: pathlib.Path | list[pathlib.Path],
     timestep: datetime.timedelta,
     save_monthly_files: bool = True,
     derived_names: list[str] = [],
     allow_incompatible_dataset_info: bool = True,  # stepper checkpoint has arbitrary info  # noqa: E501
+    checkpoint_weights: list[float] | None = None,
 ):
+    checkpoint_path: str | list[WeightedCheckpointPath]
+    if isinstance(stepper_path, list):
+        if checkpoint_weights is None:
+            checkpoint_weights = [1.0 / len(stepper_path)] * len(stepper_path)
+        checkpoint_path = [
+            WeightedCheckpointPath(str(path), weight)
+            for path, weight in zip(stepper_path, checkpoint_weights)
+        ]
+    else:
+        checkpoint_path = str(stepper_path)
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     all_names = list(set(in_names).union(out_names))
     data = FV3GFSData(
@@ -394,7 +602,7 @@ def inference_helper(
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
-        checkpoint_path=str(stepper_path),
+        checkpoint_path=checkpoint_path,
         logging=LoggingConfig(
             log_to_screen=True,
             log_to_file=False,

@@ -10,6 +10,8 @@ from .single_module import (
     load_stepper,
     load_stepper_config,
     load_stepper_config_with_override,
+    load_stepper_ensemble,
+    load_stepper_ensemble_config,
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
