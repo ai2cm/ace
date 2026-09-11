@@ -86,3 +86,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS
 
 # Failed: stats dataset mounted at its root instead of its ocean/ subpath.
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip-ft|rs0|01M28XNM3N5X4D279438ASEYR6|failed|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip-ft|rs0|01M28YWW8K4EDRJYTHKB1V8Z4M|training|best_inference_ckpt|normal|--min-runtime 8h
