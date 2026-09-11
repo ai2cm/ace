@@ -18,7 +18,10 @@
 set -euo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
-N_GPUS="${N_GPUS:-4}"
+# Atmosphere-only training fits H100s; jupiter with 8 GPUs avoids the titan
+# queue (Troy, 2026-09-11).
+N_GPUS="${N_GPUS:-8}"
+CLUSTER="${CLUSTER:-ai2/jupiter}"
 PRIORITY="${PRIORITY:-normal}"
 JOB_GROUP="${JOB_GROUP:-era5-1deg-hybrid-residual}"
 
@@ -56,7 +59,7 @@ launch() {
     --workspace ai2/ace \
     --priority "$PRIORITY" \
     --min-runtime "${MIN_RUNTIME:-8h}" \
-    --cluster ai2/titan \
+    --cluster "$CLUSTER" \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env FME_COLLECTIVE_TIMEOUT_MINUTES=120 \
