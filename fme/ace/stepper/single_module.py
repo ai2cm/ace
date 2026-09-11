@@ -1946,7 +1946,8 @@ class _ParsedStepperState:
 
         The members' dataset infos must be mutually compatible; the ensemble
         takes the first member's dataset info, training history, and stepper
-        configuration other than the step (input masking, derived forcings).
+        configuration other than the step (input masking, derived forcings),
+        logging a warning for any member whose values differ.
         The ensemble step config validates the members' step compatibility.
         """
         first = members[0]
@@ -1958,6 +1959,16 @@ class _ParsedStepperState:
                     f"ensemble member {i} was trained on a dataset incompatible "
                     f"with member 0's: {err}"
                 ) from err
+            for field in dataclasses.fields(first.config):
+                if field.name == "step":
+                    continue
+                if getattr(first.config, field.name) != getattr(
+                    member.config, field.name
+                ):
+                    logging.warning(
+                        f"ensemble member {i} has a different {field.name} than "
+                        f"member 0; using member 0's for the whole ensemble"
+                    )
         step = StepSelector(
             type="ensemble",
             config={

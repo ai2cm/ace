@@ -24,11 +24,14 @@ class EnsembleStepConfig(StepConfigABC):
     Every member is called on the same inputs, and each output variable is the
     weighted sum of the members' predictions for it. The weights are used as
     given (not normalized), so a weighted mean needs weights summing to one.
-    Members must agree on their input, output, and next-step input names,
-    number of initial-condition timesteps, and ocean configuration; anything
-    else that a step exposes once (normalizer, surface temperature name, SST
-    prescription, carried stepper state) is taken from the first member.
-    Corrector diagnostics from the members are dropped.
+    Members must agree on their input, output, next-step input, and next-step
+    forcing names, number of initial-condition timesteps, and ocean
+    configuration; anything else that a step exposes once (normalizer, surface
+    temperature name, SST prescription, carried stepper state) is taken from
+    the first member. Every member is stepped on the first member's carried
+    state, and the other members' state updates are discarded, so stochastic
+    members share the first member's random state rather than sampling
+    independently. Corrector diagnostics from the members are dropped.
 
     Parameters:
         members: The member step configurations.
@@ -132,6 +135,11 @@ def _assert_members_agree(first: StepSelector, other: StepSelector, index: int):
             first.next_step_input_names,
             other.next_step_input_names,
         ),
+        (
+            "next_step_forcing_names",
+            frozenset(first.get_next_step_forcing_names()),
+            frozenset(other.get_next_step_forcing_names()),
+        ),
         ("n_ic_timesteps", first.n_ic_timesteps, other.n_ic_timesteps),
         ("ocean", first.get_ocean(), other.get_ocean()),
     ]
@@ -211,17 +219,16 @@ class EnsembleStep(StepABC):
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> StepOutput:
         outputs = [member.step(args=args, wrapper=wrapper) for member in self._members]
-        names = set(outputs[0].output)
         for i, member_output in enumerate(outputs[1:], start=1):
-            if set(member_output.output) != names:
+            if set(member_output.output) != set(outputs[0].output):
                 raise ValueError(
                     f"ensemble member {i} returned variables "
                     f"{sorted(member_output.output)}, member 0 returned "
-                    f"{sorted(names)}"
+                    f"{sorted(outputs[0].output)}"
                 )
         weights = self._config.weights
         output: TensorDict = {}
-        for name in names:
+        for name in outputs[0].output:  # keep member 0's variable order
             total = weights[0] * outputs[0].output[name]
             for weight, member_output in zip(weights[1:], outputs[1:]):
                 total = total + weight * member_output.output[name]
