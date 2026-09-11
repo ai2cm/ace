@@ -3,7 +3,7 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 23 # 190 yr x 1460/yr / bs 8 = 16425 iter/epoch -> ~377,775 iterations
+max_epochs: 23 # 90 yr x 1460/yr / bs 8 = 16425 iter/epoch -> ~377,775 iterations
 ema:
   decay: 0.999
 inference:
