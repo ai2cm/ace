@@ -9,7 +9,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.training_history import TrainingHistory
-from fme.core.weight_ops import overwrite_weights, prefix_submodule
+from fme.core.weight_ops import overwrite_weights, prefix_submodule, require_subset
 from fme.core.wildcard import apply_by_exclude, apply_by_include, wildcard_match
 
 Weights = list[Mapping[str, Any]]
@@ -114,11 +114,13 @@ class ParameterInitializationConfig:
             same network needs ``conditional_model``, since
             ``NoiseConditionedModel`` holds the wrapped network under that
             name. Every loaded parameter name is prefixed with it before being
-            matched against the destination, so ``parameters`` exclude and
-            frozen patterns are written against destination names either way.
-            Parameters the destination has and the checkpoint does not (the
-            zero-initialized conditioning layers, for instance) keep their
-            initialized values.
+            matched against the destination, both when the weights are loaded
+            and when ``alpha``/``beta`` pair them with the current weights, so
+            ``parameters`` exclude and frozen patterns are written against
+            destination names either way. Parameters the destination has and
+            the checkpoint does not (the zero-initialized conditioning layers,
+            for instance) keep their initialized values. Raises at
+            initialization if no weights were loaded to rename.
         parameters: list of ParameterClassification objects, each specifying
             whether parameters are excluded from initialization or frozen.
             By default modules are unfrozen and all parameters are included.
@@ -142,15 +144,16 @@ class ParameterInitializationConfig:
 
     def __post_init__(self):
         if self.weights_submodule is not None:
-            if self.weights_path is None:
+            # Not validated against weights_path here: the coupled stepper
+            # loads component weights from CoupledParameterInitConfig's
+            # checkpoint, which requires weights_path to be None. Whether any
+            # weights were actually loaded is known only to the initializer,
+            # so apply_weights raises there instead.
+            if any(segment == "" for segment in self.weights_submodule.split(".")):
                 raise ValueError(
-                    "weights_submodule has no effect without weights_path; "
-                    "it renames the parameters loaded from that checkpoint."
-                )
-            if not self.weights_submodule or self.weights_submodule.endswith("."):
-                raise ValueError(
-                    "weights_submodule must be a dotted submodule name without a "
-                    f"trailing '.', got {self.weights_submodule!r}"
+                    "weights_submodule must be a dotted submodule name with no "
+                    "empty segments (no leading, trailing or doubled '.'), got "
+                    f"{self.weights_submodule!r}"
                 )
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
             if len(self.parameters) > 0:
@@ -180,14 +183,18 @@ class ParameterInitializationConfig:
             config=self, load_weights_and_history=load_weights_and_history
         )
 
+    @property
+    def has_submodule_prefix(self) -> bool:
+        """Whether loaded weights are renamed onto a submodule."""
+        return self.weights_submodule is not None
 
-def _maybe_prefixed(
-    state_dict: Mapping[str, Any], submodule: str | None
-) -> Mapping[str, Any]:
-    """``prefix_submodule`` when a submodule is configured, else a passthrough."""
-    if submodule is None:
-        return state_dict
-    return prefix_submodule(state_dict, submodule)
+    def apply_submodule_prefix(
+        self, state_dict: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """Rename loaded weights onto the configured submodule, if any."""
+        if self.weights_submodule is None:
+            return state_dict
+        return prefix_submodule(state_dict, self.weights_submodule)
 
 
 def null_weights_and_history(*_) -> StepperWeightsAndHistory:
@@ -240,15 +247,23 @@ class ParameterInitializer:
             modules: a list of nn.Modules to initialize
         """
         filled_parameters = self._filled_parameters(len(modules))
-        if self.base_weights is not None:
-            for module, state_dict, classification in zip(
-                modules, self.base_weights, filled_parameters
-            ):
-                overwrite_weights(
-                    _maybe_prefixed(state_dict, self.config.weights_submodule),
-                    module,
-                    exclude_parameters=classification.exclude,
+        if self.base_weights is None:
+            if self.config.has_submodule_prefix:
+                raise ValueError(
+                    "weights_submodule is set but no weights were loaded, so it "
+                    "has nothing to rename. Set weights_path, or the coupled "
+                    "CoupledParameterInitConfig.checkpoint_path, to the "
+                    "checkpoint whose parameters it names."
                 )
+            return
+        for module, state_dict, classification in zip(
+            modules, self.base_weights, filled_parameters
+        ):
+            overwrite_weights(
+                self.config.apply_submodule_prefix(state_dict),
+                module,
+                exclude_parameters=classification.exclude,
+            )
 
     def freeze_weights(self, modules: list[nn.Module]):
         """
@@ -290,18 +305,21 @@ class ParameterInitializer:
         if base_weights is not None and (
             self.config.alpha != 0 or self.config.beta != 0
         ):
-            for module, state_dict in zip(modules, base_weights):
-                state_dict = {
-                    name: value.to(device) for name, value in state_dict.items()
+            # Renamed onto the destination's names, exactly as apply_weights
+            # loaded them, so that the L2-SP terms pair each parameter with the
+            # base value it was initialized from and `exclude` patterns match
+            # destination names in both places.
+            base_weights = [
+                {
+                    name: value.to(device)
+                    for name, value in self.config.apply_submodule_prefix(
+                        state_dict
+                    ).items()
                 }
-                from_names = set(state_dict.keys())
-                to_names = set(module.state_dict().keys())
-                if not from_names.issubset(to_names):
-                    missing_parameters = from_names - to_names
-                    raise ValueError(
-                        f"Dest module is missing parameters {missing_parameters}, "
-                        "which is not allowed"
-                    )
+                for state_dict in base_weights
+            ]
+            for module, state_dict in zip(modules, base_weights):
+                require_subset(state_dict, module)
 
             def regularizer():
                 loss = torch.tensor(0.0, device=device)
