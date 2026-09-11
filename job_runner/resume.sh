@@ -73,6 +73,9 @@ while read RESUMING; do
     CLUSTER=$(echo "$RESUMING" | cut -d"|" -f7)
     N_GPUS=$(echo "$RESUMING" | cut -d"|" -f8)
     SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f9)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$RESUMING" | cut -d"|" -f10)
     WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f11)
     OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f12)

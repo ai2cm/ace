@@ -101,6 +101,57 @@ build_cluster_args() {
     export WORKSPACE
 }
 
+# Default --shared-memory from the node caps table when the job row leaves it blank.
+# Args: $1 = CLUSTER alias or beaker cluster name, $2 = N_GPUS
+# Env:  SHARED_MEM_FRACTION (default 0.8) of the job's N_GPUS/gpus_per_node slice of node RAM
+# Prints e.g. "1494GiB". Aliases spanning several clusters take the smallest node.
+# Unrecognized clusters fall back to N_GPUS x 64GiB.
+default_shared_mem() {
+    local CLUSTER="$1"
+    local N_GPUS="$2"
+    local FALLBACK="64GiB"
+    if [[ "$N_GPUS" =~ ^[1-9][0-9]*$ ]]; then
+        FALLBACK="$((N_GPUS * 64))GiB"
+    fi
+    local FRACTION="${SHARED_MEM_FRACTION:-0.8}"
+    local CAPS_FILE
+    CAPS_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/node_caps.txt"
+
+    local MEMBERS
+    case "$CLUSTER" in
+        ""|h100)   MEMBERS="ceres jupiter" ;;
+        a100)      MEMBERS="saturn" ;;
+        b200)      MEMBERS="titan" ;;
+        a100+h100) MEMBERS="saturn ceres jupiter" ;;
+        *)         MEMBERS="${CLUSTER#ai2/}" ;;
+    esac
+
+    if [[ ! -f "$CAPS_FILE" || ! "$N_GPUS" =~ ^[0-9]+$ || "$N_GPUS" -eq 0 ]]; then
+        echo "$FALLBACK"
+        return
+    fi
+
+    # min over members of fraction * n_gpus/gpus_per_node * node_mem_limit_gib, floored
+    local RESULT
+    RESULT=$(awk -F'|' -v members="$MEMBERS" -v n="$N_GPUS" -v f="$FRACTION" '
+        BEGIN { split(members, m, " "); for (i in m) want[m[i]] = 1; best = -1 }
+        /^#/ || $1 == "cluster" { next }
+        ($1 in want) {
+            v = int(f * n / $3 * $4); found[$1] = 1
+            if (best < 0 || v < best) best = v
+        }
+        END {
+            for (c in want) if (!(c in found)) { best = -1; break }
+            if (best > 0) printf "%dGiB\n", best
+        }' "$CAPS_FILE")
+
+    if [[ -n "$RESULT" ]]; then
+        echo "$RESULT"
+    else
+        echo "$FALLBACK"
+    fi
+}
+
 # Build STATS_DATASET_ARGS array based on stats configuration
 # Handles both coupled and separate stats datasets
 # Sets global STATS_DATASET_ARGS array

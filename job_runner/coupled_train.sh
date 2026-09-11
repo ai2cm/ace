@@ -83,6 +83,9 @@ while read PRETRAINING; do
     CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f11)
     N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f12)
     SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f13)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
     WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)

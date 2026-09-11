@@ -75,6 +75,9 @@ while read FINETUNING; do
     CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f8)
     N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f9)
     SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f10)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$FINETUNING" | cut -d"|" -f11)
     WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f12)
     OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f13)

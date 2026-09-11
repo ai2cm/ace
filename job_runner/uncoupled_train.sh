@@ -70,6 +70,9 @@ while read TRAINING; do
     CLUSTER=$(echo "$TRAINING" | cut -d"|" -f5)
     N_GPUS=$(echo "$TRAINING" | cut -d"|" -f6)
     SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f7)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$TRAINING" | cut -d"|" -f8)
     WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f9)
     OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f10)

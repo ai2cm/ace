@@ -159,13 +159,13 @@ while read TRAIN_EXPER; do
         )
     fi
 
-    if [[ -z $SHARED_MEM ]]; then
-        SHARED_MEM="20GiB"
-    fi
-
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
     N_GPUS=1
+
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     FME_MODULE="$FME_MODULE_EVALUATOR"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
@@ -186,6 +186,7 @@ while read TRAIN_EXPER; do
         echo " - Checkpoint: ${CKPT}"
         echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Cluster: ${CLUSTER}"
+        echo " - Shared memory: ${SHARED_MEM}"
         echo " - Priority: ${PRIORITY}"
         echo " - ${MIN_RUNTIME}"
         echo " - --override args: ${OVERRIDE_ARGS}"
