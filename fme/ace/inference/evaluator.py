@@ -32,6 +32,8 @@ from fme.ace.stepper import (
     StepperOverrideConfig,
     load_stepper,
     load_stepper_config_with_override,
+    load_stepper_ensemble,
+    load_stepper_ensemble_config,
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
@@ -194,7 +196,14 @@ class InferenceEvaluatorConfig:
                 written to a local ``experiment_dir``.
 
         n_forward_steps: Number of steps to run the model forward for.
-        checkpoint_path: Path to stepper checkpoint to load.
+        checkpoint_path: Path to stepper checkpoint to load, or a list of paths.
+            Given a list, the loaded stepper predicts each step as the weighted
+            sum of the checkpoints' steps (see
+            :class:`fme.core.step.EnsembleStepConfig`), so e.g. residual and
+            non-residual models can be mixed.
+        checkpoint_weights: One weight per checkpoint in ``checkpoint_path``,
+            used as given (not normalized). Defaults to equal weights summing
+            to one. Only valid when ``checkpoint_path`` is a list.
         logging: configuration for logging.
         loader: Configuration for data to be used as initial conditions, forcing, and
             target in inference.
@@ -228,10 +237,11 @@ class InferenceEvaluatorConfig:
 
     experiment_dir: str
     n_forward_steps: int
-    checkpoint_path: str
+    checkpoint_path: str | list[str]
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     forward_steps_in_memory: int
+    checkpoint_weights: list[float] | None = None
     prediction_loader: InferenceDataLoaderConfig | None = None
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
@@ -251,6 +261,23 @@ class InferenceEvaluatorConfig:
             self.forward_steps_in_memory,
             self.n_forward_steps,
         )
+        # checkpoint_path is a dacite union; this is the one place it is resolved.
+        if isinstance(self.checkpoint_path, str):
+            if self.checkpoint_weights is not None:
+                raise ValueError(
+                    "checkpoint_weights requires checkpoint_path to be a list"
+                )
+        else:
+            n_checkpoints = len(self.checkpoint_path)
+            if n_checkpoints == 0:
+                raise ValueError("checkpoint_path list must not be empty")
+            if self.checkpoint_weights is None:
+                self.checkpoint_weights = [1.0 / n_checkpoints] * n_checkpoints
+            elif len(self.checkpoint_weights) != n_checkpoints:
+                raise ValueError(
+                    f"got {n_checkpoints} checkpoint paths but "
+                    f"{len(self.checkpoint_weights)} checkpoint_weights"
+                )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -260,12 +287,22 @@ class InferenceEvaluatorConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        if isinstance(self.checkpoint_path, str):
+            return load_stepper(self.checkpoint_path, self.stepper_override)
+        assert self.checkpoint_weights is not None  # set in __post_init__
+        return load_stepper_ensemble(
+            self.checkpoint_path, self.checkpoint_weights, self.stepper_override
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config_with_override(
-            self.checkpoint_path, self.stepper_override
+        if isinstance(self.checkpoint_path, str):
+            return load_stepper_config_with_override(
+                self.checkpoint_path, self.stepper_override
+            )
+        assert self.checkpoint_weights is not None  # set in __post_init__
+        return load_stepper_ensemble_config(
+            self.checkpoint_path, self.checkpoint_weights, self.stepper_override
         )
 
     def get_data_writer(
