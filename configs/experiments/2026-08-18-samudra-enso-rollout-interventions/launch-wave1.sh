@@ -134,6 +134,16 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "hybridresid-seed2" || "$arm" == "hybridresid-seed3" ]]; then
+    # seed-robustness arms: byte-identical to hybridresid-pretrain except the
+    # RNG seed (2 / 3 vs the original 1). Full 150-epoch treatment with the
+    # same best-inference checkpoint selection, so zero-shot skill of the
+    # selected checkpoints is directly comparable to the original hybrid.
+    config="${CONFIG_DIR}/${arm}.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "hybridswap" ]]; then
     # anchor-swap diagnostic (25 epochs): thetao_0 full-field, sst residual —
     # mirror image of the hybrid recipe. Tests whether ONE absolute-valued
