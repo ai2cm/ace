@@ -166,7 +166,7 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|01M1ZFX8JCFRTXXJBFDJ07
 # results_dataset is left empty so evaluate.sh resolves each job's LAST attempt
 # from beaker -- correct under autoResume, which these four carry.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs0|01M26HXDVRB22RK8Q9KBXB0V74|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs0|01M26HXDVRB22RK8Q9KBXB0V74|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs1|01M26HXTJP12DXBZX1CBZ3NE9Y|hold_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt-ft|rs2|01M26HY6BBEZ6SH1T8C89EGP4E|ran_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae_pt_lr1e-4-ft|rs0|01M26HYHN9866J8B6CE59M4D8Y|ran_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
