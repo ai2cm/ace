@@ -81,7 +81,7 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS
 # 200-yr numbers these compare against were taken on FINETUNED checkpoints, so
 # this is a pretrained-vs-finetuned comparison until the tw8 finetune lands.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M28RFHSX6B2EVQE2QN2406XX|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M28RFHSX6B2EVQE2QN2406XX|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M28RFHSX6B2EVQE2QN2406XX|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M28RFHSX6B2EVQE2QN2406XX|ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip-ft|rs0|01M28XNM3N5X4D279438ASEYR6|training|best_inference_ckpt|normal|--min-runtime 8h
