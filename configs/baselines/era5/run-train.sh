@@ -61,6 +61,7 @@ run_training() {
   local job_name="$2"
   local N_GPUS="${3:-1}"
   local CLUSTER="${4:-ai2/jupiter}"   # 1° runs: exactly one cluster (jupiter@8, or titan@8 for BPTT)
+  local PRIORITY="${5:-high}"        # beaker priority; pair a low arm with a "# arg: --env CM_PRIORITY=low" header
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   should_run "$config_filename" "$job_name" || { echo "skip (filter): $job_name"; return 0; }
@@ -94,7 +95,8 @@ run_training() {
     --description 'Run ACE training' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
-    --priority high \
+    --priority "$PRIORITY" \
+    --min-runtime 8h \
     --cluster "$CLUSTER" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
@@ -141,3 +143,10 @@ run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-resume120.yaml" \
   "1deg-daily-no-corr-mean-pretrain-rs0" \
   8
+
+# Fresh 120-epoch pretrain with n_ensemble=3 (vs 2 in gjsqlvsf), 8 GPUs on
+# jupiter at LOW beaker priority (the config header also labels CM_PRIORITY=low).
+run_training \
+  "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-nens3-120ep.yaml" \
+  "1deg-daily-no-corr-mean-nens3-pretrain-rs0" \
+  8 ai2/jupiter low
