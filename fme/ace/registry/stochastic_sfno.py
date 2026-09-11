@@ -8,6 +8,7 @@ import torch
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
+from fme.core.models.conditional_sfno.local_filter import LocalFilterConfig
 from fme.core.models.conditional_sfno.s2convolutions import validate_spectral_ratio
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
@@ -230,6 +231,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             convolution (DISCO) blocks, which apply local filters. See
             Ocampo et al. (2022)
             https://arxiv.org/abs/2209.13603 for more details.
+        local_filter: Configuration of the DISCO filter used by the blocks
+            named in local_blocks, including its basis, support radius, and
+            whether to use the two-branch form that reproduces the dhconv
+            spectral filter. Ignored when local_blocks is empty.
         normalize_big_skip: Whether to normalize the big_skip connection.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
@@ -292,6 +297,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_residual: bool = False
     filter_output: bool = False
     local_blocks: list[int] | None = None
+    local_filter: LocalFilterConfig = dataclasses.field(
+        default_factory=LocalFilterConfig
+    )
     normalize_big_skip: bool = False
     affine_norms: bool = False
     filter_num_groups: int = 1
@@ -352,6 +360,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             filter_residual=self.filter_residual,
             filter_output=self.filter_output,
             local_blocks=self.local_blocks,
+            local_filter=self.local_filter,
             normalize_big_skip=self.normalize_big_skip,
             affine_norms=self.affine_norms,
             filter_num_groups=self.filter_num_groups,

@@ -18,6 +18,15 @@ filter_type: linear
 global_layer_norm: false
 label_embed_dim: 3
 local_blocks: null
+local_filter:
+  basis_norm_mode: mean
+  basis_type: morlet
+  kernel_shape:
+  - 3
+  - 3
+  match_spectral_init: false
+  theta_cutoff: null
+  two_branch: false
 lora_alpha: null
 lora_rank: 0
 mlp_ratio: 2.0
