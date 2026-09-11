@@ -3728,6 +3728,31 @@ def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
     assert stds["b"].item() == pytest.approx(field_stds["b"])
 
 
+def test_residual_normalized_prediction_rejects_explicit_loss_normalization():
+    """residual_normalized_prediction needs a residual block, which cannot
+    coexist with an explicit loss block, so the option commits the loss to the
+    tendency convention. Say that here rather than sending the user round the
+    two-step dead end of 'add a residual block' then 'residual conflicts with
+    loss', neither of which names the option that forced it."""
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    with pytest.raises(ValueError, match="cannot be combined with normalization.loss"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+                loss=NormalizationConfig(means={"a": 0.0}, stds={"a": 2.0}),
+            ),
+            residual_prediction=True,
+            residual_normalized_prediction=True,
+        )
+
+
 def test_residual_normalized_prediction_requires_residual_block():
     class AddOne(torch.nn.Module):
         def forward(self, x):

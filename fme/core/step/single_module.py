@@ -80,7 +80,11 @@ class SingleModuleStepConfig(StepConfigABC):
             so a unit network output corresponds to one standard deviation of
             the true per-step tendency; any nonzero mean tendency is learned
             through the network output. Requires ``residual_prediction`` and a
-            ``normalization.residual`` block.
+            ``normalization.residual`` block. Since ``normalization.residual``
+            cannot be combined with ``normalization.loss``, enabling this also
+            commits the loss to the same convention: residual-stepped names are
+            scored in tendency-std units, and there is no way to keep an
+            explicit loss normalization alongside the prediction transform.
         include_channel_mask_inputs: Whether to append per-variable mask indicator
             channels to the network input. When True, the network receives
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
@@ -132,6 +136,20 @@ class SingleModuleStepConfig(StepConfigABC):
             if not self.residual_prediction:
                 raise ValueError(
                     "residual_normalized_prediction requires residual_prediction"
+                )
+            if self.normalization.loss is not None:
+                # Only reachable with loss set and residual unset; the reverse
+                # is rejected by NetworkAndLossNormalizationConfig before this
+                # runs. Without this, adding the option to a config that has a
+                # loss block reports only the missing residual block, and
+                # adding one then reports a loss/residual conflict -- neither
+                # message naming the option that forced the conflict.
+                raise ValueError(
+                    "residual_normalized_prediction requires a "
+                    "normalization.residual block, which cannot be combined "
+                    "with normalization.loss; remove normalization.loss to use "
+                    "it. The loss then follows the prediction convention, "
+                    "scoring residual-stepped names in tendency-std units."
                 )
             if self.normalization.residual is None:
                 raise ValueError(
