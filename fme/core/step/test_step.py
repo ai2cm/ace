@@ -2299,12 +2299,15 @@ def test_step_with_adjustments_hybrid_residual_names():
     """residual_names restricts the residual add to a subset of prognostics:
     listed names step as input + output, the rest are full-field."""
     names = ["a", "b"]
+    # StandardNormalizer moves its stats to get_device(), so every tensor here
+    # has to be built there too or the step mixes devices on a GPU box.
+    device = fme.get_device()
     normalizer = StandardNormalizer(
         means={n: torch.tensor(0.0) for n in names},
         stds={n: torch.tensor(1.0) for n in names},
     )
-    input_data = {n: torch.full((1, 4, 4), 2.0) for n in names}
-    delta = {n: torch.full((1, 4, 4), 0.5) for n in names}
+    input_data = {n: torch.full((1, 4, 4), 2.0, device=device) for n in names}
+    delta = {n: torch.full((1, 4, 4), 0.5, device=device) for n in names}
 
     def network_calls(input_norm):
         return dict(delta)
@@ -2320,8 +2323,12 @@ def test_step_with_adjustments_hybrid_residual_names():
         prognostic_names=frozenset(names),
         residual_names=["a"],
     ).output
-    torch.testing.assert_close(out["a"], torch.full((1, 4, 4), 2.5))  # residual
-    torch.testing.assert_close(out["b"], torch.full((1, 4, 4), 0.5))  # full-field
+    torch.testing.assert_close(
+        out["a"], torch.full((1, 4, 4), 2.5, device=device)
+    )  # residual
+    torch.testing.assert_close(
+        out["b"], torch.full((1, 4, 4), 0.5, device=device)
+    )  # full-field
 
     # default (residual_names=None): every prognostic residual
     out_all = step_with_adjustments(
@@ -2334,7 +2341,7 @@ def test_step_with_adjustments_hybrid_residual_names():
         residual_prediction=True,
         prognostic_names=frozenset(names),
     ).output
-    torch.testing.assert_close(out_all["b"], torch.full((1, 4, 4), 2.5))
+    torch.testing.assert_close(out_all["b"], torch.full((1, 4, 4), 2.5, device=device))
 
 
 def _residual_names_config(**kwargs) -> SingleModuleStepConfig:
