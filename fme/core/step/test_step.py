@@ -1859,6 +1859,58 @@ def _make_single_module_step(
     return step
 
 
+def _capture_packed_step_input(
+    step: SingleModuleStep, grad_enabled: bool
+) -> torch.Tensor:
+    """Run one step and return the packed tensor handed to the network."""
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    grad_context = torch.enable_grad() if grad_enabled else torch.no_grad()
+    try:
+        with grad_context:
+            step.step(
+                args=StepArgs(
+                    input=input_data,
+                    next_step_input_data=next_step,
+                    labels=None,
+                )
+            )
+    finally:
+        handle.remove()
+    return captured[0]
+
+
+def test_input_dropout_skipped_when_grad_disabled():
+    """Input dropout applies only when gradients are enabled.
+
+    The training loops run non-optimized rollout steps under torch.no_grad().
+    A rate-1.0 Bernoulli default drops every input channel, so the presence
+    indicators are deterministic: a grad-enabled step sees 0.0, a no_grad
+    step sees 1.0.
+    """
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0)),
+        include_channel_mask_inputs=True,
+    )
+    step.module.torch_module.train()
+    n_channels = len(step.in_packer.names)
+
+    grad_packed = _capture_packed_step_input(step, grad_enabled=True)
+    assert (grad_packed[:, n_channels:] == 0.0).all()
+
+    no_grad_packed = _capture_packed_step_input(step, grad_enabled=False)
+    assert (no_grad_packed[:, n_channels:] == 1.0).all()
+
+
 def _make_gmr_input_dropout_step(
     input_dropout: VariableMaskingConfig, include_channel_mask_inputs: bool
 ):

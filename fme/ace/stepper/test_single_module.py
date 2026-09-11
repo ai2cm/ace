@@ -1283,7 +1283,9 @@ class _DummyParamModule(torch.nn.Module):
 
 
 def _input_dropout_stepper_config(
-    in_names: list[str], out_names: list[str], input_dropout: VariableMaskingConfig
+    in_names: list[str],
+    out_names: list[str],
+    input_dropout: VariableMaskingConfig,
 ) -> StepperConfig:
     return StepperConfig(
         step=StepSelector(
@@ -1401,6 +1403,76 @@ def test_input_dropout_mask_sampled_per_forward_step():
     for packed in captured:
         indicators = packed[:, 1:, 0, 0]  # [batch, 1]
         assert (indicators == 0.0).all(), "dropped channel indicator must be 0"
+
+
+def _rollout_dropout_indicators(
+    optimize_last_step_only: bool,
+    n_steps: int = 3,
+) -> list[float]:
+    """Train one rollout batch and return the per-step presence indicator of "a".
+
+    A rate-1.0 Bernoulli group always drops "a", so each step's indicator is
+    deterministic: 0.0 where input dropout applied, 1.0 where it did not.
+    """
+    config = _input_dropout_stepper_config(
+        ["a"],
+        ["a"],
+        VariableMaskingConfig(
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=1.0)
+                )
+            ]
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_ensemble=1,
+        loss=StepLossConfig(type="MSE"),
+        n_forward_steps=n_steps,
+        optimize_last_step_only=optimize_last_step_only,
+    )
+    data = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert len(captured) == n_steps
+    # channel 0 is the input "a", channel 1 its presence indicator
+    indicators = []
+    for packed in captured:
+        indicator = packed[:, 1, 0, 0]
+        assert (indicator == indicator[0]).all()
+        indicators.append(float(indicator[0]))
+    return indicators
+
+
+def test_input_dropout_masks_only_optimized_step_with_last_step_only():
+    """Under optimize_last_step_only, only the final step is masked.
+
+    The training loop runs every step but the last under no_grad, so the two
+    non-optimized steps see "a" present (1.0) and only the final optimized
+    step sees it dropped (0.0).
+    """
+    indicators = _rollout_dropout_indicators(optimize_last_step_only=True)
+    assert indicators == [1.0, 1.0, 0.0]
+
+
+def test_input_dropout_masks_every_optimized_step():
+    """Without optimize_last_step_only every rollout step is optimized and masked."""
+    indicators = _rollout_dropout_indicators(optimize_last_step_only=False)
+    assert indicators == [0.0, 0.0, 0.0]
 
 
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
