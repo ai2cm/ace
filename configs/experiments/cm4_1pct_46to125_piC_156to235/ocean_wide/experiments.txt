@@ -153,9 +153,9 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs0|01M1ZFWPFZFM3QK02SXAKM
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs1|01M1ZFWZCHETM6X75178NQG948|ran_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|01M1ZFX8JCFRTXXJBFDJ07DA3F|ran_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs0|01M1ZFWPFZFM3QK02SXAKMA5JD|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs1|01M1ZFWZCHETM6X75178NQG948|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|01M1ZFX8JCFRTXXJBFDJ07DA3F|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs0|01M1ZFWPFZFM3QK02SXAKMA5JD|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs1|01M1ZFWZCHETM6X75178NQG948|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae|rs2|01M1ZFX8JCFRTXXJBFDJ07DA3F|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
 # Stage 2 -- the 8-step L1 finetune
 # (research experiments/2026-09-10-mae-pretrain-multistep-finetune), incl. the
