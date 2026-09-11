@@ -84,4 +84,33 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-c
 # handicapped the conditioning"; a STRONG result is informative either way.
 # Settling the weak case would need a layer-norm MAE pretrain (1 seed, 75
 # epochs, ~52 h) and a rerun against it.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h
+
+# MOVED TO JUPITER 2026-09-11. The b200 row above is now `skip`: we are over
+# the titan budget, so its job (01M28TCF74NZW7YAM8ZHVQRPPN) never started and
+# was cancelled. The row below is the SAME ARM on 8 H100s, and is
+# scientifically identical to it -- ace's `batch_size` is GLOBAL, split across
+# data-parallel ranks by dist.local_batch_size (and validated divisible), so
+# the unchanged `batch_size: 8` on 8 GPUs instead of 4 just takes per-GPU load
+# from 2 samples to 1. Nothing in the train config changes; only the cluster
+# and n_gpus columns differ, so this arm stays comparable to A and B.
+#
+# Does it fit in 80 GiB? Measured on the running B200 twin mae2_a2s
+# (wandb wej56umm, 4xB200 @ 2 samples/GPU): training steady state 66.9 GiB/GPU,
+# peak 83.8 GiB/GPU -- and the peak is in the INFERENCE phase, not training.
+# At 1 sample/GPU both should land near half (~35-45 GiB).
+#
+# Gradient checkpointing is NOT the lever here, despite ace#1493. That fix is
+# in the conditional SFNO = our ATMOSPHERE, which this config freezes
+# (loss_weight 0.0, n_steps 0). ComponentLossSchedule.step_is_optimized returns
+# False for weight 0, so _accumulate_loss runs every atmosphere step inside
+# torch.no_grad() -- no activations are saved, so `checkpointing` on the
+# atmosphere buys no memory and costs no speed here. The realm that holds a
+# graph is the ocean (Samudra), whose separate knob is
+# builder.config.checkpoint_strategy = "simple"|"all" (fme/ace/registry/m2lines.py).
+# That is the fallback if training memory is tight; it cannot help the
+# inference peak, which is all no_grad (that lever is coupled_steps_in_memory).
+#
+# jupiter nodes are 8xH100-80GB with ~2 TB RAM, so 8 GPUs is exactly one node
+# and the all-reduce stays NVLink-local.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h
