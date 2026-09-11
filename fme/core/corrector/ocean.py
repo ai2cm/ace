@@ -104,11 +104,18 @@ class OceanHeatContentBudgetConfig:
             into the ocean when conserving the heat content. This can be useful
             for correcting errors in heat budget in target data. The same
             additional heating is imposed at all time steps and grid cells.
+        origin_deg_C: Temperature origin in degrees C, the units of thetao, about
+            which the uniform correction factor scales. The factor multiplies
+            (thetao - origin_deg_C) rather than thetao, so the correction vanishes
+            at origin_deg_C instead of at 0 C. Heat content closure holds for any
+            origin; only the spatial distribution of the correction changes. The
+            default 0.0 reproduces scaling about 0 C exactly.
 
     """
 
     method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
+    origin_deg_C: float = 0.0
 
 
 @dataclasses.dataclass
@@ -205,6 +212,7 @@ class OceanHeatContentCorrection:
     timestep_seconds: float
     method: Literal["scaled_temperature"]
     unaccounted_heating: float
+    origin_deg_C: float = 0.0
 
     def __call__(
         self,
@@ -233,6 +241,7 @@ class OceanHeatContentCorrection:
             self.timestep_seconds,
             self.method,
             self.unaccounted_heating,
+            self.origin_deg_C,
         )
         return corrected, corrector_state
 
@@ -343,6 +352,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                    self.ocean_heat_content_correction.origin_deg_C,
                 )
             )
         return OceanCorrector(corrections)
@@ -426,6 +436,7 @@ def _force_conserve_ocean_heat_content(
     timestep_seconds: float,
     method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
+    origin_deg_C: float = 0.0,
 ) -> TensorDict:
     if method != "scaled_temperature":
         raise NotImplementedError(
@@ -450,6 +461,19 @@ def _force_conserve_ocean_heat_content(
     )
     global_input_ocean_heat_content = area_weighted_mean(
         input.ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    # Heat content of a uniform ocean at the origin temperature, computed through
+    # the same depth-integral path so the dz and mask handling is identical. It
+    # cancels out of the closure, leaving H(theta_final) = H_target for any origin.
+    n_levels = gen.sea_water_potential_temperature.shape[-1]
+    origin_data = {
+        f"thetao_{k}": torch.full_like(gen.data[f"thetao_{k}"], origin_deg_C)
+        for k in range(n_levels)
+    }
+    global_origin_ocean_heat_content = area_weighted_mean(
+        OceanData(origin_data, vertical_coordinate).ocean_heat_content,
         keepdim=True,
         name="ocean_heat_content",
     )
@@ -479,16 +503,20 @@ def _force_conserve_ocean_heat_content(
         energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
     heat_content_correction_ratio = (
-        global_input_ocean_heat_content + expected_change_ocean_heat_content
-    ) / global_gen_ocean_heat_content
-    # apply same temperature correction to all vertical layers
+        global_input_ocean_heat_content
+        + expected_change_ocean_heat_content
+        - global_origin_ocean_heat_content
+    ) / (global_gen_ocean_heat_content - global_origin_ocean_heat_content)
+    # apply same temperature correction to all vertical layers, scaling the
+    # departure from the origin rather than the temperature itself
     out: TensorDict = {}
-    n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
         name = f"thetao_{k}"
-        out[name] = gen.data[name] * heat_content_correction_ratio
+        out[name] = (
+            gen.data[name] - origin_deg_C
+        ) * heat_content_correction_ratio + origin_deg_C
     if "sst" in gen.data:
         out["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN - origin_deg_C
+        ) * heat_content_correction_ratio + (FREEZING_TEMPERATURE_KELVIN + origin_deg_C)
     return out

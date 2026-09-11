@@ -477,6 +477,163 @@ def test_ocean_heat_content_correction(hfds_type):
     )
 
 
+def _ohc_origin_fixture():
+    """Fixture for the origin_deg_C tests: masked two-level ocean whose
+    generated temperatures straddle 0 C, so the origin choice matters."""
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, 0] = 0.0
+    mask[0, 0, 1] = 0.0
+    mask[0, 1, 1] = 0.0
+    masks = {
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
+    }
+    ops = LatLonOperations(torch.ones(size=[nlat, nlon]), SpatialMaskProvider(masks))
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10, 20]), mask)
+    sea_surface_fraction = mask[:, :, 0]
+
+    torch.manual_seed(0)
+    shape = (nsamples, nlat, nlon)
+    input_data = {
+        "thetao_0": torch.rand(shape) * 20 - 2,
+        "thetao_1": torch.rand(shape) * 10 - 2,
+    }
+    input_data["sst"] = input_data["thetao_0"] + 273.15
+    gen_data = {
+        "thetao_0": torch.rand(shape) * 20 - 2,
+        "thetao_1": torch.rand(shape) * 10 - 2,
+        "hfds": torch.rand(shape) * 10,
+    }
+    gen_data["sst"] = gen_data["thetao_0"] + 273.15
+    forcing_data = {
+        "hfgeou": torch.ones(shape) * 0.1,
+        "sea_surface_fraction": sea_surface_fraction,
+    }
+    return (
+        ops,
+        depth_coordinate,
+        timestep,
+        input_data,
+        gen_data,
+        forcing_data,
+    )
+
+
+@pytest.mark.parametrize("origin_deg_C", [-2.0, 4.0])
+def test_ocean_heat_content_correction_origin_closes_budget(origin_deg_C):
+    unaccounted = 0.1
+    (
+        ops,
+        depth_coordinate,
+        timestep,
+        input_dict,
+        gen_dict,
+        forcing_dict,
+    ) = _ohc_origin_fixture()
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=unaccounted,
+            origin_deg_C=origin_deg_C,
+        )
+    )
+    corrector = config._build(ops, depth_coordinate, timestep)
+    corrected_dict = dict(gen_dict)
+    corrected_dict.update(corrector(input_dict, gen_dict, forcing_dict, None).corrected)
+
+    def _global_ohc(data):
+        return ops.area_weighted_mean(
+            OceanData(data, depth_coordinate).ocean_heat_content,
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+
+    net_flux = (gen_dict["hfds"] + forcing_dict["hfgeou"]) * forcing_dict[
+        "sea_surface_fraction"
+    ]
+    expected_change = (
+        ops.area_weighted_mean(net_flux, keepdim=True, name="ocean_heat_content")
+        + unaccounted
+    ) * timestep.total_seconds()
+    torch.testing.assert_close(
+        _global_ohc(corrected_dict),
+        _global_ohc(input_dict) + expected_change,
+        equal_nan=True,
+    )
+
+    # one scalar per sample multiplies the departure from the origin, at every
+    # level and for sst (converted to the units of thetao)
+    ratio = (corrected_dict["thetao_0"] - origin_deg_C) / (
+        gen_dict["thetao_0"] - origin_deg_C
+    )
+    per_sample_ratio = ratio[:, :1, :1]
+    for name in ["thetao_0", "thetao_1"]:
+        torch.testing.assert_close(
+            corrected_dict[name] - origin_deg_C,
+            (gen_dict[name] - origin_deg_C) * per_sample_ratio,
+        )
+    # sst is stored in Kelvin, so subtracting 273.15 in float32 leaves an
+    # absolute error of order the float32 spacing at 273 K (~3e-5)
+    torch.testing.assert_close(
+        corrected_dict["sst"] - 273.15 - origin_deg_C,
+        (gen_dict["sst"] - 273.15 - origin_deg_C) * per_sample_ratio,
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    assert not torch.allclose(per_sample_ratio, torch.ones_like(per_sample_ratio))
+
+
+def test_ocean_heat_content_correction_zero_origin_matches_scaling_about_zero():
+    # The origin = 0 branch reproduces the r * theta arithmetic exactly.
+    unaccounted = 0.1
+    (
+        ops,
+        depth_coordinate,
+        timestep,
+        input_dict,
+        gen_dict,
+        forcing_dict,
+    ) = _ohc_origin_fixture()
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=unaccounted,
+            origin_deg_C=0.0,
+        )
+    )
+    corrector = config._build(ops, depth_coordinate, timestep)
+    corrected = corrector(input_dict, gen_dict, forcing_dict, None).corrected
+
+    def _global_ohc(data):
+        return ops.area_weighted_mean(
+            OceanData(data, depth_coordinate).ocean_heat_content,
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+
+    net_flux = (gen_dict["hfds"] + forcing_dict["hfgeou"]) * forcing_dict[
+        "sea_surface_fraction"
+    ]
+    expected_change = (
+        ops.area_weighted_mean(net_flux, keepdim=True, name="ocean_heat_content")
+        + unaccounted
+    ) * timestep.total_seconds()
+    ratio = (_global_ohc(input_dict) + expected_change) / _global_ohc(gen_dict)
+
+    for name in ["thetao_0", "thetao_1"]:
+        assert torch.equal(corrected[name], gen_dict[name] * ratio)
+    assert torch.equal(corrected["sst"], (gen_dict["sst"] - 273.15) * ratio + 273.15)
+
+
+def test_ocean_heat_content_budget_config_defaults_to_zero_origin():
+    # Checkpoint configs saved before the option exists must still load.
+    config = OceanHeatContentBudgetConfig(method="scaled_temperature")
+    assert config.origin_deg_C == 0.0
+
+
 def test_ocean_corrector_config_fields_are_known():
     # Staleness guard: if a new corrector option is added to
     # OceanCorrectorConfig this fails, flagging that the corrector delta/
