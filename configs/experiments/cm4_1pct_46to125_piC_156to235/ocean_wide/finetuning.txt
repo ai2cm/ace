@@ -38,4 +38,22 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw90
 # min_runtime 8h: the pretraining ran with 3h and lost a 12-hour job to
 # preemption.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|yva51vwg|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M1PV0PX1Q85J1TMMBDG023J5|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|yva51vwg|best_ckpt|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M1PV0PX1Q85J1TMMBDG023J5|8h
+
+# ocean_wide_uniformdt_tw8_clip -- pretraining finished at 75 epochs 2026-09-11
+# (beaker 01M23YN6RYKZW7KS1M221AD36D, wandb v5v6xulf). Same 4 -> 8 unroll as the
+# rows above, so all three arms are comparable at matched unroll length.
+#
+# The 20 loss-weight overrides are restated here and this is NOT belt-and-braces.
+# create_finetune_config.sh merges only the `.stepper` block in from the
+# pretraining run's saved config.yaml; `stepper_training` comes from
+# finetune-config-template.yaml, which hardcodes `loss: {type: MSE}` with no
+# weights. Drop these and the finetune silently reverts to the unweighted loss --
+# i.e. it would no longer be this arm. Same class of footgun as
+# optimization.max_grad_norm, which also lives outside .stepper.
+#
+# results_dataset is pinned: the pretraining was preempted at ~epoch 71 and
+# auto-resumed, so the experiment carries two result datasets and
+# 01M28RFHSX6B2EVQE2QN2406XX is the second, holding the final checkpoints.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip-ft|rs0|ace-samudra-cm4|v5v6xulf|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.weights.thetao_0=8.0 stepper_training.loss.weights.thetao_1=8.0 stepper_training.loss.weights.thetao_2=8.0 stepper_training.loss.weights.thetao_3=8.0 stepper_training.loss.weights.thetao_4=8.0 stepper_training.loss.weights.thetao_5=8.0 stepper_training.loss.weights.thetao_6=8.0 stepper_training.loss.weights.thetao_7=8.0 stepper_training.loss.weights.thetao_8=8.0 stepper_training.loss.weights.thetao_9=8.0 stepper_training.loss.weights.thetao_10=8.0 stepper_training.loss.weights.thetao_11=8.0 stepper_training.loss.weights.thetao_12=8.0 stepper_training.loss.weights.thetao_13=8.0 stepper_training.loss.weights.thetao_14=8.0 stepper_training.loss.weights.thetao_15=8.0 stepper_training.loss.weights.thetao_16=8.0 stepper_training.loss.weights.thetao_17=8.0 stepper_training.loss.weights.thetao_18=8.0 stepper_training.loss.weights.sst=8.0|01M28RFHSX6B2EVQE2QN2406XX|8h

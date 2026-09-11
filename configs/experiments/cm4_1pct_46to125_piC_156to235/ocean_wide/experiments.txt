@@ -68,3 +68,18 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBH
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ocean_wide_uniformdt_tw8_clip -- pretraining finished at 75 epochs 2026-09-11.
+# The pretraining was preempted at ~epoch 71 and auto-resumed, so the experiment
+# carries two result datasets; 01M28RFHSX6B2EVQE2QN2406XX is the second and
+# holds the final checkpoints (best_inference_ckpt written 2026-09-11 10:49,
+# i.e. the epoch-74 checkpoint). Pinned rather than resolved from wandb, as for
+# the uniformdt_clip-ft rows above.
+#
+# Standalone rollouts on the pretrained checkpoint, before the finetune, to read
+# the 200-yr piC SST/temperature drift directly. Note the ohc_clip / uniformdt_clip
+# 200-yr numbers these compare against were taken on FINETUNED checkpoints, so
+# this is a pretrained-vs-finetuned comparison until the tw8 finetune lands.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M28RFHSX6B2EVQE2QN2406XX|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_tw8_clip|rs0|01M23YN6RYKZW7KS1M221AD36D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M28RFHSX6B2EVQE2QN2406XX|ai2/ace|jupiter
