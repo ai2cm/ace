@@ -12,6 +12,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - `make jr_change`
 - [FEAT] Add `--config-dir` arg to `{evaluate,inference}.sh` for shared eval
   configs
+- [FEAT] Default `SHARED_MEM` of `N_GPUS` / `N_TOTAL_GPUS_ON_NODE` times 80% the
+  node total RAM
 
 ### Changed
 
@@ -75,11 +77,10 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [CHORE] Automate porting of experiment-branch-to-job_runner-branch updates
 - [ISSUE] `make jr_changelog` doesn't properly handle insertion after multi-line
   items
-- [FEAT] Default `SHARED_MEM` of `N_GPUS` / 8 times (some percentage of) the
-  node total RAM
 - [FEAT] `train.sh` and `finetune.sh` with `--coupled` flag
 - [FEAT] Keyword-based job specification in `*.txt` files
 - [FEAT] Automated `run_` to `ran_` in `experiments.txt`
 - [ISSUE] Catch failed beaker submission and avoid adding rows with empty
   experiment ID in `experiments.txt`
 - [FEAT] Document `*.txt` headers in each launcher script `--help`.
+- [FEAT] `--dry-run` skip header / comments / whitespace
