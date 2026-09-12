@@ -1,0 +1,58 @@
+experiment_dir: /results
+checkpoint_path:
+  ocean:
+    timedelta: 5D
+    path: /ocean_ckpt.tar
+  atmosphere:
+    timedelta: 6h
+    path: /atmos_ckpt.tar
+  sst_name: sst
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+n_coupled_steps: 128
+coupled_steps_in_memory: 1
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2004-01-01T12:00:00'
+    - '2004-02-05T12:00:00'
+    - '2004-03-01T12:00:00'
+    - '2004-04-05T12:00:00'
+    - '2004-05-05T12:00:00'
+    - '2004-06-04T12:00:00'
+    - '2004-07-04T12:00:00'
+    - '2004-08-03T12:00:00'
+    - '2004-09-02T12:00:00'
+    - '2004-10-02T12:00:00'
+    - '2004-11-01T12:00:00'
+    - '2004-12-01T12:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: true
+    names:
+    - sst
+    - thetao_0
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
