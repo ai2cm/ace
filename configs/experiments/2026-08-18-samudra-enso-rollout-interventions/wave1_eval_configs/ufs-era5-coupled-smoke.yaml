@@ -18,7 +18,7 @@ loader:
   dataset:
     ocean:
       data_path: gs://vcm-ml-intermediate
-      file_pattern: 2026-09-12-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
+      file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
       engine: zarr
     atmosphere:
       data_path: /climate-default/
