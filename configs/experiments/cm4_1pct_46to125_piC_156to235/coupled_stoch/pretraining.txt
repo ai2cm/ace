@@ -34,7 +34,7 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # --- Arm A: stochastic Samudra (long-tail all_blocks rs0) ---
 # Inherits norm=layer, noise_embed_dim=32, conditioned_blocks=all_blocks from
 # the checkpoint config. No override needed.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|high|b200|4|500GiB|3|ai2/ace|seed=0|8h
 
 # second seed held back for now (rssferbq, best_inference_error 0.09045)
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm4|rssferbq|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|8h
@@ -53,7 +53,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o1a0rs0|ace-samudra-cm
 # switches the spread term on -- where an MSE pretrain has to change loss
 # family. That is Chris's "less of a shock", and it needs no architecture
 # change and no norm change (instance, as in James's lineage).
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|high|b200|4|500GiB|3|ai2/ace|seed=0|8h
 
 # other two MAE seeds held back
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o0a0rs0|ace-samudra-cm4|xxwzrty6|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|normal|b200|4|500GiB|3|ai2/ace|seed=0|8h
@@ -76,4 +76,57 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o1a0rs0|ace-samudra-c
 # handicapped the conditioning"; a STRONG result is informative either way.
 # Settling the weak case would need a layer-norm MAE pretrain (1 seed, 75
 # epochs, ~52 h) and a rerun against it.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks|8h
+
+# =====================================================================
+# WAVE 2, launched 2026-09-12. Same fork of James's `owc_a2s` recipe as
+# arms A-C above: every training knob is the template's (atmosphere frozen,
+# 8 epochs, lr 7e-5, bs 8, n_coupled_steps 4, n_ensemble 2, ocean
+# EnsembleLoss), and the ONE thing each row changes is the ocean init.
+#
+# On jupiter at 8 GPUs rather than titan at 4. ace's batch_size is a GLOBAL
+# batch split across ranks, so bs 8 on 8 GPUs is 1 sample/GPU instead of 2 and
+# the generated train-config.yaml is unchanged. Measured on the mae2n twin:
+# 11.37 s/batch against the B200's 14.29 (fp32, AMP off, so B200's FP8/FP4
+# advantage never engages), peak 49.7 GiB of an 80 GiB card. Arm A was also
+# preempted off titan on 2026-09-11 for being over budget.
+#
+# The per-channel-fill arm (Arm E) is NOT here: it needs ace#1458, which is
+# unmerged, so it runs from exp/coupled-armE. This branch carries no unmerged
+# code, which is the property that makes arms A-C and D-E comparable.
+
+# --- Arm D: Samudra-MAE, 8-STEP FINETUNED init (mae2ft) ---
+# The pair to Arm B. Arm B initializes from the MAE *pretrain* (ouivl7ev);
+# this initializes from that same seed's own 8-step multi-step finetune
+# (j1eeib1r, 10 epochs). Nothing else differs, n_coupled_steps stays 4.
+#
+# Why this is the highest-information arm available. The piC/1pct ensemble-
+# spread evaluation found owc8_a2s (crps8) beats both other James arms on
+# coupled mean state by many seed sd, and attributed it to the finetuned
+# ocean init rather than the loss -- but owc8 changed init AND coupled unroll
+# depth (4 -> 8) together, so that attribution is confounded. Arm B vs Arm D
+# is the same init contrast with unroll depth held at 4, so it isolates the
+# lever cleanly inside our own lineage and decomposes James's confound by
+# analogy.
+#
+# Caveat to read it with: standalone, the MAE 8-step finetune is 34% behind
+# the MSE one on the piC rollout (0.04921 vs 0.03643). This arm asks whether
+# a finetuned init helps in COUPLING, not whether MAE beats MSE.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|ace-samudra-cm4|j1eeib1r|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+
+# --- Arm F: stochastic Samudra, DEEP-TAIL schedule (dt0) ---
+# Replaces the "another long-tail seed" option. Deep-tail all_blocks rs0
+# (2ef45wyt) dominates Arm A's long-tail checkpoint (jshu3e8a) on every
+# standalone metric -- inline piC 0.0431 vs 0.0450, 200-yr piC rollout 0.0542
+# vs 0.0572, best_inference_error 0.08464 vs 0.08905 -- and is the only
+# stochastic arm that beats the deterministic baseline over 200 stationary
+# years. A second long-tail seed would be replication on an axis that has not
+# yet produced a coupled result; this moves along the axis instead.
+#
+# Inherits norm=layer, noise_embed_dim=32, conditioned_blocks=all_blocks from
+# its own checkpoint config, exactly as Arm A does. No override needed, and no
+# unmerged code.
+#
+# NORMAL priority, deliberately: elynn's call that this arm is genuinely lower
+# priority than the rest of the wave and should not bump them off jupiter.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|ace-samudra-cm4|2ef45wyt|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
