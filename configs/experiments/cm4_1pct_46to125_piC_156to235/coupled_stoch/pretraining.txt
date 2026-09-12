@@ -112,7 +112,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-
 # Caveat to read it with: standalone, the MAE 8-step finetune is 34% behind
 # the MSE one on the piC rollout (0.04921 vs 0.03643). This arm asks whether
 # a finetuned init helps in COUPLING, not whether MAE beats MSE.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|ace-samudra-cm4|j1eeib1r|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|ace-samudra-cm4|j1eeib1r|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
 
 # --- Arm F: stochastic Samudra, DEEP-TAIL schedule (dt0) ---
 # Replaces the "another long-tail seed" option. Deep-tail all_blocks rs0
@@ -129,4 +129,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|ace-samudra
 #
 # NORMAL priority, deliberately: elynn's call that this arm is genuinely lower
 # priority than the rest of the wave and should not bump them off jupiter.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|ace-samudra-cm4|2ef45wyt|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|ace-samudra-cm4|2ef45wyt|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|normal|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
