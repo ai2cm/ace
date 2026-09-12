@@ -12,7 +12,7 @@ SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
 for Y in $YEARS; do
-JOB="samudra-ufs-era5-coupled-yr${Y}"
+JOB="${NAME_PREFIX:-samudra-ufs-era5-coupled}-yr${Y}"
 gantry run \
   --name "$JOB" --task-name "$JOB" \
   --description "Zero-shot coupled UFS+ERA5 hindcasts, year ${Y} ICs" \
