@@ -83,6 +83,15 @@ launch() {
             --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
             --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "hybridufs-coupledft" ]]; then
+    # UFS+ERA5 coupled FT: ep-120 UFS hybrid ocean + ACE2S-ERA5 atmosphere,
+    # CM4 hybridresidft recipe. Wind stress couples via atmosphere_output_rename
+    # (leak fix); ocean exogenous set is static geography only.
+    config="${CONFIG_DIR}/hybridufs-coupledft.yaml"
+    mounts=(--dataset "${ERA5_ATMOS_CKPT_DATASET:-01KWD8DZVJFKYC5A9PNW8259GH}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
+            --dataset "${UFSFT_EXT_CKPT_DATASET:-01M29HD9WZYA7H144CSS6FY9VN}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar"
+            --dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "residfixft" ]]; then
     mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
             --dataset "${RESIDFIX_SNAPSHOT_DATASET}:best_ckpt.tar:/ocean_ckpt.tar"
