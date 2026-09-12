@@ -10,3 +10,5 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|b
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|resumed|high|b200|4|400GiB|3|ai2/ace|seed=2 stepper_training.corrector_loss.precorrector_optimization.names_and_prefixes='[PRATEsfc]'||4h
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate_adv|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|training|high|b200|4|400GiB|3|ai2/ace|seed=2 stepper_training.corrector_loss.precorrector_optimization.names_and_prefixes='[PRATEsfc,tendency_of_total_water_path_due_to_advection]'||4h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft_precorr_prate_adv_fprec|rs2|ace2-cm4-atmos-noLSM|jbg7a0z4|best_ckpt|train|urgent|b200|4||3|ai2/ace|seed=2 stepper_training.corrector_loss.precorrector_optimization.names_and_prefixes='[PRATEsfc,tendency_of_total_water_path_due_to_advection,total_frozen_precipitation_rate]'||8h
