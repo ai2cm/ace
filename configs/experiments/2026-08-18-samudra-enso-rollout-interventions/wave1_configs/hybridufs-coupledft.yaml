@@ -12,7 +12,7 @@ ema:
   decay: 0.999
 max_epochs: 25
 inference:
-  n_coupled_steps: 140
+  n_coupled_steps: 100
   coupled_steps_in_memory: 2
   loader:
     num_data_workers: 4
@@ -28,6 +28,9 @@ inference:
     start_indices:
       times:
       - '2022-01-01T12:00:00'
+      - '2022-02-05T12:00:00'
+      - '2022-03-02T12:00:00'
+      - '2022-04-01T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
