@@ -12,7 +12,7 @@ ema:
   decay: 0.999
 max_epochs: 25
 inference:
-  n_coupled_steps: 100
+- n_coupled_steps: 100
   coupled_steps_in_memory: 2
   loader:
     num_data_workers: 4
@@ -31,6 +31,28 @@ inference:
       - '2022-02-05T12:00:00'
       - '2022-03-02T12:00:00'
       - '2022-04-01T12:00:00'
+  aggregator:
+    log_zonal_mean_images: false
+    log_histograms: false
+- n_coupled_steps: 630
+  coupled_steps_in_memory: 2
+  loader:
+    num_data_workers: 4
+    dataset:
+      ocean:
+        data_path: gs://vcm-ml-intermediate
+        file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
+        engine: zarr
+      atmosphere:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+    start_indices:
+      times:
+      - '2012-01-04T12:00:00'
+      - '2013-01-03T12:00:00'
+      - '2014-01-03T12:00:00'
+      - '2015-01-03T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
