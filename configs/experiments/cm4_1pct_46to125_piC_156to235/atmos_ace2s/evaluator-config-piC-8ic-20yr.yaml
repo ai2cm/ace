@@ -42,7 +42,7 @@ aggregator:
     enabled: false
   step_diagnostics:
     correction_scalars: true
-    correction_maps: false
+    correction_maps: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
