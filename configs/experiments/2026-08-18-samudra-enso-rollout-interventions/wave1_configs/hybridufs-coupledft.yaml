@@ -34,7 +34,7 @@ inference:
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
-- n_coupled_steps: 630
+- n_coupled_steps: 730
   coupled_steps_in_memory: 2
   loader:
     num_data_workers: 4
@@ -50,9 +50,9 @@ inference:
     start_indices:
       times:
       - '2012-01-04T12:00:00'
+      - '2012-07-02T12:00:00'
       - '2013-01-03T12:00:00'
-      - '2014-01-03T12:00:00'
-      - '2015-01-03T12:00:00'
+      - '2013-07-02T12:00:00'
   aggregator:
     log_zonal_mean_images: false
     log_histograms: false
