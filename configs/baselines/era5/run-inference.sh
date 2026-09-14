@@ -95,7 +95,7 @@ run_inference() {
     --workspace ai2/ace \
     --priority high \
     --min-runtime 8h \
-    --not-preemptible \
+    --no-auto-resume \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
