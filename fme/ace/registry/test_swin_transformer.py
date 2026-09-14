@@ -337,3 +337,17 @@ def test_swin_transformer_patch_size_builds_and_runs(builder):
 def test_swin_transformer_patch_size_validation(builder, patch_size):
     with pytest.raises(ValueError, match="patch_size"):
         builder(patch_size=patch_size)
+
+
+@pytest.mark.parametrize("builder", [_builder, _nc_builder])
+def test_swin_transformer_num_levels_builds_and_runs(builder):
+    """An extra U-Net level still maps back to the full pixel resolution."""
+    module = builder(num_levels=2).build(5, 3, _get_dataset_info()).to(fme.get_device())
+    x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, 3, *IMG_SHAPE)
+
+
+@pytest.mark.parametrize("builder", [_builder, _nc_builder])
+def test_swin_transformer_num_levels_validation(builder):
+    with pytest.raises(ValueError, match="num_levels"):
+        builder(num_levels=0)

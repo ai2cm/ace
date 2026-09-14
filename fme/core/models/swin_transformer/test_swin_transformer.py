@@ -9,6 +9,8 @@ from fme.core.testing.regression import validate_tensor_dict
 
 from .swin_layers import (
     ColumnMixer,
+    PatchExpanding,
+    PatchMerging,
     WindowAttention2D,
     window_lat_mean,
     window_partition_2d,
@@ -31,6 +33,8 @@ def _build_net(
     lat_coords: torch.Tensor | None = None,
     padding_conf: dict | None = None,
     patch_size: tuple[int, int] = (1, 1),
+    num_levels: int = 1,
+    window_size: tuple[int, int] = (4, 4),
 ) -> SwinTransformerNet:
     return SwinTransformerNet(
         in_chans=in_chans,
@@ -39,8 +43,9 @@ def _build_net(
         embed_dim=embed_dim,
         depth_multiplier=1,
         num_heads=num_heads,
-        window_size=(4, 4),
+        window_size=window_size,
         patch_size=patch_size,
+        num_levels=num_levels,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
@@ -63,6 +68,7 @@ def _build_cln_net(
     mlp_layer: str = "mlp",
     lat_coords: torch.Tensor | None = None,
     patch_size: tuple[int, int] = (1, 1),
+    num_levels: int = 1,
 ) -> SwinTransformerNet:
     context_config = ContextConfig(
         embed_dim_scalar=0,
@@ -79,6 +85,7 @@ def _build_cln_net(
         num_heads=num_heads,
         window_size=(4, 4),
         patch_size=patch_size,
+        num_levels=num_levels,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
@@ -810,6 +817,219 @@ def test_patch_size_default_keeps_state_dict_keys():
 def test_patch_size_rejects_non_positive():
     with pytest.raises(ValueError, match="patch_size"):
         _build_net(4, 2, (16, 32), patch_size=(0, 2))
+
+
+_NUM_LEVELS_IMG_SHAPE = (32, 64)  # multiple of window_size * 2**2
+
+
+@pytest.mark.parametrize(
+    "use_skip,skip_projection", [(True, False), (False, False), (True, True)]
+)
+def test_num_levels_forward(use_skip: bool, skip_projection: bool):
+    """A two-level U-Net returns the original pixel resolution for each of the
+    three skip configurations."""
+    in_chans, out_chans = 5, 3
+    img_shape = _NUM_LEVELS_IMG_SHAPE
+    n = 2
+    device = get_device()
+    net = _build_net(
+        in_chans,
+        out_chans,
+        img_shape,
+        num_levels=2,
+        use_skip=use_skip,
+        skip_projection=skip_projection,
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_num_levels_forward_with_padding():
+    """An odd grid needing earth padding up to the 2**num_levels multiple."""
+    in_chans, out_chans = 4, 4
+    img_shape = (9, 18)
+    n = 2
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": [2, 1],
+        "pad_lon": [2, 2],
+    }
+    device = get_device()
+    net = _build_net(
+        in_chans,
+        out_chans,
+        img_shape,
+        num_levels=2,
+        lat_coords=torch.linspace(-80.0, 80.0, img_shape[0]),
+        padding_conf=padding_conf,
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_cln_num_levels_forward():
+    """CLN noise is subsampled once per level, including the inserted ones."""
+    in_chans, out_chans = 4, 2
+    img_shape = _NUM_LEVELS_IMG_SHAPE
+    n = 2
+    device = get_device()
+    net = _build_cln_net(in_chans, out_chans, img_shape, num_levels=2).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
+    )
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_num_levels_backward():
+    in_chans, out_chans = 4, 2
+    img_shape = _NUM_LEVELS_IMG_SHAPE
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape, num_levels=2).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    net(x).sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_num_levels_default_keeps_state_dict_keys():
+    """Default num_levels=1 must not change any parameter name or shape, so
+    existing checkpoints keep loading."""
+    reference = SwinTransformerNet(
+        in_chans=5,
+        out_chans=3,
+        img_shape=(16, 32),
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+    )
+    net = _build_net(5, 3, (16, 32), num_levels=1)
+    reference_state = reference.state_dict()
+    state = net.state_dict()
+    assert set(state) == set(reference_state)
+    for key in state:
+        assert state[key].shape == reference_state[key].shape, key
+
+
+def test_num_levels_keeps_bottleneck_parameters():
+    """Extra levels are dim-preserving, so the bottleneck stages and the
+    merge/expand around them are unchanged in size."""
+    img_shape = _NUM_LEVELS_IMG_SHAPE
+    one = _build_net(5, 3, img_shape, num_levels=1)
+    two = _build_net(5, 3, img_shape, num_levels=2)
+    for name in ("layer2", "layer3", "downsample", "upsample"):
+        n_one = sum(p.numel() for p in getattr(one, name).parameters())
+        n_two = sum(p.numel() for p in getattr(two, name).parameters())
+        assert n_one == n_two, name
+    assert sum(p.numel() for p in two.parameters()) > sum(
+        p.numel() for p in one.parameters()
+    )
+
+
+def test_num_levels_bottleneck_resolution():
+    """Each extra level halves the token grid the bottleneck stages run on."""
+    net = _build_net(4, 2, _NUM_LEVELS_IMG_SHAPE, num_levels=2)
+    assert net.token_shape == (32, 64)
+    assert net.layer1.blocks[0].input_resolution == (32, 64)
+    assert len(net.extra_encoders) == 1
+    assert net.extra_encoders[0].blocks[0].input_resolution == (16, 32)
+    assert net.extra_decoders[0].blocks[0].input_resolution == (16, 32)
+    assert net.layer2.blocks[0].input_resolution == (8, 16)
+    assert net.layer3.blocks[0].input_resolution == (8, 16)
+
+
+_ONE_DEGREE_PADDING_CONF = {
+    "activate": True,
+    "mode": "earth",
+    "pad_lat": [2, 1],
+    "pad_lon": [3, 3],
+}
+
+
+def test_one_degree_shape_matches_four_degree_bottleneck():
+    """patch_size (2, 2) + num_levels 2 at 1 degree gives the same bottleneck
+    token grid and bottleneck parameter count as the 4-degree model."""
+    in_chans, out_chans = 3, 3
+
+    def build(
+        img_shape: tuple[int, int], patch_size: tuple[int, int], num_levels: int
+    ) -> SwinTransformerNet:
+        return _build_net(
+            in_chans,
+            out_chans,
+            img_shape,
+            embed_dim=16,
+            num_heads=(2, 2, 2, 2),
+            window_size=(4, 8),
+            padding_conf=_ONE_DEGREE_PADDING_CONF,
+            patch_size=patch_size,
+            num_levels=num_levels,
+            lat_coords=torch.linspace(-89.0, 89.0, img_shape[0]),
+        )
+
+    four_degree = build((45, 90), patch_size=(1, 1), num_levels=1)
+    one_degree = build((180, 360), patch_size=(2, 2), num_levels=2)
+    assert (
+        one_degree.layer2.blocks[0].input_resolution
+        == four_degree.layer2.blocks[0].input_resolution
+    )
+    for name in ("layer2", "layer3"):
+        assert sum(p.numel() for p in getattr(one_degree, name).parameters()) == sum(
+            p.numel() for p in getattr(four_degree, name).parameters()
+        ), name
+    device = get_device()
+    one_degree = one_degree.to(device)
+    x = torch.randn(1, in_chans, 180, 360, device=device)
+    with torch.no_grad():
+        out = one_degree(x)
+    assert out.shape == (1, out_chans, 180, 360)
+
+
+def test_num_levels_rejects_zero():
+    with pytest.raises(ValueError, match="num_levels"):
+        _build_net(4, 2, (16, 32), num_levels=0)
+
+
+def test_patch_merging_out_dim():
+    """out_dim overrides the default channel doubling; the default is unchanged."""
+    x = torch.randn(2, 8, 16, 8)
+    default = PatchMerging(8)
+    assert default(x).shape == (2, 4, 8, 16)
+    assert default.reduction.weight.shape == (16, 32)
+    preserving = PatchMerging(8, out_dim=8)
+    assert preserving(x).shape == (2, 4, 8, 8)
+    assert preserving.reduction.weight.shape == (8, 32)
+
+
+def test_patch_expanding_out_dim():
+    """out_dim overrides the default channel halving; the default is unchanged."""
+    x = torch.randn(2, 4, 8, 8)
+    default = PatchExpanding(8)
+    assert default(x).shape == (2, 8, 16, 4)
+    assert default.expand.weight.shape == (16, 8)
+    assert default.linear.weight.shape == (4, 4)
+    preserving = PatchExpanding(8, out_dim=8)
+    assert preserving(x).shape == (2, 8, 16, 8)
+    assert preserving.expand.weight.shape == (32, 8)
+    assert preserving.linear.weight.shape == (8, 8)
+
+
+def test_patch_expanding_rejects_odd_dim_without_out_dim():
+    with pytest.raises(ValueError, match="must be even"):
+        PatchExpanding(7)
+    # An explicit out_dim makes an odd input dim fine.
+    assert PatchExpanding(7, out_dim=4)(torch.randn(2, 4, 8, 7)).shape == (2, 8, 16, 4)
 
 
 _REGRESSION_DIR = pathlib.Path(__file__).parent / "testdata"
