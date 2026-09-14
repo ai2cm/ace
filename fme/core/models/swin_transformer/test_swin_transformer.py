@@ -1,8 +1,11 @@
+import pathlib
+
 import pytest
 import torch
 
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.testing.regression import validate_tensor_dict
 
 from .swin_layers import (
     ColumnMixer,
@@ -22,20 +25,28 @@ def _build_net(
     context_config: ContextConfig | None = None,
     use_skip: bool = True,
     skip_projection: bool = False,
+    embed_dim: int = 32,
+    num_heads: tuple[int, ...] = (2, 4, 4, 2),
+    mlp_layer: str = "mlp",
+    lat_coords: torch.Tensor | None = None,
+    padding_conf: dict | None = None,
 ) -> SwinTransformerNet:
     return SwinTransformerNet(
         in_chans=in_chans,
         out_chans=out_chans,
         img_shape=img_shape,
-        embed_dim=32,
+        embed_dim=embed_dim,
         depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
+        num_heads=num_heads,
         window_size=(4, 4),
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
         skip_projection=skip_projection,
+        mlp_layer=mlp_layer,
+        lat_coords=lat_coords,
+        padding_conf=padding_conf,
     )
 
 
@@ -45,6 +56,10 @@ def _build_cln_net(
     img_shape: tuple[int, int],
     use_skip: bool = True,
     padding_conf: dict | None = None,
+    embed_dim: int = 32,
+    num_heads: tuple[int, ...] = (2, 4, 4, 2),
+    mlp_layer: str = "mlp",
+    lat_coords: torch.Tensor | None = None,
 ) -> SwinTransformerNet:
     context_config = ContextConfig(
         embed_dim_scalar=0,
@@ -56,15 +71,17 @@ def _build_cln_net(
         in_chans=in_chans,
         out_chans=out_chans,
         img_shape=img_shape,
-        embed_dim=32,
+        embed_dim=embed_dim,
         depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
+        num_heads=num_heads,
         window_size=(4, 4),
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
         conditioning="cln",
+        mlp_layer=mlp_layer,
+        lat_coords=lat_coords,
         padding_conf=padding_conf,
     )
 
@@ -673,3 +690,96 @@ def test_blocks_precompute_cpb_coords_per_shift():
     assert "coords_log" not in {k.split(".")[-1] for k in net.state_dict()}
     net_no_lat = _build_net(4, 2, img_shape)
     assert net_no_lat.layer1.blocks[0].attn.coords_log is None
+
+
+_REGRESSION_DIR = pathlib.Path(__file__).parent / "testdata"
+_REGRESSION_PADDING_CONF = {
+    "activate": True,
+    "mode": "earth",
+    "pad_lat": [2, 1],
+    "pad_lon": [3, 3],
+}
+_REGRESSION_IMG_SHAPE = (9, 18)
+_REGRESSION_EMBED_DIM = 16
+_REGRESSION_NUM_HEADS = (2, 2, 2, 2)
+
+
+def test_regression_adaln():
+    """The AdaLN forward pass matches a stored reference output.
+
+    Locks the numerics of the encoder/decoder/level wiring on CPU in float32 so
+    refactors of that wiring can be checked to be bit-for-bit unchanged.
+    """
+    in_chans, out_chans = 4, 2
+    img_shape = _REGRESSION_IMG_SHAPE
+    n = 2
+    embed_dim_scalar, embed_dim_labels = 8, 4
+    context_config = ContextConfig(
+        embed_dim_scalar=embed_dim_scalar,
+        embed_dim_labels=embed_dim_labels,
+        embed_dim_noise=0,
+        embed_dim_pos=0,
+    )
+    lat_coords = torch.linspace(-80.0, 80.0, img_shape[0])
+    torch.manual_seed(0)
+    net = _build_net(
+        in_chans,
+        out_chans,
+        img_shape,
+        context_config=context_config,
+        use_skip=True,
+        skip_projection=False,
+        embed_dim=_REGRESSION_EMBED_DIM,
+        num_heads=_REGRESSION_NUM_HEADS,
+        mlp_layer="swiglu",
+        lat_coords=lat_coords,
+        padding_conf=_REGRESSION_PADDING_CONF,
+    )
+    net.eval()
+    torch.manual_seed(0)
+    x = torch.randn(n, in_chans, *img_shape)
+    context = Context(
+        embedding_scalar=torch.randn(n, embed_dim_scalar),
+        embedding_pos=None,
+        labels=torch.randn(n, embed_dim_labels),
+        noise=None,
+    )
+    with torch.no_grad():
+        out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    _REGRESSION_DIR.mkdir(parents=True, exist_ok=True)
+    validate_tensor_dict({"output": out}, _REGRESSION_DIR / "swin_regression_adaln.pt")
+
+
+def test_regression_cln():
+    """The CLN (noise-conditioned) forward pass matches a stored reference."""
+    in_chans, out_chans = 4, 2
+    img_shape = _REGRESSION_IMG_SHAPE
+    n = 2
+    lat_coords = torch.linspace(-80.0, 80.0, img_shape[0])
+    torch.manual_seed(0)
+    net = _build_cln_net(
+        in_chans,
+        out_chans,
+        img_shape,
+        use_skip=True,
+        padding_conf=_REGRESSION_PADDING_CONF,
+        embed_dim=_REGRESSION_EMBED_DIM,
+        num_heads=_REGRESSION_NUM_HEADS,
+        mlp_layer="swiglu",
+        lat_coords=lat_coords,
+    )
+    net.eval()
+    torch.manual_seed(0)
+    x = torch.randn(n, in_chans, *img_shape)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape),
+    )
+    with torch.no_grad():
+        out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    _REGRESSION_DIR.mkdir(parents=True, exist_ok=True)
+    validate_tensor_dict({"output": out}, _REGRESSION_DIR / "swin_regression_cln.pt")
