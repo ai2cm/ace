@@ -117,9 +117,10 @@ to compare.
 
 ## `ace-train-config-4deg-AIMIP-nc-swin-v2-fm-random-v1.yaml`
 
-Only one version, but listed here because it is the sole non-SFNO base config
-in this directory and the per-dataset normalization ablation composes against
-it (see `per_dataset_norm_plan.md`).
+Only one version, but listed here because it is one of the two non-SFNO base
+configs in this directory (the other is the `nc-swin-v2.1` base below) and the
+per-dataset normalization ablation composes against it (see
+`per_dataset_norm_plan.md`).
 
 - Same training mix, validation split, inference suite, corrector, ocean,
   optimization, scheduler and `max_epochs` as
@@ -132,6 +133,82 @@ it (see `per_dataset_norm_plan.md`).
   `global_mean_co2` last. That ordering is baked into a checkpoint's channel
   layout, so anything composing against this config must take `in_names` from
   it and not from an SFNO base.
-- Omits `train_aggregator.ensemble_metrics` and `ema_checkpoint_save_epochs`,
-  which the SFNO bases set. Consumers that want comparable logging across
-  backbones have to add them back.
+- Omits `train_aggregator.ensemble_metrics` and `ema_checkpoint_save_epochs`.
+  This is not a swin-vs-SFNO difference: the `fm-random` SFNO bases omit them
+  too (a `diff` against
+  `ace-train-config-4deg-AIMIP-nc-sfno-fm-random-v2.yaml` shows only `builder`
+  and `residual_prediction` differ); it is the non-`fm` bases such as
+  `ace-train-config-4deg-AIMIP-nc-sfno-v2.yaml` that set them. The
+  norm-ablation generator adds both uniformly to every generated cell
+  (`SHARED_TOP_LEVEL` in `generate_norm_ablation_configs.py`), so all cells log
+  and checkpoint identically regardless of which base they came from.
+
+## `ace-train-config-4deg-AIMIP-nc-swin-v2.1-fm-random-v1.yaml`
+
+`nc-swin-v2.1` is an *architecture tag*, not a config version: the `v2` in
+`nc-swin-v2` names the Swin V2 family, and `v2.1` is the same family with a
+different fixed shape and the `feature/swin-changes` speed options turned on.
+The trailing `-v1` is the config version, which restarts at `v1` for the new
+tag. Checkpoints are not interchangeable with `nc-swin-v2` (different shape,
+and `skip_projection` changes the state dict).
+
+Differences from `ace-train-config-4deg-AIMIP-nc-swin-v2-fm-random-v1.yaml`,
+which are the only differences — everything else (training mix, validation
+split, inference suite, normalization, corrector, ocean, scheduler,
+`max_epochs`, `in_names` ordering) is identical:
+
+- `builder.config.embed_dim`: `256` -> `128`.
+- `builder.config.depth_multiplier`: `4` -> `1`.
+- `builder.config.drop_path_rate`: `0.2` -> `0.1` (less regularization for the
+  much smaller model).
+- `builder.config.skip_projection`: added, `true`. Projects the concatenated
+  layer-1 skip back to `embed_dim` so the decoder runs at `embed_dim` rather
+  than `2 * embed_dim`; about a quarter fewer FLOPs, and it changes the state
+  dict.
+- `builder.config.patch_size: [1, 1]` and `builder.config.num_levels: 1`:
+  added explicitly. Both are the builder defaults and reproduce the previous
+  network exactly; they are written out because they are the 1-degree lift
+  knobs (the intended 1-degree recipe is `patch_size: [2, 2]` with
+  `num_levels: 2`), and a 4-degree run should show that it is not using them.
+- `num_heads: [4, 8, 8, 4]`, `window_size: [4, 8]`, `mlp_ratio: 4.0`,
+  `noise_embed_dim: 32`, `use_skip: true`, `mlp_layer: swiglu` and
+  `padding_conf` are unchanged.
+- `stepper.step.config.residual_prediction`: `false` -> `true`, matching the
+  SFNO `v2` bases.
+- `stepper.step.config.compile`: added, `true`. Routes the module forward
+  through `torch.compile`.
+- `optimization.float32_matmul_precision`: added, `high` (TF32 matmuls). This
+  matters here because `enable_automatic_mixed_precision` is `false`, so
+  without it the matmuls run in full fp32.
+
+The SDPA window attention, channels-last `ConditionalLayerNorm` and
+precomputed CPB coordinates that came with the same branch are automatic and
+have no config knob.
+
+Size, at 44 input / 50 output channels on the 45x90 grid:
+
+| config | params | fwd GFLOPs (counted) |
+| --- | --- | --- |
+| `nc-sfno` v2 | 14.43M | 98.7 |
+| `nc-swin-v2` base | 264M | 936 |
+| `nc-swin-v2` base + `skip_projection` | 237M | 687 |
+| `nc-swin-v2.1` | 15.46M | 46.7 |
+
+The FLOP counter does not count FFTs, so the SFNO figure is a lower bound; the
+swin figures are complete. The point of the shape is the parameter match with
+`nc-sfno` v2, so that a swin-vs-SFNO comparison is not confounded by a 18x
+parameter difference.
+
+Comparison baselines are the `nc-swin-v2-{fm,c96,era5}-a1` norm-ablation cells
+— the A1 (shared/pooled normalization) cell of the previous architecture tag
+in each regime. Relative to those cells, a `nc-swin-v2.1` A1 cell changes the
+builder shape (`embed_dim`, `depth_multiplier`, `drop_path_rate`), adds
+`skip_projection`, flips `residual_prediction` to `true`, adds `compile`, and
+enables TF32 matmuls. As with the `nc-swin-v2` base, this file is the
+architecture source the generator composes from; the runs that are actually
+compared are the generated A1 cells, not this file directly. Note that
+`generate_norm_ablation_configs.py` currently copies only `builder`,
+`residual_prediction` and `in_names` from the architecture source
+(`ARCH_STEP_CONFIG_KEYS`), and takes `optimization` from the regime source, so
+`compile` and `float32_matmul_precision` have to be carried across explicitly
+for a generated cell to get them.
