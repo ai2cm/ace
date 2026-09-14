@@ -342,6 +342,26 @@ PATCHED_MODELS = {
         "video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-"
         "coarse-endpoints-flat/test-2023-2024-ens4-global.zarr"
     ),
+    # Same two-block (r/d, fixed kernel) setting as two-block-flat above, but
+    # trained at the HiRO-ACE coarse patch size (16x16 instead of 44x72) --
+    # see configs/experiments/2026-09-10-video-pmd-spatiotemporal-25km-100km-two-block-hiro-patch/
+    # and .../2026-09-15-video-pmd-spatiotemporal-25km-100km-two-block-hiro-patch-test-inference-global/.
+    # Checkpoint ~epoch 55-60/200 (manually stopped, matching two-block-flat's
+    # own stop depth so the two are comparable). In-training test/*/mae
+    # (same held-out period, per-patch, not stitched) already showed a
+    # scale-dependent pattern vs two-block-flat: PRMSL ~2.4x worse, temp/wind
+    # ~1.3-1.4x worse, PRATEsfc actually better -- consistent with losing
+    # large-scale (synoptic) spatial context at the smaller patch size while
+    # small-scale precip is unaffected. This entry mirrors what that global,
+    # patch-tiled (divide_generation, coarse_patch_extent [16,16]) inference
+    # is expected to produce; PENDING as of 2026-09-15 (run
+    # 01M26N8CB71XEDD5T40BCZFA67's checkpoint, inference job launched via the
+    # config above -- check that job's status before trusting this path).
+    "two-block-flat-hiro-patch": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-hiro-patch/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
 }
 # Every KNOWN_MODELS/PATCHED_MODELS label resolves to a pred spec (str path
 # or a PATCHED_MODELS region dict) via this combined lookup.

@@ -93,6 +93,15 @@ PATCHED_MODELS = {
         "video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-"
         "coarse-endpoints-flat/test-2023-2024-ens4-global.zarr"
     ),
+    # Same two-block model, trained at the HiRO-ACE coarse patch size
+    # (16x16 instead of 44x72) -- see crps_eval.py's PATCHED_MODELS comment
+    # for the full caveat. PENDING as of 2026-09-15 -- check the inference
+    # job's status before trusting this path.
+    "two-block-flat-hiro-patch": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-hiro-patch/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
     # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
     # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
     # epoch 41/200, preliminary/undertrained).
