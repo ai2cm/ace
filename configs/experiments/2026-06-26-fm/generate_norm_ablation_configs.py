@@ -32,33 +32,38 @@ source -- so the arms and masking are compared against each other, and the
 cross lets them be attributed separately.
 
 Cells that would train a model identical to a cheaper one are skipped; see
-degenerate_reason. That leaves 11 unmasked configs per architecture, 22 in
-total:
+degenerate_reason. That leaves 11 unmasked configs per architecture:
 
     c96 regime   A1 (== A2), A3, each off/on            -> 4
     era5 regime  A1 (== A2 == A3), conditioning a no-op -> 1
     fm regime    A1, A2, A3, each off/on                -> 6
 
 Masking multiplies that by the number of MASKINGS entries plus one for the
-unmasked cells: 22 unmasked plus 22 mask10, 44 in total. Nothing collapses
+unmasked cells: 11 unmasked plus 11 mask10 per architecture. Nothing collapses
 under the masking axis -- masking changes the training distribution in every
 cell -- so it adds no new degenerate cases. Writing a config is cheap and
-submission is filtered separately, so every cell of the cross is written
-whether or not it is queued for training.
+submission is filtered separately, so by default every cell of the cross is
+written whether or not it is queued for training. The cell filters are the same
+ones submit_norm_ablation_jobs.py takes, for the case where only one
+architecture's cells are wanted; unfiltered stays the default here, because
+writing the rest costs nothing.
 
 Each config is composed from two base configs: the regime source supplies the
 datasets, validation and inference entries, and the architecture source
 supplies the module builder and the input ordering it was trained with. For
 the two cells whose regime and architecture come from the same base config,
 that composition is a no-op. A handful of top-level logging and checkpointing
-settings which the swin base omits are then applied uniformly, so all 22 runs
-report the same metrics.
+settings which the swin base omits are then applied uniformly, so every
+generated run reports the same metrics.
 
 Every config carries dataset labels, including the A1 controls, so that the
 cells differ only in the two axes under test.
 
 Usage:
-    python generate_norm_ablation_configs.py [--include-degenerate]
+    python generate_norm_ablation_configs.py [--arch ARCH] [--regime REGIME]
+                                            [--arm ARM] [--masking MASKING]
+                                            [--conditional | --no-conditional]
+                                            [--include-degenerate]
 """
 
 import argparse
@@ -182,15 +187,34 @@ REGIME_LABELS = {
 ARCH_SOURCES = {
     "nc-sfno": "ace-train-config-4deg-AIMIP-nc-sfno-v2.yaml",
     "nc-swin-v2": "ace-train-config-4deg-AIMIP-nc-swin-v2-fm-random-v1.yaml",
+    "nc-swin-v2.1": "ace-train-config-4deg-AIMIP-nc-swin-v2.1-fm-random-v1.yaml",
 }
 
-# Keys copied from the architecture source into the generated config. Anything
-# not listed here comes from the regime source.
+# Step-config keys copied from the architecture source into the generated
+# config. Anything not listed here comes from the regime source. A key absent
+# from the architecture source is left alone, so a source that does not set one
+# leaves the regime source's value (or its absence) in place.
 #
-# in_names is included because the two architectures order their inputs
-# differently (the swin config puts global_mean_co2 last), and that ordering is
-# baked into a checkpoint's channel layout.
-ARCH_STEP_CONFIG_KEYS = ["builder", "residual_prediction", "in_names"]
+# in_names is included because the architectures order their inputs differently
+# (the swin configs put global_mean_co2 last), and that ordering is baked into a
+# checkpoint's channel layout.
+#
+# compile is an architecture-level speed choice, not a property of the data
+# regime: whether a backbone is worth routing through torch.compile depends on
+# the module, so it travels with the builder that sets it.
+ARCH_STEP_CONFIG_KEYS = ["builder", "residual_prediction", "in_names", "compile"]
+
+# Keys copied from the architecture source's `optimization` block, under the
+# same absent-means-leave-alone rule. float32_matmul_precision is here for the
+# same reason as compile: TF32 matmuls are a speed choice made for a backbone
+# (it matters because enable_automatic_mixed_precision is false everywhere
+# here), and it happens to live outside `builder`.
+ARCH_OPTIMIZATION_KEYS = ["float32_matmul_precision"]
+
+# --masking takes the unmasked cells by name rather than by the empty string
+# MASKINGS keys them with, which is unusable on a command line.
+UNMASKED = "none"
+MASKING_CHOICES = [UNMASKED] + [name for name in MASKINGS if name]
 
 # Top-level settings the swin base config omits but the sfno ones set. Applied
 # to every generated config so all 22 log and checkpoint identically.
@@ -375,6 +399,92 @@ def degenerate_reason(regime: str, arm: str, conditional: bool) -> str | None:
     return None
 
 
+def select_cells(
+    *,
+    arch: str | None = None,
+    regime: str | None = None,
+    arm: str | None = None,
+    conditional: bool | None = None,
+    masking: str | None = None,
+    include_degenerate: bool = False,
+) -> list[tuple[str, str, str, bool, str]]:
+    """The cells of all_cells() matching the filters, in the same order.
+
+    Shared with submit_norm_ablation_jobs.py so a cell is selected the same way
+    whether it is being written or submitted. Every filter is optional and None
+    means "every value of that axis"; `masking` takes UNMASKED for the cells
+    without synthetic input masking. The two scripts differ only in their
+    defaults: generating every cell is cheap, submitting every cell is not.
+    """
+    selected_masking = (
+        None if masking is None else ("" if masking == UNMASKED else masking)
+    )
+    cells = []
+    for cell in all_cells():
+        cell_arch, cell_regime, cell_arm, cell_conditional, cell_masking = cell
+        if arch is not None and cell_arch != arch:
+            continue
+        if regime is not None and cell_regime != regime:
+            continue
+        if arm is not None and cell_arm != arm:
+            continue
+        if selected_masking is not None and cell_masking != selected_masking:
+            continue
+        if conditional is not None and cell_conditional != conditional:
+            continue
+        if (
+            not include_degenerate
+            and degenerate_reason(cell_regime, cell_arm, cell_conditional) is not None
+        ):
+            continue
+        cells.append(cell)
+    return cells
+
+
+def add_cell_filter_args(
+    parser: argparse.ArgumentParser, *, masking_default: str | None
+) -> None:
+    """Register the cell filters select_cells() takes.
+
+    `masking_default` is the one place the two scripts disagree: the generator
+    writes every variant by default, the submit script queues only one.
+    """
+    parser.add_argument("--arch", choices=sorted(ARCH_SOURCES), help="Only this arch.")
+    parser.add_argument(
+        "--regime", choices=sorted(REGIME_SOURCES), help="Only this data regime."
+    )
+    parser.add_argument("--arm", choices=sorted(ARMS), help="Only this grouping arm.")
+    parser.add_argument(
+        "--masking",
+        choices=MASKING_CHOICES,
+        default=masking_default,
+        help=(
+            "Which masking variant to select"
+            + (
+                f" (default: {masking_default}, the cells without synthetic "
+                "input masking). One variant per invocation: the masked and "
+                "unmasked cells are separate training runs."
+                if masking_default is not None
+                else " (default: every variant)."
+            )
+        ),
+    )
+    conditioning = parser.add_mutually_exclusive_group()
+    conditioning.add_argument(
+        "--conditional",
+        dest="conditional",
+        action="store_true",
+        default=None,
+        help="Only the module-conditioning cells.",
+    )
+    conditioning.add_argument(
+        "--no-conditional",
+        dest="conditional",
+        action="store_false",
+        help="Only the cells without module conditioning.",
+    )
+
+
 def build_config(
     arch: str, regime: str, arm: str, conditional: bool, masking: str = ""
 ) -> dict:
@@ -385,7 +495,14 @@ def build_config(
     step_config = config["stepper"]["step"]["config"]
     arch_step_config = arch_base["stepper"]["step"]["config"]
     for key in ARCH_STEP_CONFIG_KEYS:
-        step_config[key] = copy.deepcopy(arch_step_config[key])
+        if key in arch_step_config:
+            step_config[key] = copy.deepcopy(arch_step_config[key])
+    arch_optimization = arch_base.get("optimization", {})
+    for key in ARCH_OPTIMIZATION_KEYS:
+        if key in arch_optimization:
+            config.setdefault("optimization", {})[key] = copy.deepcopy(
+                arch_optimization[key]
+            )
     for key, value in SHARED_TOP_LEVEL.items():
         config[key] = copy.deepcopy(value)
 
@@ -424,6 +541,7 @@ def config_name(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_cell_filter_args(parser, masking_default=None)
     parser.add_argument(
         "--include-degenerate",
         action="store_true",
@@ -438,7 +556,17 @@ def main() -> None:
     RUN_CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     skipped: list[tuple[str, str]] = []
-    for arch, regime, arm, conditional, masking in all_cells():
+    # Degenerate cells are kept here and dropped in the loop so they can be
+    # reported with their reason; select_cells() drops them on its own for
+    # callers that only want the kept ones.
+    for arch, regime, arm, conditional, masking in select_cells(
+        arch=args.arch,
+        regime=args.regime,
+        arm=args.arm,
+        conditional=args.conditional,
+        masking=args.masking,
+        include_degenerate=True,
+    ):
         name = config_name(arch, regime, arm, conditional, masking)
         reason = degenerate_reason(regime, arm, conditional)
         if reason is not None and not args.include_degenerate:

@@ -60,16 +60,19 @@ eval mode, so validation and every inference entry see the full input.
 
 Each config is composed from two base configs: the **regime source** supplies
 datasets, validation and inference entries; the **architecture source**
-supplies the module builder, `residual_prediction`, and `in_names` ordering.
+supplies the module builder, `residual_prediction`, `in_names` ordering, and —
+when it sets them — `compile` and `optimization.float32_matmul_precision`.
 
 | | c96-only | era5-only | fm |
 |---|---|---|---|
 | **nc-sfno** | `sfno-c96-v3` | `sfno-v2` | fm data + sfno builder |
 | **nc-swin-v2** | c96 data + swin builder | era5 data + swin builder | `swin-v2-fm-random-v1` |
+| **nc-swin-v2.1** | c96 data + swin v2.1 builder | era5 data + swin v2.1 builder | fm data + swin v2.1 builder |
 
 Regime sources: c96 → `sfno-c96-v3`, era5 → `sfno-v2`, fm →
-`swin-v2-fm-random-v1`. Architecture sources: `sfno-v2` and
-`swin-v2-fm-random-v1`. `sfno-fm-random-v3` is not used.
+`swin-v2-fm-random-v1`. Architecture sources: `sfno-v2`,
+`swin-v2-fm-random-v1` and `swin-v2.1-fm-random-v1`. `sfno-fm-random-v3` is not
+used.
 
 The three bases are already near-identical outside the builder: `out_names`,
 `next_step_forcing_names`, `corrector`, `ocean`, `optimization`, `scheduler`,
@@ -122,6 +125,30 @@ estimate, and only if the seeds are then changed). A degenerate arm has one
 group covering the regime's whole label set, so that group reads the regime's
 root pooled stats rather than a `groups/{name}/` directory the stats run never
 writes — the two are pooled over the same stores.
+
+### nc-swin-v2.1, the third architecture row
+
+`nc-swin-v2.1` joined `ARCH_SOURCES` after the counts above were written: the
+same Swin V2 family reshaped to the `nc-sfno` parameter count (15.46M against
+14.43M) and run with the `feature/swin-changes` speed options — `skip_projection`,
+`compile`, and TF32 matmuls. `base_configs/config_overview.md` has the shapes
+and the FLOP counts.
+
+Two of those options sit outside `builder`, so the generator now also carries
+`stepper.step.config.compile` (`ARCH_STEP_CONFIG_KEYS`) and
+`optimization.float32_matmul_precision` (`ARCH_OPTIMIZATION_KEYS`) from the
+architecture source, each only when that source sets it — the two older sources
+set neither, so their 44 configs are byte-identical to before. The generator
+also takes the same cell filters as the submit script (`select_cells`), so one
+architecture's cells can be written without the rest; unfiltered it now writes
+66 and skips 42.
+
+Only the three A1 unmasked cells are written and queued for now —
+`nc-swin-v2.1-{fm,c96,era5}-a1`, compared against the `nc-swin-v2-*-a1` cells.
+A1 for the same reason masking started there: it is where an architecture
+change stands on its own, with pooled normalization and no conditioning to
+share credit with. The other arms and the `mask10` twins are one generator
+invocation away if the A1 comparison justifies them.
 
 ## Pinned variables
 

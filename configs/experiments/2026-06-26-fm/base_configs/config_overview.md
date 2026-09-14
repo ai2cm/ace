@@ -206,9 +206,10 @@ builder shape (`embed_dim`, `depth_multiplier`, `drop_path_rate`), adds
 `skip_projection`, flips `residual_prediction` to `true`, adds `compile`, and
 enables TF32 matmuls. As with the `nc-swin-v2` base, this file is the
 architecture source the generator composes from; the runs that are actually
-compared are the generated A1 cells, not this file directly. Note that
-`generate_norm_ablation_configs.py` currently copies only `builder`,
-`residual_prediction` and `in_names` from the architecture source
-(`ARCH_STEP_CONFIG_KEYS`), and takes `optimization` from the regime source, so
-`compile` and `float32_matmul_precision` have to be carried across explicitly
-for a generated cell to get them.
+compared are the generated A1 cells, not this file directly.
+`generate_norm_ablation_configs.py` carries across both of the options that sit
+outside `builder`: `compile` via `ARCH_STEP_CONFIG_KEYS` and
+`float32_matmul_precision` via `ARCH_OPTIMIZATION_KEYS`, each copied only when
+the architecture source sets it, with the rest of `optimization` still coming
+from the regime source. A generated `nc-swin-v2.1` cell therefore differs from
+its `nc-swin-v2` twin in exactly the list above and nothing else.
