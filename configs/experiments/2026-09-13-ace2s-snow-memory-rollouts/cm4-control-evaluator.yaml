@@ -1,0 +1,56 @@
+experiment_dir: gs://vcm-ml-experiments/2026-09-13-ace2s-snow-memory-rollouts/cm4-control
+n_forward_steps: 1825
+forward_steps_in_memory: 25
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0311-01-01T00:00:00'
+    - '0321-01-01T00:00:00'
+    - '0331-01-01T00:00:00'
+    - '0341-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
+    engine: zarr
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  # The control predicts no snow; its snow proxy is the diagnosed albedo
+  # USWRFsfc/DSWRFsfc, which is the predictor the ace-eval snow-albedo report used.
+  - label: daily_fields
+    names:
+    - USWRFsfc
+    - DSWRFsfc
+    - DLWRFsfc
+    - ULWRFsfc
+    - SHTFLsfc
+    - LHTFLsfc
+    - total_frozen_precipitation_rate
+    - TMP2m
+    - surface_temperature
+    lat_extent: [-40, 90]
+    save_reference: false
+    format:
+      name: zarr
+aggregator:
+  power_spectrum:
+    enabled: false
+  zonal_mean:
+    enabled: false
+  annual:
+    enabled: false
+  enso_index:
+    enabled: false
+  enso_coefficient:
+    enabled: false
+  ipo_index:
+    enabled: false
