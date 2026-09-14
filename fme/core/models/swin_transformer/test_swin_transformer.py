@@ -4,7 +4,12 @@ import torch
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
-from .swin_layers import ColumnMixer, WindowAttention2D
+from .swin_layers import (
+    ColumnMixer,
+    WindowAttention2D,
+    window_lat_mean,
+    window_partition_2d,
+)
 from .swin_transformer import SwinTransformerNet
 
 _EMBED_DIM_NOISE = 8
@@ -16,6 +21,7 @@ def _build_net(
     img_shape: tuple[int, int],
     context_config: ContextConfig | None = None,
     use_skip: bool = True,
+    skip_projection: bool = False,
 ) -> SwinTransformerNet:
     return SwinTransformerNet(
         in_chans=in_chans,
@@ -29,6 +35,7 @@ def _build_net(
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
+        skip_projection=skip_projection,
     )
 
 
@@ -121,6 +128,54 @@ def test_no_skip():
     assert out.shape == (n, out_chans, *img_shape)
 
 
+def test_skip_projection_runs_decoder_at_embed_dim():
+    """With skip_projection the decoder stage has embed_dim channels, the
+    projection gets gradients, and the output shape is unchanged."""
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape, skip_projection=True).to(device)
+    assert net.skip_proj is not None
+    assert net.layer4.blocks[0].dim == 32
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    assert net.skip_proj.weight.grad is not None
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_skip_projection_has_fewer_parameters_than_concat_decoder():
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n_params_concat = sum(
+        p.numel() for p in _build_net(in_chans, out_chans, img_shape).parameters()
+    )
+    n_params_proj = sum(
+        p.numel()
+        for p in _build_net(
+            in_chans, out_chans, img_shape, skip_projection=True
+        ).parameters()
+    )
+    assert n_params_proj < n_params_concat
+
+
+def test_skip_projection_default_keeps_state_dict_keys():
+    """Default skip_projection=False must not add parameters, so existing
+    checkpoints keep loading."""
+    net = _build_net(5, 3, (16, 32))
+    assert net.skip_proj is None
+    assert not any("skip_proj" in k for k in net.state_dict())
+
+
+def test_skip_projection_ignored_without_skip():
+    net = _build_net(5, 3, (16, 32), use_skip=False, skip_projection=True)
+    assert net.skip_proj is None
+    assert net.layer4.blocks[0].dim == 32
+
+
 def test_column_mixer():
     """Zeroing the ColumnMixer's Linear makes its output zero, so the folded
     residual ``x + column_mixer(x)`` in a block reduces to ``x``."""
@@ -166,6 +221,21 @@ def test_cln_forward_backward():
     out.sum().backward()
     for name, param in net.named_parameters():
         assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_cln_state_dict_keeps_conv_weight_shapes():
+    """The channels-last CLN path reuses the 1x1 conv parameters, so the state
+    dict (and therefore checkpoint compatibility) is unchanged."""
+    net = _build_cln_net(4, 2, (16, 32))
+    state = net.state_dict()
+    scale_keys = [k for k in state if k.endswith("norm1.W_scale_2d.weight")]
+    assert len(scale_keys) == sum(len(layer.blocks) for layer in _layers(net))
+    for key in scale_keys:
+        assert state[key].shape[2:] == (1, 1), key
+
+
+def _layers(net: SwinTransformerNet):
+    return [net.layer1, net.layer2, net.layer3, net.layer4]
 
 
 def test_cln_padded_shape():
@@ -429,7 +499,29 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
     pad_h = net.padded_shape[0] - expected.shape[0]
     if pad_h > 0:
         expected = torch.cat([expected, expected[-1:].expand(pad_h)])
-    torch.testing.assert_close(net.layer1.blocks[0].lat_coords, expected)
+    # The block precomputes per-window mean latitudes from the padded lat
+    # coordinates; recover the padded lat rows from them to check the padding.
+    Hp, Wp = net.padded_shape
+    n_win_w = Wp // 4
+    expected_lat_mean = window_lat_mean(expected, (Hp, Wp), (4, 4), shift=0)
+    block = net.layer1.blocks[0]
+    actual_lat_mean = _lat_mean_from_coords_log(block.attn, n_win_w)
+    # Inverting cos/log in float32 costs a few 1e-4 degrees of precision.
+    torch.testing.assert_close(actual_lat_mean, expected_lat_mean, atol=1e-2, rtol=0)
+
+
+def _lat_mean_from_coords_log(attn: WindowAttention2D, n_win_w: int) -> torch.Tensor:
+    """Invert the cos(lat) scaling of the precomputed CPB coordinates to
+    recover each window's mean latitude in degrees."""
+    assert attn.coords_log is not None
+    # Pick an offset pair with unit longitude displacement and zero latitude
+    # displacement: its scaled log-coordinate is log(1 + cos(lat)).
+    base = attn.relative_coords_base
+    idx = int(((base[:, 0] == 0) & (base[:, 1] == 1)).nonzero()[0])
+    cos_lat = torch.exp(attn.coords_log[:, idx, 1]) - 1.0
+    lat_abs = torch.rad2deg(torch.acos(cos_lat.clamp(-1.0, 1.0)))
+    # Latitude sign is lost through cos; the test lat coords are non-negative.
+    return lat_abs
 
 
 def test_earth_padding_cln_forward():
@@ -448,3 +540,136 @@ def test_earth_padding_cln_forward():
         3,
         *img_shape,
     )
+
+
+def _reference_window_attention(
+    attn: WindowAttention2D,
+    x: torch.Tensor,
+    mask: torch.Tensor | None,
+    lat_mean: torch.Tensor | None,
+) -> torch.Tensor:
+    """Explicit-logits cosine attention, as implemented before the switch to
+    ``F.scaled_dot_product_attention``. Shares parameters with ``attn``."""
+    B_, N, C = x.shape
+    qkv = (
+        attn.qkv(x)
+        .reshape(B_, N, 3, attn.num_heads, C // attn.num_heads)
+        .permute(2, 0, 3, 1, 4)
+    )
+    q, k, v = qkv[0], qkv[1], qkv[2]
+    norm_q = torch.norm(q, dim=-1, keepdim=True)
+    norm_k = torch.norm(k, dim=-1, keepdim=True).transpose(-2, -1)
+    logits = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
+    logits = logits / attn.tau.clamp(min=0.01)
+    if lat_mean is None:
+        bias = 16.0 * torch.sigmoid(attn.cpb_mlp(attn.relative_coords_log))
+        bias = bias.permute(1, 0).reshape(attn.num_heads, N, N)
+        logits = logits + bias.unsqueeze(0)
+    else:
+        nW = lat_mean.shape[0]
+        # The module precomputes these coordinates in float32 at construction.
+        base = attn.relative_coords_base.float()
+        lat_rad = lat_mean.float() * (torch.pi / 180.0)
+        h_coords = base[:, 0]
+        w_coords = base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(1)
+        coords = torch.stack([h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1)
+        coords_log = (torch.sign(coords) * torch.log(1.0 + coords.abs())).to(x.dtype)
+        bias = 16.0 * torch.sigmoid(attn.cpb_mlp(coords_log))
+        bias = bias.permute(0, 2, 1).reshape(nW, attn.num_heads, N, N)
+        logits = logits.view(B_ // nW, nW, attn.num_heads, N, N) + bias.unsqueeze(0)
+        logits = logits.view(B_, attn.num_heads, N, N)
+    if mask is not None:
+        nW = mask.shape[0]
+        logits = logits.view(B_ // nW, nW, attn.num_heads, N, N) + mask.unsqueeze(
+            1
+        ).unsqueeze(0)
+        logits = logits.view(-1, attn.num_heads, N, N)
+    probs = torch.softmax(logits, dim=-1)
+    out = (probs @ v).transpose(1, 2).reshape(B_, N, C)
+    return attn.proj(out)
+
+
+@pytest.mark.parametrize("use_mask", [False, True])
+@pytest.mark.parametrize("use_lat", [False, True])
+def test_window_attention_matches_explicit_logits(use_mask: bool, use_lat: bool):
+    """SDPA-based attention equals the explicit softmax(QK^T + bias) V
+    formulation for outputs and parameter gradients."""
+    device = get_device()
+    torch.manual_seed(0)
+    dim, num_heads, window_size = 16, 4, (4, 4)
+    H, W, B = 8, 16, 2
+    nW = (H // window_size[0]) * (W // window_size[1])
+    lat_mean = (
+        torch.linspace(-60.0, 60.0, nW, device=device, dtype=torch.float64)
+        if use_lat
+        else None
+    )
+    attn = (
+        WindowAttention2D(dim, window_size, num_heads, lat_mean=lat_mean)
+        .to(device)
+        .double()
+    )
+    with torch.no_grad():
+        for param in attn.parameters():
+            param.normal_()
+        attn.tau.abs_().add_(0.1)
+    x = torch.randn(B, H, W, dim, device=device, dtype=torch.float64)
+    x = window_partition_2d(x, *window_size).view(-1, 16, dim).requires_grad_(True)
+    mask = None
+    if use_mask:
+        mask = torch.zeros(nW, 16, 16, device=device, dtype=torch.float64)
+        mask[:, :8, 8:] = -100.0
+        mask[:, 8:, :8] = -100.0
+    out = attn(x, mask=mask)
+    grads = torch.autograd.grad(out.square().sum(), [x, *attn.parameters()])
+    ref = _reference_window_attention(attn, x, mask, lat_mean)
+    ref_grads = torch.autograd.grad(ref.square().sum(), [x, *attn.parameters()])
+    torch.testing.assert_close(out, ref, atol=1e-10, rtol=1e-10)
+    for g, g_ref in zip(grads, ref_grads):
+        torch.testing.assert_close(g, g_ref, atol=1e-8, rtol=1e-8)
+
+
+def test_window_lat_mean_matches_rolled_window_means():
+    """Precomputed per-window latitudes equal the mean of the (shifted)
+    latitude rows in each window, in window-partition order."""
+    H, W = 8, 16
+    ws = (4, 4)
+    lat = torch.linspace(-70.0, 70.0, H)
+    for shift in (0, 2):
+        lat_mean = window_lat_mean(lat, (H, W), ws, shift)
+        assert lat_mean is not None
+        assert lat_mean.shape == ((H // ws[0]) * (W // ws[1]),)
+        rolled = torch.roll(lat, -shift)
+        expected_rows = rolled.reshape(H // ws[0], ws[0]).mean(1)
+        expected = expected_rows.repeat_interleave(W // ws[1])
+        torch.testing.assert_close(lat_mean, expected)
+    assert window_lat_mean(None, (H, W), ws, 0) is None
+
+
+def test_blocks_precompute_cpb_coords_per_shift():
+    """Regular and shifted blocks hold distinct precomputed coordinate buffers
+    that follow the module across devices and are absent without lat_coords."""
+    img_shape = (16, 32)
+    lat = torch.linspace(-80.0, 80.0, img_shape[0])
+    net = SwinTransformerNet(
+        in_chans=4,
+        out_chans=2,
+        img_shape=img_shape,
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat,
+    ).to(get_device())
+    regular, shifted = net.layer1.blocks[0].attn, net.layer1.blocks[1].attn
+    n_windows = (img_shape[0] // 4) * (img_shape[1] // 4)
+    for attn in (regular, shifted):
+        assert attn.coords_log is not None
+        assert attn.coords_log.shape == (n_windows, 16 * 16, 2)
+        assert attn.coords_log.device.type == get_device().type
+    assert not torch.equal(regular.coords_log, shifted.coords_log)
+    assert "coords_log" not in {k.split(".")[-1] for k in net.state_dict()}
+    net_no_lat = _build_net(4, 2, img_shape)
+    assert net_no_lat.layer1.blocks[0].attn.coords_log is None

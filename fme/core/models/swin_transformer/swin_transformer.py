@@ -75,6 +75,12 @@ class SwinTransformerNet(nn.Module):
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        skip_projection: When True (and ``use_skip``), project the concatenated
+            ``2 * embed_dim`` skip back to ``embed_dim`` with a linear layer so
+            the decoder stage runs at ``embed_dim`` channels rather than
+            ``2 * embed_dim``. The decoder runs on the full-resolution grid, so
+            this removes roughly a quarter of the network's FLOPs at the cost
+            of decoder width. Ignored when ``use_skip`` is False.
         context_config: Conditioning configuration.  In ``"adaln"`` mode,
             scalar and label conditioning are applied as independent additive
             AdaLN projections; ``None`` (or both 0) disables AdaLN.  In
@@ -103,6 +109,7 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
         padding_conf: dict | None = None,
+        skip_projection: bool = False,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -111,6 +118,7 @@ class SwinTransformerNet(nn.Module):
         self.out_chans = out_chans
         self.img_shape = img_shape
         self.use_skip = use_skip
+        self.skip_projection = skip_projection and use_skip
         self.window_size = window_size
         self.conditioning = conditioning
 
@@ -226,7 +234,14 @@ class SwinTransformerNet(nn.Module):
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
-        decoder_dim = 2 * embed_dim if use_skip else embed_dim
+        if self.skip_projection:
+            self.skip_proj: nn.Module | None = nn.Linear(
+                2 * embed_dim, embed_dim, bias=False
+            )
+            decoder_dim = embed_dim
+        else:
+            self.skip_proj = None
+            decoder_dim = 2 * embed_dim if use_skip else embed_dim
         self.layer4 = BasicLayer(
             decoder_dim,
             (Hp, Wp),
@@ -277,7 +292,9 @@ class SwinTransformerNet(nn.Module):
             if self.embed_dim_labels > 0:
                 cond_labels = context.labels  # may be None; BasicLayer skips when None
 
-        # CLN conditioning: pad and subsample noise to match U-Net resolutions.
+        # CLN conditioning: pad and subsample noise to match U-Net resolutions,
+        # then move it to channels-last once so every block's CLN can consume
+        # it without transposing activations.
         ctx_full: Context | None = context
         ctx_half: Context | None = context
         if self.conditioning == "cln" and self.embed_dim_noise > 0:
@@ -285,12 +302,18 @@ class SwinTransformerNet(nn.Module):
                 raise ValueError(
                     "context.noise is required for a cln-conditioned SwinTransformerNet"
                 )
+            if context.embedding_pos is not None:
+                raise ValueError(
+                    "embedding_pos is not supported by a cln-conditioned "
+                    "SwinTransformerNet"
+                )
             noise = context.noise  # (B, embed_dim_noise, H, W)
             if self.use_padding:
                 noise = self.padding_opt.pad(noise)
             if pad_h > 0 or pad_w > 0:
                 noise = F.pad(noise, (0, pad_w, 0, pad_h))
-            noise_half = noise[..., ::2, ::2]
+            noise = noise.permute(0, 2, 3, 1)  # (B, Hp, Wp, embed_dim_noise)
+            noise_half = noise[:, ::2, ::2, :]
             ctx_full = dataclasses.replace(context, noise=noise)
             ctx_half = dataclasses.replace(context, noise=noise_half)
 
@@ -302,6 +325,8 @@ class SwinTransformerNet(nn.Module):
         x = self.upsample(x)
         if self.use_skip:
             x = torch.cat([x, skip], dim=-1)
+            if self.skip_proj is not None:
+                x = self.skip_proj(x)
         x = self.layer4(x, cond_scalar, cond_labels, context=ctx_full)
 
         x = self.final_linear(x)  # (B, Hp, Wp, embed_dim)
