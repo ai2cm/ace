@@ -18,6 +18,13 @@ rep = xr.open_zarr(
     decode_timedelta=True,
     storage_options={"token": "google_default"},
 )
+ren = {}
+if "latitude" in era5.dims:
+    ren = {"latitude": "lat", "longitude": "lon"}
+    era5 = era5.rename(ren)
+era5 = era5.sortby("lat")
+if float(era5.lon.min()) < 0:
+    era5 = era5.assign_coords(lon=(era5.lon % 360)).sortby("lon")
 sl = slice("1994-01-01", "2021-12-31")
 e = era5["eastward_surface_stress"].sel(time=sl).mean("time").load()
 r = rep["eastward_surface_wind_stress"].sel(time=sl).mean("time").load()
