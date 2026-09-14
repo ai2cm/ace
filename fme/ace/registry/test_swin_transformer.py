@@ -320,3 +320,20 @@ def test_nc_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
     )
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
     assert module(x).shape == (2, n_out, *IMG_SHAPE)
+
+
+@pytest.mark.parametrize("builder", [_builder, _nc_builder])
+def test_swin_transformer_patch_size_builds_and_runs(builder):
+    """A coarser token grid still maps back to the full pixel resolution."""
+    module = (
+        builder(patch_size=[2, 2]).build(5, 3, _get_dataset_info()).to(fme.get_device())
+    )
+    x = torch.randn(2, 5, *IMG_SHAPE, device=fme.get_device())
+    assert module(x).shape == (2, 3, *IMG_SHAPE)
+
+
+@pytest.mark.parametrize("builder", [_builder, _nc_builder])
+@pytest.mark.parametrize("patch_size", [[0, 2], [2]])
+def test_swin_transformer_patch_size_validation(builder, patch_size):
+    with pytest.raises(ValueError, match="patch_size"):
+        builder(patch_size=patch_size)

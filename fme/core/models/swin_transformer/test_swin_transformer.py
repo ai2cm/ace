@@ -30,6 +30,7 @@ def _build_net(
     mlp_layer: str = "mlp",
     lat_coords: torch.Tensor | None = None,
     padding_conf: dict | None = None,
+    patch_size: tuple[int, int] = (1, 1),
 ) -> SwinTransformerNet:
     return SwinTransformerNet(
         in_chans=in_chans,
@@ -39,6 +40,7 @@ def _build_net(
         depth_multiplier=1,
         num_heads=num_heads,
         window_size=(4, 4),
+        patch_size=patch_size,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
@@ -60,6 +62,7 @@ def _build_cln_net(
     num_heads: tuple[int, ...] = (2, 4, 4, 2),
     mlp_layer: str = "mlp",
     lat_coords: torch.Tensor | None = None,
+    patch_size: tuple[int, int] = (1, 1),
 ) -> SwinTransformerNet:
     context_config = ContextConfig(
         embed_dim_scalar=0,
@@ -75,6 +78,7 @@ def _build_cln_net(
         depth_multiplier=1,
         num_heads=num_heads,
         window_size=(4, 4),
+        patch_size=patch_size,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
@@ -518,9 +522,9 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
         expected = torch.cat([expected, expected[-1:].expand(pad_h)])
     # The block precomputes per-window mean latitudes from the padded lat
     # coordinates; recover the padded lat rows from them to check the padding.
-    Hp, Wp = net.padded_shape
-    n_win_w = Wp // 4
-    expected_lat_mean = window_lat_mean(expected, (Hp, Wp), (4, 4), shift=0)
+    Ht, Wt = net.token_shape
+    n_win_w = Wt // 4
+    expected_lat_mean = window_lat_mean(expected, (Ht, Wt), (4, 4), shift=0)
     block = net.layer1.blocks[0]
     actual_lat_mean = _lat_mean_from_coords_log(block.attn, n_win_w)
     # Inverting cos/log in float32 costs a few 1e-4 degrees of precision.
@@ -690,6 +694,122 @@ def test_blocks_precompute_cpb_coords_per_shift():
     assert "coords_log" not in {k.split(".")[-1] for k in net.state_dict()}
     net_no_lat = _build_net(4, 2, img_shape)
     assert net_no_lat.layer1.blocks[0].attn.coords_log is None
+
+
+@pytest.mark.parametrize("patch_size", [(2, 2), (2, 4)])
+def test_forward_with_patch_size(patch_size: tuple[int, int]):
+    """A coarser token grid still returns the original pixel resolution."""
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape, patch_size=patch_size).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_forward_with_patch_size_and_padding():
+    """An odd grid that needs zero padding up to the patch/window multiple."""
+    in_chans, out_chans = 4, 4
+    img_shape = (9, 18)
+    n = 2
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": [2, 1],
+        "pad_lon": [2, 2],
+    }
+    device = get_device()
+    net = _build_net(
+        in_chans,
+        out_chans,
+        img_shape,
+        patch_size=(2, 2),
+        padding_conf=padding_conf,
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_cln_forward_with_patch_size_and_padding():
+    """CLN noise is subsampled to the token grid on a padded, patched grid."""
+    in_chans, out_chans = 4, 2
+    img_shape = (9, 18)
+    n = 2
+    padding_conf = {
+        "activate": True,
+        "mode": "earth",
+        "pad_lat": [2, 1],
+        "pad_lon": [2, 2],
+    }
+    device = get_device()
+    net = _build_cln_net(
+        in_chans,
+        out_chans,
+        img_shape,
+        patch_size=(2, 2),
+        padding_conf=padding_conf,
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
+    )
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_backward_with_patch_size():
+    in_chans, out_chans = 4, 2
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape, patch_size=(2, 2)).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    net(x).sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_patch_size_sets_token_grid():
+    """The U-Net stages run on the padded pixel grid divided by patch_size."""
+    net = _build_net(4, 2, (16, 32), patch_size=(2, 2))
+    assert net.padded_shape == (16, 32)
+    assert net.token_shape == (8, 16)
+    assert net.layer1.blocks[0].input_resolution == (8, 16)
+    assert net.layer2.blocks[0].input_resolution == (4, 8)
+
+
+def test_patch_size_default_keeps_state_dict_keys():
+    """Default patch_size=(1, 1) must not change any parameter name or shape,
+    so existing checkpoints keep loading."""
+    reference = SwinTransformerNet(
+        in_chans=5,
+        out_chans=3,
+        img_shape=(16, 32),
+        embed_dim=32,
+        depth_multiplier=1,
+        num_heads=(2, 4, 4, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+    )
+    net = _build_net(5, 3, (16, 32))
+    assert net.patch_size == (1, 1)
+    reference_state = reference.state_dict()
+    state = net.state_dict()
+    assert set(state) == set(reference_state)
+    for key in state:
+        assert state[key].shape == reference_state[key].shape, key
+
+
+def test_patch_size_rejects_non_positive():
+    with pytest.raises(ValueError, match="patch_size"):
+        _build_net(4, 2, (16, 32), patch_size=(0, 2))
 
 
 _REGRESSION_DIR = pathlib.Path(__file__).parent / "testdata"
