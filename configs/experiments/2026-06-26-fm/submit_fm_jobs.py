@@ -1,10 +1,11 @@
-"""Submit a gantry training job for each nc-sfno foundation model (fm) config.
+"""Submit a gantry training job for each foundation model (fm) training config.
 
-Each nc-sfno config in this directory is submitted via run-ace-train.sh, which
+Each config in this directory is submitted via run-ace-train.sh, which
 validates the config and calls gantry.
 
 Usage:
-    python submit_fm_jobs.py [--version {v1,v2,v3}] [--dry-run]
+    python submit_fm_jobs.py [--version {v1,v2,v3}]
+                             [--arch ARCH [ARCH ...]] [--dry-run]
                              [--beaker-workspace WORKSPACE]
                              [--beaker-cluster CLUSTER [CLUSTER ...]]
                              [--beaker-priority PRIORITY]
@@ -13,6 +14,7 @@ Usage:
 
 import argparse
 import pathlib
+from collections.abc import Sequence
 
 from _submit_common import add_beaker_args, submit_job
 from _version_select import add_version_arg, stem_matches_version
@@ -28,19 +30,26 @@ WANDB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-2026-06-26"
 CONFIG_PREFIX = "ace-train-config-4deg-"
 # Dataset tag stripped from job names so that
-# ace-train-config-4deg-AIMIP-nc-sfno-v3.yaml -> ace2-fm-nc-sfno-v3. Configs
-# without the tag keep their full suffix.
+# ace-train-config-4deg-AIMIP-nc-sfno-v3.yaml -> ace2-fm-nc-sfno-v3 and
+# ace-train-config-4deg-AIMIP-nc-swin-v2-fm-random-v1.yaml ->
+# ace2-fm-nc-swin-v2-fm-random-v1. Configs without the tag keep their full
+# suffix.
 DATASET_TAG = "AIMIP-"
 
+# Architecture tags appearing in config filenames, directly after the dataset
+# tag. Matching is exact-tag, so `nc-swin-v2` never selects a `nc-swin-v2.1`
+# config (or vice versa), and the untagged `...-AIMIP-sfno.yaml` is excluded.
+ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1")
 
-def configs_for_version(version: str | None) -> list[str]:
+
+def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
     # Training configs only: cooldown configs are submitted by
     # submit_cooldown_jobs.py, and eval suites use a different prefix.
+    arch_prefixes = tuple(f"{CONFIG_PREFIX}{DATASET_TAG}{arch}-" for arch in archs)
     return sorted(
         path.name
         for path in BASE_CONFIGS_DIR.glob("*.yaml")
-        if path.name.startswith(CONFIG_PREFIX)
-        and "nc-sfno" in path.name
+        if path.name.startswith(arch_prefixes)
         and stem_matches_version(path.stem, version)
         and not path.name.endswith("-finetune.yaml")
         and not path.name.endswith("-cooldown.yaml")
@@ -67,6 +76,18 @@ def wandb_run_names() -> set[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_version_arg(parser)
+    parser.add_argument(
+        "--arch",
+        nargs="+",
+        choices=ARCH_CHOICES,
+        default=list(ARCH_CHOICES),
+        help=(
+            "Restrict submission to configs whose filename carries one of these "
+            "architecture tags, e.g. 'nc-swin-v2.1' selects "
+            f"{CONFIG_PREFIX}{DATASET_TAG}nc-swin-v2.1-*.yaml only. Defaults to "
+            "all architectures."
+        ),
+    )
     add_beaker_args(
         parser,
         default_workspace="ai2/climate-titan",
@@ -85,7 +106,7 @@ def main() -> None:
 
     existing_runs = wandb_run_names() if args.skip_if_in_wandb else set()
 
-    configs = configs_for_version(args.version)
+    configs = select_configs(args.version, args.arch)
     for config_filename in configs:
         config_path = BASE_CONFIGS_DIR / config_filename
         if not config_path.exists():
