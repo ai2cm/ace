@@ -143,12 +143,13 @@ also takes the same cell filters as the submit script (`select_cells`), so one
 architecture's cells can be written without the rest; unfiltered it now writes
 66 and skips 42.
 
-Only the three A1 unmasked cells are written and queued for now —
-`nc-swin-v2.1-{fm,c96,era5}-a1`, compared against the `nc-swin-v2-*-a1` cells.
-A1 for the same reason masking started there: it is where an architecture
-change stands on its own, with pooled normalization and no conditioning to
-share credit with. The other arms and the `mask10` twins are one generator
-invocation away if the A1 comparison justifies them.
+All 11 unmasked non-degenerate `nc-swin-v2.1` cells are written and queued: six
+in `fm` (A1, A2, A3, each with conditioning off and on), four in `c96` (A1,
+A1-cond, A3, A3-cond), and A1 in `era5`. That is the unmasked `nc-swin-v2` set
+cell for cell, so every one of them has a same-regime same-arm `nc-swin-v2`
+twin standing as its baseline and the architecture is the only thing that
+moves. The `mask10` twins are not written yet; they are one generator
+invocation away (`--arch nc-swin-v2.1 --masking mask10`).
 
 ## Pinned variables
 
