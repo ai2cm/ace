@@ -1,0 +1,198 @@
+# Model 2 of the 5-channel isolation set: per-channel noise kernel (each
+# channel gets its own temporal correlation kernel, matched to
+# toy/process_residual_bridge_report.md's empirical fit over the TRAIN
+# split), no subset training / no L_marg. A/B partner of
+# ../2026-07-20-video-pmd-5ch-flat/ (identical except
+# temporal_noise_correlation) and the base model for model 3
+# (.../2026-07-20-video-pmd-5ch-per-channel-kernel-subset-cons0/, which adds
+# subset training on top of this). 4x B200 DDP.
+#
+# Per-channel kernel choice: OU for every channel. u10/v10/PRATEsfc were
+# OU's best fit outright (report's "best kernel" column). PRMSL and T2m's
+# best fit was RBF, but RBF's determinant there is ~1e-16 / ~1e-11 --
+# effectively rank-deficient/numerically degenerate as a mixing matrix (it
+# would collapse those channels' ensemble spread far more severely than
+# even the plain Brownian bridge already does) -- so both fall back to
+# their own second-best fit, OU, which is vastly better conditioned
+# (det ~3.6e-4 / ~4.7e-3) while still beating the bridge's fit error.
+# Length scales are per_channel_kernel_length_scale, in the model's
+# normalized-tau units (hours / 24h window), converted from the report's
+# raw-hour fits: u10 12.9h, v10 13.4h, PRMSL 19.3h, PRATEsfc 7.9h, T2m
+# 11.4h.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-1degree-24to3-5ch-per-channel-kernel-v1
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 8  # global across ranks
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 8
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 8
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  temporal_noise_correlation: per_channel
+  per_channel_noise_kernel:
+    eastward_wind_at_ten_meters: ou
+    northward_wind_at_ten_meters: ou
+    PRMSL: ou
+    PRATEsfc: ou
+    air_temperature_at_two_meters: ou
+  per_channel_kernel_length_scale:
+    eastward_wind_at_ten_meters: 0.5375      # 12.9h / 24h
+    northward_wind_at_ten_meters: 0.558333   # 13.4h / 24h
+    PRMSL: 0.804167                          # 19.3h / 24h
+    PRATEsfc: 0.329167                       # 7.9h / 24h
+    air_temperature_at_two_meters: 0.475     # 11.4h / 24h
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.96
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+    air_temperature_at_two_meters: 0.1403
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+    air_temperature_at_two_meters: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+    air_temperature_at_two_meters: 22.4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # train-only, global domain
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
