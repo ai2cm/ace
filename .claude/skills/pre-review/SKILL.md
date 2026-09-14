@@ -120,3 +120,5 @@ Start each audit pass with a ✅ if clear, or a ⚠️ or ❌ (depending on seve
 Then, under a separate heading, revisit the overall purpose of the pre-review.
 Give the user a clear summary of the state of the PR and what you recommend for next steps.
 When giving this summary, do not re-cap on each successful check that has no actions required, but you could give a summary of the overall state.
+
+When posting this summary to the PR itself, lead your comment with up to two sentences summarizing the overall review, then use the `<details>` tag to collapse the full review for readers who want more details, using "Full review" as the summary.
