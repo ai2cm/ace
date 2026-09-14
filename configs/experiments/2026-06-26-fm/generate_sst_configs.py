@@ -15,15 +15,34 @@ C96, ERA5-trained runs (``*-era5-*`` and the hand-written ``nc-sfno-vN``) only
 on ERA5, and FM runs (``*-fm-*``) on both. Source configs are the hand-written
 runs in base_configs and the generated norm-ablation cells in run_configs.
 
-Each config carries the label of its forcing dataset (``era5`` / ``amip``) as
-``labels`` on the InferenceConfig, which sets it on both the initial condition
-and the forcing windows. The norm-ablation A2/A3 checkpoints resolve their
-per-group normalization from these labels; without them, the unconditional
-cells would silently normalize against ``default_group`` and the ``-cond``
-cells would refuse to run. A1 and the hand-written runs have no grouped
-normalization and ignore the labels. The configs are consumed by
-``python -m fme.ace.inference`` (via run-ace-inference.sh), not by the
-evaluator suite.
+Each config carries a dataset label as ``labels`` on the InferenceConfig, which
+sets it on both the initial condition and the forcing windows. The norm-ablation
+A2/A3 checkpoints resolve their per-group normalization from these labels;
+without them, the unconditional cells would silently normalize against
+``default_group`` and the ``-cond`` cells would refuse to run. A1 and the
+hand-written runs have no grouped normalization and ignore the labels. The
+configs are consumed by ``python -m fme.ace.inference`` (via
+run-ace-inference.sh), not by the evaluator suite.
+
+The label is named in the filename rather than left implicit in the grid,
+because the two are not the same thing: the label a checkpoint needs is a
+property of *its own* training vocabulary, not of the data being forced with.
+See GRID_LABELS.
+
+Two config families are written:
+
+``ace-inference-sst-config-4deg-{grid}-{label}-{level}.yaml``
+    The best-inference sweep driven by submit_sst_jobs.py: one checkpoint per
+    training run, each grid with its own native label. Writes daily and monthly
+    netCDF.
+
+``ace-inference-sst-epoch-config-4deg-{grid}-{label}-{level}.yaml``
+    The fine-tune epoch sweep driven by submit_sst_epoch_jobs.py: every saved
+    epoch of every ERA5 fine-tune, on both grids. Adds the ``era5``-grid /
+    ``amip``-label cell, and writes monthly netCDF only -- at 660 jobs the daily
+    file is ~11.6 TB, and nothing reads it (the SST notebooks open only
+    ``annual_diagnostics.nc`` and ``time_mean_diagnostics.nc``, which are
+    written regardless of ``data_writer``).
 """
 
 import argparse
@@ -46,6 +65,7 @@ from generate_eval_configs import (
 
 HERE = pathlib.Path(__file__).parent
 SST_CONFIG_PREFIX = "ace-inference-sst-config-4deg-"
+SST_EPOCH_CONFIG_PREFIX = "ace-inference-sst-epoch-config-4deg-"
 CHECKPOINT_PATH = "/ckpt.tar"
 
 # Constant SST perturbation amplitudes (Kelvin), keyed by config/job suffix.
@@ -60,7 +80,10 @@ class DatasetSpec(NamedTuple):
     data_path: str
     file_pattern: str
     n_forward_steps: int
-    label: str
+    #: The label this grid's own training data carries. Used by the
+    #: best-inference sweep, where every checkpoint was trained on its native
+    #: grid and so shares that grid's vocabulary.
+    native_label: str
 
 
 # The two native forcing datasets of the FM training runs. ``n_forward_steps``
@@ -74,7 +97,7 @@ DATASETS = {
         data_path="/climate-default",
         file_pattern="2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr",
         n_forward_steps=16794,
-        label="era5",
+        native_label="era5",
     ),
     "c96": DatasetSpec(
         data_path=(
@@ -84,8 +107,29 @@ DATASETS = {
         ),
         file_pattern="ic_0001.zarr",
         n_forward_steps=15683,
-        label="amip",
+        native_label="amip",
     ),
+}
+
+# Dataset labels each forcing grid's configs are written for.
+#
+# A grid's native label is the one its own training data carries, and is the
+# only one the best-inference sweep needs. The ERA5 grid additionally gets
+# ``amip``, for checkpoints whose vocabulary holds no ``era5``: the c96
+# norm-ablation fine-tunes were trained on ERA5 data labeled ``amip``
+# (generate_norm_ablation_finetune_configs.C96_ERA5_ALIAS), so that is the label
+# which reproduces the normalization -- and, for the -cond cells, the
+# conditioning one-hot -- those weights actually saw.
+#
+# Sending the wrong label fails in three different ways depending on the cell,
+# only two of them loudly: a grouped (A2/A3) checkpoint raises from
+# GroupedNormalizer._resolve_group_index; a conditional checkpoint has the
+# unknown label silently dropped by BatchLabels.conform_to_encoding and runs on
+# an all-zero one-hot it never saw in training; an unconditional, ungrouped A1
+# checkpoint ignores labels entirely and is unaffected.
+GRID_LABELS = {
+    "era5": ("era5", "amip"),
+    "c96": ("amip",),
 }
 
 # Free-running inference settings (shared by every config).
@@ -93,8 +137,12 @@ FORWARD_STEPS_IN_MEMORY = 73
 INITIAL_CONDITION_TIME = "1979-01-01T00:00:00"
 
 
-def sst_config_filename(grid: str, level: str) -> str:
-    return f"{SST_CONFIG_PREFIX}{grid}-{level}.yaml"
+def sst_config_filename(grid: str, label: str, level: str) -> str:
+    return f"{SST_CONFIG_PREFIX}{grid}-{label}-{level}.yaml"
+
+
+def sst_epoch_config_filename(grid: str, label: str, level: str) -> str:
+    return f"{SST_EPOCH_CONFIG_PREFIX}{grid}-{label}-{level}.yaml"
 
 
 def sst_job_name(run_name: str, grid: str, level: str) -> str:
@@ -146,7 +194,12 @@ def sst_runs(version: str | None = None) -> dict[str, tuple[str, ...]]:
     return runs
 
 
-def _build_inference_config(spec: DatasetSpec, amplitude: float) -> dict:
+def _build_inference_config(
+    spec: DatasetSpec,
+    amplitude: float,
+    label: str,
+    save_prediction_files: bool = True,
+) -> dict:
     return {
         "checkpoint_path": CHECKPOINT_PATH,
         "allow_incompatible_dataset": True,
@@ -158,12 +211,15 @@ def _build_inference_config(spec: DatasetSpec, amplitude: float) -> dict:
         # need it. Putting ``labels`` on the forcing dataset alone would leave
         # the initial condition unlabeled and fail the stepper's IC/forcing
         # label agreement check.
-        "labels": [spec.label],
-        # Daily and monthly netCDF output, so the response maps can be built
-        # from the data rather than decoded from the logged wandb images.
+        "labels": [label],
+        # Monthly netCDF always; daily only for the best-inference sweep, where
+        # the raw fields were wanted so response maps could be built from the
+        # data rather than decoded from the logged wandb images. The epoch sweep
+        # turns daily off: it is ~15.5 GiB per job across 660 jobs, and no
+        # analysis in explore2 opens it.
         "data_writer": {
             "save_monthly_files": True,
-            "save_prediction_files": True,
+            "save_prediction_files": save_prediction_files,
         },
         "initial_condition": {
             "path": f"{spec.data_path}/{spec.file_pattern}",
@@ -218,9 +274,11 @@ def generate_configs(
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
         runs = sst_runs()
-    for grid in DATASETS:
+    for grid, spec in DATASETS.items():
         for level, amplitude in SST_PERTURBATIONS.items():
-            out_path = RUN_CONFIGS_DIR / sst_config_filename(grid, level)
+            out_path = RUN_CONFIGS_DIR / sst_config_filename(
+                grid, spec.native_label, level
+            )
             if wandb_run_names is not None and _all_runs_finished_in_wandb(
                 grid, level, runs, wandb_run_names
             ):
@@ -233,11 +291,35 @@ def generate_configs(
             if existing_only and not out_path.exists():
                 print(f"Skipped {out_path.name}")
                 continue
-            cfg = _build_inference_config(DATASETS[grid], amplitude)
+            cfg = _build_inference_config(spec, amplitude, spec.native_label)
             out_path.write_text(
                 yaml.dump(cfg, default_flow_style=False, sort_keys=False)
             )
             print(f"Wrote {out_path.name}")
+
+
+def generate_epoch_configs() -> None:
+    """Write the fine-tune epoch sweep's configs: every (grid, label) pair.
+
+    Unconditionally rewritten -- there is no --existing-only or wandb-completion
+    pruning here, because the epoch sweep's completeness is per
+    (run, grid, level, epoch) and is checked by submit_sst_epoch_jobs.py
+    --skip-if-in-wandb instead.
+    """
+    RUN_CONFIGS_DIR.mkdir(exist_ok=True)
+    for grid, labels in GRID_LABELS.items():
+        for label in labels:
+            for level, amplitude in SST_PERTURBATIONS.items():
+                cfg = _build_inference_config(
+                    DATASETS[grid], amplitude, label, save_prediction_files=False
+                )
+                out_path = RUN_CONFIGS_DIR / sst_epoch_config_filename(
+                    grid, label, level
+                )
+                out_path.write_text(
+                    yaml.dump(cfg, default_flow_style=False, sort_keys=False)
+                )
+                print(f"Wrote {out_path.name}")
 
 
 def main() -> None:
@@ -245,7 +327,10 @@ def main() -> None:
     parser.add_argument(
         "--existing-only",
         action="store_true",
-        help="Only rewrite SST configs that already exist.",
+        help=(
+            "Only rewrite best-inference SST configs that already "
+            "exist. Does not apply to the epoch-sweep family."
+        ),
     )
     parser.add_argument(
         "--delete-if-in-wandb",
@@ -260,6 +345,7 @@ def main() -> None:
     generate_configs(
         existing_only=args.existing_only, delete_if_in_wandb=args.delete_if_in_wandb
     )
+    generate_epoch_configs()
 
 
 if __name__ == "__main__":

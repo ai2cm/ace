@@ -128,7 +128,14 @@ def main() -> None:
             grids = tuple(grid for grid in grids if grid in args.forcing_grid)
         for grid in grids:
             for level in levels:
-                jobs.append((run_name, grid, level, sst_config_filename(grid, level)))
+                jobs.append(
+                    (
+                        run_name,
+                        grid,
+                        level,
+                        sst_config_filename(grid, DATASETS[grid].native_label, level),
+                    )
+                )
 
     if args.skip_if_in_wandb:
         print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
