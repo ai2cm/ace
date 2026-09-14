@@ -98,7 +98,7 @@ from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
-from fme.core.step.single_module import SingleModuleStep
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStep
 from fme.core.stepper_state import StepperState
 from fme.core.testing import (
     get_dataset_info,
@@ -1553,7 +1553,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         ["a", "b"],
         ["a", "c"],
         norm_mean=norm_mean,
-        residual_prediction=residual_prediction,
+        residual_prediction=(
+            ResidualPredictionConfig() if residual_prediction else None
+        ),
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
@@ -3708,8 +3710,7 @@ def test_step_residual_normalized_prediction():
                         network=NormalizationConfig(means=field_means, stds=field_stds),
                         residual=NormalizationConfig(means=res_means, stds=res_stds),
                     ),
-                    residual_prediction=True,
-                    residual_normalized_prediction=True,
+                    residual_prediction=ResidualPredictionConfig(normalized=True),
                 )
             ),
         ),
@@ -3755,9 +3756,9 @@ def test_step_hybrid_residual_normalized_prediction():
                             means={n: 0.0 for n in names}, stds=res_stds
                         ),
                     ),
-                    residual_prediction=True,
-                    residual_prediction_names=["a"],
-                    residual_normalized_prediction=True,
+                    residual_prediction=ResidualPredictionConfig(
+                        names=["a"], normalized=True
+                    ),
                 )
             ),
         ),
@@ -3792,16 +3793,15 @@ def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
             network=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=field_stds),
             residual=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=res_stds),
         ),
-        residual_prediction=True,
-        residual_prediction_names=["a"],
+        residual_prediction=ResidualPredictionConfig(names=["a"]),
     )
     stds = config.get_loss_normalizer().stds
     assert stds["a"].item() == pytest.approx(res_stds["a"])
     assert stds["b"].item() == pytest.approx(field_stds["b"])
 
 
-def test_residual_normalized_prediction_rejects_explicit_loss_normalization():
-    """residual_normalized_prediction needs a residual block, which cannot
+def test_normalized_residual_prediction_rejects_explicit_loss_normalization():
+    """residual_prediction.normalized needs a residual block, which cannot
     coexist with an explicit loss block, so the option commits the loss to the
     tendency convention. Say that here rather than sending the user round the
     two-step dead end of 'add a residual block' then 'residual conflicts with
@@ -3820,12 +3820,11 @@ def test_residual_normalized_prediction_rejects_explicit_loss_normalization():
                 network=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
                 loss=NormalizationConfig(means={"a": 0.0}, stds={"a": 2.0}),
             ),
-            residual_prediction=True,
-            residual_normalized_prediction=True,
+            residual_prediction=ResidualPredictionConfig(normalized=True),
         )
 
 
-def test_residual_normalized_prediction_requires_residual_block():
+def test_normalized_residual_prediction_requires_residual_block():
     class AddOne(torch.nn.Module):
         def forward(self, x):
             return x + 1
@@ -3838,6 +3837,5 @@ def test_residual_normalized_prediction_requires_residual_block():
             normalization=NetworkAndLossNormalizationConfig(
                 network=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
             ),
-            residual_prediction=True,
-            residual_normalized_prediction=True,
+            residual_prediction=ResidualPredictionConfig(normalized=True),
         )

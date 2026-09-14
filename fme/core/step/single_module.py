@@ -45,6 +45,27 @@ DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
+@dataclasses.dataclass
+class ResidualPredictionConfig:
+    """
+    Configuration for predicting prognostics as tendencies rather than states.
+
+    Parameters:
+        names: Prognostic names to step as residuals, the rest predicted
+            full-field. Each must be in both ``in_names`` and ``out_names``.
+            Default (None) steps every prognostic as a residual.
+        normalized: Treat the network's residual outputs as tendencies in
+            ``normalization.residual`` units rather than full-field-normalized
+            units, so a unit output is one standard deviation of the per-step
+            tendency. Requires a ``normalization.residual`` block, which
+            cannot be combined with ``normalization.loss``, so enabling this
+            also commits the loss to the tendency convention.
+    """
+
+    names: list[str] | None = None
+    normalized: bool = False
+
+
 @StepSelector.register("single_module")
 @StepSelector.register("default")
 @dataclasses.dataclass
@@ -64,27 +85,11 @@ class SingleModuleStepConfig(StepConfigABC):
         next_step_forcing_names: Names of forcing variables for the next timestep.
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
-        residual_prediction: Whether to use residual prediction.
-        residual_prediction_names: When set, restrict residual prediction to
-            these prognostic names (each must be in both ``in_names`` and
-            ``out_names``); the remaining prognostics are predicted
-            full-field. Enables hybrid steppers (e.g. temperature stepped as a
-            tendency while velocities, salinity and ice are full-field).
-            Requires ``residual_prediction``. Default (None) applies residual
-            prediction to every prognostic.
-        residual_normalized_prediction: When using residual prediction, treat
-            the network's prognostic outputs as residuals in
-            residual-normalized units (the ``normalization.residual``
-            statistics) instead of full-field-normalized units. The step adds
-            ``residual_std * network_output`` to the input in physical units,
-            so a unit network output corresponds to one standard deviation of
-            the true per-step tendency; any nonzero mean tendency is learned
-            through the network output. Requires ``residual_prediction`` and a
-            ``normalization.residual`` block. Since ``normalization.residual``
-            cannot be combined with ``normalization.loss``, enabling this also
-            commits the loss to the same convention: residual-stepped names are
-            scored in tendency-std units, and there is no way to keep an
-            explicit loss normalization alongside the prediction transform.
+        residual_prediction: When set, predict prognostics as tendencies
+            added to the input rather than as states. See
+            ``ResidualPredictionConfig`` for the per-variable and normalization
+            options. Accepts a bool in serialized configs for backwards
+            compatibility.
         include_channel_mask_inputs: Whether to append per-variable mask indicator
             channels to the network input. When True, the network receives
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
@@ -115,51 +120,38 @@ class SingleModuleStepConfig(StepConfigABC):
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
-    residual_prediction: bool = False
-    residual_prediction_names: list[str] | None = None
-    residual_normalized_prediction: bool = False
+    residual_prediction: ResidualPredictionConfig | None = None
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        if self.residual_prediction_names is not None:
-            if not self.residual_prediction:
-                raise ValueError(
-                    "residual_prediction_names requires residual_prediction"
-                )
-            for name in self.residual_prediction_names:
+        if self.residual_prediction is not None:
+            for name in self.residual_prediction.names or []:
                 if name not in self.prognostic_names:
                     raise ValueError(
-                        f"residual_prediction_name '{name}' is not a prognostic "
-                        "variable (it must be in both in_names and out_names); "
+                        f"residual_prediction name '{name}' is not prognostic; "
                         f"prognostic names are {sorted(self.prognostic_names)}"
                     )
-        if self.residual_normalized_prediction:
-            if not self.residual_prediction:
-                raise ValueError(
-                    "residual_normalized_prediction requires residual_prediction"
-                )
-            if self.normalization.loss is not None:
-                # Only reachable with loss set and residual unset; the reverse
-                # is rejected by NetworkAndLossNormalizationConfig before this
-                # runs. Without this, adding the option to a config that has a
-                # loss block reports only the missing residual block, and
-                # adding one then reports a loss/residual conflict -- neither
-                # message naming the option that forced the conflict.
-                raise ValueError(
-                    "residual_normalized_prediction requires a "
-                    "normalization.residual block, which cannot be combined "
-                    "with normalization.loss; remove normalization.loss to use "
-                    "it. The loss then follows the prediction convention, "
-                    "scoring residual-stepped names in tendency-std units."
-                )
-            if self.normalization.residual is None:
-                raise ValueError(
-                    "residual_normalized_prediction requires a "
-                    "normalization.residual block"
-                )
+            if self.residual_prediction.normalized:
+                # Report the loss conflict directly. Otherwise the user is told
+                # to add a residual block, then told it conflicts with the loss
+                # block, with neither message naming the option behind it.
+                if self.normalization.loss is not None:
+                    raise ValueError(
+                        "residual_prediction.normalized requires a "
+                        "normalization.residual block, which cannot be combined "
+                        "with normalization.loss; remove normalization.loss to "
+                        "use it. The loss then follows the prediction "
+                        "convention, scoring residual names in tendency-std "
+                        "units."
+                    )
+                if self.normalization.residual is None:
+                    raise ValueError(
+                        "residual_prediction.normalized requires a "
+                        "normalization.residual block"
+                    )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -204,10 +196,8 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_names = []
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
-        # Loss scaling follows the prediction convention per variable: names
-        # stepped as residuals are scored in tendency-std units, full-field
-        # names in full-field-std units. Scoring a full-field state error in
-        # tendency units inflates it by (field_std / tendency_std)^2.
+        # Residual names are scored in tendency-std units, the rest in
+        # full-field-std units, matching how each is predicted.
         return self.normalization.get_loss_normalizer(
             names=sorted(self._normalize_names) + extra_names,
             residual_scaled_names=sorted(self.residual_names)
@@ -223,14 +213,16 @@ class SingleModuleStepConfig(StepConfigABC):
 
     @property
     def residual_names(self) -> frozenset[str]:
-        """Prognostic names stepped as residuals; the rest are full-field.
+        """Names carrying the residual convention; the rest are full-field.
 
-        ``residual_prediction_names`` unset means every prognostic, which is
-        the only behavior available before that option existed.
+        Every prognostic unless a subset is named. Note this is independent of
+        whether residual prediction is enabled: a config may set a
+        normalization.residual block purely to scale the loss, which has
+        always applied to all prognostics.
         """
-        if self.residual_prediction_names is None:
+        if self.residual_prediction is None or self.residual_prediction.names is None:
             return self.prognostic_names
-        return frozenset(self.residual_prediction_names)
+        return frozenset(self.residual_prediction.names)
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -312,6 +304,13 @@ class SingleModuleStepConfig(StepConfigABC):
         state_copy = state.copy()
         if "crps_training" in state_copy:
             del state_copy["crps_training"]
+        if isinstance(state_copy.get("residual_prediction"), bool):
+            # residual_prediction was a bool before it grew per-variable and
+            # normalization options. True meant every prognostic, full-field
+            # normalized. Both checkpoints and user yaml reach this hook.
+            state_copy["residual_prediction"] = (
+                {} if state_copy["residual_prediction"] else None
+            )
         return state_copy
 
     def get_step(
@@ -324,7 +323,7 @@ class SingleModuleStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(
             sorted(self._normalize_names)
         )
-        if self.residual_normalized_prediction:
+        if self.residual_prediction is not None and self.residual_prediction.normalized:
             assert self.normalization.residual is not None
             residual_normalizer: StandardNormalizer | None = (
                 self.normalization.residual.build(names=sorted(self.residual_names))
@@ -369,13 +368,11 @@ class SingleModuleStep(StepABC):
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
-            residual_normalizer: When set, the per-step transform for
-                residual-normalized prediction: residual-stepped network
-                outputs are rescaled by ``residual_std / field_std`` in
-                normalized space before being added to the input. Residual
-                means are never applied: the stats convention pairs
-                full-field centering with tendency stds, and any nonzero
-                mean tendency is learned through the network output.
+            residual_normalizer: When set, rescales residual outputs by
+                ``residual_std / field_std`` in normalized space before they
+                are added to the input. Scale only: the stats convention pairs
+                full-field centering with tendency stds, so a mean tendency is
+                learned through the network output instead.
         """
         super().__init__()
         if config.global_mean_removal is not None:
@@ -552,7 +549,7 @@ class SingleModuleStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
+            residual_prediction=self._config.residual_prediction is not None,
             prognostic_names=self.prognostic_names,
             residual_names=sorted(self._config.residual_names),
             residual_transform=self._residual_transform,
@@ -747,12 +744,9 @@ def step_with_adjustments(
         residual_prediction: Whether to use residual prediction.
         residual_names: Prognostic names stepped as residuals; the rest are
             full-field. Defaults to all of ``prognostic_names``.
-        residual_transform: Optional per-name scale mapping for
-            residual-normalized prediction: the network's residual-stepped
-            outputs are multiplied by ``residual_std / field_std`` in
-            full-field-normalized space before being added to the input, so a
-            unit network output corresponds to one residual (per-step
-            tendency) standard deviation. Residual means are never applied.
+        residual_transform: Optional per-name scale applied to residual outputs
+            in normalized space, so a unit network output is one tendency
+            standard deviation. Scale only; means are never applied.
         prognostic_names: Names of prognostic variables.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).

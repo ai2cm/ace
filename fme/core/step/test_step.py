@@ -36,6 +36,7 @@ from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    ResidualPredictionConfig,
     SingleModuleStep,
     SingleModuleStepConfig,
     _apply_input_mask,
@@ -2412,32 +2413,33 @@ def _residual_names_config(**kwargs) -> SingleModuleStepConfig:
 
 
 @pytest.mark.parametrize(
-    "name, match",
-    [
-        pytest.param("b", "not a prognostic", id="diagnostic_name"),
-        pytest.param("typo", "not a prognostic", id="unknown_name"),
-    ],
+    "name",
+    [pytest.param("b", id="diagnostic_name"), pytest.param("typo", id="unknown_name")],
 )
-def test_residual_prediction_names_must_be_prognostic(name, match):
+def test_residual_prediction_names_must_be_prognostic(name):
     """A non-prognostic name has no input to add the residual to, so it must be
     rejected at config time rather than raising deep inside the step."""
-    with pytest.raises(ValueError, match=match):
+    with pytest.raises(ValueError, match="not prognostic"):
         _residual_names_config(
-            residual_prediction=True, residual_prediction_names=[name]
+            residual_prediction=ResidualPredictionConfig(names=[name])
         )
 
 
-def test_residual_prediction_names_requires_residual_prediction():
-    with pytest.raises(ValueError, match="requires residual_prediction"):
-        _residual_names_config(residual_prediction_names=["a"])
-
-
-def test_single_module_step_config_loads_state_without_residual_keys():
-    """A checkpoint written before the residual options existed must still load,
-    falling back to the previous all-prognostic full-field-normalized behavior."""
-    state = _residual_names_config(residual_prediction=True).get_state()
-    for key in ("residual_prediction_names", "residual_normalized_prediction"):
-        del state[key]
+@pytest.mark.parametrize(
+    "legacy, expected_names",
+    [
+        pytest.param(True, frozenset({"a"}), id="enabled"),
+        pytest.param(False, frozenset({"a"}), id="disabled"),
+    ],
+)
+def test_single_module_step_config_loads_legacy_residual_prediction_bool(
+    legacy, expected_names
+):
+    """residual_prediction was a bool before it grew options; checkpoints and
+    user yaml written against that shape must still load. Either way the loss
+    keeps scaling every prognostic, which never depended on the bool."""
+    state = _residual_names_config().get_state()
+    state["residual_prediction"] = legacy
     config = SingleModuleStepConfig.from_state(state)
-    assert config.residual_prediction_names is None
-    assert config.residual_normalized_prediction is False
+    assert (config.residual_prediction is not None) == legacy
+    assert config.residual_names == expected_names
