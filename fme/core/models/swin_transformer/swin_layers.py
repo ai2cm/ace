@@ -547,16 +547,24 @@ class SwinTransformerBlock(nn.Module):
 
 
 class PatchMerging(nn.Module):
-    """Downsample 2x: concat 2x2 patches, normalize, then project ``4C -> 2C``.
+    """Downsample 2x: concat 2x2 patches, normalize, then project ``4C -> out_dim``.
 
     Norm precedes the linear, matching ArchesWeather's ``DownSample``.
     Operates on ``(B, H, W, C)`` with ``H`` and ``W`` even.
+
+    Args:
+        dim: Number of input channels.
+        out_dim: Number of output channels. Defaults to ``2 * dim``, the
+            channel-doubling merge used at the U-Net bottleneck. Pass ``dim``
+            for a dim-preserving merge.
     """
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, out_dim: int | None = None):
         super().__init__()
+        if out_dim is None:
+            out_dim = 2 * dim
         self.norm = nn.LayerNorm(4 * dim)
-        self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
+        self.reduction = nn.Linear(4 * dim, out_dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x0 = x[:, 0::2, 0::2, :]
@@ -570,27 +578,37 @@ class PatchMerging(nn.Module):
 
 
 class PatchExpanding(nn.Module):
-    """Upsample 2x, mapping ``dim -> dim // 2`` channels.
+    """Upsample 2x, mapping ``dim -> out_dim`` channels.
 
-    ``Linear(dim, 2*dim)`` -> pixel-shuffle 2x -> ``LayerNorm`` ->
+    ``Linear(dim, 4*out_dim)`` -> pixel-shuffle 2x -> ``LayerNorm`` ->
     ``Linear``, matching ArchesWeather's ``UpSample`` (two linears + norm).
     Operates on ``(B, H, W, C)``.
+
+    Args:
+        dim: Number of input channels.
+        out_dim: Number of output channels. Defaults to ``dim // 2``, the
+            channel-halving expand used at the U-Net bottleneck, for which the
+            expand linear is ``Linear(dim, 2 * dim)``. Pass ``dim`` for a
+            dim-preserving expand.
     """
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, out_dim: int | None = None):
         super().__init__()
-        if dim % 2 != 0:
-            raise ValueError(f"PatchExpanding dim ({dim}) must be even")
-        out_dim = dim // 2
-        self.expand = nn.Linear(dim, 2 * dim, bias=False)
+        if out_dim is None:
+            if dim % 2 != 0:
+                raise ValueError(
+                    f"PatchExpanding dim ({dim}) must be even when out_dim is None"
+                )
+            out_dim = dim // 2
+        self.expand = nn.Linear(dim, 4 * out_dim, bias=False)
         self.norm = nn.LayerNorm(out_dim)
         self.linear = nn.Linear(out_dim, out_dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.expand(x)  # (B, H, W, 2C)
-        x = x.permute(0, 3, 1, 2)  # (B, 2C, H, W)
-        x = F.pixel_shuffle(x, 2)  # (B, C/2, 2H, 2W)
-        x = x.permute(0, 2, 3, 1)  # (B, 2H, 2W, C/2)
+        x = self.expand(x)  # (B, H, W, 4 * out_dim)
+        x = x.permute(0, 3, 1, 2)  # (B, 4 * out_dim, H, W)
+        x = F.pixel_shuffle(x, 2)  # (B, out_dim, 2H, 2W)
+        x = x.permute(0, 2, 3, 1)  # (B, 2H, 2W, out_dim)
         x = self.norm(x)
         x = self.linear(x)
         return x
