@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from typing import Any, Literal, cast
 
 import dacite
@@ -31,7 +31,11 @@ from fme.core.corrector.loss_config import CorrectorLossConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
-from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.dataset_info import (
+    DatasetInfo,
+    IncompatibleDatasetInfo,
+    MissingDatasetInfo,
+)
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -1394,67 +1398,7 @@ class Stepper:
         Returns:
             The stepper.
         """
-        try:
-            legacy_config = SingleModuleStepperConfig.from_state(state["config"])
-            dataset_state = {}
-            dataset_state["timestep"] = state.get(
-                "encoded_timestep", DEFAULT_ENCODED_TIMESTEP
-            )
-            if "sigma_coordinates" in state:
-                # for backwards compatibility with old checkpoints
-                dataset_state["vertical_coordinate"] = state["sigma_coordinates"]
-            else:
-                dataset_state["vertical_coordinate"] = state["vertical_coordinate"]
-
-            if "area" in state:
-                # backwards-compatibility, these older checkpoints are always lat-lon
-                dataset_state["gridded_operations"] = {
-                    "type": "LatLonOperations",
-                    "state": {"area_weights": state["area"]},
-                }
-            else:
-                dataset_state["gridded_operations"] = state["gridded_operations"]
-
-            if "img_shape" in state:
-                dataset_state["img_shape"] = state["img_shape"]
-            elif "data_shapes" in state:
-                for _, shape in state["data_shapes"].items():
-                    if len(shape) == 4:
-                        dataset_state["img_shape"] = shape[-2:]
-                        break
-
-            normalizer = StandardNormalizer.from_state(
-                state.get("normalizer", state.get("normalization"))
-            )
-            if normalizer is None:
-                raise ValueError(
-                    f"No normalizer state found, keys include {state.keys()}"
-                )
-            if "loss_normalizer" in state or "loss_normalization" in state:
-                loss_normalizer = StandardNormalizer.from_state(
-                    state.get("loss_normalizer", state.get("loss_normalization"))
-                )
-            else:
-                loss_normalizer = normalizer
-            config = legacy_config.to_stepper_config(
-                normalizer=normalizer, loss_normalizer=loss_normalizer
-            )
-            dataset_info = DatasetInfo.from_state(dataset_state)
-            state["step"] = {
-                # SingleModuleStep inside MultiCallStep
-                "wrapped_step": {"module": state["module"]}
-            }
-        except dacite.exceptions.DaciteError:
-            config = StepperConfig.from_stepper_state(state)
-            dataset_info = DatasetInfo.from_state(state["dataset_info"])
-        training_history = TrainingHistory.from_state(state.get("training_history", []))
-        stepper = config.get_stepper(
-            dataset_info=dataset_info,
-            training_history=training_history,
-            # no parameter_initializer: we're about to load_state
-        )
-        stepper.load_state(state)
-        return stepper
+        return _ParsedStepperState.from_state(state).build_stepper()
 
     def set_eval(self) -> None:
         self._step_obj.eval()
@@ -1914,6 +1858,141 @@ class StepperOverrideConfig:
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
 
 
+@dataclasses.dataclass
+class _ParsedStepperState:
+    """A serialized stepper's state, parsed but with no modules built.
+
+    Parameters:
+        config: The stepper configuration.
+        dataset_info: Information about the dataset the stepper was trained on.
+        training_history: History of the stepper's training jobs.
+        step_state: The step state as expected by ``StepABC.load_state``.
+    """
+
+    config: StepperConfig
+    dataset_info: DatasetInfo
+    training_history: TrainingHistory
+    step_state: dict[str, Any]
+
+    @classmethod
+    def from_state(cls, state) -> "_ParsedStepperState":
+        try:
+            legacy_config = SingleModuleStepperConfig.from_state(state["config"])
+            dataset_state = {}
+            dataset_state["timestep"] = state.get(
+                "encoded_timestep", DEFAULT_ENCODED_TIMESTEP
+            )
+            if "sigma_coordinates" in state:
+                # for backwards compatibility with old checkpoints
+                dataset_state["vertical_coordinate"] = state["sigma_coordinates"]
+            else:
+                dataset_state["vertical_coordinate"] = state["vertical_coordinate"]
+
+            if "area" in state:
+                # backwards-compatibility, these older checkpoints are always lat-lon
+                dataset_state["gridded_operations"] = {
+                    "type": "LatLonOperations",
+                    "state": {"area_weights": state["area"]},
+                }
+            else:
+                dataset_state["gridded_operations"] = state["gridded_operations"]
+
+            if "img_shape" in state:
+                dataset_state["img_shape"] = state["img_shape"]
+            elif "data_shapes" in state:
+                for _, shape in state["data_shapes"].items():
+                    if len(shape) == 4:
+                        dataset_state["img_shape"] = shape[-2:]
+                        break
+
+            normalizer = StandardNormalizer.from_state(
+                state.get("normalizer", state.get("normalization"))
+            )
+            if normalizer is None:
+                raise ValueError(
+                    f"No normalizer state found, keys include {state.keys()}"
+                )
+            if "loss_normalizer" in state or "loss_normalization" in state:
+                loss_normalizer = StandardNormalizer.from_state(
+                    state.get("loss_normalizer", state.get("loss_normalization"))
+                )
+            else:
+                loss_normalizer = normalizer
+            config = legacy_config.to_stepper_config(
+                normalizer=normalizer, loss_normalizer=loss_normalizer
+            )
+            dataset_info = DatasetInfo.from_state(dataset_state)
+            step_state = {
+                # SingleModuleStep inside MultiCallStep
+                "wrapped_step": {"module": state["module"]}
+            }
+        except dacite.exceptions.DaciteError:
+            config = StepperConfig.from_stepper_state(state)
+            dataset_info = DatasetInfo.from_state(state["dataset_info"])
+            step_state = state["step"]
+        training_history = TrainingHistory.from_state(state.get("training_history", []))
+        return cls(
+            config=config,
+            dataset_info=dataset_info,
+            training_history=training_history,
+            step_state=step_state,
+        )
+
+    @classmethod
+    def ensemble(
+        cls, members: list["_ParsedStepperState"], weights: list[float]
+    ) -> "_ParsedStepperState":
+        """Combine member steppers into one whose step is an ``ensemble`` step.
+
+        The members' dataset infos must be mutually compatible; the ensemble
+        takes the first member's dataset info, training history, and stepper
+        configuration other than the step (input masking, derived forcings),
+        logging a warning for any member whose values differ.
+        The ensemble step config validates the members' step compatibility.
+        """
+        first = members[0]
+        for i, member in enumerate(members[1:], start=1):
+            try:
+                first.dataset_info.assert_compatible_with(member.dataset_info)
+            except IncompatibleDatasetInfo as err:
+                raise IncompatibleDatasetInfo(
+                    f"ensemble member {i} was trained on a dataset incompatible "
+                    f"with member 0's: {err}"
+                ) from err
+            for field in dataclasses.fields(first.config):
+                if field.name == "step":
+                    continue
+                if getattr(first.config, field.name) != getattr(
+                    member.config, field.name
+                ):
+                    logging.warning(
+                        f"ensemble member {i} has a different {field.name} than "
+                        f"member 0; using member 0's for the whole ensemble"
+                    )
+        step = StepSelector(
+            type="ensemble",
+            config={
+                "members": [dataclasses.asdict(m.config.step) for m in members],
+                "weights": list(weights),
+            },
+        )
+        return cls(
+            config=dataclasses.replace(first.config, step=step),
+            dataset_info=first.dataset_info,
+            training_history=first.training_history,
+            step_state={"members": [m.step_state for m in members]},
+        )
+
+    def build_stepper(self) -> Stepper:
+        stepper = self.config.get_stepper(
+            dataset_info=self.dataset_info,
+            training_history=self.training_history,
+            # no parameter_initializer: we're about to load_state
+        )
+        stepper.load_state({"step": self.step_state})
+        return stepper
+
+
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path,
 ) -> StepperConfig:
@@ -1968,6 +2047,67 @@ def load_stepper(
     stepper = Stepper.from_state(checkpoint["stepper"])
     apply_stepper_override(stepper, override_config)
     return stepper
+
+
+def _parse_stepper_ensemble(
+    checkpoint_paths: Sequence[str | pathlib.Path],
+    weights: Sequence[float],
+) -> _ParsedStepperState:
+    if len(checkpoint_paths) != len(weights):
+        raise ValueError(
+            f"got {len(checkpoint_paths)} checkpoint paths but {len(weights)} weights"
+        )
+    members = []
+    for path in checkpoint_paths:
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        members.append(_ParsedStepperState.from_state(checkpoint["stepper"]))
+    return _ParsedStepperState.ensemble(members, list(weights))
+
+
+def load_stepper_ensemble(
+    checkpoint_paths: Sequence[str | pathlib.Path],
+    weights: Sequence[float],
+    override_config: StepperOverrideConfig | None = None,
+) -> Stepper:
+    """Load a stepper whose step is the weighted sum of several checkpoints' steps.
+
+    Args:
+        checkpoint_paths: The paths to the serialized member checkpoints.
+        weights: One weight per checkpoint, applied to that member's output.
+        override_config: Configuration options to override (optional); applied
+            to every member.
+
+    Returns:
+        A stepper with an ``ensemble`` step over the checkpoints' steps. See
+        :class:`fme.core.step.EnsembleStepConfig` for how the members are
+        combined and which member's values are used where only one applies.
+    """
+    stepper = _parse_stepper_ensemble(checkpoint_paths, weights).build_stepper()
+    apply_stepper_override(stepper, override_config)
+    return stepper
+
+
+def load_stepper_ensemble_config(
+    checkpoint_paths: Sequence[str | pathlib.Path],
+    weights: Sequence[float],
+    override_config: StepperOverrideConfig | None = None,
+) -> StepperConfig:
+    """Load the configuration :func:`load_stepper_ensemble` would give, without
+    instantiating the model when no override is given.
+
+    Args:
+        checkpoint_paths: The paths to the serialized member checkpoints.
+        weights: One weight per checkpoint.
+        override_config: Configuration options to override (optional).
+
+    Returns:
+        The configuration of the ensemble stepper, with appropriate options
+        overridden.
+    """
+    if override_config is None:
+        return _parse_stepper_ensemble(checkpoint_paths, weights).config
+    stepper = load_stepper_ensemble(checkpoint_paths, weights, override_config)
+    return stepper._config
 
 
 def apply_stepper_override(
