@@ -39,3 +39,14 @@ numbers, no file inventory.
 
 - **Baseline** — the A1 cell of the previous architecture tag in the same
   regime. A new architecture tag is judged against it.
+
+## Slab-ocean experiments
+
+- **Climate** — one of the 1x/2x/3x/4xCO2 slab-ocean equilibrium states of the
+  SHiELD-SOM ensemble, each with its own ensemble members.
+- **Equilibrium run** — a slab-ocean free run forced by, and initialized from,
+  a member of one climate.
+- **Abrupt run** — a slab-ocean run initialized from a 1xCO2 state with the CO2
+  forcing set to another climate's value.
+- **Data-only evaluation** — a reference member evaluated against itself,
+  giving the reference climate's diagnostics with no model skill involved.

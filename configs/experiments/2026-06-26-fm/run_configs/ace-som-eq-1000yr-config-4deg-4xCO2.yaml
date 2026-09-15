@@ -1,0 +1,40 @@
+experiment_dir: /results
+n_forward_steps: 365250
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+labels:
+- som
+logging:
+  project: FM
+  entity: ai2cm
+  log_to_screen: true
+  log_to_file: true
+  log_to_wandb: true
+initial_condition:
+  path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0005.zarr
+  engine: zarr
+  start_indices:
+    times:
+    - '2032-01-01T06:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0005.zarr
+    engine: zarr
+    overwrite:
+      constant:
+        global_mean_co2: 0.0014537
+    n_repeats: 101
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+stepper_override:
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: false
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
