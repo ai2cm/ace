@@ -9,6 +9,12 @@
 # This file is the architecture source for the norm-ablation generator. The
 # runs compared against baselines are the generated A1 cells, not this file
 # directly.
+#
+# The swin runs occasionally hit a single-batch non-finite loss on one rank that
+# is not reproducible, and a rerun of the same run passes.
+# max_consecutive_non_finite_losses lets training skip such a batch (no
+# optimizer step) and abort only if the non-finite loss persists for more than
+# five batches in a row.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -706,6 +712,7 @@ validation:
 optimization:
   enable_automatic_mixed_precision: false
   float32_matmul_precision: high
+  max_consecutive_non_finite_losses: 5
   lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true

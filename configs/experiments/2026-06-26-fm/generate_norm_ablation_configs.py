@@ -209,7 +209,13 @@ ARCH_STEP_CONFIG_KEYS = ["builder", "residual_prediction", "in_names", "compile"
 # same reason as compile: TF32 matmuls are a speed choice made for a backbone
 # (it matters because enable_automatic_mixed_precision is false everywhere
 # here), and it happens to live outside `builder`.
-ARCH_OPTIMIZATION_KEYS = ["float32_matmul_precision"]
+# max_consecutive_non_finite_losses travels with the architecture as well,
+# because the transient non-finite loss it tolerates is a property of the Swin
+# backbone, not of the data regime.
+ARCH_OPTIMIZATION_KEYS = [
+    "float32_matmul_precision",
+    "max_consecutive_non_finite_losses",
+]
 
 # --masking takes the unmasked cells by name rather than by the empty string
 # MASKINGS keys them with, which is unusable on a command line.

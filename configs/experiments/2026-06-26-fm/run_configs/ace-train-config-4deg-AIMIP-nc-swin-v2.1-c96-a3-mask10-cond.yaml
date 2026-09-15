@@ -517,6 +517,7 @@ optimization:
     - 8
     - 142
   float32_matmul_precision: high
+  max_consecutive_non_finite_losses: 5
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
