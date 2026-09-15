@@ -54,7 +54,7 @@ cd "$REPO_ROOT"
 
 launch() {
   local arm="$1"
-  local job_name="samudra-enso-w1-${arm}"
+  local job_name="samudra-enso-w1-${arm}${NAME_SUFFIX:-}"
   local config="${CONFIG_DIR}/${arm}.yaml"
   local module="fme.coupled.train"
   # Coupled FT arms only fit on titan's B200s (180 GB): batch-8 coupled

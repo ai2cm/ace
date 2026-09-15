@@ -16,7 +16,7 @@ inference:
       - '1996-01-03T09:00:00'
       - '1997-01-02T09:00:00'
     dataset:
-      data_path: gs://vcm-ml-intermediate
+      data_path: /climate-default
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
     num_data_workers: 4
@@ -37,12 +37,12 @@ train_loader:
   num_data_workers: 8
   dataset:
     concat:
-    - data_path: gs://vcm-ml-intermediate
+    - data_path: /climate-default
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
       subset:
         stop_time: '2001-12-27T09:00:00'
-    - data_path: gs://vcm-ml-intermediate
+    - data_path: /climate-default
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
       subset:
@@ -53,7 +53,7 @@ validation:
     batch_size: 16
     num_data_workers: 8
     dataset:
-      data_path: gs://vcm-ml-intermediate
+      data_path: /climate-default
       file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
       engine: zarr
       subset:
