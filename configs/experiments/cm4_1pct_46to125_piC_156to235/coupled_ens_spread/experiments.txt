@@ -1,0 +1,79 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# 5-member ensembles from one IC for the three arms elynn selected 2026-09-14
+# after the coupled training read-out: mae2ft (best of ours on inline rollout,
+# and the clean finetuned-init arm), mae2n (the MAE + noise-injection arm) and
+# pcfe0 (Arm E per-channel fill). lt0/dt0 are deliberately NOT here — both
+# regress under coupled finetuning, so spread budget on them measures the
+# dispersion of a drifting mean state.
+#
+# Construction is byte-identical to the incumbent wave (coupled-ensemble-spread
+# branch, owc_a2s / owc8_a2s / coupled_mse): same two configs, same 5 seeds,
+# same best_ckpt rule, same footprint. That is what makes these directly
+# comparable to crps4's 0.504 primary / 0.58 tropical / 0.131 area-fraction
+# reference values.
+#
+#   job_runner/evaluate.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_ens_spread .
+#
+# Each row is ONE member, distinguished only by `seed` (atmosphere takes seed,
+# ocean seed + 1; fme/coupled/data_loading/batch_data.py). results_dataset is
+# pinned to the exit-0 job of each training run: mae2ft carries a preempted
+# exit-1 job in its history.
+#
+# NOTE on mae2n: its ocean is noise-conditioned, so `seed + 1` is live there
+# and its 5 members differ in ocean noise AS WELL AS atmosphere forcing. For
+# mae2ft/pcfe0 (deterministic oceans) and for all three incumbent arms the
+# ocean seed is inert and the spread is forcing-driven only. mae2n's spread is
+# therefore a total-spread number against a forcing-only reference — that is
+# the quantity the noise arm exists to raise, but it is not the same
+# construction.
+#
+# high priority on jupiter (the incumbent wave used normal): elynn's call
+# 2026-09-14 that GPUs are free and this should not sit queued.
+
+# --- piC-ic0151-60yr-ens ---
+
+# mae2ft
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s10|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s20|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s30|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s40|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+
+# mae2n
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s10|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s20|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s30|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s40|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+
+# pcfe0
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s10|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s20|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s30|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s40|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+
+# --- 1pct-ic0001-130yr-ens ---
+
+# mae2ft
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s10|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s20|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s30|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s40|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+
+# mae2n
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s10|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s20|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s30|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s40|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+
+# pcfe0
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s10|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s20|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s30|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s40|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
