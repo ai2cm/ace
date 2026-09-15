@@ -615,6 +615,9 @@ class Trainer:
                 samples_per_second = n_samples_seen_since_logging / duration
                 metrics["training_samples_per_second_on_rank_0"] = samples_per_second
                 metrics["lr"] = self.optimization.learning_rate
+                metrics["skipped_non_finite_batches"] = (
+                    self.optimization.skipped_non_finite_batches
+                )
                 wandb.log(metrics, step=self.num_batches_seen)
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")

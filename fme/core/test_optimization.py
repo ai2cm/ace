@@ -9,6 +9,7 @@ import torch.random
 import yaml
 
 import fme
+from fme.core.distributed import Distributed
 from fme.core.optimization import (
     Checkpoint,
     CheckpointConfig,
@@ -904,3 +905,169 @@ def test_optimization_config_sets_float32_matmul_precision(
         assert reloaded.float32_matmul_precision == precision
     finally:
         torch.set_float32_matmul_precision(original)
+
+
+def _build_non_finite_optimization(
+    model: nn.Module,
+    max_consecutive_non_finite_losses: int = 0,
+    use_gradient_accumulation: bool = False,
+) -> Optimization:
+    """Helper to build an Optimization exercising non-finite loss handling."""
+    return OptimizationConfig(
+        optimizer_type="Adam",
+        lr=0.1,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={},
+        use_gradient_accumulation=use_gradient_accumulation,
+        max_consecutive_non_finite_losses=max_consecutive_non_finite_losses,
+    ).build(nn.ModuleList([model]), max_epochs=1)
+
+
+def _non_finite_loss(model: nn.Module, x: torch.Tensor, value: float) -> torch.Tensor:
+    """A loss that is non-finite but still attached to the model's graph."""
+    return model(x).sum() * value
+
+
+def _finite_loss(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
+    return model(x).sum()
+
+
+def _params(model: nn.Module) -> list[torch.Tensor]:
+    return [p.detach().clone() for p in model.parameters()]
+
+
+def _params_equal(a: list[torch.Tensor], b: list[torch.Tensor]) -> bool:
+    return all(torch.equal(x, y) for x, y in zip(a, b))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_loss_raises_by_default(value: float):
+    """With the default limit of 0, a NaN or inf loss raises immediately in
+    accumulate_loss, as it always has for NaN."""
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(model)
+    x = torch.ones(1, 2).to(fme.get_device())
+    with pytest.raises(ValueError, match="Loss is non-finite"):
+        optimization.accumulate_loss(_non_finite_loss(model, x, value))
+
+
+def test_non_finite_loss_skips_step_when_tolerated(caplog):
+    """With a positive limit, a non-finite batch is skipped: no parameter
+    change, a warning, and the skip counter incremented."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(
+        model, max_consecutive_non_finite_losses=2
+    )
+    x = torch.ones(1, 2).to(fme.get_device())
+    before = _params(model)
+    optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+    with caplog.at_level("WARNING"):
+        optimization.step_weights()
+    assert _params_equal(before, _params(model))
+    assert optimization.skipped_non_finite_batches == 1
+    assert any("non-finite" in record.message for record in caplog.records)
+
+
+def test_finite_batch_after_skip_steps_and_resets_counter():
+    """A finite batch following a skipped one steps normally and resets the
+    consecutive counter, so an alternating NaN/finite sequence never raises."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(
+        model, max_consecutive_non_finite_losses=1
+    )
+    x = torch.ones(1, 2).to(fme.get_device())
+    for _ in range(2):
+        optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+        optimization.step_weights()
+        before = _params(model)
+        optimization.accumulate_loss(_finite_loss(model, x))
+        optimization.step_weights()
+        assert not _params_equal(before, _params(model))
+    assert optimization.skipped_non_finite_batches == 2
+
+
+def test_consecutive_non_finite_losses_over_limit_raises():
+    """Two consecutive non-finite batches exceed a limit of 1."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(
+        model, max_consecutive_non_finite_losses=1
+    )
+    x = torch.ones(1, 2).to(fme.get_device())
+    optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+    optimization.step_weights()
+    optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+    with pytest.raises(ValueError, match="2 consecutive"):
+        optimization.step_weights()
+
+
+def test_negative_max_consecutive_non_finite_losses_rejected():
+    with pytest.raises(ValueError, match="max_consecutive_non_finite_losses"):
+        OptimizationConfig(max_consecutive_non_finite_losses=-1)
+
+
+def test_non_finite_substep_skips_accumulated_step():
+    """With gradient accumulation, a non-finite loss in one sub-step skips the
+    optimizer step for the whole accumulated batch."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(
+        model, max_consecutive_non_finite_losses=2, use_gradient_accumulation=True
+    )
+    x = torch.ones(1, 2).to(fme.get_device())
+    before = _params(model)
+    optimization.accumulate_loss(_finite_loss(model, x))
+    optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+    optimization.step_weights()
+    assert _params_equal(before, _params(model))
+    assert optimization.skipped_non_finite_batches == 1
+    # the next fully-finite accumulated batch steps normally
+    optimization.accumulate_loss(_finite_loss(model, x))
+    optimization.accumulate_loss(_finite_loss(model, x))
+    optimization.step_weights()
+    assert not _params_equal(before, _params(model))
+    assert optimization.skipped_non_finite_batches == 1
+
+
+def test_default_config_does_not_all_reduce(monkeypatch):
+    """With the default limit of 0 no rank can carry a non-finite flag, so
+    step_weights must not pay for a collective."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(model)
+    dist = Distributed.get_instance()
+
+    def fail_reduce_max(tensor):
+        raise AssertionError("reduce_max should not be called with a limit of 0")
+
+    monkeypatch.setattr(dist, "reduce_max", fail_reduce_max)
+    x = torch.ones(1, 2).to(fme.get_device())
+    optimization.accumulate_loss(_finite_loss(model, x))
+    optimization.step_weights()
+
+
+def test_tolerating_non_finite_losses_uses_all_reduce(monkeypatch):
+    """With a positive limit the per-rank flag is combined via Distributed."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(
+        model, max_consecutive_non_finite_losses=1
+    )
+    dist = Distributed.get_instance()
+    calls = []
+    original_reduce_max = dist.reduce_max
+
+    def spy_reduce_max(tensor):
+        calls.append(tensor.clone())
+        return original_reduce_max(tensor)
+
+    monkeypatch.setattr(dist, "reduce_max", spy_reduce_max)
+    x = torch.ones(1, 2).to(fme.get_device())
+    optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+    optimization.step_weights()
+    assert len(calls) == 1
+    assert calls[0].item() == 1.0
+    assert optimization.skipped_non_finite_batches == 1

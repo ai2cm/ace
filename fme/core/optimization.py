@@ -11,6 +11,7 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -100,6 +101,7 @@ class Optimization(OptimizationABC):
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
         max_grad_norm: float | None = None,
+        max_consecutive_non_finite_losses: int = 0,
     ):
         self.optimizer = optimizer
         if enable_automatic_mixed_precision:
@@ -112,6 +114,19 @@ class Optimization(OptimizationABC):
         self._get_checkpoint = get_checkpoint
         self._max_grad_norm = max_grad_norm
         self._last_grad_norm: float | None = None
+        self._max_consecutive_non_finite_losses = max_consecutive_non_finite_losses
+        # set on this rank by accumulate_loss, combined across ranks in
+        # step_weights, and reset there for the next batch
+        self._saw_non_finite_loss = False
+        self._consecutive_non_finite_losses = 0
+        self._skipped_non_finite_batches = 0
+
+    @property
+    def skipped_non_finite_batches(self) -> int:
+        """Total number of batches whose optimizer step was skipped because
+        the loss was non-finite on at least one rank.
+        """
+        return self._skipped_non_finite_batches
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -198,15 +213,64 @@ class Optimization(OptimizationABC):
         else:
             self.optimizer.step()
 
+    def _any_rank_saw_non_finite_loss(self) -> bool:
+        """Combine the per-rank non-finite loss flag across all ranks.
+
+        Every rank must take the same branch in step_weights, otherwise the
+        ranks would disagree about which collectives to run.
+        """
+        if self._max_consecutive_non_finite_losses == 0:
+            # accumulate_loss already raised in this mode, so no rank can carry
+            # the flag; skip the collective entirely
+            return False
+        dist = Distributed.get_instance()
+        flag = torch.tensor(
+            float(self._saw_non_finite_loss), device=self._accumulated_loss.device
+        )
+        return bool(dist.reduce_max(flag).item() > 0.0)
+
     def step_weights(self):
         if not self._use_gradient_accumulation:
+            # backward is run even for a non-finite loss so that all ranks
+            # participate in DDP's gradient all-reduce
             self._backward(self._accumulated_loss)
-        self._clip_gradients()
-        self._step_weights()
+        skip = self._any_rank_saw_non_finite_loss()
+        if skip:
+            self._skipped_non_finite_batches += 1
+            self._consecutive_non_finite_losses += 1
+            self._last_grad_norm = None
+            if self.gscaler is not None:
+                # record an inf check for this iteration (normally done by
+                # gscaler.step) so that gscaler.update() below has state to
+                # consume and lowers the scale
+                self.gscaler.unscale_(self.optimizer)
+        else:
+            self._consecutive_non_finite_losses = 0
+            self._clip_gradients()
+            self._step_weights()
         self.optimizer.zero_grad()
         if self.gscaler is not None:
             self.gscaler.update()
+        self._saw_non_finite_loss = False
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
+        if skip:
+            logging.warning(
+                "Skipping optimizer step: loss was non-finite (NaN or inf) on at "
+                f"least one rank. This batch is the "
+                f"{self._consecutive_non_finite_losses} in a row with a non-finite "
+                f"loss, and the {self._skipped_non_finite_batches} skipped in total."
+            )
+            if (
+                self._consecutive_non_finite_losses
+                > self._max_consecutive_non_finite_losses
+            ):
+                raise ValueError(
+                    "Loss is non-finite (NaN or inf) during training for "
+                    f"{self._consecutive_non_finite_losses} consecutive batches, "
+                    "exceeding max_consecutive_non_finite_losses="
+                    f"{self._max_consecutive_non_finite_losses} "
+                    f"({self._skipped_non_finite_batches} batches skipped in total)."
+                )
 
     def set_learning_rate(self, lr: float):
         for param_group in self.optimizer.param_groups:
@@ -281,9 +345,18 @@ class Optimization(OptimizationABC):
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
     def _validate_loss(self, loss: torch.Tensor):
+        """Check the loss for NaN or inf values.
+
+        When no non-finite losses are tolerated this raises immediately, as it
+        has historically done for NaN. Otherwise it only records a flag, and
+        the optimizer step is skipped in step_weights once the flag has been
+        combined across ranks.
+        """
         with torch.no_grad():
-            if torch.isnan(loss):
-                raise ValueError("Loss is NaN-valued during training.")
+            if not torch.isfinite(loss):
+                if self._max_consecutive_non_finite_losses == 0:
+                    raise ValueError("Loss is non-finite (NaN or inf) during training.")
+                self._saw_non_finite_loss = True
 
 
 @dataclasses.dataclass
@@ -329,6 +402,19 @@ class OptimizationConfig:
             PyTorch, so this mostly matters for transformer-style models.
             ``None`` (default) leaves the process-wide PyTorch setting
             untouched. Has no effect when automatic mixed precision is enabled.
+        max_consecutive_non_finite_losses: How many consecutive batches with a
+            non-finite (NaN or inf) loss are tolerated before training aborts.
+            ``0`` (the default) keeps the historical behavior of raising on the
+            first one. When greater than zero, a batch whose loss is non-finite
+            on any rank contributes no optimizer step (its gradients are
+            discarded), a warning is logged, and the total number of skipped
+            batches is exposed as ``Optimization.skipped_non_finite_batches``;
+            the consecutive count resets on the next finite batch, and a
+            ``ValueError`` naming the count is raised once it exceeds this
+            limit. The per-iteration learning rate scheduler is still stepped on
+            a skipped batch so the schedule stays aligned with the batch count.
+            Note that inf losses previously slipped through the NaN-only check;
+            they are now treated like NaN, which is a deliberate tightening.
     """
 
     optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
@@ -345,8 +431,14 @@ class OptimizationConfig:
     )
     resume_optimizer_ckpt_path: str | None = None
     float32_matmul_precision: Literal["highest", "high", "medium"] | None = None
+    max_consecutive_non_finite_losses: int = 0
 
     def __post_init__(self):
+        if self.max_consecutive_non_finite_losses < 0:
+            raise ValueError(
+                "max_consecutive_non_finite_losses must be >= 0, got "
+                f"{self.max_consecutive_non_finite_losses}."
+            )
         if self.optimizer_type == "FusedAdam":
             warnings.warn(
                 "FusedAdam is deprecated. Use AdamW with fused=True in kwargs instead.",
@@ -379,6 +471,7 @@ class OptimizationConfig:
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
             max_grad_norm=self.max_grad_norm,
+            max_consecutive_non_finite_losses=self.max_consecutive_non_finite_losses,
         )
         if self.resume_optimizer_ckpt_path is not None:
             _load_finetune_optimization_state(

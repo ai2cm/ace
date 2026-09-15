@@ -206,7 +206,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         compute_derived_variables: bool = False,
         evaluate_all_steps: bool = False,
     ) -> TrainOutput:
-        optimization.accumulate_loss(torch.tensor(float("inf")))
+        # a finite placeholder loss; non-finite losses are now rejected by
+        # Optimization.accumulate_loss
+        optimization.accumulate_loss(torch.tensor(1.0))
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
             self.validation_batches_seen.append(batch.i)
