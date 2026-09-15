@@ -18,7 +18,7 @@ JOB_GROUP="${JOB_GROUP:-era5-1deg-hybrid-residual}"
 JOB_NAME="${JOB_NAME:-era5-1deg-hybridresid-ep15-eval-1940-2025}"
 RESULTS_DATASET="${RESULTS_DATASET:-01M2DXYPGS2NJES6GAENPG84DD}"
 CKPT_PATH="${CKPT_PATH:-training_checkpoints/best_inference_ckpt.tar}"
-CONFIG_FILENAME="hybridresid-eval-1940-2025.yaml"
+CONFIG_FILENAME="${CONFIG_FILENAME:-hybridresid-eval-1940-2025.yaml}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
