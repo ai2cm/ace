@@ -105,9 +105,10 @@ launch() {
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
   if [[ "$arm" == "ffweights" ]]; then
-    # Troy's confound control: FULL-FIELD targets with per-variable loss
-    # weights (sigma_ff/sigma_res)^2 on thetao_0..18 — numerically replicating
-    # the hybrid's implicit reweighting without the residual target. If this
+    # Troy's confound control: FULL-FIELD targets with per-channel loss
+    # weights calibrated so per-variable loss CONTRIBUTIONS match the hybrid
+    # run's measured shares (w_v = share_hybrid_v / share_baseline_v, median
+    # non-thetao weight = 1; e.g. thetao_0 57.5, thetao_8 27, sst 5). If this
     # matches hybrid skill, the ingredient was weighting; if it matches the
     # baseline, the tendency target itself matters.
     config="${CONFIG_DIR}/ffweights-pretrain.yaml"
