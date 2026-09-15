@@ -25,6 +25,13 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW9
 # mae2, mae2ft and dt0 each carry preempted exit-1 jobs in their history,
 # and the pinned id is the exit-0 job that reached epoch 8.
 #
+# min-runtime is 8h on every row, NOT James's 2h/3h. --min-runtime is the
+# guaranteed window before preemption and evaluate.sh passes --no-auto-resume,
+# so a preempted eval job is gone, not retried. These rollouts take ~8h (1pct)
+# and ~12h (piC), so 2h/3h left most of their length exposed. 8h is evaluate.sh's
+# own default and what the 37h training rows use. Raised 2026-09-14 on elynn's
+# call, mid-flight: the first wave was cancelled ~0.8h in and relaunched.
+#
 # jupiter at high priority, not the empty-cluster default (ceres+jupiter):
 # urgent/high priority is not available on ceres, so an h100 request sits
 # queued instead of starting.
@@ -35,18 +42,18 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW9
 
 # --- 1pct-ic0001-130yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
 
 # --- piC-ic0151-200yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter

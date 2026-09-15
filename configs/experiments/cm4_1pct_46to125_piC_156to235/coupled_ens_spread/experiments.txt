@@ -29,51 +29,57 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # the quantity the noise arm exists to raise, but it is not the same
 # construction.
 #
+# min-runtime is 8h, not the incumbent wave's 3h. --min-runtime is the
+# guaranteed window before preemption and evaluate.sh passes --no-auto-resume,
+# so a preempted eval job is gone. The incumbent 1pct wave lost 2 of its 15
+# members to preemption at 3h; these run ~4h (piC) and ~7.5h (1pct). Raised
+# 2026-09-14 before these had accumulated meaningful runtime.
+#
 # high priority on jupiter (the incumbent wave used normal): elynn's call
 # 2026-09-14 that GPUs are free and this should not sit queued.
 
 # --- piC-ic0151-60yr-ens ---
 
 # mae2ft
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s10|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s20|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s30|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s40|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=0|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s10|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=10|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s20|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=20|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s30|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=30|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-s40|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=40|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
 
 # mae2n
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s10|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s20|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s30|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s40|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=0|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s10|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=10|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s20|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=20|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s30|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=30|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-s40|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=40|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
 
 # pcfe0
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s10|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s20|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s30|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s40|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=0|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s10|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=10|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s20|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=20|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s30|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=30|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-s40|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-60yr-ens|best_ckpt|high|--min-runtime 8h|seed=40|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
 
 # --- 1pct-ic0001-130yr-ens ---
 
 # mae2ft
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s10|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s20|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s30|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s40|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=0|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s10|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=10|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s20|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=20|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s30|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=30|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0-1pct-s40|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=40|01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter|||20GiB
 
 # mae2n
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s10|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s20|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s30|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s40|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=0|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s10|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=10|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s20|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=20|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s30|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=30|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0-1pct-s40|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=40|01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter|||20GiB
 
 # pcfe0
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=0|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s10|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=10|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s20|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=20|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s30|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=30|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s40|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 3h|seed=40|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=0|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s10|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=10|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s20|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=20|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s30|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=30|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0-1pct-s40|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr-ens|best_ckpt|high|--min-runtime 8h|seed=40|01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter|||20GiB
