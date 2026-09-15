@@ -176,6 +176,10 @@ This is useful for:
 
 **Cluster and Job Configuration:**
 - `build_cluster_args()`: Construct `CLUSTER_ARGS` array for gantry
+- `default_shared_mem()`: Fill a blank `shared_mem` column from `node_caps.txt`:
+  `SHARED_MEM_FRACTION` (default 0.8) x `n_gpus/gpus_per_node` x node memory
+  limit, min over the alias's clusters; unknown clusters fall back to
+  `n_gpus` x 64GiB
 - `get_beaker_username()`: Get Beaker username from account info
 - `build_job_name()`: Build job name from group, tag, and suffix
 

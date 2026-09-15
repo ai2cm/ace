@@ -71,6 +71,9 @@ while read TRAINING; do
     CLUSTER=$(echo "$TRAINING" | cut -d"|" -f5)
     N_GPUS=$(echo "$TRAINING" | cut -d"|" -f6)
     SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f7)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$TRAINING" | cut -d"|" -f8)
     WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f9)
     OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f10)
@@ -139,11 +142,15 @@ while read TRAINING; do
     # Run the job (use relative path for CONFIG_PATH)
     CONFIG_PATH="$CONFIG_PATH_REL" MIN_RUNTIME="$MIN_RUNTIME" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run uncoupled pretraining: ${JOB_GROUP}")
 
+    # Stop the loop if beaker did not return an experiment ID
+    require_experiment_id "$EXPERIMENT_ID" "$JOB_NAME"
+
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
         "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 
-# Print dry-run summary
+# Print submission and dry-run summaries
+print_submission_summary
 print_dry_run_summary "$TOTAL_JOBS" "$PROCESSED_JOBS" "$SKIPPED_JOBS"

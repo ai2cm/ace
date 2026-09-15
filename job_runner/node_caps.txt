@@ -1,0 +1,11 @@
+# Per-node caps for the beaker clusters we use. Source: `beaker node get <id> --format json`
+# .limits (schedulable ceiling, what jobs can actually consume) and `beaker cluster get
+# ai2/<cluster> --format json` .nodeShape (hardware total). Sampled 3 ok nodes per cluster,
+# all identical within a cluster. Queried 2026-09-11.
+# Unrecognized clusters fall back to the hard-coded SHARED_MEM default in the job runner.
+
+cluster|gpu_type|gpus_per_node|node_mem_limit_gib|node_mem_shape_gib|cpus_limit
+saturn|a100|8|933|1024|243
+ceres|h100|8|1867|2048|180
+jupiter|h100|8|1868|2048|180
+titan|b200|8|2101|2252|276

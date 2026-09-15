@@ -5,8 +5,8 @@ Quickstart
 
 .. important::
 
-    This page documents the **uncoupled** model configuration.
-    For information on using the coupled atmosphere-ocean model, see :ref:`Coupled Emulation <coupled>`.
+    This page documents usage of **uncoupled** models like ACE, SamudraI or FloeNet.
+    For information on using coupled atmosphere-ocean models, see the :ref:`Coupled Inference <coupled>` section.
 
 Install
 =======
@@ -17,7 +17,7 @@ To install the latest release directly from PyPI, use:
 
     pip install fme
 
-If desired, see the :ref:`installation <installation>` page for more information on installing from source or using conda.
+See the :ref:`installation <installation>` page for more information on installing from source or using conda.
 
 Commands
 ========
@@ -28,6 +28,11 @@ The following commands are available, and can be run with ``--help`` for more in
 - ``python3 -m fme.ace.train`` - Train a model
 - ``python3 -m fme.ace.inference`` - Run a saved model checkpoint
 - ``python3 -m fme.ace.evaluator`` - Run a saved model checkpoint and compare to target data
+
+.. note::
+
+    These commands are not only used to train and run inference with atmosphere models like ACE,
+    but also for ocean and sea ice models like SamudraI and FloeNet.
 
 Accessing ACE checkpoints and datasets
 ======================================
@@ -80,7 +85,7 @@ If you run into configuration issues, you can validate your configuration with
 
 .. code-block:: bash
 
-    python -m fme.ace.validate_config config-evaluator.yaml --config_type inference
+    python -m fme.ace.validate_config config-inference.yaml --config_type inference
 
 .. tip::
 
@@ -88,6 +93,10 @@ If you run into configuration issues, you can validate your configuration with
     ``export FME_USE_MPS=1`` to enable using the `Metal Performance Shaders`_ framework for GPU acceleration. Note this backend is
     not fully featured and it may not work with all inference features or for training. It is recommended to use the latest version
     of torch if using MPS.
+
+The ``inference`` entrypoint also supports splitting a long run into multiple
+segments and overriding configuration parameters from the command line. See
+:ref:`advanced_inference` for some more sophisticated examples.
 
 .. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5
 .. _zarr: https://zarr.readthedocs.io/en/stable/

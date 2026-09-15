@@ -13,6 +13,9 @@ from fme.ace.models.ocean.m2lines.layers import (
     ZonallyPeriodicBilinearUpsample,
 )
 from fme.ace.models.ocean.m2lines.utils import pairwise
+from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+
+ConditionedBlocks = Literal["bottleneck", "all_blocks"]
 
 
 class Samudra(torch.nn.Module):
@@ -43,6 +46,15 @@ class Samudra(torch.nn.Module):
         longitude axis in the decoder, removing the lon=0 seam introduced by the
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
+    context_config : ContextConfig, optional
+        If given (with a non-zero noise embedding), the ConvNeXt blocks selected
+        by ``conditioned_blocks`` take a conditional scale and bias off the noise
+        field in the ``Context`` passed to ``forward``. Only noise conditioning
+        is supported so far; scalar, label, and positional embeddings are not.
+    conditioned_blocks : {"bottleneck", "all_blocks"}, optional
+        Which ConvNeXt blocks are conditioned. ``"bottleneck"`` conditions only
+        the block at the coarsest resolution. ``"all_blocks"`` conditions every block.
+        Required when ``context_config`` is given.
 
     Example:
     --------
@@ -74,6 +86,8 @@ class Samudra(torch.nn.Module):
         upscale_factor: int = 4,
         checkpoint_strategy: Literal["all", "simple"] | None = None,
         zonally_periodic_upsample: bool = False,
+        context_config: ContextConfig | None = None,
+        conditioned_blocks: ConditionedBlocks | None = None,
     ):
         super().__init__()
 
@@ -97,6 +111,42 @@ class Samudra(torch.nn.Module):
             else BilinearUpsample
         )
 
+        if context_config is not None:
+            if context_config.embed_dim_noise <= 0:
+                raise ValueError(
+                    "Samudra conditioning is noise-only, so context_config must "
+                    "have embed_dim_noise > 0."
+                )
+            if (
+                context_config.embed_dim_scalar > 0
+                or context_config.embed_dim_labels > 0
+                or context_config.embed_dim_pos > 0
+            ):
+                raise ValueError(
+                    "Samudra only supports noise conditioning; scalar, label, and "
+                    "positional embeddings are not implemented."
+                )
+            if conditioned_blocks is None:
+                raise ValueError("context_config requires conditioned_blocks to be set")
+        elif conditioned_blocks is not None:
+            raise ValueError("conditioned_blocks requires context_config to be set")
+        self.conditioned_blocks = conditioned_blocks
+
+        # Called once per block in construction order: num_steps encoder
+        # blocks, the bottleneck, then num_steps decoder blocks.
+        num_steps = len(self.ch_width)
+        n_built = 0
+
+        def block_context() -> ContextConfig | None:
+            nonlocal n_built
+            is_bottleneck = n_built == num_steps
+            n_built += 1
+            if conditioned_blocks == "all_blocks":
+                return context_config
+            if conditioned_blocks == "bottleneck" and is_bottleneck:
+                return context_config
+            return None
+
         ch_width_with_input = (self.input_channels, *self.ch_width)
 
         # going down
@@ -113,6 +163,7 @@ class Samudra(torch.nn.Module):
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
                     checkpoint_strategy=self.checkpoint_strategy,
+                    context_config=block_context(),
                 )
             )
             layers.append(AvgPool())
@@ -127,6 +178,7 @@ class Samudra(torch.nn.Module):
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
                 checkpoint_strategy=self.checkpoint_strategy,
+                context_config=block_context(),
             )
         )
         layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -145,6 +197,7 @@ class Samudra(torch.nn.Module):
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
                     checkpoint_strategy=self.checkpoint_strategy,
+                    context_config=block_context(),
                 )
             )
             layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -159,14 +212,20 @@ class Samudra(torch.nn.Module):
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
                 checkpoint_strategy=self.checkpoint_strategy,
+                context_config=block_context(),
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
 
+        if n_built != 2 * num_steps + 1:
+            raise AssertionError(
+                f"built {n_built} ConvNeXt blocks, expected {2 * num_steps + 1}"
+            )
+
         self.layers = nn.ModuleList(layers)
         self.num_steps = int(len(ch_width_with_input) - 1)
 
-    def forward(self, fts):
+    def forward(self, fts, context: Context | None = None):
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:
@@ -178,10 +237,18 @@ class Samudra(torch.nn.Module):
                 fts = torch.nn.functional.pad(
                     fts, (0, 0, self.N_pad, self.N_pad), mode="constant"
                 )
-            if self.checkpoint_strategy == "all":
-                fts = torch.utils.checkpoint.checkpoint(layer, fts, use_reentrant=False)
+            # only the ConvNeXt blocks are conditionable; the pooling, upsample
+            # and final conv layers take the tensor alone
+            if isinstance(layer, ConvNeXtBlock):
+                layer_args: tuple = (fts, context)
             else:
-                fts = layer(fts)
+                layer_args = (fts,)
+            if self.checkpoint_strategy == "all":
+                fts = torch.utils.checkpoint.checkpoint(
+                    layer, *layer_args, use_reentrant=False
+                )
+            else:
+                fts = layer(*layer_args)
             if count < self.num_steps:
                 if isinstance(layer, ConvNeXtBlock):
                     temp.append(fts)

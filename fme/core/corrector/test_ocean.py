@@ -539,3 +539,94 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     assert dict(result.diagnostics.delta) == {}
     assert set(result.modified_names) == set()
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_ocean_corrector_is_per_member_under_ensemble_folding():
+    """Ensemble training folds the ensemble members into the batch dimension, so
+    the corrector sees several members at once. Every correction must act
+    per-member: one that coupled across the batch dim (e.g. a global mean taken
+    over samples too) would tie the members together and silently collapse the
+    ensemble spread the proper scoring rule is meant to reward.
+    """
+    torch.manual_seed(0)
+    n_members, nlat, nlon, nlevels = 2, 3, 3, 2
+    config = OceanCorrectorConfig(
+        force_positive_names=["so_0", "so_1"],
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["sea_ice_thickness"],
+        ),
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.1,
+        ),
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, :] = 0.0
+    masks = {
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
+    }
+    # non-uniform in latitude only, as the area weights require
+    area = torch.tensor([0.5, 1.0, 1.5]).unsqueeze(-1).expand(nlat, nlon)
+    ops = LatLonOperations(area, SpatialMaskProvider(masks))
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10.0, 20.0]), mask)
+    corrector = config._build(ops, depth_coordinate, timestep)
+
+    def randoms(shape):
+        return torch.randn(shape)
+
+    input_data = {
+        "thetao_0": randoms((n_members, nlat, nlon)) + 2.0,
+        "thetao_1": randoms((n_members, nlat, nlon)) + 2.0,
+        "sst": randoms((n_members, nlat, nlon)) + 275.0,
+        "land_fraction": torch.zeros(n_members, nlat, nlon),
+    }
+    # members differ in every generated field, as they would under different
+    # noise draws
+    gen_data = {
+        "thetao_0": randoms((n_members, nlat, nlon)) + 2.0,
+        "thetao_1": randoms((n_members, nlat, nlon)) + 2.0,
+        "sst": randoms((n_members, nlat, nlon)) + 275.0,
+        "so_0": randoms((n_members, nlat, nlon)),
+        "so_1": randoms((n_members, nlat, nlon)),
+        # spans the clamp range at both ends so the sea-ice rebalance engages
+        "sea_ice_fraction": randoms((n_members, nlat, nlon)) * 0.8 + 0.5,
+        "sea_ice_thickness": randoms((n_members, nlat, nlon)),
+        "hfds": randoms((n_members, nlat, nlon)),
+    }
+    forcing_data = {
+        "hfgeou": randoms((n_members, nlat, nlon)),
+        "sea_surface_fraction": mask[:, :, 0].expand(n_members, nlat, nlon),
+    }
+
+    folded = corrector(input_data, gen_data, forcing_data, None).corrected
+    assert set(folded) >= {"so_0", "sea_ice_fraction", "thetao_0", "sst"}
+
+    for member in range(n_members):
+
+        def slice_member(data, member=member):
+            return {name: value[member : member + 1] for name, value in data.items()}
+
+        alone = corrector(
+            slice_member(input_data),
+            slice_member(gen_data),
+            slice_member(forcing_data),
+            None,
+        ).corrected
+        for name, value in alone.items():
+            torch.testing.assert_close(
+                folded[name][member : member + 1],
+                value,
+                msg=lambda m, name=name, member=member: (
+                    f"{name} for member {member} depends on the other members: {m}"
+                ),
+            )
+
+    # and the members really are distinct after correction, so the comparison
+    # above is not vacuous
+    for name in folded:
+        assert not torch.allclose(folded[name][0], folded[name][1])
