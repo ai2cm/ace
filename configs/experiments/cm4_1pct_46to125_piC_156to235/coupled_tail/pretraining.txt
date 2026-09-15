@@ -48,8 +48,8 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 
 # --- owclt: crps4's ocean init, long-tail coupled schedule ---
 # Pairs with crps4 (cghk183p): same init, schedule is the only change.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h
 
 # --- owc8lt: crps8's ocean init, long-tail coupled schedule ---
 # Pairs with crps8 (pxz4q8hw-initialised): same init, fixed 8 -> sampled tail.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h
