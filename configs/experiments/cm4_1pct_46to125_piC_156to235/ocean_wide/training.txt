@@ -92,3 +92,35 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_hybridresid_clip|rs0|trained|
 # one kept a healthy teacher-forced validation loss while its 20-yr
 # inference_piC time_mean_norm RMSE went 1.42 (ep15) -> 1.0e9 (ep29).
 cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_noclip_sstff_ohc|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
+
+# ocean_wide_hybridresid_clip1_sstff_ohc -- the arm above, spike-free.
+#
+# ocean_wide_hybridresid_noclip_sstff_ohc (wandb fid0krok, beaker
+# 01M2A0APTES66B1Q3ENTK81TY3) converged -- the first hybrid-residual arm on this
+# dataset to do so -- but a single catastrophic optimizer step mid-epoch 44 took
+# batch_loss from 0.70 to 27.0 inside one 100-batch window and cost it the whole
+# second half of training. Not a restart artifact (the one preemption was 9.5 h
+# later, at step ~42900, and batch_loss is continuous across it: 0.7547 ->
+# 0.7510), not AMP overflow (amp is off), not an LR event (scheduler is null).
+#
+# inference_piC/time_mean_norm/rmse/channel_mean against the three
+# ocean_wide_ohc_clip baseline seeds (7w9qf9aj / 07fcva1p / pjxiw906):
+#
+#   epoch   baseline mean   fid0krok
+#   43      0.06517         0.06680   <- matched
+#   44      0.06473         0.84284   <- spike
+#   75      0.04961         0.06461   <- 30% behind
+#
+# NB: the "0.0905 baseline" quoted in the three preceding hybridresid rows is
+# the baseline's epoch-21 value, not its converged skill. The 75-epoch number is
+# 0.0496.
+#
+# This row is that arm with one token added, optimization.max_grad_norm=1.0.
+# That is the setting all three ocean_wide_ohc_clip baseline seeds already use,
+# and none of them shows a train/mean/loss spike over 75 epochs. Measured
+# batch_grad_norm (vllqmr9e) is min 17.2 / median ~108 / p99 ~5071 / max 31520,
+# so a 1.0 bound clips 100% of steps -- with AdamW that is normalized-gradient
+# AdamW, identical to any threshold <= 17.2. It re-opens the one difference from
+# Troy this lineage closed; that is the deliberate trade, since we already know
+# the unclipped config converges.
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
