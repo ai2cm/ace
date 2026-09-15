@@ -6,13 +6,7 @@ from fme.core.loss import ChannelLossInfo
 
 
 class PerStepLossAggregator:
-    """Accumulates per-step loss metrics across batches and produces means.
-
-    Ranks may record different key sets — e.g. sparse ``loss_step_N`` keys
-    when the stepper evaluates a per-batch sampled step count, unequal batch
-    counts per rank, or a rank that records no batches at all — so the
-    distributed reduction must not depend on locally-observed keys.
-    """
+    """Accumulates per-step loss metrics across batches and produces means."""
 
     def __init__(self):
         self._sums: dict[str, torch.Tensor] = {}
