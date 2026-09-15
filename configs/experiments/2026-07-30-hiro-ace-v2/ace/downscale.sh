@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="hiro-v1-precip-only-ace2s-inference-2023-global-ic0000"
+JOB_NAME="hiro-ace2s-inference-2023-WUS-ic0000"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="downscale-hiro-v1-ace2s-global-2023.yaml"
+CONFIG_FILENAME="downscale-ace2s-WUS-10yr.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -40,8 +40,9 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority urgent \
+    --min-runtime 8h \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
@@ -51,7 +52,8 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
+    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
