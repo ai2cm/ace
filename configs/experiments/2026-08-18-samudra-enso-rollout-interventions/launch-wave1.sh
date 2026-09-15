@@ -125,6 +125,17 @@ launch() {
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "hybridufsft-v2" ]]; then
+    # UFS FT redo with the July lineage's config matched: UFS-replay stats
+    # (the v1 line wrongly normalized with CM4 stats), lr 1e-4 + warmup,
+    # EMA 0.9995, 120 epochs, lean corrector, 20-yr inline windows; grad
+    # clip 1 added per stability requirement; 2002-2011 holdout preserved.
+    config="${CONFIG_DIR}/hybridufsft-v2.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
+            --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
+  fi
   if [[ "$arm" == "hybridufsft-ext2" ]]; then
     # second continuation: +180 epochs from the 120-epoch checkpoint (300 total).
     # Val bottomed ~ep90 but inline-rollout rmse was still falling at 120;
