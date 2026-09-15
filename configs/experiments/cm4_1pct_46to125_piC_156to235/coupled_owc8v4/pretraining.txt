@@ -1,0 +1,17 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# owc8v4: crps4's recipe with crps8's ocean init.
+#
+# The missing cell of James's 2x2. crps4 is owc @ 4 fixed coupled steps; crps8
+# is owc8 @ 8. This is owc8 @ 4, so it isolates the finetuned ocean init at
+# fixed unroll depth -- the CRPS-lineage twin of what mae2 vs mae2ft settled
+# inside the MAE lineage (experiments/2026-09-10-coupled-ft-stochastic-and-mae).
+# crps8 confounds init with depth; this arm decomposes it.
+#
+# NOT a tail arm. It uses ../coupled/train-config-template.yaml verbatim and
+# lives in its own directory only because coupled_train.sh writes the generated
+# train-config.yaml into the directory it reads.
+#
+# Zero overrides beyond seed: the row differs from James's crps4 row in exactly
+# the ocean_wandb_id column (pjxiw906 -> pxz4q8hw), plus cluster/gpus/min_runtime.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h

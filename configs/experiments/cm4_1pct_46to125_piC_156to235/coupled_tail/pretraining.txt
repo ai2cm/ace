@@ -1,0 +1,49 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# Coupled tail-schedule ablations of crps4 / crps8.
+#
+# Both arms fork James's coupled template and hold every training knob at his
+# values (atmosphere frozen, 8 epochs, lr 7e-5, batch 8, n_ensemble 2, ocean
+# EnsembleLoss CRPS 0.9 + energy 0.1). The ONLY change is stepper_training:
+# the ocean's optimisation depth is sampled from the long-tail schedule
+# (mean 7.50) under optimize_last_step_only, instead of a fixed 4.
+#
+# ocean codes (unchanged from ../coupled/pretraining.txt):
+# - owc  = ocean_wide_ohc_clip rs2      (pjxiw906) -- crps4's init
+# - owc8 = ocean_wide_ohc_clip-ft rs2   (pxz4q8hw) -- crps8's init
+# atmos code: a2s = atmos_ace2s (j0ng1tw3), frozen, loss_weight 0
+#
+# Both checkpoints are James's own, so these arms carry his sea_surface_fraction
+# masking (ace f00e06f70) -- unlike our MAE/stochastic arms, they ARE clean
+# one-variable forks of crps4 / crps8.
+#
+# Cluster: 8 H100s on jupiter, not 4 B200s on titan. fp32 throughput (AMP is
+# off in this recipe) makes 8xH100 ~26% faster per batch than 4xB200 here, and
+# titan is budget-contended; measured in
+# experiments/2026-09-10-coupled-ft-stochastic-and-mae.
+#
+# HEADROOM. GPU memory is NOT the risk here: optimize_last_step_only puts every
+# non-optimised ocean step under no_grad, so peak is one step's backward at any
+# depth. The loader is. n_coupled_steps 20 sizes the forcing window at 401
+# atmosphere + 21 ocean timesteps per sample, against crps4's 81 + 5, on EVERY
+# batch including the depth-1 draws.
+#
+# Estimated from the generated config's own channel counts (61 atmosphere, 101
+# ocean union in+out; 180x360; fp32; batch 8 as 1 sample/GPU over 8 ranks;
+# 2 workers x prefetch 2 in flight):
+#
+#   cap 20   6.89 GB/sample   ~220 GB/node
+#   crps8    2.78 GB/sample   ~ 89 GB/node
+#   crps4    1.41 GB/sample   ~ 45 GB/node
+#
+# against the 500 GiB (537 GB) requested below, so it fits with ~2.4x headroom.
+# This is an estimate, not a measurement -- confirm actual host RAM and
+# throughput on the first arm before arming the second.
+
+# --- owclt: crps4's ocean init, long-tail coupled schedule ---
+# Pairs with crps4 (cghk183p): same init, schedule is the only change.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+
+# --- owc8lt: crps8's ocean init, long-tail coupled schedule ---
+# Pairs with crps8 (pxz4q8hw-initialised): same init, fixed 8 -> sampled tail.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
