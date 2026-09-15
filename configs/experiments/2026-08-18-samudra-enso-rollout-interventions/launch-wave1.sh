@@ -23,6 +23,12 @@
 
 set -euo pipefail
 
+if [[ $# -gt 0 ]]; then
+  echo "ERROR: arms are selected via the ARMS env var, not positional args" >&2
+  echo "  e.g. ARMS=\"hybridufsft-v2\" $0" >&2
+  exit 1
+fi
+
 JOB_GROUP="${JOB_GROUP:-samudra-enso-rollout-interventions-w1}"
 ARMS="${ARMS:-wint5 wint20 hzn12 noohc}"
 DRY_RUN="${DRY_RUN:-0}"
