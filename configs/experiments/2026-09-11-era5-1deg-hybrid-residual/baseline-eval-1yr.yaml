@@ -1,0 +1,32 @@
+# Same 1-yr window as hybridresid-eval-1yr.yaml, for the FULL-FIELD ace2s
+# baseline checkpoint, which was trained on an older ERA5 zarr whose ak[0]
+# differs by 1 Pa from the current dataset — scientifically identical, so
+# the dataset-compatibility guard is relaxed.
+allow_incompatible_dataset: true
+experiment_dir: /results
+n_forward_steps: 1460 # 1 year, pre-blowup (hybrid NaNs at step ~1669)
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '1940-01-01T12:00:00'
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  zonal_mean:
+    enabled: true
+  histogram:
+    enabled: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
