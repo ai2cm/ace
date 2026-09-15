@@ -36,14 +36,20 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 #   crps8    2.78 GB/sample   ~ 89 GB/node
 #   crps4    1.41 GB/sample   ~ 45 GB/node
 #
-# against the 500 GiB (537 GB) requested below, so it fits with ~2.4x headroom.
-# This is an estimate, not a measurement -- confirm actual host RAM and
+# The shared_mem column is left BLANK deliberately, so default_shared_mem picks
+# it up from job_runner/node_caps.txt (ace 344204721): 0.8 * n_gpus/gpus_per_node
+# * node_mem_limit_gib, i.e. 1494GiB for 8 of jupiter's 8 H100s. That is ~7x the
+# estimate above, so the cap-20 loader window is comfortably covered. Earlier
+# revisions of this file hard-coded 500GiB, copied from rows that predate the
+# node-caps change; blank is now the right entry.
+#
+# The estimate is not a measurement -- still confirm actual host RAM and
 # throughput on the first arm before arming the second.
 
 # --- owclt: crps4's ocean init, long-tail coupled schedule ---
 # Pairs with crps4 (cghk183p): same init, schedule is the only change.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||3|ai2/ace|seed=0|8h
 
 # --- owc8lt: crps8's ocean init, long-tail coupled schedule ---
 # Pairs with crps8 (pxz4q8hw-initialised): same init, fixed 8 -> sampled tail.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||3|ai2/ace|seed=0|8h
