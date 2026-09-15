@@ -79,11 +79,18 @@ def _cos_lat_scaled_coords_log(
 ) -> torch.Tensor | None:
     """Log-spaced relative coordinates with longitude offsets scaled by
     ``cos(lat)`` per window: ``(nW, N*N, 2)``, or None when ``lat_mean`` is None.
+
+    The result follows ``relative_coords_base``: ``lat_mean`` may arrive on the
+    training device (dataset latitudes live there), but it is constant metadata
+    and the coordinates are registered as a buffer at construction, so they are
+    built where the module's other coordinate buffers are and move with it.
     """
     if lat_mean is None:
         return None
     nW = lat_mean.shape[0]
-    lat_rad = lat_mean.to(relative_coords_base.dtype) * (math.pi / 180.0)  # (nW,)
+    lat_rad = lat_mean.to(
+        device=relative_coords_base.device, dtype=relative_coords_base.dtype
+    ) * (math.pi / 180.0)  # (nW,)
     h_coords = relative_coords_base[:, 0]  # (N*N,)
     w_coords = relative_coords_base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(
         1

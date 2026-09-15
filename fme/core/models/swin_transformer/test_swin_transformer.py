@@ -11,6 +11,7 @@ from .swin_layers import (
     ColumnMixer,
     PatchExpanding,
     PatchMerging,
+    SwinTransformerBlock,
     WindowAttention2D,
     window_lat_mean,
     window_partition_2d,
@@ -701,6 +702,57 @@ def test_blocks_precompute_cpb_coords_per_shift():
     assert "coords_log" not in {k.split(".")[-1] for k in net.state_dict()}
     net_no_lat = _build_net(4, 2, img_shape)
     assert net_no_lat.layer1.blocks[0].attn.coords_log is None
+
+
+def _non_cpu_device() -> torch.device:
+    """A real non-CPU device, skipping the calling test if there is none.
+
+    In training ``lat_coords`` reach the model on the training device, so
+    construction must not depend on which device they live on.
+    """
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    pytest.skip("requires a non-CPU device")
+
+
+def test_block_accepts_lat_coords_on_non_cpu_device():
+    """Latitude coordinates handed in on the training device (as
+    ``DatasetInfo`` provides them) must not strand the precomputed CPB
+    coordinates on that device: every buffer is built on CPU and travels
+    together under ``.to(device)``."""
+    device = _non_cpu_device()
+    lat = torch.linspace(-80.0, 80.0, 16, device=device)
+    block = SwinTransformerBlock(
+        dim=16,
+        input_resolution=(16, 32),
+        num_heads=2,
+        window_size=(4, 4),
+        shift_size=(0, 0),
+        lat_coords=lat,
+    )
+    assert block.attn.coords_log is not None
+    devices = {t.device for t in block.buffers()} | {
+        t.device for t in block.parameters()
+    }
+    assert devices == {torch.device("cpu")}
+    moved_coords_log = block.to(device).attn.coords_log
+    assert moved_coords_log is not None
+    assert moved_coords_log.device.type == device.type
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_net_forward_with_cuda_lat_coords():
+    """The training path: lat coords on the CUDA device, model moved there."""
+    device = torch.device("cuda")
+    img_shape = (16, 32)
+    in_chans, out_chans = 4, 2
+    lat = torch.linspace(-80.0, 80.0, img_shape[0], device=device)
+    net = _build_net(in_chans, out_chans, img_shape, lat_coords=lat).to(device)
+    x = torch.randn(2, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (2, out_chans, *img_shape)
 
 
 @pytest.mark.parametrize("patch_size", [(2, 2), (2, 4)])
