@@ -13,6 +13,7 @@ from fme.core.atmosphere_data import (
 )
 from fme.core.constants import (
     GRAVITY,
+    LATENT_HEAT_OF_VAPORIZATION,
     RDGAS,
     RVGAS,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
@@ -693,6 +694,18 @@ def _force_conserve_total_energy(
 
     energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
     energy_to_temperature_factor = _energy_correction_factor(gen, vertical_coordinate)
+    if preserve_relative_humidity:
+        # The q scaling adds Lv*dq latent energy per unit dT.  Account for it
+        # so the combined (sensible + latent) change matches the energy deficit.
+        # dq/dT = q * Lv / (Rv * T^2)  (Clausius-Clapeyron)
+        # dE_latent/dT = integral(Lv * q * Lv / (Rv * T^2) dp/g)
+        latent_amplification = vertical_coordinate.vertical_integral(
+            LATENT_HEAT_OF_VAPORIZATION**2
+            * gen.specific_total_water
+            / (RVGAS * gen.air_temperature**2),
+            gen.surface_pressure,
+        )
+        energy_to_temperature_factor = energy_to_temperature_factor + latent_amplification
     # take global mean to impose a spatially uniform temperature correction
     energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
     temperature_correction = energy_correction / energy_to_temp_factor_gm
