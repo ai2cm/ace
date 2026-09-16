@@ -43,8 +43,18 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 
 # --- owclt: crps4's ocean init, long-tail coupled schedule ---
 # Pairs with crps4 (cghk183p): same init, schedule is the only change.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||0|ai2/ace|seed=0|8h
+#
+# 4xB200 on titan, not 8xH100: at cap 16 the H100 twin (owc8lt, 2thyv9bz) runs
+# at 98.9% median / 0.42 GiB headroom, while 4xB200 projects to ~140-143 GiB of
+# 179 (78-80%) -- the headroom crps8 already demonstrated at 82.7%. batch_size
+# is a GLOBAL batch split across ranks, so 4 GPUs means 2 samples/GPU and the
+# generated train-config.yaml is byte-identical to the H100 arm's; the cluster
+# change does not touch the experiment.
+#
+# retries 3, not 0: this is a production run with real headroom, unlike the
+# deliberate cap-16 probe that owc8lt was launched as.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4||3|ai2/ace|seed=0|8h
 
 # --- owc8lt: crps8's ocean init, long-tail coupled schedule ---
 # Pairs with crps8 (pxz4q8hw-initialised): same init, fixed 8 -> sampled tail.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||0|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||0|ai2/ace|seed=0|8h
