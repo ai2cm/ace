@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from unittest.mock import MagicMock
 
+import dacite
 import pytest
 import torch
 from torch import nn
@@ -313,7 +314,6 @@ def test_remove_deprecated_keys_drops_and_renames():
 
 def test_remove_deprecated_keys_unknown_key_raises():
     """Strict dacite loading should reject genuinely unknown keys."""
-    import dacite
 
     with pytest.raises(dacite.UnexpectedDataError):
         StepSelector(
