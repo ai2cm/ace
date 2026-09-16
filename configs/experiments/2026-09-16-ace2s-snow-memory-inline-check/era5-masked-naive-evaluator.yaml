@@ -1,0 +1,83 @@
+experiment_dir: gs://vcm-ml-experiments/2026-09-16-ace2s-snow-memory-inline-check/era5-masked-naive
+n_forward_steps: 1825
+forward_steps_in_memory: 25
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '1998-01-01T00:00:00'
+    - '2003-01-01T00:00:00'
+    - '2008-01-01T00:00:00'
+    - '2013-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default/
+      file_pattern: 2026-08-07-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+    - data_path: /climate-default/
+      file_pattern: 2026-08-07-era5-1deg-8layer-daily-1940-2025-snow-masked.zarr
+      engine: zarr
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  power_spectrum:
+    enabled: false
+  zonal_mean:
+    enabled: false
+  annual:
+    enabled: false
+  enso_index:
+    enabled: false
+  enso_coefficient:
+    enabled: false
+  ipo_index:
+    enabled: false
+  anomaly_memory:
+    enabled: true
+    variables:
+    - USWRFsfc
+    - TMP2m
+    - surface_temperature
+    - surface_snow_amount_masked
+    - surface_snow_area_fraction_masked
+    lags: [0, 1, 3, 7, 14, 30]
+    report_lags: [7, 14]
+    map_lags: [7]
+    # Leading times scored: extended cold season per hemisphere, so snow-season
+    # memory is not diluted by snow-free months.
+    months_northern: [11, 12, 1, 2, 3, 4, 5]
+    months_southern: [5, 6, 7, 8, 9, 10, 11]
+    # Per-cell correlations are averaged over these boxes for the logged scalars.
+    regions:
+    - name: Siberia
+      lat: [50, 68]
+      lon: [60, 140]
+    - name: Canada
+      lat: [50, 65]
+      lon: [250, 285]
+    - name: N_Europe
+      lat: [55, 68]
+      lon: [5, 40]
+    - name: Tibet
+      lat: [30, 38]
+      lon: [80, 100]
+    - name: Great_Plains
+      lat: [32, 49]
+      lon: [255, 265]
+    - name: Rockies
+      lat: [38, 45]
+      lon: [249, 256]
+    - name: Andes
+      lat: [-35, -15]
+      lon: [287, 293]
+    - name: north_of_40S
+      lat: [-40, 90]
+      lon: [0, 360]
