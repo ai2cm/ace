@@ -43,10 +43,10 @@ RUN_CONFIGS_DIR = HERE / "run_configs"
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
 
 # Architecture tags appearing in the training config filenames, and the
-# vocabulary of --arch here and in submit_eval_jobs.py. A config belongs to an
-# architecture when its filename contains that tag; every config which has an
-# eval suite carries exactly one of them.
-ARCHITECTURES = ("nc-sfno", "nc-swin-v2")
+# vocabulary of --arch here and in submit_eval_jobs.py. Every config which has
+# an eval suite carries exactly one of them; see config_arch for how a tag
+# which is a prefix of another (`nc-swin-v2` of `nc-swin-v2.1`) is told apart.
+ARCHITECTURES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1")
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
@@ -54,6 +54,18 @@ DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 # source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
 with open(DEFAULT_SOURCE_MAP) as _f:
     TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
+
+
+def config_arch(config_filename: str) -> str | None:
+    """The architecture tag a config filename carries, or None.
+
+    Longest tag first, so `...-nc-swin-v2.1-fm-a1.yaml` is `nc-swin-v2.1` and
+    not `nc-swin-v2`, which is a substring of it.
+    """
+    for arch in sorted(ARCHITECTURES, key=len, reverse=True):
+        if f"-{arch}-" in config_filename:
+            return arch
+    return None
 
 
 def source_config_to_run_name(config_filename: str) -> str:
@@ -299,7 +311,7 @@ def discover_source_configs(
         for path in sorted(source_dir.glob("*.yaml")):
             if not path.name.startswith(CONFIG_PREFIX):
                 continue
-            if not any(arch in path.name for arch in architectures):
+            if config_arch(path.name) not in architectures:
                 continue
             if not stem_matches_version(path.stem, version):
                 continue

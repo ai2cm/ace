@@ -13,6 +13,7 @@ separately by submit_orography_jobs.py and submit_fixed_var_jobs.py.
 
 Usage:
     python submit_eval_jobs.py [--version {v1,v2,v3}] [--arch ARCH [ARCH ...]]
+                               [--run RUN [RUN ...]]
                                [--skip-if-in-beaker] [--dry-run]
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
@@ -36,6 +37,7 @@ from generate_eval_configs import (
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
     WANDB_PROJECT,
+    config_arch,
     eval_suite_config_to_run_name,
 )
 from generate_fixed_var_configs import FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX
@@ -61,13 +63,16 @@ CHECKPOINTS = list(zip(CHECKPOINT_PATHS, EVAL_CHECKPOINT_NAME_SUFFIXES))
 
 
 def configs_for_version(
-    version: str | None, architectures: Sequence[str]
+    version: str | None,
+    architectures: Sequence[str],
+    runs: Sequence[str] | None = None,
 ) -> tuple[list[str], int]:
     """Suites to submit, and how many matched the filters before the map lookup.
 
-    The count lets main() tell "no suite matches --version/--arch" from "the
-    matching suites have no training result dataset recorded yet", which are
-    fixed by different commands.
+    The count lets main() tell "no suite matches --version/--arch/--run" from
+    "the matching suites have no training result dataset recorded yet", which
+    are fixed by different commands. `runs` narrows to the suites of the named
+    training runs.
     """
     matched = []
     for path in sorted(RUN_CONFIGS_DIR.glob("*.yaml")):
@@ -77,9 +82,11 @@ def configs_for_version(
             continue
         if path.name.startswith(FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX):
             continue
-        if not any(arch in path.name for arch in architectures):
+        if config_arch(path.name) not in architectures:
             continue
         if not stem_matches_version(path.stem, version):
+            continue
+        if runs is not None and eval_suite_config_to_run_name(path.name) not in runs:
             continue
         matched.append(path.name)
 
@@ -146,6 +153,13 @@ def main() -> None:
         default=None,
         help="Only submit suites for these architectures (default: all).",
     )
+    parser.add_argument(
+        "--run",
+        nargs="+",
+        default=None,
+        metavar="RUN",
+        help="Only submit the suites of these training run names (default: all).",
+    )
     add_beaker_args(
         parser,
         default_workspace="ai2/ace",
@@ -154,11 +168,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configs, n_matched = configs_for_version(args.version, args.arch or ARCHITECTURES)
+    configs, n_matched = configs_for_version(
+        args.version, args.arch or ARCHITECTURES, args.run
+    )
     if n_matched == 0:
         raise SystemExit(
             "No eval suite config matches these filters - run "
-            "generate_eval_configs.py with the same --version/--arch first."
+            "generate_eval_configs.py with the same --version/--arch first, "
+            "and check --run names against the suite filenames."
         )
     if not configs:
         raise SystemExit(
