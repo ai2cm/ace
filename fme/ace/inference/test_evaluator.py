@@ -378,8 +378,8 @@ def test_load_stepper_ensemble_mixes_residual_and_non_residual(
     stepper_config = load_stepper_ensemble_config(paths, weights)
     assert stepper_config.step.type == "ensemble"
     assert stepper_config.step.config["weights"] == weights
-    assert stepper_config.input_names == frozenset(["var"])
-    assert stepper_config.output_names == frozenset(["var"])
+    assert set(stepper_config.input_names) == {"var"}
+    assert set(stepper_config.output_names) == {"var"}
 
 
 def test_load_stepper_ensemble_applies_override_to_every_member(

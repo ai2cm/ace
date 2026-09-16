@@ -70,15 +70,15 @@ class EnsembleStepConfig(StepConfigABC):
         return self.members[0].n_ic_timesteps
 
     @property
-    def input_names(self) -> frozenset[str]:
+    def input_names(self) -> list[str]:
         return self.members[0].input_names
 
     @property
-    def output_names(self) -> frozenset[str]:
+    def output_names(self) -> list[str]:
         return self.members[0].output_names
 
     @property
-    def next_step_input_names(self) -> frozenset[str]:
+    def next_step_input_names(self) -> list[str]:
         return self.members[0].next_step_input_names
 
     @property
@@ -128,12 +128,16 @@ class EnsembleStepConfig(StepConfigABC):
 
 def _assert_members_agree(first: StepSelector, other: StepSelector, index: int):
     checks: list[tuple[str, Any, Any]] = [
-        ("input_names", first.input_names, other.input_names),
-        ("output_names", first.output_names, other.output_names),
+        ("input_names", frozenset(first.input_names), frozenset(other.input_names)),
+        (
+            "output_names",
+            frozenset(first.output_names),
+            frozenset(other.output_names),
+        ),
         (
             "next_step_input_names",
-            first.next_step_input_names,
-            other.next_step_input_names,
+            frozenset(first.next_step_input_names),
+            frozenset(other.next_step_input_names),
         ),
         (
             "next_step_forcing_names",

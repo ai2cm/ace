@@ -150,8 +150,8 @@ def test_ensemble_step_delegates_to_members():
         ],
         weights=[0.5, 0.5],
     )
-    assert step.input_names == frozenset(NAMES)
-    assert step.output_names == frozenset(NAMES)
+    assert set(step.input_names) == set(NAMES)
+    assert set(step.output_names) == set(NAMES)
     assert step.n_ic_timesteps == 1
     assert len(step.modules) == 2
     assert step.get_state().keys() == {"members"}

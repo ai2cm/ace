@@ -1881,7 +1881,7 @@ def test_stepper_from_state_loads_legacy_checkpoint_format():
     }
     stepper = Stepper.from_state(legacy_state)
     assert stepper.config.step.type == "multi_call"
-    assert stepper.config.input_names == frozenset(names)
+    assert set(stepper.config.input_names) == set(names)
     normalizer = stepper._step_obj.normalizer
     torch.testing.assert_close(normalizer.means["a"].cpu(), torch.tensor(2.0))
     torch.testing.assert_close(normalizer.stds["a"].cpu(), torch.tensor(5.0))
