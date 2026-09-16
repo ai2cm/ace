@@ -1,4 +1,4 @@
-experiment_dir: gs://vcm-ml-experiments/2026-09-16-ace2s-snow-memory-inline-check/era5-control
+experiment_dir: gs://vcm-ml-intermediate/2026-09-16-ace2s-snow-memory-inline-check/era5-control
 n_forward_steps: 1825
 forward_steps_in_memory: 25
 checkpoint_path: /ckpt.tar
