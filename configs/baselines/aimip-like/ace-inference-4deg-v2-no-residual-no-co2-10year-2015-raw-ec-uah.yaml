@@ -1,7 +1,7 @@
 # Standalone re-run of the inline "10year" evaluation of the no-CO2, no-residual
 # 4deg v2 model (wandb im4ecamc, train-4deg-daily-v2-era5-only-no-residual-no-co2.yaml)
 # with raw daily prediction + target netCDFs saved, for process diagnosis of the
-# 1995-2004 rollout. Same eight ICs, step count and forcing as the inline entry.
+# 2015-2024 rollout. Same eight ICs, step count and forcing as the inline entry.
 checkpoint_path: /ckpt.tar
 allow_incompatible_dataset: true
 experiment_dir: /results
@@ -49,14 +49,14 @@ initial_condition:
   engine: zarr
   start_indices:
     times:
-      - '1995-01-01T00:00:00'
-      - '1995-01-02T00:00:00'
-      - '1995-01-03T00:00:00'
-      - '1995-01-04T00:00:00'
-      - '1995-01-05T00:00:00'
-      - '1995-01-06T00:00:00'
-      - '1995-01-07T00:00:00'
-      - '1995-01-08T00:00:00'
+      - '2015-01-01T00:00:00'
+      - '2015-01-02T00:00:00'
+      - '2015-01-03T00:00:00'
+      - '2015-01-04T00:00:00'
+      - '2015-01-05T00:00:00'
+      - '2015-01-06T00:00:00'
+      - '2015-01-07T00:00:00'
+      - '2015-01-08T00:00:00'
 forcing_loader:
   dataset:
     data_path: /climate-default/
@@ -88,4 +88,4 @@ stepper_override:
       - USWRFtoa
     total_energy_budget_correction:
       method: constant_temperature
-      constant_unaccounted_heating: 0.0
+      constant_unaccounted_heating: 3.994

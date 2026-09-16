@@ -1,8 +1,8 @@
 # Standalone re-run of the inline "10year" evaluation of the no-CO2, no-residual
 # 4deg v2 model (wandb im4ecamc, train-4deg-daily-v2-era5-only-no-residual-no-co2.yaml)
-# with energy corrector and raw daily prediction + target netCDFs saved, for process diagnosis of the
+# with raw daily prediction + target netCDFs saved, for process diagnosis of the
 # 2015-2024 rollout. Same eight ICs, step count and forcing as the inline entry.
-checkpoint_path: /ckpt_ec.tar
+checkpoint_path: /ckpt.tar
 allow_incompatible_dataset: true
 experiment_dir: /results
 n_forward_steps: 3652
@@ -65,3 +65,27 @@ forcing_loader:
   num_data_workers: 8
 logging:
   project: ace
+stepper_override:
+  corrector:
+    conserve_dry_air: true
+    moisture_budget_correction: advection_and_precipitation
+    force_positive_names:
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - Q2m
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+    total_energy_budget_correction:
+      method: constant_temperature
+      constant_unaccounted_heating: 0.0
