@@ -144,15 +144,18 @@ MISSING_DATASETS = {
         kinds=("abrupt-10yr-eval", "abrupt-10yr-eval-sst", "abrupt-data-only"),
     ),
     "spin-up": MissingDataset(
-        path=_MISSING_ROOT + "ensemble-spin-up-fme-dataset",
+        path=(
+            "/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-"
+            "som-ensemble-spin-up-fme-dataset"
+        ),
         purpose="initial condition and forcing of the equilibrium spin-up stage",
         source=(
             "gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/"
             "regridded-zarrs/gaussian_grid_45_by_90/{climate}-spin-up-ic_000N"
         ),
         how=(
-            "clone scripts/data_process/configs/shield-som-spin-up-c96-1deg-8layer"
-            ".yaml to 4deg (gaussian_grid_45_by_90 inputs, daily time_coarsen)"
+            "make shield_som_c96_spin_up_dataset RESOLUTION=4deg in "
+            "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
         kinds=("eq",),
     ),
