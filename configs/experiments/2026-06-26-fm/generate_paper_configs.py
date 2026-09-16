@@ -1,9 +1,9 @@
-"""Generate slab-ocean (SOM) equilibrium and abrupt-CO2 configs for the FM runs.
+"""Generate the ACE2S-SHiELD+ paper experiment configs for the FM runs.
 
 Reproduces the ACE experiments of the ACE2S-SHiELD+ paper repository
 (``ai2cm/ace2s-shield-plus-paper``, ``ACE-experiments/inference``) on the 4deg
 daily SHiELD-SOM ensemble dataset the FM runs were trained on. Every config is
-run-agnostic: the checkpoint is mounted at ``/ckpt.tar`` by submit_som_jobs.py
+run-agnostic: the checkpoint is mounted at ``/ckpt.tar`` by submit_paper_jobs.py
 and the same config is reused across every training run.
 
 The slab ocean is applied at inference time through ``stepper_override``, as in
@@ -20,7 +20,7 @@ checkpoint resolves and the conditioning one-hot a ``-cond`` checkpoint saw.
 
 Kinds
 -----
-One config family per kind, named ``ace-som-{kind}-config-4deg-...yaml``:
+One config family per kind, named ``ace-paper-{kind}-config-4deg-...yaml``:
 
 ``eq``
     Paper's equilibrium-climate inference, two stages per (climate, ic): a one
@@ -84,7 +84,7 @@ from generate_eval_configs import WANDB_ENTITY, WANDB_PROJECT
 
 HERE = pathlib.Path(__file__).parent
 RUN_CONFIGS_DIR = HERE / "run_configs"
-SOM_CONFIG_PREFIX = "ace-som-"
+PAPER_CONFIG_PREFIX = "ace-paper-"
 CHECKPOINT_PATH = "/ckpt.tar"
 LABEL = "som"
 
@@ -111,7 +111,7 @@ class MissingDataset(NamedTuple):
     source: str
     how: str
     kinds: tuple[str, ...]
-    #: False until the dataset is on weka; submit_som_jobs.py refuses the
+    #: False until the dataset is on weka; submit_paper_jobs.py refuses the
     #: dependent kinds while it is False.
     available: bool = False
 
@@ -121,7 +121,7 @@ class MissingDataset(NamedTuple):
 # path is the real name once its processing config exists (so the two agree)
 # and a TBD date before that, so a stale path fails loudly instead of running
 # on the wrong data. Flip ``available`` once the dataset is on weka and
-# submit_som_jobs.py stops refusing the dependent kinds. See MISSING_DATASETS.md.
+# submit_paper_jobs.py stops refusing the dependent kinds. See MISSING_DATASETS.md.
 _MISSING_ROOT = "/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-"
 MISSING_DATASETS = {
     "abrupt": MissingDataset(
@@ -274,9 +274,9 @@ KINDS = INFERENCE_KINDS + EVALUATOR_KINDS
 DATA_ONLY_KINDS = ("data-only", "abrupt-data-only", "abrupt-ens-data-only")
 
 
-def som_config_filename(kind: str, *parts: str) -> str:
+def paper_config_filename(kind: str, *parts: str) -> str:
     suffix = "-".join(parts)
-    return f"{SOM_CONFIG_PREFIX}{kind}-config-4deg-{suffix}.yaml"
+    return f"{PAPER_CONFIG_PREFIX}{kind}-config-4deg-{suffix}.yaml"
 
 
 def member_path(climate: str, member: str) -> str:
@@ -418,7 +418,7 @@ def build_eq_configs() -> dict[str, dict]:
         for ic in range(1, N_INITIAL_CONDITIONS + 1):
             offset = ic - 1
             spin_up_pattern = f"{climate}-spin-up-{spec.member}.zarr"
-            configs[som_config_filename("eq-spinup", climate, f"ic{ic}")] = (
+            configs[paper_config_filename("eq-spinup", climate, f"ic{ic}")] = (
                 _inference_config(
                     experiment_dir=SPIN_UP_EXPERIMENT_DIR,
                     n_forward_steps=SPIN_UP_N_STEPS - offset,
@@ -431,7 +431,7 @@ def build_eq_configs() -> dict[str, dict]:
                     log_to_wandb=False,
                 )
             )
-            configs[som_config_filename("eq-main", climate, f"ic{ic}")] = (
+            configs[paper_config_filename("eq-main", climate, f"ic{ic}")] = (
                 _inference_config(
                     experiment_dir="/results",
                     n_forward_steps=SOM_N_STEPS,
@@ -451,7 +451,7 @@ def build_eq_nospinup_configs() -> dict[str, dict]:
     for climate, spec in CLIMATES.items():
         for ic in range(1, N_INITIAL_CONDITIONS + 1):
             offset = ic - 1
-            configs[som_config_filename("eq-nospinup", climate, f"ic{ic}")] = (
+            configs[paper_config_filename("eq-nospinup", climate, f"ic{ic}")] = (
                 _inference_config(
                     experiment_dir="/results",
                     n_forward_steps=SOM_N_STEPS - offset,
@@ -472,7 +472,7 @@ def build_eq_1000yr_configs() -> dict[str, dict]:
     for climate, spec in CLIMATES.items():
         forcing = _member_dataset(CONTROL_CLIMATE, control.member, co2=spec.co2)
         forcing["n_repeats"] = THOUSAND_YEAR_N_REPEATS
-        configs[som_config_filename("eq-1000yr", climate)] = _inference_config(
+        configs[paper_config_filename("eq-1000yr", climate)] = _inference_config(
             experiment_dir="/results",
             n_forward_steps=THOUSAND_YEAR_N_STEPS,
             forward_steps_in_memory=FORWARD_STEPS_IN_MEMORY,
@@ -490,7 +490,7 @@ def build_data_only_configs() -> dict[str, dict]:
     for climate, members in SOM_MEMBERS.items():
         for member in members:
             dataset = _member_dataset(climate, member)
-            configs[som_config_filename("data-only", climate, member)] = (
+            configs[paper_config_filename("data-only", climate, member)] = (
                 _evaluator_config(
                     n_forward_steps=SOM_N_STEPS,
                     forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
@@ -519,7 +519,7 @@ def build_abrupt_10yr_configs() -> dict[str, dict]:
     control = CLIMATES[CONTROL_CLIMATE]
     configs = {}
     for climate in ABRUPT_CLIMATES:
-        configs[som_config_filename("abrupt-10yr", climate)] = _inference_config(
+        configs[paper_config_filename("abrupt-10yr", climate)] = _inference_config(
             experiment_dir="/results",
             n_forward_steps=SOM_N_STEPS,
             forward_steps_in_memory=FORWARD_STEPS_IN_MEMORY,
@@ -538,7 +538,7 @@ def _build_abrupt_10yr_eval_configs(kind: str, slab: bool) -> dict[str, dict]:
     root = MISSING_DATASETS["abrupt"].path
     configs = {}
     for climate in ABRUPT_CLIMATES:
-        configs[som_config_filename(kind, climate)] = _evaluator_config(
+        configs[paper_config_filename(kind, climate)] = _evaluator_config(
             n_forward_steps=ABRUPT_N_STEPS,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=_zarr_dataset(root, f"abrupt-{climate}.zarr"),
@@ -563,7 +563,7 @@ def build_abrupt_data_only_configs() -> dict[str, dict]:
     configs = {}
     for climate in ABRUPT_CLIMATES:
         dataset = _zarr_dataset(root, f"abrupt-{climate}.zarr")
-        configs[som_config_filename("abrupt-data-only", climate)] = _evaluator_config(
+        configs[paper_config_filename("abrupt-data-only", climate)] = _evaluator_config(
             n_forward_steps=ABRUPT_N_STEPS,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=dataset,
@@ -578,7 +578,7 @@ def build_abrupt_data_only_configs() -> dict[str, dict]:
 def build_abrupt_ens_configs() -> dict[str, dict]:
     control = CLIMATES[CONTROL_CLIMATE]
     return {
-        som_config_filename("abrupt-ens", "4xCO2"): _evaluator_config(
+        paper_config_filename("abrupt-ens", "4xCO2"): _evaluator_config(
             n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS,
             forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=_member_dataset(
@@ -596,7 +596,7 @@ def build_abrupt_ens_data_only_configs() -> dict[str, dict]:
     for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
         member = f"ic_{n:04d}"
         dataset = _zarr_dataset(root, f"abrupt4xCO2-{member}.zarr")
-        configs[som_config_filename("abrupt-ens-data-only", "4xCO2", member)] = (
+        configs[paper_config_filename("abrupt-ens-data-only", "4xCO2", member)] = (
             _evaluator_config(
                 n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS - 1,
                 forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
@@ -614,7 +614,7 @@ def build_7day_configs() -> dict[str, dict]:
     configs = {}
     for climate in (CONTROL_CLIMATE, "4xCO2"):
         co2 = None if climate == CONTROL_CLIMATE else CLIMATES[climate].co2
-        configs[som_config_filename("7day", climate)] = _inference_config(
+        configs[paper_config_filename("7day", climate)] = _inference_config(
             experiment_dir="/results",
             n_forward_steps=SEVEN_DAY_N_STEPS,
             forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,

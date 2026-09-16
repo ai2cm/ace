@@ -5,13 +5,13 @@ Living plan for reproducing the ACE experiments of
 ("Disentangling the effects of sea surface temperature and CO2 in global
 machine learned weather-climate emulators", arXiv 2606.07928) on the 4deg daily
 FM / c96 training runs of this directory. Machinery lives in
-`generate_som_configs.py` (config generator, one "kind" per experiment type),
-`submit_som_jobs.py` (gantry submission), `run-ace-evaluator.sh`,
+`generate_paper_configs.py` (config generator, one "kind" per experiment type),
+`submit_paper_jobs.py` (gantry submission), `run-ace-evaluator.sh`,
 `run-ace-som-two-stage.sh`; dataset gaps in `MISSING_DATASETS.md`; vocabulary
 in `CONTEXT.md` ("Slab-ocean experiments").
 
 Resume with a fresh agent: read this file, `MISSING_DATASETS.md`, and the
-docstrings of `generate_som_configs.py` / `submit_som_jobs.py`, then check the
+docstrings of `generate_paper_configs.py` / `submit_paper_jobs.py`, then check the
 status section below against `argo list` and the GCS/weka paths.
 
 ## Status (2026-09-16)
@@ -82,7 +82,7 @@ Design questions to settle before writing these kinds:
    vs one 1979-2020 run with the windows split in analysis.
 4. Labels: `amip` for AMIP-family data, `ramped` for the random-CO2 data,
    `som` for `eq-eval-sst` (all three regimes' vocabularies include them).
-5. Where the kinds live: extend `generate_som_configs.py` (rename to a
+5. Where the kinds live: extend `generate_paper_configs.py` (rename to a
    paper-wide generator) or a sibling `generate_prescribed_sst_configs.py`
    sharing the submit script.
 
@@ -107,15 +107,15 @@ See `MISSING_DATASETS.md` for full detail.
    python scripts/data_process/copy_zarrs_to_weka.py gs://vcm-ml-intermediate/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-ensemble-spin-up-fme-dataset
    ```
    then set `available=True` on `MISSING_DATASETS["abrupt"]` / `["spin-up"]`
-   in `generate_som_configs.py`, commit, push.
+   in `generate_paper_configs.py`, commit, push.
 3. Submit (from this directory, fme env; `--dry-run` first):
    ```bash
-   python submit_som_jobs.py --kind eq-nospinup abrupt-10yr abrupt-ens 7day --arm a1 a2 a3
-   python submit_som_jobs.py --kind data-only
-   python submit_som_jobs.py --kind abrupt-10yr-eval-sst abrupt-10yr-eval --climate 4xCO2 --arm a1 a2 a3   # after D1
-   python submit_som_jobs.py --kind abrupt-data-only --climate 4xCO2                                     # after D1
-   python submit_som_jobs.py --kind eq --arm a1 a2 a3 --skip-if-in-wandb                                 # after D2
-   python submit_som_jobs.py --kind eq-1000yr --arm a1 --arch nc-swin-v2                                 # long jobs
+   python submit_paper_jobs.py --kind eq-nospinup abrupt-10yr abrupt-ens 7day --arm a1 a2 a3
+   python submit_paper_jobs.py --kind data-only
+   python submit_paper_jobs.py --kind abrupt-10yr-eval-sst abrupt-10yr-eval --climate 4xCO2 --arm a1 a2 a3   # after D1
+   python submit_paper_jobs.py --kind abrupt-data-only --climate 4xCO2                                     # after D1
+   python submit_paper_jobs.py --kind eq --arm a1 a2 a3 --skip-if-in-wandb                                 # after D2
+   python submit_paper_jobs.py --kind eq-1000yr --arm a1 --arch nc-swin-v2                                 # long jobs
    ```
    Watch the first `eq-nospinup 1xCO2` run for SST drift: the slab is
    forward-Euler at a daily step, untested here (paper was 6-hourly).
@@ -129,7 +129,7 @@ See `MISSING_DATASETS.md` for full detail.
 
 ## Decisions log
 
-- Models: fm and c96 regimes (`submit_som_jobs.REGIMES`); `--arm` narrows to
+- Models: fm and c96 regimes (`submit_paper_jobs.REGIMES`); `--arm` narrows to
   norm-ablation cells. era5-regime cells are mechanically able to run every
   kind (all runs have SST in `in_names`/`out_names` and predict the surface
   fluxes) but are excluded by default as fully out-of-distribution; add

@@ -2,9 +2,9 @@
 
 set -e
 
-CONFIG_FILENAME="${1:-run_configs/ace-som-data-only-config-4deg-1xCO2-ic_0005.yaml}"
-JOB_NAME="${2:-ace-som-data-only}"
-JOB_GROUP="${3:-ace2-fm-som-2026-06-26}"
+CONFIG_FILENAME="${1:-run_configs/ace-paper-data-only-config-4deg-1xCO2-ic_0005.yaml}"
+JOB_NAME="${2:-ace-paper-data-only}"
+JOB_GROUP="${3:-ace2-fm-paper-2026-06-26}"
 EXISTING_RESULTS_DATASET="${4:-REPLACE_WITH_BEAKER_DATASET_ID}"  # contains the checkpoint to use for inference
 CHECKPOINT_PATH="${5:-training_checkpoints/best_inference_ckpt.tar}"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository

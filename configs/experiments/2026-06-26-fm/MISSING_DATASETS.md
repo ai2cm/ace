@@ -1,13 +1,13 @@
 # Datasets still to produce for the slab-ocean (SOM) experiments
 
-`generate_som_configs.py` reproduces the ACE experiments of
+`generate_paper_configs.py` reproduces the ACE experiments of
 [ai2cm/ace2s-shield-plus-paper](https://github.com/ai2cm/ace2s-shield-plus-paper/tree/main/ACE-experiments/inference)
 on the 4deg daily SHiELD-SOM data. Three of the paper's inputs have no 4deg
 daily counterpart yet. Their configs are generated anyway so the machinery is
 complete — against the real name once a processing config fixes it, a
-placeholder (`/climate-default/TBD-...`) before that — and `submit_som_jobs.py`
+placeholder (`/climate-default/TBD-...`) before that — and `submit_paper_jobs.py`
 refuses the dependent kinds until the entry is marked `available` in
-`MISSING_DATASETS` in `generate_som_configs.py`.
+`MISSING_DATASETS` in `generate_paper_configs.py`.
 
 To bring one online: produce the dataset, copy it to weka, set the real name
 and `available=True` in `MISSING_DATASETS`, regenerate, commit, submit.

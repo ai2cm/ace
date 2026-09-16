@@ -1,6 +1,6 @@
-"""Submit slab-ocean (SOM) equilibrium and abrupt-CO2 jobs for the FM checkpoints.
+"""Submit the ACE2S-SHiELD+ paper experiment jobs for the FM checkpoints.
 
-Runs the configs written by generate_som_configs.py (see its docstring for the
+Runs the configs written by generate_paper_configs.py (see its docstring for the
 kinds) against every fm- and c96-regime training run with a result dataset in
 wandb_to_beaker_map.json, mounting that run's best_inference_ckpt.tar at
 /ckpt.tar. The era5 regime and the hand-written ERA5 runs are skipped: they
@@ -13,14 +13,14 @@ hundred jobs. --arm restricts to the norm-ablation cells (dropping the
 hand-written runs), and --run/--arch/--regime/--climate/--ic narrow further.
 
 Kinds whose configs point at a dataset that is not on weka yet (the entries of
-generate_som_configs.MISSING_DATASETS with available=False) are refused with a
+generate_paper_configs.MISSING_DATASETS with available=False) are refused with a
 pointer to MISSING_DATASETS.md unless --allow-missing-datasets is given.
 
 Gantry clones the repository at HEAD, so the configs must be committed and
 pushed before submitting; this is checked unless --dry-run is given.
 
 Usage:
-    python submit_som_jobs.py --kind KIND [KIND ...]
+    python submit_paper_jobs.py --kind KIND [KIND ...]
                               [--run RUN ...] [--arch ARCH ...]
                               [--regime {fm,c96} ...] [--arm {a1,a2,a3} ...]
                               [--climate CLIMATE ...] [--ic IC ...]
@@ -54,7 +54,7 @@ from generate_eval_configs import (
     fetch_wandb_finished_summaries,
     source_config_to_run_name,
 )
-from generate_som_configs import (
+from generate_paper_configs import (
     ABRUPT_CLIMATES,
     ABRUPT_ENSEMBLE_N_MEMBERS,
     CLIMATES,
@@ -65,8 +65,8 @@ from generate_som_configs import (
     MISSING_DATASETS,
     N_INITIAL_CONDITIONS,
     SOM_MEMBERS,
+    paper_config_filename,
     references_missing_dataset,
-    som_config_filename,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -74,7 +74,7 @@ RUN_CONFIGS_DIRNAME = RUN_CONFIGS_DIR.name
 INFERENCE_RUN_SCRIPT = HERE / "run-ace-inference.sh"
 EVALUATOR_RUN_SCRIPT = HERE / "run-ace-evaluator.sh"
 TWO_STAGE_RUN_SCRIPT = HERE / "run-ace-som-two-stage.sh"
-WANDB_GROUP = "ace2-fm-som-2026-06-26"
+WANDB_GROUP = "ace2-fm-paper-2026-06-26"
 # best_inference_ckpt.tar is always written by training; mounted at /ckpt.tar.
 CHECKPOINT_PATH = "training_checkpoints/best_inference_ckpt.tar"
 
@@ -150,8 +150,8 @@ def model_jobs(
                         f"{run_name}-som-eq-{climate}-ic{ic}",
                         TWO_STAGE_RUN_SCRIPT,
                         (
-                            som_config_filename("eq-spinup", climate, f"ic{ic}"),
-                            som_config_filename("eq-main", climate, f"ic{ic}"),
+                            paper_config_filename("eq-spinup", climate, f"ic{ic}"),
+                            paper_config_filename("eq-main", climate, f"ic{ic}"),
                         ),
                         dataset_id,
                     )
@@ -163,7 +163,7 @@ def model_jobs(
                     Job(
                         f"{run_name}-som-eq-nospinup-{climate}-ic{ic}",
                         INFERENCE_RUN_SCRIPT,
-                        (som_config_filename(kind, climate, f"ic{ic}"),),
+                        (paper_config_filename(kind, climate, f"ic{ic}"),),
                         dataset_id,
                     )
                 )
@@ -173,7 +173,7 @@ def model_jobs(
                 Job(
                     f"{run_name}-som-eq1000-{climate}",
                     INFERENCE_RUN_SCRIPT,
-                    (som_config_filename(kind, climate),),
+                    (paper_config_filename(kind, climate),),
                     dataset_id,
                 )
             )
@@ -184,7 +184,7 @@ def model_jobs(
                     Job(
                         f"{run_name}-som-abrupt-{climate}-10yr",
                         INFERENCE_RUN_SCRIPT,
-                        (som_config_filename(kind, climate),),
+                        (paper_config_filename(kind, climate),),
                         dataset_id,
                     )
                 )
@@ -196,7 +196,7 @@ def model_jobs(
                     Job(
                         f"{run_name}-som-abrupt-{climate}-{suffix}",
                         EVALUATOR_RUN_SCRIPT,
-                        (som_config_filename(kind, climate),),
+                        (paper_config_filename(kind, climate),),
                         dataset_id,
                     )
                 )
@@ -206,7 +206,7 @@ def model_jobs(
                 Job(
                     f"{run_name}-som-abrupt-4xCO2-ens",
                     EVALUATOR_RUN_SCRIPT,
-                    (som_config_filename(kind, "4xCO2"),),
+                    (paper_config_filename(kind, "4xCO2"),),
                     dataset_id,
                 )
             )
@@ -217,7 +217,7 @@ def model_jobs(
                     Job(
                         f"{run_name}-som-7day-{climate}",
                         INFERENCE_RUN_SCRIPT,
-                        (som_config_filename(kind, climate),),
+                        (paper_config_filename(kind, climate),),
                         dataset_id,
                     )
                 )
@@ -237,7 +237,7 @@ def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[J
                     Job(
                         f"som-data-only-{climate}-{_ic_member_tag(member)}",
                         EVALUATOR_RUN_SCRIPT,
-                        (som_config_filename(kind, climate, member),),
+                        (paper_config_filename(kind, climate, member),),
                         dataset_id,
                     )
                 )
@@ -248,7 +248,7 @@ def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[J
                     Job(
                         f"som-abrupt-{climate}-data-only",
                         EVALUATOR_RUN_SCRIPT,
-                        (som_config_filename(kind, climate),),
+                        (paper_config_filename(kind, climate),),
                         dataset_id,
                     )
                 )
@@ -260,7 +260,7 @@ def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[J
                     Job(
                         f"som-abrupt-4xCO2-ens-data-only-{_ic_member_tag(member)}",
                         EVALUATOR_RUN_SCRIPT,
-                        (som_config_filename(kind, "4xCO2", member),),
+                        (paper_config_filename(kind, "4xCO2", member),),
                         dataset_id,
                     )
                 )
@@ -281,7 +281,7 @@ def refuse_missing_datasets(kinds: list[str], config_filenames: list[str]) -> No
     lines = [
         "Refusing to submit: these configs reference datasets that are not on "
         "weka yet. Produce the dataset, mark it available in "
-        "generate_som_configs.MISSING_DATASETS, regenerate and commit; see "
+        "generate_paper_configs.MISSING_DATASETS, regenerate and commit; see "
         "MISSING_DATASETS.md. Pass --allow-missing-datasets to submit anyway.",
     ]
     for key, dataset in MISSING_DATASETS.items():
@@ -296,7 +296,7 @@ def refuse_missing_datasets(kinds: list[str], config_filenames: list[str]) -> No
 
 def validate_configs(config_filenames: list[str]) -> None:
     for config_filename in config_filenames:
-        kind = config_filename.removeprefix("ace-som-").split("-config-")[0]
+        kind = config_filename.removeprefix("ace-paper-").split("-config-")[0]
         config_type = "evaluator" if kind in EVALUATOR_KINDS else "inference"
         subprocess.run(
             [
@@ -318,7 +318,7 @@ def main() -> None:
         nargs="+",
         required=True,
         choices=KINDS,
-        help="Experiment kinds to submit (see generate_som_configs.py).",
+        help="Experiment kinds to submit (see generate_paper_configs.py).",
     )
     add_version_arg(parser)
     parser.add_argument(
@@ -448,7 +448,7 @@ def main() -> None:
     for config_filename in needed_configs:
         if not (RUN_CONFIGS_DIR / config_filename).exists():
             raise FileNotFoundError(
-                f"{config_filename} not found — run generate_som_configs.py first"
+                f"{config_filename} not found — run generate_paper_configs.py first"
             )
     if not args.allow_missing_datasets:
         refuse_missing_datasets(args.kind, needed_configs)
