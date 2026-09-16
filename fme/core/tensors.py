@@ -56,6 +56,11 @@ def fold_sized_ensemble_dim(d: EnsembleTensorDict, n_ensemble: int) -> TensorDic
     If the sample dimension is 1, it may be broadcasted to a larger n_ensemble
     count before folding.
 
+    NOTE: folding is a copy whenever ``n_ensemble > 1`` and the input ensemble
+    dimension is 1 (the broadcast is a stride-0 view, but merging it into the
+    sample dimension is not expressible as a stride). Subset to the names that
+    will be read before folding a long data window.
+
     Args:
         d: The tensor dict to fold.
         n_ensemble: The number of ensemble members.
@@ -126,9 +131,13 @@ def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict
     """
     if repeats == 1:
         return dict(data)  # no-op
+    # NOTE: this copies. ``expand`` is a view, but the ``reshape`` that merges
+    # the repeat dimension into the sample dimension cannot be expressed as a
+    # stride, so it falls back to a contiguous copy. Subset to the names that
+    # will actually be read before calling this on a long data window.
     return {
         k: v.unsqueeze(1).expand(-1, repeats, *v.shape[1:]).reshape(-1, *v.shape[1:])
-        for k, v in data.items()  # view-only, no copy
+        for k, v in data.items()
     }
 
 
