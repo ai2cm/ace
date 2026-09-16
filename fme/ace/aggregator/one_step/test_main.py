@@ -1,3 +1,5 @@
+import hashlib
+
 import numpy as np
 import pytest
 import torch
@@ -24,6 +26,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.loss import ChannelLossInfo
 from fme.core.typing_ import EnsembleTensorDict
+from fme.core.wandb import Image
 
 
 def get_ds_info(nx: int, ny: int) -> DatasetInfo:
@@ -641,6 +644,27 @@ def test_strict_metric_raises_even_when_not_raise_on_unsupported(monkeypatch):
         )
 
 
+def _log_value_fingerprint(value) -> tuple[str, str]:
+    """An exactly-comparable (kind, digest) pair for any one-step log value.
+
+    Unhandled types raise rather than compare equal, so a new kind of log value
+    cannot slip past the comparison below unchecked.
+    """
+    if isinstance(value, float | int):
+        return "scalar", repr(value)
+    if isinstance(value, np.ndarray):
+        digest = hashlib.sha256(np.ascontiguousarray(value).tobytes()).hexdigest()
+        return "array", f"{value.shape}:{digest}"
+    if isinstance(value, Image):
+        pixels = np.asarray(value.image)
+        digest = hashlib.sha256(np.ascontiguousarray(pixels).tobytes()).hexdigest()
+        return "image", f"{pixels.shape}:{digest}"
+    raise AssertionError(
+        f"log value of unhandled type {type(value).__name__}; teach "
+        "_log_value_fingerprint to compare it rather than skipping it"
+    )
+
+
 def test_logs_ignore_timesteps_past_the_first_forward_step(monkeypatch):
     """Slicing a batch to N_TIMESTEPS_READ must not change any log value.
 
@@ -674,19 +698,21 @@ def test_logs_ignore_timesteps_past_the_first_forward_step(monkeypatch):
         normalize=lambda x: x,
     )
 
-    def summarize(n_timesteps_read: int) -> dict[str, float]:
+    def summarize(n_timesteps_read: int) -> dict[str, tuple[str, str]]:
         monkeypatch.setattr(main, "N_TIMESTEPS_READ", n_timesteps_read)
         agg = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
         agg.record_batch(batch=batch)
         return {
-            k: v
+            k: _log_value_fingerprint(v)
             for k, v in agg.get_summary(label="test").logs.items()
-            if isinstance(v, float | int)
         }
 
     sliced = summarize(N_TIMESTEPS_READ)
     unsliced = summarize(n_time)
-    assert len(sliced) > 0
+    # The default metric set logs scalars, arrays and images. Assert all three
+    # are in the comparison so it cannot quietly narrow to scalars if a default
+    # changes, leaving the map and image metrics unguarded.
+    assert {kind for kind, _ in sliced.values()} == {"scalar", "array", "image"}
     assert set(sliced) == set(unsliced)
     for key in sliced:
         assert sliced[key] == unsliced[key], key
