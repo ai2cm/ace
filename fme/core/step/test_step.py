@@ -18,11 +18,7 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudge
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
-from fme.core.normalizer import (
-    NetworkAndLossNormalizationConfig,
-    NormalizationConfig,
-    StandardNormalizer,
-)
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
@@ -44,7 +40,11 @@ from fme.core.step.single_module import (
     step_with_adjustments,
 )
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
+from fme.core.testing import (
+    get_dataset_info,
+    trivial_network_and_loss_normalization,
+    trivial_normalization,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
@@ -2352,13 +2352,10 @@ def test_step_with_adjustments_hybrid_residual_names():
     """residual_names restricts the residual add to a subset of prognostics:
     listed names step as input + output, the rest are full-field."""
     names = ["a", "b"]
-    # StandardNormalizer moves its stats to get_device(), so every tensor here
-    # has to be built there too or the step mixes devices on a GPU box.
+    # The normalizer's stats live on get_device(), so the tensors here must
+    # be built there too or the step mixes devices on a GPU box.
     device = fme.get_device()
-    normalizer = StandardNormalizer(
-        means={n: torch.tensor(0.0) for n in names},
-        stds={n: torch.tensor(1.0) for n in names},
-    )
+    normalizer = trivial_normalization(names).build(names)
     input_data = {n: torch.full((1, 4, 4), 2.0, device=device) for n in names}
     delta = {n: torch.full((1, 4, 4), 0.5, device=device) for n in names}
 
@@ -2399,11 +2396,7 @@ def _residual_names_config(**kwargs) -> SingleModuleStepConfig:
         builder=ModuleSelector(type="prebuilt", config={"module": nn.Identity()}),
         in_names=["a"],
         out_names=["a", "b"],
-        normalization=NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}
-            ),
-        ),
+        normalization=trivial_network_and_loss_normalization(["a", "b"]),
         **kwargs,
     )
 
