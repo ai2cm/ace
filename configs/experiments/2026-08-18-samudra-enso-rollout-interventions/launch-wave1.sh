@@ -154,6 +154,17 @@ launch() {
     mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "hybridufsft-v3" ]]; then
+    # v2 + the CM4-recipe corrector restored (surface_energy_flux prescribed +
+    # OHC scaled_temperature). Deep dive on v2 showed the residual thetao
+    # column drifts 1-5 K in 20-yr rollouts without the training-time OHC
+    # anchor the CM4 pretrain had; July's lean corrector only works full-field.
+    config="${CONFIG_DIR}/hybridufsft-v3.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
+            --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
+  fi
   if [[ "$arm" == "hybridufsft-v2-ext" ]]; then
     # continuation of hybridufsft-v2-weka: +180 epochs (300 total), constant LR,
     # seeded from the v2 final training checkpoint. Inline rollout rmse was
