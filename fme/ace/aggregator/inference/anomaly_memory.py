@@ -19,6 +19,7 @@ from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 from .utils import LatLonBoxConfig
 
 ALL_MONTHS = list(range(1, 13))
+N_HARMONICS = 3
 
 
 def annual_harmonic_basis(time: xr.DataArray, n_harmonics: int) -> torch.Tensor:
@@ -494,8 +495,10 @@ class AnomalyMemoryMetricConfig:
     seasonal climatology and the anomaly ``lag`` steps later, for the
     prediction and the target, accumulated in a single pass. Region-mean
     scalars, side-by-side maps at selected lags and the full curves are
-    reported. Intended for fields with a slow reservoir such as snow and the
-    surface fluxes it controls. Disabled by default.
+    reported. The seasonal climatology is a constant plus three annual
+    harmonics fit per cell over the whole record. Intended for fields with a
+    slow reservoir such as snow and the surface fluxes it controls. Disabled
+    by default.
 
     Parameters:
         variables: Variables to compute memory for. If ``None``, all
@@ -506,8 +509,6 @@ class AnomalyMemoryMetricConfig:
             subset of ``lags``.
         map_lags: Lags at which target/prediction maps are logged. Must be a
             subset of ``lags``; empty disables maps.
-        n_harmonics: Number of annual harmonics in the seasonal climatology
-            (plus a constant).
         months_northern: Calendar months (1-12) whose anomalies count as the
             leading time for cells at or north of the equator.
         months_southern: The same for cells south of the equator.
@@ -523,7 +524,6 @@ class AnomalyMemoryMetricConfig:
     lags: list[int] = dataclasses.field(default_factory=lambda: [0, 1, 3, 7, 14, 30])
     report_lags: list[int] = dataclasses.field(default_factory=lambda: [7])
     map_lags: list[int] = dataclasses.field(default_factory=lambda: [7])
-    n_harmonics: int = 3
     months_northern: list[int] = dataclasses.field(default_factory=lambda: ALL_MONTHS)
     months_southern: list[int] = dataclasses.field(default_factory=lambda: ALL_MONTHS)
     regions: list[LatLonBoxConfig] = dataclasses.field(default_factory=list)
@@ -544,8 +544,6 @@ class AnomalyMemoryMetricConfig:
                 raise ValueError(
                     f"anomaly_memory {field_name} {sorted(missing)} not in lags"
                 )
-        if self.n_harmonics < 0:
-            raise ValueError("anomaly_memory n_harmonics must be non-negative")
         for field_name in ("months_northern", "months_southern"):
             months = getattr(self, field_name)
             if not months or any(m not in ALL_MONTHS for m in months):
@@ -575,7 +573,7 @@ class AnomalyMemoryMetricConfig:
             lags=self.lags,
             report_lags=self.report_lags,
             map_lags=self.map_lags,
-            n_harmonics=self.n_harmonics,
+            n_harmonics=N_HARMONICS,
             months_northern=self.months_northern,
             months_southern=self.months_southern,
             regions=self.regions,
