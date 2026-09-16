@@ -150,3 +150,10 @@ run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-nens3-120ep.yaml" \
   "1deg-daily-no-corr-mean-nens3-pretrain-rs0" \
   8 ai2/jupiter low
+
+# PRATEsfc zero-clip ablation: the 40-epoch n_ensemble=2 pretrain with PRATEsfc
+# dropped from force_positive_names. 8 GPUs on jupiter.
+run_training \
+  "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-no-prate-clip.yaml" \
+  "1deg-daily-no-corr-mean-no-prate-clip-pretrain-rs0" \
+  8 ai2/jupiter
