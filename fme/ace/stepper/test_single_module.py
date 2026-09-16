@@ -107,7 +107,7 @@ from fme.core.testing import (
 )
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
-from fme.core.typing_ import EnsembleTensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
     MaskingGroupConfig,
@@ -1982,6 +1982,87 @@ def test_prepend_initial_condition():
         assert torch.allclose(
             prepended.target_data[v][:, :, :1], ic_data[v][:, None, ...]
         )
+
+
+def test_ensemble_derive_func_broadcasts_only_the_forcing_it_will_read():
+    """Only forcing names absent from the data are broadcast across members.
+
+    Broadcasting a forcing variable to the folded sample dimension copies it
+    (see fold_sized_ensemble_dim), and derive functions ignore forcing entries
+    whose name is already in the data (DeriveFnABC). In coupled training the
+    forcing window is the whole target dataset while the data holds every
+    generated name, so copying all of it costs a full rollout window per
+    ensemble member for nothing.
+    """
+    batch_size, n_ensemble, nt, nx = 2, 3, 4, 5
+    seen: dict[str, TensorDict] = {}
+
+    def derive_func(data, forcing_data):
+        seen["data"] = dict(data)
+        seen["forcing_data"] = dict(forcing_data)
+        return dict(data)
+
+    gen = EnsembleTensorDict(
+        {"shared": torch.rand(batch_size, n_ensemble, nt, nx).to(DEVICE)}
+    )
+    forcing = {
+        "shared": torch.rand(batch_size, nt, nx).to(DEVICE),
+        "forcing_only": torch.rand(batch_size, nt, nx).to(DEVICE),
+    }
+    stepped = TrainOutput(
+        gen_data=gen,
+        target_data=EnsembleTensorDict({"shared": gen["shared"][:, :1]}),
+        time=xr.DataArray(np.zeros((batch_size, nt)), dims=["sample", "time"]),
+        metrics={"loss": torch.tensor(0.0)},
+        normalize=lambda x: dict(x),
+        derive_func=derive_func,
+    )
+
+    stepped.ensemble_derive_func(gen, forcing)
+
+    assert set(seen["forcing_data"]) == {"forcing_only"}
+    # what is passed is still the per-member broadcast the derive function
+    # expects: sample s of the folded batch occupies [s * n_ensemble, ...).
+    broadcast = seen["forcing_data"]["forcing_only"]
+    assert broadcast.shape == (batch_size * n_ensemble, nt, nx)
+    for sample in range(batch_size):
+        for member in range(n_ensemble):
+            torch.testing.assert_close(
+                broadcast[sample * n_ensemble + member],
+                forcing["forcing_only"][sample],
+            )
+
+
+def test_ensemble_derive_func_matches_per_member_derivation():
+    """Deriving the ensemble at once gives what deriving each member gives."""
+    batch_size, n_ensemble, nt, nx = 2, 3, 4, 5
+
+    def derive_func(data, forcing_data):
+        out = dict(data)
+        out["derived"] = data["prognostic"] + forcing_data["forcing_only"]
+        return out
+
+    gen = EnsembleTensorDict(
+        {"prognostic": torch.rand(batch_size, n_ensemble, nt, nx).to(DEVICE)}
+    )
+    forcing = {"forcing_only": torch.rand(batch_size, nt, nx).to(DEVICE)}
+    stepped = TrainOutput(
+        gen_data=gen,
+        target_data=EnsembleTensorDict({"prognostic": gen["prognostic"][:, :1]}),
+        time=xr.DataArray(np.zeros((batch_size, nt)), dims=["sample", "time"]),
+        metrics={"loss": torch.tensor(0.0)},
+        normalize=lambda x: dict(x),
+        derive_func=derive_func,
+    )
+
+    derived = stepped.ensemble_derive_func(gen, forcing)
+
+    assert derived["derived"].shape == (batch_size, n_ensemble, nt, nx)
+    for member in range(n_ensemble):
+        expected = derive_func({"prognostic": gen["prognostic"][:, member]}, forcing)[
+            "derived"
+        ]
+        torch.testing.assert_close(derived["derived"][:, member], expected)
 
 
 def test_stepper_from_state_using_resnorm_has_correct_normalizer():
