@@ -244,26 +244,13 @@ SHARED_TOP_LEVEL = {
 # seed-variance term rides on that one comparison.
 #
 # nc-swin-v2 fm A1 mask10 at seed 0 died three times with a NaN-valued loss,
-# all before the end of epoch 0 and without max_consecutive_non_finite_losses
-# to skip the batch (see MAX_CONSECUTIVE_NON_FINITE_LOSSES_OVERRIDES). It is
-# resubmitted at seed 1 with that tolerance, so the rerun does not retrace the
-# seed-0 trajectory into the same batch.
+# all before the end of epoch 0 and before its architecture source set
+# max_consecutive_non_finite_losses. It is resubmitted at seed 1 with that
+# tolerance, so the rerun does not retrace the seed-0 trajectory into the same
+# batch.
 SEED_OVERRIDES: dict[tuple[str, str, str, bool, str], int] = {
     ("nc-swin-v2.1", "fm", "a1", True, ""): 1,
     ("nc-swin-v2", "fm", "a1", False, "mask10"): 1,
-}
-
-# Cells given optimization.max_consecutive_non_finite_losses without their
-# architecture source setting it. Keyed like SEED_OVERRIDES.
-#
-# The nc-swin-v2.1 source carries this key for all of its cells (see
-# ARCH_OPTIMIZATION_KEYS). The nc-swin-v2 source does not, and adding it there
-# would rewrite the configs of the eleven finished nc-swin-v2 runs, so the one
-# nc-swin-v2 cell that needs it is listed here instead.
-MAX_CONSECUTIVE_NON_FINITE_LOSSES_OVERRIDES: dict[
-    tuple[str, str, str, bool, str], int
-] = {
-    ("nc-swin-v2", "fm", "a1", False, "mask10"): 5,
 }
 
 
@@ -549,15 +536,9 @@ def build_config(
     for key, value in SHARED_TOP_LEVEL.items():
         config[key] = copy.deepcopy(value)
 
-    cell = (arch, regime, arm, conditional, masking)
-    seed_override = SEED_OVERRIDES.get(cell)
+    seed_override = SEED_OVERRIDES.get((arch, regime, arm, conditional, masking))
     if seed_override is not None:
         config["seed"] = seed_override
-    non_finite_override = MAX_CONSECUTIVE_NON_FINITE_LOSSES_OVERRIDES.get(cell)
-    if non_finite_override is not None:
-        config.setdefault("optimization", {})["max_consecutive_non_finite_losses"] = (
-            non_finite_override
-        )
 
     labels = add_labels(config)
     expected = set(REGIME_LABELS[regime])

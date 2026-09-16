@@ -744,6 +744,7 @@ validation:
         - era5
 optimization:
   enable_automatic_mixed_precision: false
+  max_consecutive_non_finite_losses: 5
   lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
@@ -770,7 +771,6 @@ optimization:
     milestones:
     - 8
     - 142
-  max_consecutive_non_finite_losses: 5
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
