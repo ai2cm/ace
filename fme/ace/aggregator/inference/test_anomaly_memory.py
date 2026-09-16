@@ -166,7 +166,7 @@ def test_ar1_correlation_recovered():
         assert corr[i].mean() == pytest.approx(rho**lag, abs=0.03)
 
 
-def test_pure_seasonal_cycle_has_no_anomaly_variance():
+def test_pure_seasonal_cycle_is_masked():
     time = _daily_time(n_sample=1, n_time=365 * 3)
     x = _seasonal_ar1(time, rho=0.0, seed=2, amplitude=50.0, noise=0.0)
     basis = annual_harmonic_basis(time, n_harmonics=1)
@@ -174,7 +174,24 @@ def test_pure_seasonal_cycle_has_no_anomaly_variance():
     moments = LaggedAnomalyMoments(LAGS, basis.shape[-1], x.shape[2:])
     _stream(moments, x, basis, season, window=100)
     cov = _finalize(moments)
-    assert np.abs(cov).max() < 1e-6
+    assert np.isnan(cov).all()
+
+
+def test_constant_cells_are_masked():
+    """A cell that never varies has no anomaly variance; roundoff in the
+    streaming algebra must not turn it into a spurious correlation."""
+    time = _daily_time(n_sample=2, n_time=300)
+    x = _seasonal_ar1(time, rho=0.7, seed=14)
+    x[:, :, 2, 3] = 0.37
+    x[:, :, 3, 3] = 0.0
+    basis = annual_harmonic_basis(time, n_harmonics=2)
+    season = torch.ones(time.shape, dtype=torch.bool, device=get_device())
+    moments = LaggedAnomalyMoments(LAGS, basis.shape[-1], x.shape[2:])
+    _stream(moments, x, basis, season, window=40)
+    cov = _finalize(moments)
+    assert np.isnan(cov[:, 2, 3]).all()
+    assert np.isnan(cov[:, 3, 3]).all()
+    assert np.isfinite(cov[:, 0, 0]).all()
 
 
 def test_nan_cells_masked_and_finite_cells_unaffected():

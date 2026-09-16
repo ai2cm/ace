@@ -20,6 +20,7 @@ from .utils import LatLonBoxConfig
 
 ALL_MONTHS = list(range(1, 13))
 N_HARMONICS = 3
+RELATIVE_VARIANCE_FLOOR = 1e-10
 
 
 def annual_harmonic_basis(time: xr.DataArray, n_harmonics: int) -> torch.Tensor:
@@ -203,7 +204,11 @@ class LaggedAnomalyMoments:
     def finalize(state: Mapping[str, torch.Tensor]) -> torch.Tensor:
         """Lagged anomaly covariance ``(n_lags, *spatial)`` from reduced state.
 
-        Cells with any non-finite value, and lags with no pairs, are NaN.
+        Cells with any non-finite value, and lags with no pairs, are NaN. So
+        are cells whose anomaly variance is below ``RELATIVE_VARIANCE_FLOOR``
+        times their mean square: a constant series leaves only cancellation
+        roundoff in the variance, whose sign would otherwise decide at random
+        whether the cell reports a meaningless correlation or NaN.
         """
         gram = state["gram"]
         basis_x = state["basis_x"]
@@ -218,7 +223,9 @@ class LaggedAnomalyMoments:
         nan = torch.full_like(cov, float("nan"))
         cov = torch.where(counts > 0, cov, nan)
         all_finite = state["n_finite"] == state["n_total"]
-        return torch.where(all_finite, cov, nan)
+        mean_square = state["raw"][0] / state["counts"][0]
+        resolved = cov[0] > RELATIVE_VARIANCE_FLOOR * mean_square
+        return torch.where(all_finite & resolved, cov, nan)
 
 
 class AnomalyMemoryAggregator:
