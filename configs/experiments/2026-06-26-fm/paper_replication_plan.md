@@ -77,9 +77,9 @@ settings (default aggregator, `forward_steps_in_memory: 1`).
 | `run-ace-split-amip-plus-4K-inference.sh` (+ daily PRATEsfc) | `amip-p4k`, `amip-p2k` | `AMIP-p4K.zarr`, `AMIP-p2K.zarr`, IC from own 1979 state | same | 1 each | `amip` | daily `PRATEsfc` zarr | ✅ |
 | `run-ace-amip-split-data-only-evaluator.sh`, `run-ace-amip-variant-data-only-evaluator.sh` | `amip-data-only` | `ic_0002`, `AMIP-p4K`, `AMIP-p2K` vs themselves | 1980-01-01T06, 15324 steps | 3 total | `amip` | daily `PRATEsfc` zarr | ✅ |
 | `run-ace-random-CO2-evaluator.sh` | `random-co2-eval` | ramped `ic_0003` (held out), 1x/2x/4x | 2019-10-01T06, 1918 steps | 3 | `ramped` | none | ✅ |
-| `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` under prescribed SST (ours) | `abrupt-ens-eval-sst` | D3 member per job, SST/sea ice/CO2 from it | 89 steps from each member's start | 36 (`--ens-member`) | `som` | none | 🚧 |
+| — `abrupt-ens` with SST from SHiELD's own 4xCO2 members instead of the slab (ours; paper script is slab) | `abrupt-ens-eval-sst` | D3 member per job, SST/sea ice/CO2 from it | 89 steps from each member's start | 36 (`--ens-member`) | `som` | none | 🚧 |
 | — control ensemble (ours) | `control-ens-eval-sst` | SOM 1x member, 36 monthly ICs, no CO2 override | 2031-01 … 2033-12 starts, 90 steps | 1 | `som` | none | ✅ |
-| — CO2 step at fixed SST (ours) | `abrupt-ens-fixed-sst` | SOM 1x member SST, CO2 → 4x, vs 1x member | same | 1 | `som` | none | ✅ |
+| — `abrupt-ens` with SST held at 1xCO2 instead of the slab (ours) | `abrupt-ens-fixed-sst` | SOM 1x member SST, CO2 → 4x, vs 1x member | same | 1 | `som` | none | ✅ |
 | `run-ace-amip-constant-CO2-inference.sh` | — | `AMIP-constant-CO2.zarr` | — | — | — | — | ❌ eval suites' `*_constant_co2` entries cover it |
 
 Job names: `{run}-som-eq-eval-sst-{climate}-ic{n}`, `{run}-amip-{ic2,p4k,p2k}-eval`,
