@@ -39,9 +39,13 @@ extended cold season per hemisphere (Nov-May north, May-Nov south). Regions are 
 boxes of the prototype plus one box covering everything north of 40S (`north_of_40S`). Region names use underscores because
 they become W&B key segments.
 
-Outputs: W&B scalars `anomaly_memory/{prediction,target,gap}/<var>-<region>-lag<L>` and
-`anomaly_memory/variance_ratio/<var>-<region>`, one target/prediction map image per variable, and
-`anomaly_memory_diagnostics.nc` with the full per-cell curves under `experiment_dir`.
+Outputs: W&B scalars `anomaly_memory/{prediction,target,gap}/lag<L>/<region>/<var>` and
+`anomaly_memory/anomaly_std_ratio/<region>/<var>` (predicted over target anomaly standard
+deviation, each against its own climatology), per variable and
+map lag a target-beside-prediction image under `anomaly_memory/maps/lag<L>/<var>` and a
+prediction-minus-target image under `anomaly_memory/difference_map/lag<L>/<var>`, and
+`anomaly_memory_diagnostics.nc` with the full per-cell curves and lag-0 anomaly variance under
+`experiment_dir`.
 
 ## Acceptance
 
