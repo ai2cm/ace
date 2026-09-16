@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 import dacite
@@ -53,7 +53,10 @@ class ResidualPredictionConfig:
     Parameters:
         names: Prognostic names to step as residuals, the rest predicted
             full-field. Each must be in both ``in_names`` and ``out_names``.
-            Default (None) steps every prognostic as a residual.
+            Default (None) steps every prognostic as a residual. Naming a
+            subset also narrows tendency-std loss scaling to that subset: the
+            remaining prognostics are scored in full-field-std units, where
+            before they would have used the ``normalization.residual`` stats.
         normalized: Treat the network's residual outputs as tendencies in
             ``normalization.residual`` units rather than full-field-normalized
             units, so a unit output is one standard deviation of the per-step
@@ -64,6 +67,22 @@ class ResidualPredictionConfig:
 
     names: list[str] | None = None
     normalized: bool = False
+
+    def __post_init__(self):
+        if self.names is not None and len(self.names) == 0:
+            raise ValueError(
+                "residual_prediction.names must not be empty; use names: null "
+                "to step every prognostic as a residual, or residual_prediction:"
+                " null to disable residual prediction"
+            )
+
+    def validate_names(self, prognostic_names: Collection[str]) -> None:
+        for name in self.names or []:
+            if name not in prognostic_names:
+                raise ValueError(
+                    f"residual_prediction name '{name}' is not prognostic; "
+                    f"prognostic names are {sorted(prognostic_names)}"
+                )
 
 
 @StepSelector.register("single_module")
@@ -88,8 +107,9 @@ class SingleModuleStepConfig(StepConfigABC):
         residual_prediction: When set, predict prognostics as tendencies
             added to the input rather than as states. See
             ``ResidualPredictionConfig`` for the per-variable and normalization
-            options. Accepts a bool in serialized configs for backwards
-            compatibility.
+            options. The deprecated bool form is still accepted, from
+            serialized configs and direct construction alike, meaning every
+            prognostic (True) or none (False).
         include_channel_mask_inputs: Whether to append per-variable mask indicator
             channels to the network input. When True, the network receives
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
@@ -127,13 +147,16 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if isinstance(self.residual_prediction, bool):
+            # residual_prediction was a bool before it grew options. Serialized
+            # state migrates in _remove_deprecated_keys; this isinstance keeps
+            # direct construction with the old bool working too, since the
+            # config is public API (exported from fme.ace).
+            self.residual_prediction = (
+                ResidualPredictionConfig() if self.residual_prediction else None
+            )
         if self.residual_prediction is not None:
-            for name in self.residual_prediction.names or []:
-                if name not in self.prognostic_names:
-                    raise ValueError(
-                        f"residual_prediction name '{name}' is not prognostic; "
-                        f"prognostic names are {sorted(self.prognostic_names)}"
-                    )
+            self.residual_prediction.validate_names(self.prognostic_names)
             if self.residual_prediction.normalized:
                 # Report the loss conflict directly. Otherwise the user is told
                 # to add a residual block, then told it conflicts with the loss

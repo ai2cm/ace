@@ -2443,3 +2443,68 @@ def test_single_module_step_config_loads_legacy_residual_prediction_bool(
     config = SingleModuleStepConfig.from_state(state)
     assert (config.residual_prediction is not None) == legacy
     assert config.residual_names == expected_names
+
+
+def test_residual_prediction_names_must_not_be_empty():
+    """[] would silently disable residual prediction; only None means "all"."""
+    with pytest.raises(ValueError, match="must not be empty"):
+        ResidualPredictionConfig(names=[])
+
+
+@pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
+def test_single_module_step_config_accepts_legacy_bool_directly(legacy):
+    """The config is public API (exported from fme.ace), so the deprecated bool
+    must keep working for direct construction, not only for serialized state."""
+    config = _residual_names_config(residual_prediction=legacy)
+    if legacy:
+        assert config.residual_prediction == ResidualPredictionConfig()
+    else:
+        assert config.residual_prediction is None
+
+
+def test_multi_call_loss_scaling_follows_wrapped_residual_names():
+    """A multi-called variant is scored in the same units as its base variable.
+    With a hybrid wrapped step, a full-field prognostic's variants must use
+    field-std units even though the variable is prognostic."""
+    names = ["a", "b"]
+    field_stds = {"a": 4.0, "b": 3.0, "forcing": 1.0}
+    res_stds = {"a": 0.25, "b": 0.05, "forcing": 1.0}
+    all_stats = list(field_stds)
+    multi_call = MultiCallConfig(
+        forcing_name="forcing",
+        forcing_multipliers={"_double": 2.0},
+        output_names=["a", "b"],
+    )
+    means = {n: 0.0 for n in all_stats}
+    for suffix_name in multi_call.names:
+        base = suffix_name.removesuffix("_double")
+        field_stds[suffix_name] = field_stds[base]
+        res_stds[suffix_name] = res_stds[base]
+        means[suffix_name] = 0.0
+    config = MultiCallStepConfig(
+        wrapped_step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": nn.Identity()}
+                    ),
+                    in_names=names + ["forcing"],
+                    out_names=names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means=means, stds=field_stds),
+                        residual=NormalizationConfig(means=means, stds=res_stds),
+                    ),
+                    residual_prediction=ResidualPredictionConfig(names=["a"]),
+                )
+            ),
+        ),
+        config=multi_call,
+    )
+    stds = {k: float(v) for k, v in config.get_loss_normalizer().stds.items()}
+    # base variables: residual-stepped "a" in tendency units, full-field "b" not
+    assert stds["a"] == pytest.approx(res_stds["a"])
+    assert stds["b"] == pytest.approx(field_stds["b"])
+    # each variant matches its base variable's convention
+    assert stds["a_double"] == pytest.approx(res_stds["a"])
+    assert stds["b_double"] == pytest.approx(field_stds["b"])
