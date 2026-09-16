@@ -1,10 +1,9 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
-import dacite
 import torch
 from torch import nn
 
@@ -153,11 +152,11 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "SingleModuleStepConfig":
-        state = cls._remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        state_copy = dict(state)
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]
+        return state_copy
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -233,13 +232,6 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
-
-    @classmethod
-    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
-        state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]
-        return state_copy
 
     def get_step(
         self,

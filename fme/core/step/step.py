@@ -132,9 +132,20 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
-    @abc.abstractmethod
+    @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
-        pass
+        state = cls.remove_deprecated_keys(state)
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
+    @classmethod
+    @abc.abstractmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove or transform deprecated keys from a serialized config.
+
+        Called by ``from_state`` before the dict is loaded via dacite.
+        Implementations must return a new dict and never mutate the input.
+        When there is nothing to remove, implement as ``return dict(state)``.
+        """
 
 
 @dataclasses.dataclass
@@ -239,8 +250,8 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
     @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 class StepABC(abc.ABC):
