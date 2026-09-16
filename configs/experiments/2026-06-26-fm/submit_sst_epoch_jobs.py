@@ -2,12 +2,13 @@
 fine-tunes.
 
 The best-inference sweep (submit_sst_jobs.py) runs one checkpoint per training
-run. This one runs the *trajectory*: each of the ten `nc-sfno` ERA5 fine-tunes
-at every epoch it saved, on both forcing grids and all three perturbation
-levels, so the climate sensitivity can be read as a function of fine-tuning
-epoch rather than at a single endpoint.
+run. This one runs the *trajectory*: each ERA5 fine-tune (every architecture,
+the cells generate_norm_ablation_finetune_configs.source_cells lists) at every
+epoch it saved, on both forcing grids and all three perturbation levels, so the
+climate sensitivity can be read as a function of fine-tuning epoch rather than
+at a single endpoint.
 
-    10 runs x 2 grids x 3 levels x 11 epochs = 660 jobs
+    per architecture: 14 runs x 2 grids x 3 levels x 11 epochs = 924 jobs
 
 **Epoch 0 comes from a different dataset.** `evaluate_before_training` measures
 the pre-fine-tune state but saves no checkpoint, so the epoch-0 weights live in
@@ -31,7 +32,7 @@ pushed before submitting; this is checked unless --dry-run is given.
 
 Usage:
     python submit_sst_epoch_jobs.py [--dry-run] [--run RUN [RUN ...]]
-                                    [--regime {fm,c96}]
+                                    [--arch ARCH] [--regime {fm,c96}]
                                     [--epoch N [N ...]]
                                     [--perturbation {p0k,p2k,p4k} ...]
                                     [--forcing-grid {era5,c96} ...]
@@ -43,6 +44,7 @@ Usage:
 
 import argparse
 import pathlib
+from collections.abc import Sequence
 
 from _submit_common import (
     add_beaker_args,
@@ -52,6 +54,7 @@ from _submit_common import (
 )
 from generate_eval_configs import TRAINING_RESULT_DATASETS, WANDB_PROJECT
 from generate_norm_ablation_finetune_configs import (
+    ARCHS,
     C96_ERA5_ALIAS,
     DEFAULT_EPOCHS,
     FINETUNE_SUFFIX,
@@ -94,24 +97,32 @@ ERA5_GRID_LABEL_BY_REGIME = {
 }
 
 
-def _finetune_run_name(regime: str, arm: str, conditional: bool) -> str:
-    stem = pathlib.Path(source_config_name(regime, arm, conditional)).stem
+def _finetune_run_name(
+    arch: str, regime: str, arm: str, conditional: bool, masking: str
+) -> str:
+    stem = pathlib.Path(
+        source_config_name(arch, regime, arm, conditional, masking)
+    ).stem
     return config_to_run_name(f"{stem}{FINETUNE_SUFFIX}.yaml")
 
 
-def finetune_runs() -> dict[str, tuple[str, str]]:
+def finetune_runs(archs: Sequence[str] = ARCHS) -> dict[str, tuple[str, str]]:
     """Fine-tune run name -> (pretraining regime, source run name).
 
     Built from the fine-tune generator's own cell list rather than by parsing
     run names, so a cell added or dropped there shows up here without edits.
     """
     runs: dict[str, tuple[str, str]] = {}
-    for regime in REGIMES:
-        for arm, conditional in source_cells(regime):
-            source_run = config_to_run_name(
-                source_config_name(regime, arm, conditional)
-            )
-            runs[_finetune_run_name(regime, arm, conditional)] = (regime, source_run)
+    for arch in archs:
+        for regime in REGIMES:
+            for arm, conditional, masking in source_cells(regime):
+                source_run = config_to_run_name(
+                    source_config_name(arch, regime, arm, conditional, masking)
+                )
+                finetune_run = _finetune_run_name(
+                    arch, regime, arm, conditional, masking
+                )
+                runs[finetune_run] = (regime, source_run)
     return runs
 
 
@@ -147,7 +158,13 @@ def main() -> None:
         nargs="+",
         default=None,
         metavar="RUN",
-        help="Restrict to these fine-tune run names (default: all ten).",
+        help="Restrict to these fine-tune run names (default: every cell).",
+    )
+    parser.add_argument(
+        "--arch",
+        choices=ARCHS,
+        default=None,
+        help="Restrict to fine-tunes of this architecture.",
     )
     parser.add_argument(
         "--regime",
@@ -185,7 +202,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    runs = finetune_runs()
+    runs = finetune_runs([args.arch] if args.arch else ARCHS)
     if args.regime is not None:
         runs = {name: value for name, value in runs.items() if value[0] == args.regime}
     if args.run is not None:
@@ -200,19 +217,21 @@ def main() -> None:
     levels = args.perturbation or list(SST_PERTURBATIONS)
     epochs = args.epoch or list(EPOCHS)
 
-    missing = sorted(
-        {
-            source_run if epoch == SOURCE_EPOCH else finetune_run
-            for finetune_run, (_, source_run) in runs.items()
-            for epoch in epochs
+    # A run is dropped when any dataset its selected epochs read is not in the
+    # map: the source run's for epoch 0, the fine-tune's own for the rest. Not
+    # an error, so the runs whose sources are done can go out while others
+    # are still training; refresh with update_beaker_map.py for the rest.
+    ready = {}
+    for finetune_run, (regime, source_run) in runs.items():
+        needed = {
+            source_run if epoch == SOURCE_EPOCH else finetune_run for epoch in epochs
         }
-        - set(TRAINING_RESULT_DATASETS)
-    )
-    if missing:
-        raise KeyError(
-            f"No Beaker dataset ID for {missing} — refresh with "
-            "update_beaker_map.py."
-        )
+        missing = sorted(needed - set(TRAINING_RESULT_DATASETS))
+        if missing:
+            print(f"Skipped {finetune_run} (no dataset ID for {missing})")
+            continue
+        ready[finetune_run] = (regime, source_run)
+    runs = ready
 
     jobs: list[tuple[str, str, str, int, str, str, str]] = []
     for finetune_run, (regime, source_run) in sorted(runs.items()):
