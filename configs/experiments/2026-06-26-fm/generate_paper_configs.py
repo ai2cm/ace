@@ -185,6 +185,7 @@ MISSING_DATASETS = {
             "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
         kinds=("abrupt-10yr-eval", "abrupt-10yr-eval-sst", "abrupt-data-only"),
+        available=True,  # copied to weka 2026-09-16
     ),
     "spin-up": MissingDataset(
         path=(
@@ -201,6 +202,7 @@ MISSING_DATASETS = {
             "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
         kinds=("eq",),
+        available=True,  # copied to weka 2026-09-16
     ),
     "abrupt-ensemble": MissingDataset(
         path=_MISSING_ROOT + "abrupt-4xCO2-ensemble-fme-dataset",
