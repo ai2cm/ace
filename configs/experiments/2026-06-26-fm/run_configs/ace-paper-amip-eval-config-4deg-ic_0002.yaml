@@ -1,0 +1,34 @@
+experiment_dir: /results
+n_forward_steps: 15689
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+labels:
+- amip
+logging:
+  project: FM
+  entity: ai2cm
+  log_to_screen: true
+  log_to_file: true
+  log_to_wandb: true
+loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0002.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '1979-01-01T06:00:00'
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: daily
+    names:
+    - PRATEsfc
+    save_reference: false
+    format:
+      name: zarr
+aggregator:
+  log_zonal_mean_images: false

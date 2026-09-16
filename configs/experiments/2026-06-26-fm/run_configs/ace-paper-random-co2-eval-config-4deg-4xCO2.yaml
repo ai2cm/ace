@@ -1,0 +1,27 @@
+experiment_dir: /results
+n_forward_steps: 1918
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+labels:
+- ramped
+logging:
+  project: FM
+  entity: ai2cm
+  log_to_screen: true
+  log_to_file: true
+  log_to_wandb: true
+loader:
+  dataset:
+    data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
+    file_pattern: ramped-sst-4xCO2-random-perturbation-ic_0003.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '2019-10-01T06:00:00'
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  log_zonal_mean_images: false

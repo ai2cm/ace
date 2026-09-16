@@ -4,13 +4,20 @@ Runs the configs written by generate_paper_configs.py (see its docstring for the
 kinds) against every fm- and c96-regime training run with a result dataset in
 wandb_to_beaker_map.json, mounting that run's best_inference_ckpt.tar at
 /ckpt.tar. The era5 regime and the hand-written ERA5 runs are skipped: they
-never saw the SOM data or its label. Data-only kinds evaluate reference data
-against itself and run once per reference member with a single checkpoint
-(--data-only-run) rather than once per training run.
+never saw the SOM, AMIP or ramped data or their labels. Data-only kinds
+evaluate reference data against itself and run once per reference member with
+a single checkpoint (--data-only-run) rather than once per training run.
 
---kind is required; there is no default, since the full set is several
-hundred jobs. --arm restricts to the norm-ablation cells (dropping the
+--kind is required; there is no default, since the full set is well over a
+thousand jobs. --arm restricts to the norm-ablation cells (dropping the
 hand-written runs), and --run/--arch/--regime/--climate/--ic narrow further.
+--climate applies to the SOM kinds and random-co2-eval (1x/2x/4x); --ic to
+eq, eq-nospinup and eq-eval-sst.
+
+Job names are the wandb run names: ``{run}-som-{kind}-{climate}[-ic{n}]`` for
+the SOM kinds, ``{run}-amip-{variant}-eval`` and ``{run}-ramped-{climate}-eval``
+for the prescribed-SST kinds, and ``som-``/``amip-``-prefixed names without a
+run for the data-only kinds.
 
 Kinds whose configs point at a dataset that is not on weka yet (the entries of
 generate_paper_configs.MISSING_DATASETS with available=False) are refused with a
@@ -57,6 +64,8 @@ from generate_eval_configs import (
 from generate_paper_configs import (
     ABRUPT_CLIMATES,
     ABRUPT_ENSEMBLE_N_MEMBERS,
+    AMIP_HELD_OUT_MEMBER,
+    AMIP_VARIANTS,
     CLIMATES,
     CONTROL_CLIMATE,
     DATA_ONLY_KINDS,
@@ -64,6 +73,7 @@ from generate_paper_configs import (
     KINDS,
     MISSING_DATASETS,
     N_INITIAL_CONDITIONS,
+    RAMPED_CLIMATES,
     SOM_MEMBERS,
     paper_config_filename,
     references_missing_dataset,
@@ -221,9 +231,46 @@ def model_jobs(
                         dataset_id,
                     )
                 )
+    elif kind == "eq-eval-sst":
+        for climate in climates:
+            for ic in ics:
+                jobs.append(
+                    Job(
+                        f"{run_name}-som-eq-eval-sst-{climate}-ic{ic}",
+                        EVALUATOR_RUN_SCRIPT,
+                        (paper_config_filename(kind, climate, f"ic{ic}"),),
+                        dataset_id,
+                    )
+                )
+    elif kind in ("amip-eval", "amip-p4k", "amip-p2k"):
+        variant = AMIP_HELD_OUT_MEMBER if kind == "amip-eval" else kind[5:]
+        jobs.append(
+            Job(
+                f"{run_name}-amip-{_amip_variant_tag(variant)}-eval",
+                EVALUATOR_RUN_SCRIPT,
+                (paper_config_filename(kind, variant),),
+                dataset_id,
+            )
+        )
+    elif kind == "random-co2-eval":
+        for climate in climates:
+            if climate in RAMPED_CLIMATES:
+                jobs.append(
+                    Job(
+                        f"{run_name}-ramped-{climate}-eval",
+                        EVALUATOR_RUN_SCRIPT,
+                        (paper_config_filename(kind, climate),),
+                        dataset_id,
+                    )
+                )
     else:
         raise ValueError(f"{kind!r} is not a per-run kind")
     return jobs
+
+
+def _amip_variant_tag(variant: str) -> str:
+    """``ic_0002`` -> ``ic2``, ``p4k`` -> ``p4k``, for job names."""
+    return _ic_member_tag(variant) if variant.startswith("ic_") else variant
 
 
 def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[Job]:
@@ -264,6 +311,16 @@ def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[J
                         dataset_id,
                     )
                 )
+    elif kind == "amip-data-only":
+        for variant in AMIP_VARIANTS:
+            jobs.append(
+                Job(
+                    f"amip-{_amip_variant_tag(variant)}-data-only",
+                    EVALUATOR_RUN_SCRIPT,
+                    (paper_config_filename(kind, variant),),
+                    dataset_id,
+                )
+            )
     else:
         raise ValueError(f"{kind!r} is not a data-only kind")
     return jobs
@@ -365,7 +422,10 @@ def main() -> None:
         type=int,
         default=None,
         choices=range(1, N_INITIAL_CONDITIONS + 1),
-        help="Restrict eq/eq-nospinup to these staggered initial conditions.",
+        help=(
+            "Restrict eq/eq-nospinup/eq-eval-sst to these staggered initial "
+            "conditions."
+        ),
     )
     parser.add_argument(
         "--data-only-run",
