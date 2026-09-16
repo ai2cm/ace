@@ -1,4 +1,4 @@
-seed: 0
+seed: 1
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -770,6 +770,7 @@ optimization:
     milestones:
     - 8
     - 142
+  max_consecutive_non_finite_losses: 5
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1

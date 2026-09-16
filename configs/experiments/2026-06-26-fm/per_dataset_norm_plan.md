@@ -159,6 +159,15 @@ inside the warmup non-finite-loss window — two identical reruns followed the s
 trajectory step for step — while every other cell, including its `nc-swin-v2`
 twin, stays at seed 0. That one comparison therefore carries a seed-variance term.
 
+The `nc-swin-v2` `fm` A1 `mask10` cell also runs at seed 1, and is the one
+`nc-swin-v2` cell with `max_consecutive_non_finite_losses: 5`, set per cell by
+`MAX_CONSECUTIVE_NON_FINITE_LOSSES_OVERRIDES` rather than through the
+`nc-swin-v2` source (which would rewrite the eleven finished runs' configs). Its
+three seed-0 attempts all died on a NaN-valued loss inside epoch 0, before the
+tolerance existed. Its unmasked A1 baseline and its `mask10-cond` twin stay at
+seed 0 without the tolerance, so both of those comparisons carry a seed-variance
+term.
+
 ## Pinned variables
 
 Always use pooled stats regardless of sample group.
