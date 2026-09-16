@@ -36,7 +36,7 @@ import xarray as xr
 
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data
-from fme.ace.stepper.single_module import TrainStepper, TrainStepperConfig, load_stepper
+from fme.ace.stepper.single_module import Stepper, TrainStepper, TrainStepperConfig
 from fme.core.cli import prepare_config
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
@@ -125,7 +125,10 @@ def main(yaml_path: str):
     os.makedirs(cfg.output_dir, exist_ok=True)
     device = get_device()
 
-    stepper = load_stepper(cfg.checkpoint_path)
+    checkpoint = torch.load(cfg.checkpoint_path, map_location="cpu", weights_only=False)
+    stepper = Stepper.from_state(checkpoint["stepper"])
+    ckpt_epoch = checkpoint.get("epoch")
+    del checkpoint  # ckpt.tar also carries optimizer state
     stepper.set_train() if cfg.train_mode else stepper.set_eval()
     step_obj = stepper._step_obj
     assert isinstance(step_obj, SingleModuleStep), type(step_obj)
@@ -214,6 +217,7 @@ def main(yaml_path: str):
     )
     ds.attrs.update(
         checkpoint_path=cfg.checkpoint_path,
+        checkpoint_epoch=-1 if ckpt_epoch is None else int(ckpt_epoch),
         uniform_bias_c=c,
         train_mode=int(cfg.train_mode),
         loss_type=cfg.stepper_training.loss.type,
@@ -225,6 +229,8 @@ def main(yaml_path: str):
     P_pos = np.clip(P_raw, 0, None)
     s = P_pos / (ds["a"].values * P_pos).sum((-2, -1), keepdims=True)
     facts = {
+        "checkpoint_path": cfg.checkpoint_path,
+        "checkpoint_epoch": ckpt_epoch,
         "n_samples": int(ds.sizes["sample"]),
         "n_ensemble": n_ens,
         "frac_clipped": float(neg.mean()),

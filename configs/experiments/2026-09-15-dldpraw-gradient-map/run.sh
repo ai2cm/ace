@@ -1,13 +1,17 @@
 #!/bin/bash
-# dL_P/dP_raw through the precip corrector at jbg7a0z4 best_ckpt. One GPU,
+# dL_P/dP_raw through the precip corrector at a jbg7a0z4 checkpoint. One GPU,
 # a few val_piC batches; writes gradient_map.nc and facts.json to /results.
+#
+#   ./run.sh [best_ckpt|best_inference_ckpt|ckpt]     default best_ckpt
+#
+# best_* hold the EMA weights; ckpt holds the optimized weights at the last epoch.
 
 set -e
 
-JOB_NAME="dldpraw-gradient-map-jbg7a0z4-best-ckpt"
+CKPT_TYPE="${1:-best_ckpt}"
+JOB_NAME="dldpraw-gradient-map-jbg7a0z4-${CKPT_TYPE//_/-}"
 JOB_GROUP="2026-09-15-dldpraw-gradient-map"
 TRAINING_RESULTS_DATASET="01M09BT2ECCFX2XF3HEFJZJ7G7"  # beaker results dataset of wandb run jbg7a0z4
-CKPT_TYPE="best_ckpt"
 ATMOS_STATS_DATASET="01KXNT0RA6VX2YTZ8WJ936Q5RS"      # as mounted by the training run
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -20,7 +24,7 @@ cd "$REPO_ROOT"
 gantry run \
     --name "$JOB_NAME" \
     --task-name "$JOB_NAME" \
-    --description "dL_P/dP_raw through the moisture-budget precip rescale, jbg7a0z4 best_ckpt, val_piC" \
+    --description "dL_P/dP_raw through the moisture-budget precip rescale, jbg7a0z4 $CKPT_TYPE, val_piC" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority high \
