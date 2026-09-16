@@ -67,10 +67,6 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    schedulers:
-    - type: ConstantLR
-      step_each_iteration: true
 stepper_training:
   n_forward_steps: 4
   loss:
