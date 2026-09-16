@@ -1,14 +1,23 @@
+import datetime
+import os
 from unittest.mock import MagicMock
 
+import cftime
+import numpy as np
 import pytest
+import zarr
 
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
+from fme.core.writer import ZarrWriter
 from fme.downscaling.data import PairedDataLoaderConfig
 from fme.downscaling.data.config import XarrayDataConfig
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.video_inference import (
+    DIMS,
     ENSEMBLE_NAME,
+    LAT_NAME,
+    LON_NAME,
     TIME_NAME,
     VideoInferenceConfig,
     _all_slices_written,
@@ -120,3 +129,80 @@ def test_all_slices_written_true_for_empty_batch():
     writer = _mock_writer([])
     assert _all_slices_written(writer, [], ensemble_slice=slice(0, 4)) is True
     writer.is_slice_written.assert_not_called()
+
+
+def _make_real_writer(path, n_times=8, n_ens=4, mode="w-"):
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=3 * i)
+            for i in range(n_times)
+        ]
+    )
+    coords = {
+        TIME_NAME: times,
+        ENSEMBLE_NAME: np.arange(n_ens),
+        LAT_NAME: np.arange(4, dtype=np.float32),
+        LON_NAME: np.arange(4, dtype=np.float32),
+    }
+    return ZarrWriter(
+        path=path,
+        dims=DIMS,
+        coords=coords,
+        data_vars=["var"],
+        mode=mode,
+        overwrite_check=(mode != "a"),
+        time_calendar="julian",
+    )
+
+
+def test_resume_against_real_writer_does_not_wipe_prior_data(tmp_path):
+    """End-to-end (no mocks) check of the exact sequence a killed-and-
+    restarted video_inference.py run performs: a first process writes some
+    batches and gets killed; a second process opens the SAME store with
+    mode="a" (what config.resume selects), calls initialize_store() again
+    (as run_inference always does, unconditionally) and record_batch() for
+    a later batch. Verifies the first writer's data survives untouched and
+    _all_slices_written correctly distinguishes written vs. unwritten
+    batches using the real ZarrWriter, not a mock."""
+    path = os.path.join(tmp_path, "out.zarr")
+    n_ens = 4
+    ensemble_slice = slice(0, n_ens)
+
+    # "Process 1": writes batch 0 (frames 0-3), then gets killed -- batch 1
+    # (frames 4-7) never happens.
+    writer1 = _make_real_writer(path, mode="w-")
+    batch0_slice = slice(0, 4)
+    original_batch0 = np.random.rand(4, n_ens, 4, 4).astype(np.float32)
+    writer1.initialize_store(data_dtype=np.float32)
+    writer1.record_batch(
+        {"var": original_batch0},
+        position_slices={TIME_NAME: batch0_slice, ENSEMBLE_NAME: ensemble_slice},
+    )
+
+    # "Process 2": resumed run. Constructs a fresh ZarrWriter exactly like
+    # run_inference does when config.resume=True (mode="a"), and -- just
+    # like run_inference -- unconditionally calls initialize_store() again
+    # before touching any batch.
+    writer2 = _make_real_writer(path, mode="a")
+    writer2.initialize_store(data_dtype=np.float32)  # must be a no-op, not a wipe
+
+    batch1_slice = slice(4, 8)
+    assert _all_slices_written(writer2, [batch0_slice], ensemble_slice) is True, (
+        "already-written batch must be detected as written after resume"
+    )
+    assert _all_slices_written(writer2, [batch1_slice], ensemble_slice) is False, (
+        "not-yet-written batch must be detected as unwritten after resume"
+    )
+
+    # The resumed process writes the batch that was actually missing.
+    new_batch1 = np.random.rand(4, n_ens, 4, 4).astype(np.float32)
+    writer2.record_batch(
+        {"var": new_batch1},
+        position_slices={TIME_NAME: batch1_slice, ENSEMBLE_NAME: ensemble_slice},
+    )
+
+    # The critical assertion: process 1's data was NOT wiped by process 2's
+    # initialize_store() call, and both batches are now present correctly.
+    root = zarr.open_group(path, mode="r")
+    np.testing.assert_array_equal(root["var"][batch0_slice], original_batch0)
+    np.testing.assert_array_equal(root["var"][batch1_slice], new_batch1)
