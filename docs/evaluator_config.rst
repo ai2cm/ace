@@ -160,6 +160,12 @@ in the default aggregator configuration above.
 .. autoclass:: fme.ace.NearZeroFractionMetricConfig
    :noindex:
 
+.. autoclass:: fme.ace.AnomalyMemoryMetricConfig
+   :noindex:
+
+.. autoclass:: fme.ace.LatLonBoxConfig
+   :noindex:
+
 .. autoclass:: fme.ace.StepperOverrideConfig
    :show-inheritance:
    :noindex:

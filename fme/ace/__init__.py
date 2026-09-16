@@ -1,6 +1,7 @@
 import sys
 
 from fme.ace.aggregator.inference.annual import AnnualMetricConfig
+from fme.ace.aggregator.inference.anomaly_memory import AnomalyMemoryMetricConfig
 from fme.ace.aggregator.inference.enso.dynamic_index import EnsoIndexMetricConfig
 from fme.ace.aggregator.inference.enso.enso_coefficient import (
     EnsoCoefficientMetricConfig,
@@ -19,6 +20,7 @@ from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
 from fme.ace.aggregator.inference.step_diagnostics import StepDiagnosticsMetricConfig
 from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
 from fme.ace.aggregator.inference.trend import TrendMetricConfig
+from fme.ace.aggregator.inference.utils import LatLonBoxConfig
 from fme.ace.aggregator.inference.video import VideoMetricConfig
 from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
 from fme.ace.aggregator.one_step import (
