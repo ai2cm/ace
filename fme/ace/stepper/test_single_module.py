@@ -3682,6 +3682,54 @@ def test_corrector_loss_errors_at_the_first_active_step(selected, trains):
             train_stepper.train_on_batch(data, optimization=NullOptimization())
 
 
+@pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
+def test_legacy_residual_prediction_bool_checkpoint_steps_identically(
+    tmp_path: pathlib.Path, legacy: bool
+):
+    """A checkpoint written when residual_prediction was a bool must keep
+    stepping exactly as it did. Config-level loading is not enough to promise
+    that: this goes through torch.save and load_stepper, the way inference
+    reaches a real checkpoint, and compares against the equivalent config
+    built the current way.
+    """
+
+    def make(residual_prediction):
+        norm = NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0})
+        return StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="prebuilt", config={"module": torch.nn.Identity()}
+                        ),
+                        in_names=["a"],
+                        out_names=["a"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=norm, residual=norm
+                        ),
+                        residual_prediction=residual_prediction,
+                    )
+                ),
+            ),
+            derived_forcings=DerivedForcingsConfig(),
+        )
+
+    current = make(ResidualPredictionConfig() if legacy else None)
+    state = current.get_stepper(get_dataset_info()).get_state()
+    # Exactly what a pre-ResidualPredictionConfig checkpoint holds.
+    state["config"]["step"]["config"]["residual_prediction"] = legacy
+
+    path = tmp_path / "legacy_stepper"
+    torch.save({"stepper": state}, path)
+    loaded = load_stepper(path)
+
+    input_data = {"a": torch.rand(2, 5, 5).to(DEVICE)}
+    args = StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    expected = current.get_stepper(get_dataset_info()).step(args).output["a"]
+    torch.testing.assert_close(loaded.step(args).output["a"], expected)
+
+
 def test_step_residual_normalized_prediction():
     """A unit network output must correspond to one residual std, added to
     the input in physical units; residual means are never applied (the stats
