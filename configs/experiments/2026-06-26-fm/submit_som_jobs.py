@@ -12,9 +12,9 @@ against itself and run once per reference member with a single checkpoint
 hundred jobs. --arm restricts to the norm-ablation cells (dropping the
 hand-written runs), and --run/--arch/--regime/--climate/--ic narrow further.
 
-Kinds whose configs point at a dataset that does not exist yet (the TBD paths
-in generate_som_configs.MISSING_DATASETS) are refused with a pointer to
-MISSING_DATASETS.md unless --allow-missing-datasets is given.
+Kinds whose configs point at a dataset that is not on weka yet (the entries of
+generate_som_configs.MISSING_DATASETS with available=False) are refused with a
+pointer to MISSING_DATASETS.md unless --allow-missing-datasets is given.
 
 Gantry clones the repository at HEAD, so the configs must be committed and
 pushed before submitting; this is checked unless --dry-run is given.
@@ -188,12 +188,13 @@ def model_jobs(
                         dataset_id,
                     )
                 )
-    elif kind == "abrupt-10yr-eval":
+    elif kind in ("abrupt-10yr-eval", "abrupt-10yr-eval-sst"):
+        suffix = kind.removeprefix("abrupt-")
         for climate in climates:
             if climate in ABRUPT_CLIMATES:
                 jobs.append(
                     Job(
-                        f"{run_name}-som-abrupt-{climate}-10yr-eval",
+                        f"{run_name}-som-abrupt-{climate}-{suffix}",
                         EVALUATOR_RUN_SCRIPT,
                         (som_config_filename(kind, climate),),
                         dataset_id,
@@ -269,7 +270,7 @@ def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[J
 
 
 def refuse_missing_datasets(kinds: list[str], config_filenames: list[str]) -> None:
-    """Exit if any needed config still points at a TBD dataset path."""
+    """Exit if any needed config points at a dataset not yet on weka."""
     stale = [
         name
         for name in config_filenames
@@ -278,8 +279,8 @@ def refuse_missing_datasets(kinds: list[str], config_filenames: list[str]) -> No
     if not stale:
         return
     lines = [
-        "Refusing to submit: these configs reference datasets that do not exist "
-        "yet (TBD paths). Produce the dataset, set its name in "
+        "Refusing to submit: these configs reference datasets that are not on "
+        "weka yet. Produce the dataset, mark it available in "
         "generate_som_configs.MISSING_DATASETS, regenerate and commit; see "
         "MISSING_DATASETS.md. Pass --allow-missing-datasets to submit anyway.",
     ]
@@ -385,7 +386,7 @@ def main() -> None:
     parser.add_argument(
         "--allow-missing-datasets",
         action="store_true",
-        help="Submit kinds whose configs still point at TBD dataset paths.",
+        help="Submit kinds whose configs point at datasets not yet on weka.",
     )
     add_beaker_args(
         parser,

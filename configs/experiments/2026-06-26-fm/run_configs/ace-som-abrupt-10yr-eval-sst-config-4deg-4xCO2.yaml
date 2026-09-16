@@ -14,18 +14,11 @@ logging:
 loader:
   dataset:
     data_path: /climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset
-    file_pattern: abrupt-2xCO2.zarr
+    file_pattern: abrupt-4xCO2.zarr
     engine: zarr
-  start_indices: &id001
+  start_indices:
     times:
     - '2020-01-01T06:00:00'
-  num_data_workers: 8
-prediction_loader:
-  dataset:
-    data_path: /climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset
-    file_pattern: abrupt-2xCO2.zarr
-    engine: zarr
-  start_indices: *id001
   num_data_workers: 8
 data_writer:
   save_prediction_files: false
@@ -45,11 +38,3 @@ data_writer:
 aggregator:
   log_zonal_mean_images: false
   log_histograms: true
-stepper_override:
-  ocean:
-    surface_temperature_name: surface_temperature
-    ocean_fraction_name: ocean_fraction
-    interpolate: false
-    slab:
-      mixed_layer_depth_name: prescribed_mixed_layer_depth
-      q_flux_name: prescribed_qflux

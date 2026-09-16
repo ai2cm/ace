@@ -3,27 +3,35 @@
 `generate_som_configs.py` reproduces the ACE experiments of
 [ai2cm/ace2s-shield-plus-paper](https://github.com/ai2cm/ace2s-shield-plus-paper/tree/main/ACE-experiments/inference)
 on the 4deg daily SHiELD-SOM data. Three of the paper's inputs have no 4deg
-daily counterpart yet. Their configs are generated against placeholder paths
-(`/climate-default/TBD-...`) so the machinery is complete; `submit_som_jobs.py`
-refuses the dependent kinds until the placeholder is replaced.
+daily counterpart yet. Their configs are generated anyway so the machinery is
+complete — against the real name once a processing config fixes it, a
+placeholder (`/climate-default/TBD-...`) before that — and `submit_som_jobs.py`
+refuses the dependent kinds until the entry is marked `available` in
+`MISSING_DATASETS` in `generate_som_configs.py`.
 
-To bring one online: produce the dataset, put its real name into
-`MISSING_DATASETS` in `generate_som_configs.py`, regenerate, commit, submit.
+To bring one online: produce the dataset, copy it to weka, set the real name
+and `available=True` in `MISSING_DATASETS`, regenerate, commit, submit.
 
-## D1 — daily 4deg abrupt-CO2 runs
+## D1 — daily 4deg abrupt-CO2 runs — IN PROGRESS
 
-- Placeholder: `/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr`
-- Needed by: `abrupt-10yr-eval` (model vs SHiELD's abrupt run, initialized
-  from its 2020-01-01 state), `abrupt-data-only` (that run scored against
-  itself). Until then `abrupt-10yr` runs the same experiment as free inference
-  with no reference.
-- Source: 6-hourly 4deg already processed —
-  `gs://vcm-ml-intermediate/2024-08-14-vertically-resolved-4deg-c96-shield-som-abrupt-co2-increase-fme-dataset/`
-  (14612 steps from 2020-01-01T06; has every model variable plus
-  `prescribed_qflux` / `prescribed_mixed_layer_depth`).
-- How: add a daily `time_coarsen` block to
-  `scripts/data_process/configs/shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml`
-  mirroring `shield-som-ensemble-c96-4deg-8layer.yaml`. Cheapest of the three.
+- Path (fixed): `/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr`
+- Needed by: `abrupt-10yr-eval` (model with slab ocean vs SHiELD's abrupt
+  run, initialized from its 2020-01-01 state), `abrupt-10yr-eval-sst` (same,
+  but SST and sea ice prescribed from SHiELD's run — the atmospheric response
+  given SHiELD's own surface warming), `abrupt-data-only` (the run scored
+  against itself). Until then `abrupt-10yr` runs the slab experiment as free
+  inference with no reference.
+- Source: raw 45x90 regrids
+  `gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/abrupt-{2x,3x,4x}CO2`
+  (14612 six-hourly steps from 2020-01-01T06). A 2024-08-14 six-hourly 4deg
+  processing exists but predates `total_frozen_precipitation_rate` and
+  `PRMSL`; the dataset is recomputed with the current pipeline instead.
+- How: `scripts/data_process/configs/shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml`
+  now writes the 2026-09-16 six-hourly store and a daily `time_coarsen`
+  (same variable lists as the SOM ensemble). On the argo VM:
+  `make shield_som_abrupt_co2_increase_c96_dataset RESOLUTION=4deg` (3 pods),
+  then `python scripts/data_process/copy_zarrs_to_weka.py gs://vcm-ml-intermediate/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset`,
+  then set `available=True` on `MISSING_DATASETS["abrupt"]`.
 
 ## D2 — daily 4deg SOM spin-up year
 

@@ -51,6 +51,11 @@ One config family per kind, named ``ace-som-{kind}-config-4deg-...yaml``:
     Paper's abrupt-4xCO2 evaluator: same run scored against SHiELD's own
     abrupt-CO2 run, whose 2020 state is the initial condition. Needs the daily
     4deg abrupt-CO2 dataset (MISSING_DATASETS["abrupt"]).
+``abrupt-10yr-eval-sst``
+    The abrupt-CO2 evaluator with the surface prescribed instead of the slab:
+    SST and sea ice are read from SHiELD's abrupt run at every step (the
+    training-time ocean, no ``stepper_override``), so the score isolates the
+    atmospheric response given SHiELD's own surface warming.
 ``abrupt-data-only``
     SHiELD's abrupt-CO2 run evaluated against itself (same dataset dependency).
 ``abrupt-ens``
@@ -106,17 +111,24 @@ class MissingDataset(NamedTuple):
     source: str
     how: str
     kinds: tuple[str, ...]
+    #: False until the dataset is on weka; submit_som_jobs.py refuses the
+    #: dependent kinds while it is False.
+    available: bool = False
 
 
 # Datasets the paper's experiments need which do not exist at 4deg daily yet.
-# Configs referencing them are generated anyway so the machinery is ready; the
-# paths carry a TBD date so a stale path fails loudly instead of running on the
-# wrong data. Replace the TBD once the dataset is on weka, regenerate, and
+# Configs referencing them are generated anyway so the machinery is ready. A
+# path is the real name once its processing config exists (so the two agree)
+# and a TBD date before that, so a stale path fails loudly instead of running
+# on the wrong data. Flip ``available`` once the dataset is on weka and
 # submit_som_jobs.py stops refusing the dependent kinds. See MISSING_DATASETS.md.
 _MISSING_ROOT = "/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-"
 MISSING_DATASETS = {
     "abrupt": MissingDataset(
-        path=_MISSING_ROOT + "abrupt-co2-increase-fme-dataset",
+        path=(
+            "/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-"
+            "som-abrupt-co2-increase-fme-dataset"
+        ),
         purpose=(
             "reference trajectory for the abrupt-CO2 evaluator and the abrupt "
             "data-only evaluator"
@@ -126,11 +138,10 @@ MISSING_DATASETS = {
             "shield-som-abrupt-co2-increase-fme-dataset (6-hourly, abrupt-2x/3x/4x)"
         ),
         how=(
-            "add a daily time_coarsen block to scripts/data_process/configs/"
-            "shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml, as in "
-            "shield-som-ensemble-c96-4deg-8layer.yaml"
+            "make shield_som_abrupt_co2_increase_c96_dataset RESOLUTION=4deg in "
+            "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
-        kinds=("abrupt-10yr-eval", "abrupt-data-only"),
+        kinds=("abrupt-10yr-eval", "abrupt-10yr-eval-sst", "abrupt-data-only"),
     ),
     "spin-up": MissingDataset(
         path=_MISSING_ROOT + "ensemble-spin-up-fme-dataset",
@@ -161,7 +172,6 @@ MISSING_DATASETS = {
         kinds=("abrupt-ens-data-only",),
     ),
 }
-MISSING_PATH_MARKER = "/TBD-"
 
 
 class Climate(NamedTuple):
@@ -251,6 +261,7 @@ INFERENCE_KINDS = ("eq", "eq-nospinup", "eq-1000yr", "abrupt-10yr", "7day")
 EVALUATOR_KINDS = (
     "data-only",
     "abrupt-10yr-eval",
+    "abrupt-10yr-eval-sst",
     "abrupt-data-only",
     "abrupt-ens",
     "abrupt-ens-data-only",
@@ -355,6 +366,7 @@ def _evaluator_config(
     data_writer: dict,
     prediction_dataset: dict | None = None,
     aggregator: dict | None = None,
+    slab: bool = True,
 ) -> dict:
     loader = {
         "dataset": loader_dataset,
@@ -376,7 +388,8 @@ def _evaluator_config(
     cfg["data_writer"] = data_writer
     if aggregator is not None:
         cfg["aggregator"] = aggregator
-    cfg["stepper_override"] = copy.deepcopy(SLAB_OCEAN_OVERRIDE)
+    if slab:
+        cfg["stepper_override"] = copy.deepcopy(SLAB_OCEAN_OVERRIDE)
     return cfg
 
 
@@ -518,19 +531,28 @@ def build_abrupt_10yr_configs() -> dict[str, dict]:
     return configs
 
 
-def build_abrupt_10yr_eval_configs() -> dict[str, dict]:
+def _build_abrupt_10yr_eval_configs(kind: str, slab: bool) -> dict[str, dict]:
     root = MISSING_DATASETS["abrupt"].path
     configs = {}
     for climate in ABRUPT_CLIMATES:
-        configs[som_config_filename("abrupt-10yr-eval", climate)] = _evaluator_config(
+        configs[som_config_filename(kind, climate)] = _evaluator_config(
             n_forward_steps=ABRUPT_N_STEPS,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=_zarr_dataset(root, f"abrupt-{climate}.zarr"),
             start_indices={"times": [ABRUPT_FIRST_TIME]},
             data_writer=_abrupt_monthly_writer(),
             aggregator=_abrupt_aggregator(),
+            slab=slab,
         )
     return configs
+
+
+def build_abrupt_10yr_eval_configs() -> dict[str, dict]:
+    return _build_abrupt_10yr_eval_configs("abrupt-10yr-eval", slab=True)
+
+
+def build_abrupt_10yr_eval_sst_configs() -> dict[str, dict]:
+    return _build_abrupt_10yr_eval_configs("abrupt-10yr-eval-sst", slab=False)
 
 
 def build_abrupt_data_only_configs() -> dict[str, dict]:
@@ -609,6 +631,7 @@ BUILDERS = {
     "data-only": build_data_only_configs,
     "abrupt-10yr": build_abrupt_10yr_configs,
     "abrupt-10yr-eval": build_abrupt_10yr_eval_configs,
+    "abrupt-10yr-eval-sst": build_abrupt_10yr_eval_sst_configs,
     "abrupt-data-only": build_abrupt_data_only_configs,
     "abrupt-ens": build_abrupt_ens_configs,
     "abrupt-ens-data-only": build_abrupt_ens_data_only_configs,
@@ -618,8 +641,13 @@ assert set(BUILDERS) == set(KINDS)
 
 
 def references_missing_dataset(config_path: pathlib.Path) -> bool:
-    """True if a generated config still points at a TBD dataset path."""
-    return MISSING_PATH_MARKER in config_path.read_text()
+    """True if a generated config points at a dataset not yet on weka."""
+    text = config_path.read_text()
+    return any(
+        dataset.path in text
+        for dataset in MISSING_DATASETS.values()
+        if not dataset.available
+    )
 
 
 def generate_configs(kinds: list[str] | None = None) -> None:
