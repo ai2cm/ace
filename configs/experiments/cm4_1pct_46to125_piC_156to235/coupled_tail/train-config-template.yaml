@@ -242,9 +242,14 @@ stepper_training:
   # the schedule below; n_coupled_steps only has to be >= the deepest outcome,
   # because ComponentLossSchedule.n_required_forward_steps clamps the sample to
   # it (fme/coupled/loss.py) and a sample above the cap would silently collapse
-  # onto it. 20 admits the schedule's full tail; it does NOT mean every batch
-  # rolls 20 steps.
-  n_coupled_steps: 20
+  # onto it.
+  #
+  # 16, not the 20 first attempted. Memory scales with this CAP, not with the
+  # sampled depth: the atmosphere's data window is n_coupled_steps*20+1
+  # timesteps and is retained and scored on every batch, including the depth-1
+  # draws. At 20 both arms OOM'd in the first validation
+  # (01M2KGYC6E1QH64KC9RXYQPP4W, 01M2KGYTGM0T3G4RGQRQQ8TZA4).
+  n_coupled_steps: 16
   # Required, not incidental: the ocean's stochasticity is supplied by the
   # atmosphere, so the ensemble must run through both realms even while the
   # atmosphere is frozen and contributes no loss.
@@ -253,11 +258,11 @@ stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
-    # The standalone long-tail schedule, verbatim -- the one that produced the
-    # stage-2 ocean whose Nino 3.4 shape motivated this wave
-    # (configs/.../ocean_wide_stochastic_longtail). Mean optimised depth 7.50,
-    # against crps4's fixed 4 and crps8's fixed 8. 0.3 is kept at depth 1 rather
-    # than 0 so the one-step distribution still has an anchor.
+    # The standalone long-tail schedule re-scoped to a reachable cap. Mean
+    # optimised depth 8.05, against the standalone wave's 7.50, crps4's fixed 4
+    # and crps8's fixed 8. Shape is preserved: the 1/2/4 anchor keeps the
+    # one-step distribution represented, and the tail mass sits on two depths
+    # (8 and 16) as the standalone schedule put it on 12 and 20.
     #
     # NOTE this schedule has never before been applied in the COUPLED stage: the
     # lt0_a2s / dt0_a2s arms took it only through their ocean INIT and trained
@@ -265,22 +270,23 @@ stepper_training:
     n_steps:
       outcomes:
         - steps: 1
-          probability: 0.3
+          probability: 0.25
         - steps: 2
-          probability: 0.2
+          probability: 0.10
         - steps: 4
-          probability: 0.1
-        - steps: 12
-          probability: 0.2
-        - steps: 20
-          probability: 0.2
-    # Required by the schedule, and the reason depth is affordable. With this
-    # true only the sampled step holds a graph; fme/coupled/stepper.py wraps
-    # every other ocean step in torch.no_grad(), so peak memory is ONE step's
-    # backward whatever the depth. It also truncates the gradient: the model
-    # learns a calibrated one-step distribution from states its own rollout
-    # reached, rather than backpropagating across coupled steps as crps4/crps8
-    # do. That is a second axis against crps8, accepted deliberately.
+          probability: 0.10
+        - steps: 8
+          probability: 0.20
+        - steps: 16
+          probability: 0.35
+    # Required by the schedule. With this true only the sampled step holds a
+    # graph; fme/coupled/stepper.py wraps every other ocean step in
+    # torch.no_grad(). That bounds the BACKWARD graph, not the retained forward
+    # data -- the distinction that made the first launch OOM. It also truncates
+    # the gradient: the model learns a calibrated one-step distribution from
+    # states its own rollout reached, rather than backpropagating across coupled
+    # steps as crps4/crps8 do. That is a second axis against crps8, accepted
+    # deliberately.
     optimize_last_step_only: true
     loss_weight: 1.0
     loss:

@@ -22,34 +22,29 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # titan is budget-contended; measured in
 # experiments/2026-09-10-coupled-ft-stochastic-and-mae.
 #
-# HEADROOM. GPU memory is NOT the risk here: optimize_last_step_only puts every
-# non-optimised ocean step under no_grad, so peak is one step's backward at any
-# depth. The loader is. n_coupled_steps 20 sizes the forcing window at 401
-# atmosphere + 21 ocean timesteps per sample, against crps4's 81 + 5, on EVERY
-# batch including the depth-1 draws.
+# MEMORY PROBE, 2026-09-15. This wave first ran at cap 20 and both arms OOM'd
+# in the first validation. Cause: memory scales with the CAP, not the sampled
+# depth -- the frozen atmosphere's window (n_coupled_steps*20+1 timesteps) is
+# retained and scored on every batch. ace#1496 (on this branch) removes three
+# whole-window copies, cutting the per-atmosphere-timestep term 52%.
 #
-# Estimated from the generated config's own channel counts (61 atmosphere, 101
-# ocean union in+out; 180x360; fp32; batch 8 as 1 sample/GPU over 8 ranks;
-# 2 workers x prefetch 2 in flight):
+# Measured peaks, for anchoring: crps4 cghk183p cap4 85.2 GiB and crps8
+# o0nc2dp3 cap8 148.2 GiB (both 4xB200, 2 samples/GPU) give 0.79 GiB per
+# atmosphere timestep on a ~21 GiB base. On 8xH100 at 1 sample/GPU the slope
+# halves, but the BASE is arm-specific and unexplained: mae2n 8chmcf8l implies
+# 18.0 GiB, owc8v4 jc8l3r1d implies 40.2 GiB.
 #
-#   cap 20   6.89 GB/sample   ~220 GB/node
-#   crps8    2.78 GB/sample   ~ 89 GB/node
-#   crps4    1.41 GB/sample   ~ 45 GB/node
-#
-# The shared_mem column is left BLANK deliberately, so default_shared_mem picks
-# it up from job_runner/node_caps.txt (ace 344204721): 0.8 * n_gpus/gpus_per_node
-# * node_mem_limit_gib, i.e. 1494GiB for 8 of jupiter's 8 H100s. That is ~7x the
-# estimate above, so the cap-20 loader window is comfortably covered. Earlier
-# revisions of this file hard-coded 500GiB, copied from rows that predate the
-# node-caps change; blank is now the right entry.
-#
-# The estimate is not a measurement -- still confirm actual host RAM and
-# throughput on the first arm before arming the second.
+# PROJECTION for cap 16 on 8xH100 post-#1496: ~79.0 GiB against 79.6 available
+# under the optimistic 18.0 GiB base -- i.e. expected to be marginal or to fail.
+# Cap 12 projects to ~63.8 GiB (80%). This row is launched deliberately as a
+# probe of that projection and of whether owc8v4's 40.2 GiB base is a glitch:
+# RETRIES 0, one arm only. If it OOMs near 79 GiB the model is right and the
+# fallback is cap 12 (or cap 16 on 4xB200, projected 143 GiB / 80%).
 
 # --- owclt: crps4's ocean init, long-tail coupled schedule ---
 # Pairs with crps4 (cghk183p): same init, schedule is the only change.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||0|ai2/ace|seed=0|8h
 
 # --- owc8lt: crps8's ocean init, long-tail coupled schedule ---
 # Pairs with crps8 (pxz4q8hw-initialised): same init, fixed 8 -> sampled tail.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||0|ai2/ace|seed=0|8h
