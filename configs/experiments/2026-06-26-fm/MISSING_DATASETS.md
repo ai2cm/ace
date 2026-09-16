@@ -20,7 +20,10 @@ To bring one online: produce the dataset, copy it to weka with
 
 - Placeholder: `/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr`
 - Needed by: `abrupt-ens-data-only` — SHiELD's own 90-day abrupt-4xCO2
-  spread, the target for the model's `abrupt-ens` runs (paper figures 8, 10).
+  spread, the target for the model's `abrupt-ens` runs (paper figures 8, 10) —
+  and `abrupt-ens-eval-sst`, the prescribed-SST version of the same figure:
+  one evaluator per member with SST, sea ice and CO2 read from it (36 jobs per
+  training run; `--ens-member` narrows).
 - Source: 1deg only —
   `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_180_by_360/abrupt-4xCO2-ic_00NN`.
   Spencer is regridding to `gaussian_grid_45_by_90` on Gaea (Snakemake, not

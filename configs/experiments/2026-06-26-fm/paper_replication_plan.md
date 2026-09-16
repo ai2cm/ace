@@ -18,12 +18,14 @@ the status section below against `argo list`, `beaker`, and the GCS paths
 
 ## Status (2026-09-16, end of day)
 
-- All kinds are written: 11 slab-ocean, 6 prescribed-SST (see inventory).
-  Every kind but `abrupt-ens-data-only` is submittable. No experiment jobs
-  submitted yet; wandb group `ace2-fm-paper-2026-06-26` is empty.
+- All kinds are written: 11 slab-ocean, 9 prescribed-SST (see inventory).
+  Every kind but the two on D3 (`abrupt-ens-data-only`,
+  `abrupt-ens-eval-sst`) is submittable. No experiment jobs submitted yet;
+  wandb group `ace2-fm-paper-2026-06-26` is empty.
 - Commits on `exp/alexeyfm` since the plan was first written: `593aa955e`
   (rename to paper-wide names), `792e0788c` (prescribed-SST kinds),
-  `62f3366e6` (D1/D2 marked available), plus this docs commit. Pushed.
+  `62f3366e6` (D1/D2 marked available), `f7259c4fd` (docs), `c4159803c`
+  (figure-8 prescribed-SST ensemble kinds), plus this docs commit. Pushed.
 - Argo (`gke_vcm-ml_us-central1-c_ml-cluster-dev`): `xwpb9` (D1) and
   `26c2p` (D2) succeeded. Seven `gcs-to-weka-*` gantry copy jobs
   (`01M2P5FQ…` … `01M2P5GA…`, workspace `ai2/climate-titan`) finished with
@@ -70,10 +72,25 @@ All evaluators with the training-time ocean, no `stepper_override`, aggregator
 | `run-ace-split-amip-plus-4K-inference.sh` (+ daily PRATEsfc) | `amip-p4k`, `amip-p2k` | `AMIP-p4K.zarr`, `AMIP-p2K.zarr`, IC from own 1979 state | same | 1 each | `amip` | daily `PRATEsfc` zarr |
 | `run-ace-amip-split-data-only-evaluator.sh`, `run-ace-amip-variant-data-only-evaluator.sh` | `amip-data-only` | `ic_0002`, `AMIP-p4K`, `AMIP-p2K` vs themselves | 1980-01-01T06, 15324 steps | 3 total | `amip` | daily `PRATEsfc` zarr |
 | `run-ace-random-CO2-evaluator.sh` | `random-co2-eval` | ramped `ic_0003` (held out), 1x/2x/4x | 2019-10-01T06, 1918 steps | 3 | `ramped` | none |
+| `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` under prescribed SST (ours) | `abrupt-ens-eval-sst` | D3 member `abrupt4xCO2-ic_00NN` per job, SST/sea ice/CO2 from it | 89 steps from each member's start | 36 (`--ens-member`) | `som` | none |
+| — control ensemble (ours) | `control-ens-eval-sst` | SOM 1x member, 36 monthly ICs, no CO2 override | 2031-01 … 2033-12 starts, 90 steps | 1 | `som` | none |
+| — CO2 step at fixed SST (ours) | `abrupt-ens-fixed-sst` | SOM 1x member SST, CO2 → 4x, vs 1x member | same | 1 | `som` | none |
 | `run-ace-amip-constant-CO2-inference.sh` | — | `AMIP-constant-CO2.zarr` | | | | skipped: eval suites' `*_constant_co2` entries cover it |
 
 Job names: `{run}-som-eq-eval-sst-{climate}-ic{n}`, `{run}-amip-{ic2,p4k,p2k}-eval`,
-`{run}-ramped-{climate}-eval`, `amip-{ic2,p4k,p2k}-data-only`.
+`{run}-ramped-{climate}-eval`, `amip-{ic2,p4k,p2k}-data-only`,
+`{run}-som-abrupt-4xCO2-ens-eval-sst-ic{n}`, `{run}-som-control-ens-eval-sst`,
+`{run}-som-abrupt-4xCO2-ens-fixed-sst`.
+
+Figure 8 (and 10) under prescribed SST: `abrupt-ens-eval-sst` gives the ACE
+4xCO2 lines and, as its target, the SHiELD 4xCO2 line (so
+`abrupt-ens-data-only` is not needed for this version); `control-ens-eval-sst`
+gives the SHiELD 1xCO2 dashed line as its target plus ACE's control drift;
+`abrupt-ens-fixed-sst` adds the direct-CO2 line with no SHiELD counterpart.
+Ensemble means over the 36 `abrupt-ens-eval-sst` jobs are taken at analysis
+time (the single-job kinds already log the ensemble mean). Metrics come from
+wandb `inference/mean/weighted_mean_{gen,target}/*` as in the paper notebook
+`figures-08-10.ipynb`.
 
 ## Datasets
 
@@ -83,7 +100,7 @@ See `MISSING_DATASETS.md` for full detail.
 |---|---|---|---|
 | D1 | `2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr` | `abrupt-10yr-eval`, `abrupt-10yr-eval-sst`, `abrupt-data-only` | ✅ on weka |
 | D2 | `2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-ensemble-spin-up-fme-dataset/{climate}-spin-up-ic_000N.zarr` | `eq` | ✅ on weka |
-| D3 | `TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr` | `abrupt-ens-data-only` | 🚧 Spencer regrid; processing config not written |
+| D3 | `TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr` | `abrupt-ens-data-only`, `abrupt-ens-eval-sst` | 🚧 Spencer regrid; processing config not written |
 | 3x members | new-dated SOM ensemble store with 3xCO2 `ic_0003-0005` | 3 more `data-only` jobs | 🚧 Spencer regrid; config not written |
 | D4 | daily increasing-CO2 | `2pct*` | ❌ not planned |
 | AMIP `ic_0002`, `AMIP-p4K`, `AMIP-p2K`, ramped `ic_0003` | see `generate_paper_configs.AMIP_VARIANTS` / `RAMPED_DATASET` | prescribed-SST kinds | ✅ (p2k/p4k copied in July via `amip_p2k_p4k_transfer.yaml`, not re-verified) |
@@ -114,16 +131,21 @@ python submit_paper_jobs.py --kind eq --arm a1 a2 a3 --skip-if-in-wandb
 # Prescribed-SST
 python submit_paper_jobs.py --kind eq-eval-sst random-co2-eval --arm a1 a2 a3
 python submit_paper_jobs.py --kind amip-eval amip-p4k amip-p2k --arm a1 a2 a3
+# Figure-8 ensembles under prescribed SST (single-job kinds now; the D3 kind later)
+python submit_paper_jobs.py --kind control-ens-eval-sst abrupt-ens-fixed-sst --arm a1 a2 a3
+python submit_paper_jobs.py --kind abrupt-ens-eval-sst --arm a1 --ens-member 1 2 3   # after D3; 36/run
 # 1000-year runs: long; one arch at a time
 python submit_paper_jobs.py --kind eq-1000yr --arm a1 --arch nc-swin-v2
 ```
 
 Per-run job counts: slab-ocean 56 (`eq` 20, `eq-nospinup` 20, `eq-1000yr` 4,
-`abrupt-10yr*` 9, `abrupt-ens` 1, `7day` 2), prescribed-SST 26
-(`eq-eval-sst` 20, `amip-*` 3, `random-co2-eval` 3); data-only 23 total now,
-+36 when D3 lands. The submit script sees 33 fm/c96 runs (22 with
-`--arm a1 a2 a3`), so everything is ~2700 jobs, ~1900 for the arms alone:
-submit by kind and arm.
+`abrupt-10yr*` 9, `abrupt-ens` 1, `7day` 2), prescribed-SST 28 now
+(`eq-eval-sst` 20, `amip-*` 3, `random-co2-eval` 3, `control-ens-eval-sst` 1,
+`abrupt-ens-fixed-sst` 1) + 36 `abrupt-ens-eval-sst` when D3 lands; data-only
+23 now, +36 with D3. The submit script sees 33 fm/c96 runs (22 with
+`--arm a1 a2 a3`), so everything is ~4000 jobs, ~2700 for the arms alone, of
+which `abrupt-ens-eval-sst` is ~800: submit by kind and arm, and run that one
+on a subset (`--run`, `--ens-member`).
 
 Watch the first `eq-nospinup 1xCO2` run for SST drift: the slab is
 forward-Euler at a daily step, untested here (paper was 6-hourly).
@@ -138,8 +160,8 @@ forward-Euler at a daily step, untested here (paper was 6-hourly).
    did for D1) and the 3xCO2 `ic_0003-0005` processing (new-dated store; ask
    Spencer whether he runs the argo step). Then name the store in
    `MISSING_DATASETS["abrupt-ensemble"]`, flip `available`, extend
-   `SOM_MEMBERS["3xCO2"]`, regenerate, submit `abrupt-ens-data-only` and the
-   three new `data-only` jobs.
+   `SOM_MEMBERS["3xCO2"]`, regenerate, submit `abrupt-ens-data-only`,
+   `abrupt-ens-eval-sst` and the three new `data-only` jobs.
 3. Analysis: the AMIP windows (discard 1979; 1980-2011 train/validate;
    2012-2020 test) are cut from the single `amip-eval` runs at analysis time.
 
@@ -175,6 +197,13 @@ forward-Euler at a daily step, untested here (paper was 6-hourly).
 - Labels follow the data: `som`, `amip`, `ramped`. `AMIP-p4K`/`p2K` never
   appeared in training; `amip` is the closest label and what the SST sweep
   (`submit_sst_jobs.py`, forcing SST +2/+4 K) implies.
+- Figure 8 under prescribed SST (2026-09-16): `abrupt-ens-eval-sst` needs
+  SHiELD's own 4xCO2 SST, hence one job per D3 member (36/run, 89 steps, CO2
+  from the member) rather than the slab version's one 36-IC job.
+  `control-ens-eval-sst` (1x member as is) supplies the 1xCO2 target line;
+  `abrupt-ens-fixed-sst` (1x SST, CO2 → 4x) isolates the direct CO2 response
+  and has no SHiELD counterpart. No aggregator override, as the paper's
+  ensemble evaluator config.
 - `amip-constant-co2` skipped: eval suites already run AMIP `ic_0001` with
   constant CO2. `amip-eval` on `ic_0002` is kept because the suites never
   touch a held-out AMIP member.
