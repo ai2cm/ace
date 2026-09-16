@@ -25,6 +25,18 @@ where ``[clip] = [F_pos > alpha P_pos]``. ``<factor>`` is the corrector's own
 and without the clip (``dT_alpha_from_T``, float32 temperature difference)
 checks it.
 
+The configured training loss is also differentiated with respect to ``alpha``
+along each route by which ``alpha`` reaches a scored output, one leaf per
+route, every leaf equal to ``alpha`` in value:
+
+    s_T : T_final_k  = energy step with F = min(F_pos, s_T P_pos)   # clip -> dT
+    s_F : F_final    = F_final + (s_F - alpha) P_pos [clip]
+    s_P : P_final    = P_final + (s_P - alpha) P_pos
+    s_A : adv_final  = adv_final + (s_A - alpha) P_pos   # advection_and_precipitation
+
+    dL_dalpha_<route> = dL / ds_<route>
+    check:  dL_dalpha_T = ( sum_{k,cells} dL/dT_final_k ) * ddT_dalpha
+
 Writes ``dtdalpha_map.nc`` and ``facts.json`` to ``output_dir``.
 """
 
@@ -59,7 +71,9 @@ from fme.core.step.single_module import SingleModuleStep
 
 PRECIP = "PRATEsfc"
 FROZEN = "total_frozen_precipitation_rate"
+ADV = "tendency_of_total_water_path_due_to_advection"
 T0 = "air_temperature_0"
+ROUTES = ("T", "F", "P", "A")
 HDIMS = (-2, -1)
 
 
@@ -78,6 +92,18 @@ class Config:
 
 def gm(a, x):
     return (a * x).sum(HDIMS, keepdim=True)
+
+
+class RecordingOptimization(NullOptimization):
+    """NullOptimization that keeps the accumulated losses on the graph."""
+
+    def __init__(self):
+        super().__init__()
+        self.losses: list[torch.Tensor] = []
+
+    def accumulate_loss(self, loss: torch.Tensor):
+        self.losses.append(loss)
+        super().accumulate_loss(loss)
 
 
 class ReplayingCorrector:
@@ -99,6 +125,8 @@ class ReplayingCorrector:
         self.raw: dict = {}
         self.final: dict = {}
         self.args: tuple = ()
+        self.s: dict[str, torch.Tensor] = {}
+        self.T_out: list[torch.Tensor] = []
 
     def __call__(self, input, output, next_step_input_data, corrector_state):
         torch.set_grad_enabled(True)
@@ -118,11 +146,38 @@ class ReplayingCorrector:
             modified |= changed.keys()
         self.final = dict(gen)
         self.args = (input, next_step_input_data, corrector_state)
+        gen = self._with_route_leaves(gen)
         return CorrectorOutput(
             corrected=gen,
             diagnostics=build_corrector_diagnostics(snapshot, gen, modified),
             corrector_state=corrector_state,
         )
+
+    def _with_route_leaves(self, gen):
+        """Return ``gen`` with the scored outputs rewritten through one leaf per
+        route (values unchanged); ``self.s`` holds the leaves.
+        """
+        pre = self.pre_energy
+        P_pos = torch.clamp(self.raw[PRECIP], min=0)
+        F_pos = torch.clamp(self.raw[FROZEN], min=0)
+        area = self.energy.area_weighted_mean
+        alpha = (area(gen[PRECIP], keepdim=True) / area(P_pos, keepdim=True)).detach()
+        clip = (F_pos > alpha * P_pos).to(P_pos.dtype)
+        self.s = {r: alpha.clone().requires_grad_(True) for r in ROUTES}
+        out = dict(gen)
+        T_out, _ = self.energy(
+            self.args[0],
+            {**pre, FROZEN: torch.minimum(F_pos, self.s["T"] * P_pos)},
+            self.args[1],
+            self.args[2],
+        )
+        self.T_out = [T_out[k] for k in sorted(T_out)]
+        out.update(T_out)
+        out[FROZEN] = gen[FROZEN] + (self.s["F"] - alpha) * P_pos * clip
+        out[PRECIP] = gen[PRECIP] + (self.s["P"] - alpha) * P_pos
+        if ADV in gen:
+            out[ADV] = gen[ADV] + (self.s["A"] - alpha) * P_pos
+        return out
 
     def dT_with_frozen(self, F):
         """DT of the energy step with the frozen field replaced by ``F``."""
@@ -189,6 +244,9 @@ def main(yaml_path: str):
     scalars: dict[str, list] = {
         k: []
         for k in [
+            "loss",
+            "sum_dL_dT",
+            *[f"dL_dalpha_{r}" for r in ROUTES],
             "alpha",
             "dT",
             "dT_alpha",
@@ -208,8 +266,18 @@ def main(yaml_path: str):
             break
         batch = batch.to_device()
         torch.set_grad_enabled(False)
-        train_stepper.train_on_batch(batch, NullOptimization())
+        opt = RecordingOptimization()
+        train_stepper.train_on_batch(batch, opt)
         assert torch.is_grad_enabled() and rep.pre_energy
+        total = sum(opt.losses)
+        assert isinstance(total, torch.Tensor) and total.requires_grad
+
+        # dL/dalpha per route, and the T- and P-loss sensitivities behind them
+        leaves = [rep.s[r] for r in ROUTES]
+        dL_ds = torch.autograd.grad(total, leaves, retain_graph=True, allow_unused=True)
+        dL_ds = [torch.zeros_like(x) if g is None else g for x, g in zip(leaves, dL_ds)]
+        dL_dT = torch.autograd.grad(total, rep.T_out, retain_graph=True)
+        sum_dL_dT = sum(g.sum(HDIMS) for g in dL_dT)  # (n,)
         P_raw, P_final = rep.raw[PRECIP], rep.final[PRECIP]
         F_raw, F_final = rep.raw[FROZEN], rep.final[FROZEN]
         F_pos = torch.clamp(
@@ -282,6 +350,9 @@ def main(yaml_path: str):
                 ("g", g),
                 ("f", f),
                 ("dT_alpha_from_T", dT_alpha_from_T),
+                ("loss", total.detach().expand(dT.shape[0])),
+                ("sum_dL_dT", sum_dL_dT),
+                *[(f"dL_dalpha_{r}", g.squeeze(HDIMS)) for r, g in zip(ROUTES, dL_ds)],
             ]:
                 scalars[k].append(v.detach().cpu())
             curves.append(curve.cpu())
@@ -365,6 +436,17 @@ def main(yaml_path: str):
         "dT_dPraw_max_abs_grad_on_clipped": float(np.abs(g_[neg]).max())
         if neg.any()
         else 0.0,
+        "loss_type": cfg.stepper_training.loss.type,
+        **{f"dL_dalpha_{r}_mean": float(ds[f"dL_dalpha_{r}"].mean()) for r in ROUTES},
+        "dL_dalpha_T_over_P_mean_abs": float(
+            np.abs(ds["dL_dalpha_T"]).mean() / np.abs(ds["dL_dalpha_P"]).mean()
+        ),
+        "dL_dalpha_T_chain_max_rel_err": float(
+            np.abs(
+                ds["dL_dalpha_T"] - ds["sum_dL_dT"] * ds["ddT_dalpha_autograd"]
+            ).max()
+            / np.abs(ds["dL_dalpha_T"]).max()
+        ),
         "dT_dPraw_ppos_weighted_sum_relative": float(
             (np.clip(ds["P_raw"].values, 0, None) * g_).sum()
             / (np.clip(ds["P_raw"].values, 0, None) * np.abs(g_)).sum()
