@@ -154,6 +154,17 @@ launch() {
     mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "julyrep-cm4hybrid" ]]; then
+    # July-pipeline replication, stage 1: their exact CM4 pretrain config
+    # (lean corrector — no OHC/energy-flux/salinity clamps, EMA .999, const
+    # lr 1e-4, no grad clip, 150 ep, from scratch) with the ONLY delta being
+    # hybrid residual (thetao_0..18 residual-normalized, sst full-field).
+    # Stage 2 (julyrep-ufsft-hybrid) FTs it on UFS with their FT config.
+    config="${CONFIG_DIR}/julyrep-cm4hybrid.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "hybridufsft-v3" ]]; then
     # v2 + the CM4-recipe corrector restored (surface_energy_flux prescribed +
     # OHC scaled_temperature). Deep dive on v2 showed the residual thetao
