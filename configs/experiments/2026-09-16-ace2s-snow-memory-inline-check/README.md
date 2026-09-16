@@ -18,10 +18,16 @@ initial conditions, same rollout length as the prototype's saved rollouts.
 | cm4-masked-naive | `01KZVBJZ8KHR9E84CEF0NF95ES` | 46 |
 | era5-control | `01KYX6AQTSXD3N23HP128TJYTC` | 34 |
 | era5-masked-naive | `01KZVBA39HPP7ZNZ8FXD2HG9DR` | 39 |
+| cm4-masked-log1p | `01KZVBJZJ1E81EAF5BQJEVN8AH` | 48 |
+| era5-masked-log1p | `01KZWD52T8QEQW3V08F9ENBE06` | 30 |
 
-The prototype also scored masked-log1p. Those checkpoints need the per-field transforms that exist
-only on `exp/ace2s-snow-prognostic-daily`, so they cannot be loaded from this branch and are left
-out here; the memory metric could not separate log1p from naive in the prototype anyway.
+The masked checkpoints store the per-field `transforms` stepper field that exists only on
+`exp/ace2s-snow-prognostic-daily`, so this directory lives on a side branch of that branch
+(`exp/ace2s-snow-memory-inline-check`) with the aggregator commits cherry-picked onto it. The two
+control arms were run once from `feature/anomaly-memory-aggregator` (main-tip code, commit
+9571f3580) before the treatment loads failed there; those runs are kept, and only the four masked
+arms were launched from this branch (`./run-ace-evaluator.sh masked`). The aggregator code is
+identical on both branches.
 
 ## Initial conditions
 
@@ -52,7 +58,7 @@ aggregator's exact settings (pooled climatology, these months, raw upward shortw
 ## Launch
 
 ```bash
-./run-ace-evaluator.sh                    # all four, ai2/jupiter
+./run-ace-evaluator.sh                    # all six, ai2/jupiter
 CLUSTER=ai2/titan ./run-ace-evaluator.sh  # elsewhere
 ./run-ace-evaluator.sh cm4                # substring filter on the job name
 ```

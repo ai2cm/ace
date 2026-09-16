@@ -4,7 +4,7 @@
 # snow-memory prototype.
 #
 # Usage:
-#   ./run-ace-evaluator.sh              # submit all four
+#   ./run-ace-evaluator.sh              # submit all six
 #   ./run-ace-evaluator.sh cm4          # optional substring filter on the job name
 
 set -e
@@ -60,3 +60,5 @@ run_evaluator cm4-control        01KZC1J3R3EW9YVM6HPNSNNNCY
 run_evaluator cm4-masked-naive   01KZVBJZ8KHR9E84CEF0NF95ES
 run_evaluator era5-control       01KYX6AQTSXD3N23HP128TJYTC
 run_evaluator era5-masked-naive  01KZVBA39HPP7ZNZ8FXD2HG9DR
+run_evaluator cm4-masked-log1p   01KZVBJZJ1E81EAF5BQJEVN8AH
+run_evaluator era5-masked-log1p  01KZWD52T8QEQW3V08F9ENBE06
