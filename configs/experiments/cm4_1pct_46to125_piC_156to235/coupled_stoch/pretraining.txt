@@ -113,4 +113,49 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-
 #
 # jupiter nodes are 8xH100-80GB with ~2 TB RAM, so 8 GPUs is exactly one node
 # and the all-reduce stays NVLink-local.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|ace-samudra-cm4|ouivl7ev|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h
+
+# --- Arm E: Samudra-MAE, 8-STEP FINETUNED init + direct noise injection (mae2ftn) ---
+# ON THIS BRANCH ONLY, for the same reason Arm C is: it loads a DETERMINISTIC
+# checkpoint into a noise-conditioned module, which needs the unmerged ace#1491
+# (`parameter_init.weights_submodule`). Identical override string to Arm C.
+#
+# This is a strict ONE-VARIABLE fork of Arm D (mae2ft_a2s, j1eeib1r, running
+# from exp/coupled-stochastic-mae): same seed rs2, same sea_surface_fraction
+# masking, same norm=instance, same coupled recipe, same cluster shape. The
+# only change is that the ocean is made stochastic.
+#
+# It fills the empty cell of the MAE lineage's 2x2 (1pct ocean channel-mean
+# normalized RMSE at coupled epoch 8):
+#
+#                    | no noise        | noise
+#   pretrain init    | mae2   0.0535   | mae2n  0.0475
+#   8-step ft init   | mae2ft 0.0485   | THIS ARM
+#
+# Why it is worth an arm: wave 1 showed the stochastic-from-scratch arms
+# (lt0, dt0) REGRESS under coupled finetuning -- 20-yr rollout skill degrading
+# monotonically while they hold the lowest 4-step validation loss of any arm --
+# while mae2n, carrying identical noise conditioning on an MAE init, does not.
+# So the regression tracks the stochastic PRETRAINING PROTOCOL, not noise
+# conditioning. Every noise-carrying arm so far also had a second defect: an
+# init that cannot hold a rollout (lt0/dt0), or one that is not its lineage's
+# best (mae2n). This arm removes the second.
+#
+# On the wave-2 spread measurement the two halves we want sit on different
+# arms: mae2n takes ENSO (0.794 vs mae2ft's 0.755, best of the three new arms)
+# and mae2ft takes tropical dispersion (0.98 vs 0.67, against the corrected
+# 200-yr internal-variability reference). Whether they compose is the question.
+#
+# READING CAVEAT, unchanged from Arm C: j1eeib1r is norm=instance, so FiLM
+# conditioning sits after an instance norm and its magnitude is a learned
+# constant identical for every sample (experiments/2026-08-28-layernorm-samudra-smoke).
+# A STRONG result is conclusive -- noise helped despite crippled conditioning.
+# A WEAK result does NOT separate "noise does not help the MAE lineage" from
+# "instance norm handicapped the conditioning"; settling that still needs a
+# layer-norm MAE pretrain (1 seed, 75 epochs, ~52 h). This arm can open the
+# stochastic-ocean question, not close it.
+#
+# Arm C's jupiter row is now `skip` -- it has already run
+# (01M28Z4A89GPK0MJJDWQM4RHT1) and must not relaunch.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|ace-samudra-cm4|j1eeib1r|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h
+
