@@ -7,7 +7,14 @@ checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    # Monthly-mean SST only. Needed for regional SST variability diagnostics
+    # (box-mean index spectra, pooled anomaly distributions) that the
+    # aggregators cannot provide: they emit indices for two fixed regions
+    # (Nino 3.4, Pacific tripole) and no gridded field. `names` scopes the
+    # writer to one variable, so this costs ~1-2 GB per job rather than the
+    # tens of GB an unscoped monthly writer produces.
+    save_monthly_files: true
+    names: [sst]
   atmosphere:
     save_prediction_files: false
     save_monthly_files: false

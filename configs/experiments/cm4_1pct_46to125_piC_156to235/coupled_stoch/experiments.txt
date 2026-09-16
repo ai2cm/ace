@@ -11,7 +11,15 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTG
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|training|best_inference_ckpt|normal|--min-runtime 8h
 
 # =====================================================================
-# EVALUATION, re-launched 2026-09-16 from best_inference_ckpt.
+# EVALUATION, re-launched 2026-09-16 from best_inference_ckpt, WITH monthly
+# mean SST written out (data_writer.ocean.save_monthly_files, names: [sst]).
+#
+# The first attempt at this wave was cancelled ~30 min in: it inherited
+# save_monthly_files: false, and the regional SST variability diagnostics we
+# want (Gulf Stream Extension box-mean index spectrum, pooled SST anomaly
+# distribution) need a gridded monthly field that no aggregator emits. Adding
+# the writer does not touch the rollout, so the mean-state and variability
+# metrics are unchanged by it.
 #
 #   job_runner/evaluate.sh \
 #     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_stoch . \
