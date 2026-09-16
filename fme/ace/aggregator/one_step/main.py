@@ -44,6 +44,17 @@ OneStepMetricConfig = (
 )
 
 
+# Every one-step metric is pinned to forward step 1 (MeanAggregator and the
+# spectrum and ensemble aggregators default to target_time=1; the snapshot and
+# map aggregators hard-code it), so no sub-aggregator reads past window index 1.
+# record_batch slices each batch to this many leading timesteps before folding
+# and normalizing it -- both of those allocate, and on a deep coupled rollout
+# the unread remainder of the window dominates validation memory. See
+# test_main.test_logs_ignore_timesteps_past_the_first_forward_step, which
+# compares the sliced result against the unsliced one.
+N_TIMESTEPS_READ = 2
+
+
 class OneStepAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
@@ -84,6 +95,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             and batch.per_channel_losses is not None
         ):
             self._per_channel_losses.record(batch.per_channel_losses)
+        batch = batch.select_first_timesteps(N_TIMESTEPS_READ)
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
         self._deterministic_aggregator.record_batch(

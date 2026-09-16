@@ -40,7 +40,14 @@ def get_e2ghpx():
 class DeriveFnABC(abc.ABC):
     @abc.abstractmethod
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        pass
+        """Compute derived variables from ``data``, returning ``data`` plus them.
+
+        ``forcing_data`` supplies inputs that ``data`` does not carry; a name
+        present in both is taken from ``data`` and its ``forcing_data`` entry is
+        ignored. Callers rely on that to avoid materializing forcing variables
+        that would not be read (see ``TrainOutput.ensemble_derive_func``).
+        """
+        ...
 
 
 class NullDeriveFn(DeriveFnABC):
