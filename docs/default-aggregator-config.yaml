@@ -126,7 +126,6 @@ aggregator:
     - 7
     map_lags:
     - 7
-    n_harmonics: 3
     months_northern:
     - 1
     - 2
