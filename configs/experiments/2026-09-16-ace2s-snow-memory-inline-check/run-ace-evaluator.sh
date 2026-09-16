@@ -1,10 +1,11 @@
 #!/bin/bash
 # Evaluator runs that exercise the inline anomaly_memory aggregator on the
-# control and masked-naive checkpoints, for comparison against the offline
-# snow-memory prototype.
+# control checkpoints, for comparison against the offline snow-memory
+# prototype. The treatment checkpoints cannot be loaded from this branch; see
+# the README.
 #
 # Usage:
-#   ./run-ace-evaluator.sh              # submit all four
+#   ./run-ace-evaluator.sh              # submit both controls
 #   ./run-ace-evaluator.sh cm4          # optional substring filter on the job name
 
 set -e
@@ -57,6 +58,4 @@ run_evaluator() {
 }
 
 run_evaluator cm4-control        01KZC1J3R3EW9YVM6HPNSNNNCY
-run_evaluator cm4-masked-naive   01KZVBJZ8KHR9E84CEF0NF95ES
 run_evaluator era5-control       01KYX6AQTSXD3N23HP128TJYTC
-run_evaluator era5-masked-naive  01KZVBA39HPP7ZNZ8FXD2HG9DR

@@ -1,6 +1,6 @@
 # ACE2S snow-memory inline check
 
-Evaluator runs that exercise the new `anomaly_memory` inference aggregator on the checkpoints the
+Evaluator runs that exercise the new `anomaly_memory` inference aggregator on checkpoints the
 offline snow-memory prototype scored, so the inline numbers can be compared against the prototype
 before the aggregator is used in training runs.
 
@@ -12,16 +12,18 @@ initial conditions, same rollout length as the prototype's saved rollouts.
 
 ## Arms
 
+Only the two control arms run from this branch:
+
 | arm | checkpoint dataset | best-inference epoch |
 |---|---|---|
 | cm4-control | `01KZC1J3R3EW9YVM6HPNSNNNCY` | 43 |
-| cm4-masked-naive | `01KZVBJZ8KHR9E84CEF0NF95ES` | 46 |
 | era5-control | `01KYX6AQTSXD3N23HP128TJYTC` | 34 |
-| era5-masked-naive | `01KZVBA39HPP7ZNZ8FXD2HG9DR` | 39 |
 
-The prototype also scored masked-log1p. Those checkpoints need the per-field transforms that exist
-only on `exp/ace2s-snow-prognostic-daily`, so they cannot be loaded from this branch and are left
-out here; the memory metric could not separate log1p from naive in the prototype anyway.
+The masked-snow checkpoints (masked-naive, masked-log1p) store the per-field `transforms`
+stepper field that exists only on `exp/ace2s-snow-prognostic-daily`, so main-based code cannot
+load them. Those four arms run from `exp/ace2s-snow-memory-inline-check`, a side branch of the
+experiment branch with the aggregator commits cherry-picked onto it, where this directory also
+holds their configs. The aggregator code is identical on both branches.
 
 ## Initial conditions
 
@@ -31,7 +33,7 @@ Four ICs per arm, 1825 forward steps (~5 yr), as in the prototype rollouts: CM4 
 ## Metric settings
 
 `anomaly_memory` on `USWRFsfc`, `TMP2m`, `surface_temperature` and, where the arm predicts them,
-`surface_snow_amount_masked` and `surface_snow_area_fraction_masked`. Lags 0, 1, 3, 7, 14 and
+`surface_snow_amount_masked` and `surface_snow_area_fraction_masked` (treatment arms only). Lags 0, 1, 3, 7, 14 and
 30 days; scalars logged at lags 7 and 14; maps at lag 7. Leading times are restricted to the
 extended cold season per hemisphere (Nov-May north, May-Nov south). Regions are the seven snow
 boxes of the prototype plus one box covering everything north of 40S (`north_of_40S`). Region names use underscores because
@@ -52,7 +54,7 @@ aggregator's exact settings (pooled climatology, these months, raw upward shortw
 ## Launch
 
 ```bash
-./run-ace-evaluator.sh                    # all four, ai2/jupiter
+./run-ace-evaluator.sh                    # both controls, ai2/jupiter
 CLUSTER=ai2/titan ./run-ace-evaluator.sh  # elsewhere
 ./run-ace-evaluator.sh cm4                # substring filter on the job name
 ```
