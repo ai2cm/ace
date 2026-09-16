@@ -2372,8 +2372,6 @@ def test_step_with_adjustments_hybrid_residual_names():
         normalizer=normalizer,
         corrector=None,
         ocean=None,
-        residual_prediction=True,
-        prognostic_names=frozenset(names),
         residual_names=["a"],
     ).output
     torch.testing.assert_close(
@@ -2383,18 +2381,16 @@ def test_step_with_adjustments_hybrid_residual_names():
         out["b"], torch.full((1, 4, 4), 0.5, device=device)
     )  # full-field
 
-    # default (residual_names=None): every prognostic residual
-    out_all = step_with_adjustments(
+    # residual_names=None disables the residual add entirely
+    out_off = step_with_adjustments(
         input=input_data,
         next_step_input_data={},
         network_calls=network_calls,
         normalizer=normalizer,
         corrector=None,
         ocean=None,
-        residual_prediction=True,
-        prognostic_names=frozenset(names),
     ).output
-    torch.testing.assert_close(out_all["b"], torch.full((1, 4, 4), 2.5, device=device))
+    torch.testing.assert_close(out_off["a"], torch.full((1, 4, 4), 0.5, device=device))
 
 
 def _residual_names_config(**kwargs) -> SingleModuleStepConfig:

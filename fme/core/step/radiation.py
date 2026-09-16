@@ -397,8 +397,9 @@ class SeparateRadiationStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            residual_names=(
+                self.prognostic_names if self._config.residual_prediction else None
+            ),
             stepper_state=args.stepper_state,
         )
 

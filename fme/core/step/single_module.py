@@ -346,20 +346,12 @@ class SingleModuleStepConfig(StepConfigABC):
         normalizer = self.normalization.get_network_normalizer(
             sorted(self._normalize_names)
         )
-        if self.residual_prediction is not None and self.residual_prediction.normalized:
-            assert self.normalization.residual is not None
-            residual_normalizer: StandardNormalizer | None = (
-                self.normalization.residual.build(names=sorted(self.residual_names))
-            )
-        else:
-            residual_normalizer = None
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
             init_weights=init_weights,
-            residual_normalizer=residual_normalizer,
         )
 
     def load(self):
@@ -381,7 +373,6 @@ class SingleModuleStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         init_weights: Callable[[list[nn.Module]], None],
-        residual_normalizer: StandardNormalizer | None = None,
     ):
         """
         Args:
@@ -391,11 +382,6 @@ class SingleModuleStep(StepABC):
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
-            residual_normalizer: When set, rescales residual outputs by
-                ``residual_std / field_std`` in normalized space before they
-                are added to the input. Scale only: the stats convention pairs
-                full-field centering with tendency stds, so a mean tendency is
-                learned through the network output instead.
         """
         super().__init__()
         if config.global_mean_removal is not None:
@@ -426,7 +412,22 @@ class SingleModuleStep(StepABC):
         self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
-        if residual_normalizer is not None:
+        if config.residual_prediction is None:
+            self._residual_names: frozenset[str] | None = None
+        else:
+            self._residual_names = config.residual_names
+        if (
+            config.residual_prediction is not None
+            and config.residual_prediction.normalized
+        ):
+            assert config.normalization.residual is not None
+            residual_normalizer = config.normalization.residual.build(
+                names=sorted(config.residual_names)
+            )
+            # Scale residual outputs by residual_std / field_std in normalized
+            # space, so a unit network output is one tendency std. Scale only:
+            # the stats convention pairs full-field centering with tendency
+            # stds, so a mean tendency is learned through the network output.
             self._residual_transform: TensorDict | None = {
                 name: residual_normalizer.stds[name] / normalizer.stds[name]
                 for name in config.residual_names
@@ -572,9 +573,7 @@ class SingleModuleStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction is not None,
-            prognostic_names=self.prognostic_names,
-            residual_names=sorted(self._config.residual_names),
+            residual_names=self._residual_names,
             residual_transform=self._residual_transform,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             global_mean_removal=self._global_mean_removal,
@@ -739,9 +738,7 @@ def step_with_adjustments(
     normalizer: StandardNormalizer,
     corrector: CorrectorABC | None,
     ocean: Ocean | None,
-    residual_prediction: bool,
-    prognostic_names: frozenset[str],
-    residual_names: list[str] | None = None,
+    residual_names: Collection[str] | None = None,
     residual_transform: TensorMapping | None = None,
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
@@ -764,13 +761,13 @@ def step_with_adjustments(
         normalizer: The normalizer to use.
         corrector: The corrector to use at the end of each step.
         ocean: The ocean model to use.
-        residual_prediction: Whether to use residual prediction.
-        residual_names: Prognostic names stepped as residuals; the rest are
-            full-field. Defaults to all of ``prognostic_names``.
+        residual_names: Names stepped as residuals (network output added to the
+            input in normalized space); the rest are full-field. None disables
+            residual prediction.
         residual_transform: Optional per-name scale applied to residual outputs
             in normalized space, so a unit network output is one tendency
-            standard deviation. Scale only; means are never applied.
-        prognostic_names: Names of prognostic variables.
+            standard deviation. Scale only; means are never applied. Must cover
+            every name in ``residual_names``.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
         global_mean_removal: Optional transform that removes per-sample
@@ -807,14 +804,16 @@ def step_with_adjustments(
     else:
         input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
-    if residual_prediction:
-        names = prognostic_names if residual_names is None else residual_names
+    if residual_names is not None:
         if residual_transform is not None:
             output_norm = dict(output_norm)
-            for name in names:
-                if name in output_norm:
-                    output_norm[name] = output_norm[name] * residual_transform[name]
-        output_norm = add_names(input_norm, output_norm, names)
+            for name in residual_names:
+                # Indexing is deliberately strict on both dicts: a residual
+                # name the network did not produce, or a missing scale, is an
+                # invariant violation better surfaced than silently stepped
+                # full-field under the tendency convention.
+                output_norm[name] = output_norm[name] * residual_transform[name]
+        output_norm = add_names(input_norm, output_norm, residual_names)
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         assert gmr_state is not None
