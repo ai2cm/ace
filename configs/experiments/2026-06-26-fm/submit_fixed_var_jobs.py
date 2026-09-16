@@ -7,25 +7,22 @@ run's best-inference checkpoint:
 
   - training_checkpoints/best_inference_ckpt.tar -> -bestinf
 
-Pass --skip-if-in-wandb to skip jobs whose run name already exists in wandb,
-so an interrupted sweep can be re-run without resubmitting what already went
-out. Note this skips on the name existing at all, not on the run having
-finished: to retry a suite that crashed partway, delete its wandb run first.
+Pass --skip-if-in-beaker to skip jobs whose name already has a succeeded or
+running Beaker experiment, so an interrupted sweep can be re-run without
+resubmitting what already went out.
 """
 
 import argparse
 import pathlib
 
-from _submit_common import add_beaker_args, submit_job
+from _submit_common import add_beaker_args, drop_jobs_in_beaker, submit_job
 from _version_select import add_version_arg, stem_matches_version
 from generate_eval_configs import (
     CONFIG_PREFIX,
     EVAL_CHECKPOINT_NAME_SUFFIXES,
     TRAINING_RESULT_DATASETS,
-    WANDB_ENTITY,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    _fetch_wandb_run_names,
     eval_suite_config_to_run_name,
 )
 from generate_fixed_var_configs import (
@@ -140,24 +137,24 @@ def config_to_jobs(config_filename: str) -> list[tuple[str, str, str]]:
 
 
 def _jobs_to_submit(
-    config_filenames: list[str], existing_runs: set[str]
+    config_filenames: list[str], args: argparse.Namespace
 ) -> dict[str, list[tuple[str, str, str]]]:
-    """Jobs per config, dropping those whose run name is already in wandb.
+    """Jobs per config, dropping those already in Beaker (--skip-if-in-beaker).
 
     Configs left with no jobs are dropped entirely, so a fully-submitted suite
     is not validated -- validation loads every inference entry and is the slow
     part of a submit run.
     """
-    jobs = {}
-    for config_filename in config_filenames:
-        remaining = []
-        for job in config_to_jobs(config_filename):
-            if job[0] in existing_runs:
-                print(f"Skipping (already in wandb): {job[0]}")
-            else:
-                remaining.append(job)
-        if remaining:
-            jobs[config_filename] = remaining
+    all_jobs = [
+        (config_filename, job)
+        for config_filename in config_filenames
+        for job in config_to_jobs(config_filename)
+    ]
+    jobs: dict[str, list[tuple[str, str, str]]] = {}
+    for config_filename, job in drop_jobs_in_beaker(
+        all_jobs, lambda item: item[1][0], args
+    ):
+        jobs.setdefault(config_filename, []).append(job)
     return jobs
 
 
@@ -179,17 +176,7 @@ def main() -> None:
         default_cluster=["ai2/titan", "ai2/jupiter"],
         default_priority="high",
     )
-    parser.add_argument(
-        "--skip-if-in-wandb",
-        action="store_true",
-        help=(
-            "Skip jobs whose run name already exists as a run in the "
-            f"{WANDB_ENTITY}/{WANDB_PROJECT} wandb project."
-        ),
-    )
     args = parser.parse_args()
-
-    existing_runs = _fetch_wandb_run_names() if args.skip_if_in_wandb else set()
 
     configs = configs_for_version(args.version, args.base_config)
     for config_filename in configs:
@@ -200,7 +187,7 @@ def main() -> None:
                 "generate_fixed_var_configs.py first"
             )
 
-    jobs = _jobs_to_submit(configs, existing_runs)
+    jobs = _jobs_to_submit(configs, args)
     if not args.dry_run:
         validate_configs(list(jobs))
 

@@ -17,7 +17,7 @@ six GPU jobs that are already done.
 Usage:
     python submit_norm_ablation_finetune_jobs.py --regime {fm,c96} [--arm ARM]
                                         [--conditional | --no-conditional]
-                                        [--dry-run]
+                                        [--dry-run] [--skip-if-in-beaker]
                                         [--beaker-workspace WORKSPACE]
                                         [--beaker-cluster CLUSTER [CLUSTER ...]]
                                         [--beaker-priority PRIORITY]
@@ -26,7 +26,12 @@ Usage:
 import argparse
 import pathlib
 
-from _submit_common import add_beaker_args, check_configs_at_head, submit_job
+from _submit_common import (
+    add_beaker_args,
+    check_configs_at_head,
+    drop_jobs_in_beaker,
+    submit_job,
+)
 from generate_norm_ablation_configs import ARMS, CONFIG_PREFIX
 from generate_norm_ablation_finetune_configs import (
     FINETUNE_SUFFIX,
@@ -103,7 +108,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    config_filenames = selected_configs(args)
+    config_filenames = drop_jobs_in_beaker(
+        selected_configs(args), config_to_job_name, args
+    )
     config_paths = []
     for config_filename in config_filenames:
         config_path = RUN_CONFIGS_DIR / config_filename

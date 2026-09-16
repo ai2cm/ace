@@ -18,7 +18,7 @@ Usage:
                               [--perturbation {p0k,p2k,p4k} ...]
                               [--forcing-grid {era5,c96} ...]
                               [--version {v1,v2,v3}]
-                              [--skip-if-in-wandb]
+                              [--skip-if-in-beaker]
                               [--beaker-workspace WORKSPACE]
                               [--beaker-cluster CLUSTER [CLUSTER ...]]
                               [--beaker-priority PRIORITY]
@@ -29,14 +29,14 @@ import pathlib
 import subprocess
 import sys
 
-from _submit_common import add_beaker_args, check_configs_at_head, submit_job
-from _version_select import add_version_arg
-from generate_eval_configs import (
-    TRAINING_RESULT_DATASETS,
-    WANDB_ENTITY,
-    WANDB_PROJECT,
-    fetch_wandb_finished_summaries,
+from _submit_common import (
+    add_beaker_args,
+    check_configs_at_head,
+    drop_jobs_in_beaker,
+    submit_job,
 )
+from _version_select import add_version_arg
+from generate_eval_configs import TRAINING_RESULT_DATASETS, WANDB_PROJECT
 from generate_sst_configs import (
     DATASETS,
     RUN_CONFIGS_DIR,
@@ -95,14 +95,6 @@ def main() -> None:
             "Restrict to these forcing grids (default: each run's native " "grid(s))."
         ),
     )
-    parser.add_argument(
-        "--skip-if-in-wandb",
-        action="store_true",
-        help=(
-            "Skip each job whose name already has a finished run in wandb, so "
-            "a resubmission only fills in what is missing."
-        ),
-    )
     add_beaker_args(
         parser,
         default_workspace="ai2/ace",
@@ -137,20 +129,7 @@ def main() -> None:
                     )
                 )
 
-    if args.skip_if_in_wandb:
-        print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
-        finished = set(fetch_wandb_finished_summaries())
-        pending = []
-        for job in jobs:
-            run_name, grid, level, _ = job
-            if sst_job_name(run_name, grid, level) in finished:
-                print(
-                    f"Skipping (already finished in wandb): {run_name} {grid} {level}"
-                )
-            else:
-                pending.append(job)
-        print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
-        jobs = pending
+    jobs = drop_jobs_in_beaker(jobs, lambda job: sst_job_name(*job[:3]), args)
 
     needed_configs = sorted({config_filename for *_, config_filename in jobs})
     for config_filename in needed_configs:

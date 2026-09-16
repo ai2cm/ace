@@ -21,7 +21,7 @@ Usage:
                                         [--arm ARM] [--masking MASKING]
                                         [--conditional | --no-conditional]
                                         [--include-degenerate]
-                                        [--dry-run]
+                                        [--dry-run] [--skip-if-in-beaker]
                                         [--beaker-workspace WORKSPACE]
                                         [--beaker-cluster CLUSTER [CLUSTER ...]]
                                         [--beaker-priority PRIORITY]
@@ -30,7 +30,7 @@ Usage:
 import argparse
 import pathlib
 
-from _submit_common import add_beaker_args, submit_job
+from _submit_common import add_beaker_args, drop_jobs_in_beaker, submit_job
 from generate_norm_ablation_configs import (
     CONFIG_PREFIX,
     UNMASKED,
@@ -107,6 +107,7 @@ def main() -> None:
             )
         )
 
+    config_filenames = drop_jobs_in_beaker(config_filenames, config_to_job_name, args)
     for config_filename in config_filenames:
         submit_job(
             RUN_SCRIPT,
