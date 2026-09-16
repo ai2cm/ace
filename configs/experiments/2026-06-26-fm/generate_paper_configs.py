@@ -106,6 +106,26 @@ compared offline; an evaluator gives that comparison directly.
     ramped-climatological-SST random-CO2-perturbation runs, 1x/2x/4xCO2,
     2019-10-01 to the end of the store.
 
+The prescribed-SST counterpart of the paper's figure 8 (90-day global-mean
+response to abrupt 4xCO2, ensemble mean over 36 monthly initial conditions)
+takes three more kinds:
+
+``abrupt-ens-eval-sst``
+    The 4xCO2 lines: one evaluator per member of SHiELD's 36-member
+    abrupt-4xCO2 ensemble, SST, sea ice and CO2 read from that member and
+    scored against it, so the target is SHiELD's own 4xCO2 response. Needs
+    the daily 4deg abrupt-4xCO2 ensemble dataset
+    (MISSING_DATASETS["abrupt-ensemble"]); 36 jobs per run.
+``control-ens-eval-sst``
+    The 1xCO2 dashed line and ACE's control drift: the 36 monthly initial
+    conditions run 90 days on the 1xCO2 member as is, one evaluator job.
+``abrupt-ens-fixed-sst``
+    The CO2 step with the surface held at 1xCO2: ``abrupt-ens`` without the
+    slab, i.e. 1xCO2 member SST and sea ice with CO2 overwritten to 4x,
+    scored against the 1xCO2 member. The direct atmospheric CO2 response;
+    ``abrupt-ens-eval-sst`` minus this is the SST-mediated part. SHiELD never
+    ran a fixed-SST 4xCO2 experiment, so the score is a response, not a skill.
+
 Labels follow the data: ``som`` for SOM members, ``amip`` for the AMIP family,
 ``ramped`` for the random-CO2 runs. The +2 K/+4 K runs never appeared in
 training under any label; ``amip`` is the closest distribution and what the
@@ -217,7 +237,7 @@ MISSING_DATASETS = {
             "configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-8layer.yaml to 4deg "
             "with a daily time_coarsen"
         ),
-        kinds=("abrupt-ens-data-only",),
+        kinds=("abrupt-ens-data-only", "abrupt-ens-eval-sst"),
     ),
 }
 
@@ -369,6 +389,9 @@ EVALUATOR_KINDS = (
     "amip-p2k",
     "amip-data-only",
     "random-co2-eval",
+    "abrupt-ens-eval-sst",
+    "control-ens-eval-sst",
+    "abrupt-ens-fixed-sst",
 )
 KINDS = INFERENCE_KINDS + EVALUATOR_KINDS
 # Kinds run once per reference member with a fixed checkpoint, not per run.
@@ -688,14 +711,9 @@ def build_abrupt_data_only_configs() -> dict[str, dict]:
 def build_abrupt_ens_configs() -> dict[str, dict]:
     control = CLIMATES[CONTROL_CLIMATE]
     return {
-        paper_config_filename("abrupt-ens", "4xCO2"): _evaluator_config(
-            n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS,
-            forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
-            loader_dataset=_member_dataset(
-                CONTROL_CLIMATE, control.member, co2=CLIMATES["4xCO2"].co2
-            ),
-            start_indices={"times": list(ENSEMBLE_INITIAL_TIMES)},
-            data_writer=_no_files(),
+        paper_config_filename("abrupt-ens", "4xCO2"): _ensemble_evaluator_config(
+            _member_dataset(CONTROL_CLIMATE, control.member, co2=CLIMATES["4xCO2"].co2),
+            slab=True,
         )
     }
 
@@ -836,6 +854,61 @@ def build_random_co2_eval_configs() -> dict[str, dict]:
     return configs
 
 
+def _ensemble_evaluator_config(loader_dataset: dict, slab: bool) -> dict:
+    """The 36-monthly-IC, 90-day evaluator on the 1xCO2 member."""
+    return _evaluator_config(
+        n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS,
+        forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
+        loader_dataset=loader_dataset,
+        start_indices={"times": list(ENSEMBLE_INITIAL_TIMES)},
+        data_writer=_no_files(),
+        slab=slab,
+    )
+
+
+def build_abrupt_ens_eval_sst_configs() -> dict[str, dict]:
+    root = MISSING_DATASETS["abrupt-ensemble"].path
+    configs = {}
+    for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
+        member = f"ic_{n:04d}"
+        configs[paper_config_filename("abrupt-ens-eval-sst", "4xCO2", member)] = (
+            _evaluator_config(
+                n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS - 1,
+                forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
+                loader_dataset=_zarr_dataset(root, f"abrupt4xCO2-{member}.zarr"),
+                start_indices={"list": [0]},
+                data_writer=_no_files(),
+                slab=False,
+            )
+        )
+    return configs
+
+
+def build_control_ens_eval_sst_configs() -> dict[str, dict]:
+    control = CLIMATES[CONTROL_CLIMATE]
+    return {
+        paper_config_filename("control-ens-eval-sst", CONTROL_CLIMATE): (
+            _ensemble_evaluator_config(
+                _member_dataset(CONTROL_CLIMATE, control.member), slab=False
+            )
+        )
+    }
+
+
+def build_abrupt_ens_fixed_sst_configs() -> dict[str, dict]:
+    control = CLIMATES[CONTROL_CLIMATE]
+    return {
+        paper_config_filename("abrupt-ens-fixed-sst", "4xCO2"): (
+            _ensemble_evaluator_config(
+                _member_dataset(
+                    CONTROL_CLIMATE, control.member, co2=CLIMATES["4xCO2"].co2
+                ),
+                slab=False,
+            )
+        )
+    }
+
+
 BUILDERS = {
     "eq": build_eq_configs,
     "eq-nospinup": build_eq_nospinup_configs,
@@ -854,6 +927,9 @@ BUILDERS = {
     "amip-p2k": build_amip_p2k_configs,
     "amip-data-only": build_amip_data_only_configs,
     "random-co2-eval": build_random_co2_eval_configs,
+    "abrupt-ens-eval-sst": build_abrupt_ens_eval_sst_configs,
+    "control-ens-eval-sst": build_control_ens_eval_sst_configs,
+    "abrupt-ens-fixed-sst": build_abrupt_ens_fixed_sst_configs,
 }
 assert set(BUILDERS) == set(KINDS)
 

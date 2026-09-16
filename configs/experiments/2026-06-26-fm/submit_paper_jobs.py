@@ -12,7 +12,9 @@ a single checkpoint (--data-only-run) rather than once per training run.
 thousand jobs. --arm restricts to the norm-ablation cells (dropping the
 hand-written runs), and --run/--arch/--regime/--climate/--ic narrow further.
 --climate applies to the SOM kinds and random-co2-eval (1x/2x/4x); --ic to
-eq, eq-nospinup and eq-eval-sst.
+eq, eq-nospinup and eq-eval-sst; --ens-member to the per-member abrupt-4xCO2
+ensemble kinds (abrupt-ens-eval-sst, abrupt-ens-data-only), which otherwise
+expand to all 36 members.
 
 Job names are the wandb run names: ``{run}-som-{kind}-{climate}[-ic{n}]`` for
 the SOM kinds, ``{run}-amip-{variant}-eval`` and ``{run}-ramped-{climate}-eval``
@@ -31,6 +33,7 @@ Usage:
                               [--run RUN ...] [--arch ARCH ...]
                               [--regime {fm,c96} ...] [--arm {a1,a2,a3} ...]
                               [--climate CLIMATE ...] [--ic IC ...]
+                              [--ens-member N ...]
                               [--version {v1,v2,v3}]
                               [--data-only-run RUN]
                               [--skip-if-in-wandb] [--allow-missing-datasets]
@@ -147,7 +150,11 @@ def _ic_member_tag(member: str) -> str:
 
 
 def model_jobs(
-    kind: str, run_name: str, climates: list[str], ics: list[int]
+    kind: str,
+    run_name: str,
+    climates: list[str],
+    ics: list[int],
+    ens_members: list[int],
 ) -> list[Job]:
     """Jobs of a per-training-run kind for one run."""
     dataset_id = TRAINING_RESULT_DATASETS[run_name]
@@ -263,6 +270,38 @@ def model_jobs(
                         dataset_id,
                     )
                 )
+    elif kind == "abrupt-ens-eval-sst":
+        if "4xCO2" in climates:
+            for n in ens_members:
+                member = f"ic_{n:04d}"
+                jobs.append(
+                    Job(
+                        f"{run_name}-som-abrupt-4xCO2-ens-eval-sst-{_ic_member_tag(member)}",
+                        EVALUATOR_RUN_SCRIPT,
+                        (paper_config_filename(kind, "4xCO2", member),),
+                        dataset_id,
+                    )
+                )
+    elif kind == "control-ens-eval-sst":
+        if CONTROL_CLIMATE in climates:
+            jobs.append(
+                Job(
+                    f"{run_name}-som-control-ens-eval-sst",
+                    EVALUATOR_RUN_SCRIPT,
+                    (paper_config_filename(kind, CONTROL_CLIMATE),),
+                    dataset_id,
+                )
+            )
+    elif kind == "abrupt-ens-fixed-sst":
+        if "4xCO2" in climates:
+            jobs.append(
+                Job(
+                    f"{run_name}-som-abrupt-4xCO2-ens-fixed-sst",
+                    EVALUATOR_RUN_SCRIPT,
+                    (paper_config_filename(kind, "4xCO2"),),
+                    dataset_id,
+                )
+            )
     else:
         raise ValueError(f"{kind!r} is not a per-run kind")
     return jobs
@@ -273,7 +312,9 @@ def _amip_variant_tag(variant: str) -> str:
     return _ic_member_tag(variant) if variant.startswith("ic_") else variant
 
 
-def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[Job]:
+def data_only_jobs(
+    kind: str, data_only_run: str, climates: list[str], ens_members: list[int]
+) -> list[Job]:
     """Jobs of a data-only kind: one per reference member, fixed checkpoint."""
     dataset_id = TRAINING_RESULT_DATASETS[data_only_run]
     jobs = []
@@ -301,7 +342,7 @@ def data_only_jobs(kind: str, data_only_run: str, climates: list[str]) -> list[J
                 )
     elif kind == "abrupt-ens-data-only":
         if "4xCO2" in climates:
-            for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
+            for n in ens_members:
                 member = f"ic_{n:04d}"
                 jobs.append(
                     Job(
@@ -428,6 +469,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ens-member",
+        nargs="+",
+        type=int,
+        default=None,
+        choices=range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1),
+        metavar="N",
+        help=(
+            "Restrict abrupt-ens-eval-sst/abrupt-ens-data-only to these members "
+            "of the 36-member abrupt-4xCO2 ensemble (default: all)."
+        ),
+    )
+    parser.add_argument(
         "--data-only-run",
         default=DEFAULT_DATA_ONLY_RUN,
         help=(
@@ -458,6 +511,7 @@ def main() -> None:
 
     climates = args.climate or list(CLIMATES)
     ics = args.ic or list(range(1, N_INITIAL_CONDITIONS + 1))
+    ens_members = args.ens_member or list(range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1))
 
     runs = som_runs(args.version)
     if args.run is not None:
@@ -487,10 +541,10 @@ def main() -> None:
     jobs: list[Job] = []
     for kind in args.kind:
         if kind in DATA_ONLY_KINDS:
-            jobs.extend(data_only_jobs(kind, args.data_only_run, climates))
+            jobs.extend(data_only_jobs(kind, args.data_only_run, climates, ens_members))
         else:
             for run_name in runs:
-                jobs.extend(model_jobs(kind, run_name, climates, ics))
+                jobs.extend(model_jobs(kind, run_name, climates, ics, ens_members))
 
     if args.skip_if_in_wandb:
         print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
