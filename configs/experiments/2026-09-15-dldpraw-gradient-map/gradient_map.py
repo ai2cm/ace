@@ -86,6 +86,22 @@ class CapturingCorrector:
         return getattr(self._inner, name)
 
 
+class RecordingOptimization(NullOptimization):
+    """NullOptimization that keeps the accumulated losses on the graph.
+
+    ``train_on_batch`` ends with ``step_weights()``, which resets the
+    accumulated loss to a constant; the recorded terms survive that.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.losses: list[torch.Tensor] = []
+
+    def accumulate_loss(self, loss: torch.Tensor):
+        self.losses.append(loss)
+        super().accumulate_loss(loss)
+
+
 def gm(a, x):
     return (a * x).sum(HDIMS, keepdim=True)
 
@@ -145,11 +161,12 @@ def main(yaml_path: str):
         if i >= cfg.n_batches:
             break
         batch = batch.to_device()
-        opt = NullOptimization()
+        opt = RecordingOptimization()
         torch.set_grad_enabled(False)  # network forward without activation graph
         train_stepper.train_on_batch(batch, opt)  # CapturingCorrector re-enables grad
         assert torch.is_grad_enabled()
-        total = opt.get_accumulated_loss()
+        total = sum(opt.losses)
+        assert isinstance(total, torch.Tensor) and total.requires_grad
         assert cap.raw is not None and cap.final is not None
         P_raw, P_final = cap.raw, cap.final  # (n_sample * n_ens, lat, lon)
         target = batch.data[PRECIP][:, n_ic].repeat_interleave(n_ens, dim=0)
