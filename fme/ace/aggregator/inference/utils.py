@@ -1,5 +1,6 @@
 import abc
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
@@ -41,6 +42,38 @@ class LatLonRegion(Region):
     @property
     def regional_weights(self) -> torch.Tensor:
         return self._regional_weights
+
+
+@dataclass
+class LatLonBoxConfig:
+    """A named latitude-longitude box over which per-cell statistics are averaged.
+
+    Parameters:
+        name: Label used in logged metric keys.
+        lat: Inclusive (south, north) latitude bounds in degrees.
+        lon: Inclusive (west, east) longitude bounds in degrees, on the
+            grid's own longitude convention (0-360 for ACE data).
+    """
+
+    name: str
+    lat: Sequence[float]
+    lon: Sequence[float]
+
+    def __post_init__(self):
+        if len(self.lat) != 2 or len(self.lon) != 2:
+            raise ValueError(f"region {self.name}: lat and lon must each have 2 values")
+        if self.lat[0] > self.lat[1]:
+            raise ValueError(f"region {self.name}: lat bounds must be (south, north)")
+        if self.lon[0] > self.lon[1]:
+            raise ValueError(f"region {self.name}: lon bounds must be (west, east)")
+
+    def build(self, lat: torch.Tensor, lon: torch.Tensor) -> LatLonRegion:
+        return LatLonRegion(
+            lat=lat,
+            lon=lon,
+            lat_bounds=(self.lat[0], self.lat[1]),
+            lon_bounds=(self.lon[0], self.lon[1]),
+        )
 
 
 def compute_power_spectrum(

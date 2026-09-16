@@ -1,6 +1,7 @@
 from ..one_step.ensemble import EnsembleMetricConfig
 from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig
+from .anomaly_memory import AnomalyMemoryMetricConfig
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
@@ -20,5 +21,6 @@ from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig
 from .time_mean import TimeMeanMetricConfig
 from .trend import TrendMetricConfig
+from .utils import LatLonBoxConfig
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig

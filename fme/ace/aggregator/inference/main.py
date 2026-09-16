@@ -28,6 +28,7 @@ from fme.core.wandb import Table, WandB
 from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregator
 from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig, GlobalMeanAnnualAggregator
+from .anomaly_memory import AnomalyMemoryMetricConfig
 from .build_context import MetricBuildContext, MetricNotSupportedError
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
 from .enso import RegionalIndexAggregator
@@ -69,6 +70,7 @@ MetricConfig = (
     | IpoIndexMetricConfig
     | TrendMetricConfig
     | NearZeroFractionMetricConfig
+    | AnomalyMemoryMetricConfig
 )
 
 
@@ -225,6 +227,9 @@ class InferenceEvaluatorAggregatorConfig:
             logs side-by-side generated/target maps of the per-cell
             at-or-below-``eps`` fraction and the error map. Disabled by
             default.
+        anomaly_memory: Per-grid-cell lagged autocorrelation of deseasonalized
+            anomalies (memory), with region-mean scalars and maps. Disabled by
+            default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
         step_diagnostics: Granularity of metrics computed from the step
@@ -281,6 +286,9 @@ class InferenceEvaluatorAggregatorConfig:
     near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
         default_factory=NearZeroFractionMetricConfig
     )
+    anomaly_memory: AnomalyMemoryMetricConfig = dataclasses.field(
+        default_factory=AnomalyMemoryMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
@@ -326,6 +334,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.ipo_index,
             self.trend,
             self.near_zero_fraction,
+            self.anomaly_memory,
         ]
         return [m for m in all_metrics if m.enabled]
 
