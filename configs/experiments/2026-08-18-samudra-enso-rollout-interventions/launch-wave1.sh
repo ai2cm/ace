@@ -154,6 +154,18 @@ launch() {
     mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "julyrep-ufsft-hybrid" ]]; then
+    # July-pipeline replication, stage 2: their exact UFS FT config (lr 1e-4 +
+    # 2000-iter warmup, EMA .9995, 120 ep, train through 2015, lean corrector,
+    # UFS stats flat layout) + hybrid residual only. Initialized from stage 1's
+    # best_ckpt via the same /weights mount July used. Set JULYREP_CKPT_DATASET
+    # to the julyrep-cm4hybrid results dataset id.
+    config="${CONFIG_DIR}/julyrep-ufsft-hybrid.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
+            --dataset "${JULYREP_CKPT_DATASET:?set to julyrep-cm4hybrid results dataset}:/weights")
+  fi
   if [[ "$arm" == "julyrep-cm4hybrid" ]]; then
     # July-pipeline replication, stage 1: their exact CM4 pretrain config
     # (lean corrector — no OHC/energy-flux/salinity clamps, EMA .999, const
