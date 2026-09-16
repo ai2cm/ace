@@ -2,3 +2,5 @@
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M2KGYC6E1QH64KC9RXYQPP4W|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|01M2KGYTGM0T3G4RGQRQQ8TZA4|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|01M2M38RSGXTXW4PJVRN3ZPMK9|training|best_inference_ckpt|normal|--min-runtime 8h
