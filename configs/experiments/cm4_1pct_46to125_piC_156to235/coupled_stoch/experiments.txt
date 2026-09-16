@@ -11,23 +11,42 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTG
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|training|best_inference_ckpt|normal|--min-runtime 8h
 
 # =====================================================================
-# EVALUATION, added 2026-09-14 once all six coupled finetunes reached
-# epoch 8. Same two evaluations James ran on owc_a2s / owc8_a2s /
-# coupled_mse, from the shared config dir, so the numbers are directly
-# comparable to his:
+# EVALUATION, re-launched 2026-09-16 from best_inference_ckpt.
 #
 #   job_runner/evaluate.sh \
 #     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_stoch . \
 #     --config-dir configs/experiments/cm4_eval/coupled
 #
-# best_ckpt, matching James. results_dataset (field 9) is PINNED on every
-# row rather than left to evaluate.sh's `jobs[-1].result` lookup: lt0,
-# mae2, mae2ft and dt0 each carry preempted exit-1 jobs in their history,
-# and the pinned id is the exit-0 job that reached epoch 8.
+# SUPERSEDES the 2026-09-14 best_ckpt wave (18 jobs, the numbers behind
+# ai2cm/reports#103). Those mounted best_ckpt.tar -- the lowest-VALIDATION-loss
+# checkpoint -- copied from James's rows. Validation here is n_coupled_steps x
+# 5 d, i.e. a 20-day objective (40 for owc8), and it falls monotonically
+# through all 8 epochs in 8 of the 9 arms, so best_ckpt is just the LAST epoch.
+# The 20-yr inline rollout error (time_mean_norm/rmse/channel_mean over the piC
+# and 1pct inference tasks -- what best_inference_error tracks) instead peaks
+# early and then degrades in three arms:
 #
-# jupiter at high priority, not the empty-cluster default (ceres+jupiter):
-# urgent/high priority is not available on ceres, so an h100 request sits
-# queued instead of starting.
+#   dt0   best inference epoch 1, best_ckpt epoch 8  -> +30% worse rollout
+#   lt0   best inference epoch 1, best_ckpt epoch 8  -> +23%
+#   mse4  best inference epoch 1, best_ckpt epoch 7  ->  +6%
+#   crps4 best inference epoch 6, best_ckpt epoch 8  ->  +3%
+#   mae2  epoch 5 / 8 (+1%), pcfe0 epoch 7 / 8 (+0.1%)
+#   owc8 / mae2ft / mae2n: epoch 8 either way -- these three re-run to
+#   IDENTICAL numbers, included so the whole table has one provenance.
+#
+# James's three reference arms are re-run from HERE rather than from his
+# exper/2026-07-16-jamesd branch, so one launch covers all nine and his branch
+# is untouched. Their group names are his, so the wandb runs stay recognisable.
+#
+# results_dataset (field 9) is PINNED on every row rather than left to
+# evaluate.sh's `jobs[-1].result` lookup: lt0, mae2, mae2ft and dt0 each carry
+# preempted exit-1 jobs in their history, and the pinned id is the exit-0 job
+# that reached epoch 8. James's three are pinned to the datasets his own eval
+# jobs mounted.
+#
+# jupiter at high priority in ai2/ace, matching the 2026-09-14 wave. James's
+# rows used urgent; urgent preempts others' jobs and is opt-in only, so it is
+# deliberately NOT carried over.
 #
 # mae2n's experiment_id here is the relaunched 01M28Z4A89GPK0MJJDWQM4RHT1,
 # not the 01M26T4AN7KVHN718YTDBVCZ4Z of the training row above, which died
@@ -35,18 +54,24 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW9
 
 # --- 1pct-ic0001-130yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 2h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter
 
 # --- piC-ic0151-200yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 3h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter
