@@ -42,7 +42,9 @@ Four ICs per arm, 1825 forward steps (~5 yr) each, non-overlapping:
 ## Output
 
 Daily fields, written as zarr under
-`gs://vcm-ml-experiments/2026-09-13-ace2s-snow-memory-rollouts/<arm>/` and cropped to `lat_extent
+`gs://vcm-ml-experiments/2026-09-13-ace2s-snow-memory-rollouts/<arm>/` and copied on 2026-09-16 to
+`gs://vcm-ml-intermediate/2026-09-13-ace2s-snow-memory-rollouts/<arm>/` (the experiments bucket
+deletes objects after two years; read from the intermediate copy), cropped to `lat_extent
 [-40, 90]`, which covers every snow region in the analysis including the Andes:
 
 - `USWRFsfc`, `DSWRFsfc` — diagnosed albedo = USWRF/DSWRF, the control's only snow proxy and the
