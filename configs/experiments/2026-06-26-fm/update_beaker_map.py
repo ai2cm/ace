@@ -1,14 +1,19 @@
-"""Refresh wandb_to_beaker_map.json from wandb run notes.
+"""Refresh wandb_to_beaker_map.json from the Beaker workspace listing.
 
 Resolution path for each run:
-  wandb run name
-    -> run.notes  (a https://beaker.org/ex/<experiment_id> link)
-    -> beaker experiment  (may contain several retried jobs)
+  beaker experiment name (gantry job name, hash suffix stripped)
     -> latest job with exitCode 0  -> its result dataset ID
 
 A stale map happens when a training job is preempted and retried: the first
 job's result dataset has no pre_cooldown_ckpt.tar, while the succeeded retry
-writes a *new* result dataset. The map must point at the succeeded job.
+writes a *new* result dataset. The map must point at the succeeded job, which
+is why only exit-0 jobs are consulted.
+
+Only runs whose result dataset something downstream mounts enter the map:
+training and fine-tuning runs (their checkpoints), and the best-inference SST
+sweep (its prediction files). Evaluator runs and the fine-tune epoch sweep are
+excluded by name: nothing reads their datasets, and the epoch sweep alone is
+thousands of names.
 
 Usage:
     python update_beaker_map.py [--dry-run] [--map PATH]
@@ -18,55 +23,47 @@ import argparse
 import json
 import pathlib
 import re
-import subprocess
+
+from _beaker_listing import OK, fetch_experiments_by_name
 
 HERE = pathlib.Path(__file__).parent
 DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
-WANDB_ENTITY = "ai2cm"
-WANDB_PROJECT = "FM"
 
-EXPERIMENT_RE = re.compile(r"beaker\.org/ex/([0-9A-Za-z]+)")
-
-# Eval/export runs reuse a training run's name with one of these suffixes; they
-# are not training runs and must not enter the map.
+# Runs whose result datasets nothing mounts. Evaluator runs reuse a training
+# run's name with a checkpoint suffix; fixed-variable and orography evals carry
+# their own prefix; the fine-tune epoch sweep ends in an epoch segment.
 SKIP_SUFFIXES = ("-bestinf", "-besttrain", "-lastepoch")
+SKIP_PREFIXES = ("ace2-fm-fixed-", "ace2-fm-orog-")
+SKIP_PATTERNS = (re.compile(r"-sst-(era5|c96)-p\dk-e\d\d$"),)
 
 
-def _experiment_id_from_notes(notes: str | None) -> str | None:
-    if not notes:
-        return None
-    match = EXPERIMENT_RE.search(notes)
-    return match.group(1) if match else None
+def is_mapped_run(run_name: str) -> bool:
+    if run_name.endswith(SKIP_SUFFIXES):
+        return False
+    if run_name.startswith(SKIP_PREFIXES):
+        return False
+    return not any(pattern.search(run_name) for pattern in SKIP_PATTERNS)
 
 
-def _succeeded_dataset_id(experiment_id: str) -> str | None:
-    """Return the result dataset of the latest exitCode==0 job, else None."""
-    proc = subprocess.run(
-        ["beaker", "experiment", "get", experiment_id, "--format", "json"],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return None
-    experiment = json.loads(proc.stdout)[0]
-    succeeded = [
-        job
-        for job in experiment.get("jobs", [])
-        if job.get("status", {}).get("exitCode") == 0
-    ]
-    if not succeeded:
-        return None
-    # Latest by start time wins if a job somehow succeeded more than once.
-    succeeded.sort(key=lambda j: j.get("status", {}).get("started", ""))
-    return succeeded[-1].get("result", {}).get("beaker")
-
-
-def _fetch_run_notes() -> dict[str, str | None]:
-    import wandb  # lazy import: keeps the module importable without wandb
-
-    api = wandb.Api()
-    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
-    return {run.name: run.notes for run in runs}
+def resolve_map(old_map: dict[str, str]) -> dict[str, str]:
+    """`old_map` with every succeeded, mapped run added or corrected."""
+    new_map = dict(old_map)
+    for run_name, named in sorted(fetch_experiments_by_name().items()):
+        if not is_mapped_run(run_name):
+            continue
+        if named.status != OK:
+            continue
+        dataset_id = named.result_dataset
+        if dataset_id is None:
+            print(f"  skip {run_name}: succeeded job has no result dataset")
+            continue
+        previous = old_map.get(run_name)
+        if previous == dataset_id:
+            continue
+        verb = "add " if previous is None else "fix "
+        print(f"  {verb}{run_name}: {previous} -> {dataset_id}")
+        new_map[run_name] = dataset_id
+    return new_map
 
 
 def main() -> None:
@@ -88,26 +85,7 @@ def main() -> None:
     if args.map.exists():
         old_map = json.loads(args.map.read_text())
 
-    run_notes = _fetch_run_notes()
-
-    new_map = dict(old_map)
-    for run_name, notes in sorted(run_notes.items()):
-        if run_name.endswith(SKIP_SUFFIXES):
-            continue
-        experiment_id = _experiment_id_from_notes(notes)
-        if experiment_id is None:
-            print(f"  skip {run_name}: no beaker link in notes")
-            continue
-        dataset_id = _succeeded_dataset_id(experiment_id)
-        if dataset_id is None:
-            print(f"  skip {run_name}: no succeeded job / experiment unavailable")
-            continue
-        previous = old_map.get(run_name)
-        if previous == dataset_id:
-            continue
-        verb = "add " if previous is None else "fix "
-        print(f"  {verb}{run_name}: {previous} -> {dataset_id}")
-        new_map[run_name] = dataset_id
+    new_map = resolve_map(old_map)
 
     if new_map == old_map:
         print("Map already up to date.")
