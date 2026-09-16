@@ -11,7 +11,12 @@ from fme.core.atmosphere_data import (
     HasAtmosphereVerticalIntegral,
     compute_layer_thickness,
 )
-from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
+from fme.core.constants import (
+    GRAVITY,
+    RDGAS,
+    RVGAS,
+    SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
+)
 from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
@@ -43,10 +48,15 @@ class EnergyBudgetConfig:
             to the energy flux into the atmosphere when conserving total energy.
             This can be useful for correcting errors in energy budget in target data.
             The same additional heating is imposed at all time steps and grid cells.
+        preserve_relative_humidity: If True, when the temperature correction is
+            applied, also scale specific_total_water at each level so that the
+            relative humidity is unchanged. This prevents the energy correction
+            from drying the column (warming raises q_sat; fixed q lowers RH).
     """
 
     method: Literal["constant_temperature"]
     constant_unaccounted_heating: float = 0.0
+    preserve_relative_humidity: bool = False
 
 
 @dataclasses.dataclass
@@ -187,6 +197,7 @@ class TotalEnergyBudgetCorrection:
     timestep_seconds: float
     method: Literal["constant_temperature"]
     unaccounted_heating: float
+    preserve_relative_humidity: bool = False
 
     def __call__(
         self,
@@ -198,7 +209,9 @@ class TotalEnergyBudgetCorrection:
         """
         Returns:
             A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (the air temperature at every vertical level).
+            this correction (air temperature at every vertical level, and
+            optionally specific_total_water when preserve_relative_humidity
+            is True).
         """
         if self.vertical_coordinate is None:
             raise ValueError(
@@ -214,6 +227,7 @@ class TotalEnergyBudgetCorrection:
             timestep_seconds=self.timestep_seconds,
             method=self.method,
             unaccounted_heating=self.unaccounted_heating,
+            preserve_relative_humidity=self.preserve_relative_humidity,
         )
         return corrected, corrector_state
 
@@ -372,6 +386,17 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             corrections.append(
                 ConserveDryAir(area_weighted_mean, vertical_coordinate, precision)
             )
+        if self.total_energy_budget_correction is not None:
+            corrections.append(
+                TotalEnergyBudgetCorrection(
+                    area_weighted_mean,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    self.total_energy_budget_correction.method,
+                    self.total_energy_budget_correction.constant_unaccounted_heating,
+                    self.total_energy_budget_correction.preserve_relative_humidity,
+                )
+            )
         if self.zero_global_mean_moisture_advection:
             corrections.append(ZeroGlobalMeanMoistureAdvection(area_weighted_mean))
         if self.moisture_budget_correction is not None:
@@ -382,16 +407,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.moisture_budget_correction,
                     clip_frozen_precipitation=self.clip_frozen_precipitation,
-                )
-            )
-        if self.total_energy_budget_correction is not None:
-            corrections.append(
-                TotalEnergyBudgetCorrection(
-                    area_weighted_mean,
-                    vertical_coordinate,
-                    timestep_seconds,
-                    self.total_energy_budget_correction.method,
-                    self.total_energy_budget_correction.constant_unaccounted_heating,
                 )
             )
         return AtmosphereCorrector(corrections)
@@ -608,6 +623,26 @@ def _force_conserve_moisture(
     return gen.modified_data
 
 
+def _saturation_specific_humidity(
+    temperature: torch.Tensor,
+    pressure: torch.Tensor,
+) -> torch.Tensor:
+    """Saturation specific humidity over liquid water (Tetens formula)."""
+    EPSILON = RDGAS / RVGAS
+    t_celsius = temperature - 273.15
+    e_sat = 611.2 * torch.exp(17.67 * t_celsius / (t_celsius + 243.5))
+    return EPSILON * e_sat / (pressure - (1.0 - EPSILON) * e_sat)
+
+
+def _mid_level_pressure(
+    vertical_coordinate: HasAtmosphereVerticalIntegral,
+    surface_pressure: torch.Tensor,
+) -> torch.Tensor:
+    """Pressure at the midpoint of each model layer."""
+    p_interface = vertical_coordinate.interface_pressure(surface_pressure)
+    return 0.5 * (p_interface[..., :-1] + p_interface[..., 1:])
+
+
 def _force_conserve_total_energy(
     input_data: TensorMapping,
     gen_data: TensorMapping,
@@ -617,10 +652,14 @@ def _force_conserve_total_energy(
     timestep_seconds: float,
     method: Literal["constant_temperature"] = "constant_temperature",
     unaccounted_heating: float = 0.0,
+    preserve_relative_humidity: bool = False,
 ) -> TensorDict:
     """Apply a correction to the generated data to conserve total energy.
 
     This function also inserts the unaccounted heating into the generated data.
+    When ``preserve_relative_humidity`` is True, specific_total_water at each
+    level is scaled so that the relative humidity is unchanged by the
+    temperature correction.
     """
     if method != "constant_temperature":
         raise NotImplementedError(
@@ -660,9 +699,24 @@ def _force_conserve_total_energy(
 
     # apply same temperature correction to all vertical layers
     air_temperature_names = gen.get_all_vertical_level_names("air_temperature")
-    return {
+    corrected: TensorDict = {
         name: gen.data[name] + temperature_correction for name in air_temperature_names
     }
+
+    if preserve_relative_humidity:
+        mid_p = _mid_level_pressure(vertical_coordinate, gen.surface_pressure)
+        T_old = gen.air_temperature
+        T_new = T_old + temperature_correction
+        qsat_old = _saturation_specific_humidity(T_old, mid_p)
+        qsat_new = _saturation_specific_humidity(T_new, mid_p)
+        rh_scale = qsat_new / qsat_old
+        water_names = gen.get_all_vertical_level_names("specific_total_water")
+        q_old = gen.specific_total_water
+        q_new = q_old * rh_scale
+        for i, name in enumerate(water_names):
+            corrected[name] = q_new[..., i]
+
+    return corrected
 
 
 def _energy_correction_factor(
