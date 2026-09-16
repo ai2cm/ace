@@ -31,8 +31,9 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.testing import PeakTensorMemory, trivial_network_and_loss_normalization
 from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
+from fme.coupled.aggregator import OneStepAggregator as CoupledOneStepAggregator
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -2499,3 +2500,97 @@ def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
         assert {len(keys) for keys in atmos_key_sets} == {1, 4}
         for keys in atmos_key_sets:
             assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
+
+
+_OCEAN_DERIVED_NAMES = (
+    [f"thetao_{i}" for i in range(NZ - 1)]
+    + ["sst"]
+    + [f"mask_{i}" for i in range(NZ - 1)]
+)
+
+
+def _validation_peak_bytes(n_coupled_steps: int, n_samples: int) -> tuple[int, int]:
+    """Peak live tensor bytes for one frozen-atmosphere validation batch.
+
+    Returns the peak alongside the size of one atmosphere data window, so a
+    caller can express a budget in windows rather than in bytes.
+    """
+    nz_layers = NZ - 1
+    atmos_prog_names = (
+        [f"specific_total_water_{i}" for i in range(nz_layers)]
+        + [f"air_temperature_{i}" for i in range(nz_layers)]
+        + ["PRESsfc", "surface_temperature"]
+    )
+    # the default stub network keeps its channel count, so in and out must
+    # be the same length
+    atmos_forcing_names = ["ocean_fraction", "DSWRFtoa"]
+    atmos_diagnostic_names = ["LHTFLsfc", "PRATEsfc"]
+    train_stepper, coupled_data, _, dataset_info = get_train_stepper_and_batch(
+        train_stepper_config=CoupledTrainStepperConfig(
+            n_coupled_steps=n_coupled_steps,
+            n_ensemble=2,
+            ocean=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"),
+                n_steps=n_coupled_steps,
+                loss_weight=1.0,
+            ),
+            # frozen realm: contributes no loss, but its window is
+            # n_inner_steps times longer than the ocean's
+            atmosphere=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"), n_steps=0, loss_weight=0.0
+            ),
+        ),
+        ocean_in_names=_OCEAN_DERIVED_NAMES,
+        ocean_out_names=_OCEAN_DERIVED_NAMES,
+        atmosphere_in_names=atmos_prog_names + atmos_forcing_names,
+        atmosphere_out_names=atmos_prog_names + atmos_diagnostic_names,
+        n_forward_times_ocean=n_coupled_steps,
+        n_forward_times_atmosphere=2 * n_coupled_steps,
+        n_samples=n_samples,
+    )
+    aggregator = CoupledOneStepAggregator(
+        dataset_info=dataset_info, save_diagnostics=False
+    )
+    atmosphere_data = coupled_data.data.atmosphere_data.data
+    with PeakTensorMemory() as memory:
+        memory.track(dict(atmosphere_data), dict(coupled_data.data.ocean_data.data))
+        with torch.no_grad():
+            stepped = train_stepper.train_on_batch(
+                data=coupled_data.data,
+                optimization=NullOptimization(),
+                compute_derived_variables=True,
+            )
+            aggregator.record_batch(stepped)
+        peak = memory.peak
+    window_bytes = sum(v.numel() * v.element_size() for v in atmosphere_data.values())
+    return peak, window_bytes
+
+
+def test_coupled_validation_memory_scales_with_window():
+    """A validation batch holds a bounded number of atmosphere-window copies.
+
+    The frozen realm's data window is n_inner_steps times the ocean's, so
+    anything that copies or normalizes the whole window per ensemble member
+    sets the maximum affordable n_coupled_steps. This pins how many such copies
+    one batch is allowed to be worth, per atmosphere timestep, so a
+    reintroduced full-window copy shows up here rather than as an
+    out-of-memory error at depth.
+    """
+    n_samples = 2
+    shallow_steps, deep_steps = 2, 8
+    shallow_peak, shallow_window = _validation_peak_bytes(shallow_steps, n_samples)
+    deep_peak, deep_window = _validation_peak_bytes(deep_steps, n_samples)
+    # Per atmosphere timestep, in units of one timestep of the data window.
+    n_inner_steps = 2
+    bytes_per_timestep = shallow_window / (shallow_steps * n_inner_steps + 1)
+    growth = (deep_peak - shallow_peak) / ((deep_steps - shallow_steps) * n_inner_steps)
+    copies_per_timestep = growth / bytes_per_timestep
+    assert deep_window > shallow_window
+    # This setup measures 8.1; one reinstated full-window copy per ensemble
+    # member would add 2, and dropping the aggregator's window slice would take
+    # it past 16.
+    assert copies_per_timestep < 10.0, (
+        f"validation peak grows by {copies_per_timestep:.1f} atmosphere-window "
+        "copies per timestep; something is retaining or normalizing the whole "
+        "window again"
+    )
