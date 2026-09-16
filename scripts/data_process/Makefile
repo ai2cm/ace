@@ -188,9 +188,9 @@ fv3gfs_AMIP_stats_beaker_dataset: enable_coldline_check
 
 # TODO: Add AMIP baseline C48 dataset processing when available
 
-.PHONY: shield_som_spin_up_c96_dataset
+.PHONY: shield_som_c96_spin_up_dataset
 shield_som_c96_spin_up_dataset:
-	./compute_dataset.sh --config configs/shield-som-spin-up-c96-1deg-$(LAYERS).yaml
+	./compute_dataset.sh --dataset $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/shield-som-spin-up-c96-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: shield_som_ensemble_c96_dataset
 shield_som_ensemble_c96_dataset:
