@@ -59,7 +59,14 @@ class Config:
 
 
 class CapturingCorrector:
-    """Wraps the step's corrector; keeps raw and corrected PRATEsfc on the graph."""
+    """Wraps the step's corrector; keeps raw and corrected PRATEsfc on the graph.
+
+    The network runs with grad disabled (set by the caller), so no activation
+    graph is stored. Here every network output is detached, ``P_raw`` becomes
+    a leaf, and grad is switched back on, so the graph the loss builds spans
+    only corrector + loss. ``dL/dP_raw`` is the partial with the other network
+    outputs held fixed, which is the quantity wanted.
+    """
 
     def __init__(self, inner):
         self._inner = inner
@@ -67,6 +74,9 @@ class CapturingCorrector:
         self.final: torch.Tensor | None = None
 
     def __call__(self, input, output, next_step_input_data, corrector_state):
+        torch.set_grad_enabled(True)
+        output = {k: v.detach() for k, v in output.items()}
+        output[PRECIP] = output[PRECIP].requires_grad_(True)
         self.raw = output[PRECIP]
         result = self._inner(input, output, next_step_input_data, corrector_state)
         self.final = result.corrected[PRECIP]
@@ -136,7 +146,9 @@ def main(yaml_path: str):
             break
         batch = batch.to_device()
         opt = NullOptimization()
-        train_stepper.train_on_batch(batch, opt)
+        torch.set_grad_enabled(False)  # network forward without activation graph
+        train_stepper.train_on_batch(batch, opt)  # CapturingCorrector re-enables grad
+        assert torch.is_grad_enabled()
         total = opt.get_accumulated_loss()
         assert cap.raw is not None and cap.final is not None
         P_raw, P_final = cap.raw, cap.final  # (n_sample * n_ens, lat, lon)

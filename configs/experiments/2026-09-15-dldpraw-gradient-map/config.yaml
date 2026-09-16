@@ -2,7 +2,7 @@
 # val_piC window, as in the training run's validation[2].loader.
 checkpoint_path: /ckpt.tar
 output_dir: /results
-n_batches: 4
+n_batches: 8
 uniform_bias_c: 1.0
 train_mode: true
 stepper_training:  # verbatim from the run's stepper_training (wandb config)
@@ -16,7 +16,7 @@ stepper_training:  # verbatim from the run's stepper_training (wandb config)
     weights:
       h500: 5
 loader:
-  batch_size: 4
+  batch_size: 2
   num_data_workers: 2
   prefetch_factor: 2
   time_buffer: 10
