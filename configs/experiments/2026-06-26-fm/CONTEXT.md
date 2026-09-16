@@ -40,7 +40,7 @@ numbers, no file inventory.
 - **Baseline** — the A1 cell of the previous architecture tag in the same
   regime. A new architecture tag is judged against it.
 
-## Slab-ocean experiments
+## Paper-replication experiments
 
 - **Climate** — one of the 1x/2x/3x/4xCO2 slab-ocean equilibrium states of the
   SHiELD-SOM ensemble, each with its own ensemble members.
@@ -50,3 +50,12 @@ numbers, no file inventory.
   forcing set to another climate's value.
 - **Data-only evaluation** — a reference member evaluated against itself,
   giving the reference climate's diagnostics with no model skill involved.
+- **Prescribed-SST evaluation** — an evaluator run with the training-time
+  ocean (SST and sea ice read from the reference at every step) scored against
+  that reference: the SOM member (`eq-eval-sst`), an AMIP or AMIP +2 K / +4 K
+  run, or a ramped-SST random-CO2 run. The paper's AMIP inference plus
+  data-only evaluator, in one job.
+- **Held-out member** — an ensemble member the norm-ablation cells did not
+  train on: AMIP `ic_0002`, ramped `ic_0003`, SOM `ic_0005` (3xCO2 `ic_0002`).
+  The hand-written `fm-random-v1/v3` and `fm-0.x-v1` runs trained on the first
+  two as well.
