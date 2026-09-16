@@ -229,6 +229,23 @@ SHARED_TOP_LEVEL = {
     "ema_checkpoint_save_epochs": {"start": 5, "step": 5},
 }
 
+# Cells whose training seed is overridden from the regime source's `seed`.
+# Keyed like the tuples all_cells() yields: (arch, regime, arm, conditional,
+# masking), with "" for the unmasked cell.
+#
+# nc-swin-v2.1 fm A1-cond at seed 0 is deterministic and dies: its loss goes
+# non-finite on a rising fraction of training batches from step ~4500 during
+# the 1e-6 warmup learning rate, and two identical resubmissions reproduced
+# the trajectory step for step until six consecutive non-finite batches
+# tripped max_consecutive_non_finite_losses at the start of epoch 1. The
+# other 21 nc-swin-v2.1 cells cleared that window at seed 0. The seed
+# changes init, noise, drop-path and shuffle order, so this cell follows a
+# different trajectory; its nc-swin-v2 twin stays at seed 0, so a small
+# seed-variance term rides on that one comparison.
+SEED_OVERRIDES: dict[tuple[str, str, str, bool, str], int] = {
+    ("nc-swin-v2.1", "fm", "a1", True, ""): 1,
+}
+
 
 def load_base(filename: str) -> dict:
     with open(BASE_CONFIGS_DIR / filename) as f:
@@ -511,6 +528,10 @@ def build_config(
             )
     for key, value in SHARED_TOP_LEVEL.items():
         config[key] = copy.deepcopy(value)
+
+    seed_override = SEED_OVERRIDES.get((arch, regime, arm, conditional, masking))
+    if seed_override is not None:
+        config["seed"] = seed_override
 
     labels = add_labels(config)
     expected = set(REGIME_LABELS[regime])

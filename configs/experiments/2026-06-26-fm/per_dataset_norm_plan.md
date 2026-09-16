@@ -153,6 +153,12 @@ moves. The `mask10` twins of all 11 cells are written as well, so
 Submitting the masked and the unmasked cells is still one `--masking` variant
 per invocation.
 
+One cell moves off the shared seed: the unmasked `fm` A1-cond run trains at seed
+1, set by `SEED_OVERRIDES` in the generator. At seed 0 it dies deterministically
+inside the warmup non-finite-loss window — two identical reruns followed the same
+trajectory step for step — while every other cell, including its `nc-swin-v2`
+twin, stays at seed 0. That one comparison therefore carries a seed-variance term.
+
 ## Pinned variables
 
 Always use pooled stats regardless of sample group.
