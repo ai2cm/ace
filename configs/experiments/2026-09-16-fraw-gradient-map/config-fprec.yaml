@@ -1,0 +1,48 @@
+# dL/dF_raw at the pre-corrector fine-tuning checkpoint (wandb kj3ap00o, ft_precorr_fprec),
+# best_inference_ckpt, val_piC window as in the run's validation[2].loader.
+checkpoint_path: /ckpt.tar
+run_label: fprec
+output_dir: /results
+n_batches: 8
+train_mode: true
+stepper_training:  # verbatim from the run's config.yaml (corrector_loss included)
+  n_forward_steps: 1
+  n_ensemble: 2
+  corrector_loss:
+    precorrector_optimization:
+      names_and_prefixes:
+        - PRATEsfc
+        - tendency_of_total_water_path_due_to_advection
+        - total_frozen_precipitation_rate
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+    weights:
+      h500: 5
+loader:
+  batch_size: 2
+  num_data_workers: 2
+  prefetch_factor: 2
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-sea_ice.zarr
+        engine: zarr
+        dtype: float32
+        infer_timestep: true
+        spatial_dimensions: latlon
+        subset:
+          start_time: "0236-01-01T06:00:00"
+          stop_time: "0241-01-01T00:00:00"
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+        dtype: float32
+        infer_timestep: true
+        spatial_dimensions: latlon
+        subset:
+          start_time: "0236-01-01T06:00:00"
+          stop_time: "0241-01-01T00:00:00"
