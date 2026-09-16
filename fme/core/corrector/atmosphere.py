@@ -706,7 +706,9 @@ def _force_conserve_total_energy(
     if preserve_relative_humidity:
         mid_p = _mid_level_pressure(vertical_coordinate, gen.surface_pressure)
         T_old = gen.air_temperature
-        T_new = T_old + temperature_correction
+        # temperature_correction is (batch, 1, 1); T_old is (batch, lat, lon, n_levels)
+        temp_corr_4d = temperature_correction.unsqueeze(-1)
+        T_new = T_old + temp_corr_4d
         qsat_old = _saturation_specific_humidity(T_old, mid_p)
         qsat_new = _saturation_specific_humidity(T_new, mid_p)
         rh_scale = qsat_new / qsat_old
