@@ -44,16 +44,28 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # --- owclt: crps4's ocean init, long-tail coupled schedule ---
 # Pairs with crps4 (cghk183p): same init, schedule is the only change.
 #
-# 4xB200 on titan, not 8xH100: at cap 16 the H100 twin (owc8lt, 2thyv9bz) runs
-# at 98.9% median / 0.42 GiB headroom, while 4xB200 projects to ~140-143 GiB of
-# 179 (78-80%) -- the headroom crps8 already demonstrated at 82.7%. batch_size
-# is a GLOBAL batch split across ranks, so 4 GPUs means 2 samples/GPU and the
-# generated train-config.yaml is byte-identical to the H100 arm's; the cluster
-# change does not touch the experiment.
+# 8xH100 on jupiter, after the 4xB200/titan launch (01M2M7M3VB8ZVS2QTX10SJ092G)
+# was killed three times and cancelled. That failure was NOT GPU memory: the
+# B200s peaked at 154.7 GiB of 179 (86.4%) and no attempt ever raised
+# torch.OutOfMemoryError. Every death was the HOST OOM killer (torchrun root
+# cause `exitcode: -9`), with node memory at 92.6 / 93.1 / 95.7%; the middle
+# attempt instead hung rank 0 for 30 min in the inference aggregators and died
+# on a NCCL watchdog timeout. Two causes, both set by the GPU count:
+#   1. batch_size is a GLOBAL batch, so 4 ranks means 2 samples/GPU against
+#      8 ranks' 1 -- per-rank host RSS measured ~300 GiB vs ~158 GiB.
+#   2. 4 of 8 GPUs is a HALF-NODE claim (138/276 CPUs, 840 GiB shm on a
+#      2101 GiB node), so the job shares host RAM with a co-tenant. The 8-GPU
+#      twin owns its jupiter node outright (180/180 CPUs, 1868 GiB, 1494 GiB
+#      shm) and has never exceeded 83.4% node memory.
+# So GPU count is a lever on host RAM in the SAME direction as on GPU memory,
+# and 8xH100 fixes both. The generated train-config.yaml is unchanged, so this
+# stays a byte-identical fork of the owc8lt arm; only cluster and n_gpus move.
 #
-# retries 3, not 0: this is a production run with real headroom, unlike the
-# deliberate cap-16 probe that owc8lt was launched as.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4||3|ai2/ace|seed=0|8h
+# Accepted exposure: at cap 16 on 8xH100 this will sit where owc8lt sits --
+# ~99% of 79.6 GiB, revisiting that peak at each epoch's inline 20-yr rollout.
+# That is the risk elynn already took deliberately for owc8lt; retries 3 (not
+# owc8lt's probe-time 0) so a transient loss does not forfeit the run.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h
 
 # --- owc8lt: crps8's ocean init, long-tail coupled schedule ---
 # Pairs with crps8 (pxz4q8hw-initialised): same init, fixed 8 -> sampled tail.
