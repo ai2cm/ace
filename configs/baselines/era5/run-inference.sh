@@ -78,7 +78,9 @@ declare -A WANDB_GROUPS=(
 run_inference() {
   local model="$1"
   local eval_name="$2"  # e.g. 10yr-IC0, 81yr-IC1, weather-2020
-  local job_name="${model}-${eval_name}"
+  local ckpt_file="${3:-training_checkpoints/best_ckpt.tar}"
+  local suffix="${4:-}"  # optional name suffix, e.g. "-bestinf"
+  local job_name="${model}-${eval_name}${suffix}"
 
   should_run "$job_name" || { echo "skip (filter): $job_name"; return 0; }
 
@@ -86,7 +88,7 @@ run_inference() {
   local wandb_group="${WANDB_GROUPS[$model]}"
   local eval_config="evaluator-${eval_name}.yaml"
 
-  echo "launching: $job_name  (ckpt=$ckpt_dataset  config=$eval_config)"
+  echo "launching: $job_name  (ckpt=$ckpt_dataset:$ckpt_file  config=$eval_config)"
 
   gantry run \
     --name "$job_name" \
@@ -106,7 +108,7 @@ run_inference() {
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset "$ckpt_dataset":training_checkpoints/best_ckpt.tar:/ckpt.tar \
+    --dataset "$ckpt_dataset":"$ckpt_file":/ckpt.tar \
     --dataset "$EVAL_CONFIGS_DATASET":/eval-configs \
     --gpus 1 \
     --shared-memory 50GiB \
@@ -144,3 +146,21 @@ run_inference nocorr-detached 81yr-IC0
 run_inference nocorr-detached 81yr-IC1
 run_inference nocorr-detached 81yr-IC2
 run_inference nocorr-detached weather-2020
+
+# No-corr+mean BPTT — best_inference_ckpt.tar (best 5yr inference error)
+run_inference nocorr-bptt 10yr-IC0 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-bptt 10yr-IC1 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-bptt 10yr-IC2 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-bptt 81yr-IC0 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-bptt 81yr-IC1 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-bptt 81yr-IC2 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-bptt weather-2020 training_checkpoints/best_inference_ckpt.tar -bestinf
+
+# No-corr+mean detached — best_inference_ckpt.tar (best 5yr inference error)
+run_inference nocorr-detached 10yr-IC0 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-detached 10yr-IC1 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-detached 10yr-IC2 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-detached 81yr-IC0 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-detached 81yr-IC1 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-detached 81yr-IC2 training_checkpoints/best_inference_ckpt.tar -bestinf
+run_inference nocorr-detached weather-2020 training_checkpoints/best_inference_ckpt.tar -bestinf

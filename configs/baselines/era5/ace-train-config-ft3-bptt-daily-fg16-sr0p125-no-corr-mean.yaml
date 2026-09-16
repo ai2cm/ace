@@ -15,6 +15,8 @@
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
+checkpoint_save_epochs:
+  step: 5
 validate_using_ema: true
 max_epochs: 40
 ema:
