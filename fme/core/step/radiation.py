@@ -1,10 +1,9 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
-import dacite
 import torch
 from torch import nn
 
@@ -136,10 +135,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "SeparateRadiationStepConfig":
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     @property
     def _normalize_names(self) -> frozenset[str]:
