@@ -272,12 +272,13 @@ def test_logs_and_dataset_structure():
     agg = _aggregator()
     agg.record_batch(_batch(time, {"a": x}, i_time_start=0, target={"a": y}))
     logs = agg.get_logs(label="anomaly_memory")
-    assert "anomaly_memory/maps/a-lag5" in logs
-    gen = logs["anomaly_memory/prediction/a-north-lag5"]
-    target = logs["anomaly_memory/target/a-north-lag5"]
+    assert "anomaly_memory/maps/lag5/a" in logs
+    assert "anomaly_memory/difference_map/lag5/a" in logs
+    gen = logs["anomaly_memory/prediction/lag5/north/a"]
+    target = logs["anomaly_memory/target/lag5/north/a"]
     assert gen > target
-    assert logs["anomaly_memory/gap/a-north-lag5"] == pytest.approx(gen - target)
-    assert logs["anomaly_memory/variance_ratio/a-north"] > 1.0
+    assert logs["anomaly_memory/gap/lag5/north/a"] == pytest.approx(gen - target)
+    assert logs["anomaly_memory/anomaly_std_ratio/north/a"] > 1.5
     ds = agg.get_dataset()
     assert ds["corr-a"].dims == ("source", "lag", "lat", "lon")
     assert ds["variance-a"].dims == ("source", "lat", "lon")

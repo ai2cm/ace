@@ -236,8 +236,8 @@ class AnomalyMemoryAggregator:
     over the record and over samples. For snow and the surface fluxes it
     controls, this is the reservoir memory that a model without prognostic
     snow lacks. The metric is normalized by the anomaly variance, so it is
-    blind to drift and to amplitude errors; the lag-0 variance is reported
-    alongside as the complement.
+    blind to drift and to amplitude errors; the ratio of anomaly standard
+    deviations is reported alongside as the amplitude complement.
 
     Statistics are accumulated per cell in a single streaming pass (see
     ``LaggedAnomalyMoments``) for the prediction and the target, then
@@ -390,15 +390,18 @@ class AnomalyMemoryAggregator:
         values = torch.where(finite, field, torch.zeros_like(field))
         return float((values * weights).sum() / total)
 
-    def _caption(self, name: str, lag: int) -> str:
-        if name in self._variable_metadata:
-            display = self._variable_metadata[name].display_long_name(name)
-        else:
-            display = name
-        return (
-            f"{display} anomaly autocorrelation at lag {lag}; "
+    _image_captions = {
+        "maps": (
+            "{name} anomaly autocorrelation at lag {lag}; "
             "(left) target and (right) generated"
-        )
+        ),
+        "difference_map": (
+            "{name} anomaly autocorrelation at lag {lag}, generated minus target"
+        ),
+    }
+
+    def _caption(self, key: str, name: str, lag: int) -> str:
+        return self._image_captions[key].format(name=self._long_name(name), lag=lag)
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, Any]:
@@ -412,24 +415,35 @@ class AnomalyMemoryAggregator:
             target_cov = covariances["target"][name]
             gen_corr = self._correlation(gen_cov)
             target_corr = self._correlation(target_cov)
-            for region in self._regions:
-                for lag in self._report_lags:
-                    i = self._lags.index(lag)
-                    key = f"{name}-{region.name}-lag{lag}"
+            for lag in self._report_lags:
+                i = self._lags.index(lag)
+                for region in self._regions:
+                    key = f"lag{lag}/{region.name}/{name}"
                     gen_value = self._region_mean(gen_corr[i], region.name)
                     target_value = self._region_mean(target_corr[i], region.name)
                     metrics[f"prediction/{key}"] = gen_value
                     metrics[f"target/{key}"] = target_value
                     metrics[f"gap/{key}"] = gen_value - target_value
-                metrics[f"variance_ratio/{name}-{region.name}"] = self._region_mean(
-                    gen_cov[0], region.name
-                ) / self._region_mean(target_cov[0], region.name)
+            for region in self._regions:
+                metrics[f"anomaly_std_ratio/{region.name}/{name}"] = float(
+                    np.sqrt(
+                        self._region_mean(gen_cov[0], region.name)
+                        / self._region_mean(target_cov[0], region.name)
+                    )
+                )
             for lag in self._map_lags:
                 i = self._lags.index(lag)
-                images[f"maps/{name}-lag{lag}"] = plot_paneled_data(
-                    [[target_corr[i].cpu().numpy(), gen_corr[i].cpu().numpy()]],
+                target_map = target_corr[i].cpu().numpy()
+                gen_map = gen_corr[i].cpu().numpy()
+                images[f"maps/lag{lag}/{name}"] = plot_paneled_data(
+                    [[target_map, gen_map]],
                     diverging=True,
-                    caption=self._caption(name, lag),
+                    caption=self._caption("maps", name, lag),
+                )
+                images[f"difference_map/lag{lag}/{name}"] = plot_paneled_data(
+                    [[gen_map - target_map]],
+                    diverging=True,
+                    caption=self._caption("difference_map", name, lag),
                 )
         logs: dict[str, Any] = {}
         if len(label) > 0:
@@ -501,11 +515,15 @@ class AnomalyMemoryMetricConfig:
     For each variable, the correlation between a cell's anomaly from its
     seasonal climatology and the anomaly ``lag`` steps later, for the
     prediction and the target, accumulated in a single pass. Region-mean
-    scalars, side-by-side maps at selected lags and the full curves are
-    reported. The seasonal climatology is a constant plus three annual
-    harmonics fit per cell over the whole record. Intended for fields with a
-    slow reservoir such as snow and the surface fluxes it controls. Disabled
-    by default.
+    scalars are logged as ``{prediction,target,gap}/lag<L>/<region>/<var>``,
+    the ratio of predicted to target anomaly standard deviation (each relative
+    to its own climatology, so it measures anomaly amplitude independent of
+    bias) as ``anomaly_std_ratio/<region>/<var>``, maps as ``maps/lag<L>/<var>``
+    (target beside prediction) and ``difference_map/lag<L>/<var>``, and the
+    full curves go to the dataset.
+    The seasonal climatology is a constant plus three annual harmonics fit per
+    cell over the whole record. Intended for fields with a slow reservoir such
+    as snow and the surface fluxes it controls. Disabled by default.
 
     Parameters:
         variables: Variables to compute memory for. If ``None``, all
