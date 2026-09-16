@@ -154,6 +154,16 @@ launch() {
     mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
             --dataset "${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}:training_checkpoints/best_inference_ckpt.tar:/base_ckpt.tar")
   fi
+  if [[ "$arm" == "hybridufsft-v2-ext" ]]; then
+    # continuation of hybridufsft-v2-weka: +180 epochs (300 total), constant LR,
+    # seeded from the v2 final training checkpoint. Inline rollout rmse was
+    # still falling at epoch 120 (best = last, 0.245).
+    config="${CONFIG_DIR}/hybridufsft-v2-ext.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "01KWAQMR2Q4HBT1271N9CJDXTQ:/ocean_stats"
+            --dataset "${V2_PREV_CKPT_DATASET:-01M2KQZKVYFD273426Z60GXYAM}:training_checkpoints/ckpt.tar:/prev_ckpt.tar")
+  fi
   if [[ "$arm" == "hybridufsft-ext2" ]]; then
     # second continuation: +180 epochs from the 120-epoch checkpoint (300 total).
     # Val bottomed ~ep90 but inline-rollout rmse was still falling at 120;
