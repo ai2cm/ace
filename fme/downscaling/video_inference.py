@@ -124,6 +124,20 @@ def _reference_time_and_attrs(
     return time, attrs
 
 
+def _all_slices_written(
+    writer: ZarrWriter, time_slices: list[slice], ensemble_slice: slice
+) -> bool:
+    """True if every clip's time slice in a raw batch is already fully
+    written (all variables, no fill-value gaps) -- i.e. this whole raw
+    batch can be skipped without generating anything, when resuming a
+    killed run. False as soon as any clip isn't (short-circuits).
+    """
+    return all(
+        writer.is_slice_written({TIME_NAME: ts, ENSEMBLE_NAME: ensemble_slice})
+        for ts in time_slices
+    )
+
+
 @dataclass
 class VideoInferenceConfig:
     """Config for running test-set inference with a trained video PMD model.
@@ -144,11 +158,27 @@ class VideoInferenceConfig:
     # Cap the number of batches processed per rank; for smoke tests.
     max_batches: int | None = None
     # If True, overwrite an existing store at output_path (mode="w") instead
-    # of the safe default (mode="w-", fail if it already exists). Use this
-    # while iterating on a run that keeps failing/retrying; leave False once
-    # a run is expected to succeed, so a completed store can't be clobbered
-    # by accident.
+    # of the safe default (mode="w-", fail if it already exists). This
+    # REDOES ALL WORK FROM SCRATCH -- every batch is regenerated and
+    # rewritten, even ones a prior (killed) attempt already wrote correctly.
+    # Use this for an intentional from-scratch restart; for resuming a
+    # killed run without redoing completed work, use `resume` instead.
+    # Mutually exclusive with resume.
     overwrite: bool = False
+    # If True, open an existing store at output_path (mode="a"; creates it
+    # if it doesn't exist yet) and skip regenerating any raw batch whose
+    # clips are ALL already fully written (per ZarrWriter.is_slice_written),
+    # instead of always starting over from batch 0. This is what a restart
+    # after a preemption/cordon/OOM should use -- see
+    # fme/core/writer.py's is_slice_written docstring and
+    # fme/downscaling/inference/output.py's DownscalingOutputConfig.resume
+    # for the same pattern already used by the plain (non-video) inference
+    # path. A raw batch that was only PARTIALLY written when a prior attempt
+    # was killed (some but not all of its clips/variables) is treated as not
+    # written and regenerated in full -- this can rewrite a few already-
+    # correct clips redundantly, but never leaves a gap. Mutually exclusive
+    # with overwrite.
+    resume: bool = False
     # If True, generate the requested domain (data.lat_extent/lon_extent) by
     # tiling it into coarse_patch_extent-sized patches (see
     # VideoPatchPredictor), generating each independently, and compositing
@@ -179,6 +209,12 @@ class VideoInferenceConfig:
             raise ValueError(
                 "coarse_patch_extent must be [lat, lon], got "
                 f"{self.coarse_patch_extent}."
+            )
+        if self.overwrite and self.resume:
+            raise ValueError(
+                "overwrite and resume are mutually exclusive: overwrite "
+                "always redoes all work from scratch, resume skips work "
+                "already done."
             )
 
     def configure_logging(self, log_filename: str) -> None:
@@ -283,15 +319,49 @@ def run_inference(config: VideoInferenceConfig) -> None:
         nondim_coords={
             "frame_source": xr.DataArray(frame_source, dims=[TIME_NAME]),
         },
-        mode="w" if config.overwrite else "w-",
+        mode="a" if config.resume else ("w" if config.overwrite else "w-"),
+        # Resume's own is_slice_written check (below) is the safety net
+        # during a resumed run -- it only lets a genuinely-incomplete raw
+        # batch reach record_batch at all. ZarrWriter's own overwrite_check
+        # would otherwise block legitimately re-writing a batch that has
+        # some but not all of its clips/variables already written from the
+        # prior (killed) attempt. See fme/downscaling/inference/output.py's
+        # get_writer for the same reasoning.
+        overwrite_check=not config.resume,
         time_calendar="julian",
     )
     writer.initialize_store(data_dtype=np.float32)
 
+    ensemble_slice = slice(0, config.n_ensemble)
     n_batches = len(griddata.loader)
     for i, batch in enumerate(itertools.chain([first_batch], batch_iterator)):
         if config.max_batches is not None and i >= config.max_batches:
             break
+
+        # Time slices only depend on this batch's own clip start times, not
+        # on anything generated -- compute them before generation so a
+        # resumed run can skip the (expensive) generation step entirely for
+        # a raw batch whose clips are all already written, not just skip
+        # the write.
+        clip_times = batch.fine.time.values  # (B, T) cftime
+        batch_size = clip_times.shape[0]
+        time_slices = []
+        for b in range(batch_size):
+            start_idx = int(np.searchsorted(time, clip_times[b, 0]))
+            if time[start_idx] != clip_times[b, 0]:
+                raise ValueError(
+                    f"Clip start time {clip_times[b, 0]} not found in the "
+                    "reference test time axis; data/config mismatch."
+                )
+            is_last_clip = start_idx + (n_timesteps - 1) == n_time - 1
+            n_frames_to_write = n_timesteps if is_last_clip else n_timesteps - 1
+            time_slices.append(slice(start_idx, start_idx + n_frames_to_write))
+
+        if config.resume and _all_slices_written(writer, time_slices, ensemble_slice):
+            logger.info(
+                f"Rank {dist.rank}: batch {i + 1}/{n_batches} already written, skipping"
+            )
+            continue
 
         remaining = config.n_ensemble
         ensemble_chunks: dict[str, list[torch.Tensor]] = {
@@ -318,19 +388,16 @@ def run_inference(config: VideoInferenceConfig) -> None:
                     -1, config.n_ensemble, -1, -1
                 )
 
-        clip_times = batch.fine.time.values  # (B, T) cftime
-        batch_size = clip_times.shape[0]
-        for b in range(batch_size):
-            start_idx = int(np.searchsorted(time, clip_times[b, 0]))
-            if time[start_idx] != clip_times[b, 0]:
-                raise ValueError(
-                    f"Clip start time {clip_times[b, 0]} not found in the "
-                    "reference test time axis; data/config mismatch."
-                )
-            is_last_clip = start_idx + (n_timesteps - 1) == n_time - 1
-            n_frames_to_write = n_timesteps if is_last_clip else n_timesteps - 1
-            time_slice = slice(start_idx, start_idx + n_frames_to_write)
-
+        for b, time_slice in enumerate(time_slices):
+            if config.resume and writer.is_slice_written(
+                {TIME_NAME: time_slice, ENSEMBLE_NAME: ensemble_slice}
+            ):
+                # Only reachable for a raw batch that was PARTIALLY written
+                # (some clips done, some not) when a prior attempt was
+                # killed -- _all_slices_written above already sent a fully-
+                # written batch to `continue` before generation ran.
+                continue
+            n_frames_to_write = time_slice.stop - time_slice.start
             write_data = {
                 name: full[name][b, :, :n_frames_to_write]
                 .permute(1, 0, 2, 3)  # (n_ensemble, T', H, W) -> (T', n_ensemble, H, W)
@@ -343,7 +410,7 @@ def run_inference(config: VideoInferenceConfig) -> None:
                 write_data,
                 position_slices={
                     TIME_NAME: time_slice,
-                    ENSEMBLE_NAME: slice(0, config.n_ensemble),
+                    ENSEMBLE_NAME: ensemble_slice,
                 },
             )
 

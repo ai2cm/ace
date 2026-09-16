@@ -37,13 +37,25 @@
 #
 # Checkpoint dataset: 01M26N8CBHE5DB0KG08WPR5EWV (result of task
 # 01M26N8CEXNVCQ326E16HK4SST / job 01M26N8CB71XEDD5T40BCZFA67)
+#
+# RESUME, not overwrite (added 2026-09-16, fme/downscaling/video_inference.py):
+# the first attempt (01M2GGAVQYTQVHGDC5X91FZ0PC on titan) burned ~2 days
+# across 3 job attempts with zero net progress -- every restart re-ran with
+# overwrite=true, which unconditionally wipes the output zarr, so a node
+# cordon after 19.5h of real generation (batch 15/92) lost all of it. resume
+# opens the existing store (mode="a") and skips any raw batch whose clips
+# are already fully written (ZarrWriter.is_slice_written), matching the
+# pattern already used by fme.downscaling.inference (the plain/non-video
+# path) -- see VideoInferenceConfig.resume's docstring. Safe to resubmit
+# this exact config after any future preemption/cordon: it will pick up
+# from wherever the last attempt left off instead of starting over.
 checkpoint_path: /checkpoint/checkpoints/best.ckpt
 experiment_dir: /results
 output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-hiro-patch/test-2023-2024-ens4-global.zarr
 n_ensemble: 4
 ensemble_chunk_size: 1
 use_ema: true
-overwrite: true
+resume: true
 divide_generation: true
 coarse_patch_extent: [16, 16]
 coarse_horizontal_overlap: 1
