@@ -1,0 +1,10 @@
+name: glorys-ingest
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - esmpy
+  - xesmf>=0.8
+  - pip
+  - pip:
+    - -r dataflow-requirements.txt
