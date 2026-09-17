@@ -325,7 +325,7 @@ def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
     np.testing.assert_array_equal(read_all["var"][:2], 0.0)
 
 
-def test_ZarrWriter_records_storage_timings(tmp_path):
+def test_ZarrWriter_records_data_writer_io(tmp_path):
     path = os.path.join(tmp_path, "test.zarr")
     writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
     with GlobalTimer():
@@ -336,8 +336,7 @@ def test_ZarrWriter_records_storage_timings(tmp_path):
         )
         writer.read_batch(["var"], position_slices={"time": slice(0, 2)})
         durations = timer.get_durations()
-    assert durations["storage_write"] > 0.0
-    assert durations["storage_read"] > 0.0
+    assert durations["data_writer_io"] > 0.0
 
 
 def test_ZarrWriter_read_batch_before_initialization_errors(tmp_path):

@@ -65,9 +65,9 @@ def test_benchmark_writes_and_logs_throughput(tmp_path, format_):
     n_windows = N_FORWARD_STEPS // FORWARD_STEPS_IN_MEMORY
     assert summary["total_mb_written"] > 0.0
     assert summary["write_mb_per_s"] > 0.0
-    assert summary["storage_write_mb_per_s"] > 0.0
+    assert summary["data_writer_io_mb_per_s"] > 0.0
     assert summary["data_writer"] > 0.0
-    assert summary["storage_write"] <= summary["data_writer"]
+    assert summary["data_writer_io"] <= summary["data_writer"]
     assert len(logs) == n_windows
     for step_logs in logs:
         assert step_logs["seconds_per_window"] >= 0.0
@@ -109,5 +109,5 @@ def test_benchmark_errors_when_nothing_is_written(tmp_path):
         ),
     )
     with mock_wandb():
-        with pytest.raises(RuntimeError, match="No storage write time"):
+        with pytest.raises(RuntimeError, match="No data writer I/O time"):
             benchmark(config)

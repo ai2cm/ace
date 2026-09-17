@@ -226,7 +226,7 @@ class RawDataWriter:
 
             data_numpy = data[variable_name].detach().cpu().numpy()
             # Append the data to the variables
-            with timer.context("storage_write"):
+            with timer.context("data_writer_io"):
                 self.dataset.variables[variable_name][
                     :,
                     current_lead_time_size : current_lead_time_size
@@ -238,7 +238,7 @@ class RawDataWriter:
             self.initial_condition_times,
             batch_time.values,
         )
-        with timer.context("storage_write"):
+        with timer.context("data_writer_io"):
             self.dataset.variables[LEAD_TIME_DIM][
                 current_lead_time_size : current_lead_time_size
                 + lead_time_microseconds.shape[0]
@@ -249,7 +249,7 @@ class RawDataWriter:
             units=self.dataset.variables[VALID_TIME].units,
             calendar=self.dataset.variables[VALID_TIME].calendar,
         )
-        with timer.context("storage_write"):
+        with timer.context("data_writer_io"):
             self.dataset.variables[VALID_TIME][
                 :,
                 current_lead_time_size : current_lead_time_size

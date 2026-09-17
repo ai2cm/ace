@@ -350,7 +350,7 @@ class ZarrWriter:
         }
         write_data = {v: data[v] for v in self._data_vars or data.keys()}
         timer = GlobalTimer.get_instance()
-        with timer.context("storage_write"):
+        with timer.context("data_writer_io"):
             _insert_into_zarr(
                 self._path, write_data, indexed_position_slices, self._overwrite_check
             )
@@ -384,7 +384,7 @@ class ZarrWriter:
             self._dims.index(dim): position_slices[dim] for dim in position_slices
         }
         timer = GlobalTimer.get_instance()
-        with timer.context("storage_read"):
+        with timer.context("data_writer_io"):
             return _read_from_zarr(self._path, names, indexed_position_slices)
 
     def initialize_store(
