@@ -11,7 +11,6 @@ import zarr
 from zarr.core.sync import sync
 
 from fme.core.distributed import Distributed
-from fme.core.timing import GlobalTimer
 
 logger = logging.getLogger(__name__)
 DATETIME_ENCODING_UNITS = "microseconds since 1970-01-01"
@@ -389,11 +388,9 @@ class ZarrWriter:
             for dim in position_slices.keys()
         }
         write_data = {v: data[v] for v in self._data_vars or data.keys()}
-        timer = GlobalTimer.get_instance()
-        with timer.context("storage_write"):
-            _insert_into_zarr(
-                self._path, write_data, indexed_position_slices, self._overwrite_check
-            )
+        _insert_into_zarr(
+            self._path, write_data, indexed_position_slices, self._overwrite_check
+        )
 
     def read_batch(
         self, names: Sequence[str], position_slices: Mapping[str, slice]
@@ -423,9 +420,7 @@ class ZarrWriter:
         indexed_position_slices = {
             self._dims.index(dim): position_slices[dim] for dim in position_slices
         }
-        timer = GlobalTimer.get_instance()
-        with timer.context("storage_read"):
-            return _read_from_zarr(self._path, names, indexed_position_slices)
+        return _read_from_zarr(self._path, names, indexed_position_slices)
 
     def initialize_store(
         self, data_dtype: np.dtype | str, data_vars: list[str] | None = None

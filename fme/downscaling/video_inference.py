@@ -30,7 +30,6 @@ from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
-from fme.core.timing import GlobalTimer
 from fme.core.writer import ZarrWriter
 from fme.downscaling.data import PairedVideoGriddedData, PairedVideoLoaderConfig
 from fme.downscaling.inference.zarr_utils import determine_zarr_chunks
@@ -406,10 +405,7 @@ def main(config_path: str) -> None:
     prepare_directory(inference_config.experiment_dir, config)
     inference_config.configure_logging(log_filename="out.log")
     logging.info("Starting video diffusion test-set inference")
-    with GlobalTimer():
-        timer = GlobalTimer.get_instance()
-        inference_config.build().run()
-        timer.log_durations()
+    inference_config.build().run()
 
 
 def parse_args():

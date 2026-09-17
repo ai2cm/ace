@@ -5,6 +5,7 @@ separately from the loader that feeds them.
 
 import argparse
 import dataclasses
+import datetime
 import logging
 import os
 import shutil
@@ -39,7 +40,10 @@ class BenchmarkConfig:
 
     Parameters:
         experiment_dir: Directory to write output to. May be local or a remote
-            path recognized by fsspec, such as ``gs://bucket/results``.
+            path recognized by fsspec, such as ``gs://bucket/results``. Each run
+            writes into its own timestamped subdirectory, so a rerun neither
+            overwrites nor deletes earlier output and its timing is unaffected
+            by what is already there.
         loader: Parameters for the inference data loader supplying the windows
             that are written. The inference loader is required because its
             windows tile the time axis, whereas training loader windows start at
@@ -100,9 +104,11 @@ class BenchmarkConfig:
             ),
         )
 
-    def build_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
+    def build_writer(
+        self, data: InferenceGriddedData, output_dir: str
+    ) -> PairedDataWriter:
         return self.data_writer.build_paired(
-            experiment_dir=self.experiment_dir,
+            experiment_dir=output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
@@ -119,6 +125,11 @@ class BenchmarkConfig:
         )
 
 
+def _run_output_dir(experiment_dir: str) -> str:
+    timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H%M%SZ")
+    return os.path.join(experiment_dir, f"{timestamp}-{uuid.uuid4().hex[:6]}")
+
+
 def _payload_bytes(data: dict[str, torch.Tensor]) -> int:
     return sum(tensor.numel() * tensor.element_size() for tensor in data.values())
 
@@ -131,10 +142,12 @@ def benchmark(config: BenchmarkConfig):
         timer = GlobalTimer.get_instance()
         logging.info("Initializing data loader and writers.")
         with timer.context("initialization"):
-            makedirs(config.experiment_dir, exist_ok=True)
+            output_dir = _run_output_dir(config.experiment_dir)
+            logging.info(f"Writing benchmark output to {output_dir}")
+            makedirs(output_dir, exist_ok=True)
             data = config.build_data()
             loader = data.loader
-            writer = config.build_writer(data)
+            writer = config.build_writer(data, output_dir)
 
         n_windows = len(loader)
         total_bytes = 0
@@ -172,26 +185,25 @@ def benchmark(config: BenchmarkConfig):
             writer.finalize()
 
         durations = timer.get_durations()
-        if "storage_write" not in durations:
+        if "data_writer_io" not in durations:
             raise RuntimeError(
-                "No storage write time was recorded, so the write throughput "
+                "No data writer I/O time was recorded, so the write throughput "
                 "cannot be separated from writer overhead. The configured writers "
                 "do not time their storage calls."
             )
         total_time = durations["data_loading"] + durations["data_writer"]
-        write_throughput = total_bytes / durations["data_writer"]
-        logging.info(f"Write throughput achieved: {write_throughput / 1e6:.2f} MB/s")
-        logging.info("Timer results:")
-        timer.log_durations()
-        wandb_logs = durations | {
+        summary = durations | {
             "total_time": total_time,
             "mb_per_window": bytes_per_window / 1e6,
             "total_mb_written": total_bytes / 1e6,
-            "write_mb_per_s": write_throughput / 1e6,
+            "write_mb_per_s": total_bytes / durations["data_writer"] / 1e6,
             "throughput_mb_per_s": total_bytes / total_time / 1e6,
-            "storage_write_mb_per_s": total_bytes / durations["storage_write"] / 1e6,
+            "data_writer_io_mb_per_s": total_bytes / durations["data_writer_io"] / 1e6,
         }
-        wandb.log(wandb_logs, step=n_windows - 1)
+        logging.info("Benchmark summary:")
+        for name, value in summary.items():
+            logging.info(f"{name}: {value:.2f}")
+        wandb.log(summary, step=n_windows - 1)
     shutil.rmtree(TMPDIR, ignore_errors=True)
 
 

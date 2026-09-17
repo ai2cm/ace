@@ -10,7 +10,6 @@ import yaml
 from fme.core.cli import prepare_directory
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
-from fme.core.timing import GlobalTimer
 
 from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
@@ -256,7 +255,4 @@ def main(config_path: str):
     logging.info("Starting downscaling generation...")
     downscaler = generation_config.build()
     logging.info(f"Number of parameters: {count_parameters(downscaler.model.modules)}")
-    with GlobalTimer():
-        timer = GlobalTimer.get_instance()
-        downscaler.run_all()
-        timer.log_durations()
+    downscaler.run_all()

@@ -65,6 +65,7 @@ Table of contents
 
    Training <training_config>
    Inference <inference_config>
+   Advanced inference <advanced_inference>
    Evaluator <evaluator_config>
 
 .. toctree::

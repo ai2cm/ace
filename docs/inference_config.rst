@@ -38,6 +38,8 @@ While netCDFs files are specified in the example, zarr stores are also compatibl
 specifying the parent folder containing the zarr store directory as the ``path``, setting ``engine`` to "zarr", and setting ``file_pattern`` to "<zarr_store_name>.zarr"
 in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for more information.
 
+.. _example-yaml-configuration:
+
 Example YAML Configuration
 ---------------------------
 

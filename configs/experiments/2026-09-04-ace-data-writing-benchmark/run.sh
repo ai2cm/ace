@@ -40,3 +40,5 @@ run_arm() {
 
 run_arm weka config-weka.yaml
 run_arm gcs config-gcs.yaml
+run_arm weka-monthly config-weka-monthly.yaml
+run_arm gcs-monthly config-gcs-monthly.yaml

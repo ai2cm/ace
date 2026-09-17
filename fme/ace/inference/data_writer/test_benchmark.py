@@ -65,12 +65,27 @@ def test_benchmark_writes_and_logs_throughput(tmp_path, format_):
     n_windows = N_FORWARD_STEPS // FORWARD_STEPS_IN_MEMORY
     assert summary["total_mb_written"] > 0.0
     assert summary["write_mb_per_s"] > 0.0
-    assert summary["storage_write_mb_per_s"] > 0.0
+    assert summary["data_writer_io_mb_per_s"] > 0.0
     assert summary["data_writer"] > 0.0
-    assert summary["storage_write"] <= summary["data_writer"]
+    assert summary["data_writer_io"] <= summary["data_writer"]
     assert len(logs) == n_windows
     for step_logs in logs:
         assert step_logs["seconds_per_window"] >= 0.0
+
+
+def test_benchmark_reruns_write_to_separate_directories(tmp_path):
+    """A rerun must not overwrite or delete an earlier run's output, so its
+    timing is unaffected by what the experiment directory already holds."""
+    config = get_config(
+        tmp_path, data_writer=get_file_writer_config(ZarrWriterConfig())
+    )
+    for _ in range(2):
+        with mock_wandb():
+            benchmark(config)
+    run_dirs = sorted(p for p in (tmp_path / "output").iterdir() if p.is_dir())
+    assert len(run_dirs) == 2
+    for run_dir in run_dirs:
+        assert (run_dir / "predictions.zarr").is_dir()
 
 
 def test_benchmark_rejects_reference_writers(tmp_path):
@@ -109,5 +124,5 @@ def test_benchmark_errors_when_nothing_is_written(tmp_path):
         ),
     )
     with mock_wandb():
-        with pytest.raises(RuntimeError, match="No storage write time"):
+        with pytest.raises(RuntimeError, match="No data writer I/O time"):
             benchmark(config)

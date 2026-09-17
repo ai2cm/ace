@@ -690,9 +690,9 @@ class TestDataWriter:
                 np.testing.assert_equal(ds.time.values, expected_time)
 
 
-def test_default_netcdf_writers_record_storage_timings(tmp_path):
-    """The default config writes netCDF only, so its storage time must be timed
-    for the data_writer breakdown to account for it."""
+def test_default_netcdf_writers_record_data_writer_io(tmp_path):
+    """The default config writes netCDF only, so its storage calls must be timed
+    for the data_writer breakdown to account for them."""
     n_initial_conditions, n_times = 2, 3
     shape = (n_initial_conditions, n_times, 4, 5)
     initial_condition_times = get_initial_condition_times(
@@ -720,9 +720,7 @@ def test_default_netcdf_writers_record_storage_timings(tmp_path):
         writer.append_batch(get_paired_data(data, {}, batch_time))
         writer.finalize()
         durations = timer.get_durations()
-    assert durations["storage_write"] > 0.0
-    # the monthly writer folds each batch into the values already on disk
-    assert durations["storage_read"] > 0.0
+    assert durations["data_writer_io"] > 0.0
 
 
 def test_data_writer_validate_filenames_duplicate():
