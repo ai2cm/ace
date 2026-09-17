@@ -1992,5 +1992,13 @@
   "ace2-fm-nc-swin-v2-c96-a3-cond-som-eq-dataCO2-1000yr-sstslab-inference-2xCO2": "01M2PRZ1MHBJTM6XSDCTNCVVYK",
   "ace2-fm-nc-swin-v2-fm-a3-cond-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M2PS1ND7G2JQFZY62MN5B5AQ",
   "ace2-fm-nc-swin-v2-fm-a3-cond-som-eq-dataCO2-1000yr-sstslab-inference-3xCO2": "01M2PS1WBEZDE6GSKAK8DQTQZ0",
-  "ace2-fm-nc-swin-v2-fm-a3-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M2PVWZ8ZB5E8JMWW7HY1RM1G"
+  "ace2-fm-nc-swin-v2-fm-a3-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M2PVWZ8ZB5E8JMWW7HY1RM1G",
+  "ace2-fm-nc-sfno-c96-a1-cond-som-eq-dataCO2-1000yr-sstslab-inference-4xCO2": "01M2Q7D5CXBWCCZSYAFMYNPNP8",
+  "ace2-fm-nc-sfno-fm-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-3xCO2": "01M2Q7BMG0W34VNWAE0KQS6W72",
+  "ace2-fm-nc-sfno-fm-a1-som-eq-dataCO2-1000yr-sstslab-inference-4xCO2": "01M2Q7D5QMYB3VT7SRAFCHB6KP",
+  "ace2-fm-nc-swin-v2-c96-a1-cond-som-eq-dataCO2-1000yr-sstslab-inference-4xCO2": "01M2PRYAVVFAA5RAEEB7XP52W2",
+  "ace2-fm-nc-swin-v2-fm-a1-cond-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M2PRZT0W23K3JDWZF65NWJ2H",
+  "ace2-fm-nc-swin-v2-fm-a1-cond-som-eq-dataCO2-1000yr-sstslab-inference-3xCO2": "01M2PS03SXVHMH7KB8CTSJ1B3V",
+  "ace2-fm-nc-swin-v2-fm-a1-cond-som-eq-dataCO2-1000yr-sstslab-inference-4xCO2": "01M2PS07CCM9DE2NG768DPR7D0",
+  "ace2-fm-nc-swin-v2-fm-a3-cond-som-eq-dataCO2-1000yr-sstslab-inference-4xCO2": "01M2PS20YB679BX78NBXHGC7WS"
 }
