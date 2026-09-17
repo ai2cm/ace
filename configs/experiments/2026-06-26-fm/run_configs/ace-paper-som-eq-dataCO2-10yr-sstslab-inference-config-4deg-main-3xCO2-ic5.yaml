@@ -16,11 +16,11 @@ initial_condition:
   engine: netcdf4
   start_indices:
     times:
-    - '2031-01-01T06:00:00'
+    - '2031-01-01T00:00:00'
 forcing_loader:
   dataset:
-    data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
-    file_pattern: 3xCO2-ic_0002.zarr
+    data_path: /climate-default/2026-09-17-vertically-resolved-4deg-daily-c96-shield-som-eq-spin-up-plus-member-symlinks
+    file_pattern: 3xCO2-ic_0002-*.zarr
     engine: zarr
   num_data_workers: 4
 data_writer:

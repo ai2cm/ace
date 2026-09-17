@@ -82,16 +82,16 @@ marks experiments the paper does not have.
 
 | Paper script | Our kind | Data (4deg daily) | Window | Jobs / run | Label | Output | Status |
 |---|---|---|---|---|---|---|---|
-| `run-ace-equilibrium-climate-inference.sh` (spin-up 2030 → 10 yr main, 4 climates × 5 ICs) | `som-eq-dataCO2-10yr-sstslab-inference` | D2 spin-up member, then SOM paper member | 2030-01-01T06 + ic stagger, 365 steps; restart → 2031-01-01T06, 3652 steps | 20 (two-stage) | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
-| — single-stage variant (ours) | `som-eqnospinup-dataCO2-10yr-sstslab-inference` | SOM paper member | 2031-01-01T06 + ic stagger, `3652 - offset` steps | 20 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
-| `run-ace-1000-year-equilibrium-climate-inference.sh` | `som-eq-dataCO2-1000yr-sstslab-inference` | SOM 1x member tiled ×101, CO2 → climate | 2032-01-01T06, 365250 steps | 4 | `som` | none | ✅ (long) |
-| `run-ace-data-only-equilibrium-climate-evaluator.sh` | `som-eq-dataCO2-10yr-sstdata-dataonly` | every SOM member vs itself (3x has `ic_0001-2` only) | 2031-01-01T06, 3652 steps | 17 total; +3 🚧 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
-| — free variant (ours) | `som-abrupt-4xCO2-10yr-sstslab-inference` | SOM 1x member, CO2 → 4x | 2031-01-01T06, 3652 steps | 1 | `som` | monthly netCDF | ✅ |
-| `run-ace-abrupt-4xCO2-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstslab-eval` | D1 `abrupt-4xCO2` | 2020-01-01T06, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
+| `run-ace-equilibrium-climate-inference.sh` (spin-up 2030 → 10 yr main, 4 climates × 5 ICs) | `som-eq-dataCO2-10yr-sstslab-inference` | D2 spin-up member, then SOM paper member | 2030-01-02T00 + ic stagger, `364 - offset` steps; restart at 2031-01-01T00, 3652 steps on spin-up + member symlink dir | 20 (two-stage) | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
+| — single-stage variant (ours) | `som-eqnospinup-dataCO2-10yr-sstslab-inference` | SOM paper member | 2031-01-02T00 + ic stagger, `3652 - offset` steps | 20 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
+| `run-ace-1000-year-equilibrium-climate-inference.sh` | `som-eq-dataCO2-1000yr-sstslab-inference` | SOM 1x member tiled ×101, CO2 → climate | 2032-01-01T00, 365250 steps | 4 | `som` | none | ✅ (long) |
+| `run-ace-data-only-equilibrium-climate-evaluator.sh` | `som-eq-dataCO2-10yr-sstdata-dataonly` | every SOM member vs itself (3x has `ic_0001-2` only) | 2031-01-02T00, 3652 steps | 17 total; +3 🚧 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
+| — free variant (ours) | `som-abrupt-4xCO2-10yr-sstslab-inference` | SOM 1x member, CO2 → 4x | 2031-01-02T00, 3652 steps | 1 | `som` | monthly netCDF | ✅ |
+| `run-ace-abrupt-4xCO2-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstslab-eval` | D1 `abrupt-4xCO2` | 2020-01-02T00, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
 | `run-ace-abrupt-4xCO2-data-only-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstdata-dataonly` | D1 vs itself | same | 1 total | `som` | monthly netCDF | ✅ |
-| `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` | `som-abrupt-4xCO2-ens-sstslab-eval` | SOM 1x member, CO2 → 4x | 2031-01 … 2033-12 starts, 90 steps | 1 | `som` | none | ✅ |
+| `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` | `som-abrupt-4xCO2-ens-sstslab-eval` | SOM 1x member, CO2 → 4x | 2nd of each month 2031-01 … 2033-12 at 00Z, 90 steps | 1 | `som` | none | ✅ |
 | `run-ace-abrupt-4xCO2-ensemble-data-only-evaluator.sh` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` | D3 member vs itself | 89 steps from each member's start | 36 total (`--ens-member`) | `som` | none | 🚧 |
-| `run-seven-day-1xCO2-and-abrupt-4xCO2-inference-ensemble.sh` | `som-control-dataCO2-7day-sstslab-inference`, `som-abrupt-4xCO2-7day-sstslab-inference` | SOM 1x member; CO2 as is / → 4x | 2031-01 … 2033-12 starts, 7 steps | 1 + 1 | `som` | none | ✅ |
+| `run-seven-day-1xCO2-and-abrupt-4xCO2-inference-ensemble.sh` | `som-control-dataCO2-7day-sstslab-inference`, `som-abrupt-4xCO2-7day-sstslab-inference` | SOM 1x member; CO2 as is / → 4x | same 36 starts, 7 steps | 1 + 1 | `som` | none | ✅ |
 | `run-ace-2pctCO2-*.sh` | — | D4 increasing-CO2 daily | — | — | — | — | ❌ |
 
 D1 also holds `abrupt-2xCO2` and `abrupt-3xCO2`; no kind uses them (paper is
@@ -105,16 +105,16 @@ evaluator settings (default aggregator, `forward_steps_in_memory: 1`).
 
 | Paper script | Our kind | Data (4deg daily) | Window | Jobs / run | Label | Output | Status |
 |---|---|---|---|---|---|---|---|
-| — control for the equilibrium runs (ours) | `som-eq-dataCO2-10yr-sstprescribed-eval` | SOM paper member per climate | 2031-01-01T06 + ic stagger, `3652 - offset` steps, 5 ICs | 20 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
-| — abrupt evaluator with SHiELD's SST instead of the slab (ours) | `somabrupt-abrupt-4xCO2-10yr-sstprescribed-eval` | D1 `abrupt-4xCO2`, its SST and CO2 | 2020-01-01T06, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
-| — CO2 step with SST held at 1x (ours) | `som-abrupt-4xCO2-10yr-sstprescribed-eval` | SOM 1x member SST, CO2 → 4x, vs 1x member | 2031-01-01T06, 3652 steps | 1 | `som` | monthly netCDF | ✅ |
+| — control for the equilibrium runs (ours) | `som-eq-dataCO2-10yr-sstprescribed-eval` | SOM paper member per climate | 2031-01-02T00 + ic stagger, `3652 - offset` steps, 5 ICs | 20 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
+| — abrupt evaluator with SHiELD's SST instead of the slab (ours) | `somabrupt-abrupt-4xCO2-10yr-sstprescribed-eval` | D1 `abrupt-4xCO2`, its SST and CO2 | 2020-01-02T00, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
+| — CO2 step with SST held at 1x (ours) | `som-abrupt-4xCO2-10yr-sstprescribed-eval` | SOM 1x member SST, CO2 → 4x, vs 1x member | 2031-01-02T00, 3652 steps | 1 | `som` | monthly netCDF | ✅ |
 | — ensemble with SST from SHiELD's 4xCO2 members (ours) | `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | D3 member per job, SST/sea ice/CO2 from it | 89 steps from each member's start | 36 (`--ens-member`) | `som` | none | 🚧 |
-| — ensemble CO2 step with SST held at 1x (ours) | `som-abrupt-4xCO2-ens-sstprescribed-eval` | SOM 1x member SST, CO2 → 4x, vs 1x member | 2031-01 … 2033-12 starts, 90 steps | 1 | `som` | none | ✅ |
+| — ensemble CO2 step with SST held at 1x (ours) | `som-abrupt-4xCO2-ens-sstprescribed-eval` | SOM 1x member SST, CO2 → 4x, vs 1x member | same 36 starts, 90 steps | 1 | `som` | none | ✅ |
 | — control ensemble (ours) | `som-control-dataCO2-ens-sstprescribed-eval` | SOM 1x member as is | same | 1 | `som` | none | ✅ |
-| `run-ace-split-amip-ensemble-inference.sh`, `…-single-member-split-amip-inference-daily-PRATEsfc.sh` | `amip-control-dataCO2-43yr-sstprescribed-eval` | AMIP `ic_0002` (held out) | 1979-01-01T06, 15689 steps (to 2021-12-15) | 1 | `amip` | daily `PRATEsfc` zarr | ✅ |
+| `run-ace-split-amip-ensemble-inference.sh`, `…-single-member-split-amip-inference-daily-PRATEsfc.sh` | `amip-control-dataCO2-43yr-sstprescribed-eval` | AMIP `ic_0002` (held out) | 1979-01-02T00, 15689 steps (to 2021-12-16) | 1 | `amip` | daily `PRATEsfc` zarr | ✅ |
 | `run-ace-split-amip-plus-4K-inference.sh` (+ daily PRATEsfc) | `amipp4k-control-dataCO2-43yr-sstprescribed-eval`, `amipp2k-control-dataCO2-43yr-sstprescribed-eval` | `AMIP-p4K.zarr`, `AMIP-p2K.zarr`, IC from own 1979 state | same | 1 + 1 | `amip` | daily `PRATEsfc` zarr | ✅ |
-| `run-ace-amip-split-data-only-evaluator.sh`, `run-ace-amip-variant-data-only-evaluator.sh` | `amip-control-dataCO2-42yr-sstdata-dataonly`, `amipp4k-…`, `amipp2k-…` | `ic_0002`, `AMIP-p4K`, `AMIP-p2K` vs themselves | 1980-01-01T06, 15324 steps | 1 + 1 + 1 total | `amip` | daily `PRATEsfc` zarr | ✅ |
-| `run-ace-random-CO2-evaluator.sh` | `ramped-control-dataCO2-5yr-sstprescribed-eval` | ramped `ic_0003` (held out), 1x/2x/4x | 2019-10-01T06, 1918 steps | 3 | `ramped` | none | ✅ |
+| `run-ace-amip-split-data-only-evaluator.sh`, `run-ace-amip-variant-data-only-evaluator.sh` | `amip-control-dataCO2-42yr-sstdata-dataonly`, `amipp4k-…`, `amipp2k-…` | `ic_0002`, `AMIP-p4K`, `AMIP-p2K` vs themselves | 1980-01-01T00, 15325 steps | 1 + 1 + 1 total | `amip` | daily `PRATEsfc` zarr | ✅ |
+| `run-ace-random-CO2-evaluator.sh` | `ramped-control-dataCO2-5yr-sstprescribed-eval` | ramped `ic_0003` (held out), 1x/2x/4x | 2019-10-02T00, 1918 steps | 3 | `ramped` | none | ✅ |
 | `run-ace-amip-constant-CO2-inference.sh` | — | `AMIP-constant-CO2.zarr` | — | — | — | — | ❌ eval suites' `*_constant_co2` entries cover it |
 
 ### Prescribed-SST (ERA5)

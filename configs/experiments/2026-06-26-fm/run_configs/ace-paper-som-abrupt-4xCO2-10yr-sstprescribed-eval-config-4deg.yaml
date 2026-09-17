@@ -21,7 +21,7 @@ loader:
         global_mean_co2: 0.0014537
   start_indices:
     times:
-    - '2031-01-01T06:00:00'
+    - '2031-01-02T00:00:00'
   num_data_workers: 8
 data_writer:
   save_prediction_files: false

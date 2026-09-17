@@ -18,7 +18,7 @@ loader:
     engine: zarr
   start_indices: &id001
     times:
-    - '2020-01-01T06:00:00'
+    - '2020-01-02T00:00:00'
   num_data_workers: 8
 prediction_loader:
   dataset:

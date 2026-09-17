@@ -72,8 +72,9 @@ Slab-ocean kinds (SHiELD-SOM)
     Paper's equilibrium-climate inference, two stages per (climate, ic): a one
     year spin-up from the spin-up dataset's 2030 state writing
     ``/results/spin-up/restart.nc``, then the ten year main run from that
-    restart under the climate's own member as forcing. Configs ``-spinup-`` and
-    ``-main-``; run by run-ace-som-two-stage.sh.
+    restart under the climate's own member as forcing (read through
+    EQ_FORCING_DIR, see there). Configs ``-spinup-`` and ``-main-``; run by
+    run-ace-som-two-stage.sh.
 ``som-eqnospinup-dataCO2-10yr-sstslab-inference``
     Single-stage variant (ours): the initial condition is the member's own 2031
     state, ten years minus the ic stagger.
@@ -180,14 +181,17 @@ PAPER_CONFIG_PREFIX = "ace-paper-"
 CHECKPOINT_PATH = "/ckpt.tar"
 
 # The 4deg daily SHiELD-SOM ensemble the FM and c96 regimes train on. Members are
-# 1x/2x/4xCO2 ic_0001-ic_0005 and 3xCO2 ic_0001-ic_0002, each 3653 daily steps
-# from 2031-01-01T06 to 2041-01-01T06.
+# 1x/2x/4xCO2 ic_0001-ic_0005 and 3xCO2 ic_0001-ic_0002, each 3653 daily steps.
+# Every 4deg daily store labels a day's mean at the following 00Z, so the first
+# label is 2031-01-02T00 (the mean of 2031-01-01) and the last 2041-01-01T00;
+# fme matches initial-condition timestamps exactly, so every start time below
+# is such a label.
 SOM_LABEL = "som"
 SOM_DATASET = (
     "/climate-default/"
     "2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset"
 )
-SOM_FIRST_TIME = "2031-01-01T06:00:00"
+SOM_FIRST_TIME = "2031-01-02T00:00:00"
 SOM_N_STEPS = 3652  # ten years at one step per day
 SOM_MEMBERS = {
     "1xCO2": ("ic_0001", "ic_0002", "ic_0003", "ic_0004", "ic_0005"),
@@ -307,20 +311,30 @@ N_INITIAL_CONDITIONS = 5
 DAILY_PRECIP_CLIMATES = ("1xCO2", "3xCO2")
 
 # Spin-up stage: paper starts 2030-01-01 in the spin-up dataset and runs one
-# year, so every stagger ends at 2031-01-01T06 where the main forcing begins.
-SPIN_UP_FIRST_TIME = "2030-01-01T06:00:00"
-SPIN_UP_N_STEPS = 365
+# year. The daily spin-up store holds 2030-01-02T00 .. 2031-01-01T00 (365
+# labels), so every stagger runs to its last label, 2031-01-01T00, and the
+# main stage restarts there. The main member store begins one day later, so
+# the main stage's forcing is read from EQ_FORCING_DIR, a weka directory of
+# symlinks that lists each climate's spin-up store before its member store
+# (XarrayDataConfig concatenates a glob's files in sorted path order).
+SPIN_UP_FIRST_TIME = "2030-01-02T00:00:00"
+SPIN_UP_LAST_TIME = "2031-01-01T00:00:00"
+SPIN_UP_N_STEPS = 364
 SPIN_UP_EXPERIMENT_DIR = "/results/spin-up"
+EQ_FORCING_DIR = (
+    "/climate-default/2026-09-17-vertically-resolved-4deg-daily-c96-shield-som-"
+    "eq-spin-up-plus-member-symlinks"
+)
 
 # 1000-year run: 365250 daily steps; the 10-year forcing member repeated 101
 # times spans 1010 years.
 THOUSAND_YEAR_N_STEPS = 365250
 THOUSAND_YEAR_N_REPEATS = 101
-THOUSAND_YEAR_INITIAL_TIME = "2032-01-01T06:00:00"
+THOUSAND_YEAR_INITIAL_TIME = "2032-01-01T00:00:00"
 
 # Abrupt-CO2 reference run (paper: 2025-03-28 1deg dataset from 2020-01-01T06,
-# 14604 six-hourly steps); the 4deg source starts at the same time.
-ABRUPT_FIRST_TIME = "2020-01-01T06:00:00"
+# 14604 six-hourly steps); the 4deg daily store's first label is 2020-01-02T00.
+ABRUPT_FIRST_TIME = "2020-01-02T00:00:00"
 ABRUPT_N_STEPS = 3651
 # Paper's monthly netCDF variable allowlist for the abrupt runs.
 ABRUPT_MONTHLY_NAMES = [
@@ -337,10 +351,11 @@ ABRUPT_MONTHLY_NAMES = [
     "total_frozen_precipitation_rate",
 ]
 
-# Abrupt ensemble: 36 monthly initial conditions (paper: 2031-01 .. 2033-12)
-# run 90 days; the seven-day ensembles reuse the same initial conditions.
+# Abrupt ensemble: 36 monthly initial conditions (paper: the 1st of each month
+# 2031-01 .. 2033-12) run 90 days; at daily labels the 1st's mean is labelled
+# the 2nd at 00Z. The seven-day ensembles reuse the same initial conditions.
 ENSEMBLE_INITIAL_TIMES = [
-    f"{year}-{month:02d}-01T06:00:00"
+    f"{year}-{month:02d}-02T00:00:00"
     for year in (2031, 2032, 2033)
     for month in range(1, 13)
 ]
@@ -374,9 +389,9 @@ class PrescribedSstDataset(NamedTuple):
 
 # AMIP family, prescribed observed SST: the SHiELD AMIP ensemble (the norm-
 # ablation cells trained on ic_0001 and held out ic_0002) and SHiELD's AMIP
-# runs with the SST uniformly +2 K / +4 K. All three stores run
-# 1979-01-01T06 .. 2021-12-15T06 (15690 daily steps; the ensemble members start
-# earlier, in 1939).
+# runs with the SST uniformly +2 K / +4 K. The +2 K / +4 K stores run
+# 1979-01-02T00 .. 2021-12-16T00 (15690 daily labels); the ensemble members start
+# in 1939 and end the same day.
 AMIP_LABEL = "amip"
 AMIP_HELD_OUT_MEMBER = "ic_0002"
 AMIP_VARIANTS = {
@@ -396,16 +411,16 @@ AMIP_VARIANTS = {
         "AMIP-p2K.zarr",
     ),
 }
-# Paper's AMIP inference starts 1979-01-01T06 and its data-only evaluator
+# Paper's AMIP inference starts 1979-01-01 and its data-only evaluator
 # 1980-01-01, skipping the spin-up year; both run to the end of the store.
-AMIP_FIRST_TIME = "1979-01-01T06:00:00"
+AMIP_FIRST_TIME = "1979-01-02T00:00:00"
 AMIP_N_STEPS = 15689
-AMIP_DATA_ONLY_FIRST_TIME = "1980-01-01T06:00:00"
-AMIP_DATA_ONLY_N_STEPS = 15324
+AMIP_DATA_ONLY_FIRST_TIME = "1980-01-01T00:00:00"
+AMIP_DATA_ONLY_N_STEPS = 15325
 
 # Ramped-climatological-SST random-CO2 runs: the cells trained on the unnamed
-# member and ic_0002 of each climate, ic_0003 is held out. 1919 daily steps from
-# 2019-10-01T06; the paper's 7675 six-hourly steps cover the same span.
+# member and ic_0002 of each climate, ic_0003 is held out. 1919 daily labels
+# from 2019-10-02T00; the paper's 7675 six-hourly steps cover the same span.
 RAMPED_LABEL = "ramped"
 RAMPED_DATASET = (
     "/climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-"
@@ -413,7 +428,7 @@ RAMPED_DATASET = (
 )
 RAMPED_HELD_OUT_MEMBER = "ic_0003"
 RAMPED_CLIMATES = ("1xCO2", "2xCO2", "4xCO2")
-RAMPED_FIRST_TIME = "2019-10-01T06:00:00"
+RAMPED_FIRST_TIME = "2019-10-02T00:00:00"
 RAMPED_N_STEPS = 1918
 
 # ERA5, 4deg daily 1940-2025, labels at 00Z (the training configs' own inline
@@ -676,6 +691,26 @@ def _stagger_time(first_time: str, offset_days: int) -> str:
     return f"{year}-{month}-{int(day) + offset_days:02d}T{clock}"
 
 
+def eq_forcing_symlinks() -> list[tuple[str, str]]:
+    """(link name in EQ_FORCING_DIR, target store) for every eq climate: the
+    spin-up store sorts before the member store so a ``{climate}-{member}-*``
+    glob concatenates them in time order.
+    """
+    links = []
+    spin_up_root = MISSING_DATASETS["spin-up"].path
+    for climate, spec in CLIMATES.items():
+        links.append(
+            (
+                f"{climate}-{spec.member}-0-spin-up.zarr",
+                f"{spin_up_root}/{climate}-spin-up-{spec.member}.zarr",
+            )
+        )
+        links.append(
+            (f"{climate}-{spec.member}-1-main.zarr", member_path(climate, spec.member))
+        )
+    return links
+
+
 # --- slab-ocean kinds ---------------------------------------------------------
 
 
@@ -707,8 +742,10 @@ def build_som_eq_10yr_slab_inference_configs() -> dict[str, dict]:
                     forward_steps_in_memory=FORWARD_STEPS_IN_MEMORY,
                     initial_condition_path=f"{SPIN_UP_EXPERIMENT_DIR}/restart.nc",
                     initial_condition_engine="netcdf4",
-                    initial_times=[SOM_FIRST_TIME],
-                    forcing_dataset=_member_dataset(climate, spec.member),
+                    initial_times=[SPIN_UP_LAST_TIME],
+                    forcing_dataset=_zarr_dataset(
+                        EQ_FORCING_DIR, f"{climate}-{spec.member}-*.zarr"
+                    ),
                     data_writer=_files_only(_daily_precip_files(climate)),
                 )
             )

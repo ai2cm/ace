@@ -55,7 +55,8 @@ To bring one online: produce the dataset, copy it to weka with
 ### D1 — daily 4deg abrupt-CO2 runs
 
 - Path: `/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr`,
-  3653 daily steps each from 2020-01-01T06.
+  3653 daily labels each, 2020-01-02T00 .. 2030-01-01T00 (a day's mean is
+  labelled at the following 00Z, as in every 4deg daily store).
 - Unblocked: `somabrupt-abrupt-4xCO2-10yr-sstslab-eval`, `somabrupt-abrupt-4xCO2-10yr-sstprescribed-eval`,
   `somabrupt-abrupt-4xCO2-10yr-sstdata-dataonly`. The 2x/3x stores are unused (paper is 4x only).
 - Produced by argo `compute-fme-dataset-ensemble-xwpb9` from
@@ -69,7 +70,10 @@ To bring one online: produce the dataset, copy it to weka with
 ### D2 — daily 4deg SOM spin-up year
 
 - Path: `/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-ensemble-spin-up-fme-dataset/{1xCO2,2xCO2,4xCO2}-spin-up-ic_0005.zarr`,
-  `3xCO2-spin-up-ic_0002.zarr`; 365 daily steps each from 2030-01-01T06.
+  `3xCO2-spin-up-ic_0002.zarr`; 365 daily labels each, 2030-01-02T00 ..
+  2031-01-01T00. The member stores begin 2031-01-02T00, so the two-stage `eq`
+  main stage reads its forcing through a weka directory of ordered symlinks
+  (`generate_paper_configs.EQ_FORCING_DIR`, created by a one-off gantry job).
 - Unblocked: `som-eq-dataCO2-10yr-sstslab-inference`.
 - Produced by argo `compute-fme-dataset-ensemble-26c2p` from
   `scripts/data_process/configs/shield-som-spin-up-c96-4deg-8layer.yaml`.
