@@ -12,9 +12,9 @@ INITIAL_CONDITION_ROOT=/climate-default/2026-01-28-vertically-resolved-1deg-c96-
 
 declare -A INITIAL_CONDITION_DATASETS
 INITIAL_CONDITION_DATASETS=( \
-    # ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
-    # ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
-    # ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
+    ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
+    ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
+    ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
     ["4xCO2"]="${INITIAL_CONDITION_ROOT}/4xCO2-ic_0005.zarr" \
 )
 
@@ -37,7 +37,8 @@ declare -A MODELS=( \
     # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
     # [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
     # ["only-eq-rs0"]="01KP8M1T7F3NGVSPH2J7VNWNN4" \
-    [ace2-som-like-full-rs0]="01M17655EQD9BVRB9MY4T7S6EY" \
+    # [ace2-som-like-full-rs0]="01M17655EQD9BVRB9MY4T7S6EY" \
+    [ace2-som-like-full-rs1]="01M235Y7DSCW4TPKTX7S305QYD" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -46,7 +47,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 # Use an initial condition ensemble to run multiple ensemble members with a
 # deterministic model. No need to provide a seed. We will assume there are less
 # than 10 ensemble members per climate.
-for ensemble_member in {1..5}; do
+for ensemble_member in {0..0}; do
     day=$(( ensemble_member + 1 ))
     initial_condition_time=2032-01-0${day}T00:00:00
     for model in "${!MODELS[@]}"; do
@@ -69,8 +70,8 @@ for ensemble_member in {1..5}; do
                 --description 'Run inference with ACE' \
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
                 --workspace ai2/ace \
-                --priority high \
-                --cluster ai2/titan \
+                --priority urgent \
+                --cluster ai2/jupiter \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \
