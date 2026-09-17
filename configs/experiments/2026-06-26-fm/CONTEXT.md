@@ -51,18 +51,20 @@ numbers, no file inventory.
 - **Data-only evaluation** — a reference member evaluated against itself,
   giving the reference climate's diagnostics with no model skill involved.
 - **Kind** — one config family of `generate_paper_configs.py`, named
-  `{data}-{experiment}[-{co2}]-{shape}-{ocean}-{mode}` (e.g.
-  `som-abrupt-4xCO2-ens-slab-eval`); see the plan's "Kind naming".
-- **Ocean mode** — where SST comes from at inference: `slab` (mixed-layer
-  ocean driven by the model's fluxes, SOM data only), `sst` (read from the
-  reference store as in training), `sst-fixed` (read from the control store
-  while CO2 is stepped to a constant).
+  `{data}-{experiment}-{co2}-{shape}-{ocean}-{mode}`, six slots always
+  present, no token containing `-` (e.g. `som-abrupt-4xCO2-ens-sstslab-eval`);
+  see the plan's "Kind naming".
+- **Ocean mode** — where SST comes from at inference: `sstslab` (mixed-layer
+  ocean driven by the model's fluxes, SOM data only), `sstprescribed` (read
+  from the data store as in training), `sstdata` (no model ran; data-only).
+  "SST held at control while CO2 steps" is spelled by the data slot (`som`,
+  a control store) plus the co2 slot (`4xCO2`), not by the ocean slot.
 - **Forcing grid** — `shield` (SOM, AMIP, ramped stores) or `era5`; a kind runs
   on the regimes that trained on its grid (c96 → shield, era5 → era5, fm →
   both).
 - **Prescribed-SST evaluation** — an evaluator run with the training-time
   ocean (SST and sea ice read from the reference at every step) scored against
-  that reference: the SOM member (`som-eq-10yr-sst-eval`), an AMIP or AMIP +2 K / +4 K
+  that reference: the SOM member (`som-eq-dataCO2-10yr-sstprescribed-eval`), an AMIP or AMIP +2 K / +4 K
   run, or a ramped-SST random-CO2 run. The paper's AMIP inference plus
   data-only evaluator, in one job.
 - **Held-out member** — an ensemble member the norm-ablation cells did not
