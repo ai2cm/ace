@@ -16,11 +16,10 @@ per training run.
 --kind is required; there is no default, since the full set is several
 thousand jobs. --arm restricts to the norm-ablation cells (dropping the
 hand-written runs), and --run/--arch/--regime narrow further. --climate applies
-to the kinds that span climates (``som-eq-*`` and ``ramped-random-co2-sst-eval``),
---ic to the staggered-IC kinds (``som-eq-10yr-*``, ``som-eq-nospinup-*``), and
+to the kinds that span climates (``som-eq-*`` and ``ramped-*``), --ic to the
+staggered-IC kinds (``som-eq-dataCO2-10yr-*``, ``som-eqnospinup-*``), and
 --ens-member to the per-member abrupt-4xCO2 ensemble kinds
-(``som-abrupt-4xCO2-ens-sst-eval``, ``som-abrupt-4xCO2-ens-data-only``), which
-otherwise expand to all 36 members.
+(``somabruptens-*``), which otherwise expand to all 36 members.
 
 Job names are the wandb run names: ``{run}-{kind}[-{climate}][-ic{n}]`` for
 the per-run kinds and ``{kind}-{member}`` for the data-only kinds.
@@ -48,6 +47,7 @@ Usage:
 """
 
 import argparse
+import os
 import pathlib
 import re
 import subprocess
@@ -71,7 +71,6 @@ from generate_eval_configs import (
 from generate_paper_configs import (
     ABRUPT_ENSEMBLE_N_MEMBERS,
     AMIP_HELD_OUT_MEMBER,
-    AMIP_VARIANTS,
     CLIMATES,
     DATA_ONLY_KINDS,
     KINDS,
@@ -86,6 +85,7 @@ from generate_paper_configs import (
 )
 
 HERE = pathlib.Path(__file__).parent
+REPO_ROOT = HERE.parents[2]
 RUN_CONFIGS_DIRNAME = RUN_CONFIGS_DIR.name
 INFERENCE_RUN_SCRIPT = HERE / "run-ace-inference.sh"
 EVALUATOR_RUN_SCRIPT = HERE / "run-ace-evaluator.sh"
@@ -107,15 +107,15 @@ REGIMES = ("fm", "c96", "era5")
 ARMS = ("a1", "a2", "a3")
 DEFAULT_DATA_ONLY_RUN = "ace2-fm-nc-swin-v2-fm-a1"
 
-TWO_STAGE_KIND = "som-eq-10yr-slab-inference"
+TWO_STAGE_KIND = "som-eq-dataCO2-10yr-sstslab-inference"
 CLIMATE_IC_KINDS = (
-    "som-eq-10yr-slab-inference",
-    "som-eq-nospinup-10yr-slab-inference",
-    "som-eq-10yr-sst-eval",
+    "som-eq-dataCO2-10yr-sstslab-inference",
+    "som-eqnospinup-dataCO2-10yr-sstslab-inference",
+    "som-eq-dataCO2-10yr-sstprescribed-eval",
 )
 ENSEMBLE_MEMBER_KINDS = (
-    "som-abrupt-4xCO2-ens-sst-eval",
-    "som-abrupt-4xCO2-ens-data-only",
+    "somabruptens-abrupt-4xCO2-ens-sstprescribed-eval",
+    "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
 )
 
 
@@ -213,12 +213,12 @@ def _expand(
             for climate in climates
             for ic in ics
         ]
-    if kind == "som-eq-1000yr-slab-inference":
+    if kind == "som-eq-dataCO2-1000yr-sstslab-inference":
         return [
             ((climate,), (paper_config_filename(kind, climate),))
             for climate in climates
         ]
-    if kind == "som-eq-10yr-data-only":
+    if kind == "som-eq-dataCO2-10yr-sstdata-dataonly":
         return [
             (
                 (climate, _ic_member_tag(member)),
@@ -227,7 +227,7 @@ def _expand(
             for climate in climates
             for member in SOM_MEMBERS[climate]
         ]
-    if kind == "ramped-random-co2-sst-eval":
+    if kind == "ramped-control-dataCO2-5yr-sstprescribed-eval":
         return [
             ((climate,), (paper_config_filename(kind, climate),))
             for climate in climates
@@ -241,17 +241,15 @@ def _expand(
             )
             for n in ens_members
         ]
-    if kind == "amip-sst-eval":
+    if kind in (
+        "amip-control-dataCO2-43yr-sstprescribed-eval",
+        "amip-control-dataCO2-42yr-sstdata-dataonly",
+    ):
         return [
             (
                 (_variant_tag(AMIP_HELD_OUT_MEMBER),),
                 (paper_config_filename(kind, AMIP_HELD_OUT_MEMBER),),
             )
-        ]
-    if kind == "amip-data-only":
-        return [
-            ((_variant_tag(variant),), (paper_config_filename(kind, variant),))
-            for variant in AMIP_VARIANTS
         ]
     # Single-config kinds.
     return [((), (paper_config_filename(kind),))]
@@ -319,6 +317,8 @@ def validate_configs(config_filenames: list[str]) -> None:
     for config_filename in config_filenames:
         mode = kind_mode(config_kind(config_filename))
         config_type = "inference" if mode == "inference" else "evaluator"
+        # Validate against this checkout's fme, not the installed package:
+        # gantry runs the configs from this repository at HEAD.
         subprocess.run(
             [
                 sys.executable,
@@ -329,6 +329,7 @@ def validate_configs(config_filenames: list[str]) -> None:
                 str(RUN_CONFIGS_DIR / config_filename),
             ],
             check=True,
+            env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
         )
 
 
