@@ -533,8 +533,8 @@ def main() -> None:
                 cwd=HERE,
                 extra_env={"SKIP_VALIDATE": "1"},
             )
-        except subprocess.CalledProcessError as err:
-            print(f"SUBMISSION FAILED (rc={err.returncode}): {job.name}")
+        except (subprocess.CalledProcessError, OSError) as err:
+            print(f"SUBMISSION FAILED ({err}): {job.name}")
             failed_submissions.append(job.name)
     if failed_submissions:
         print(f"{len(failed_submissions)} submission(s) failed:")
