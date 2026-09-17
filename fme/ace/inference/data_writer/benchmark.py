@@ -5,6 +5,7 @@ separately from the loader that feeds them.
 
 import argparse
 import dataclasses
+import datetime
 import logging
 import os
 import shutil
@@ -39,7 +40,10 @@ class BenchmarkConfig:
 
     Parameters:
         experiment_dir: Directory to write output to. May be local or a remote
-            path recognized by fsspec, such as ``gs://bucket/results``.
+            path recognized by fsspec, such as ``gs://bucket/results``. Each run
+            writes into its own timestamped subdirectory, so a rerun neither
+            overwrites nor deletes earlier output and its timing is unaffected
+            by what is already there.
         loader: Parameters for the inference data loader supplying the windows
             that are written. The inference loader is required because its
             windows tile the time axis, whereas training loader windows start at
@@ -100,9 +104,11 @@ class BenchmarkConfig:
             ),
         )
 
-    def build_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
+    def build_writer(
+        self, data: InferenceGriddedData, output_dir: str
+    ) -> PairedDataWriter:
         return self.data_writer.build_paired(
-            experiment_dir=self.experiment_dir,
+            experiment_dir=output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
@@ -119,6 +125,11 @@ class BenchmarkConfig:
         )
 
 
+def _run_output_dir(experiment_dir: str) -> str:
+    timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H%M%SZ")
+    return os.path.join(experiment_dir, f"{timestamp}-{uuid.uuid4().hex[:6]}")
+
+
 def _payload_bytes(data: dict[str, torch.Tensor]) -> int:
     return sum(tensor.numel() * tensor.element_size() for tensor in data.values())
 
@@ -131,10 +142,12 @@ def benchmark(config: BenchmarkConfig):
         timer = GlobalTimer.get_instance()
         logging.info("Initializing data loader and writers.")
         with timer.context("initialization"):
-            makedirs(config.experiment_dir, exist_ok=True)
+            output_dir = _run_output_dir(config.experiment_dir)
+            logging.info(f"Writing benchmark output to {output_dir}")
+            makedirs(output_dir, exist_ok=True)
             data = config.build_data()
             loader = data.loader
-            writer = config.build_writer(data)
+            writer = config.build_writer(data, output_dir)
 
         n_windows = len(loader)
         total_bytes = 0
