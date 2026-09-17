@@ -24,7 +24,7 @@ import json
 import pathlib
 import re
 
-from _beaker_listing import OK, fetch_experiments_by_name
+from _beaker_listing import OK, NamedExperiment, fetch_experiments_by_name
 
 HERE = pathlib.Path(__file__).parent
 DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
@@ -45,10 +45,18 @@ def is_mapped_run(run_name: str) -> bool:
     return not any(pattern.search(run_name) for pattern in SKIP_PATTERNS)
 
 
-def resolve_map(old_map: dict[str, str]) -> dict[str, str]:
-    """`old_map` with every succeeded, mapped run added or corrected."""
+def resolve_map(
+    old_map: dict[str, str], experiments: dict[str, NamedExperiment] | None = None
+) -> dict[str, str]:
+    """`old_map` with every succeeded, mapped run added or corrected.
+
+    `experiments` is a listing already fetched by the caller (the job watcher
+    lists once per tick); by default one is fetched here.
+    """
+    if experiments is None:
+        experiments = fetch_experiments_by_name()
     new_map = dict(old_map)
-    for run_name, named in sorted(fetch_experiments_by_name().items()):
+    for run_name, named in sorted(experiments.items()):
         if not is_mapped_run(run_name):
             continue
         if named.status != OK:
@@ -80,23 +88,32 @@ def main() -> None:
         help=f"Map file to update (default: {DEFAULT_MAP}).",
     )
     args = parser.parse_args()
+    refresh_map(args.map, dry_run=args.dry_run)
 
+
+def refresh_map(
+    map_path: pathlib.Path = DEFAULT_MAP,
+    experiments: dict[str, NamedExperiment] | None = None,
+    dry_run: bool = False,
+) -> bool:
+    """Rewrite the map file if the listing changes it; True if it did."""
     old_map: dict[str, str] = {}
-    if args.map.exists():
-        old_map = json.loads(args.map.read_text())
+    if map_path.exists():
+        old_map = json.loads(map_path.read_text())
 
-    new_map = resolve_map(old_map)
+    new_map = resolve_map(old_map, experiments)
 
     if new_map == old_map:
         print("Map already up to date.")
-        return
+        return False
 
-    if args.dry_run:
+    if dry_run:
         print("\n--dry-run: not writing.")
-        return
+        return True
 
-    args.map.write_text(json.dumps(new_map, indent=2) + "\n")
-    print(f"\nWrote {args.map.name}")
+    map_path.write_text(json.dumps(new_map, indent=2) + "\n")
+    print(f"\nWrote {map_path.name}")
+    return True
 
 
 if __name__ == "__main__":

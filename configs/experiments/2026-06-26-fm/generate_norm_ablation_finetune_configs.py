@@ -86,6 +86,7 @@ from generate_norm_ablation_configs import (
     REGIME_SOURCES,
     config_name,
     degenerate_reason,
+    file_seed_override,
     label_for_member,
     load_base,
 )
@@ -124,6 +125,8 @@ MASK10_ARMS = ("a1",)
 #: Keyed like `source_cells` plus the architecture: (arch, regime, arm,
 #: conditional, masking). Used to move a fine-tune that died on a non-finite
 #: loss onto a different trajectory; see SEED_OVERRIDES in the base generator.
+#: seed_overrides.json (the base generator's SEED_OVERRIDES_FILE), keyed by
+#: the fine-tune config stem, wins over this table.
 SEED_OVERRIDES: dict[tuple[str, str, str, bool, str], int] = {}
 
 #: Filename inside the source run's Beaker result dataset. This is the
@@ -479,6 +482,11 @@ def main() -> None:
                     seed=SEED_OVERRIDES.get((arch, regime, arm, conditional, masking)),
                 )
                 out_path = RUN_CONFIGS_DIR / f"{source_path.stem}{FINETUNE_SUFFIX}.yaml"
+                file_override = file_seed_override(
+                    out_path.stem.removeprefix(CONFIG_PREFIX)
+                )
+                if file_override is not None:
+                    cfg["seed"] = file_override
                 _write_config(cfg, out_path, beaker_dataset_id)
 
 

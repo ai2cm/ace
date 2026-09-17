@@ -58,29 +58,45 @@ def add_beaker_args(
             "in what is missing. Failed and canceled experiments do not count."
         ),
     )
+    parser.add_argument(
+        "--exclude-job",
+        nargs="+",
+        default=(),
+        metavar="NAME",
+        help=(
+            "Job names never to submit, whatever the other filters select. "
+            "Used by the job watcher to hold back a job that has used up its "
+            "retries."
+        ),
+    )
 
 
 def drop_jobs_in_beaker(
     jobs: Iterable[T], job_name: Callable[[T], str], args: argparse.Namespace
 ) -> list[T]:
-    """`jobs` without those already succeeded or running in Beaker.
+    """`jobs` without those named by --exclude-job and, with
+    --skip-if-in-beaker, without those already succeeded or running in Beaker.
 
-    A no-op unless --skip-if-in-beaker was passed. One workspace listing per
-    call, matched on the job name with gantry's collision suffix stripped.
+    One workspace listing per call, matched on the job name with gantry's
+    collision suffix stripped.
     """
     jobs = list(jobs)
-    if not args.skip_if_in_beaker:
-        return jobs
-    print(f"Listing experiments in {args.beaker_workspace}...")
-    existing = existing_job_names(args.beaker_workspace)
+    excluded = set(args.exclude_job)
+    existing: set[str] = set()
+    if args.skip_if_in_beaker:
+        print(f"Listing experiments in {args.beaker_workspace}...")
+        existing = existing_job_names(args.beaker_workspace)
     pending = []
     for job in jobs:
         name = job_name(job)
-        if name in existing:
+        if name in excluded:
+            print(f"Skipping (excluded): {name}")
+        elif name in existing:
             print(f"Skipping (already in Beaker): {name}")
         else:
             pending.append(job)
-    print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
+    if excluded or args.skip_if_in_beaker:
+        print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
     return pending
 
 

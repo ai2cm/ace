@@ -68,6 +68,7 @@ Usage:
 
 import argparse
 import copy
+import json
 import pathlib
 from typing import Any
 
@@ -252,6 +253,24 @@ SEED_OVERRIDES: dict[tuple[str, str, str, bool, str], int] = {
     ("nc-swin-v2.1", "fm", "a1", True, ""): 1,
     ("nc-swin-v2", "fm", "a1", False, "mask10"): 1,
 }
+
+# Further overrides, written by watch_fm_jobs.py when a training or fine-tune
+# job dies on a non-finite loss: config stem (the run name without its
+# `ace2-fm-` prefix, e.g. `nc-swin-v2-fm-a1-mask10` or
+# `nc-swin-v2-fm-a1-finetune`) -> {"seed": int, "reason": str}. Read by this
+# generator and the fine-tune generator; an entry here wins over
+# SEED_OVERRIDES. Kept as data rather than in this table so the watcher never
+# edits Python source.
+SEED_OVERRIDES_FILE = HERE / "seed_overrides.json"
+
+
+def file_seed_override(config_stem: str) -> int | None:
+    """The seed seed_overrides.json sets for a config stem, if any."""
+    if not SEED_OVERRIDES_FILE.exists():
+        return None
+    overrides = json.loads(SEED_OVERRIDES_FILE.read_text())
+    entry = overrides.get(config_stem)
+    return None if entry is None else int(entry["seed"])
 
 
 def load_base(filename: str) -> dict:
@@ -537,6 +556,10 @@ def build_config(
         config[key] = copy.deepcopy(value)
 
     seed_override = SEED_OVERRIDES.get((arch, regime, arm, conditional, masking))
+    stem = config_name(arch, regime, arm, conditional, masking).removesuffix(".yaml")
+    file_override = file_seed_override(stem.removeprefix(CONFIG_PREFIX))
+    if file_override is not None:
+        seed_override = file_override
     if seed_override is not None:
         config["seed"] = seed_override
 
