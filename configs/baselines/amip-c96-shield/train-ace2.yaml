@@ -22,7 +22,7 @@ inference:
           - '1996-11-15T00:00:00'
       dataset:
         data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002
-      num_data_workers: 8
+      num_data_workers: 4
     aggregator:
       histogram:
         enabled: true
@@ -36,7 +36,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 8
+  num_data_workers: 4
   prefetch_factor: 4
   dataset:
     concat:
@@ -55,7 +55,7 @@ train_loader:
 validation:
   loader:
     batch_size: 128
-    num_data_workers: 8
+    num_data_workers: 4
     prefetch_factor: 4
     dataset:
       concat:
