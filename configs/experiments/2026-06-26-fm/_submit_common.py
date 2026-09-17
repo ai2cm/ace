@@ -9,7 +9,12 @@ import argparse
 import os
 import pathlib
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
+from typing import TypeVar
+
+from _beaker_listing import existing_job_names
+
+T = TypeVar("T")
 
 
 def add_beaker_args(
@@ -44,6 +49,55 @@ def add_beaker_args(
         default=default_priority,
         help=f"Beaker job priority (default: {default_priority}).",
     )
+    parser.add_argument(
+        "--skip-if-in-beaker",
+        action="store_true",
+        help=(
+            "Skip each job whose name already has a succeeded or running "
+            "experiment in the Beaker workspace, so a resubmission only fills "
+            "in what is missing. Failed and canceled experiments do not count."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-job",
+        nargs="+",
+        default=(),
+        metavar="NAME",
+        help=(
+            "Job names never to submit, whatever the other filters select. "
+            "Used by the job watcher to hold back a job that has used up its "
+            "retries."
+        ),
+    )
+
+
+def drop_jobs_in_beaker(
+    jobs: Iterable[T], job_name: Callable[[T], str], args: argparse.Namespace
+) -> list[T]:
+    """`jobs` without those named by --exclude-job and, with
+    --skip-if-in-beaker, without those already succeeded or running in Beaker.
+
+    One workspace listing per call, matched on the job name with gantry's
+    collision suffix stripped.
+    """
+    jobs = list(jobs)
+    excluded = set(args.exclude_job)
+    existing: set[str] = set()
+    if args.skip_if_in_beaker:
+        print(f"Listing experiments in {args.beaker_workspace}...")
+        existing = existing_job_names(args.beaker_workspace)
+    pending = []
+    for job in jobs:
+        name = job_name(job)
+        if name in excluded:
+            print(f"Skipping (excluded): {name}")
+        elif name in existing:
+            print(f"Skipping (already in Beaker): {name}")
+        else:
+            pending.append(job)
+    if excluded or args.skip_if_in_beaker:
+        print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
+    return pending
 
 
 def submit_job(

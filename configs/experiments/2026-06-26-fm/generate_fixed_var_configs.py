@@ -61,6 +61,7 @@ import pathlib
 import yaml
 from _version_select import add_version_arg
 from generate_eval_configs import (
+    ARCHITECTURES,
     BASE_CONFIGS_DIR,
     CONFIG_PREFIX,
     DEFAULT_CHECKPOINT_PATH,
@@ -70,6 +71,7 @@ from generate_eval_configs import (
     _build_eval_suite_config,
     _fetch_wandb_run_names,
     _write_config,
+    config_arch,
     discover_source_configs,
     eval_suite_config_to_run_name,
     fetch_wandb_finished_summaries,
@@ -132,8 +134,15 @@ TIME_MEAN_PATHS = {
 
 
 def _is_fm_run(run_name: str) -> bool:
-    """True for the multi-dataset (foundation model) training runs."""
-    return run_name.removeprefix(WANDB_PREFIX).startswith("nc-sfno-fm")
+    """True for the multi-dataset (foundation model) training runs.
+
+    The regime is the segment after the architecture tag (`nc-sfno-fm-a1`,
+    `nc-swin-v2.1-fm-a2-cond`, `nc-sfno-fm-random-v2`), so this holds for
+    every architecture's `fm` cells and for none of the c96 or era5 ones.
+    """
+    suffix = run_name.removeprefix(WANDB_PREFIX)
+    arch = config_arch(f"-{suffix}-")
+    return arch is not None and suffix.startswith(f"{arch}-fm-")
 
 
 def _time_mean_path(dataset: dict, variant: str) -> str:
@@ -259,7 +268,9 @@ def select_source_configs(
     stem, or the run-name suffix that remains once CONFIG_PREFIX is stripped.
     """
     source_configs = discover_source_configs(
-        version, source_dirs=(BASE_CONFIGS_DIR, RUN_CONFIGS_DIR)
+        version,
+        architectures=ARCHITECTURES,
+        source_dirs=(BASE_CONFIGS_DIR, RUN_CONFIGS_DIR),
     )
     if base_configs is None:
         return source_configs
@@ -269,7 +280,9 @@ def select_source_configs(
         by_name[path.stem.removeprefix(CONFIG_PREFIX)] = path
     selected = []
     for name in base_configs:
-        stem = pathlib.Path(name).stem
+        # Not pathlib's stem: a run-name suffix such as `nc-swin-v2.1-fm-a1`
+        # has no extension, and `.1-fm-a1` must not be taken for one.
+        stem = name.removesuffix(".yaml")
         if stem not in by_name:
             raise ValueError(
                 f"Base config {name!r} not found in {BASE_CONFIGS_DIR} or "

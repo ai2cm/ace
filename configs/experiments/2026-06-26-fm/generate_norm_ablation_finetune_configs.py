@@ -60,8 +60,15 @@ Three things about the transformation are load-bearing:
   through fine-tuning and inline inference. Same reasoning as the cooldown
   generator.
 
+**Masked cells.** The mask10 twins of the A1 cells are fine-tuned as well, with
+the synthetic input dropout switched off: fine-tuning is plain ERA5 adaptation,
+and the masking was a pretraining regularizer. `include_channel_mask_inputs`
+stays on, because it doubles the network's input channels and the checkpoint's
+first layer is shaped for it; with no dropout the mask channels are all ones.
+
 Usage:
-    python generate_norm_ablation_finetune_configs.py [--regime {fm,c96}]
+    python generate_norm_ablation_finetune_configs.py [--arch ARCH]
+                                                      [--regime {fm,c96}]
 """
 
 import argparse
@@ -72,11 +79,14 @@ from typing import Any
 
 import yaml
 from generate_norm_ablation_configs import (
+    ARCH_SOURCES,
     ARMS,
     CONFIG_PREFIX,
+    MASKINGS,
     REGIME_SOURCES,
     config_name,
     degenerate_reason,
+    file_seed_override,
     label_for_member,
     load_base,
 )
@@ -85,9 +95,9 @@ HERE = pathlib.Path(__file__).parent
 RUN_CONFIGS_DIR = HERE / "run_configs"
 WANDB_PREFIX = "ace2-fm-"
 
-#: Only the sfno architecture is fine-tuned. The era5 cell is skipped in every
-#: regime list: it is already an ERA5 specialist.
-ARCH = "nc-sfno"
+#: Every architecture is fine-tuned. The era5 cell is skipped in every regime
+#: list: it is already an ERA5 specialist.
+ARCHS = tuple(ARCH_SOURCES)
 
 #: Regimes whose cells are fine-tuned onto ERA5, in submission order.
 REGIMES = ("fm", "c96")
@@ -105,9 +115,19 @@ ERA5_SOURCE_REGIME = "fm"
 #: closest to ERA5 physically -- prescribed observed SSTs over 1979-2008.
 C96_ERA5_ALIAS = "amip"
 
-#: The unmasked cells; the mask10 twins are a separate axis and are not
-#: fine-tuned.
-MASKING = ""
+#: The unmasked cells of every arm are fine-tuned; of the mask10 twins, only
+#: the A1 cells (see the module docstring).
+UNMASKED = ""
+MASK10 = "mask10"
+MASK10_ARMS = ("a1",)
+
+#: Cells whose fine-tuning seed is overridden from the source config's `seed`.
+#: Keyed like `source_cells` plus the architecture: (arch, regime, arm,
+#: conditional, masking). Used to move a fine-tune that died on a non-finite
+#: loss onto a different trajectory; see SEED_OVERRIDES in the base generator.
+#: seed_overrides.json (the base generator's SEED_OVERRIDES_FILE), keyed by
+#: the fine-tune config stem, wins over this table.
+SEED_OVERRIDES: dict[tuple[str, str, str, bool, str], int] = {}
 
 #: Filename inside the source run's Beaker result dataset. This is the
 #: last-epoch checkpoint, the same file submit_eval_jobs.py evaluates as
@@ -127,8 +147,9 @@ DEFAULT_LR = 1e-5
 ERA5_LABEL = "era5"
 
 
-def source_cells(regime: str) -> list[tuple[str, bool]]:
-    """The (arm, conditional) cells to fine-tune for a regime, in a stable order.
+def source_cells(regime: str) -> list[tuple[str, bool, str]]:
+    """The (arm, conditional, masking) cells to fine-tune for a regime, in a
+    stable order: the unmasked cells first, then the mask10 A1 cells.
 
     Degenerate cells are skipped for the same reason the base generator skips
     them: no source run exists, because training one would have reproduced a
@@ -136,15 +157,19 @@ def source_cells(regime: str) -> list[tuple[str, bool]]:
     out and so reduces to the A1 control.
     """
     return [
-        (arm, conditional)
+        (arm, conditional, masking)
+        for masking in (UNMASKED, MASK10)
         for arm in ARMS
         for conditional in (False, True)
         if degenerate_reason(regime, arm, conditional) is None
+        and (masking == UNMASKED or arm in MASK10_ARMS)
     ]
 
 
-def source_config_name(regime: str, arm: str, conditional: bool) -> str:
-    return config_name(ARCH, regime, arm, conditional, MASKING)
+def source_config_name(
+    arch: str, regime: str, arm: str, conditional: bool, masking: str
+) -> str:
+    return config_name(arch, regime, arm, conditional, masking)
 
 
 def config_to_run_name(config_filename: str) -> str:
@@ -320,10 +345,31 @@ def _apply_era5_data(cfg: dict, regime: str) -> None:
     _splice_era5_inference(cfg, era5_source, C96_ERA5_ALIAS)
 
 
+def _disable_input_masking(cfg: dict) -> None:
+    """Drop the synthetic input dropout a mask10 source config trains with.
+
+    Only `input_dropout` goes; `include_channel_mask_inputs` is part of the
+    module's input shape and must match the checkpoint. A no-op for an
+    unmasked source.
+    """
+    step_config = cfg["stepper"]["step"]["config"]
+    for key in MASKINGS[MASK10]:
+        if key != "include_channel_mask_inputs":
+            step_config.pop(key, None)
+
+
 def build_config(
-    source_cfg: dict, regime: str, checkpoint_path: str, epochs: int, lr: float
+    source_cfg: dict,
+    regime: str,
+    checkpoint_path: str,
+    epochs: int,
+    lr: float,
+    seed: int | None = None,
 ) -> dict:
     cfg = copy.deepcopy(source_cfg)
+
+    if seed is not None:
+        cfg["seed"] = seed
 
     cfg["stepper_training"]["parameter_init"] = {
         "weights_path": checkpoint_path,
@@ -331,6 +377,7 @@ def build_config(
         "override_vertical_coordinate_from_weights": True,
     }
 
+    _disable_input_masking(cfg)
     _apply_era5_data(cfg, regime)
     _clear_inference_epochs(cfg)
     _select_checkpoints_on_era5(cfg)
@@ -365,6 +412,11 @@ def _write_config(cfg: dict, out_path: pathlib.Path, beaker_dataset_id: str) -> 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--arch",
+        choices=ARCHS,
+        help="Only this architecture's cells (default: all of them).",
+    )
+    parser.add_argument(
         "--regime",
         choices=REGIMES,
         help="Only this regime's cells (default: all of them).",
@@ -392,37 +444,50 @@ def main() -> None:
     with open(args.source_map) as f:
         source_map: dict[str, str] = json.load(f)
 
+    archs = [args.arch] if args.arch else list(ARCHS)
     regimes = [args.regime] if args.regime else list(REGIMES)
-    for regime in regimes:
-        for arm, conditional in source_cells(regime):
-            source_name = source_config_name(regime, arm, conditional)
-            source_path = RUN_CONFIGS_DIR / source_name
-            if not source_path.exists():
-                raise FileNotFoundError(
-                    f"{source_name} not found — run "
-                    "generate_norm_ablation_configs.py first"
+    for arch in archs:
+        for regime in regimes:
+            for arm, conditional, masking in source_cells(regime):
+                source_name = source_config_name(
+                    arch, regime, arm, conditional, masking
                 )
-            source_run_name = config_to_run_name(source_name)
-            beaker_dataset_id = source_map.get(source_run_name)
-            if beaker_dataset_id is None:
-                # No result dataset recorded means the source run has not
-                # finished, so its last-epoch checkpoint does not exist yet.
-                raise ValueError(
-                    f"No Beaker dataset ID for {source_run_name!r} in "
-                    f"{args.source_map} — has the source run finished? "
-                    "Refresh with update_beaker_map.py."
+                source_path = RUN_CONFIGS_DIR / source_name
+                if not source_path.exists():
+                    raise FileNotFoundError(
+                        f"{source_name} not found — run "
+                        "generate_norm_ablation_configs.py first"
+                    )
+                source_run_name = config_to_run_name(source_name)
+                beaker_dataset_id = source_map.get(source_run_name)
+                if beaker_dataset_id is None:
+                    # No result dataset recorded means the source run has not
+                    # finished, so its last-epoch checkpoint does not exist
+                    # yet. Skip rather than halt, as the eval generators do,
+                    # so the cells whose sources are done can be written.
+                    print(
+                        f"Skipped {source_name} (no dataset ID for "
+                        f"{source_run_name!r}; refresh with update_beaker_map.py "
+                        "once the source run has finished)"
+                    )
+                    continue
+                with source_path.open() as f:
+                    source_cfg = yaml.safe_load(f)
+                cfg = build_config(
+                    source_cfg,
+                    regime,
+                    f"/checkpoints/{CHECKPOINT_NAME}",
+                    args.epochs,
+                    args.lr,
+                    seed=SEED_OVERRIDES.get((arch, regime, arm, conditional, masking)),
                 )
-            with source_path.open() as f:
-                source_cfg = yaml.safe_load(f)
-            cfg = build_config(
-                source_cfg,
-                regime,
-                f"/checkpoints/{CHECKPOINT_NAME}",
-                args.epochs,
-                args.lr,
-            )
-            out_path = RUN_CONFIGS_DIR / f"{source_path.stem}{FINETUNE_SUFFIX}.yaml"
-            _write_config(cfg, out_path, beaker_dataset_id)
+                out_path = RUN_CONFIGS_DIR / f"{source_path.stem}{FINETUNE_SUFFIX}.yaml"
+                file_override = file_seed_override(
+                    out_path.stem.removeprefix(CONFIG_PREFIX)
+                )
+                if file_override is not None:
+                    cfg["seed"] = file_override
+                _write_config(cfg, out_path, beaker_dataset_id)
 
 
 if __name__ == "__main__":

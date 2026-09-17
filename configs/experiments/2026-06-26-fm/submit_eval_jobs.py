@@ -13,7 +13,8 @@ separately by submit_orography_jobs.py and submit_fixed_var_jobs.py.
 
 Usage:
     python submit_eval_jobs.py [--version {v1,v2,v3}] [--arch ARCH [ARCH ...]]
-                               [--skip-if-in-wandb] [--dry-run]
+                               [--run RUN [RUN ...]]
+                               [--skip-if-in-beaker] [--dry-run]
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]
@@ -23,19 +24,21 @@ import argparse
 import pathlib
 from collections.abc import Sequence
 
-import yaml
-from _submit_common import add_beaker_args, check_configs_at_head, submit_job
+from _submit_common import (
+    add_beaker_args,
+    check_configs_at_head,
+    drop_jobs_in_beaker,
+    submit_job,
+)
 from _version_select import add_version_arg, stem_matches_version
 from generate_eval_configs import (
     ARCHITECTURES,
     EVAL_CHECKPOINT_NAME_SUFFIXES,
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
-    WANDB_ENTITY,
     WANDB_PROJECT,
-    all_inferences_succeeded,
+    config_arch,
     eval_suite_config_to_run_name,
-    fetch_wandb_finished_summaries,
 )
 from generate_fixed_var_configs import FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX
 from generate_orography_configs import OROGRAPHY_EVAL_SUITE_CONFIG_PREFIX
@@ -60,13 +63,16 @@ CHECKPOINTS = list(zip(CHECKPOINT_PATHS, EVAL_CHECKPOINT_NAME_SUFFIXES))
 
 
 def configs_for_version(
-    version: str | None, architectures: Sequence[str]
+    version: str | None,
+    architectures: Sequence[str],
+    runs: Sequence[str] | None = None,
 ) -> tuple[list[str], int]:
     """Suites to submit, and how many matched the filters before the map lookup.
 
-    The count lets main() tell "no suite matches --version/--arch" from "the
-    matching suites have no training result dataset recorded yet", which are
-    fixed by different commands.
+    The count lets main() tell "no suite matches --version/--arch/--run" from
+    "the matching suites have no training result dataset recorded yet", which
+    are fixed by different commands. `runs` narrows to the suites of the named
+    training runs.
     """
     matched = []
     for path in sorted(RUN_CONFIGS_DIR.glob("*.yaml")):
@@ -76,9 +82,11 @@ def configs_for_version(
             continue
         if path.name.startswith(FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX):
             continue
-        if not any(arch in path.name for arch in architectures):
+        if config_arch(path.name) not in architectures:
             continue
         if not stem_matches_version(path.stem, version):
+            continue
+        if runs is not None and eval_suite_config_to_run_name(path.name) not in runs:
             continue
         matched.append(path.name)
 
@@ -110,39 +118,29 @@ def config_to_jobs(config_filename: str) -> list[tuple[str, str, str]]:
 
 
 def _pending_jobs(
-    config_filenames: list[str],
-    wandb_finished_summaries: dict[str, list[set[str]]] | None,
+    config_filenames: list[str], args: argparse.Namespace
 ) -> tuple[list[tuple[str, list[tuple[str, str, str]]]], int]:
     """The jobs still to run, per suite, and how many were already done.
 
-    A checkpoint's job is dropped when a single finished wandb run of its name
-    logged every inference entry in the suite, so a suite whose three
-    checkpoints are all done contributes nothing.
+    With --skip-if-in-beaker a checkpoint's job is dropped when its name has
+    a succeeded or running Beaker experiment, so a suite whose three
+    checkpoints are all done contributes nothing and is not validated.
     """
-    pending = []
-    n_skipped = 0
+    all_jobs: list[tuple[str, tuple[str, str, str]]] = []
     for config_filename in config_filenames:
         config_path = RUN_CONFIGS_DIR / config_filename
         if not config_path.exists():
             raise FileNotFoundError(
                 f"{config_filename} not found - run generate_eval_configs.py first"
             )
-        jobs = config_to_jobs(config_filename)
-        if wandb_finished_summaries is not None:
-            with config_path.open() as f:
-                cfg = yaml.safe_load(f)
-            remaining = []
-            for job in jobs:
-                job_name = job[0]
-                if all_inferences_succeeded(cfg, [job_name], wandb_finished_summaries):
-                    print(f"Skipping (already finished in wandb): {job_name}")
-                    n_skipped += 1
-                else:
-                    remaining.append(job)
-            jobs = remaining
-        if jobs:
-            pending.append((config_filename, jobs))
-    return pending, n_skipped
+        all_jobs.extend(
+            (config_filename, job) for job in config_to_jobs(config_filename)
+        )
+    kept = drop_jobs_in_beaker(all_jobs, lambda item: item[1][0], args)
+    pending: dict[str, list[tuple[str, str, str]]] = {}
+    for config_filename, job in kept:
+        pending.setdefault(config_filename, []).append(job)
+    return list(pending.items()), len(all_jobs) - len(kept)
 
 
 def main() -> None:
@@ -156,13 +154,11 @@ def main() -> None:
         help="Only submit suites for these architectures (default: all).",
     )
     parser.add_argument(
-        "--skip-if-in-wandb",
-        action="store_true",
-        help=(
-            "Skip each checkpoint whose eval run already finished in "
-            f"{WANDB_ENTITY}/{WANDB_PROJECT} with every inference entry in the "
-            "suite logged; a suite with all three done submits nothing."
-        ),
+        "--run",
+        nargs="+",
+        default=None,
+        metavar="RUN",
+        help="Only submit the suites of these training run names (default: all).",
     )
     add_beaker_args(
         parser,
@@ -172,11 +168,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configs, n_matched = configs_for_version(args.version, args.arch or ARCHITECTURES)
+    configs, n_matched = configs_for_version(
+        args.version, args.arch or ARCHITECTURES, args.run
+    )
     if n_matched == 0:
         raise SystemExit(
             "No eval suite config matches these filters - run "
-            "generate_eval_configs.py with the same --version/--arch first."
+            "generate_eval_configs.py with the same --version/--arch first, "
+            "and check --run names against the suite filenames."
         )
     if not configs:
         raise SystemExit(
@@ -185,13 +184,7 @@ def main() -> None:
             "enters the map once its Beaker job has exited 0)."
         )
 
-    wandb_finished_summaries = None
-    if args.skip_if_in_wandb:
-        print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
-        wandb_finished_summaries = fetch_wandb_finished_summaries()
-        print(f"Found {len(wandb_finished_summaries)} finished run names.")
-
-    pending, n_skipped = _pending_jobs(configs, wandb_finished_summaries)
+    pending, n_skipped = _pending_jobs(configs, args)
     if not pending:
         print("Nothing to submit.")
         return
@@ -226,7 +219,7 @@ def main() -> None:
 
     noun = "job" if n_submitted == 1 else "jobs"
     verb = "would be submitted" if args.dry_run else "submitted"
-    skipped = f" ({n_skipped} skipped, already finished in wandb)" if n_skipped else ""
+    skipped = f" ({n_skipped} skipped, already in Beaker)" if n_skipped else ""
     print(f"{n_submitted} {noun} {verb}{skipped}")
 
 

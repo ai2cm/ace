@@ -15,9 +15,11 @@ submitted at different times, and defaulting would make a bare re-run resubmit
 six GPU jobs that are already done.
 
 Usage:
-    python submit_norm_ablation_finetune_jobs.py --regime {fm,c96} [--arm ARM]
+    python submit_norm_ablation_finetune_jobs.py --regime {fm,c96} [--arch ARCH]
+                                        [--arm ARM] [--masking {none,mask10}]
                                         [--conditional | --no-conditional]
-                                        [--dry-run]
+                                        [--run RUN [RUN ...]]
+                                        [--dry-run] [--skip-if-in-beaker]
                                         [--beaker-workspace WORKSPACE]
                                         [--beaker-cluster CLUSTER [CLUSTER ...]]
                                         [--beaker-priority PRIORITY]
@@ -26,10 +28,17 @@ Usage:
 import argparse
 import pathlib
 
-from _submit_common import add_beaker_args, check_configs_at_head, submit_job
-from generate_norm_ablation_configs import ARMS, CONFIG_PREFIX
+from _submit_common import (
+    add_beaker_args,
+    check_configs_at_head,
+    drop_jobs_in_beaker,
+    submit_job,
+)
+from generate_norm_ablation_configs import ARMS, CONFIG_PREFIX, UNMASKED
 from generate_norm_ablation_finetune_configs import (
+    ARCHS,
     FINETUNE_SUFFIX,
+    MASK10,
     REGIMES,
     source_cells,
     source_config_name,
@@ -51,19 +60,32 @@ def config_to_job_name(config_filename: str) -> str:
     return f"ace2-fm-{stem.removeprefix(CONFIG_PREFIX)}"
 
 
-def finetune_config_name(regime: str, arm: str, conditional: bool) -> str:
-    stem = pathlib.Path(source_config_name(regime, arm, conditional)).stem
+def finetune_config_name(
+    arch: str, regime: str, arm: str, conditional: bool, masking: str
+) -> str:
+    stem = pathlib.Path(
+        source_config_name(arch, regime, arm, conditional, masking)
+    ).stem
     return f"{stem}{FINETUNE_SUFFIX}.yaml"
 
 
 def selected_configs(args: argparse.Namespace) -> list[str]:
+    selected_masking = (
+        None if args.masking is None else ("" if args.masking == UNMASKED else MASK10)
+    )
     names = []
-    for arm, conditional in source_cells(args.regime):
-        if args.arm and arm != args.arm:
-            continue
-        if args.conditional is not None and conditional != args.conditional:
-            continue
-        names.append(finetune_config_name(args.regime, arm, conditional))
+    for arch in [args.arch] if args.arch else ARCHS:
+        for arm, conditional, masking in source_cells(args.regime):
+            if args.arm and arm != args.arm:
+                continue
+            if args.conditional is not None and conditional != args.conditional:
+                continue
+            if selected_masking is not None and masking != selected_masking:
+                continue
+            name = finetune_config_name(arch, args.regime, arm, conditional, masking)
+            if args.run is not None and config_to_job_name(name) not in args.run:
+                continue
+            names.append(name)
     return names
 
 
@@ -80,7 +102,23 @@ def main() -> None:
             "whose jobs are already running."
         ),
     )
+    parser.add_argument(
+        "--arch", choices=ARCHS, help="Only this architecture (default: all)."
+    )
     parser.add_argument("--arm", choices=sorted(ARMS), help="Only this grouping arm.")
+    parser.add_argument(
+        "--masking",
+        choices=(UNMASKED, MASK10),
+        default=None,
+        help="Only the unmasked or only the mask10 cells (default: both).",
+    )
+    parser.add_argument(
+        "--run",
+        nargs="+",
+        default=None,
+        metavar="RUN",
+        help="Only these fine-tune run names (default: every selected cell).",
+    )
     conditioning = parser.add_mutually_exclusive_group()
     conditioning.add_argument(
         "--conditional",
@@ -103,7 +141,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    config_filenames = selected_configs(args)
+    config_filenames = drop_jobs_in_beaker(
+        selected_configs(args), config_to_job_name, args
+    )
     config_paths = []
     for config_filename in config_filenames:
         config_path = RUN_CONFIGS_DIR / config_filename
