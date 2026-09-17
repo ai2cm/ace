@@ -166,6 +166,9 @@ in the default aggregator configuration above.
 .. autoclass:: fme.ace.LatLonBoxConfig
    :noindex:
 
+.. autoclass:: fme.ace.SnowSeasonMetricConfig
+   :noindex:
+
 .. autoclass:: fme.ace.StepperOverrideConfig
    :show-inheritance:
    :noindex:
