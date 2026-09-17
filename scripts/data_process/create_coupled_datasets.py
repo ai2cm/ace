@@ -5,6 +5,8 @@ from typing import Literal
 
 import click
 import dacite
+import numpy as np
+import pandas as pd
 import xarray as xr
 import yaml
 from combine_stats import combine_stats
@@ -229,6 +231,42 @@ def _combine_ensemble_stats(
             )
 
 
+def _stride_steps(time: xr.DataArray, time_stride: str) -> int:
+    """Number of input timesteps spanning time_stride.
+
+    Args:
+        time: Time coordinate of the input dataset, assumed uniform.
+        time_stride: Coarser cadence to subsample to, as a timedelta string.
+
+    Returns:
+        The stride, in input timesteps.
+
+    Raises:
+        ValueError: If the time axis has fewer than two timestamps or is not
+            uniform, or if time_stride is not a whole multiple of the input
+            cadence.
+    """
+    if len(time) < 2:
+        raise ValueError(
+            "Cannot apply a time_stride to a dataset with fewer than two "
+            f"timestamps; got {len(time)}."
+        )
+    deltas = pd.to_timedelta(pd.Series(np.diff(time.values))).unique()
+    if len(deltas) > 1:
+        raise ValueError(
+            "time_stride requires a uniform input time axis, but found "
+            f"timesteps {sorted(str(d) for d in deltas)}."
+        )
+    step = pd.Timedelta(deltas[0])
+    stride = pd.Timedelta(time_stride)
+    if stride < step or stride % step != pd.Timedelta(0):
+        raise ValueError(
+            f"time_stride {time_stride} is not a whole multiple of the input "
+            f"cadence {step}."
+        )
+    return int(stride // step)
+
+
 @dataclasses.dataclass
 class CoupledInputDatasetConfig:
     """Configuration for a single input dataset.
@@ -239,6 +277,16 @@ class CoupledInputDatasetConfig:
         time_chunk_size: Chunk size for the time dimension.
         extra_fields: Optional list of variable names/prefixes
             to copy to the outputs.
+        first_timestamp: Optional first timestamp to select.
+        last_timestamp: Optional last timestamp to select.
+        time_stride: Optional coarser cadence to subsample the store to, as a
+            timedelta (e.g., "5D"). It must be a whole multiple of the store's
+            own uniform cadence. Snapshots are selected, never averaged, and
+            the stride is anchored at the first timestamp of the range
+            first_timestamp/last_timestamp select, so first_timestamp is the
+            window origin when it is set and the record's first timestamp
+            otherwise. A record whose length is not a whole multiple of the
+            stride leaves a trailing remainder unselected.
     """
 
     zarr_path: str
@@ -248,16 +296,24 @@ class CoupledInputDatasetConfig:
     )
     first_timestamp: str | None = None
     last_timestamp: str | None = None
+    time_stride: str | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        """Load the zarr dataset with specified time chunking and range.
+        """Load the zarr dataset with specified time chunking, range, and stride.
 
         Returns:
-            Dataset loaded from zarr with time selection applied.
+            Dataset loaded from zarr with time selection and subsampling applied.
         """
         logging.info(f"Loading dataset from {self.zarr_path}")
         ds = xr.open_zarr(self.zarr_path, chunks={"time": self.time_chunk_size})
         ds = ds.sel(time=slice(self.first_timestamp, self.last_timestamp))
+        if self.time_stride is not None:
+            steps = _stride_steps(ds.time, self.time_stride)
+            logging.info(
+                f"  Subsampling to {self.time_stride} "
+                f"(every {steps} input timesteps)"
+            )
+            ds = ds.isel(time=slice(None, None, steps))
         logging.info(f"  Loaded dataset with {len(ds.time)} timesteps")
         return ds
 
@@ -271,6 +327,8 @@ class CoupledInputDatasetConfig:
                 f"  time_range: {self.first_timestamp or 'start'} to "
                 f"{self.last_timestamp or 'end'}"
             )
+        if self.time_stride is not None:
+            logging.info(f"  time_stride: {self.time_stride}")
         if self.extra_fields.names_and_prefixes:
             logging.info(f"  extra_fields: {self.extra_fields.names_and_prefixes}")
 
