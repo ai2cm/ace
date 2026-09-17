@@ -1,0 +1,45 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/ocean
+experiment_dir: /results
+n_forward_steps: 14598
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+# Uncoupled ocean driven by perfect CM4 atmosphere forcing, for the Gulf Stream
+# Extension SST variability diagnostic. The writer emits the box only: 10 x 30
+# cells rather than the global 180 x 360, which is ~3 MB per variable per source
+# instead of ~600 MB.
+seed: 0
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+    - label: gulf_stream_monthly
+      names: [sst]
+      lat_extent: [35.0, 45.0]
+      lon_extent: [285.0, 315.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: true
+aggregator:
+  log_histograms: true
+  log_nino34_index: true
+  log_ipo_index: true

@@ -1,0 +1,65 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+experiment_dir: /results
+n_coupled_steps: 14598
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+# Gulf Stream Extension box writers, for the SST variability diagnostic and the
+# matching surface-flux panels. lat_extent/lon_extent emit the box only -- 10 x
+# 30 cells against the global 180 x 360 -- so a monthly variable is ~3 MB per
+# source rather than ~600 MB, and all three fit in the result dataset as netCDF.
+# Ocean SST is written alongside the fluxes deliberately: the evaluator is
+# stochastic, so fluxes from a separate wave would be a different realization
+# from the SST they are meant to be compared against.
+seed: 0
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: gulf_stream_monthly
+        names: [sst]
+        lat_extent: [35.0, 45.0]
+        lon_extent: [285.0, 315.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: gulf_stream_monthly
+        names: [LHTFLsfc, SHTFLsfc]
+        lat_extent: [35.0, 45.0]
+        lon_extent: [285.0, 315.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'

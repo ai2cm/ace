@@ -62,24 +62,51 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW9
 
 # --- 1pct-ic0001-130yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter
 
 # --- piC-ic0151-200yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter
+
+# =====================================================================
+# GULF STREAM BOX WAVE, 2026-09-17. piControl only.
+#
+# Re-runs the nine coupled arms writing Gulf Stream Extension boxes for SST and
+# for the surface turbulent fluxes (LHTFLsfc, SHTFLsfc). No coupled evaluation
+# has ever saved gridded monthly ATMOSPHERE output, so the flux panels need a
+# re-run; the SST box rides along in the same jobs because the evaluator is
+# stochastic and a separate wave would be a different realization.
+#
+# These use FileWriterConfig with lat_extent/lon_extent rather than
+# save_monthly_files, which writes the box (10 x 30 cells) instead of the globe:
+# ~3 MB per variable per source against ~600 MB. seed: 0 is set, so unlike every
+# wave before this one a rerun reproduces.
+#
+# The 2026-09-16 rows above are marked done_ so a launch from this branch does
+# not resubmit them; their result datasets are what the coupled-arms report reads.
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-lt0_a2s-fto|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2DZ9PB69NT2T12D40C0EGQE|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2_a2s-fto|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2DAKB43T4QCR8FYMXS7Z5FC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2n_a2s-fto|o2a0rs0|01M28Z4A89GPK0MJJDWQM4RHT1|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M28Z4A8ND9PJ0SJ8T720H6F2|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ft_a2s-fto|o2a0rs0|01M2A1S0PT79B3YBKRE4R85TJ9|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2DXZXRW6YD4FBYCQRNF61Y8|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|01M2A1SHSKDGTGF61GP4PE430C|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2DXXRZQENE618SZAS30RA83|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|01M2A212FAW926RTQJ3KNHB2J3|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2A212FHJJ7W943FQVT3FHJY|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M1MD1SS3CHJR8VYH2KYPFGKN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M1CBNB8VCWPX9D7J0D6842RR|ai2/ace|jupiter

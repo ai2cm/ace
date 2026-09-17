@@ -1,0 +1,31 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# =====================================================================
+# UNCOUPLED SAMUDRA, 2026-09-17.
+#
+#   job_runner/evaluate.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_decoupled . \
+#     --config-dir configs/experiments/cm4_eval/ocean
+#
+# The ocean component split out of each arm's COUPLED best_inference_ckpt with
+# scripts/coupled/create_decoupled_checkpoint_beaker.sh --component ocean, then
+# run with perfect CM4 atmosphere forcing. The question: the Gulf Stream
+# Extension SST variability that separates these arms in coupled mode -- is it a
+# property of the ocean weights, or does the coupled atmosphere make it?
+#
+# results_dataset (field 9) is the DECOUPLED checkpoint dataset, not a training
+# results dataset; evaluate.sh mounts
+# <results_dataset>:training_checkpoints/<checkpoint>.tar, and the decoupling
+# script writes the component checkpoint at exactly that path.
+#
+# Three arms span the range the diagnostic resolves: the incumbent
+# ensemble-trained ocean, the noise-conditioned ocean that matches CM4 in
+# coupled mode, and the deterministic ocean that is furthest below it.
+#
+# piControl only -- the Gulf Stream panels are the control scenario.
+
+# --- piC-ic0151-200yr ---
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_decoupled-owc_a2s|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RTMHA1C006P3KDZABVKDZF|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_decoupled-lt0|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RV7ZSXWP9W2AWBMBN2R3YN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_decoupled-coupled_mse|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RVPZH2RSV20WPXXD2D0VXM|ai2/ace|jupiter
