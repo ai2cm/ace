@@ -126,11 +126,10 @@ class SurfaceEnergyFluxCorrectionConfig:
       - "prescribed": corrected_hfds = net_flux * ocean_fraction + gen_hfds *
         (1 - ocean_fraction). Open-ocean hfds is prescribed from forcings; the
         network prediction is retained under sea ice and on land.
-      - "prescribed_open_ocean": corrected_hfds = net_flux where
-        ocean_fraction == 1, and gen_hfds elsewhere. A binary switch on exact
-        equality: hfds is prescribed from forcings only on cells that are
-        entirely ice-free ocean, and the network prediction passes through
-        unweighted everywhere else.
+      - "prescribed_open_ocean": corrected_hfds = net_flux where ocean_fraction
+        == 1, and gen_hfds elsewhere. hfds is prescribed from forcings only on
+        cells that are entirely ice-free ocean, and the network prediction
+        passes through unweighted everywhere else.
 
     Parameters:
         method: Method to use for the correction.
