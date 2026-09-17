@@ -1,7 +1,7 @@
 import dataclasses
 import math
-from collections.abc import Callable
-from typing import Literal
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
 
 import torch
 
@@ -302,6 +302,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_preserves_global_mean: bool = False
     spectral_ratio: float = 1.0
     clip_latent_global_means: bool = False
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
