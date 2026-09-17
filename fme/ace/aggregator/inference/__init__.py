@@ -18,6 +18,7 @@ from .main import (
 )
 from .reduced import MeanMetricConfig
 from .seasonal import SeasonalMetricConfig
+from .snow_season import SnowSeasonMetricConfig
 from .spectrum import PowerSpectrumMetricConfig
 from .time_mean import TimeMeanMetricConfig
 from .trend import TrendMetricConfig

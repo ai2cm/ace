@@ -156,6 +156,14 @@ aggregator:
     name: anomaly_memory
     enabled: false
     strict: false
+  snow_season:
+    variable: surface_snow_amount_masked
+    regions: []
+    start_month_northern: 10
+    start_month_southern: 4
+    name: snow_season
+    enabled: false
+    strict: false
   monthly_reference_data: null
   time_mean_reference_data: null
   step_diagnostics:

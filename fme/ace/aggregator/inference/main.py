@@ -39,6 +39,7 @@ from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .near_zero_fraction import NearZeroFractionMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
+from .snow_season import SnowSeasonMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .step_diagnostics import StepDiagnosticsAggregator, StepDiagnosticsMetricConfig
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
@@ -71,6 +72,7 @@ MetricConfig = (
     | TrendMetricConfig
     | NearZeroFractionMetricConfig
     | AnomalyMemoryMetricConfig
+    | SnowSeasonMetricConfig
 )
 
 
@@ -230,6 +232,9 @@ class InferenceEvaluatorAggregatorConfig:
         anomaly_memory: Per-grid-cell lagged autocorrelation of deseasonalized
             anomalies (memory), with region-mean scalars and maps. Disabled by
             default.
+        snow_season: Region-mean snow amount through each water year with
+            peak, midwinter mean, melt-out day and summer floor per region.
+            Disabled by default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
         step_diagnostics: Granularity of metrics computed from the step
@@ -289,6 +294,9 @@ class InferenceEvaluatorAggregatorConfig:
     anomaly_memory: AnomalyMemoryMetricConfig = dataclasses.field(
         default_factory=AnomalyMemoryMetricConfig
     )
+    snow_season: SnowSeasonMetricConfig = dataclasses.field(
+        default_factory=SnowSeasonMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
@@ -335,6 +343,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.trend,
             self.near_zero_fraction,
             self.anomaly_memory,
+            self.snow_season,
         ]
         return [m for m in all_metrics if m.enabled]
 
