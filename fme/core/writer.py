@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 import zarr
 
+from fme.core.dataset.utils import zarrs_codec_pipeline
 from fme.core.distributed import Distributed
 
 logger = logging.getLogger(__name__)
@@ -66,19 +67,20 @@ def _insert_into_zarr(
     insert_slices: Mapping[int, slice],
     overwrite_check: bool = True,
 ):
-    root = zarr.open_group(path, mode="r+")
-    for var_name, var_data in data.items():
-        n_dims = len(var_data.shape)
-        # Array data is not loaded until index or slice is referenced
-        zarr_array = root[var_name]
-        insert_slices_tuple = tuple(
-            insert_slices.get(dim_index, slice(None, None))
-            for dim_index in range(n_dims)
-        )
-        _check_data_size_fits_slice(var_data, insert_slices)
-        if overwrite_check:
-            _check_for_overwrite(zarr_array, insert_slices_tuple)
-        zarr_array[insert_slices_tuple] = var_data
+    with zarrs_codec_pipeline():
+        root = zarr.open_group(path, mode="r+")
+        for var_name, var_data in data.items():
+            n_dims = len(var_data.shape)
+            # Array data is not loaded until index or slice is referenced
+            zarr_array = root[var_name]
+            insert_slices_tuple = tuple(
+                insert_slices.get(dim_index, slice(None, None))
+                for dim_index in range(n_dims)
+            )
+            _check_data_size_fits_slice(var_data, insert_slices)
+            if overwrite_check:
+                _check_for_overwrite(zarr_array, insert_slices_tuple)
+            zarr_array[insert_slices_tuple] = var_data
 
 
 def _read_from_zarr(
@@ -86,15 +88,16 @@ def _read_from_zarr(
     names: Sequence[str],
     insert_slices: Mapping[int, slice],
 ) -> dict[str, np.ndarray]:
-    root = zarr.open_group(path, mode="r")
-    data = {}
-    for var_name in names:
-        zarr_array = root[var_name]
-        read_slices = tuple(
-            insert_slices.get(dim_index, slice(None, None))
-            for dim_index in range(len(zarr_array.shape))
-        )
-        data[var_name] = zarr_array[read_slices]
+    with zarrs_codec_pipeline():
+        root = zarr.open_group(path, mode="r")
+        data = {}
+        for var_name in names:
+            zarr_array = root[var_name]
+            read_slices = tuple(
+                insert_slices.get(dim_index, slice(None, None))
+                for dim_index in range(len(zarr_array.shape))
+            )
+            data[var_name] = zarr_array[read_slices]
     return data
 
 

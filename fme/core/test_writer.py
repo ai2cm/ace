@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import xarray as xr
 import zarr
+from zarrs import ZarrsCodecPipeline
 
 from fme.core.writer import (
     ZarrWriter,
@@ -322,6 +323,33 @@ def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
     read_all = writer.read_batch(["var"], position_slices={})
     assert read_all["var"].shape == (4, NLAT, NLON)
     np.testing.assert_array_equal(read_all["var"][:2], 0.0)
+
+
+def _spy_on(method):
+    return patch.object(
+        ZarrsCodecPipeline,
+        method,
+        autospec=True,
+        side_effect=getattr(ZarrsCodecPipeline, method),
+    )
+
+
+def test_ZarrWriter_uses_zarrs_pipeline_for_local_store(tmp_path):
+    """The writer's I/O must go through zarrs, not silently fall back to zarr's
+    default pipeline. Strict mode makes zarrs raise instead of falling back."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    data = np.random.rand(2, NLAT, NLON).astype("f4")
+    with (
+        zarr.config.set({"codec_pipeline.strict": True}),
+        _spy_on("write") as zarrs_write,
+        _spy_on("read") as zarrs_read,
+    ):
+        writer.record_batch(data={"var": data}, position_slices={"time": slice(0, 2)})
+        read = writer.read_batch(["var"], position_slices={"time": slice(0, 2)})
+    assert zarrs_write.called
+    assert zarrs_read.called
+    np.testing.assert_array_equal(read["var"], data)
 
 
 def test_ZarrWriter_read_batch_before_initialization_errors(tmp_path):

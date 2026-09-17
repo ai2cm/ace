@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import dataclasses
 import datetime
 import functools
@@ -19,6 +20,16 @@ from fme.core.coordinates import (
 SLICE_NONE = slice(None)
 
 ZARRS_CODEC_PIPELINE = "zarrs.ZarrsCodecPipeline"
+
+
+def zarrs_codec_pipeline() -> contextlib.AbstractContextManager:
+    """Build zarr arrays opened inside this context with the zarrs codec pipeline.
+
+    zarr fixes an array's codec pipeline when the array object is constructed, so
+    only array construction needs to happen inside the context. Stores zarrs does
+    not support fall back to zarr's default pipeline.
+    """
+    return zarr.config.set({"codec_pipeline.path": ZARRS_CODEC_PIPELINE})
 
 
 def accumulate_labels(labels: list[set[str] | None]) -> set[str] | None:
@@ -136,7 +147,7 @@ def _open_async_group(path: str):
 @functools.cache
 def _get_async_array(path: str, name: str):
     loop = asyncio.get_event_loop()
-    with zarr.config.set({"codec_pipeline.path": ZARRS_CODEC_PIPELINE}):
+    with zarrs_codec_pipeline():
         return loop.run_until_complete(_open_async_group(path).getitem(name))
 
 
