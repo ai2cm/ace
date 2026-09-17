@@ -19,9 +19,10 @@ To bring one online: produce the dataset, copy it to weka with
 ### D3 — daily 4deg abrupt-4xCO2 36-member ensemble — BLOCKED
 
 - Placeholder: `/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr`
-- Needed by: `abrupt-ens-data-only` — SHiELD's own 90-day abrupt-4xCO2
-  spread, the target for the model's `abrupt-ens` runs (paper figures 8, 10) —
-  and `abrupt-ens-eval-sst`, the prescribed-SST version of the same figure:
+- Needed by: `som-abrupt-4xCO2-ens-data-only` — SHiELD's own 90-day
+  abrupt-4xCO2 spread, the target for the model's `som-abrupt-4xCO2-ens-slab-eval`
+  runs (paper figures 8, 10) — and `som-abrupt-4xCO2-ens-sst-eval`, the
+  prescribed-SST version of the same figure:
   one evaluator per member with SST, sea ice and CO2 read from it (36 jobs per
   training run; `--ens-member` narrows).
 - Source: 1deg only —
@@ -38,11 +39,11 @@ To bring one online: produce the dataset, copy it to weka with
 
 - Not a `MISSING_DATASETS` entry: the 2026-06-08 SOM ensemble store simply has
   only `ic_0001-2` for 3xCO2, so `SOM_MEMBERS["3xCO2"]` lists two members and
-  `data-only` runs 17 jobs instead of 20.
+  `som-eq-10yr-data-only` runs 17 jobs instead of 20.
 - Source: Spencer's 45x90 regrid, same batch as D3, not landed.
 - How: process into a new-dated SOM ensemble store (ask Spencer whether he runs
   the argo step), copy to weka, extend `SOM_MEMBERS["3xCO2"]`, regenerate
-  `data-only`.
+  `som-eq-10yr-data-only`.
 
 ### D4 — daily 4deg increasing-CO2 (2%/yr) — NOT PLANNED
 
@@ -55,7 +56,8 @@ To bring one online: produce the dataset, copy it to weka with
 
 - Path: `/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr`,
   3653 daily steps each from 2020-01-01T06.
-- Unblocked: `abrupt-10yr-eval`, `abrupt-10yr-eval-sst`, `abrupt-data-only`.
+- Unblocked: `som-abrupt-4xCO2-10yr-slab-eval`, `som-abrupt-4xCO2-10yr-sst-eval`,
+  `som-abrupt-4xCO2-10yr-data-only`. The 2x/3x stores are unused (paper is 4x only).
 - Produced by argo `compute-fme-dataset-ensemble-xwpb9` from
   `scripts/data_process/configs/shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml`
   (raw 45x90 regrids of `2024-07-03-C96-SHiELD-SOM`, current pipeline; the
@@ -68,7 +70,7 @@ To bring one online: produce the dataset, copy it to weka with
 
 - Path: `/climate-default/2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-ensemble-spin-up-fme-dataset/{1xCO2,2xCO2,4xCO2}-spin-up-ic_0005.zarr`,
   `3xCO2-spin-up-ic_0002.zarr`; 365 daily steps each from 2030-01-01T06.
-- Unblocked: `eq`.
+- Unblocked: `som-eq-10yr-slab-inference`.
 - Produced by argo `compute-fme-dataset-ensemble-26c2p` from
   `scripts/data_process/configs/shield-som-spin-up-c96-4deg-8layer.yaml`.
   Six-hourly sibling on GCS as for D1.
@@ -88,5 +90,6 @@ To bring one online: produce the dataset, copy it to weka with
   mapping if a job fails on a missing path.
 - 1000-year forcing: the 1xCO2 member tiled via `n_repeats` (all SOM forcing
   but CO2 is climatological), as the paper does with its Hugging Face forcing.
-- Everything for `eq-nospinup`, `eq-1000yr`, `data-only`, `abrupt-10yr`,
-  `abrupt-ens`, `7day`, `eq-eval-sst`: the 2026-06-08 4deg daily SOM ensemble.
+- Every other `som-*` kind: the 2026-06-08 4deg daily SOM ensemble.
+- ERA5 kinds: `/climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr`,
+  the training configs' own ERA5 store (00Z labels).
