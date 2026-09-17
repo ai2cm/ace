@@ -16,6 +16,7 @@ suffix stripped. See `canonical_name`.
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 
 DEFAULT_WORKSPACE = "ai2/ace"
@@ -82,25 +83,39 @@ def succeeded_result_dataset(experiment: dict) -> str | None:
     return succeeded[-1].get("result", {}).get("beaker")
 
 
+# The listing is one HTTP call that occasionally fails on the beaker side;
+# a failed tick costs twenty minutes, a retry costs seconds.
+LIST_ATTEMPTS = 3
+LIST_RETRY_DELAY_SECONDS = 20
+
+
 def list_experiments(
     workspace: str = DEFAULT_WORKSPACE, text: str = DEFAULT_TEXT
 ) -> list[dict]:
-    proc = subprocess.run(
-        [
-            "beaker",
-            "workspace",
-            "experiments",
-            workspace,
-            "--text",
-            text,
-            "--format",
-            "json",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+    cmd = [
+        "beaker",
+        "workspace",
+        "experiments",
+        workspace,
+        "--text",
+        text,
+        "--format",
+        "json",
+    ]
+    for attempt in range(1, LIST_ATTEMPTS + 1):
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0:
+            return json.loads(proc.stdout)
+        print(
+            f"beaker listing failed (attempt {attempt}/{LIST_ATTEMPTS}): "
+            f"{proc.stderr.strip()}"
+        )
+        if attempt < LIST_ATTEMPTS:
+            time.sleep(LIST_RETRY_DELAY_SECONDS)
+    raise RuntimeError(
+        f"beaker listing of {workspace} failed {LIST_ATTEMPTS} times: "
+        f"{proc.stderr.strip()}"
     )
-    return json.loads(proc.stdout)
 
 
 @dataclass(frozen=True)
