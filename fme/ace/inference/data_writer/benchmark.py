@@ -179,19 +179,18 @@ def benchmark(config: BenchmarkConfig):
                 "do not time their storage calls."
             )
         total_time = durations["data_loading"] + durations["data_writer"]
-        write_throughput = total_bytes / durations["data_writer"]
-        logging.info(f"Write throughput achieved: {write_throughput / 1e6:.2f} MB/s")
-        logging.info("Timer results:")
-        timer.log_durations()
-        wandb_logs = durations | {
+        summary = durations | {
             "total_time": total_time,
             "mb_per_window": bytes_per_window / 1e6,
             "total_mb_written": total_bytes / 1e6,
-            "write_mb_per_s": write_throughput / 1e6,
+            "write_mb_per_s": total_bytes / durations["data_writer"] / 1e6,
             "throughput_mb_per_s": total_bytes / total_time / 1e6,
             "data_writer_io_mb_per_s": total_bytes / durations["data_writer_io"] / 1e6,
         }
-        wandb.log(wandb_logs, step=n_windows - 1)
+        logging.info("Benchmark summary:")
+        for name, value in summary.items():
+            logging.info(f"{name}: {value:.2f}")
+        wandb.log(summary, step=n_windows - 1)
     shutil.rmtree(TMPDIR, ignore_errors=True)
 
 
