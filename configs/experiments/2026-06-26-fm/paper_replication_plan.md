@@ -197,13 +197,14 @@ python submit_paper_jobs.py --kind som-abrupt-4xCO2-ens-data-only
 python submit_paper_jobs.py --kind som-abrupt-4xCO2-ens-sst-eval --arm a1 --ens-member 1 2 3   # 36/run
 ```
 
-Per-run job counts on SHiELD data (33 fm/c96 runs, 22 with `--arm`):
-slab-ocean 49 (`eq` 20, `eq-nospinup` 20, `1000yr` 4, abrupt 10yr 2, ens 1,
-7day 2), prescribed 30 (`eq` sst 20, abrupt 10yr 2, ens 2, amip 3, ramped 3)
-plus 36 `som-abrupt-4xCO2-ens-sst-eval` after D3. On ERA5 (25 fm/era5 runs):
-3. Data-only 21 now, +36 with D3. Everything ≈ 2700 jobs now, ≈ 3900 with D3;
-the arms alone ≈ 1800. Submit by kind and arm; run the per-member D3 kind on a
-subset (`--run`, `--ens-member`).
+Per-run job counts on SHiELD data (53 fm/c96 runs, 41 with `--arm`, after
+the nc-swin-v2.1 cells landed): slab-ocean 49 (`eq` 20, `eq-nospinup` 20,
+`1000yr` 4, abrupt 10yr 2, ens 1, 7day 2), prescribed 30 (`eq` sst 20, abrupt
+10yr 2, ens 2, amip 3, ramped 3) plus 36 `som-abrupt-4xCO2-ens-sst-eval` after
+D3. On ERA5 (39 fm/era5 runs, 29 with `--arm`): 3. Data-only 21 now, +36 with
+D3. Everything ≈ 4300 jobs now, ≈ 6300 with D3; the arms alone
+≈ 3300. Submit by kind and arm; run the per-member D3 kind on a subset
+(`--run`, `--ens-member`).
 
 The slab is forward-Euler at a daily step, untested here (paper was 6-hourly):
 run one `som-eq-nospinup-10yr-slab-inference` 1xCO2 job and check SST drift
@@ -294,5 +295,7 @@ before submitting the rest of the slab kinds.
 - Generator/submitter renamed from `*_som_*` to `*_paper_*`, config prefix
   `ace-paper-`, wandb group `ace2-fm-paper-2026-06-26`, before any job was
   submitted. `run-ace-som-two-stage.sh` keeps its name (SOM-specific).
-- Job volume is the main risk: `--kind` is required; everything is ≈ 2700
-  jobs now, ≈ 3900 with D3 (see "How to run").
+- Job volume is the main risk: `--kind` is required; everything is ≈ 4300
+  jobs now, ≈ 6300 with D3 (see "How to run"). Sibling submitters now skip
+  already-submitted jobs via the Beaker listing (`drop_jobs_in_beaker`);
+  this one still uses `--skip-if-in-wandb`. Switch before the first bulk submit.
