@@ -125,8 +125,10 @@ class SnowSeasonAggregator:
     default), so that one snow season falls within one year. Every complete
     year is drawn against the target's, and from each the peak, midwinter mean,
     melt-out day and summer floor are read off, then averaged over years and
-    samples for logging. Non-finite values of the variable count as zero, which
-    is right for a snow channel that is NaN outside a snow mask.
+    samples for logging. The mean runs over the cells the grid operations'
+    spatial mask admits for the variable (for a masked snow channel, the snow
+    mask itself); non-finite values are zeroed first so they cannot poison
+    the sum.
 
     Only the leading timestep of the first window (the initial condition) is
     dropped; windows must arrive in time order.
@@ -467,8 +469,9 @@ class SnowSeasonMetricConfig:
     floor (mean over water-year months 10-12), each averaged over years and
     samples, as ``{prediction,target,gap}/<region>/<quantity>``, plus one
     figure of every water year's trace against the target's. The full traces
-    and per-year statistics go to the dataset. Non-finite values count as
-    zero, which suits a snow channel stored as NaN outside a snow mask.
+    and per-year statistics go to the dataset. The region mean covers the
+    cells the dataset's spatial mask admits for the variable (the snow mask,
+    for a masked snow channel), and non-finite values are zeroed first.
     Requires a lat-lon grid and more than two years of rollout. Disabled by
     default.
 

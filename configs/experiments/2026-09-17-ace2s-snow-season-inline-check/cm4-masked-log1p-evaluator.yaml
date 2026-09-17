@@ -1,0 +1,69 @@
+experiment_dir: gs://vcm-ml-intermediate/2026-09-17-ace2s-snow-season-inline-check/cm4-masked-log1p
+n_forward_steps: 1825
+forward_steps_in_memory: 25
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0311-01-01T00:00:00'
+    - '0321-01-01T00:00:00'
+    - '0331-01-01T00:00:00'
+    - '0341-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-snow-masked.zarr
+      engine: zarr
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  power_spectrum:
+    enabled: false
+  zonal_mean:
+    enabled: false
+  annual:
+    enabled: false
+  enso_index:
+    enabled: false
+  enso_coefficient:
+    enabled: false
+  ipo_index:
+    enabled: false
+  snow_season:
+    enabled: true
+    variable: surface_snow_amount_masked
+    # The seven snow boxes of the snow-memory prototype; a box south of the
+    # equator uses the April water-year start.
+    regions:
+    - name: Siberia
+      lat: [50, 68]
+      lon: [60, 140]
+    - name: Canada
+      lat: [50, 65]
+      lon: [250, 285]
+    - name: N_Europe
+      lat: [55, 68]
+      lon: [5, 40]
+    - name: Tibet
+      lat: [30, 38]
+      lon: [80, 100]
+    - name: Great_Plains
+      lat: [32, 49]
+      lon: [255, 265]
+    - name: Rockies
+      lat: [38, 45]
+      lon: [249, 256]
+    - name: Andes
+      lat: [-35, -15]
+      lon: [287, 293]
