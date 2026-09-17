@@ -20,6 +20,19 @@ initial_condition:
     times:
     - '2022-03-02T12:00:00'
     - '2022-04-01T12:00:00'
+forcing_loader:
+  num_data_workers: 2
+  atmosphere:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+  ocean:
+    dataset:
+      data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
+      engine: zarr
+      n_repeats: 2
 aggregator:
   log_global_mean_time_series: false
 data_writer:
