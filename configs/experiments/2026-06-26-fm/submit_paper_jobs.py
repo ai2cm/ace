@@ -1,25 +1,29 @@
 """Submit the ACE2S-SHiELD+ paper experiment jobs for the FM checkpoints.
 
 Runs the configs written by generate_paper_configs.py (see its docstring for the
-kinds) against every fm- and c96-regime training run with a result dataset in
-wandb_to_beaker_map.json, mounting that run's best_inference_ckpt.tar at
-/ckpt.tar. The era5 regime and the hand-written ERA5 runs are skipped: they
-never saw the SOM, AMIP or ramped data or their labels. Data-only kinds
-evaluate reference data against itself and run once per reference member with
-a single checkpoint (--data-only-run) rather than once per training run.
+kinds and their naming scheme) against every training run with a result
+dataset in wandb_to_beaker_map.json whose regime saw the kind's forcing data,
+mounting that run's best_inference_ckpt.tar at /ckpt.tar:
 
---kind is required; there is no default, since the full set is well over a
+- SHiELD-data kinds (``som-``, ``amip-``, ``ramped-``): the fm and c96 regimes.
+- ERA5-data kinds (``era5-``): the fm and era5 regimes plus the hand-written
+  ERA5 runs (``nc-sfno-vN``), which have no regime segment.
+
+Data-only kinds evaluate reference data against itself and run once per
+reference member with a single checkpoint (--data-only-run) rather than once
+per training run.
+
+--kind is required; there is no default, since the full set is several
 thousand jobs. --arm restricts to the norm-ablation cells (dropping the
-hand-written runs), and --run/--arch/--regime/--climate/--ic narrow further.
---climate applies to the SOM kinds and random-co2-eval (1x/2x/4x); --ic to
-eq, eq-nospinup and eq-eval-sst; --ens-member to the per-member abrupt-4xCO2
-ensemble kinds (abrupt-ens-eval-sst, abrupt-ens-data-only), which otherwise
-expand to all 36 members.
+hand-written runs), and --run/--arch/--regime narrow further. --climate applies
+to the kinds that span climates (``som-eq-*`` and ``ramped-random-co2-sst-eval``),
+--ic to the staggered-IC kinds (``som-eq-10yr-*``, ``som-eq-nospinup-*``), and
+--ens-member to the per-member abrupt-4xCO2 ensemble kinds
+(``som-abrupt-4xCO2-ens-sst-eval``, ``som-abrupt-4xCO2-ens-data-only``), which
+otherwise expand to all 36 members.
 
-Job names are the wandb run names: ``{run}-som-{kind}-{climate}[-ic{n}]`` for
-the SOM kinds, ``{run}-amip-{variant}-eval`` and ``{run}-ramped-{climate}-eval``
-for the prescribed-SST kinds, and ``som-``/``amip-``-prefixed names without a
-run for the data-only kinds.
+Job names are the wandb run names: ``{run}-{kind}[-{climate}][-ic{n}]`` for
+the per-run kinds and ``{kind}-{member}`` for the data-only kinds.
 
 Kinds whose configs point at a dataset that is not on weka yet (the entries of
 generate_paper_configs.MISSING_DATASETS with available=False) are refused with a
@@ -31,7 +35,7 @@ pushed before submitting; this is checked unless --dry-run is given.
 Usage:
     python submit_paper_jobs.py --kind KIND [KIND ...]
                               [--run RUN ...] [--arch ARCH ...]
-                              [--regime {fm,c96} ...] [--arm {a1,a2,a3} ...]
+                              [--regime {fm,c96,era5} ...] [--arm {a1,a2,a3} ...]
                               [--climate CLIMATE ...] [--ic IC ...]
                               [--ens-member N ...]
                               [--version {v1,v2,v3}]
@@ -65,19 +69,18 @@ from generate_eval_configs import (
     source_config_to_run_name,
 )
 from generate_paper_configs import (
-    ABRUPT_CLIMATES,
     ABRUPT_ENSEMBLE_N_MEMBERS,
     AMIP_HELD_OUT_MEMBER,
     AMIP_VARIANTS,
     CLIMATES,
-    CONTROL_CLIMATE,
     DATA_ONLY_KINDS,
-    EVALUATOR_KINDS,
     KINDS,
     MISSING_DATASETS,
     N_INITIAL_CONDITIONS,
     RAMPED_CLIMATES,
     SOM_MEMBERS,
+    kind_grid,
+    kind_mode,
     paper_config_filename,
     references_missing_dataset,
 )
@@ -91,16 +94,37 @@ WANDB_GROUP = "ace2-fm-paper-2026-06-26"
 # best_inference_ckpt.tar is always written by training; mounted at /ckpt.tar.
 CHECKPOINT_PATH = "training_checkpoints/best_inference_ckpt.tar"
 
-REGIMES = ("fm", "c96")
+# Training regime (segment after the architecture tag in the run name; "" for
+# the hand-written ERA5 runs) -> forcing grids whose data the regime trained
+# on. c96 cells never saw ERA5; era5 cells never saw SHiELD; fm cells saw both.
+REGIME_GRIDS = {
+    "fm": ("shield", "era5"),
+    "c96": ("shield",),
+    "era5": ("era5",),
+    "": ("era5",),
+}
+REGIMES = ("fm", "c96", "era5")
 ARMS = ("a1", "a2", "a3")
 DEFAULT_DATA_ONLY_RUN = "ace2-fm-nc-swin-v2-fm-a1"
+
+TWO_STAGE_KIND = "som-eq-10yr-slab-inference"
+CLIMATE_IC_KINDS = (
+    "som-eq-10yr-slab-inference",
+    "som-eq-nospinup-10yr-slab-inference",
+    "som-eq-10yr-sst-eval",
+)
+ENSEMBLE_MEMBER_KINDS = (
+    "som-abrupt-4xCO2-ens-sst-eval",
+    "som-abrupt-4xCO2-ens-data-only",
+)
 
 
 class Job(NamedTuple):
     name: str
     run_script: pathlib.Path
     #: Config filenames (relative to run_configs/) in the order the run script
-    #: takes them: one for single-stage kinds, spin-up then main for ``eq``.
+    #: takes them: one for single-stage kinds, spin-up then main for the
+    #: two-stage equilibrium kind.
     configs: tuple[str, ...]
     dataset_id: str
 
@@ -125,9 +149,9 @@ def run_arm(run_name: str) -> str | None:
     return match.group(1) if match else None
 
 
-def som_runs(version: str | None = None) -> list[str]:
-    """Training run names the SOM experiments apply to: every base or
-    norm-ablation config with a recorded result dataset in the fm or c96 regime.
+def paper_runs(version: str | None = None) -> list[str]:
+    """Every base or norm-ablation training run with a recorded result dataset,
+    in any regime; runs_for_kind narrows per kind.
     """
     runs = []
     for source_path in discover_source_configs(
@@ -139,14 +163,98 @@ def som_runs(version: str | None = None) -> list[str]:
         if run_name not in TRAINING_RESULT_DATASETS:
             print(f"Skipped {source_path.name} (no dataset ID for {run_name!r})")
             continue
-        if run_regime(run_name) in REGIMES:
-            runs.append(run_name)
+        runs.append(run_name)
     return runs
+
+
+def runs_for_kind(kind: str, runs: list[str]) -> list[str]:
+    """The runs whose regime trained on the kind's forcing grid."""
+    grid = kind_grid(kind)
+    return [name for name in runs if grid in REGIME_GRIDS.get(run_regime(name), ())]
 
 
 def _ic_member_tag(member: str) -> str:
     """``ic_0005`` -> ``ic5``, for job names."""
     return f"ic{int(member.removeprefix('ic_'))}"
+
+
+def _variant_tag(variant: str) -> str:
+    """``ic_0002`` -> ``ic2``, ``p4k`` -> ``p4k``, for job names."""
+    return _ic_member_tag(variant) if variant.startswith("ic_") else variant
+
+
+def _run_script(kind: str) -> pathlib.Path:
+    if kind == TWO_STAGE_KIND:
+        return TWO_STAGE_RUN_SCRIPT
+    if kind_mode(kind) == "inference":
+        return INFERENCE_RUN_SCRIPT
+    return EVALUATOR_RUN_SCRIPT
+
+
+def _expand(
+    kind: str, climates: list[str], ics: list[int], ens_members: list[int]
+) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
+    """(job-name parts, config filenames) for every job of a kind."""
+    if kind in CLIMATE_IC_KINDS:
+        if kind == TWO_STAGE_KIND:
+            return [
+                (
+                    (climate, f"ic{ic}"),
+                    (
+                        paper_config_filename(kind, "spinup", climate, f"ic{ic}"),
+                        paper_config_filename(kind, "main", climate, f"ic{ic}"),
+                    ),
+                )
+                for climate in climates
+                for ic in ics
+            ]
+        return [
+            ((climate, f"ic{ic}"), (paper_config_filename(kind, climate, f"ic{ic}"),))
+            for climate in climates
+            for ic in ics
+        ]
+    if kind == "som-eq-1000yr-slab-inference":
+        return [
+            ((climate,), (paper_config_filename(kind, climate),))
+            for climate in climates
+        ]
+    if kind == "som-eq-10yr-data-only":
+        return [
+            (
+                (climate, _ic_member_tag(member)),
+                (paper_config_filename(kind, climate, member),),
+            )
+            for climate in climates
+            for member in SOM_MEMBERS[climate]
+        ]
+    if kind == "ramped-random-co2-sst-eval":
+        return [
+            ((climate,), (paper_config_filename(kind, climate),))
+            for climate in climates
+            if climate in RAMPED_CLIMATES
+        ]
+    if kind in ENSEMBLE_MEMBER_KINDS:
+        return [
+            (
+                (_ic_member_tag(f"ic_{n:04d}"),),
+                (paper_config_filename(kind, f"ic_{n:04d}"),),
+            )
+            for n in ens_members
+        ]
+    if kind == "amip-sst-eval":
+        return [
+            (
+                (_variant_tag(AMIP_HELD_OUT_MEMBER),),
+                (paper_config_filename(kind, AMIP_HELD_OUT_MEMBER),),
+            )
+        ]
+    if kind == "amip-data-only":
+        return [
+            ((_variant_tag(variant),), (paper_config_filename(kind, variant),))
+            for variant in AMIP_VARIANTS
+        ]
+    # Single-config kinds.
+    return [((), (paper_config_filename(kind),))]
 
 
 def model_jobs(
@@ -158,213 +266,24 @@ def model_jobs(
 ) -> list[Job]:
     """Jobs of a per-training-run kind for one run."""
     dataset_id = TRAINING_RESULT_DATASETS[run_name]
-    jobs = []
-    if kind == "eq":
-        for climate in climates:
-            for ic in ics:
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-eq-{climate}-ic{ic}",
-                        TWO_STAGE_RUN_SCRIPT,
-                        (
-                            paper_config_filename("eq-spinup", climate, f"ic{ic}"),
-                            paper_config_filename("eq-main", climate, f"ic{ic}"),
-                        ),
-                        dataset_id,
-                    )
-                )
-    elif kind == "eq-nospinup":
-        for climate in climates:
-            for ic in ics:
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-eq-nospinup-{climate}-ic{ic}",
-                        INFERENCE_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate, f"ic{ic}"),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "eq-1000yr":
-        for climate in climates:
-            jobs.append(
-                Job(
-                    f"{run_name}-som-eq1000-{climate}",
-                    INFERENCE_RUN_SCRIPT,
-                    (paper_config_filename(kind, climate),),
-                    dataset_id,
-                )
-            )
-    elif kind == "abrupt-10yr":
-        for climate in climates:
-            if climate in ABRUPT_CLIMATES:
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-abrupt-{climate}-10yr",
-                        INFERENCE_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate),),
-                        dataset_id,
-                    )
-                )
-    elif kind in ("abrupt-10yr-eval", "abrupt-10yr-eval-sst"):
-        suffix = kind.removeprefix("abrupt-")
-        for climate in climates:
-            if climate in ABRUPT_CLIMATES:
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-abrupt-{climate}-{suffix}",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "abrupt-ens":
-        if "4xCO2" in climates:
-            jobs.append(
-                Job(
-                    f"{run_name}-som-abrupt-4xCO2-ens",
-                    EVALUATOR_RUN_SCRIPT,
-                    (paper_config_filename(kind, "4xCO2"),),
-                    dataset_id,
-                )
-            )
-    elif kind == "7day":
-        for climate in climates:
-            if climate in (CONTROL_CLIMATE, "4xCO2"):
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-7day-{climate}",
-                        INFERENCE_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "eq-eval-sst":
-        for climate in climates:
-            for ic in ics:
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-eq-eval-sst-{climate}-ic{ic}",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate, f"ic{ic}"),),
-                        dataset_id,
-                    )
-                )
-    elif kind in ("amip-eval", "amip-p4k", "amip-p2k"):
-        variant = AMIP_HELD_OUT_MEMBER if kind == "amip-eval" else kind[5:]
-        jobs.append(
-            Job(
-                f"{run_name}-amip-{_amip_variant_tag(variant)}-eval",
-                EVALUATOR_RUN_SCRIPT,
-                (paper_config_filename(kind, variant),),
-                dataset_id,
-            )
-        )
-    elif kind == "random-co2-eval":
-        for climate in climates:
-            if climate in RAMPED_CLIMATES:
-                jobs.append(
-                    Job(
-                        f"{run_name}-ramped-{climate}-eval",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "abrupt-ens-eval-sst":
-        if "4xCO2" in climates:
-            for n in ens_members:
-                member = f"ic_{n:04d}"
-                jobs.append(
-                    Job(
-                        f"{run_name}-som-abrupt-4xCO2-ens-eval-sst-{_ic_member_tag(member)}",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, "4xCO2", member),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "control-ens-eval-sst":
-        if CONTROL_CLIMATE in climates:
-            jobs.append(
-                Job(
-                    f"{run_name}-som-control-ens-eval-sst",
-                    EVALUATOR_RUN_SCRIPT,
-                    (paper_config_filename(kind, CONTROL_CLIMATE),),
-                    dataset_id,
-                )
-            )
-    elif kind == "abrupt-ens-fixed-sst":
-        if "4xCO2" in climates:
-            jobs.append(
-                Job(
-                    f"{run_name}-som-abrupt-4xCO2-ens-fixed-sst",
-                    EVALUATOR_RUN_SCRIPT,
-                    (paper_config_filename(kind, "4xCO2"),),
-                    dataset_id,
-                )
-            )
-    else:
-        raise ValueError(f"{kind!r} is not a per-run kind")
-    return jobs
-
-
-def _amip_variant_tag(variant: str) -> str:
-    """``ic_0002`` -> ``ic2``, ``p4k`` -> ``p4k``, for job names."""
-    return _ic_member_tag(variant) if variant.startswith("ic_") else variant
+    return [
+        Job("-".join((run_name, kind, *parts)), _run_script(kind), configs, dataset_id)
+        for parts, configs in _expand(kind, climates, ics, ens_members)
+    ]
 
 
 def data_only_jobs(
-    kind: str, data_only_run: str, climates: list[str], ens_members: list[int]
+    kind: str,
+    data_only_run: str,
+    climates: list[str],
+    ens_members: list[int],
 ) -> list[Job]:
     """Jobs of a data-only kind: one per reference member, fixed checkpoint."""
     dataset_id = TRAINING_RESULT_DATASETS[data_only_run]
-    jobs = []
-    if kind == "data-only":
-        for climate in climates:
-            for member in SOM_MEMBERS[climate]:
-                jobs.append(
-                    Job(
-                        f"som-data-only-{climate}-{_ic_member_tag(member)}",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate, member),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "abrupt-data-only":
-        for climate in climates:
-            if climate in ABRUPT_CLIMATES:
-                jobs.append(
-                    Job(
-                        f"som-abrupt-{climate}-data-only",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, climate),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "abrupt-ens-data-only":
-        if "4xCO2" in climates:
-            for n in ens_members:
-                member = f"ic_{n:04d}"
-                jobs.append(
-                    Job(
-                        f"som-abrupt-4xCO2-ens-data-only-{_ic_member_tag(member)}",
-                        EVALUATOR_RUN_SCRIPT,
-                        (paper_config_filename(kind, "4xCO2", member),),
-                        dataset_id,
-                    )
-                )
-    elif kind == "amip-data-only":
-        for variant in AMIP_VARIANTS:
-            jobs.append(
-                Job(
-                    f"amip-{_amip_variant_tag(variant)}-data-only",
-                    EVALUATOR_RUN_SCRIPT,
-                    (paper_config_filename(kind, variant),),
-                    dataset_id,
-                )
-            )
-    else:
-        raise ValueError(f"{kind!r} is not a data-only kind")
-    return jobs
+    return [
+        Job("-".join((kind, *parts)), EVALUATOR_RUN_SCRIPT, configs, dataset_id)
+        for parts, configs in _expand(kind, climates, [], ens_members)
+    ]
 
 
 def refuse_missing_datasets(kinds: list[str], config_filenames: list[str]) -> None:
@@ -392,10 +311,14 @@ def refuse_missing_datasets(kinds: list[str], config_filenames: list[str]) -> No
     raise SystemExit("\n".join(lines))
 
 
+def config_kind(config_filename: str) -> str:
+    return config_filename.removeprefix("ace-paper-").split("-config-")[0]
+
+
 def validate_configs(config_filenames: list[str]) -> None:
     for config_filename in config_filenames:
-        kind = config_filename.removeprefix("ace-paper-").split("-config-")[0]
-        config_type = "evaluator" if kind in EVALUATOR_KINDS else "inference"
+        mode = kind_mode(config_kind(config_filename))
+        config_type = "inference" if mode == "inference" else "evaluator"
         subprocess.run(
             [
                 sys.executable,
@@ -424,7 +347,7 @@ def main() -> None:
         nargs="+",
         default=None,
         metavar="RUN",
-        help="Restrict to these training run names (default: all fm/c96 runs).",
+        help="Restrict to these training run names (default: all eligible).",
     )
     parser.add_argument(
         "--arch",
@@ -438,7 +361,10 @@ def main() -> None:
         nargs="+",
         default=None,
         choices=REGIMES,
-        help="Restrict to these training regimes (default: fm and c96).",
+        help=(
+            "Restrict to these training regimes (default: every regime that "
+            "trained on the kind's forcing data)."
+        ),
     )
     parser.add_argument(
         "--arm",
@@ -455,7 +381,10 @@ def main() -> None:
         nargs="+",
         default=None,
         choices=list(CLIMATES),
-        help="Restrict to these climates (default: all a kind applies to).",
+        help=(
+            "Restrict the climate-spanning kinds to these climates (default: "
+            "all a kind applies to)."
+        ),
     )
     parser.add_argument(
         "--ic",
@@ -463,10 +392,7 @@ def main() -> None:
         type=int,
         default=None,
         choices=range(1, N_INITIAL_CONDITIONS + 1),
-        help=(
-            "Restrict eq/eq-nospinup/eq-eval-sst to these staggered initial "
-            "conditions."
-        ),
+        help="Restrict the staggered-IC kinds to these initial conditions.",
     )
     parser.add_argument(
         "--ens-member",
@@ -476,8 +402,8 @@ def main() -> None:
         choices=range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1),
         metavar="N",
         help=(
-            "Restrict abrupt-ens-eval-sst/abrupt-ens-data-only to these members "
-            "of the 36-member abrupt-4xCO2 ensemble (default: all)."
+            "Restrict the per-member abrupt-4xCO2 ensemble kinds to these "
+            "members (default: all 36)."
         ),
     )
     parser.add_argument(
@@ -513,7 +439,7 @@ def main() -> None:
     ics = args.ic or list(range(1, N_INITIAL_CONDITIONS + 1))
     ens_members = args.ens_member or list(range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1))
 
-    runs = som_runs(args.version)
+    runs = paper_runs(args.version)
     if args.run is not None:
         unknown_runs = sorted(set(args.run) - set(runs))
         if unknown_runs:
@@ -539,11 +465,13 @@ def main() -> None:
         raise KeyError(f"no dataset ID for --data-only-run {args.data_only_run!r}")
 
     jobs: list[Job] = []
+    used_runs: set[str] = set()
     for kind in args.kind:
         if kind in DATA_ONLY_KINDS:
             jobs.extend(data_only_jobs(kind, args.data_only_run, climates, ens_members))
         else:
-            for run_name in runs:
+            for run_name in runs_for_kind(kind, runs):
+                used_runs.add(run_name)
                 jobs.extend(model_jobs(kind, run_name, climates, ics, ens_members))
 
     if args.skip_if_in_wandb:
@@ -571,7 +499,7 @@ def main() -> None:
         check_configs_at_head([RUN_CONFIGS_DIR / name for name in needed_configs])
         validate_configs(needed_configs)
 
-    print(f"{len(jobs)} job(s) across {len(runs)} training run(s).")
+    print(f"{len(jobs)} job(s) across {len(used_runs)} training run(s).")
     for job in jobs:
         submit_job(
             job.run_script,

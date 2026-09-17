@@ -2,136 +2,153 @@
 
 Reproduces the ACE experiments of the ACE2S-SHiELD+ paper repository
 (``ai2cm/ace2s-shield-plus-paper``, ``ACE-experiments/inference``) on the 4deg
-daily SHiELD datasets the FM runs were trained on: the slab-ocean (SOM) climate
-experiments on the SOM ensemble, and the prescribed-SST experiments on the AMIP
-and ramped-SST random-CO2 stores. Every config is run-agnostic: the checkpoint
-is mounted at ``/ckpt.tar`` by submit_paper_jobs.py and the same config is
-reused across every training run.
+daily datasets the FM runs were trained on: the slab-ocean (SOM) climate
+experiments on the SHiELD-SOM ensemble, the prescribed-SST experiments on the
+AMIP and ramped-SST random-CO2 stores, and their transfer to ERA5 with
+prescribed observed SST. Every config is run-agnostic: the checkpoint is
+mounted at ``/ckpt.tar`` by submit_paper_jobs.py and the same config is reused
+across every training run.
 
-For the slab-ocean kinds the slab is applied at inference time through
-``stepper_override``, as in the paper: the training configs prescribe SST, and
-the override swaps the prescribed surface temperature for a mixed-layer tendency
-driven by the model's own surface fluxes plus the dataset's ``prescribed_qflux``
-and ``prescribed_mixed_layer_depth``. ``interpolate`` is left at the training
-default (False) rather than the paper's True, so the only change from training
-is the slab itself.
+Kind names
+----------
+A kind is one config family. Its name spells out the experiment::
 
-Every config carries the label of its data (``som`` for the slab-ocean kinds;
-see "Prescribed-SST kinds" for the rest). Both the fm and c96 regimes train on
-these stores under these labels, so the label is the group a grouped-
-normalization (A2/A3) checkpoint resolves and the conditioning one-hot a
-``-cond`` checkpoint saw.
+    {data}-{experiment}[-{co2}]-{shape}-{ocean}-{mode}
 
-Slab-ocean kinds
-----------------
-One config family per kind, named ``ace-paper-{kind}-config-4deg-...yaml``:
+data
+    ``som`` (SHiELD-SOM ensemble), ``amip``, ``ramped`` (ramped-climatological-
+    SST random-CO2 runs), ``era5``. Also the label every config of the kind
+    carries, so a grouped-normalization (A2/A3) checkpoint resolves the group
+    it trained with and a ``-cond`` checkpoint sees the one-hot it saw.
+experiment
+    ``eq`` (equilibrium climate), ``eq-nospinup``, ``abrupt`` (CO2 step),
+    ``control`` (forcing as is), ``7day``, ``p4k``/``p2k`` (SHiELD AMIP with
+    SST +4 K / +2 K), ``random-co2``.
+co2
+    ``4xCO2`` whenever CO2 is overwritten with a constant. Abrupt kinds are
+    4xCO2 only, as in the paper.
+shape
+    ``10yr``, ``1000yr``, ``ens`` (36 monthly initial conditions x 90 days),
+    ``7day`` (the same 36 x 7 days). Omitted where the paper has one shape
+    (AMIP and ramped runs cover their whole store).
+ocean
+    ``slab``: a mixed-layer ocean applied through ``stepper_override``, as in
+    the paper. SST is computed from the model's own surface fluxes plus the
+    SOM store's ``prescribed_qflux`` and ``prescribed_mixed_layer_depth``;
+    ``interpolate`` stays the training default (False) where the paper sets
+    True, so the only change from training is the slab itself. SOM data only.
+    ``sst``: SST and sea ice read from the reference store at every step, as
+    in training (no ``stepper_override``). The store's SST and CO2 belong
+    together, so the run reproduces the store's experiment and the store is a
+    valid step-by-step target.
+    ``sst-fixed``: SST and sea ice read from the *control* store while CO2 is
+    overwritten with the 4x constant from the first step on. The surface is
+    held at the control climate; the score against the control is the direct
+    atmospheric response to CO2, not a skill. No SHiELD counterpart exists.
+mode
+    ``inference`` (free run, no target), ``eval`` (evaluator against the
+    reference), ``data-only`` (reference evaluated against itself, so its
+    diagnostics land in the same format; the checkpoint is loaded only for
+    variable names; no ocean token).
 
-``eq``
+Training never runs a slab: all 96 training configs prescribe SST from the
+data. ``sst`` kinds are therefore the training-time setup verbatim,
+``sst-fixed`` that setup with one field overwritten, ``slab`` the only mode
+that adds a mechanism the model never saw.
+
+Slab-ocean kinds (SHiELD-SOM)
+-----------------------------
+``som-eq-10yr-slab-inference``
     Paper's equilibrium-climate inference, two stages per (climate, ic): a one
     year spin-up from the spin-up dataset's 2030 state writing
     ``/results/spin-up/restart.nc``, then the ten year main run from that
-    restart under the climate's own member as forcing. Needs the daily 4deg
-    spin-up dataset (MISSING_DATASETS["spin-up"]). Run by
-    run-ace-som-two-stage.sh.
-``eq-nospinup``
-    Single-stage variant runnable today: the initial condition is the member's
-    own 2031 state (already SHiELD-equilibrated), ten years minus the ic
-    stagger. ACE's drift to its own equilibrium happens inside the scored
-    window instead of the discarded spin-up year.
-``eq-1000yr``
-    Paper's 1000-year run: forcing is the 1xCO2 member tiled with
-    ``n_repeats`` (all forcing but CO2 is climatological in the SOM runs) with
-    CO2 overwritten to the climate's constant; initial condition from the
-    climate's own member.
-``data-only``
-    Paper's data-only evaluator: ``loader`` and ``prediction_loader`` both
-    point at a reference member, so the evaluator scores SHiELD against itself
-    and logs the reference climate's diagnostics in the same format as a model
-    run. The checkpoint is loaded only for variable names.
-``abrupt-10yr``
-    Ten-year abrupt-CO2 inference from the 1xCO2 member's 2031 state, CO2
-    overwritten to the target climate's constant. Runnable today; no reference.
-``abrupt-10yr-eval``
-    Paper's abrupt-4xCO2 evaluator: same run scored against SHiELD's own
-    abrupt-CO2 run, whose 2020 state is the initial condition. Needs the daily
-    4deg abrupt-CO2 dataset (MISSING_DATASETS["abrupt"]).
-``abrupt-10yr-eval-sst``
-    The abrupt-CO2 evaluator with the surface prescribed instead of the slab:
-    SST and sea ice are read from SHiELD's abrupt run at every step (the
-    training-time ocean, no ``stepper_override``), so the score isolates the
-    atmospheric response given SHiELD's own surface warming.
-``abrupt-data-only``
-    SHiELD's abrupt-CO2 run evaluated against itself (same dataset dependency).
-``abrupt-ens``
+    restart under the climate's own member as forcing. Configs ``-spinup-`` and
+    ``-main-``; run by run-ace-som-two-stage.sh.
+``som-eq-nospinup-10yr-slab-inference``
+    Single-stage variant (ours): the initial condition is the member's own 2031
+    state, ten years minus the ic stagger.
+``som-eq-1000yr-slab-inference``
+    Paper's 1000-year run: the 1xCO2 member tiled with ``n_repeats`` (all
+    forcing but CO2 is climatological in the SOM runs) with CO2 overwritten to
+    the climate's constant; initial condition from the climate's own member.
+``som-eq-10yr-data-only``
+    Paper's data-only evaluator on every SOM member.
+``som-abrupt-4xCO2-10yr-slab-inference``
+    Ten-year 4xCO2 step from the 1xCO2 member's 2031 state, free (ours).
+``som-abrupt-4xCO2-10yr-slab-eval``
+    Paper's abrupt-4xCO2 evaluator: the slab run initialized from SHiELD's own
+    abrupt-4xCO2 run at 2020-01-01 and scored against it.
+``som-abrupt-4xCO2-10yr-data-only``
+    SHiELD's abrupt-4xCO2 run evaluated against itself.
+``som-abrupt-4xCO2-ens-slab-eval``
     Paper's abrupt-4xCO2 ensemble evaluator: 36 monthly 1xCO2 initial
     conditions, 90 days each, CO2 overwritten to 4x, scored against the 1xCO2
-    member so the metrics are the response.
-``abrupt-ens-data-only``
+    member so the metrics are the response (figures 8 and 10).
+``som-abrupt-4xCO2-ens-data-only``
     SHiELD's 36-member abrupt-4xCO2 ensemble evaluated against itself. Needs
     the daily 4deg abrupt-4xCO2 ensemble dataset
     (MISSING_DATASETS["abrupt-ensemble"]).
-``7day``
+``som-control-7day-slab-inference``, ``som-abrupt-4xCO2-7day-slab-inference``
     Paper's seven-day ensemble inference from the same 36 initial conditions,
-    once with the 1xCO2 forcing as is and once with CO2 overwritten to 4x.
+    with the 1xCO2 forcing as is and with CO2 overwritten to 4x (figure 9).
 
-Prescribed-SST kinds
---------------------
-These run the training-time ocean (SST and sea ice read from the reference at
-every step, no ``stepper_override``, so ``interpolate`` stays the training
-default where the paper sets it True) and score against the reference member,
-which is a valid step-by-step target under prescribed SST. The paper ran the
-AMIP experiments as free inference plus separate data-only evaluators and
-compared offline; an evaluator gives that comparison directly.
-
-``eq-eval-sst``
-    Prescribed-SST control for ``eq``/``eq-nospinup``: the same climates,
-    members and five staggered initial conditions, scored against the member
-    itself. Separates the atmospheric error from the slab-feedback error.
-``amip-eval``
-    Paper's AMIP run on the held-out ensemble member ic_0002, 1979-01-01 to
-    the end of the store, as one evaluator run instead of the paper's three
-    chained inference stages (spin-up 1979 / train-validate 1980-2011 / test
-    2012-2020): restart chaining gives the identical trajectory, so the
-    windows are an analysis cut. Writes the paper's daily-PRATEsfc zarr.
-``amip-p4k``, ``amip-p2k``
-    Same on SHiELD's AMIP +4 K / +2 K SST runs, initialized from their own
-    1979 state. Unlike the SST sweep (generate_sst_configs.py), which
-    perturbs the forcing SST and has no reference, these score against
-    SHiELD's own response to the perturbation.
+Prescribed-SST kinds (SHiELD)
+-----------------------------
+``som-eq-10yr-sst-eval``
+    Prescribed-SST control for the equilibrium runs: same climates, members
+    and five staggered initial conditions, scored against the member.
+    Separates atmospheric error from slab-feedback error.
+``som-abrupt-4xCO2-10yr-sst-eval``
+    The abrupt evaluator with SST from SHiELD's abrupt-4xCO2 run instead of
+    the slab: the atmospheric response given SHiELD's own surface warming.
+``som-abrupt-4xCO2-10yr-sst-fixed-eval``
+    Ten-year 4xCO2 step with SST held at the 1xCO2 member's, scored against
+    the 1xCO2 member.
+``som-abrupt-4xCO2-ens-sst-eval``
+    Prescribed-SST figure 8: one evaluator per member of SHiELD's abrupt-4xCO2
+    ensemble, SST, sea ice and CO2 from that member, scored against it. Needs
+    MISSING_DATASETS["abrupt-ensemble"]; 36 jobs per run.
+``som-abrupt-4xCO2-ens-sst-fixed-eval``
+    The ensemble CO2 step with SST held at 1xCO2; minus
+    ``som-abrupt-4xCO2-ens-sst-eval`` it is the SST-mediated response.
+``som-control-ens-sst-eval``
+    The 36 initial conditions run 90 days on the 1xCO2 member as is: the 1xCO2
+    reference line of figure 8 and ACE's control drift.
+``amip-sst-eval``, ``amip-p4k-sst-eval``, ``amip-p2k-sst-eval``
+    Paper's AMIP runs on the held-out ensemble member ic_0002 and on SHiELD's
+    AMIP +4 K / +2 K SST runs, 1979-01-01 to the end of the store, as one
+    evaluator each instead of the paper's three chained inference stages
+    (spin-up 1979 / train-validate 1980-2011 / test 2012-2020): restart
+    chaining gives the identical trajectory, so the windows are an analysis
+    cut. Write the paper's daily-PRATEsfc zarr.
 ``amip-data-only``
     AMIP ic_0002, +4 K and +2 K evaluated against themselves from 1980-01-01
     (the paper's data-only evaluators skip the spin-up year).
-``random-co2-eval``
+``ramped-random-co2-sst-eval``
     Paper's random-CO2 evaluator on the held-out member ic_0003 of the
-    ramped-climatological-SST random-CO2-perturbation runs, 1x/2x/4xCO2,
-    2019-10-01 to the end of the store.
+    ramped-SST random-CO2 runs, 1x/2x/4xCO2, 2019-10-01 to the store's end.
 
-The prescribed-SST counterpart of the paper's figure 8 (90-day global-mean
-response to abrupt 4xCO2, ensemble mean over 36 monthly initial conditions)
-takes three more kinds:
+Prescribed-SST kinds (ERA5)
+---------------------------
+The paper's abrupt-4xCO2 experiments transferred to ERA5, which has no slab
+fields, so ``sst-fixed`` only. "4x" is four times ERA5's own global-mean CO2
+at the start date (2015-01-01), held constant, as the paper's 4x is four times
+the SOM control's constant. The reference is ERA5 itself, whose CO2 keeps
+rising through the window, so the response is measured against a slowly
+drifting baseline; SHiELD's is flat. ERA5's ten-year control needs no kind:
+the eval suites' ``10year`` entry runs the same window.
 
-``abrupt-ens-eval-sst``
-    The 4xCO2 lines: one evaluator per member of SHiELD's 36-member
-    abrupt-4xCO2 ensemble, SST, sea ice and CO2 read from that member and
-    scored against it, so the target is SHiELD's own 4xCO2 response. Needs
-    the daily 4deg abrupt-4xCO2 ensemble dataset
-    (MISSING_DATASETS["abrupt-ensemble"]); 36 jobs per run.
-``control-ens-eval-sst``
-    The 1xCO2 dashed line and ACE's control drift: the 36 monthly initial
-    conditions run 90 days on the 1xCO2 member as is, one evaluator job.
-``abrupt-ens-fixed-sst``
-    The CO2 step with the surface held at 1xCO2: ``abrupt-ens`` without the
-    slab, i.e. 1xCO2 member SST and sea ice with CO2 overwritten to 4x,
-    scored against the 1xCO2 member. The direct atmospheric CO2 response;
-    ``abrupt-ens-eval-sst`` minus this is the SST-mediated part. SHiELD never
-    ran a fixed-SST 4xCO2 experiment, so the score is a response, not a skill.
+``era5-abrupt-4xCO2-10yr-sst-fixed-eval``
+    2015-01-01, ten years, observed SST, CO2 overwritten to 4x 2015.
+``era5-abrupt-4xCO2-ens-sst-fixed-eval``
+    36 monthly initial conditions 2015-01 .. 2017-12, 90 days, same CO2.
+``era5-control-ens-sst-eval``
+    The same 36 initial conditions with CO2 as observed.
 
-Labels follow the data: ``som`` for SOM members, ``amip`` for the AMIP family,
-``ramped`` for the random-CO2 runs. The +2 K/+4 K runs never appeared in
-training under any label; ``amip`` is the closest distribution and what the
-SST sweep implies. "Held out" means held out of the norm-ablation cells: the
-hand-written fm-random-v1/v3 and fm-0.x-v1 runs trained on AMIP ic_0002 and
-ramped ic_0003 as well.
+"Held out" means held out of the norm-ablation cells: the hand-written
+fm-random-v1/v3 and fm-0.x-v1 runs trained on AMIP ic_0002 and ramped ic_0003
+as well. The +2 K/+4 K AMIP runs never appeared in training; ``amip`` is the
+closest label and what the SST sweep implies.
 
 Step counts are the paper's converted from 6-hourly to daily. See
 MISSING_DATASETS.md for the datasets still to be produced.
@@ -149,11 +166,11 @@ HERE = pathlib.Path(__file__).parent
 RUN_CONFIGS_DIR = HERE / "run_configs"
 PAPER_CONFIG_PREFIX = "ace-paper-"
 CHECKPOINT_PATH = "/ckpt.tar"
-LABEL = "som"
 
 # The 4deg daily SHiELD-SOM ensemble the FM and c96 regimes train on. Members are
 # 1x/2x/4xCO2 ic_0001-ic_0005 and 3xCO2 ic_0001-ic_0002, each 3653 daily steps
 # from 2031-01-01T06 to 2041-01-01T06.
+SOM_LABEL = "som"
 SOM_DATASET = (
     "/climate-default/"
     "2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset"
@@ -204,7 +221,11 @@ MISSING_DATASETS = {
             "make shield_som_abrupt_co2_increase_c96_dataset RESOLUTION=4deg in "
             "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
-        kinds=("abrupt-10yr-eval", "abrupt-10yr-eval-sst", "abrupt-data-only"),
+        kinds=(
+            "som-abrupt-4xCO2-10yr-slab-eval",
+            "som-abrupt-4xCO2-10yr-sst-eval",
+            "som-abrupt-4xCO2-10yr-data-only",
+        ),
         available=True,  # copied to weka 2026-09-16
     ),
     "spin-up": MissingDataset(
@@ -221,12 +242,15 @@ MISSING_DATASETS = {
             "make shield_som_c96_spin_up_dataset RESOLUTION=4deg in "
             "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
-        kinds=("eq",),
+        kinds=("som-eq-10yr-slab-inference",),
         available=True,  # copied to weka 2026-09-16
     ),
     "abrupt-ensemble": MissingDataset(
         path=_MISSING_ROOT + "abrupt-4xCO2-ensemble-fme-dataset",
-        purpose="SHiELD's own 36-member abrupt-4xCO2 spread (abrupt-ens data-only)",
+        purpose=(
+            "SHiELD's own 36-member abrupt-4xCO2 spread: the data-only rows of "
+            "figure 8 and the per-member prescribed-SST evaluators"
+        ),
         source=(
             "gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-"
             "4xCO2-ensemble/regridded-zarrs/gaussian_grid_180_by_360/"
@@ -237,7 +261,7 @@ MISSING_DATASETS = {
             "configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-8layer.yaml to 4deg "
             "with a daily time_coarsen"
         ),
-        kinds=("abrupt-ens-data-only", "abrupt-ens-eval-sst"),
+        kinds=("som-abrupt-4xCO2-ens-data-only", "som-abrupt-4xCO2-ens-sst-eval"),
     ),
 }
 
@@ -246,7 +270,8 @@ class Climate(NamedTuple):
     #: Member the paper uses for this climate's forcing, initial conditions
     #: and reference: the held-out ic_0005 where it exists, ic_0002 for 3xCO2.
     member: str
-    #: Paper's constant global-mean CO2 (kg/kg) for overwriting the forcing.
+    #: Paper's constant global-mean CO2 (volume mixing ratio) for overwriting
+    #: the forcing.
     co2: float
 
 
@@ -256,8 +281,9 @@ CLIMATES = {
     "3xCO2": Climate(member="ic_0002", co2=0.00109029),
     "4xCO2": Climate(member="ic_0005", co2=0.0014537),
 }
-ABRUPT_CLIMATES = ("2xCO2", "3xCO2", "4xCO2")
 CONTROL_CLIMATE = "1xCO2"
+# The paper's abrupt experiments step CO2 to 4x only.
+ABRUPT_CLIMATE = "4xCO2"
 
 # Paper staggers five initial conditions one timestep apart and runs each as
 # its own job; at a daily step the stagger is one day.
@@ -375,37 +401,87 @@ RAMPED_CLIMATES = ("1xCO2", "2xCO2", "4xCO2")
 RAMPED_FIRST_TIME = "2019-10-01T06:00:00"
 RAMPED_N_STEPS = 1918
 
-INFERENCE_KINDS = ("eq", "eq-nospinup", "eq-1000yr", "abrupt-10yr", "7day")
-EVALUATOR_KINDS = (
-    "data-only",
-    "abrupt-10yr-eval",
-    "abrupt-10yr-eval-sst",
-    "abrupt-data-only",
-    "abrupt-ens",
-    "abrupt-ens-data-only",
-    "eq-eval-sst",
-    "amip-eval",
-    "amip-p4k",
-    "amip-p2k",
-    "amip-data-only",
-    "random-co2-eval",
-    "abrupt-ens-eval-sst",
-    "control-ens-eval-sst",
-    "abrupt-ens-fixed-sst",
+# ERA5, 4deg daily 1940-2025, labels at 00Z (the training configs' own inline
+# inference starts there). The abrupt window is the eval suites' ``10year``
+# control window, so the ten-year control run already exists for every run;
+# the 36 ensemble initial conditions are its first three years.
+ERA5_LABEL = "era5"
+ERA5_DATASET = PrescribedSstDataset(
+    "/climate-default", "2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr"
 )
-KINDS = INFERENCE_KINDS + EVALUATOR_KINDS
+ERA5_ABRUPT_FIRST_TIME = "2015-01-01T00:00:00"
+ERA5_ABRUPT_N_STEPS = 3652
+ERA5_ENSEMBLE_INITIAL_TIMES = [
+    f"{year}-{month:02d}-01T00:00:00"
+    for year in (2015, 2016, 2017)
+    for month in range(1, 13)
+]
+# Four times the store's global_mean_co2 on 2015-01-01 (3.9862e-4, volume
+# mixing ratio; Meinshausen et al. 2017 / NOAA GML), as the paper's 4x is four
+# times the SOM control's constant. One constant for the whole run and for all
+# 36 ensemble members, as in the paper.
+ERA5_CO2_2015 = 0.00039861797
+ERA5_CO2_4X = 4 * ERA5_CO2_2015
+
+KINDS = (
+    # slab-ocean, SHiELD-SOM
+    "som-eq-10yr-slab-inference",
+    "som-eq-nospinup-10yr-slab-inference",
+    "som-eq-1000yr-slab-inference",
+    "som-eq-10yr-data-only",
+    "som-abrupt-4xCO2-10yr-slab-inference",
+    "som-abrupt-4xCO2-10yr-slab-eval",
+    "som-abrupt-4xCO2-10yr-data-only",
+    "som-abrupt-4xCO2-ens-slab-eval",
+    "som-abrupt-4xCO2-ens-data-only",
+    "som-control-7day-slab-inference",
+    "som-abrupt-4xCO2-7day-slab-inference",
+    # prescribed SST, SHiELD
+    "som-eq-10yr-sst-eval",
+    "som-abrupt-4xCO2-10yr-sst-eval",
+    "som-abrupt-4xCO2-10yr-sst-fixed-eval",
+    "som-abrupt-4xCO2-ens-sst-eval",
+    "som-abrupt-4xCO2-ens-sst-fixed-eval",
+    "som-control-ens-sst-eval",
+    "amip-sst-eval",
+    "amip-p4k-sst-eval",
+    "amip-p2k-sst-eval",
+    "amip-data-only",
+    "ramped-random-co2-sst-eval",
+    # prescribed SST, ERA5
+    "era5-abrupt-4xCO2-10yr-sst-fixed-eval",
+    "era5-abrupt-4xCO2-ens-sst-fixed-eval",
+    "era5-control-ens-sst-eval",
+)
+
+
+def kind_mode(kind: str) -> str:
+    """``inference``, ``evaluator`` or ``data-only``, from the kind's last token."""
+    if kind.endswith("-data-only"):
+        return "data-only"
+    if kind.endswith("-eval"):
+        return "evaluator"
+    if kind.endswith("-inference"):
+        return "inference"
+    raise ValueError(f"{kind!r} has no mode token")
+
+
+def kind_grid(kind: str) -> str:
+    """Forcing grid of a kind's data: ``era5`` or ``shield`` (SOM, AMIP and
+    ramped stores are all SHiELD C96 output).
+    """
+    return "era5" if kind.startswith("era5-") else "shield"
+
+
+INFERENCE_KINDS = tuple(k for k in KINDS if kind_mode(k) == "inference")
+EVALUATOR_KINDS = tuple(k for k in KINDS if kind_mode(k) != "inference")
 # Kinds run once per reference member with a fixed checkpoint, not per run.
-DATA_ONLY_KINDS = (
-    "data-only",
-    "abrupt-data-only",
-    "abrupt-ens-data-only",
-    "amip-data-only",
-)
+DATA_ONLY_KINDS = tuple(k for k in KINDS if kind_mode(k) == "data-only")
 
 
 def paper_config_filename(kind: str, *parts: str) -> str:
-    suffix = "-".join(parts)
-    return f"{PAPER_CONFIG_PREFIX}{kind}-config-4deg-{suffix}.yaml"
+    suffix = "".join(f"-{part}" for part in parts)
+    return f"{PAPER_CONFIG_PREFIX}{kind}-config-4deg{suffix}.yaml"
 
 
 def member_path(climate: str, member: str) -> str:
@@ -435,6 +511,26 @@ def _zarr_dataset(data_path: str, file_pattern: str, co2: float | None = None) -
 
 def _member_dataset(climate: str, member: str, co2: float | None = None) -> dict:
     return _zarr_dataset(SOM_DATASET, f"{climate}-{member}.zarr", co2)
+
+
+def _control_dataset(co2: float | None = None) -> dict:
+    """The 1xCO2 paper member, optionally with CO2 overwritten."""
+    return _member_dataset(CONTROL_CLIMATE, CLIMATES[CONTROL_CLIMATE].member, co2)
+
+
+def _abrupt_dataset() -> dict:
+    """SHiELD's own abrupt-4xCO2 run (MISSING_DATASETS["abrupt"])."""
+    root = MISSING_DATASETS["abrupt"].path
+    return _zarr_dataset(root, f"abrupt-{ABRUPT_CLIMATE}.zarr")
+
+
+def _abrupt_ensemble_member_dataset(member: str) -> dict:
+    root = MISSING_DATASETS["abrupt-ensemble"].path
+    return _zarr_dataset(root, f"abrupt4xCO2-{member}.zarr")
+
+
+def _era5_dataset(co2: float | None = None) -> dict:
+    return _zarr_dataset(*ERA5_DATASET, co2)
 
 
 def _daily_precip_file() -> dict:
@@ -470,13 +566,14 @@ def _inference_config(
     data_writer: dict,
     log_to_wandb: bool = True,
 ) -> dict:
+    """A free slab-ocean run on SOM data (every inference kind is one)."""
     return {
         "experiment_dir": experiment_dir,
         "n_forward_steps": n_forward_steps,
         "forward_steps_in_memory": forward_steps_in_memory,
         "checkpoint_path": CHECKPOINT_PATH,
         "allow_incompatible_dataset": True,
-        "labels": [LABEL],
+        "labels": [SOM_LABEL],
         "logging": _logging(log_to_wandb),
         "initial_condition": {
             "path": initial_condition_path,
@@ -501,8 +598,8 @@ def _evaluator_config(
     data_writer: dict,
     prediction_dataset: dict | None = None,
     aggregator: dict | None = None,
-    slab: bool = True,
-    label: str = LABEL,
+    slab: bool = False,
+    label: str = SOM_LABEL,
 ) -> dict:
     loader = {
         "dataset": loader_dataset,
@@ -537,6 +634,24 @@ def _files_only(files: list[dict]) -> dict:
     return {**_no_files(), "files": files}
 
 
+def _abrupt_monthly_writer() -> dict:
+    return {
+        "save_prediction_files": False,
+        "save_monthly_files": True,
+        "names": list(ABRUPT_MONTHLY_NAMES),
+    }
+
+
+def _abrupt_aggregator() -> dict:
+    """Paper's aggregator for the abrupt-4xCO2 evaluator."""
+    return {"log_zonal_mean_images": False, "log_histograms": True}
+
+
+def _prescribed_sst_aggregator() -> dict:
+    """Paper's aggregator for the AMIP and random-CO2 evaluators."""
+    return {"log_zonal_mean_images": False}
+
+
 def _stagger_time(first_time: str, offset_days: int) -> str:
     """The date `offset_days` after `first_time`, within the same month."""
     date, clock = first_time.split("T")
@@ -544,14 +659,18 @@ def _stagger_time(first_time: str, offset_days: int) -> str:
     return f"{year}-{month}-{int(day) + offset_days:02d}T{clock}"
 
 
-def build_eq_configs() -> dict[str, dict]:
+# --- slab-ocean kinds ---------------------------------------------------------
+
+
+def build_som_eq_10yr_slab_inference_configs() -> dict[str, dict]:
+    kind = "som-eq-10yr-slab-inference"
     configs = {}
     spin_up_root = MISSING_DATASETS["spin-up"].path
     for climate, spec in CLIMATES.items():
         for ic in range(1, N_INITIAL_CONDITIONS + 1):
             offset = ic - 1
             spin_up_pattern = f"{climate}-spin-up-{spec.member}.zarr"
-            configs[paper_config_filename("eq-spinup", climate, f"ic{ic}")] = (
+            configs[paper_config_filename(kind, "spinup", climate, f"ic{ic}")] = (
                 _inference_config(
                     experiment_dir=SPIN_UP_EXPERIMENT_DIR,
                     n_forward_steps=SPIN_UP_N_STEPS - offset,
@@ -564,7 +683,7 @@ def build_eq_configs() -> dict[str, dict]:
                     log_to_wandb=False,
                 )
             )
-            configs[paper_config_filename("eq-main", climate, f"ic{ic}")] = (
+            configs[paper_config_filename(kind, "main", climate, f"ic{ic}")] = (
                 _inference_config(
                     experiment_dir="/results",
                     n_forward_steps=SOM_N_STEPS,
@@ -579,12 +698,13 @@ def build_eq_configs() -> dict[str, dict]:
     return configs
 
 
-def build_eq_nospinup_configs() -> dict[str, dict]:
+def build_som_eq_nospinup_10yr_slab_inference_configs() -> dict[str, dict]:
+    kind = "som-eq-nospinup-10yr-slab-inference"
     configs = {}
     for climate, spec in CLIMATES.items():
         for ic in range(1, N_INITIAL_CONDITIONS + 1):
             offset = ic - 1
-            configs[paper_config_filename("eq-nospinup", climate, f"ic{ic}")] = (
+            configs[paper_config_filename(kind, climate, f"ic{ic}")] = (
                 _inference_config(
                     experiment_dir="/results",
                     n_forward_steps=SOM_N_STEPS - offset,
@@ -599,13 +719,13 @@ def build_eq_nospinup_configs() -> dict[str, dict]:
     return configs
 
 
-def build_eq_1000yr_configs() -> dict[str, dict]:
-    control = CLIMATES[CONTROL_CLIMATE]
+def build_som_eq_1000yr_slab_inference_configs() -> dict[str, dict]:
+    kind = "som-eq-1000yr-slab-inference"
     configs = {}
     for climate, spec in CLIMATES.items():
-        forcing = _member_dataset(CONTROL_CLIMATE, control.member, co2=spec.co2)
+        forcing = _control_dataset(co2=spec.co2)
         forcing["n_repeats"] = THOUSAND_YEAR_N_REPEATS
-        configs[paper_config_filename("eq-1000yr", climate)] = _inference_config(
+        configs[paper_config_filename(kind, climate)] = _inference_config(
             experiment_dir="/results",
             n_forward_steps=THOUSAND_YEAR_N_STEPS,
             forward_steps_in_memory=FORWARD_STEPS_IN_MEMORY,
@@ -618,85 +738,63 @@ def build_eq_1000yr_configs() -> dict[str, dict]:
     return configs
 
 
-def build_data_only_configs() -> dict[str, dict]:
+def build_som_eq_10yr_data_only_configs() -> dict[str, dict]:
+    kind = "som-eq-10yr-data-only"
     configs = {}
     for climate, members in SOM_MEMBERS.items():
         for member in members:
             dataset = _member_dataset(climate, member)
-            configs[paper_config_filename("data-only", climate, member)] = (
-                _evaluator_config(
-                    n_forward_steps=SOM_N_STEPS,
-                    forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
-                    loader_dataset=dataset,
-                    start_indices={"times": [SOM_FIRST_TIME]},
-                    data_writer=_files_only(_daily_precip_files(climate)),
-                    prediction_dataset=copy.deepcopy(dataset),
-                )
+            configs[paper_config_filename(kind, climate, member)] = _evaluator_config(
+                n_forward_steps=SOM_N_STEPS,
+                forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
+                loader_dataset=dataset,
+                start_indices={"times": [SOM_FIRST_TIME]},
+                data_writer=_files_only(_daily_precip_files(climate)),
+                prediction_dataset=copy.deepcopy(dataset),
             )
     return configs
 
 
-def _abrupt_monthly_writer() -> dict:
-    return {
-        "save_prediction_files": False,
-        "save_monthly_files": True,
-        "names": list(ABRUPT_MONTHLY_NAMES),
-    }
-
-
-def _abrupt_aggregator() -> dict:
-    return {"log_zonal_mean_images": False, "log_histograms": True}
-
-
-def build_abrupt_10yr_configs() -> dict[str, dict]:
+def build_som_abrupt_4xco2_10yr_slab_inference_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-10yr-slab-inference"
     control = CLIMATES[CONTROL_CLIMATE]
-    configs = {}
-    for climate in ABRUPT_CLIMATES:
-        configs[paper_config_filename("abrupt-10yr", climate)] = _inference_config(
+    return {
+        paper_config_filename(kind): _inference_config(
             experiment_dir="/results",
             n_forward_steps=SOM_N_STEPS,
             forward_steps_in_memory=FORWARD_STEPS_IN_MEMORY,
             initial_condition_path=member_path(CONTROL_CLIMATE, control.member),
             initial_condition_engine="zarr",
             initial_times=[SOM_FIRST_TIME],
-            forcing_dataset=_member_dataset(
-                CONTROL_CLIMATE, control.member, co2=CLIMATES[climate].co2
-            ),
+            forcing_dataset=_control_dataset(co2=CLIMATES[ABRUPT_CLIMATE].co2),
             data_writer=_abrupt_monthly_writer(),
         )
-    return configs
+    }
 
 
-def _build_abrupt_10yr_eval_configs(kind: str, slab: bool) -> dict[str, dict]:
-    root = MISSING_DATASETS["abrupt"].path
-    configs = {}
-    for climate in ABRUPT_CLIMATES:
-        configs[paper_config_filename(kind, climate)] = _evaluator_config(
-            n_forward_steps=ABRUPT_N_STEPS,
-            forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
-            loader_dataset=_zarr_dataset(root, f"abrupt-{climate}.zarr"),
-            start_indices={"times": [ABRUPT_FIRST_TIME]},
-            data_writer=_abrupt_monthly_writer(),
-            aggregator=_abrupt_aggregator(),
-            slab=slab,
-        )
-    return configs
+def _abrupt_10yr_eval_config(slab: bool) -> dict:
+    """The abrupt-4xCO2 evaluator against SHiELD's own abrupt run."""
+    return _evaluator_config(
+        n_forward_steps=ABRUPT_N_STEPS,
+        forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
+        loader_dataset=_abrupt_dataset(),
+        start_indices={"times": [ABRUPT_FIRST_TIME]},
+        data_writer=_abrupt_monthly_writer(),
+        aggregator=_abrupt_aggregator(),
+        slab=slab,
+    )
 
 
-def build_abrupt_10yr_eval_configs() -> dict[str, dict]:
-    return _build_abrupt_10yr_eval_configs("abrupt-10yr-eval", slab=True)
+def build_som_abrupt_4xco2_10yr_slab_eval_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-10yr-slab-eval"
+    return {paper_config_filename(kind): _abrupt_10yr_eval_config(slab=True)}
 
 
-def build_abrupt_10yr_eval_sst_configs() -> dict[str, dict]:
-    return _build_abrupt_10yr_eval_configs("abrupt-10yr-eval-sst", slab=False)
-
-
-def build_abrupt_data_only_configs() -> dict[str, dict]:
-    root = MISSING_DATASETS["abrupt"].path
-    configs = {}
-    for climate in ABRUPT_CLIMATES:
-        dataset = _zarr_dataset(root, f"abrupt-{climate}.zarr")
-        configs[paper_config_filename("abrupt-data-only", climate)] = _evaluator_config(
+def build_som_abrupt_4xco2_10yr_data_only_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-10yr-data-only"
+    dataset = _abrupt_dataset()
+    return {
+        paper_config_filename(kind): _evaluator_config(
             n_forward_steps=ABRUPT_N_STEPS,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=dataset,
@@ -705,67 +803,97 @@ def build_abrupt_data_only_configs() -> dict[str, dict]:
             aggregator=_abrupt_aggregator(),
             prediction_dataset=copy.deepcopy(dataset),
         )
-    return configs
+    }
 
 
-def build_abrupt_ens_configs() -> dict[str, dict]:
-    control = CLIMATES[CONTROL_CLIMATE]
+def _ensemble_evaluator_config(
+    loader_dataset: dict,
+    initial_times: list[str],
+    slab: bool,
+    label: str = SOM_LABEL,
+) -> dict:
+    """The paper's 36-monthly-IC, 90-day ensemble evaluator (one job)."""
+    return _evaluator_config(
+        n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS,
+        forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
+        loader_dataset=loader_dataset,
+        start_indices={"times": list(initial_times)},
+        data_writer=_no_files(),
+        slab=slab,
+        label=label,
+    )
+
+
+def build_som_abrupt_4xco2_ens_slab_eval_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-ens-slab-eval"
     return {
-        paper_config_filename("abrupt-ens", "4xCO2"): _ensemble_evaluator_config(
-            _member_dataset(CONTROL_CLIMATE, control.member, co2=CLIMATES["4xCO2"].co2),
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _control_dataset(co2=CLIMATES[ABRUPT_CLIMATE].co2),
+            ENSEMBLE_INITIAL_TIMES,
             slab=True,
         )
     }
 
 
-def build_abrupt_ens_data_only_configs() -> dict[str, dict]:
-    root = MISSING_DATASETS["abrupt-ensemble"].path
+def _abrupt_ensemble_member_configs(kind: str, data_only: bool) -> dict[str, dict]:
+    """One evaluator per member of SHiELD's abrupt-4xCO2 ensemble."""
     configs = {}
     for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
         member = f"ic_{n:04d}"
-        dataset = _zarr_dataset(root, f"abrupt4xCO2-{member}.zarr")
-        configs[paper_config_filename("abrupt-ens-data-only", "4xCO2", member)] = (
-            _evaluator_config(
-                n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS - 1,
-                forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
-                loader_dataset=dataset,
-                start_indices={"list": [0]},
-                data_writer=_no_files(),
-                prediction_dataset=copy.deepcopy(dataset),
-            )
-        )
-    return configs
-
-
-def build_7day_configs() -> dict[str, dict]:
-    control = CLIMATES[CONTROL_CLIMATE]
-    configs = {}
-    for climate in (CONTROL_CLIMATE, "4xCO2"):
-        co2 = None if climate == CONTROL_CLIMATE else CLIMATES[climate].co2
-        configs[paper_config_filename("7day", climate)] = _inference_config(
-            experiment_dir="/results",
-            n_forward_steps=SEVEN_DAY_N_STEPS,
-            forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
-            initial_condition_path=member_path(CONTROL_CLIMATE, control.member),
-            initial_condition_engine="zarr",
-            initial_times=list(ENSEMBLE_INITIAL_TIMES),
-            forcing_dataset=_member_dataset(CONTROL_CLIMATE, control.member, co2=co2),
+        dataset = _abrupt_ensemble_member_dataset(member)
+        configs[paper_config_filename(kind, member)] = _evaluator_config(
+            n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS - 1,
+            forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
+            loader_dataset=dataset,
+            start_indices={"list": [0]},
             data_writer=_no_files(),
+            prediction_dataset=copy.deepcopy(dataset) if data_only else None,
         )
     return configs
 
 
-def _prescribed_sst_aggregator() -> dict:
-    """Paper's aggregator for the AMIP and random-CO2 evaluators."""
-    return {"log_zonal_mean_images": False}
+def build_som_abrupt_4xco2_ens_data_only_configs() -> dict[str, dict]:
+    return _abrupt_ensemble_member_configs(
+        "som-abrupt-4xCO2-ens-data-only", data_only=True
+    )
 
 
-def build_eq_eval_sst_configs() -> dict[str, dict]:
+def _seven_day_config(co2: float | None) -> dict:
+    control = CLIMATES[CONTROL_CLIMATE]
+    return _inference_config(
+        experiment_dir="/results",
+        n_forward_steps=SEVEN_DAY_N_STEPS,
+        forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
+        initial_condition_path=member_path(CONTROL_CLIMATE, control.member),
+        initial_condition_engine="zarr",
+        initial_times=list(ENSEMBLE_INITIAL_TIMES),
+        forcing_dataset=_control_dataset(co2=co2),
+        data_writer=_no_files(),
+    )
+
+
+def build_som_control_7day_slab_inference_configs() -> dict[str, dict]:
+    kind = "som-control-7day-slab-inference"
+    return {paper_config_filename(kind): _seven_day_config(co2=None)}
+
+
+def build_som_abrupt_4xco2_7day_slab_inference_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-7day-slab-inference"
+    return {
+        paper_config_filename(kind): _seven_day_config(co2=CLIMATES[ABRUPT_CLIMATE].co2)
+    }
+
+
+# --- prescribed-SST kinds, SHiELD ---------------------------------------------
+
+
+def build_som_eq_10yr_sst_eval_configs() -> dict[str, dict]:
+    kind = "som-eq-10yr-sst-eval"
     configs = {}
     for climate, spec in CLIMATES.items():
         for ic in range(1, N_INITIAL_CONDITIONS + 1):
             offset = ic - 1
-            configs[paper_config_filename("eq-eval-sst", climate, f"ic{ic}")] = (
+            configs[paper_config_filename(kind, climate, f"ic{ic}")] = (
                 _evaluator_config(
                     n_forward_steps=SOM_N_STEPS - offset,
                     forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
@@ -773,10 +901,69 @@ def build_eq_eval_sst_configs() -> dict[str, dict]:
                     start_indices={"times": [_stagger_time(SOM_FIRST_TIME, offset)]},
                     data_writer=_files_only(_daily_precip_files(climate)),
                     aggregator=_prescribed_sst_aggregator(),
-                    slab=False,
                 )
             )
     return configs
+
+
+def build_som_abrupt_4xco2_10yr_sst_eval_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-10yr-sst-eval"
+    return {paper_config_filename(kind): _abrupt_10yr_eval_config(slab=False)}
+
+
+def _abrupt_10yr_sst_fixed_config(
+    loader_dataset: dict, first_time: str, n_steps: int, label: str
+) -> dict:
+    """Ten-year CO2 step with SST held at the control store's, scored against
+    the control store.
+    """
+    return _evaluator_config(
+        n_forward_steps=n_steps,
+        forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
+        loader_dataset=loader_dataset,
+        start_indices={"times": [first_time]},
+        data_writer=_abrupt_monthly_writer(),
+        aggregator=_prescribed_sst_aggregator(),
+        label=label,
+    )
+
+
+def build_som_abrupt_4xco2_10yr_sst_fixed_eval_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-10yr-sst-fixed-eval"
+    return {
+        paper_config_filename(kind): _abrupt_10yr_sst_fixed_config(
+            _control_dataset(co2=CLIMATES[ABRUPT_CLIMATE].co2),
+            SOM_FIRST_TIME,
+            SOM_N_STEPS,
+            SOM_LABEL,
+        )
+    }
+
+
+def build_som_abrupt_4xco2_ens_sst_eval_configs() -> dict[str, dict]:
+    return _abrupt_ensemble_member_configs(
+        "som-abrupt-4xCO2-ens-sst-eval", data_only=False
+    )
+
+
+def build_som_abrupt_4xco2_ens_sst_fixed_eval_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-ens-sst-fixed-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _control_dataset(co2=CLIMATES[ABRUPT_CLIMATE].co2),
+            ENSEMBLE_INITIAL_TIMES,
+            slab=False,
+        )
+    }
+
+
+def build_som_control_ens_sst_eval_configs() -> dict[str, dict]:
+    kind = "som-control-ens-sst-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _control_dataset(), ENSEMBLE_INITIAL_TIMES, slab=False
+        )
+    }
 
 
 def _amip_evaluator_config(variant: str, data_only: bool) -> dict:
@@ -796,142 +983,139 @@ def _amip_evaluator_config(variant: str, data_only: bool) -> dict:
         data_writer=_files_only([_daily_precip_file()]),
         aggregator=_prescribed_sst_aggregator(),
         prediction_dataset=copy.deepcopy(dataset) if data_only else None,
-        slab=False,
         label=AMIP_LABEL,
     )
 
 
-def build_amip_eval_configs() -> dict[str, dict]:
-    variant = AMIP_HELD_OUT_MEMBER
+def build_amip_sst_eval_configs() -> dict[str, dict]:
+    kind = "amip-sst-eval"
     return {
-        paper_config_filename("amip-eval", variant): _amip_evaluator_config(
-            variant, data_only=False
+        paper_config_filename(kind, AMIP_HELD_OUT_MEMBER): _amip_evaluator_config(
+            AMIP_HELD_OUT_MEMBER, data_only=False
         )
     }
 
 
-def build_amip_p4k_configs() -> dict[str, dict]:
-    return {
-        paper_config_filename("amip-p4k", "p4k"): _amip_evaluator_config(
-            "p4k", data_only=False
-        )
-    }
+def build_amip_p4k_sst_eval_configs() -> dict[str, dict]:
+    kind = "amip-p4k-sst-eval"
+    return {paper_config_filename(kind): _amip_evaluator_config("p4k", data_only=False)}
 
 
-def build_amip_p2k_configs() -> dict[str, dict]:
-    return {
-        paper_config_filename("amip-p2k", "p2k"): _amip_evaluator_config(
-            "p2k", data_only=False
-        )
-    }
+def build_amip_p2k_sst_eval_configs() -> dict[str, dict]:
+    kind = "amip-p2k-sst-eval"
+    return {paper_config_filename(kind): _amip_evaluator_config("p2k", data_only=False)}
 
 
 def build_amip_data_only_configs() -> dict[str, dict]:
+    kind = "amip-data-only"
     return {
-        paper_config_filename("amip-data-only", variant): _amip_evaluator_config(
+        paper_config_filename(kind, variant): _amip_evaluator_config(
             variant, data_only=True
         )
         for variant in AMIP_VARIANTS
     }
 
 
-def build_random_co2_eval_configs() -> dict[str, dict]:
+def build_ramped_random_co2_sst_eval_configs() -> dict[str, dict]:
+    kind = "ramped-random-co2-sst-eval"
     configs = {}
     for climate in RAMPED_CLIMATES:
         pattern = (
             f"ramped-sst-{climate}-random-perturbation-{RAMPED_HELD_OUT_MEMBER}.zarr"
         )
-        configs[paper_config_filename("random-co2-eval", climate)] = _evaluator_config(
+        configs[paper_config_filename(kind, climate)] = _evaluator_config(
             n_forward_steps=RAMPED_N_STEPS,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=_zarr_dataset(RAMPED_DATASET, pattern),
             start_indices={"times": [RAMPED_FIRST_TIME]},
             data_writer=_no_files(),
             aggregator=_prescribed_sst_aggregator(),
-            slab=False,
             label=RAMPED_LABEL,
         )
     return configs
 
 
-def _ensemble_evaluator_config(loader_dataset: dict, slab: bool) -> dict:
-    """The 36-monthly-IC, 90-day evaluator on the 1xCO2 member."""
-    return _evaluator_config(
-        n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS,
-        forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
-        loader_dataset=loader_dataset,
-        start_indices={"times": list(ENSEMBLE_INITIAL_TIMES)},
-        data_writer=_no_files(),
-        slab=slab,
-    )
+# --- prescribed-SST kinds, ERA5 -----------------------------------------------
 
 
-def build_abrupt_ens_eval_sst_configs() -> dict[str, dict]:
-    root = MISSING_DATASETS["abrupt-ensemble"].path
-    configs = {}
-    for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
-        member = f"ic_{n:04d}"
-        configs[paper_config_filename("abrupt-ens-eval-sst", "4xCO2", member)] = (
-            _evaluator_config(
-                n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS - 1,
-                forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
-                loader_dataset=_zarr_dataset(root, f"abrupt4xCO2-{member}.zarr"),
-                start_indices={"list": [0]},
-                data_writer=_no_files(),
-                slab=False,
-            )
-        )
-    return configs
-
-
-def build_control_ens_eval_sst_configs() -> dict[str, dict]:
-    control = CLIMATES[CONTROL_CLIMATE]
+def build_era5_abrupt_4xco2_10yr_sst_fixed_eval_configs() -> dict[str, dict]:
+    kind = "era5-abrupt-4xCO2-10yr-sst-fixed-eval"
     return {
-        paper_config_filename("control-ens-eval-sst", CONTROL_CLIMATE): (
-            _ensemble_evaluator_config(
-                _member_dataset(CONTROL_CLIMATE, control.member), slab=False
-            )
+        paper_config_filename(kind): _abrupt_10yr_sst_fixed_config(
+            _era5_dataset(co2=ERA5_CO2_4X),
+            ERA5_ABRUPT_FIRST_TIME,
+            ERA5_ABRUPT_N_STEPS,
+            ERA5_LABEL,
         )
     }
 
 
-def build_abrupt_ens_fixed_sst_configs() -> dict[str, dict]:
-    control = CLIMATES[CONTROL_CLIMATE]
+def build_era5_abrupt_4xco2_ens_sst_fixed_eval_configs() -> dict[str, dict]:
+    kind = "era5-abrupt-4xCO2-ens-sst-fixed-eval"
     return {
-        paper_config_filename("abrupt-ens-fixed-sst", "4xCO2"): (
-            _ensemble_evaluator_config(
-                _member_dataset(
-                    CONTROL_CLIMATE, control.member, co2=CLIMATES["4xCO2"].co2
-                ),
-                slab=False,
-            )
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _era5_dataset(co2=ERA5_CO2_4X),
+            ERA5_ENSEMBLE_INITIAL_TIMES,
+            slab=False,
+            label=ERA5_LABEL,
+        )
+    }
+
+
+def build_era5_control_ens_sst_eval_configs() -> dict[str, dict]:
+    kind = "era5-control-ens-sst-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _era5_dataset(), ERA5_ENSEMBLE_INITIAL_TIMES, slab=False, label=ERA5_LABEL
         )
     }
 
 
 BUILDERS = {
-    "eq": build_eq_configs,
-    "eq-nospinup": build_eq_nospinup_configs,
-    "eq-1000yr": build_eq_1000yr_configs,
-    "data-only": build_data_only_configs,
-    "abrupt-10yr": build_abrupt_10yr_configs,
-    "abrupt-10yr-eval": build_abrupt_10yr_eval_configs,
-    "abrupt-10yr-eval-sst": build_abrupt_10yr_eval_sst_configs,
-    "abrupt-data-only": build_abrupt_data_only_configs,
-    "abrupt-ens": build_abrupt_ens_configs,
-    "abrupt-ens-data-only": build_abrupt_ens_data_only_configs,
-    "7day": build_7day_configs,
-    "eq-eval-sst": build_eq_eval_sst_configs,
-    "amip-eval": build_amip_eval_configs,
-    "amip-p4k": build_amip_p4k_configs,
-    "amip-p2k": build_amip_p2k_configs,
+    "som-eq-10yr-slab-inference": build_som_eq_10yr_slab_inference_configs,
+    "som-eq-nospinup-10yr-slab-inference": (
+        build_som_eq_nospinup_10yr_slab_inference_configs
+    ),
+    "som-eq-1000yr-slab-inference": build_som_eq_1000yr_slab_inference_configs,
+    "som-eq-10yr-data-only": build_som_eq_10yr_data_only_configs,
+    "som-abrupt-4xCO2-10yr-slab-inference": (
+        build_som_abrupt_4xco2_10yr_slab_inference_configs
+    ),
+    "som-abrupt-4xCO2-10yr-slab-eval": build_som_abrupt_4xco2_10yr_slab_eval_configs,
+    "som-abrupt-4xCO2-10yr-data-only": build_som_abrupt_4xco2_10yr_data_only_configs,
+    "som-abrupt-4xCO2-ens-slab-eval": build_som_abrupt_4xco2_ens_slab_eval_configs,
+    "som-abrupt-4xCO2-ens-data-only": build_som_abrupt_4xco2_ens_data_only_configs,
+    "som-control-7day-slab-inference": build_som_control_7day_slab_inference_configs,
+    "som-abrupt-4xCO2-7day-slab-inference": (
+        build_som_abrupt_4xco2_7day_slab_inference_configs
+    ),
+    "som-eq-10yr-sst-eval": build_som_eq_10yr_sst_eval_configs,
+    "som-abrupt-4xCO2-10yr-sst-eval": build_som_abrupt_4xco2_10yr_sst_eval_configs,
+    "som-abrupt-4xCO2-10yr-sst-fixed-eval": (
+        build_som_abrupt_4xco2_10yr_sst_fixed_eval_configs
+    ),
+    "som-abrupt-4xCO2-ens-sst-eval": build_som_abrupt_4xco2_ens_sst_eval_configs,
+    "som-abrupt-4xCO2-ens-sst-fixed-eval": (
+        build_som_abrupt_4xco2_ens_sst_fixed_eval_configs
+    ),
+    "som-control-ens-sst-eval": build_som_control_ens_sst_eval_configs,
+    "amip-sst-eval": build_amip_sst_eval_configs,
+    "amip-p4k-sst-eval": build_amip_p4k_sst_eval_configs,
+    "amip-p2k-sst-eval": build_amip_p2k_sst_eval_configs,
     "amip-data-only": build_amip_data_only_configs,
-    "random-co2-eval": build_random_co2_eval_configs,
-    "abrupt-ens-eval-sst": build_abrupt_ens_eval_sst_configs,
-    "control-ens-eval-sst": build_control_ens_eval_sst_configs,
-    "abrupt-ens-fixed-sst": build_abrupt_ens_fixed_sst_configs,
+    "ramped-random-co2-sst-eval": build_ramped_random_co2_sst_eval_configs,
+    "era5-abrupt-4xCO2-10yr-sst-fixed-eval": (
+        build_era5_abrupt_4xco2_10yr_sst_fixed_eval_configs
+    ),
+    "era5-abrupt-4xCO2-ens-sst-fixed-eval": (
+        build_era5_abrupt_4xco2_ens_sst_fixed_eval_configs
+    ),
+    "era5-control-ens-sst-eval": build_era5_control_ens_sst_eval_configs,
 }
 assert set(BUILDERS) == set(KINDS)
+assert all(
+    kind in KINDS for dataset in MISSING_DATASETS.values() for kind in dataset.kinds
+)
 
 
 def references_missing_dataset(config_path: pathlib.Path) -> bool:

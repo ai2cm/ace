@@ -6,9 +6,9 @@
 
 set -e
 
-SPIN_UP_CONFIG_FILENAME="${1:-run_configs/ace-paper-eq-spinup-config-4deg-1xCO2-ic1.yaml}"
-MAIN_CONFIG_FILENAME="${2:-run_configs/ace-paper-eq-main-config-4deg-1xCO2-ic1.yaml}"
-JOB_NAME="${3:-ace-paper-eq}"
+SPIN_UP_CONFIG_FILENAME="${1:-run_configs/ace-paper-som-eq-10yr-slab-inference-config-4deg-spinup-1xCO2-ic1.yaml}"
+MAIN_CONFIG_FILENAME="${2:-run_configs/ace-paper-som-eq-10yr-slab-inference-config-4deg-main-1xCO2-ic1.yaml}"
+JOB_NAME="${3:-som-eq-10yr-slab-inference}"
 JOB_GROUP="${4:-ace2-fm-paper-2026-06-26}"
 EXISTING_RESULTS_DATASET="${5:-REPLACE_WITH_BEAKER_DATASET_ID}"  # contains the checkpoint to use for inference
 CHECKPOINT_PATH="${6:-training_checkpoints/best_inference_ckpt.tar}"
