@@ -1,0 +1,91 @@
+# Standalone re-run of the inline "10year" evaluation of the no-CO2, residual-prediction
+# 4deg v2 model (wandb 2ki61qpw, train-4deg-daily-v2-era5-only-no-co2.yaml)
+# with raw daily prediction + target netCDFs saved, for process diagnosis of the
+# 1995-2004 rollout. Same eight ICs, step count and forcing as the inline entry.
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+experiment_dir: /results
+n_forward_steps: 3652
+forward_steps_in_memory: 73
+n_ensemble_per_ic: 1
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: true
+  names:
+    - PRESsfc
+    - surface_temperature
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - ULWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - DSWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - TMP850
+initial_condition:
+  path: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '1995-01-01T00:00:00'
+      - '1995-01-02T00:00:00'
+      - '1995-01-03T00:00:00'
+      - '1995-01-04T00:00:00'
+      - '1995-01-05T00:00:00'
+      - '1995-01-06T00:00:00'
+      - '1995-01-07T00:00:00'
+      - '1995-01-08T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace
+stepper_override:
+  corrector:
+    conserve_dry_air: true
+    moisture_budget_correction: advection_and_precipitation
+    force_positive_names:
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - Q2m
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+    total_energy_budget_correction:
+      method: constant_temperature
+      constant_unaccounted_heating: 0.0
