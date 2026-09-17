@@ -1,0 +1,34 @@
+experiment_dir: /results
+n_coupled_steps: 128
+coupled_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 8
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+initial_condition:
+  ocean:
+    path: gs://vcm-ml-intermediate/2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
+    engine: zarr
+  atmosphere:
+    path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '2023-01-01T12:00:00'
+    - '2023-02-05T12:00:00'
+aggregator:
+  log_global_mean_time_series: false
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - sst
+    - thetao_0
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false

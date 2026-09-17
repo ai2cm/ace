@@ -7,7 +7,7 @@
 set -euo pipefail
 CKPT_DS="${CKPT_DS:-01M2GMQC7S44NCJN3NCS3CFEVV}"
 CKPT_FILE="${CKPT_FILE:-best_inference_ckpt.tar}"
-BLOCKS="${BLOCKS:-1 2 3 4}"
+BLOCKS="${BLOCKS:-01 02 03 04 05 06 07 08 09 10 11 12}"
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
@@ -23,6 +23,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
+  --env PYTORCH_ALLOC_CONF=expandable_segments:True \
   --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-enso-fc2022 \
   --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
   --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
