@@ -76,9 +76,11 @@ run_training() {
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
 
-  local extra_args=()
+  local extra_args=() no_cm_priority=""
   while IFS= read -r line; do
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
+    # "# cm-priority: none" header: launch with no CM_PRIORITY label at all
+    [[ "$line" =~ ^#\ cm-priority:\ none ]] && no_cm_priority=1
   done < "$CONFIG_PATH"
 
   local cm_priority_args=(--env CM_PRIORITY=high) arg prev=""
@@ -89,6 +91,7 @@ run_training() {
     fi
     prev="$arg"
   done
+  [[ -n "$no_cm_priority" ]] && cm_priority_args=()
 
   gantry run \
     --name "$job_name" \
@@ -157,3 +160,12 @@ run_training \
   "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-no-prate-clip.yaml" \
   "1deg-daily-no-corr-mean-no-prate-clip-pretrain-rs0" \
   8 ai2/jupiter
+
+# No-precipitation-corrector ablation: the 40-epoch n_ensemble=2 pretrain with
+# PRATEsfc dropped from force_positive_names AND moisture_budget_correction
+# disabled. 8 GPUs on jupiter at LOW beaker priority; the config header
+# "# cm-priority: none" omits the CM_PRIORITY label.
+run_training \
+  "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-no-corr-mean-no-prate-corr.yaml" \
+  "1deg-daily-no-corr-mean-no-prate-corr-pretrain-rs0" \
+  8 ai2/jupiter low
