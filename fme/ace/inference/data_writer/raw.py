@@ -203,9 +203,9 @@ class RawDataWriter:
             dims = (IC_DIM, LEAD_TIME_DIM, *_ordered_names)
             self._dataset_dims_created = True
 
-        timer = GlobalTimer.get_instance()
         save_names = self._get_variable_names_to_save(data.keys())
         current_lead_time_size = self.dataset.dimensions[LEAD_TIME_DIM].size
+        data_numpy = {}
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -223,40 +223,36 @@ class RawDataWriter:
                 self.dataset.variables[variable_name].coordinates = " ".join(
                     [INIT_TIME, VALID_TIME]
                 )
-
-            data_numpy = data[variable_name].detach().cpu().numpy()
-            # Append the data to the variables
-            with timer.context("data_writer_io"):
-                self.dataset.variables[variable_name][
-                    :,
-                    current_lead_time_size : current_lead_time_size
-                    + data_numpy.shape[1],
-                    :,
-                ] = data_numpy
+            data_numpy[variable_name] = data[variable_name].detach().cpu().numpy()
 
         lead_time_microseconds = get_batch_lead_time_microseconds(
             self.initial_condition_times,
             batch_time.values,
         )
-        with timer.context("data_writer_io"):
-            self.dataset.variables[LEAD_TIME_DIM][
-                current_lead_time_size : current_lead_time_size
-                + lead_time_microseconds.shape[0]
-            ] = lead_time_microseconds
-
         valid_times_numeric: np.ndarray = cftime.date2num(
             batch_time.values,
             units=self.dataset.variables[VALID_TIME].units,
             calendar=self.dataset.variables[VALID_TIME].calendar,
         )
+
+        timer = GlobalTimer.get_instance()
         with timer.context("data_writer_io"):
+            for variable_name, array in data_numpy.items():
+                self.dataset.variables[variable_name][
+                    :,
+                    current_lead_time_size : current_lead_time_size + array.shape[1],
+                    :,
+                ] = array
+            self.dataset.variables[LEAD_TIME_DIM][
+                current_lead_time_size : current_lead_time_size
+                + lead_time_microseconds.shape[0]
+            ] = lead_time_microseconds
             self.dataset.variables[VALID_TIME][
                 :,
                 current_lead_time_size : current_lead_time_size
                 + lead_time_microseconds.shape[0],
             ] = valid_times_numeric
-
-            self.dataset.sync()  # Flush the data to disk
+            self.dataset.sync()
 
     def flush(self):
         """
