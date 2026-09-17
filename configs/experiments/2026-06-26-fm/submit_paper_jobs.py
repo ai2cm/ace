@@ -24,6 +24,13 @@ staggered-IC kinds (``som-eq-dataCO2-10yr-*``, ``som-eqnospinup-*``), and
 Job names are the wandb run names: ``{run}-{kind}[-{climate}][-ic{n}]`` for
 the per-run kinds and ``{kind}-{member}`` for the data-only kinds.
 
+--skip-if-in-beaker drops every job whose name already has a succeeded or
+running experiment in the workspace (failed and canceled ones are resubmitted),
+so re-running a submission only fills in what is missing; the listing is
+filtered on the ``ace2-fm-`` prefix, so data-only jobs are never skipped. A
+gantry call that fails no longer aborts the batch: the job is reported and the
+rest continue, and the script exits non-zero at the end.
+
 Kinds whose configs point at a dataset that is not on weka yet (the entries of
 generate_paper_configs.MISSING_DATASETS with available=False) are refused with a
 pointer to MISSING_DATASETS.md unless --allow-missing-datasets is given.
@@ -39,7 +46,8 @@ Usage:
                               [--ens-member N ...]
                               [--version {v1,v2,v3}]
                               [--data-only-run RUN]
-                              [--skip-if-in-wandb] [--allow-missing-datasets]
+                              [--skip-if-in-wandb] [--skip-if-in-beaker]
+                              [--exclude-job NAME ...] [--allow-missing-datasets]
                               [--dry-run]
                               [--beaker-workspace WORKSPACE]
                               [--beaker-cluster CLUSTER [CLUSTER ...]]
@@ -54,7 +62,12 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-from _submit_common import add_beaker_args, check_configs_at_head, submit_job
+from _submit_common import (
+    add_beaker_args,
+    check_configs_at_head,
+    drop_jobs_in_beaker,
+    submit_job,
+)
 from _version_select import add_version_arg
 from generate_eval_configs import (
     ARCHITECTURES,
@@ -487,6 +500,8 @@ def main() -> None:
         print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
         jobs = pending
 
+    jobs = drop_jobs_in_beaker(jobs, lambda job: job.name, args)
+
     needed_configs = sorted({name for job in jobs for name in job.configs})
     for config_filename in needed_configs:
         if not (RUN_CONFIGS_DIR / config_filename).exists():
@@ -501,21 +516,30 @@ def main() -> None:
         validate_configs(needed_configs)
 
     print(f"{len(jobs)} job(s) across {len(used_runs)} training run(s).")
+    failed_submissions = []
     for job in jobs:
-        submit_job(
-            job.run_script,
-            [
-                *(f"{RUN_CONFIGS_DIRNAME}/{name}" for name in job.configs),
-                job.name,
-                WANDB_GROUP,
-                job.dataset_id,
-                CHECKPOINT_PATH,
-            ],
-            wandb_project=WANDB_PROJECT,
-            args=args,
-            cwd=HERE,
-            extra_env={"SKIP_VALIDATE": "1"},
-        )
+        try:
+            submit_job(
+                job.run_script,
+                [
+                    *(f"{RUN_CONFIGS_DIRNAME}/{name}" for name in job.configs),
+                    job.name,
+                    WANDB_GROUP,
+                    job.dataset_id,
+                    CHECKPOINT_PATH,
+                ],
+                wandb_project=WANDB_PROJECT,
+                args=args,
+                cwd=HERE,
+                extra_env={"SKIP_VALIDATE": "1"},
+            )
+        except subprocess.CalledProcessError as err:
+            print(f"SUBMISSION FAILED (rc={err.returncode}): {job.name}")
+            failed_submissions.append(job.name)
+    if failed_submissions:
+        print(f"{len(failed_submissions)} submission(s) failed:")
+        print("\n".join(f"  {name}" for name in failed_submissions))
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
