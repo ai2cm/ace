@@ -218,6 +218,21 @@ launch() {
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
             --dataset "${UFSFT_PREV_CKPT_DATASET:?set to 199b results dataset}:training_checkpoints/ckpt.tar:/prev_ckpt.tar")
   fi
+  if [[ "$arm" == "sstres-noflux" || "$arm" == "hybridresid-noflux" ]]; then
+    # Why can sst not be a residual variable? The surface-flux corrector takes
+    # the previous state's sst as an input (_correct_hfds ->
+    # _compute_ocean_net_surface_energy_flux), and its output feeds the heat
+    # content correction, so a drifting residual sst corrupts the budget it is
+    # then corrected against. These two arms complete a 2x2 against the
+    # existing hybridresid (0.057) and hybridsstres (diverged at 0.19):
+    #   sstres-noflux      = sst residual,   surface-flux correction removed
+    #   hybridresid-noflux = sst full-field, surface-flux correction removed
+    # The second isolates the cost of removing the corrector by itself.
+    config="${CONFIG_DIR}/${arm}-pretrain.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "hybridsstres" ]]; then
     # single-variable attribution test: hybridresid with sst ADDED to the
     # residual set; everything else byte-identical to hybridresid-pretrain.
