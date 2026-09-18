@@ -13,9 +13,9 @@ INITIAL_CONDITION_TIME=2032-01-01T00:00:00
 
 declare -A INITIAL_CONDITION_DATASETS
 INITIAL_CONDITION_DATASETS=( \
-    ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
-    ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
-    ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
+    # ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
+    # ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
+    # ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
     ["4xCO2"]="${INITIAL_CONDITION_ROOT}/4xCO2-ic_0005.zarr" \
 )
 
@@ -43,7 +43,7 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-for seed in {0..0}; do
+for seed in {0..5}; do
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
 
