@@ -26,9 +26,9 @@ gantry run \
     --workspace ai2/ace \
     --priority normal \
     --not-preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/jupiter-cirrascale \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/ceres \
+    --cluster ai2/saturn \
+    --cluster ai2/neptune \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
