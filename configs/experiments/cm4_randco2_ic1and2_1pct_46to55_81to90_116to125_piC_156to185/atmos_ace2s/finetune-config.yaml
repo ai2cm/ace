@@ -7,7 +7,7 @@ evaluate_before_training: true
 max_epochs: 23 # 90 yr x 1460/yr / bs 8 = 16425 iter/epoch -> ~377,775 iterations
 ema:
   decay: 0.999
-iinference:
+inference:
   - name: inference_1pct
     weight: 1.0
     epochs:
