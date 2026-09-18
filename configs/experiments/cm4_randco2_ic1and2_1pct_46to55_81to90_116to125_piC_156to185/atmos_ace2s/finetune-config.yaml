@@ -7,24 +7,26 @@ evaluate_before_training: true
 max_epochs: 23 # 90 yr x 1460/yr / bs 8 = 16425 iter/epoch -> ~377,775 iterations
 ema:
   decay: 0.999
-inference:
+iinference:
   - name: inference_1pct
     weight: 1.0
-    n_forward_steps: 7300 # exactly 5 noleap years
-    forward_steps_in_memory: 50
+    epochs:
+      step: 2
+    n_forward_steps: 29200 # exactly 20 noleap years
+    forward_steps_in_memory: 40
     loader:
       start_indices:
         times:
-          # 4 ICs each in the validation 1pct_early and 1pct_late periods,
-          # 5-year rollouts, never entering the 131-140 holdout
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+          # (validation + training), never entering the 131-140 holdout
           - '0041-01-01T00:00:00'
-          - '0042-01-01T00:00:00'
-          - '0043-01-01T00:00:00'
-          - '0044-01-01T00:00:00'
-          - '0123-01-01T00:00:00'
-          - '0124-01-01T00:00:00'
-          - '0125-01-01T00:00:00'
-          - '0126-01-01T00:00:00'
+          - '0051-01-01T00:00:00'
+          - '0061-01-01T00:00:00'
+          - '0071-01-01T00:00:00'
+          - '0081-01-01T00:00:00'
+          - '0091-01-01T00:00:00'
+          - '0101-01-01T00:00:00'
+          - '0111-01-01T00:00:00'
       dataset:
         merge:
           - data_path: /climate-default
@@ -38,20 +40,26 @@ inference:
       log_histograms: false
   - name: inference_piC
     weight: 1.0
-    n_forward_steps: 7300 # exactly 5 noleap years
-    forward_steps_in_memory: 50
+    epochs:
+      step: 2
+    n_forward_steps: 29200 # exactly 20 noleap years
+    forward_steps_in_memory: 40
     loader:
       start_indices:
         times:
-          # 8 ICs on either side of the training period, 5-year rollouts
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+          # 1-90, never entering the relative-year-91+ holdout. The first IC
+          # is nudged 5 days past the store start to the first valid coupled
+          # timestep (leading all-NaN ffill window in the ocean-sourced
+          # fields ends at the first 5-daily ocean snapshot).
           - '0151-01-06T00:00:00'
-          - '0152-01-01T00:00:00'
-          - '0153-01-01T00:00:00'
-          - '0154-01-01T00:00:00'
-          - '0236-01-01T00:00:00'
-          - '0237-01-01T00:00:00'
-          - '0238-01-01T00:00:00'
-          - '0239-01-01T00:00:00'
+          - '0161-01-01T00:00:00'
+          - '0171-01-01T00:00:00'
+          - '0181-01-01T00:00:00'
+          - '0191-01-01T00:00:00'
+          - '0201-01-01T00:00:00'
+          - '0211-01-01T00:00:00'
+          - '0221-01-01T00:00:00'
       dataset:
         merge:
           - data_path: /climate-default
