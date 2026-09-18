@@ -226,6 +226,9 @@ stepper:
         network:
           global_means_path: /ocean_stats/centering.nc
           global_stds_path: /ocean_stats/scaling-full-field.nc
+        residual:
+          global_means_path: /ocean_stats/centering.nc
+          global_stds_path: /ocean_stats/scaling-residual.nc
       corrector:
         type: ocean_corrector
         config:
@@ -262,7 +265,7 @@ stepper:
               - UI
               - VI
           ocean_heat_content_correction:
-            method: uniform_temperature
+            method: scaled_temperature
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc
@@ -460,3 +463,25 @@ stepper:
         - tauuo
         - tauvo
         - wfo
+      residual_prediction: true
+      residual_normalized_prediction: true
+      residual_prediction_names:
+        - thetao_0
+        - thetao_1
+        - thetao_2
+        - thetao_3
+        - thetao_4
+        - thetao_5
+        - thetao_6
+        - thetao_7
+        - thetao_8
+        - thetao_9
+        - thetao_10
+        - thetao_11
+        - thetao_12
+        - thetao_13
+        - thetao_14
+        - thetao_15
+        - thetao_16
+        - thetao_17
+        - thetao_18

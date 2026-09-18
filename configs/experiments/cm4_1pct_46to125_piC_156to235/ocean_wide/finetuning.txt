@@ -38,4 +38,24 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw90
 # min_runtime 8h: the pretraining ran with 3h and lost a 12-hour job to
 # preemption.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|yva51vwg|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M1PV0PX1Q85J1TMMBDG023J5|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|yva51vwg|best_ckpt|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M1PV0PX1Q85J1TMMBDG023J5|8h
+
+# ocean_wide_hybridresid_clip1_sstff_ohc -- pretraining finished at 75 epochs
+# 2026-09-17 (beaker 01M2KA4QCQS0G3CJTN3NE0RNA0, wandb xh398aj0). Same 4 -> 8
+# unroll and 10 epochs as the two -ft rows above, so the hybrid-residual stepper
+# and the ohc_clip baseline are comparable at matched unroll length.
+#
+# The stepper block is merged in from the pretraining run's saved config.yaml, so
+# residual_prediction, residual_normalized_prediction, the residual normalizer
+# paths and the 19-element residual_prediction_names are carried over verbatim
+# and are deliberately not restated here. Only the two non-stepper terms are:
+# optimization.max_grad_norm, which lives outside .stepper and would otherwise
+# revert to unclipped, and the OHC method, belt-and-braces.
+#
+# results_dataset is pinned rather than resolved from wandb: the pretraining was
+# preempted at 29 h and auto-resumed, so the experiment carries two result
+# datasets. 01M2PEDZQZN2QJ7PVEF391X8T2 is the second, which holds both
+# best_ckpt (epoch 75) and best_inference_ckpt (epoch 73). min_runtime 8h, as on
+# the uniformdt_clip-ft row, for the same reason.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc-ft|rs0|ace-samudra-cm4|xh398aj0|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0|01M2PEDZQZN2QJ7PVEF391X8T2|8h
