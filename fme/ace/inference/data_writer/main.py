@@ -8,7 +8,6 @@ from typing import TypeAlias
 import cftime
 import numpy as np
 import numpy.typing as npt
-
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
     BatchData,
@@ -17,6 +16,7 @@ from fme.ace.data_loading.batch_data import (
 )
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.distributed import Distributed
 from fme.core.generics.writer import WriterABC
 
 from .dataset_metadata import DatasetMetadata
@@ -85,6 +85,16 @@ class DataWriterConfig:
                 "Duplicate filenames found in file writer configurations. "
                 f"Filenames: {all_filenames}"
             )
+
+    @property
+    def has_subwriters_enabled(self) -> bool:
+        """True when any per-timestep output writer is enabled."""
+        return (
+            self.save_prediction_files
+            or self.save_monthly_files
+            or self.save_step_diagnostics
+            or bool(self.files)
+        )
 
     def _get_all_filenames(self) -> list[str]:
         filenames = []
@@ -292,18 +302,37 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
     def write(self, data: PrognosticState, filename: str):
         """Eagerly write data to a single netCDF file.
 
+        Under multi-GPU execution, each rank's shard is gathered to the root
+        process along the sample dimension; only root writes the file.  A
+        barrier at the end ensures all ranks see the file before continuing
+        (required for segmented inference, where the next segment reads the
+        restart written here).
+
         Args:
             data: the data to be written.
             filename: the filename to use for the netCDF file.
         """
-        _write(
-            data=data.as_batch_data(),
-            path=self.path,
-            filename=filename,
-            variable_metadata=self.variable_metadata,
-            coords=self.coords,
-            dataset_metadata=self.dataset_metadata,
-        )
+        dist = Distributed.get_instance()
+        batch = data.as_batch_data()
+        if dist.world_size > 1:
+            _gather_and_write(
+                batch=batch,
+                path=self.path,
+                filename=filename,
+                variable_metadata=self.variable_metadata,
+                coords=self.coords,
+                dataset_metadata=self.dataset_metadata,
+                dist=dist,
+            )
+        else:
+            _write(
+                data=batch,
+                path=self.path,
+                filename=filename,
+                variable_metadata=self.variable_metadata,
+                coords=self.coords,
+                dataset_metadata=self.dataset_metadata,
+            )
 
     def append_batch(
         self,
@@ -384,6 +413,40 @@ def _write(
     to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
 
 
+def _gather_and_write(
+    batch: BatchData,
+    path: str,
+    filename: str,
+    variable_metadata: Mapping[str, VariableMetadata],
+    coords: Mapping[str, np.ndarray],
+    dataset_metadata: DatasetMetadata,
+    dist: Distributed,
+) -> None:
+    """Gather per-rank BatchData shards to root and write once.
+
+    Each rank holds a contiguous block of samples.  The gather concatenates
+    them along the sample dimension in rank order so the written file has the
+    same layout as a serial run.  Non-root ranks skip the write.  A barrier
+    at the end ensures all ranks see the file before continuing (required for
+    segmented inference, where the next segment reads the restart).
+    """
+    gathered_batch = batch.gather(dist)
+
+    if dist.is_root():
+        if gathered_batch is None:
+            raise RuntimeError("batch.gather returned None on root")
+        _write(
+            data=gathered_batch,
+            path=path,
+            filename=filename,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
+
+    dist.barrier()
+
+
 class DataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
@@ -462,11 +525,24 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             self._step_diagnostics_writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
-        _write(
-            data=data.as_batch_data(),
-            path=self.path,
-            filename=filename,
-            variable_metadata=self.variable_metadata,
-            coords=self.coords,
-            dataset_metadata=self.dataset_metadata,
-        )
+        dist = Distributed.get_instance()
+        batch = data.as_batch_data()
+        if dist.world_size > 1:
+            _gather_and_write(
+                batch=batch,
+                path=self.path,
+                filename=filename,
+                variable_metadata=self.variable_metadata,
+                coords=self.coords,
+                dataset_metadata=self.dataset_metadata,
+                dist=dist,
+            )
+        else:
+            _write(
+                data=batch,
+                path=self.path,
+                filename=filename,
+                variable_metadata=self.variable_metadata,
+                coords=self.coords,
+                dataset_metadata=self.dataset_metadata,
+            )

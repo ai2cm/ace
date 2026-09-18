@@ -23,6 +23,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
+    local_ic_range,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
@@ -38,6 +39,7 @@ from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import is_local, makedirs, open_dataset_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
@@ -370,6 +372,21 @@ def run_inference_from_config(config: InferenceConfig):
         )
         stepper = config.load_stepper()
         stepper.set_eval()
+        dist = Distributed.get_instance()
+        n_ic = initial_condition.as_batch_data().time.sizes["sample"]
+        # Validate divisibility (raises ValueError if not divisible).
+        local_ic_range(n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks)
+
+        if dist.total_data_parallel_ranks > 1 and config.data_writer.has_subwriters_enabled:
+            raise ValueError(
+                "Multi-GPU inference does not yet support per-timestep data "
+                "writers (prediction files, monthly files, step diagnostics, "
+                "or custom file writers). Set save_prediction_files, "
+                "save_monthly_files, and save_step_diagnostics to false and "
+                "files to null in the data_writer config, or run with a single "
+                "GPU."
+            )
+
         logging.info("Initializing forcing data loader")
         data = get_forcing_data(
             config=config.forcing_loader,
@@ -380,6 +397,16 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        # Must happen before the ensemble broadcast.
+        if dist.total_data_parallel_ranks > 1:
+            ic_batch = data.initial_condition.as_batch_data()
+            start, end = local_ic_range(
+                n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
+            )
+            data._initial_condition = PrognosticState(
+                ic_batch.select_sample_slice(slice(start, end))
+            )
+
         # Broadcast the initial condition across ensemble members only after the
         # forcing loader is built, mirroring the evaluator path. The forcing then
         # has one window per initial condition (n_ensemble=1) and predict_paired
