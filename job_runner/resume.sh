@@ -18,6 +18,7 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --ocean_stats: Override ocean stats data path (optional)"
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
+  echo "  resuming.txt columns: group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|extra_env"
   exit 1
 fi
 
@@ -83,6 +84,10 @@ while read RESUMING; do
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$RESUMING" | cut -d"|" -f14)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$RESUMING" | cut -d"|" -f15)
     MIN_RUNTIME=$(echo "$RESUMING" | cut -d"|" -f16)
+    # Space-separated KEY=VALUE pairs passed through to gantry as --env.
+    # Needed to probe process-level settings (e.g. MALLOC_ARENA_MAX) that are
+    # not config and so cannot ride in the override column.
+    EXTRA_ENV=$(echo "$RESUMING" | cut -d"|" -f17)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -112,6 +117,12 @@ while read RESUMING; do
     build_cluster_args "$CLUSTER" "$WORKSPACE"
     build_stats_dataset_args
 
+    # Reset per iteration so one row's env does not leak into the next
+    EXTRA_ENV_ARGS=()
+    for ENV_KV in $EXTRA_ENV; do
+        EXTRA_ENV_ARGS+=(--env "$ENV_KV")
+    done
+
     # Set config path variable for print functions
     CONFIG_PATH_REL="/existing-results/config.yaml"
 
@@ -133,6 +144,7 @@ while read RESUMING; do
         echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"
         echo " - Shared memory: ${SHARED_MEM}"
+        echo " - Extra env: ${EXTRA_ENV}"
         echo " - Override: ${OVERRIDE_ARGS}"
     fi
 

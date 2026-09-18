@@ -1,0 +1,41 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|extra_env
+
+# --- owc8lt: resume the preempted cap-16 run, probing MALLOC_ARENA_MAX ---
+#
+# 01M2M38RSGXTXW4PJVRN3ZPMK9 ran 21h50m (1 epoch + 951 of epoch 2's 1460
+# batches) and was PREEMPTED, not crashed. Its three beaker auto-resumes then
+# all died `exitcode: -9` -- the HOST OOM killer -- 3, 11 and 40 min into
+# training, on three different jupiter nodes, with zero torch.OutOfMemoryError
+# and GPU peaking 7 pp BELOW the fresh run's 99.42%.
+#
+# The resume itself is what costs the memory. Node memory sits at the fresh
+# baseline 77% until `Resuming training from .../ckpt.tar`, then 90% two
+# minutes later and stays: ~260 GB node-wide, which eats the slack that
+# absorbs training's recurring 60-110 GB transients.
+#
+#   fresh attempt 1, 21.9 h   median 78.1%, max 85.1%, flat   ~470 GB free
+#   owclt twin, fresh, 9.9 h  median 77.2%, max 84.0%         ~460 GB free
+#   the three resumes         steady 90.1%, spikes 95.7%      ~200 GB free
+#
+# ckpt.tar is 7.0 GiB and _restore_checkpoint does torch.load(map_location=
+# "cpu", weights_only=False) on all 8 ranks: ~56 GiB live, ~112 GiB with the
+# read buffer. That is 2-5x short of 260 GB, and rank-0 RSS moves only
+# 146 -> 149 GB across the event, so it is not live tensors held by the
+# trainer. MALLOC_ARENA_MAX=4 tests the hypothesis that fits that shape --
+# glibc keeping the freed arenas after a multi-GiB transient, on a node where
+# 180 CPUs otherwise let malloc open many of them. It is an env var, so it
+# needs no code change and cannot alter the numerics.
+#
+# READ THE PROBE OFF NODE MEMORY, NOT SURVIVAL TIME. If it works, the run
+# settles at ~78% within ~15 min of training start; at ~90% the hypothesis is
+# wrong and the next candidates are torch.load(mmap=True) and an explicit
+# `del checkpoint; gc.collect()` after restore.
+#
+# retries 0: this is a probe, and the checkpoint lives in an immutable result
+# dataset, so a failed attempt costs node time but never the epoch.
+# resume_wandb=true keeps run 2thyv9bz -- without it prepare_directory DELETES
+# the wandb_run_id file and a new run is started. The ocean/atmos datasets are
+# the arm's original inits; their mounts are inert on resume (parameter_init
+# writes the weights that restore_checkpoint then overwrites, and alpha/beta
+# are 0 so nothing anchors to them) but must exist for build_trainer.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-coupled-cm4|2thyv9bz|train|high|jupiter|8||0|ai2/ace|resume_results.resume_wandb=true|01M2M38RSTM06D0QSZYTQDZV0S|01M0WRMWP63YT6K5YCJBC5CRJK|01M0VTG1SJQK69WWN5A651RXZY|8h|MALLOC_ARENA_MAX=4

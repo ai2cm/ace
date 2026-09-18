@@ -222,6 +222,7 @@ git_commit_and_push() {
 #     CLUSTER_ARGS (array), STATS_DATASET_ARGS (array)
 #   Optional:
 #     CHECKPOINT_DATASET_ARGS (array) - additional dataset mounts
+#     EXTRA_ENV_ARGS (array) - additional `--env KEY=VALUE` pairs passed to gantry
 #     OVERRIDE_ARGS - config override arguments
 #     MIN_RUNTIME (default: 0) - gantry --min-runtime value, e.g. "0", "30m", "1h", "8h"
 #   Note: CONFIG_PATH must be relative to repo root for gantry run
@@ -248,6 +249,11 @@ run_gantry_training_job() {
         CHECKPOINT_DATASET_ARGS=()
     fi
 
+    # Initialize extra env args if not set
+    if [[ -z "${EXTRA_ENV_ARGS+x}" ]]; then
+        EXTRA_ENV_ARGS=()
+    fi
+
     local EXPERIMENT_ID=$(
         gantry run \
             --name "$JOB_NAME" \
@@ -266,6 +272,7 @@ run_gantry_training_job() {
             --env NCCL_DEBUG=WARN \
             --env NCCL_DEBUG_FILE=/results/nccl_debug.log \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+            "${EXTRA_ENV_ARGS[@]}" \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${STATS_DATASET_ARGS[@]}" \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
@@ -493,8 +500,10 @@ print_detailed_job_info() {
     echo "  MIN_RUNTIME: ${MIN_RUNTIME:-0}"
     echo "  WORKSPACE: $WORKSPACE"
     echo "  OVERRIDE_ARGS: ${OVERRIDE_ARGS:-(none)}"
+    echo "  EXTRA_ENV: ${EXTRA_ENV:-(none)}"
     echo
     echo "Computed Values:"
+    echo "  Extra env args: ${EXTRA_ENV_ARGS[*]:-(none)}"
     echo "  Job Name: $JOB_NAME"
     echo "  Job Group: $JOB_GROUP"
     echo "  Config Path: ${CONFIG_PATH_REL:-${CONFIG_PATH}}"
