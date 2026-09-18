@@ -71,7 +71,10 @@ class LaggedAnomalyMoments:
     coefficients. Every sum over ``t`` accumulates as windows stream through,
     and the coefficients are solved from the normal equations at the end, so
     anomalies use the full-record climatology in a single pass and no time
-    series is retained. The state per cell is ``O(n_lags * n_basis)``.
+    series is retained. The same expansion gives the anomaly variance of the
+    leading and of the lagged endpoints over exactly the pairs that enter
+    each lag, so the covariance can be normalized into a Pearson correlation
+    bounded by one. The state per cell is ``O(n_lags * n_basis)``.
 
     Pairs are counted with the leading time restricted to a per-time mask
     (the season of interest); the lagged endpoint may fall in any month.
@@ -98,6 +101,12 @@ class LaggedAnomalyMoments:
         self.x_phi = torch.zeros((n_lags, n_basis, *shape), **f64)
         self.phi_x = torch.zeros((n_lags, n_basis, *shape), **f64)
         self.phi_phi = torch.zeros((n_lags, n_basis, n_basis), **f64)
+        self.lead_sq = torch.zeros((n_lags, *shape), **f64)
+        self.lag_sq = torch.zeros((n_lags, *shape), **f64)
+        self.lead_phi = torch.zeros((n_lags, n_basis, *shape), **f64)
+        self.lag_phi = torch.zeros((n_lags, n_basis, *shape), **f64)
+        self.phi_lead_lead = torch.zeros((n_lags, n_basis, n_basis), **f64)
+        self.phi_lag_lag = torch.zeros((n_lags, n_basis, n_basis), **f64)
         self.counts = torch.zeros(n_lags, **f64)
         self.gram = torch.zeros((n_basis, n_basis), **f64)
         self.basis_x = torch.zeros((n_basis, *shape), **f64)
@@ -176,6 +185,12 @@ class LaggedAnomalyMoments:
             self.x_phi[i] += torch.einsum("tk,t...->k...", bs[lead + lag], a)
             self.phi_x[i] += torch.einsum("tk,t...->k...", bs[lead], b)
             self.phi_phi[i] += bs[lead].T @ bs[lead + lag]
+            self.lead_sq[i] += (a * a).sum(dim=0)
+            self.lag_sq[i] += (b * b).sum(dim=0)
+            self.lead_phi[i] += torch.einsum("tk,t...->k...", bs[lead], a)
+            self.lag_phi[i] += torch.einsum("tk,t...->k...", bs[lead + lag], b)
+            self.phi_lead_lead[i] += bs[lead].T @ bs[lead]
+            self.phi_lag_lag[i] += bs[lead + lag].T @ bs[lead + lag]
             self.counts[i] += lead.numel()
         keep = min(self._max_lag, xs.shape[0])
         self._tail_x[i_sample] = xs[xs.shape[0] - keep :]
@@ -188,21 +203,28 @@ class LaggedAnomalyMoments:
         Clones before reducing, since ``reduce_sum`` mutates in place and
         finalization may be requested more than once.
         """
-        return {
-            "raw": dist.reduce_sum(self.raw.clone()),
-            "x_phi": dist.reduce_sum(self.x_phi.clone()),
-            "phi_x": dist.reduce_sum(self.phi_x.clone()),
-            "phi_phi": dist.reduce_sum(self.phi_phi.clone()),
-            "counts": dist.reduce_sum(self.counts.clone()),
-            "gram": dist.reduce_sum(self.gram.clone()),
-            "basis_x": dist.reduce_sum(self.basis_x.clone()),
-            "n_finite": dist.reduce_sum(self.n_finite.clone()),
-            "n_total": dist.reduce_sum(self.n_total.clone()),
-        }
+        names = (
+            "raw",
+            "x_phi",
+            "phi_x",
+            "phi_phi",
+            "lead_sq",
+            "lag_sq",
+            "lead_phi",
+            "lag_phi",
+            "phi_lead_lead",
+            "phi_lag_lag",
+            "counts",
+            "gram",
+            "basis_x",
+            "n_finite",
+            "n_total",
+        )
+        return {name: dist.reduce_sum(getattr(self, name).clone()) for name in names}
 
     @staticmethod
-    def finalize(state: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        """Lagged anomaly covariance ``(n_lags, *spatial)`` from reduced state.
+    def finalize(state: Mapping[str, torch.Tensor]) -> "LaggedAnomalyStats":
+        """Lagged anomaly moments, each ``(n_lags, *spatial)``, from reduced state.
 
         Cells with any non-finite value, and lags with no pairs, are NaN. So
         are cells whose anomaly variance is below ``RELATIVE_VARIANCE_FLOOR``
@@ -215,17 +237,57 @@ class LaggedAnomalyMoments:
         spatial = basis_x.shape[1:]
         coeffs = torch.linalg.pinv(gram) @ basis_x.reshape(gram.shape[0], -1)
         coeffs = coeffs.reshape(basis_x.shape)
-        cross_a = torch.einsum("k...,lk...->l...", coeffs, state["x_phi"])
-        cross_b = torch.einsum("k...,lk...->l...", coeffs, state["phi_x"])
-        clim = torch.einsum("k...,lkm,m...->l...", coeffs, state["phi_phi"], coeffs)
         counts = state["counts"].reshape(-1, *([1] * len(spatial)))
-        cov = (state["raw"] - cross_a - cross_b + clim) / counts
-        nan = torch.full_like(cov, float("nan"))
-        cov = torch.where(counts > 0, cov, nan)
+
+        def anomaly_moment(raw, phi_a, phi_b, phi_phi):
+            cross_a = torch.einsum("k...,lk...->l...", coeffs, phi_a)
+            cross_b = torch.einsum("k...,lk...->l...", coeffs, phi_b)
+            clim = torch.einsum("k...,lkm,m...->l...", coeffs, phi_phi, coeffs)
+            return (raw - cross_a - cross_b + clim) / counts
+
+        cov = anomaly_moment(
+            state["raw"], state["x_phi"], state["phi_x"], state["phi_phi"]
+        )
+        var_lead = anomaly_moment(
+            state["lead_sq"],
+            state["lead_phi"],
+            state["lead_phi"],
+            state["phi_lead_lead"],
+        )
+        var_lag = anomaly_moment(
+            state["lag_sq"], state["lag_phi"], state["lag_phi"], state["phi_lag_lag"]
+        )
         all_finite = state["n_finite"] == state["n_total"]
-        mean_square = state["raw"][0] / state["counts"][0]
-        resolved = cov[0] > RELATIVE_VARIANCE_FLOOR * mean_square
-        return torch.where(all_finite & resolved, cov, nan)
+        mean_square = state["lead_sq"][0] / state["counts"][0]
+        resolved = var_lead[0] > RELATIVE_VARIANCE_FLOOR * mean_square
+        keep = (counts > 0) & all_finite & resolved
+        nan = torch.full_like(cov, float("nan"))
+        return LaggedAnomalyStats(
+            cov=torch.where(keep, cov, nan),
+            var_lead=torch.where(keep, var_lead, nan),
+            var_lag=torch.where(keep, var_lag, nan),
+        )
+
+
+@dataclasses.dataclass
+class LaggedAnomalyStats:
+    """Anomaly covariance and endpoint variances per lag, ``(n_lags, *spatial)``."""
+
+    cov: torch.Tensor
+    var_lead: torch.Tensor
+    var_lag: torch.Tensor
+
+    @property
+    def correlation(self) -> torch.Tensor:
+        """Pearson correlation per lag in [-1, 1]; NaN where a variance is zero."""
+        scale = torch.sqrt(self.var_lead * self.var_lag)
+        nan = torch.full_like(self.cov, float("nan"))
+        return torch.where(scale > 0, (self.cov / scale).clamp(-1.0, 1.0), nan)
+
+    @property
+    def variance(self) -> torch.Tensor:
+        """Anomaly variance of the scored (leading) times, ``(*spatial)``."""
+        return self.var_lead[0]
 
 
 class AnomalyMemoryAggregator:
@@ -335,9 +397,9 @@ class AnomalyMemoryAggregator:
         target = {k: v[:, time_slice] for k, v in data.target.items()}
         self._record_source("target", target, basis, seasons, new_trajectories)
 
-    def _get_covariances(self) -> dict[str, dict[str, torch.Tensor]] | None:
-        """Reduce across ranks and finalize ``(n_lags, lat, lon)`` covariance
-        per source and variable. Returns ``None`` on non-root ranks.
+    def _get_stats(self) -> dict[str, dict[str, LaggedAnomalyStats]] | None:
+        """Reduce across ranks and finalize the ``(n_lags, lat, lon)`` anomaly
+        moments per source and variable. Returns ``None`` on non-root ranks.
 
         Collectives are issued in the same deterministic order on every rank
         before the ``is_root`` return.
@@ -357,27 +419,26 @@ class AnomalyMemoryAggregator:
                 }
         if not dist.is_root():
             return None
-        out: dict[str, dict[str, torch.Tensor]] = {}
+        out: dict[str, dict[str, LaggedAnomalyStats]] = {}
         for source, by_name in reduced.items():
             out[source] = {}
             for name, by_hemisphere in by_name.items():
-                full = torch.full(
-                    (len(self._lags), len(self._lat), len(self._lon)),
-                    float("nan"),
-                    dtype=torch.float64,
-                    device=get_device(),
-                )
+                full = {
+                    field: torch.full(
+                        (len(self._lags), len(self._lat), len(self._lon)),
+                        float("nan"),
+                        dtype=torch.float64,
+                        device=get_device(),
+                    )
+                    for field in ("cov", "var_lead", "var_lag")
+                }
                 for hemisphere, state in by_hemisphere.items():
                     rows = self._hemisphere_rows[hemisphere]
-                    full[:, rows, :] = LaggedAnomalyMoments.finalize(state)
-                out[source][name] = full
+                    stats = LaggedAnomalyMoments.finalize(state)
+                    for field in full:
+                        full[field][:, rows, :] = getattr(stats, field)
+                out[source][name] = LaggedAnomalyStats(**full)
         return out
-
-    @staticmethod
-    def _correlation(cov: torch.Tensor) -> torch.Tensor:
-        variance = cov[0]
-        nan = torch.full_like(cov, float("nan"))
-        return torch.where(variance > 0, cov / variance, nan)
 
     def _region_mean(self, field: torch.Tensor, region: str) -> float:
         """Area-weighted mean of a ``(lat, lon)`` field over finite cells."""
@@ -405,16 +466,14 @@ class AnomalyMemoryAggregator:
 
     @torch.no_grad()
     def get_logs(self, label: str) -> dict[str, Any]:
-        covariances = self._get_covariances()
-        if covariances is None:
+        stats = self._get_stats()
+        if stats is None:
             return {}
         metrics: dict[str, float] = {}
         images: dict[str, Image] = {}
-        for name in sorted(covariances["prediction"]):
-            gen_cov = covariances["prediction"][name]
-            target_cov = covariances["target"][name]
-            gen_corr = self._correlation(gen_cov)
-            target_corr = self._correlation(target_cov)
+        for name in sorted(stats["prediction"]):
+            gen_corr = stats["prediction"][name].correlation
+            target_corr = stats["target"][name].correlation
             for lag in self._report_lags:
                 i = self._lags.index(lag)
                 for region in self._regions:
@@ -427,8 +486,10 @@ class AnomalyMemoryAggregator:
             for region in self._regions:
                 metrics[f"anomaly_std_ratio/{region.name}/{name}"] = float(
                     np.sqrt(
-                        self._region_mean(gen_cov[0], region.name)
-                        / self._region_mean(target_cov[0], region.name)
+                        self._region_mean(
+                            stats["prediction"][name].variance, region.name
+                        )
+                        / self._region_mean(stats["target"][name].variance, region.name)
                     )
                 )
             for lag in self._map_lags:
@@ -439,6 +500,8 @@ class AnomalyMemoryAggregator:
                     [[target_map, gen_map]],
                     diverging=True,
                     caption=self._caption("maps", name, lag),
+                    vmin=-1.0,
+                    vmax=1.0,
                 )
                 images[f"difference_map/lag{lag}/{name}"] = plot_paneled_data(
                     [[gen_map - target_map]],
@@ -458,15 +521,14 @@ class AnomalyMemoryAggregator:
         return name
 
     def get_dataset(self) -> xr.Dataset:
-        covariances = self._get_covariances()
-        if covariances is None:
+        stats = self._get_stats()
+        if stats is None:
             return xr.Dataset()
         sources = ["target", "prediction"]
         region_names = [region.name for region in self._regions]
         data_vars: dict[str, tuple] = {}
-        for name in sorted(covariances["prediction"]):
-            covs = [covariances[source][name] for source in sources]
-            corrs = [self._correlation(cov) for cov in covs]
+        for name in sorted(stats["prediction"]):
+            corrs = [stats[source][name].correlation for source in sources]
             data_vars[f"corr-{name}"] = (
                 ["source", "lag", "lat", "lon"],
                 torch.stack(corrs).cpu().numpy(),
@@ -474,7 +536,9 @@ class AnomalyMemoryAggregator:
             )
             data_vars[f"variance-{name}"] = (
                 ["source", "lat", "lon"],
-                torch.stack([cov[0] for cov in covs]).cpu().numpy(),
+                torch.stack([stats[source][name].variance for source in sources])
+                .cpu()
+                .numpy(),
                 {"long_name": f"{self._long_name(name)} anomaly variance"},
             )
             data_vars[f"region_corr-{name}"] = (

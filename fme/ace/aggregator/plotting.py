@@ -116,28 +116,43 @@ def fold_if_healpix_data(data: np.ndarray, fill_value: float) -> np.ndarray:
     return data
 
 
+def _panel_color_limits(
+    data: list[list[np.ndarray]], diverging: bool
+) -> tuple[float, float]:
+    vmin = np.inf
+    vmax = -np.inf
+    for row in data:
+        for arr in row:
+            vmin = min(vmin, float(np.nanmin(arr)))
+            vmax = max(vmax, float(np.nanmax(arr)))
+    if diverging:
+        vmax = max(abs(vmin), abs(vmax))
+        vmin = -vmax
+    if vmin > vmax:  # occurs when all data is nan
+        vmin, vmax = 0.0, 0.0
+    return vmin, vmax
+
+
 def plot_paneled_data(
     data: list[list[np.ndarray]],
     diverging: bool,
     caption: str | None = None,
     roll_lon: bool = True,
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> Image:
-    """Plot a list of 2D data arrays in a paneled plot."""
+    """Plot a list of 2D data arrays in a paneled plot.
+
+    Color limits come from the data unless ``vmin`` and ``vmax`` are both
+    given, which fixes the scale (for quantities with a known range, so that
+    images from different steps or runs share one scale).
+    """
     if diverging:
         cmap = "RdBu_r"
     else:
         cmap = None
-    vmin = np.inf
-    vmax = -np.inf
-    for row in data:
-        for arr in row:
-            vmin = min(vmin, np.nanmin(arr))
-            vmax = max(vmax, np.nanmax(arr))
-    if diverging:
-        vmax = max(abs(vmin), abs(vmax))
-        vmin = -vmax
-    if vmin > vmax:  # occurs when all data is nan
-        vmin, vmax = 0, 0
+    if vmin is None or vmax is None:
+        vmin, vmax = _panel_color_limits(data, diverging)
     if caption is not None:
         caption += " "
     else:
