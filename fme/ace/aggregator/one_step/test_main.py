@@ -1,3 +1,5 @@
+import hashlib
+
 import numpy as np
 import pytest
 import torch
@@ -7,10 +9,12 @@ from fme.ace.aggregator.one_step import (
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
     build_one_step_aggregator,
+    main,
     spectrum,
 )
 from fme.ace.aggregator.one_step.build_context import MetricNotSupportedError
 from fme.ace.aggregator.one_step.main import (
+    N_TIMESTEPS_READ,
     OneStepMeanMetricConfig,
     OneStepSnapshotMetricConfig,
     OneStepSpectrumMetricConfig,
@@ -22,6 +26,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.loss import ChannelLossInfo
 from fme.core.typing_ import EnsembleTensorDict
+from fme.core.wandb import Image
 
 
 def get_ds_info(nx: int, ny: int) -> DatasetInfo:
@@ -637,3 +642,77 @@ def test_strict_metric_raises_even_when_not_raise_on_unsupported(monkeypatch):
             save_diagnostics=False,
             raise_on_unsupported=False,
         )
+
+
+def _log_value_fingerprint(value) -> tuple[str, str]:
+    """An exactly-comparable (kind, digest) pair for any one-step log value.
+
+    Unhandled types raise rather than compare equal, so a new kind of log value
+    cannot slip past the comparison below unchecked.
+    """
+    if isinstance(value, float | int):
+        return "scalar", repr(value)
+    if isinstance(value, np.ndarray):
+        digest = hashlib.sha256(np.ascontiguousarray(value).tobytes()).hexdigest()
+        return "array", f"{value.shape}:{digest}"
+    if isinstance(value, Image):
+        pixels = np.asarray(value.image)
+        digest = hashlib.sha256(np.ascontiguousarray(pixels).tobytes()).hexdigest()
+        return "image", f"{pixels.shape}:{digest}"
+    raise AssertionError(
+        f"log value of unhandled type {type(value).__name__}; teach "
+        "_log_value_fingerprint to compare it rather than skipping it"
+    )
+
+
+def test_logs_ignore_timesteps_past_the_first_forward_step(monkeypatch):
+    """Slicing a batch to N_TIMESTEPS_READ must not change any log value.
+
+    Every one-step metric is pinned to forward step 1, so the rest of the
+    window is unread. ``record_batch`` relies on that to slice the batch before
+    folding and normalizing it, which is what keeps a deep coupled rollout
+    window from being copied per ensemble member. A metric that started reading
+    further into the window would fail here rather than silently lose its data
+    (the sub-aggregators skip a batch whose window is shorter than their target
+    step) or silently regress the memory behavior.
+    """
+    batch_size, n_ensemble, nx, ny = 3, 2, 4, 4
+    n_time = N_TIMESTEPS_READ + 6
+    ds_info = get_ds_info(nx, ny)
+    torch.manual_seed(0)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())}
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=get_device())}
+    )
+    # Make the unread tail wildly different from the head, so a metric reaching
+    # into it could not coincidentally agree.
+    for data in (target_data, gen_data):
+        data["a"][:, :, N_TIMESTEPS_READ:] += 1000.0
+    batch = TrainOutput(
+        metrics={"loss": 1.0},
+        target_data=target_data,
+        gen_data=gen_data,
+        time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+        normalize=lambda x: x,
+    )
+
+    def summarize(n_timesteps_read: int) -> dict[str, tuple[str, str]]:
+        monkeypatch.setattr(main, "N_TIMESTEPS_READ", n_timesteps_read)
+        agg = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
+        agg.record_batch(batch=batch)
+        return {
+            k: _log_value_fingerprint(v)
+            for k, v in agg.get_summary(label="test").logs.items()
+        }
+
+    sliced = summarize(N_TIMESTEPS_READ)
+    unsliced = summarize(n_time)
+    # The default metric set logs scalars, arrays and images. Assert all three
+    # are in the comparison so it cannot quietly narrow to scalars if a default
+    # changes, leaving the map and image metrics unguarded.
+    assert {kind for kind, _ in sliced.values()} == {"scalar", "array", "image"}
+    assert set(sliced) == set(unsliced)
+    for key in sliced:
+        assert sliced[key] == unsliced[key], key
