@@ -1,0 +1,12 @@
+DONE 01M2RW2EGA87KRT1HFANVT0J4V ocean_only-owc_a2s-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+DONE 01M2RW2MVYPK5WQ2EW6QKVR6VS ocean_only-lt0-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o0a0rs0
+DONE 01M2RW2VKRGRFNDJKEG99M35KS ocean_only-mse-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+RUNNING 01M2RW3MZDX7W06PYCDCRKHWGG coupled-lt0_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o0a0rs0
+RUNNING 01M2RW3V3K31PDFYPDH9AN1W37 coupled-mae2_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+RUNNING 01M2RW41CZMP1BQ96EZ4CJYFJD coupled-mae2n_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+RUNNING 01M2RW481GZYSYFCZ3EY3GR6EX coupled-mae2ft_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+RUNNING 01M2RW4EE192AZDKPD0MK37ZYZ coupled-dt0_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o0a0rs0
+RUNNING 01M2RW4MXGKDQFT8S0A7FD47TS coupled-pcfe0_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o0a0rs0
+RUNNING 01M2RW4VHJ79WADZ4PVDWS73D3 coupled-owc_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+RUNNING 01M2RW51TBKFXFQPSVW7XMYH1D coupled-owc8_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0
+RUNNING 01M2RW58B2TCTX6P251DQ3J12A coupled_mse-owc_a2s-fto-eval_best_inference_ckpt-piC-ic0151-200yr-gsbox-o2a0rs0

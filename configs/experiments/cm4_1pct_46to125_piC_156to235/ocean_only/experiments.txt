@@ -26,6 +26,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # --- piC-ic0151-200yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-owc_a2s|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RTMHA1C006P3KDZABVKDZF|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-lt0|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RV7ZSXWP9W2AWBMBN2R3YN|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-mse|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RVPZH2RSV20WPXXD2D0VXM|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-owc_a2s|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|done_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RTMHA1C006P3KDZABVKDZF|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-lt0|o0a0rs0|01M26T37CEWSWRR62J0WJTBEG3|done_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RV7ZSXWP9W2AWBMBN2R3YN|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-mse|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|done_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2RVPZH2RSV20WPXXD2D0VXM|ai2/ace|jupiter
+
+# MAE pretrain added 2026-09-17: strongest arm outside the noise-schedule pair
+# on the Gulf Stream diagnostic (0.85 K pooled, 87% of CM4), so worth the same
+# coupled-vs-uncoupled test. The three rows above are marked done_.
+cm4_1pctCO2-1pct_45to125_piC_156to235-ocean_only-mae2|o2a0rs0|01M26T3S2W6QRKHCF7MW6DTYDW|run_piC-ic0151-200yr-gsbox|best_inference_ckpt|high|--min-runtime 2h||01M2SDA7KX81X6SKYZ21A0BVCP|ai2/ace|jupiter
