@@ -47,8 +47,11 @@ Variables
 ---------
 Prognostic: thetao_k, so_k, uo_k, vo_k (k=0..18), sst (K, from the top
 level), ssu, ssv, zos, ocean_sea_ice_fraction (siconc), HI (sithick),
-sea_ice_volume (siconc * sithick). Forcing: DLWRFsfc, DSWRFsfc, ULWRFsfc,
-USWRFsfc, LHTFLsfc, SHTFLsfc, PRATEsfc, eastward/northward_surface_wind_stress,
+sea_ice_volume (siconc * sithick), UI/VI (usi/vsi). Static: hfgeou, copied
+from the CM4 field because GLORYS publishes none and the corrector's
+scaled_temperature heat-content correction requires it. Forcing: DLWRFsfc,
+DSWRFsfc, ULWRFsfc, USWRFsfc, LHTFLsfc, SHTFLsfc, PRATEsfc,
+eastward/northward_surface_wind_stress,
 total_frozen_precipitation_rate. There is no hfds/wfo/tauuo/tauvo: the
 reanalysis does not publish the fluxes its ocean saw, and aliasing ERA5
 stress as a "diagnostic output" would give the model a target equal to
@@ -93,6 +96,11 @@ URL_COORDS = (
 )
 URL_BATHY = f"{_S3}/mdl-arco-time-026/arco/{_PRODUCT}/{_STATIC}--ext--bathy/static.zarr"
 URL_FORCING = "gs://vcm-ml-intermediate/2026-08-13-era5-1deg-8layer-1940-2025.zarr"
+# GLORYS publishes no geothermal heat flux, but the ocean corrector's
+# scaled_temperature heat-content correction requires it in every one of its
+# three flux branches. Take the static CM4 field, which is already on the
+# 1-degree output grid.
+URL_HFGEOU = "gs://vcm-ml-intermediate/2026-09-02-cm4-1pctCO2-1deg-ocean-1daily.zarr"
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {"F22.5": 22.5, "F45": 45, "F90": 90, "F360": 360}
@@ -100,7 +108,7 @@ GAUSSIAN_GRID_N = {"F22.5": 22.5, "F45": 45, "F90": 90, "F360": 360}
 # 3-D ocean variables, vertically remapped and split into per-level 2-D fields
 VARS_3D = ("thetao", "so", "uo", "vo")
 # 2-D ocean / sea-ice variables read from the same store
-VARS_2D = ("zos", "siconc", "sithick")
+VARS_2D = ("zos", "siconc", "sithick", "usi", "vsi")
 
 # Target layer interfaces (metres), identical to the idepth_0..19 of the CM4
 # and UFS-replay training sets (read from the UFS store 2026-09-08).
@@ -403,6 +411,36 @@ def _nn_fill(field: np.ndarray, ocean: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
+def _geothermal_heat_flux(mask_2d: xr.DataArray) -> xr.DataArray:
+    """``hfgeou`` on the output grid, taken from the static CM4 field.
+
+    GLORYS publishes no geothermal heat flux. The CM4 field is already on the
+    1-degree grid, so this is a copy rather than a regrid -- but the two masks
+    differ, so cells that are ocean in GLORYS and land in CM4 arrive NaN and
+    are filled with the CM4 ocean mean. The flux is order 0.1 W/m**2 against a
+    surface forcing of order 100, so the filled cells carry no weight; they
+    exist so the corrector never sees a NaN.
+    """
+    cm4 = xr.open_zarr(_make_zarr_store(URL_HFGEOU))["hfgeou"].load()
+    if cm4.sizes != mask_2d.sizes or not np.allclose(
+        cm4["lat"].values, mask_2d["lat"].values
+    ):
+        raise ValueError(
+            "the CM4 hfgeou grid does not match the output grid "
+            f"({dict(cm4.sizes)} vs {dict(mask_2d.sizes)}); it can only be "
+            "copied onto the 1-degree F90 grid it was written on"
+        )
+    cm4 = cm4.assign_coords(lat=mask_2d["lat"], lon=mask_2d["lon"])
+    ocean_mean = float(cm4.where(np.isfinite(cm4)).mean())
+    out = cm4.fillna(ocean_mean).where(mask_2d > 0).astype(np.float32)
+    out.attrs = {
+        "long_name": "Upward geothermal heat flux at sea floor",
+        "units": "W m-2",
+        "source": "CM4 static field (GLORYS publishes none)",
+    }
+    return out
+
+
 def build_invariants(
     output_grid: str, weights: np.ndarray, weights_path: str | None
 ) -> tuple[xr.Dataset, xr.Dataset]:
@@ -452,6 +490,7 @@ def build_invariants(
     dep = frac["deptho"].where(mask_2d > 0).astype(np.float32)
     dep.attrs = {"long_name": "Sea Floor Depth Below Geoid", "units": "m"}
     inv["deptho"] = dep
+    inv["hfgeou"] = _geothermal_heat_flux(mask_2d)
 
     for i, d in enumerate(TARGET_INTERFACES):
         label = "Depth interface 0 (surface)" if i == 0 else f"Depth interface {i}"
@@ -561,6 +600,16 @@ def process_ocean_2d(
     siv = sic * hi
     siv.attrs = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
     out["sea_ice_volume"] = siv
+    # Sea ice velocities. The ocean corrector's sea_ice_fraction_correction
+    # lists UI/VI in zero_where_ice_free_names, so they must be zero (not NaN)
+    # wherever there is no ice, matching the HI/sea_ice_volume treatment above.
+    for src, dst, direction in (("usi", "UI", "eastward"), ("vsi", "VI", "northward")):
+        vel = ds[src].fillna(0.0).where(sic > 0, 0.0)
+        vel.attrs = {
+            "long_name": f"Sea ice {direction} velocity",
+            "units": "m s-1",
+        }
+        out[dst] = vel
     out = _mask_and_fill(out, invariant_ds)
     out = _finalize(out, time_value)
     new_key = key.replace(
@@ -609,6 +658,8 @@ def make_template(out_times: pd.DatetimeIndex, invariant_ds: xr.Dataset) -> xr.D
         "ocean_sea_ice_fraction",
         "HI",
         "sea_ice_volume",
+        "UI",
+        "VI",
     ]
     names += list(FORCING_VARS.values())
     lat, lon = invariant_ds["lat"], invariant_ds["lon"]
