@@ -659,3 +659,100 @@ def test_variable_bounds_clamps_generated_fields():
     assert torch.all(corrected_gen["thetao_0"] >= -4.0)
     assert torch.any(corrected_gen["thetao_0"] > 45.0)  # upper side open
     torch.testing.assert_close(corrected_gen["zos"], zos_before)
+
+
+def _heat_budget_fixture(nlevels=4):
+    """Shared setup for the heat-content method comparison below."""
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon = 2, 3, 3
+    mask = torch.ones(nsamples, nlat, nlon, nlevels)
+    mask[:, 0, 0, :] = 0.0
+    masks = {f"mask_{k}": mask[:, :, :, k] for k in range(nlevels)}
+    masks["mask_2d"] = mask[:, :, :, 0]
+    ops = LatLonOperations(torch.ones(size=[3, 3]), SpatialMaskProvider(masks))
+    idepth = torch.tensor([0.0, 10.0, 30.0, 60.0, 100.0][: nlevels + 1])
+    depth_coordinate = DepthCoordinate(idepth, mask)
+    return timestep, (nsamples, nlat, nlon), ops, depth_coordinate, mask
+
+
+# A climatology that falls with depth, as the real ocean's does.
+_REFERENCE = [14.0, 8.0, 3.0, 1.0]
+
+
+def _run_method(method, gen_thetao, **kwargs):
+    timestep, (ns, nlat, nlon), ops, depth_coordinate, mask = _heat_budget_fixture()
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method=method, **kwargs
+        )
+    )
+    input_dict = {
+        f"thetao_{k}": torch.full((ns, nlat, nlon), _REFERENCE[k]) for k in range(4)
+    }
+    input_dict["sst"] = torch.full((ns, nlat, nlon), _REFERENCE[0] + 273.15)
+    input_dict["hfds"] = torch.zeros(ns, nlat, nlon)
+    gen_dict = {
+        f"thetao_{k}": torch.full((ns, nlat, nlon), gen_thetao[k]) for k in range(4)
+    }
+    gen_dict["sst"] = torch.full((ns, nlat, nlon), gen_thetao[0] + 273.15)
+    forcing = {
+        "hfgeou": torch.zeros(ns, nlat, nlon),
+        "sea_surface_fraction": mask[:, :, :, 0],
+    }
+    corrector = config._build(ops, depth_coordinate, timestep)
+    corrected = corrector(input_dict, gen_dict, forcing, None).corrected
+    input_ohc = OceanData(input_dict, depth_coordinate).ocean_heat_content
+    out_ohc = OceanData({**gen_dict, **corrected}, depth_coordinate).ocean_heat_content
+    return corrected, input_ohc.nanmean(), out_ohc.nanmean()
+
+
+@pytest.mark.parametrize(
+    "method,kwargs",
+    [
+        ("scaled_temperature", {}),
+        ("uniform_temperature", {}),
+        ("anomaly_scaled_temperature", {"reference_temperature": _REFERENCE}),
+    ],
+)
+def test_ocean_heat_content_methods_all_conserve(method, kwargs):
+    """With no surface flux, every method must return the column to the
+    input's heat content, whatever it does to the vertical distribution."""
+    # a vertical dipole: warm above, cold below, chosen to hold excess heat
+    corrected, input_ohc, out_ohc = _run_method(
+        method, [16.0, 10.0, 2.0, 0.5], **kwargs
+    )
+    torch.testing.assert_close(out_ohc, input_ohc, rtol=1e-5, atol=0.0)
+
+
+def test_uniform_leaves_vertical_dipole_free_and_anomaly_scaled_damps_it():
+    """The mechanism behind the residual-stepper failure.
+
+    A dipole that holds no net column heat is invisible to the budget, so a
+    correction that only translates the profile cannot touch it, while one
+    that contracts the anomaly about the climatology damps every level. This
+    is why 'uniform_temperature' must not be paired with residual temperature
+    prediction: with no climatological mean in the stepper, the corrector is
+    the only thing anchoring each level, and a translation anchors just one
+    degree of freedom.
+    """
+    # a dipole about the reference profile that carries ~zero column heat
+    gen = [_REFERENCE[0] + 2.0, _REFERENCE[1] + 2.0, _REFERENCE[2] - 1.0, 0.0]
+    uniform, _, _ = _run_method("uniform_temperature", gen)
+    anomaly, _, _ = _run_method(
+        "anomaly_scaled_temperature", gen, reference_temperature=_REFERENCE
+    )
+    for k in range(4):
+        before = abs(gen[k] - _REFERENCE[k])
+        if before < 1e-6:
+            continue
+        after_uniform = (uniform[f"thetao_{k}"] - _REFERENCE[k]).abs().max().item()
+        after_anomaly = (anomaly[f"thetao_{k}"] - _REFERENCE[k]).abs().max().item()
+        # the anomaly-contracting method shrinks every level's anomaly
+        assert (
+            after_anomaly < before
+        ), f"level {k} not damped: {after_anomaly} >= {before}"
+        # and it damps each level strictly more than the translation does
+        assert after_anomaly < after_uniform, (
+            f"level {k}: anomaly_scaled {after_anomaly} not below "
+            f"uniform {after_uniform}"
+        )

@@ -7,6 +7,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
@@ -99,10 +100,37 @@ class OceanHeatContentBudgetConfig:
     """Configuration for ocean heat content budget correction.
 
     Parameters:
-        method: Method to use for OHC budget correction. The available option is
-            "scaled_temperature", which enforces conservation of heat content
-            by scaling the predicted potential temperature by a vertically and
-            horizontally uniform correction factor.
+        method: Method to use for OHC budget correction. All options enforce
+            the same column heat content budget and differ only in the vertical
+            direction along which the correction acts:
+
+            - "scaled_temperature": multiply the predicted potential
+              temperature by a uniform factor, depositing heat in proportion
+              to ``T_k * dz_k``. Because it multiplies about 0 degrees Celsius
+              it contracts every vertical mode, which is what anchors a
+              residual-prediction stepper, but it also biases heat toward the
+              warm upper ocean.
+            - "uniform_temperature": add a uniform temperature increment,
+              depositing heat in proportion to ``dz_k`` alone. This gives
+              better heat placement but only translates the profile, so it
+              constrains the column mean and leaves every other vertical mode
+              free. Do not use it with residual temperature prediction.
+            - "anomaly_scaled_temperature": contract the temperature anomaly
+              about ``reference_temperature`` -- ``T_k -> Tbar_k + r *
+              (T_k - Tbar_k)``. Like "scaled_temperature" this acts on every
+              vertical mode, so it anchors a residual stepper; unlike it, the
+              deposition follows the anomaly rather than the absolute
+              temperature, so it carries no warm-upper-ocean bias. ``r`` is
+              clamped to ``1 +/- max_anomaly_contraction`` and any imbalance
+              left over is closed with a uniform increment, so the budget is
+              always satisfied exactly.
+        reference_temperature: Per-level climatological potential temperature
+            in degrees Celsius, required by "anomaly_scaled_temperature" and
+            ignored otherwise. Must have one entry per depth level.
+        max_anomaly_contraction: Largest fractional contraction of the anomaly
+            permitted in a single step by "anomaly_scaled_temperature". Bounds
+            the correction when the column anomaly is near zero, which would
+            otherwise make the solved factor blow up.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
@@ -111,8 +139,30 @@ class OceanHeatContentBudgetConfig:
 
     """
 
-    method: Literal["scaled_temperature"]
+    method: Literal[
+        "scaled_temperature", "uniform_temperature", "anomaly_scaled_temperature"
+    ]
     constant_unaccounted_heating: float = 0.0
+    reference_temperature: list[float] | None = None
+    max_anomaly_contraction: float = 0.1
+
+    def __post_init__(self):
+        if self.method == "anomaly_scaled_temperature":
+            if self.reference_temperature is None:
+                raise ValueError(
+                    "reference_temperature is required when method is "
+                    "'anomaly_scaled_temperature'."
+                )
+            if not 0.0 < self.max_anomaly_contraction <= 1.0:
+                raise ValueError(
+                    "max_anomaly_contraction must be in (0, 1], got "
+                    f"{self.max_anomaly_contraction}."
+                )
+        elif self.reference_temperature is not None:
+            raise ValueError(
+                "reference_temperature is only meaningful for method "
+                f"'anomaly_scaled_temperature', not {self.method!r}."
+            )
 
 
 @dataclasses.dataclass
@@ -240,8 +290,12 @@ class OceanHeatContentCorrection:
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
-    method: Literal["scaled_temperature"]
+    method: Literal[
+        "scaled_temperature", "uniform_temperature", "anomaly_scaled_temperature"
+    ]
     unaccounted_heating: float
+    reference_temperature: list[float] | None = None
+    max_anomaly_contraction: float = 0.1
 
     def __call__(
         self,
@@ -270,6 +324,8 @@ class OceanHeatContentCorrection:
             self.timestep_seconds,
             self.method,
             self.unaccounted_heating,
+            self.reference_temperature,
+            self.max_anomaly_contraction,
         )
         return corrected, corrector_state
 
@@ -386,6 +442,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                    self.ocean_heat_content_correction.reference_temperature,
+                    self.ocean_heat_content_correction.max_anomaly_contraction,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -519,10 +577,18 @@ def _force_conserve_ocean_heat_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["scaled_temperature"] = "scaled_temperature",
+    method: Literal[
+        "scaled_temperature", "uniform_temperature", "anomaly_scaled_temperature"
+    ] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
+    reference_temperature: list[float] | None = None,
+    max_anomaly_contraction: float = 0.1,
 ) -> TensorDict:
-    if method != "scaled_temperature":
+    if method not in (
+        "scaled_temperature",
+        "uniform_temperature",
+        "anomaly_scaled_temperature",
+    ):
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
         )
@@ -573,19 +639,137 @@ def _force_conserve_ocean_heat_content(
     expected_change_ocean_heat_content = (
         energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
-    heat_content_correction_ratio = (
+    target_ocean_heat_content = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
-    ) / global_gen_ocean_heat_content
-    # apply same temperature correction to all vertical layers
+    )
     out: TensorDict = {}
-    n_levels = gen.sea_water_potential_temperature.shape[-1]
+    gen_potential_temperature = gen.sea_water_potential_temperature
+    n_levels = gen_potential_temperature.shape[-1]
+
+    if method == "scaled_temperature":
+        # Multiplying about 0 degrees Celsius contracts every vertical mode,
+        # which is what anchors a residual stepper, at the cost of depositing
+        # heat in proportion to the absolute temperature.
+        heat_content_correction_ratio = (
+            target_ocean_heat_content / global_gen_ocean_heat_content
+        )
+        for k in range(n_levels):
+            name = f"thetao_{k}"
+            out[name] = gen.data[name] * heat_content_correction_ratio
+        if "sst" in gen.data:
+            out["sst"] = (  # assuming sst in Kelvin
+                gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
+            ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+        return out
+
+    # Both remaining methods need the column heat capacity, which must be a
+    # depth_integral over the same columns as the heat content itself or the
+    # budget is off by the difference.
+    heat_capacity_per_area = area_weighted_mean(
+        vertical_coordinate.depth_integral(
+            torch.ones_like(gen_potential_temperature)
+            * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4
+        ),
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    mask = getattr(vertical_coordinate, "mask", None)
+    if mask is None:
+        raise ValueError(
+            f"Method {method!r} needs the vertical coordinate's wet-cell mask "
+            "to place an increment, but this vertical coordinate has none."
+        )
+    # Every cell the store marks valid is shifted, including those the
+    # bathymetry puts at zero thickness: they hold real data and are scored,
+    # and shifting them adds no heat. Cells outside the mask hold fill values
+    # and are left alone. ``> 0`` mirrors depth_integral's own mask test.
+    is_masked_valid = (mask > 0.0).to(dtype=gen_potential_temperature.dtype)
+
+    if method == "uniform_temperature":
+        temperature_increment = (
+            target_ocean_heat_content - global_gen_ocean_heat_content
+        ) / heat_capacity_per_area
+    else:  # anomaly_scaled_temperature
+        if reference_temperature is None:
+            raise ValueError(
+                "reference_temperature is required for " "'anomaly_scaled_temperature'."
+            )
+        if len(reference_temperature) != n_levels:
+            raise ValueError(
+                f"reference_temperature has {len(reference_temperature)} entries "
+                f"but the data has {n_levels} depth levels."
+            )
+        reference = torch.tensor(
+            reference_temperature,
+            dtype=gen_potential_temperature.dtype,
+            device=gen_potential_temperature.device,
+        ).reshape(*([1] * (gen_potential_temperature.ndim - 1)), n_levels)
+        reference_field = reference.expand_as(gen_potential_temperature)
+        global_reference_ocean_heat_content = area_weighted_mean(
+            vertical_coordinate.depth_integral(
+                reference_field
+                * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+                * DENSITY_OF_SEA_WATER_CM4
+            ),
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+        # Heat held in the anomaly about the reference profile, and the heat the
+        # anomaly would have to hold for the budget to close.
+        gen_anomaly_heat = (
+            global_gen_ocean_heat_content - global_reference_ocean_heat_content
+        )
+        target_anomaly_heat = (
+            target_ocean_heat_content - global_reference_ocean_heat_content
+        )
+        # Contract the anomaly toward the reference. Clamping bounds the factor
+        # when the column anomaly passes through zero, where the exact solution
+        # is unbounded; whatever the clamp leaves unclosed is handled by the
+        # uniform increment below, so the budget still closes exactly.
+        safe_denominator = torch.where(
+            gen_anomaly_heat == 0.0,
+            torch.ones_like(gen_anomaly_heat),
+            gen_anomaly_heat,
+        )
+        anomaly_contraction = torch.where(
+            gen_anomaly_heat == 0.0,
+            torch.ones_like(gen_anomaly_heat),
+            target_anomaly_heat / safe_denominator,
+        ).clamp(1.0 - max_anomaly_contraction, 1.0 + max_anomaly_contraction)
+        for k in range(n_levels):
+            name = f"thetao_{k}"
+            out[name] = reference[..., k] + anomaly_contraction * (
+                gen.data[name] - reference[..., k]
+            )
+        if "sst" in gen.data:
+            # sst is in Kelvin and is not in the heat content integral, so it
+            # follows thetao_0's reference as a consistency choice.
+            sst_reference = reference[..., 0] + FREEZING_TEMPERATURE_KELVIN
+            out["sst"] = sst_reference + anomaly_contraction * (
+                gen.data["sst"] - sst_reference
+            )
+        contracted_ocean_heat_content = (
+            global_reference_ocean_heat_content + anomaly_contraction * gen_anomaly_heat
+        )
+        temperature_increment = (
+            target_ocean_heat_content - contracted_ocean_heat_content
+        ) / heat_capacity_per_area
+
+    # "uniform_temperature" leaves ``out`` empty above and applies the whole
+    # correction here; "anomaly_scaled_temperature" has already written the
+    # contracted field and this adds the increment on top of it.
+    contracted: TensorDict = dict(out) if out else dict(gen.data)
     for k in range(n_levels):
         name = f"thetao_{k}"
-        out[name] = gen.data[name] * heat_content_correction_ratio
+        out[name] = contracted[name] + temperature_increment * is_masked_valid.select(
+            -1, k
+        )
     if "sst" in gen.data:
-        out["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+        # An increment needs no Kelvin offset, unlike the multiplicative path.
+        out["sst"] = contracted["sst"] + temperature_increment * is_masked_valid.select(
+            -1, 0
+        )
     return out
 
 
