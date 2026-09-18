@@ -1,0 +1,37 @@
+# Evaluator run to check how the reworked Nino3.4 power spectrum plot (PR #1494)
+# looks on a real model. Reuses the piControl inline-inference setting from the
+# ocean_wide hybridresid training run: 1460 steps x 5-daily = 20 years, 8 ICs,
+# which clears the enso_index metric's 730-day minimum with room to spare.
+experiment_dir: /results
+n_forward_steps: 1460
+forward_steps_in_memory: 10
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+    - '0161-01-01T00:00:00'
+    - '0171-01-01T00:00:00'
+    - '0181-01-01T00:00:00'
+    - '0191-01-01T00:00:00'
+    - '0201-01-01T00:00:00'
+    - '0211-01-01T00:00:00'
+    - '0221-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
