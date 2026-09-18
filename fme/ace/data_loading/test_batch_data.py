@@ -1691,3 +1691,100 @@ class TestSelectSampleSlice:
         sliced = batch.select_sample_slice(slice(0, 1))
         assert sliced.horizontal_dims == batch.horizontal_dims
         assert sliced.epoch == batch.epoch
+
+
+@pytest.mark.parallel
+class TestGather:
+    def test_gathers_data_tensors(self):
+        dist = Distributed.get_instance()
+        rank = dist.rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.full((1, 1, 2, 3), float(rank))},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1 + rank)]]),
+                dims=["sample", "time"],
+            ),
+        )
+        result = local.gather(dist)
+        if dist.is_root():
+            assert result is not None
+            assert result.data["x"].shape[0] == dist.world_size
+            for r in range(dist.world_size):
+                torch.testing.assert_close(
+                    result.data["x"][r], torch.full((1, 2, 3), float(r))
+                )
+        else:
+            assert result is None
+
+    def test_gathers_time(self):
+        dist = Distributed.get_instance()
+        rank = dist.rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.zeros(1, 1, 2, 3)},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1 + rank)]]),
+                dims=["sample", "time"],
+            ),
+        )
+        result = local.gather(dist)
+        if dist.is_root():
+            assert result is not None
+            assert result.time.sizes["sample"] == dist.world_size
+
+    def test_gathers_labels(self):
+        dist = Distributed.get_instance()
+        rank = dist.rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.zeros(1, 1, 2, 3)},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1)]]),
+                dims=["sample", "time"],
+            ),
+            labels=BatchLabels(
+                torch.tensor([[float(rank)]]), names=["label"]
+            ),
+        )
+        result = local.gather(dist)
+        if dist.is_root():
+            assert result is not None
+            assert result.labels is not None
+            assert result.labels.tensor.shape[0] == dist.world_size
+
+    def test_gathers_stepper_state(self):
+        dist = Distributed.get_instance()
+        rank = dist.rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.zeros(1, 1, 2, 3)},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1)]]),
+                dims=["sample", "time"],
+            ),
+            stepper_state=StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.full((1, 1, 1), float(rank))
+                )
+            ),
+        )
+        result = local.gather(dist)
+        if dist.is_root():
+            assert result is not None
+            assert result.stepper_state is not None
+            assert result.stepper_state.corrector_state is not None
+            mass = result.stepper_state.corrector_state.global_dry_air_mass
+            assert mass.shape[0] == dist.world_size
+
+    def test_none_extras_stay_none(self):
+        dist = Distributed.get_instance()
+        local = BatchData.new_on_cpu(
+            data={"x": torch.zeros(1, 1, 2, 3)},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1)]]),
+                dims=["sample", "time"],
+            ),
+        )
+        result = local.gather(dist)
+        if dist.is_root():
+            assert result is not None
+            assert result.labels is None
+            assert result.stepper_state is None
+            assert result.data_mask is None
