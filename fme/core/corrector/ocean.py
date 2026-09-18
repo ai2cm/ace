@@ -131,6 +131,26 @@ class OceanHeatContentBudgetConfig:
             permitted in a single step by "anomaly_scaled_temperature". Bounds
             the correction when the column anomaly is near zero, which would
             otherwise make the solved factor blow up.
+        shape_restoring_rate: Fraction of the global-mean vertical *shape*
+            anomaly removed per step, restoring toward
+            ``reference_temperature``. Composes with any method and defaults to
+            off.
+
+            This exists so "uniform_temperature" can be used with residual
+            temperature prediction. A residual update carries no climatological
+            mean, so each level's global mean is a free integrator, and a
+            uniform increment constrains only the column mean -- the remaining
+            vertical modes drift unchecked. The shape anomaly is the global-mean
+            anomaly profile with its thickness-weighted mean removed, so it
+            carries no column heat: damping it touches none of the heat budget
+            and leaves the chosen method's deposition profile, and therefore its
+            heat placement, exactly as it was. The budget closure runs after and
+            closes exactly, so conservation does not depend on this term being
+            heat-neutral to machine precision.
+
+            Only the global-mean profile is restored; horizontal structure at
+            every level is untouched. A rate of 0.01 with a 5-day step is a
+            restoring timescale of about 500 days.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
@@ -145,8 +165,19 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
     reference_temperature: list[float] | None = None
     max_anomaly_contraction: float = 0.1
+    shape_restoring_rate: float = 0.0
 
     def __post_init__(self):
+        if self.shape_restoring_rate < 0.0 or self.shape_restoring_rate > 1.0:
+            raise ValueError(
+                "shape_restoring_rate must be in [0, 1], got "
+                f"{self.shape_restoring_rate}."
+            )
+        if self.shape_restoring_rate > 0.0 and self.reference_temperature is None:
+            raise ValueError(
+                "reference_temperature is required when shape_restoring_rate "
+                "is greater than zero."
+            )
         if self.method == "anomaly_scaled_temperature":
             if self.reference_temperature is None:
                 raise ValueError(
@@ -158,10 +189,13 @@ class OceanHeatContentBudgetConfig:
                     "max_anomaly_contraction must be in (0, 1], got "
                     f"{self.max_anomaly_contraction}."
                 )
-        elif self.reference_temperature is not None:
+        elif (
+            self.reference_temperature is not None and self.shape_restoring_rate == 0.0
+        ):
             raise ValueError(
                 "reference_temperature is only meaningful for method "
-                f"'anomaly_scaled_temperature', not {self.method!r}."
+                "'anomaly_scaled_temperature' or with a nonzero "
+                f"shape_restoring_rate, not {self.method!r} alone."
             )
 
 
@@ -296,6 +330,7 @@ class OceanHeatContentCorrection:
     unaccounted_heating: float
     reference_temperature: list[float] | None = None
     max_anomaly_contraction: float = 0.1
+    shape_restoring_rate: float = 0.0
 
     def __call__(
         self,
@@ -326,6 +361,7 @@ class OceanHeatContentCorrection:
             self.unaccounted_heating,
             self.reference_temperature,
             self.max_anomaly_contraction,
+            self.shape_restoring_rate,
         )
         return corrected, corrector_state
 
@@ -444,6 +480,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
                     self.ocean_heat_content_correction.reference_temperature,
                     self.ocean_heat_content_correction.max_anomaly_contraction,
+                    self.ocean_heat_content_correction.shape_restoring_rate,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -583,6 +620,7 @@ def _force_conserve_ocean_heat_content(
     unaccounted_heating: float = 0.0,
     reference_temperature: list[float] | None = None,
     max_anomaly_contraction: float = 0.1,
+    shape_restoring_rate: float = 0.0,
 ) -> TensorDict:
     if method not in (
         "scaled_temperature",
@@ -645,6 +683,79 @@ def _force_conserve_ocean_heat_content(
     out: TensorDict = {}
     gen_potential_temperature = gen.sea_water_potential_temperature
     n_levels = gen_potential_temperature.shape[-1]
+
+    if shape_restoring_rate > 0.0:
+        # Damp the drift in the vertical modes the column budget cannot see.
+        # The shape anomaly is the global-mean anomaly profile minus its
+        # thickness-weighted mean, so it carries no column heat and removing a
+        # fraction of it leaves the budget, and hence the deposition profile of
+        # whichever method runs below, untouched. Only the global-mean profile
+        # moves; horizontal structure at each level is left alone.
+        if reference_temperature is None:
+            raise ValueError(
+                "reference_temperature is required when shape_restoring_rate "
+                "is greater than zero."
+            )
+        if len(reference_temperature) != n_levels:
+            raise ValueError(
+                f"reference_temperature has {len(reference_temperature)} entries "
+                f"but the data has {n_levels} depth levels."
+            )
+        shape_reference = torch.tensor(
+            reference_temperature,
+            dtype=gen_potential_temperature.dtype,
+            device=gen_potential_temperature.device,
+        )
+        anomaly = gen_potential_temperature - shape_reference.reshape(
+            *([1] * (gen_potential_temperature.ndim - 1)), n_levels
+        )
+        # thickness-weighted mean anomaly, taken through depth_integral so it
+        # uses the same columns and mask the heat content itself uses
+        global_anomaly_heat = area_weighted_mean(
+            vertical_coordinate.depth_integral(
+                anomaly * SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
+            ),
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+        column_heat_capacity = area_weighted_mean(
+            vertical_coordinate.depth_integral(
+                torch.ones_like(gen_potential_temperature)
+                * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+                * DENSITY_OF_SEA_WATER_CM4
+            ),
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+        thickness_weighted_mean_anomaly = global_anomaly_heat / column_heat_capacity
+        restored: TensorDict = {}
+        for k in range(n_levels):
+            name = f"thetao_{k}"
+            level_mean_anomaly = area_weighted_mean(
+                anomaly.select(-1, k), keepdim=True, name=name
+            )
+            shape_anomaly = level_mean_anomaly - thickness_weighted_mean_anomaly
+            restored[name] = gen.data[name] - shape_restoring_rate * shape_anomaly
+        if "sst" in gen.data:
+            sst_anomaly = area_weighted_mean(
+                gen.data["sst"]
+                - FREEZING_TEMPERATURE_KELVIN
+                - float(reference_temperature[0]),
+                keepdim=True,
+                name="sst",
+            )
+            restored["sst"] = gen.data["sst"] - shape_restoring_rate * (
+                sst_anomaly - thickness_weighted_mean_anomaly
+            )
+        # everything below reads the restored state
+        gen = OceanData({**dict(gen.data), **restored}, vertical_coordinate)
+        gen_potential_temperature = gen.sea_water_potential_temperature
+        global_gen_ocean_heat_content = area_weighted_mean(
+            gen.ocean_heat_content,
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+        out.update(restored)
 
     if method == "scaled_temperature":
         # Multiplying about 0 degrees Celsius contracts every vertical mode,

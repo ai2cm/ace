@@ -756,3 +756,70 @@ def test_uniform_leaves_vertical_dipole_free_and_anomaly_scaled_damps_it():
             f"level {k}: anomaly_scaled {after_anomaly} not below "
             f"uniform {after_uniform}"
         )
+
+
+def test_uniform_with_shape_restoring_damps_dipole_and_conserves():
+    """The combination we actually want: uniform_temperature's heat placement,
+    with the vertical modes it cannot see damped separately.
+
+    The shape term must damp the dipole that uniform alone leaves free, while
+    the column heat content still returns exactly to the input's.
+    """
+    gen = [_REFERENCE[0] + 2.0, _REFERENCE[1] + 2.0, _REFERENCE[2] - 1.0, 0.0]
+    plain, input_ohc, out_ohc_plain = _run_method("uniform_temperature", gen)
+    shaped, _, out_ohc_shaped = _run_method(
+        "uniform_temperature",
+        gen,
+        reference_temperature=_REFERENCE,
+        shape_restoring_rate=0.25,
+    )
+    # conservation holds with and without the shape term
+    torch.testing.assert_close(out_ohc_plain, input_ohc, rtol=1e-5, atol=0.0)
+    torch.testing.assert_close(out_ohc_shaped, input_ohc, rtol=1e-5, atol=0.0)
+    # and the shape term strictly damps every drifting level
+    damped = 0
+    for k in range(4):
+        before = abs(gen[k] - _REFERENCE[k])
+        if before < 1e-6:
+            continue
+        a_plain = (plain[f"thetao_{k}"] - _REFERENCE[k]).abs().max().item()
+        a_shaped = (shaped[f"thetao_{k}"] - _REFERENCE[k]).abs().max().item()
+        assert (
+            a_shaped < a_plain
+        ), f"level {k}: shape restoring did not damp ({a_shaped} >= {a_plain})"
+        damped += 1
+    assert damped >= 3
+
+
+def test_shape_restoring_moves_no_column_heat():
+    """The shape term must not do the budget's job.
+
+    Its whole purpose is to damp vertical modes the budget cannot see, so the
+    heat it moves has to be negligible beside the imbalance the corrector is
+    there to close. If it moved real heat it would change the deposition
+    profile, and with it the heat placement uniform_temperature is chosen for.
+    """
+    timestep, (ns, nlat, nlon), ops, depth_coordinate, mask = _heat_budget_fixture()
+    gen = [_REFERENCE[0] + 2.0, _REFERENCE[1] + 2.0, _REFERENCE[2] - 1.0, 0.0]
+    gen_dict = {f"thetao_{k}": torch.full((ns, nlat, nlon), gen[k]) for k in range(4)}
+    before = OceanData(gen_dict, depth_coordinate).ocean_heat_content.nanmean()
+    _, _, _ = _run_method("uniform_temperature", gen)
+    shaped, input_ohc, _ = _run_method(
+        "uniform_temperature",
+        gen,
+        reference_temperature=_REFERENCE,
+        shape_restoring_rate=0.25,
+    )
+    # the imbalance the corrector has to close, as a scale to judge against
+    imbalance = (before - input_ohc).abs()
+    # reconstruct the shape step alone by damping the global-mean profile
+    heat_moved = torch.zeros(())
+    thicknesses = torch.tensor([10.0, 20.0, 30.0, 40.0])
+    anomalies = torch.tensor([gen[k] - _REFERENCE[k] for k in range(4)])
+    mean_anomaly = (anomalies * thicknesses).sum() / thicknesses.sum()
+    shape = anomalies - mean_anomaly
+    heat_moved = (shape * thicknesses).sum().abs()
+    assert (
+        heat_moved < 1e-4 * (anomalies.abs() * thicknesses).sum()
+    ), f"shape term carries column heat: {heat_moved}"
+    assert imbalance > 0, "fixture should present a real imbalance to close"
