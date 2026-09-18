@@ -123,4 +123,41 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_noclip_sstff_ohc|rs0|traine
 # AdamW, identical to any threshold <= 17.2. It re-opens the one difference from
 # Troy this lineage closed; that is the deliberate trade, since we already know
 # the unclipped config converges.
-cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
+
+# ocean_wide_hybridresid_clip1_sstff_uniformdt -- the arm above with the OHC
+# corrector's functional form flipped.
+#
+# ocean_wide_hybridresid_clip1_sstff_ohc (wandb xh398aj0, beaker
+# 01M2KA4QCQS0G3CJTN3NE0RNA0) ran all 75 epochs spike-free and finished
+# inference_piC/time_mean_norm/rmse/channel_mean 0.05364 against the three
+# ocean_wide_ohc_clip baseline seeds' 0.04734 / 0.05020 / 0.05129 -- just above
+# the seed spread rather than inside it, but the same order, and the first
+# hybrid-residual arm on this dataset to track the baseline for a full run. The
+# configuration was arrived at by closing differences from Troy's
+# samudra-enso-w1-hybridresid one at a time, so it is not yet known which of its
+# terms the result depends on.
+#
+# This row changes exactly one token from that arm:
+# ocean_heat_content_correction.method 'scaled_temperature' ->
+# 'uniform_temperature'. scaled_temperature multiplies every level by one global
+# ratio (heat deposited proportional to T_k * dz_k); uniform_temperature adds one
+# global increment to every level (heat deposited proportional to dz_k). Seed,
+# architecture, data, max_grad_norm=1.0, the 4-step unroll, the 19-element
+# thetao-only residual list and the unweighted post-corrector MSE are all held.
+#
+# It is also one token from ocean_wide_uniformdt_hybridresid_clip (wandb
+# l46sjkyk), which had this corrector and *did* fail -- 0.5011 (ep10) -> 1.5874
+# (ep21), plateau 1.46, cancelled at ep24. The difference is that l46sjkyk
+# carried sst in residual_prediction_names and this row does not. So the row
+# answers both questions at once: does the sstff fix that rescued the
+# scaled_temperature arm also rescue uniform_temperature, and does the
+# hybrid-residual result hold under the additive corrector.
+#
+# Readout, same metric as the ohc arm: track epoch 43 (~0.063) and epoch 75
+# (~0.054) against xh398aj0. A repeat of the l46sjkyk trajectory -- inline
+# rollout climbing past 0.5 by ep20 -- says the result was specific to
+# scaled_temperature. Kill if the inline metric passes 500; watch the inline
+# rollout rather than the teacher-forced validation loss, which stayed healthy
+# through an earlier blow-up.
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_uniformdt|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0 stepper.step.config.residual_prediction=true stepper.step.config.residual_normalized_prediction=true stepper.step.config.normalization.residual.global_means_path=/ocean_stats/centering.nc stepper.step.config.normalization.residual.global_stds_path=/ocean_stats/scaling-residual.nc stepper.step.config.residual_prediction_names=[thetao_0,thetao_1,thetao_2,thetao_3,thetao_4,thetao_5,thetao_6,thetao_7,thetao_8,thetao_9,thetao_10,thetao_11,thetao_12,thetao_13,thetao_14,thetao_15,thetao_16,thetao_17,thetao_18]|3h
