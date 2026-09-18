@@ -873,6 +873,31 @@ class BatchData:
             )
         )
 
+    def select_sample_slice(self: SelfType, sample_slice: slice) -> SelfType:
+        """Select a contiguous range of samples from the batch."""
+        return self.__class__(
+            {k: v[sample_slice] for k, v in self.data.items()},
+            time=self.time[sample_slice],
+            horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
+            labels=(
+                self.labels.select_sample_slice(sample_slice)
+                if self.labels is not None
+                else None
+            ),
+            n_ensemble=self.n_ensemble,
+            data_mask=(
+                {k: v[sample_slice] for k, v in self.data_mask.items()}
+                if self.data_mask is not None
+                else None
+            ),
+            stepper_state=(
+                self.stepper_state.select_sample_slice(sample_slice)
+                if self.stepper_state is not None
+                else None
+            ),
+        )
+
     def select_time_slice(self: SelfType, time_slice: slice) -> SelfType:
         """
         Select a window of data from the batch.
