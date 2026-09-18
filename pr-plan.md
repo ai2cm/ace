@@ -38,9 +38,8 @@ RUN pip install -r /tmp/requirements.txt
 > path's benefit.
 
 **Build prerequisite.** The image must exist in the registry before any of the
-four submit commands will run. `make build_coupled_processing_image
-push_coupled_processing_image` is the maintainer's step and is not run by this
-PR.
+four submit commands will run: `make build_coupled_processing_image
+push_coupled_processing_image`.
 
 ## `scripts/data_process/create_coupled_datasets_argo_workflow.yaml` (new)
 
@@ -210,8 +209,7 @@ def test_every_makefile_coupled_config_exists():  # NEW
 
 ## The four submit commands
 
-Printed by the build stage and run by the maintainer on `james-vm`; nothing in
-this PR submits them.
+Run on a host with `argo` configured, once the coupled image is pushed.
 
 ```bash
 cd scripts/data_process
