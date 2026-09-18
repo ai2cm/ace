@@ -233,6 +233,20 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "baseline-ft8" || "$arm" == "hybridresid-ft8" ]]; then
+    # 8-step multi-step fine-tune of each matched pretrain; see the config
+    # header. Checkpoint differs per arm, everything else identical.
+    config="${CONFIG_DIR}/${arm}.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    if [[ "$arm" == "baseline-ft8" ]]; then
+      ft8_ckpt="${BASELINE_CKPT_DATASET:-01KW2BQ83EGZ90WZ74CZ4TJATN}"
+    else
+      ft8_ckpt="${HYBRID_CKPT_DATASET:-01M1Q9P68PK7DC5W0KHGWFTWFN}"
+    fi
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats"
+            --dataset "${ft8_ckpt}:training_checkpoints/best_ckpt.tar:/ckpt.tar")
+  fi
   if [[ "$arm" == "hybridsstres" ]]; then
     # single-variable attribution test: hybridresid with sst ADDED to the
     # residual set; everything else byte-identical to hybridresid-pretrain.
