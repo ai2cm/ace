@@ -1,5 +1,6 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
-cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s-ft|rs0|ace2-cm4-atmos-noLSM|vntsy3tk|best_ckpt|train|urgent|b200|4|400GiB|3|ai2/ace|seed=0||1h
-cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s-ft|rs1|ace2-cm4-atmos-noLSM|yni9wahg|best_ckpt|train|high|b200|4|400GiB|3|ai2/ace|seed=1||1h
+
 cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s-ft|rs2|ace2-cm4-atmos-noLSM|z1bvr945|best_ckpt|train|normal|h100|8|400GiB|3|ai2/ace|seed=2||1h
+
+
