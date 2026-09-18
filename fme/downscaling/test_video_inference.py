@@ -131,7 +131,7 @@ def test_all_slices_written_true_for_empty_batch():
     writer.is_slice_written.assert_not_called()
 
 
-def _make_real_writer(path, n_times=8, n_ens=4, mode="w-"):
+def _make_real_writer(path, n_times=8, n_ens=4, mode="w-", fill_value=None):
     times = np.array(
         [
             cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=3 * i)
@@ -152,6 +152,7 @@ def _make_real_writer(path, n_times=8, n_ens=4, mode="w-"):
         mode=mode,
         overwrite_check=(mode != "a"),
         time_calendar="julian",
+        fill_value=fill_value,
     )
 
 
@@ -206,3 +207,65 @@ def test_resume_against_real_writer_does_not_wipe_prior_data(tmp_path):
     root = zarr.open_group(path, mode="r")
     np.testing.assert_array_equal(root["var"][batch0_slice], original_batch0)
     np.testing.assert_array_equal(root["var"][batch1_slice], new_batch1)
+
+
+def test_resume_with_default_fill_value_misdetects_legitimate_zeros(tmp_path):
+    """Negative control, documenting the bug found live on
+    01M2KWWDBWRK9B2ZHVKFYRQ8SG: with zarr's default fill_value (0.0, same
+    as the prior _make_real_writer default), a fully-written batch that
+    happens to contain real zeros (e.g. precipitation, which is exactly
+    0.0 over ~44% of the globe at any instant in the real data) is
+    indistinguishable from an unwritten one. This is why resume silently
+    regenerated every batch instead of skipping completed ones -- this
+    test pins the failure mode so a future change to _slice_fully_written
+    or the default fill value doesn't quietly reintroduce it."""
+    path = os.path.join(tmp_path, "out.zarr")
+    ensemble_slice = slice(0, 4)
+    batch0_slice = slice(0, 4)
+
+    writer1 = _make_real_writer(path, mode="w-")  # default fill_value=None -> 0.0
+    writer1.initialize_store(data_dtype=np.float32)
+    # Realistic precip-like batch: mostly real zeros (no rain almost
+    # everywhere), a few nonzero cells -- exactly the shape that broke
+    # resume in production.
+    batch0 = np.zeros((4, 4, 4, 4), dtype=np.float32)
+    batch0[0, 0, 0, 0] = 1.0
+    writer1.record_batch(
+        {"var": batch0},
+        position_slices={TIME_NAME: batch0_slice, ENSEMBLE_NAME: ensemble_slice},
+    )
+
+    writer2 = _make_real_writer(path, mode="a")
+    writer2.initialize_store(data_dtype=np.float32)
+    assert _all_slices_written(writer2, [batch0_slice], ensemble_slice) is False, (
+        "documents the bug: default (0.0) fill_value can't tell a fully-"
+        "written, mostly-zero batch from an unwritten one"
+    )
+
+
+def test_resume_with_nan_fill_value_correctly_detects_legitimate_zeros(tmp_path):
+    """The fix: with fill_value=nan (what video_inference.py now passes),
+    the same mostly-zero batch from the test above is correctly recognized
+    as fully written, so resume can actually skip it."""
+    path = os.path.join(tmp_path, "out.zarr")
+    ensemble_slice = slice(0, 4)
+    batch0_slice = slice(0, 4)
+
+    writer1 = _make_real_writer(path, mode="w-", fill_value=float("nan"))
+    writer1.initialize_store(data_dtype=np.float32)
+    batch0 = np.zeros((4, 4, 4, 4), dtype=np.float32)
+    batch0[0, 0, 0, 0] = 1.0
+    writer1.record_batch(
+        {"var": batch0},
+        position_slices={TIME_NAME: batch0_slice, ENSEMBLE_NAME: ensemble_slice},
+    )
+
+    writer2 = _make_real_writer(path, mode="a", fill_value=float("nan"))
+    writer2.initialize_store(data_dtype=np.float32)
+    assert _all_slices_written(writer2, [batch0_slice], ensemble_slice) is True, (
+        "with a NaN fill value, an all-real (mostly-zero) batch must be "
+        "recognized as written, unlike with the default 0.0 fill value"
+    )
+    # And a genuinely never-written batch must still read as unwritten.
+    batch1_slice = slice(4, 8)
+    assert _all_slices_written(writer2, [batch1_slice], ensemble_slice) is False

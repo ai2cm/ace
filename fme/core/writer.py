@@ -119,9 +119,22 @@ def _initialize_zarr(
     array_attributes: dict[str, dict[str, str]] | None = None,
     group_attributes: dict[str, str] | None = None,
     mode: str = "w-",
+    fill_value: float | None = None,
 ):
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
+
+    fill_value: Fill value for the data variable arrays (not coordinates,
+        which are always written in full immediately). Zarr's own default
+        for a float dtype is 0.0, which is indistinguishable from a
+        legitimate zero in the data (e.g. precipitation, which is exactly
+        zero over most of the globe at any instant) -- callers that rely on
+        ZarrWriter.is_slice_written / resume (anything comparing existing
+        data against the fill value to detect "not yet written") should
+        pass float("nan") here instead, so unwritten cells are unambiguous
+        regardless of what real values the field can legitimately take.
+        None preserves zarr's own default, matching prior behavior for
+        callers that don't need this distinction.
     """
     root = zarr.open_group(path, mode=mode)
     root.update_attributes(group_attributes or {})
@@ -178,6 +191,16 @@ def _initialize_zarr(
 
     array_attributes = array_attributes or {}
 
+    # zarr's create_array defaults fill_value to its own DefaultFillValue
+    # sentinel (0.0 for float dtypes) when the kwarg is omitted entirely --
+    # explicitly passing fill_value=None is a *different*, non-default
+    # value in zarr's API (means "no fill value"). Only override it when a
+    # caller actually asked for one, so omitting `fill_value` here keeps
+    # every existing caller's behavior byte-for-byte unchanged.
+    var_kwargs: dict = {}
+    if fill_value is not None:
+        var_kwargs["fill_value"] = fill_value
+
     written_coords = set()
     for var in vars:
         var_ds = root.create_array(
@@ -188,6 +211,7 @@ def _initialize_zarr(
             dtype=dtype,
             dimension_names=dim_names,
             attributes=array_attributes.get(var, {}),
+            **var_kwargs,
         )
         # Following xarray, only associate non-dimension coordinates
         # with a variable if the non-dimension coordinate's dimensions
@@ -225,8 +249,7 @@ def _resolve_data_vars(
         return data_vars_from_zarr_writer
     elif not data_vars_from_zarr_writer and not data_vars_from_init_arg:
         raise ValueError(
-            "data_vars must be provided either to ZarrWriter or to "
-            "initialize_store()."
+            "data_vars must be provided either to ZarrWriter or to initialize_store()."
         )
     else:
         # For mypy showing Exactly one is not None (checked by conditions above)
@@ -251,6 +274,7 @@ class ZarrWriter:
         time_units: str = DATETIME_ENCODING_UNITS,
         time_calendar: str | None = "julian",
         nondim_coords: dict[str, xr.DataArray] | None = None,
+        fill_value: float | None = None,
     ):
         """
         Initialize the ZarrWriter with the specified parameters.
@@ -283,6 +307,13 @@ class ZarrWriter:
             that are not associated with a dimension (ex. init_time, valid_time). Values
             are data arrays to allow for more freedom in these coords (e.g. can be
             multidimensional).
+        fill_value: Fill value for the data variable arrays (not coordinates).
+            None (default) uses zarr's own default (0.0 for float dtypes),
+            matching prior behavior. Pass float("nan") for any pipeline that
+            relies on is_slice_written / resume to detect incomplete work --
+            0.0 is indistinguishable from a legitimate zero in real data
+            (e.g. precipitation, exactly zero over most of the globe at any
+            instant), which silently defeats resume's completeness check.
 
 
         Note: If not using .initialize(), the first call to .record_batch() will
@@ -304,6 +335,7 @@ class ZarrWriter:
         self._time_calendar = time_calendar
         self._nondim_coords = nondim_coords
         self._mode = mode
+        self._fill_value = fill_value
 
         if mode == "a" or mode == "r+":
             self._store_initialized = True if self._path_exists() else False
@@ -387,8 +419,7 @@ class ZarrWriter:
             dim_sizes = tuple([len(self._coords[dim]) for dim in self._dims])
             if data_vars is None:
                 raise ValueError(
-                    "data_vars must be provided either to ZarrWriter or to "
-                    "initialize()"
+                    "data_vars must be provided either to ZarrWriter or to initialize()"
                 )
             _initialize_zarr(
                 path=self._path,
@@ -405,6 +436,7 @@ class ZarrWriter:
                 array_attributes=self._array_attributes,
                 group_attributes=self._group_attributes,
                 mode=self._mode,
+                fill_value=self._fill_value,
             )
             self._store_initialized = True
             self._dist.barrier()

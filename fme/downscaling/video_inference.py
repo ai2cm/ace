@@ -329,6 +329,16 @@ def run_inference(config: VideoInferenceConfig) -> None:
         # get_writer for the same reasoning.
         overwrite_check=not config.resume,
         time_calendar="julian",
+        # NaN, not zarr's 0.0 default: is_slice_written's completeness check
+        # compares existing data against the fill value, and 0.0 is
+        # indistinguishable from a legitimate zero -- PRATEsfc alone is
+        # exactly 0.0 over ~44% of the globe at any instant in this data,
+        # which silently made every raw batch look "incomplete" and
+        # defeated resume entirely (confirmed live: 01M2KWWDBWRK9B2ZHVKFYRQ8SG's
+        # first post-restart batch fully regenerated instead of skipping).
+        # All output vars are float32, so NaN is a safe, unambiguous
+        # "never written" sentinel regardless of resume being used.
+        fill_value=float("nan"),
     )
     writer.initialize_store(data_dtype=np.float32)
 
