@@ -57,6 +57,7 @@ its own input. Training configs must drop those four from ``out_names``.
 
 import argparse
 import datetime
+import functools
 import logging
 from typing import Sequence
 
@@ -325,7 +326,9 @@ def _source_interfaces(e3t: xr.DataArray) -> tuple[np.ndarray, np.ndarray]:
     axis shallow-first; ``interfaces`` are the 51 cell edges in metres."""
     elev = e3t[VDIM].values
     order = np.argsort(-elev)  # elevation is negative: -0.49 first
-    thick = e3t.values[order]
+    # e3t is stored float32; accumulating 50 of them in float32 drifts the deep
+    # interfaces by ~1e-4 m, which is coarser than the nesting check's tolerance.
+    thick = e3t.values[order].astype(np.float64)
     return order, np.concatenate([[0.0], np.cumsum(thick)])
 
 
@@ -713,7 +716,10 @@ def main():
             p
             | "3d_DatasetToChunks"
             >> xbeam.DatasetToChunks(ds_3d, chunks={"time": 1}, split_vars=True)
-            | "3d_Process" >> beam.MapTuple(process_ocean_3d, weights=weights, **common)
+            | "3d_Process"
+            >> beam.MapTuple(
+                functools.partial(process_ocean_3d, weights=weights, **common)
+            )
             | "3d_Consolidate" >> xbeam.ConsolidateChunks(output_shards)
             | "3d_ToZarr"
             >> xbeam.ChunksToZarr(
@@ -727,7 +733,8 @@ def main():
         (
             p
             | "2d_DatasetToChunks" >> xbeam.DatasetToChunks(ds_2d, chunks={"time": 1})
-            | "2d_Process" >> beam.MapTuple(process_ocean_2d, **common)
+            | "2d_Process"
+            >> beam.MapTuple(functools.partial(process_ocean_2d, **common))
             | "2d_Consolidate" >> xbeam.ConsolidateChunks(output_shards)
             | "2d_ToZarr"
             >> xbeam.ChunksToZarr(
@@ -744,11 +751,13 @@ def main():
             >> xbeam.DatasetToChunks(ds_forcing, chunks={"time": steps})
             | "forcing_Process"
             >> beam.MapTuple(
-                process_forcing,
-                steps=steps,
-                out_times=out_times.values,
-                target_lat=invariant_ds["lat"].values,
-                target_lon=invariant_ds["lon"].values,
+                functools.partial(
+                    process_forcing,
+                    steps=steps,
+                    out_times=out_times.values,
+                    target_lat=invariant_ds["lat"].values,
+                    target_lon=invariant_ds["lon"].values,
+                )
             )
             | "forcing_Consolidate" >> xbeam.ConsolidateChunks(output_shards)
             | "forcing_ToZarr"
