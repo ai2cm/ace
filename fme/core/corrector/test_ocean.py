@@ -325,49 +325,6 @@ def test_surface_energy_flux_correction_resid():
     assert ice_row_correction < open_row_correction
 
 
-def test_surface_energy_flux_correction_prescribed():
-    config = OceanCorrectorConfig(
-        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
-            method="prescribed"
-        ),
-    )
-    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
-    timestep = datetime.timedelta(seconds=3600)
-    corrector = config._build(ops, None, timestep)
-
-    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
-    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
-    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
-    sea_ice_fraction[0, :] = 0.3
-    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
-    land_fraction[-1, :] = 1.0
-
-    gen_data = {
-        "sst": sst,
-        "hfds": gen_hfds,
-        "sea_ice_fraction": sea_ice_fraction,
-    }
-    forcing_data = {
-        "land_fraction": land_fraction,
-        **_make_atmos_forcing_data(IMG_SHAPE),
-    }
-    input_data = {**forcing_data, **gen_data}
-
-    ocean_fraction = 1 - land_fraction - sea_ice_fraction
-    net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
-    expected_hfds = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
-
-    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
-    torch.testing.assert_close(corrected["hfds"], expected_hfds)
-    # on land (ocean_fraction=0), hfds equals gen_hfds
-    torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
-    # in open ocean (no ice, no land), hfds equals net_flux
-    open_ocean_row = 1
-    torch.testing.assert_close(
-        corrected["hfds"][open_ocean_row, :], net_flux[open_ocean_row, :]
-    )
-
-
 @pytest.mark.parametrize(
     "hfds_name",
     [
@@ -378,7 +335,7 @@ def test_surface_energy_flux_correction_prescribed():
 def test_surface_energy_flux_correction_prescribed_open_ocean(hfds_name):
     config = OceanCorrectorConfig(
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
-            method="prescribed_open_ocean"
+            method="prescribed"
         ),
     )
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
@@ -416,8 +373,7 @@ def test_surface_energy_flux_correction_prescribed_open_ocean(hfds_name):
     torch.testing.assert_close(
         corrected[hfds_name][open_ocean_row, :], net_flux[open_ocean_row, :]
     )
-    # partial ocean under sea ice: gen_hfds passes through unweighted, unlike
-    # the "prescribed" method which would blend it with the net flux
+    # partial ocean under sea ice: gen_hfds passes through unweighted
     torch.testing.assert_close(corrected[hfds_name][0, :], gen_hfds[0, :])
     # land: gen_hfds passes through
     torch.testing.assert_close(corrected[hfds_name][-1, :], gen_hfds[-1, :])
