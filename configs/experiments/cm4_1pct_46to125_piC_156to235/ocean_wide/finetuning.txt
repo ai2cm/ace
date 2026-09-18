@@ -58,4 +58,4 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|y
 # best_ckpt (epoch 75) and best_inference_ckpt (epoch 73). min_runtime 8h, as on
 # the uniformdt_clip-ft row, for the same reason.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc-ft|rs0|ace-samudra-cm4|xh398aj0|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0|01M2PEDZQZN2QJ7PVEF391X8T2|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc-ft|rs0|ace-samudra-cm4|xh398aj0|best_ckpt|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0|01M2PEDZQZN2QJ7PVEF391X8T2|8h

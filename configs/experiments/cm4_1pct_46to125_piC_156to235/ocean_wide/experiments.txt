@@ -79,9 +79,19 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4
 # preempted at 29 h and auto-resumed, so its experiment carries two result
 # datasets; 01M2PEDZQZN2QJ7PVEF391X8T2 is the second and holds the checkpoints.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M2PEDZQZN2QJ7PVEF391X8T2|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M2PEDZQZN2QJ7PVEF391X8T2|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M2PEDZQZN2QJ7PVEF391X8T2|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M2PEDZQZN2QJ7PVEF391X8T2|ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc-ft|rs0|01M2SA8011XG61HRYKJKNX0D0R|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_uniformdt|rs0|01M2SA99VV25P5WB772D3TTGH7|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# The finetune's own training row is parked above ("training" is inert to
+# evaluate.sh and inference.sh); these two arm the 130-yr 1pct and 200-yr piC
+# rollouts from its best_inference_ckpt (epoch 10, the last). The finetune ran a
+# single uninterrupted job, so its experiment carries one result dataset,
+# 01M2SA801AHDGQH8GMAK86E7X8; it is pinned anyway to match the other -ft rows and
+# to keep the checkpoint's provenance on the record.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc-ft|rs0|01M2SA8011XG61HRYKJKNX0D0R|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M2SA801AHDGQH8GMAK86E7X8|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc-ft|rs0|01M2SA8011XG61HRYKJKNX0D0R|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M2SA801AHDGQH8GMAK86E7X8|ai2/ace|jupiter
