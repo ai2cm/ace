@@ -1,10 +1,9 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
-import dacite
 import torch
 from torch import nn
 
@@ -149,7 +148,7 @@ class SingleModuleStepConfig(StepConfigABC):
         self.crps_training = None  # unused, kept for backwards compatibility
         if isinstance(self.residual_prediction, bool):
             # residual_prediction was a bool before it grew options. Serialized
-            # state migrates in _remove_deprecated_keys; this isinstance keeps
+            # state migrates in remove_deprecated_keys; this isinstance keeps
             # direct construction with the old bool working too, since the
             # config is public API (exported from fme.ace).
             self.residual_prediction = (
@@ -228,11 +227,18 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "SingleModuleStepConfig":
-        state = cls._remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        state_copy = dict(state)
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]
+        if isinstance(state_copy.get("residual_prediction"), bool):
+            # residual_prediction was a bool before it grew per-variable and
+            # normalization options. True meant every prognostic, full-field
+            # normalized. Both checkpoints and user yaml reach this hook.
+            state_copy["residual_prediction"] = (
+                {} if state_copy["residual_prediction"] else None
+            )
+        return state_copy
 
     @property
     def residual_names(self) -> frozenset[str]:
@@ -321,20 +327,6 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
-
-    @classmethod
-    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
-        state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]
-        if isinstance(state_copy.get("residual_prediction"), bool):
-            # residual_prediction was a bool before it grew per-variable and
-            # normalization options. True meant every prognostic, full-field
-            # normalized. Both checkpoints and user yaml reach this hook.
-            state_copy["residual_prediction"] = (
-                {} if state_copy["residual_prediction"] else None
-            )
-        return state_copy
 
     def get_step(
         self,

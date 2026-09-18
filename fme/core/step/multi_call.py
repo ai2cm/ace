@@ -1,9 +1,8 @@
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import copy
 from typing import Any, TypeVar
 
-import dacite
 import torch
 from torch import nn
 
@@ -223,8 +222,8 @@ class MultiCallStepConfig(StepConfigABC):
         return self.wrapped_step.allow_missing_variables
 
     @classmethod
-    def from_state(cls, state) -> "MultiCallStepConfig":
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 def _extend_normalizer_with_multi_call_outputs(
