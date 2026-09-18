@@ -18,6 +18,53 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.step.step_diagnostics import StepDiagnostics
 
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
+
+
+_WRITER_ENABLING_FIELDS = {
+    "save_prediction_files",
+    "save_monthly_files",
+    "save_step_diagnostics",
+    "files",
+}
+
+
+@pytest.mark.parametrize("field", sorted(_WRITER_ENABLING_FIELDS))
+def test_has_subwriters_enabled_covers_field(field: str):
+    """Turning on one writer-enabling field makes has_subwriters_enabled True."""
+    kwargs: dict = {f: False for f in _WRITER_ENABLING_FIELDS if f != "files"}
+    kwargs["files"] = None
+    if field == "files":
+        kwargs["files"] = [FileWriterConfig(label="test")]
+    else:
+        kwargs[field] = True
+    config = DataWriterConfig(**kwargs)
+    assert config.has_subwriters_enabled
+
+
+def test_has_subwriters_enabled_all_off():
+    config = DataWriterConfig(
+        save_prediction_files=False,
+        save_monthly_files=False,
+        save_step_diagnostics=False,
+        files=None,
+    )
+    assert not config.has_subwriters_enabled
+
+
+def test_has_subwriters_enabled_field_set_is_current():
+    """Fail if a new boolean or list[*Config] field is added that might enable
+    a writer but isn't listed in _WRITER_ENABLING_FIELDS."""
+    non_writer_fields = {"names", "time_coarsen"}
+    known = _WRITER_ENABLING_FIELDS | non_writer_fields
+    actual = {f.name for f in dataclasses.fields(DataWriterConfig)}
+    unknown = actual - known
+    assert not unknown, (
+        f"DataWriterConfig has new field(s) {unknown} not accounted for in "
+        f"test_has_subwriters_enabled_field_set_is_current. Add each to "
+        f"_WRITER_ENABLING_FIELDS or non_writer_fields."
+    )
+
 
 def test_write_single_timestep():
     n_samples = 2
