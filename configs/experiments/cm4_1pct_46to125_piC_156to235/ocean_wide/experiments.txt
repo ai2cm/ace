@@ -46,6 +46,16 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs0|01M0FY1SAKMGARA9QG2QE03868
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs1|01M0FY25WAPMPER8G4N1Y1EESP|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
+# ocean_wide_ohc_clip with "prescribed" replaced by "prescribed_open_ocean" implementation on this branch
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-pooinf|rs0|01M0FY1SAKMGARA9QG2QE03868|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-pooinf|rs1|01M0FY25WAPMPER8G4N1Y1EESP|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-pooinf|rs2|01M0FY2JC8QWR61KBKXY57B0J4|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-pooinf|rs0|01M0FY1SAKMGARA9QG2QE03868|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-pooinf|rs1|01M0FY25WAPMPER8G4N1Y1EESP|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-pooinf|rs2|01M0FY2JC8QWR61KBKXY57B0J4|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+
 # ocean_wide_ohc_clip-ft
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|training|best_inference_ckpt|normal|--min-runtime 8h
