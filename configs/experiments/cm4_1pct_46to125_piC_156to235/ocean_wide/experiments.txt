@@ -64,11 +64,20 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|01M1N34VDHEEDH5DFZYF
 # the finetune started -- the pretraining ended 09-06).
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|01M1ZK7ZCNF3YSVBHJ9Y7MCDMV|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M20ESHYFCWGPGVCC4ZKWN6DW|ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_hybridresid_clip|rs0|01M24473M1MD2ZB83BHNWQQK6P|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_noclip_sstff_ohc|rs0|01M2A0APTES66B1Q3ENTK81TY3|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# The pretraining's own row is parked above ("training" is inert to evaluate.sh
+# and inference.sh); these two arm the 130-yr 1pct and 200-yr piC rollouts from
+# best_inference_ckpt (epoch 73). results_dataset is pinned because the run was
+# preempted at 29 h and auto-resumed, so its experiment carries two result
+# datasets; 01M2PEDZQZN2QJ7PVEF391X8T2 is the second and holds the checkpoints.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M2PEDZQZN2QJ7PVEF391X8T2|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_hybridresid_clip1_sstff_ohc|rs0|01M2KA4QCQS0G3CJTN3NE0RNA0|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M2PEDZQZN2QJ7PVEF391X8T2|ai2/ace|jupiter
