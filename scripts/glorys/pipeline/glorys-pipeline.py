@@ -101,6 +101,15 @@ URL_FORCING = "gs://vcm-ml-intermediate/2026-08-13-era5-1deg-8layer-1940-2025.za
 # three flux branches. Take the static CM4 field, which is already on the
 # 1-degree output grid.
 URL_HFGEOU = "gs://vcm-ml-intermediate/2026-09-02-cm4-1pctCO2-1deg-ocean-1daily.zarr"
+# The fine-tune starts from a checkpoint pretrained on the UFS replay ocean, so
+# every conv kernel encodes that land-sea geometry. Intersecting the two masks
+# keeps the geometry fixed: cells that are ocean only in UFS have no GLORYS
+# data, and cells that are ocean only in GLORYS would be a cold start in
+# weights that never saw them. See --no_ufs_mask_intersection to disable.
+URL_UFS_MASK = (
+    "gs://vcm-ml-intermediate/"
+    "2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr"
+)
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {"F22.5": 22.5, "F45": 45, "F90": 90, "F360": 360}
@@ -441,8 +450,33 @@ def _geothermal_heat_flux(mask_2d: xr.DataArray) -> xr.DataArray:
     return out
 
 
+def _ufs_masks(reference: xr.DataArray) -> dict[str, xr.DataArray]:
+    """The UFS replay ocean masks on the output grid, for intersection.
+
+    Raises if the grids differ: the masks are copied cell-for-cell, so a
+    mismatch would silently intersect the wrong cells.
+    """
+    ufs = xr.open_zarr(_make_zarr_store(URL_UFS_MASK))
+    names = ["mask_2d"] + [f"mask_{k}" for k in range(N_LEVELS)]
+    if not np.allclose(ufs["lat"].values, reference["lat"].values) or not np.allclose(
+        ufs["lon"].values, reference["lon"].values
+    ):
+        raise ValueError(
+            "the UFS replay mask grid does not match the output grid; it can "
+            "only be intersected on the 1-degree F90 grid it was written on"
+        )
+    out = {}
+    for name in names:
+        m = ufs[name].load().astype(np.float32)
+        out[name] = m.assign_coords(lat=reference["lat"], lon=reference["lon"])
+    return out
+
+
 def build_invariants(
-    output_grid: str, weights: np.ndarray, weights_path: str | None
+    output_grid: str,
+    weights: np.ndarray,
+    weights_path: str | None,
+    intersect_ufs_mask: bool = True,
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """Build the time-invariant output fields from the static datasets.
 
@@ -470,10 +504,15 @@ def build_invariants(
     frac = _regrid_dataset(
         native, output_grid, src, weights_path, skipna=True, na_thres=1.0
     )
+    ufs = _ufs_masks(frac["mask_2d"]) if intersect_ufs_mask else None
     inv = {}
     sea_fraction = frac["mask_2d"].fillna(0.0).clip(0, 1).astype(np.float32)
+    if ufs is not None:
+        sea_fraction = sea_fraction.where(ufs["mask_2d"] > 0, 0.0).astype(np.float32)
     for k in range(N_LEVELS):
         m = (frac[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
+        if ufs is not None:
+            m = (m * (ufs[f"mask_{k}"] > 0).astype(np.float32)).astype(np.float32)
         m.attrs = {
             "long_name": f"ocean mask level-{k}",
             "units": "0 if land, 1 if ocean",
@@ -647,8 +686,57 @@ def process_forcing(
 # ---------------------------------------------------------------------------
 
 
-def make_template(out_times: pd.DatetimeIndex, invariant_ds: xr.Dataset) -> xr.Dataset:
+def _output_attrs(
+    ds_3d: xr.Dataset, ds_2d: xr.Dataset, ds_forcing: xr.Dataset
+) -> dict[str, dict[str, str]]:
+    """``{name: attrs}`` for every time-varying output.
+
+    xbeam writes the template's metadata, not the per-chunk metadata, so the
+    attrs the processors attach to each chunk are discarded and the template
+    is the only place they can be set. Derived from the source stores here so
+    the two cannot drift; the processors' copies are redundant but harmless.
+    """
+    attrs: dict[str, dict[str, str]] = {}
+    for v in VARS_3D:
+        src = ds_3d[v].attrs
+        long_name = src.get("long_name", v)
+        units = src.get("units", "")
+        for k in range(N_LEVELS):
+            attrs[f"{v}_{k}"] = {
+                "long_name": f"{long_name} level-{k}",
+                "units": units,
+            }
+    attrs["sst"] = {"long_name": "Sea surface temperature", "units": "K"}
+    attrs["ssu"] = {"long_name": "Sea surface x-velocity", "units": "m/s"}
+    attrs["ssv"] = {"long_name": "Sea surface y-velocity", "units": "m/s"}
+    attrs["zos"] = {"long_name": "Sea Surface Height", "units": "m"}
+    attrs["ocean_sea_ice_fraction"] = {
+        "long_name": "sea ice fraction over ocean",
+        "units": "fraction",
+    }
+    attrs["HI"] = {
+        "long_name": "Sea Ice Thickness (mean over ice-covered area)",
+        "units": "m",
+    }
+    attrs["sea_ice_volume"] = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
+    attrs["UI"] = {"long_name": "Sea ice eastward velocity", "units": "m s-1"}
+    attrs["VI"] = {"long_name": "Sea ice northward velocity", "units": "m s-1"}
+    for src_name, out_name in FORCING_VARS.items():
+        src = ds_forcing[out_name].attrs if out_name in ds_forcing else {}
+        attrs[out_name] = {
+            "long_name": src.get("long_name", out_name),
+            "units": src.get("units", ""),
+        }
+    return attrs
+
+
+def make_template(
+    out_times: pd.DatetimeIndex,
+    invariant_ds: xr.Dataset,
+    attrs: dict[str, dict[str, str]] | None = None,
+) -> xr.Dataset:
     """Analytic template: every time-varying output is (time, lat, lon) float32."""
+    attrs = attrs or {}
     names = [f"{v}_{k}" for v in VARS_3D for k in range(N_LEVELS)]
     names += [
         "sst",
@@ -668,7 +756,9 @@ def make_template(out_times: pd.DatetimeIndex, invariant_ds: xr.Dataset) -> xr.D
         dims=("lat", "lon"),
         coords={"lat": lat, "lon": lon},
     )
-    base = xr.Dataset({n: zeros for n in names})
+    base = xr.Dataset({n: zeros.copy() for n in names})
+    for name in names:
+        base[name].attrs = dict(attrs.get(name, {}))
     template = xbeam.make_template(base).expand_dims(
         dim={"time": out_times.values}, axis=0
     )
@@ -710,6 +800,12 @@ def _get_parser():
         "(1/12 deg -> output grid); generating them on every worker costs "
         "minutes and several GB",
     )
+    p.add_argument(
+        "--no_ufs_mask_intersection",
+        action="store_true",
+        help="keep GLORYS's own land-sea mask instead of intersecting it with "
+        "the UFS replay mask the fine-tune checkpoint was pretrained on",
+    )
     return p
 
 
@@ -740,7 +836,10 @@ def main():
         np.delete(covered, deepest), np.delete(e3t, deepest)
     ), "GLORYS cells must nest inside the target column (except the deepest)"
     invariant_ds, source_grid = build_invariants(
-        args.output_grid, weights, args.regrid_weights
+        args.output_grid,
+        weights,
+        args.regrid_weights,
+        intersect_ufs_mask=not args.no_ufs_mask_intersection,
     )
 
     ds_3d = open_ocean(VARS_3D, out_times)
@@ -751,7 +850,9 @@ def main():
         n_missing == 0
     ), f"ERA5 store lacks {n_missing} forcing steps; shorten end_date"
 
-    template = make_template(out_times, invariant_ds)
+    template = make_template(
+        out_times, invariant_ds, _output_attrs(ds_3d, ds_2d, ds_forcing)
+    )
     output_chunks = {"time": args.output_time_chunksize}
     output_shards = {"time": args.output_time_shardsize}
     output_store = _make_zarr_store(args.output_path, read_only=False)
