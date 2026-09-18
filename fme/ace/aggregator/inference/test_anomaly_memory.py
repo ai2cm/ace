@@ -127,11 +127,40 @@ def _stream(
         )
 
 
-def _finalize(moments: LaggedAnomalyMoments) -> np.ndarray:
+def _finalize_stats(moments: LaggedAnomalyMoments):
     from fme.core.distributed import Distributed
 
     state = moments.reduced_state(Distributed.get_instance())
-    return LaggedAnomalyMoments.finalize(state).cpu().numpy()
+    return LaggedAnomalyMoments.finalize(state)
+
+
+def _finalize(moments: LaggedAnomalyMoments) -> np.ndarray:
+    return _finalize_stats(moments).cov.cpu().numpy()
+
+
+def brute_force_endpoint_variances(
+    x: np.ndarray, basis: np.ndarray, lags: list[int], season: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Anomaly variance of the leading and lagged endpoints over each lag's pairs."""
+    n_sample, n_time = x.shape[:2]
+    flat = x.reshape(n_sample * n_time, -1)
+    design = basis.reshape(n_sample * n_time, -1)
+    coeffs = np.linalg.lstsq(design, flat, rcond=None)[0]
+    anomaly = (flat - design @ coeffs).reshape(x.shape)
+    lead_var, lag_var = [], []
+    for lag in lags:
+        lead = season.copy()
+        if lag > 0:
+            lead[:, n_time - lag :] = False
+        a = [anomaly[s, t] for s in range(n_sample) for t in np.flatnonzero(lead[s])]
+        b = [
+            anomaly[s, t + lag]
+            for s in range(n_sample)
+            for t in np.flatnonzero(lead[s])
+        ]
+        lead_var.append(np.mean(np.square(a), axis=0))
+        lag_var.append(np.mean(np.square(b), axis=0))
+    return np.stack(lead_var), np.stack(lag_var)
 
 
 @pytest.mark.parametrize("window", [7, 25, 400])
@@ -150,6 +179,41 @@ def test_streaming_matches_brute_force(window: int):
         season.cpu().numpy(),
     )
     np.testing.assert_allclose(streamed, expected, rtol=1e-8, atol=1e-8)
+    stats = _finalize_stats(moments)
+    lead_var, lag_var = brute_force_endpoint_variances(
+        x.cpu().numpy().astype(np.float64),
+        basis.cpu().numpy(),
+        LAGS,
+        season.cpu().numpy(),
+    )
+    np.testing.assert_allclose(
+        stats.var_lead.cpu().numpy(), lead_var, rtol=1e-8, atol=1e-8
+    )
+    np.testing.assert_allclose(
+        stats.var_lag.cpu().numpy(), lag_var, rtol=1e-8, atol=1e-8
+    )
+
+
+def test_correlation_is_bounded_with_seasonal_variance_and_restricted_season():
+    """A field whose anomaly variance is ten times larger in summer, scored
+    only in early spring, must give correlations in [-1, 1] at every lag; the
+    covariance over the lag-0 variance alone does not."""
+    time = _daily_time(n_sample=2, n_time=365 * 3)
+    x = _seasonal_ar1(time, rho=0.9, seed=21, amplitude=0.0)
+    summer = torch.tensor(
+        np.isin(time.dt.month.values, [5, 6, 7, 8, 9]), device=x.device
+    )
+    x = torch.where(summer[:, :, None, None], x * 10.0, x)
+    basis = annual_harmonic_basis(time, n_harmonics=2)
+    season = month_mask(time, [3, 4])
+    moments = LaggedAnomalyMoments([0, 1, 5, 10, 30, 60], basis.shape[-1], x.shape[2:])
+    _stream(moments, x, basis, season, window=30)
+    stats = _finalize_stats(moments)
+    corr = stats.correlation.cpu().numpy()
+    assert np.nanmax(np.abs(corr)) <= 1.0
+    np.testing.assert_allclose(corr[0], 1.0)
+    unnormalized = (stats.cov / stats.var_lead[0]).cpu().numpy()
+    assert np.nanmax(np.abs(unnormalized)) > 1.0
 
 
 def test_ar1_correlation_recovered():
@@ -160,8 +224,7 @@ def test_ar1_correlation_recovered():
     season = torch.ones(time.shape, dtype=torch.bool, device=get_device())
     moments = LaggedAnomalyMoments(LAGS, basis.shape[-1], x.shape[2:])
     _stream(moments, x, basis, season, window=50)
-    cov = _finalize(moments)
-    corr = cov / cov[0]
+    corr = _finalize_stats(moments).correlation.cpu().numpy()
     for i, lag in enumerate(LAGS):
         assert corr[i].mean() == pytest.approx(rho**lag, abs=0.03)
 
@@ -227,10 +290,12 @@ def test_hemisphere_months_restrict_pairs():
     x_np = x.cpu().numpy().astype(np.float64)
     for rows, months in (([2, 3], [12, 1, 2]), ([0, 1], [6, 7, 8])):
         season = np.isin(time.dt.month.values, months)
-        expected = brute_force_lagged_cov(x_np[:, :, rows], basis, LAGS, season)
-        np.testing.assert_allclose(
-            corr[:, rows], expected / expected[0], rtol=1e-6, atol=1e-6
+        cov = brute_force_lagged_cov(x_np[:, :, rows], basis, LAGS, season)
+        lead_var, lag_var = brute_force_endpoint_variances(
+            x_np[:, :, rows], basis, LAGS, season
         )
+        expected = cov / np.sqrt(lead_var * lag_var)
+        np.testing.assert_allclose(corr[:, rows], expected, rtol=1e-6, atol=1e-6)
 
 
 def test_streaming_matches_single_batch_through_aggregator():
