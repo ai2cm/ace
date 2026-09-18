@@ -2390,16 +2390,13 @@ def test_step_with_adjustments_hybrid_residual_names():
     torch.testing.assert_close(out_off["a"], torch.full((1, 4, 4), 0.5, device=device))
 
 
-def _residual_names_config(
-    normalization: NetworkAndLossNormalizationConfig | None = None, **kwargs
-) -> SingleModuleStepConfig:
+def _residual_names_config(**kwargs) -> SingleModuleStepConfig:
     """A minimal single-module config; `a` is prognostic and `b` diagnostic."""
     return SingleModuleStepConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": nn.Identity()}),
         in_names=["a"],
         out_names=["a", "b"],
-        normalization=normalization
-        or trivial_network_and_loss_normalization(["a", "b"]),
+        normalization=trivial_network_and_loss_normalization(["a", "b"]),
         **kwargs,
     )
 
@@ -2452,54 +2449,6 @@ def test_single_module_step_config_accepts_legacy_bool_directly(legacy):
         assert config.residual_prediction == ResidualPredictionConfig()
     else:
         assert config.residual_prediction is None
-
-
-@pytest.mark.parametrize(
-    "flat, expected",
-    [
-        pytest.param(
-            {
-                "residual_prediction": True,
-                "residual_prediction_names": ["a"],
-                "residual_normalized_prediction": True,
-            },
-            ResidualPredictionConfig(names=["a"], normalized=True),
-            id="hybrid_normalized",
-        ),
-        pytest.param(
-            {
-                "residual_prediction": True,
-                "residual_prediction_names": None,
-                "residual_normalized_prediction": False,
-            },
-            ResidualPredictionConfig(),
-            id="all_plain",
-        ),
-        pytest.param(
-            {
-                "residual_prediction": False,
-                "residual_prediction_names": None,
-                "residual_normalized_prediction": False,
-            },
-            None,
-            id="disabled",
-        ),
-    ],
-)
-def test_config_loads_development_branch_flat_residual_keys(flat, expected):
-    """Checkpoints trained on this feature's development branch stored the
-    residual options as flat keys next to a bool. Those keys never shipped in
-    a release, so a state without them is untouched, but the dev checkpoints
-    must keep loading."""
-    base = _residual_names_config(
-        normalization=NetworkAndLossNormalizationConfig(
-            network=trivial_normalization(["a", "b"]),
-            residual=trivial_normalization(["a", "b"]),
-        )
-    )
-    state = {**base.get_state(), **flat}
-    config = SingleModuleStepConfig.from_state(state)
-    assert config.residual_prediction == expected
 
 
 def test_multi_call_loss_scaling_follows_wrapped_residual_names():

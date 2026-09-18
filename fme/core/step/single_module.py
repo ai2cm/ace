@@ -231,22 +231,7 @@ class SingleModuleStepConfig(StepConfigABC):
         state_copy = dict(state)
         if "crps_training" in state_copy:
             del state_copy["crps_training"]
-        if (
-            "residual_prediction_names" in state_copy
-            or "residual_normalized_prediction" in state_copy
-        ):
-            # Flat keys from this feature's development branch, which paired a
-            # bool residual_prediction with separate names/normalized fields.
-            # They never shipped in a release, but checkpoints trained on that
-            # branch carry them; a state without them is untouched here.
-            names = state_copy.pop("residual_prediction_names", None)
-            normalized = state_copy.pop("residual_normalized_prediction", False)
-            state_copy["residual_prediction"] = (
-                {"names": names, "normalized": normalized}
-                if state_copy.get("residual_prediction")
-                else None
-            )
-        elif isinstance(state_copy.get("residual_prediction"), bool):
+        if isinstance(state_copy.get("residual_prediction"), bool):
             # residual_prediction was a bool before it grew per-variable and
             # normalization options. True meant every prognostic, full-field
             # normalized. Both checkpoints and user yaml reach this hook.
