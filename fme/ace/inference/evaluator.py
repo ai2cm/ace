@@ -22,7 +22,7 @@ from fme.ace.aggregator.inference import (
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
-from fme.ace.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.data_loading.inference import InferenceDataLoaderConfig, local_ic_range
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.default_metadata import get_default_variable_metadata
@@ -47,6 +47,7 @@ from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
@@ -340,6 +341,21 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
+
+        dist = Distributed.get_instance()
+        n_ic = config.loader.n_initial_conditions
+        # Validate divisibility (raises ValueError if not divisible).
+        local_ic_range(n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks)
+
+        if dist.total_data_parallel_ranks > 1 and config.data_writer.has_subwriters_enabled:
+            raise ValueError(
+                "Multi-GPU inference does not yet support per-timestep data "
+                "writers (prediction files, monthly files, step diagnostics, "
+                "or custom file writers). Set save_prediction_files, "
+                "save_monthly_files, and save_step_diagnostics to false and "
+                "files to null in the data_writer config, or run with a single "
+                "GPU."
+            )
 
         stepper_config = config.load_stepper_config()
         logging.info("Initializing data loader")
