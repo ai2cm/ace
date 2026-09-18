@@ -22,6 +22,7 @@ from .utils import LatLonBoxConfig
 
 SOURCES = ("prediction", "target")
 QUANTITIES = ("peak", "midwinter_mean", "meltout_day", "summer_floor")
+LOGGED_QUANTITIES = ("peak",)
 MELTOUT_FRACTION = 0.10
 MIDWINTER_MONTHS = (3, 4, 5)
 SUMMER_MONTHS = (10, 11, 12)
@@ -124,8 +125,10 @@ class SnowSeasonAggregator:
     configured start month (October north of the equator, April south by
     default), so that one snow season falls within one year. Every complete
     year is drawn against the target's, and from each the peak, midwinter mean,
-    melt-out day and summer floor are read off, then averaged over years and
-    samples for logging. The mean runs over the cells the grid operations'
+    melt-out day and summer floor are read off. Only the peak, averaged over
+    years and samples, is logged as a scalar, to keep the key count down; the
+    other statistics and the traces go to the dataset. The mean runs over the
+    cells the grid operations'
     spatial mask admits for the variable (for a masked snow channel, the snow
     mask itself); non-finite values are zeroed first so they cannot poison
     the sum.
@@ -353,7 +356,7 @@ class SnowSeasonAggregator:
         logs: dict[str, Any] = {}
         prefix = f"{label}/" if label else ""
         for name in sorted(self._weights):
-            for quantity in QUANTITIES:
+            for quantity in LOGGED_QUANTITIES:
                 values = {
                     source: _mean_of_finite(traces[source][name].stats[quantity])
                     for source in SOURCES
@@ -463,13 +466,13 @@ class SnowSeasonMetricConfig:
     configured box for the prediction and the target, splits it into complete
     water years (twelve months from the first day of the start month, October
     north of the equator and April south of it by default, so that one snow
-    season falls within one year) and logs, per region, the peak, the midwinter
-    mean (water-year months 3-5), the melt-out day (days from the water-year
-    start to the first day after the peak at or below 10% of it) and the summer
-    floor (mean over water-year months 10-12), each averaged over years and
-    samples, as ``{prediction,target,gap}/<region>/<quantity>``, plus one
-    figure of every water year's trace against the target's. The full traces
-    and per-year statistics go to the dataset. The region mean covers the
+    season falls within one year) and logs, per region, the peak averaged over
+    years and samples as ``{prediction,target,gap}/<region>/peak``, plus one
+    figure of every water year's trace against the target's. The dataset holds
+    the full traces and, per year, the peak, the midwinter mean (water-year
+    months 3-5), the melt-out day (days from the water-year start to the first
+    day after the peak at or below 10% of it) and the summer floor (mean over
+    water-year months 10-12). The region mean covers the
     cells the dataset's spatial mask admits for the variable (the snow mask,
     for a masked snow channel), and non-finite values are zeroed first.
     Requires a lat-lon grid and more than two years of rollout. Disabled by

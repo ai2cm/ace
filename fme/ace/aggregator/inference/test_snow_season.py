@@ -153,6 +153,7 @@ def test_recovers_known_season(calendar: str):
     assert logs["snow_season/prediction/north/peak"] == pytest.approx(80.0, rel=1e-5)
     assert logs["snow_season/gap/north/peak"] == pytest.approx(0.0, abs=1e-6)
     assert "snow_season/traces" in logs
+    assert not any(key.endswith("/meltout_day") for key in logs)
 
 
 def test_streaming_matches_single_batch_and_drops_initial_condition():
