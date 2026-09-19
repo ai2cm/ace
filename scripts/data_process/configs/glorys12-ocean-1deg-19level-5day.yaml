@@ -1,0 +1,17 @@
+# Normalization stats for the GLORYS12 + ERA5 5-day ocean training set
+# produced by scripts/glorys/pipeline/glorys-pipeline.py. The run name
+# matches `make glorys_dataflow` in scripts/glorys/Makefile (DATE-DATASET_NAME);
+# update it whenever that pipeline is re-run.
+#
+# Stats end at 2021-12-31 so the last four years (interim segment overlapping
+# the operational GLO12 analysis) can be held out for verification without
+# leaking into the normalization; revisit with the final train/verify split.
+runs:
+  glorys12-ocean-1deg-19level-5day-1993-2025: ""
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/glorys12-ocean-1deg-19level-5day-stats
+  beaker_dataset: glorys12-ocean-1deg-19level-5day-stats
+  data_type: UFS_REPLAY  # same variable set and layout as the UFS replay ocean
+  start_date: "1993-01-01"
+  end_date: "2021-12-31"
