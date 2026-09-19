@@ -68,6 +68,7 @@ from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
+    AggregatorSummary,
     InferenceAggregatorABC,
     InferenceSummary,
 )
@@ -574,6 +575,21 @@ class Trainer:
             logging.info(
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
             )
+            if len(epoch_data) == 0:
+                # The restart checkpoint is written before _epochs_trained is
+                # incremented, so that a resume re-runs the epoch's validation
+                # and inference. That leaves _current_epoch_num_batches_seen at
+                # a full epoch, and re-running the epoch trains nothing: the
+                # subset is empty. Finish the epoch here instead, so the caller
+                # falls through to the validation this checkpoint was written
+                # to get.
+                logging.info(
+                    "Resumed from a checkpoint written at an epoch boundary; "
+                    "the epoch is already trained, proceeding to validation."
+                )
+                self._epochs_trained += 1
+                self._current_epoch_num_batches_seen = 0
+                return AggregatorSummary(logs={}, loss=None)
         self._last_saved_num_batches_seen = self.num_batches_seen
         self._started_training = True
         current_time = time.time()
