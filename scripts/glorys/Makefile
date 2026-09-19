@@ -53,15 +53,18 @@ glorys_dataflow_test_run:
 		$(OUTPUT_PATH_TEST_RUN) $(OUTPUT_GRID_TEST_RUN) $(START_DATE_TEST_RUN) $(END_DATE_TEST_RUN)
 
 # Minimal local test: 2 states, DirectRunner. Generating the 1/12-degree ->
-# F90 conservative weights takes minutes and several GB of RAM; pass
-# --regrid_weights <file> to reuse a precomputed weight file.
+# F90 conservative weights takes minutes and several GB of RAM, and is the
+# largest term in peak memory; build them once with make_regrid_weights.py and
+# pass EXTRA_FLAGS="--regrid_weights <file>" to reuse them.
+LOCAL_EXTRA_FLAGS ?=
 .PHONY: glorys_local_debug
 glorys_local_debug:
 	rm -rf $(OUTPUT_PATH_LOCAL)
 	cd pipeline && \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		python glorys-pipeline.py $(OUTPUT_PATH_LOCAL) $(START_DATE_LOCAL) $(END_DATE_LOCAL) \
-		--output_grid F90 --runner DirectRunner --save_main_session --job_server_timeout=3600
+		--output_grid F90 --runner DirectRunner --save_main_session \
+		--job_server_timeout=3600 $(LOCAL_EXTRA_FLAGS)
 
 # Normalization stats (incl. the residual/tendency stats the hybrid ocean uses)
 .PHONY: compute_stats

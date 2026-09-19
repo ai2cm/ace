@@ -110,6 +110,14 @@ URL_UFS_MASK = (
     "gs://vcm-ml-intermediate/"
     "2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr"
 )
+# River-mouth cells, masked out because runoff is not one of the emulator's
+# inputs: GLORYS resolves discharge at 1/12 degree and the controlling variable
+# is simply absent from the model, so these cells are unpredictable by
+# construction rather than by lack of capacity. They also carry outsized
+# leverage on normalization. Built by make_plume_mask.py; see its docstring.
+URL_PLUME_MASK = (
+    "gs://vcm-ml-intermediate/2026-09-17-GLORYS-trial-run/plume-mask-5psu.zarr"
+)
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {"F22.5": 22.5, "F45": 45, "F90": 90, "F360": 360}
@@ -472,11 +480,37 @@ def _ufs_masks(reference: xr.DataArray) -> dict[str, xr.DataArray]:
     return out
 
 
+def _plume_mask(url: str, reference: xr.DataArray) -> xr.DataArray:
+    """The river-plume mask on the output grid: 0 at cells to exclude.
+
+    Raises if the grids differ or the store is missing, rather than silently
+    training on cells the mask was meant to remove.
+    """
+    try:
+        ds = xr.open_zarr(_make_zarr_store(url))
+    except Exception as exc:
+        raise ValueError(
+            f"could not open the river-plume mask at {url}: {exc}. Build it "
+            "with scripts/glorys/make_plume_mask.py, or pass --plume_mask '' "
+            "to run without one"
+        ) from exc
+    if not np.allclose(ds["lat"].values, reference["lat"].values) or not np.allclose(
+        ds["lon"].values, reference["lon"].values
+    ):
+        raise ValueError(
+            "the river-plume mask grid does not match the output grid; rebuild "
+            "it with make_plume_mask.py --output_grid matching this run"
+        )
+    mask = ds["plume_mask"].load().astype(np.float32)
+    return mask.assign_coords(lat=reference["lat"], lon=reference["lon"])
+
+
 def build_invariants(
     output_grid: str,
     weights: np.ndarray,
     weights_path: str | None,
     intersect_ufs_mask: bool = True,
+    plume_mask_url: str | None = None,
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """Build the time-invariant output fields from the static datasets.
 
@@ -505,14 +539,19 @@ def build_invariants(
         native, output_grid, src, weights_path, skipna=True, na_thres=1.0
     )
     ufs = _ufs_masks(frac["mask_2d"]) if intersect_ufs_mask else None
+    plume = _plume_mask(plume_mask_url, frac["mask_2d"]) if plume_mask_url else None
     inv = {}
     sea_fraction = frac["mask_2d"].fillna(0.0).clip(0, 1).astype(np.float32)
     if ufs is not None:
         sea_fraction = sea_fraction.where(ufs["mask_2d"] > 0, 0.0).astype(np.float32)
+    if plume is not None:
+        sea_fraction = sea_fraction.where(plume > 0, 0.0).astype(np.float32)
     for k in range(N_LEVELS):
         m = (frac[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
         if ufs is not None:
             m = (m * (ufs[f"mask_{k}"] > 0).astype(np.float32)).astype(np.float32)
+        if plume is not None:
+            m = (m * (plume > 0).astype(np.float32)).astype(np.float32)
         m.attrs = {
             "long_name": f"ocean mask level-{k}",
             "units": "0 if land, 1 if ocean",
@@ -806,6 +845,12 @@ def _get_parser():
         help="keep GLORYS's own land-sea mask instead of intersecting it with "
         "the UFS replay mask the fine-tune checkpoint was pretrained on",
     )
+    p.add_argument(
+        "--plume_mask",
+        default=URL_PLUME_MASK,
+        help="river-plume mask store to exclude (built by make_plume_mask.py); "
+        "pass an empty string to keep the river-mouth cells",
+    )
     return p
 
 
@@ -840,6 +885,7 @@ def main():
         weights,
         args.regrid_weights,
         intersect_ufs_mask=not args.no_ufs_mask_intersection,
+        plume_mask_url=args.plume_mask or None,
     )
 
     ds_3d = open_ocean(VARS_3D, out_times)
