@@ -38,19 +38,26 @@ push_dataflow: build_dataflow
 enter:
 	docker run --rm -v $$(pwd):/glorys -w /glorys --entrypoint "/bin/bash" -it $(IMAGE_NAME)
 
+# Pass --regrid_weights <gs:// or local path> here to skip the per-worker ESMF
+# weight build (~3.5 min and ~10 GB each); build the file with
+# make_regrid_weights.py. MAX_NUM_WORKERS overrides the autoscaling cap.
+DATAFLOW_EXTRA_FLAGS ?=
+
 .PHONY: glorys_dataflow
 glorys_dataflow:
 	cd pipeline && \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		./run-dataflow.sh DataflowRunner \
-		$(OUTPUT_PATH_ONE_DEGREE) $(OUTPUT_GRID_ONE_DEGREE) $(START_DATE) $(END_DATE)
+		$(OUTPUT_PATH_ONE_DEGREE) $(OUTPUT_GRID_ONE_DEGREE) $(START_DATE) $(END_DATE) \
+		$(DATAFLOW_EXTRA_FLAGS)
 
 .PHONY: glorys_dataflow_test_run
 glorys_dataflow_test_run:
 	cd pipeline && \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		./run-dataflow.sh DataflowRunner \
-		$(OUTPUT_PATH_TEST_RUN) $(OUTPUT_GRID_TEST_RUN) $(START_DATE_TEST_RUN) $(END_DATE_TEST_RUN)
+		$(OUTPUT_PATH_TEST_RUN) $(OUTPUT_GRID_TEST_RUN) $(START_DATE_TEST_RUN) $(END_DATE_TEST_RUN) \
+		$(DATAFLOW_EXTRA_FLAGS)
 
 # Minimal local test: 2 states, DirectRunner. Generating the 1/12-degree ->
 # F90 conservative weights takes minutes and several GB of RAM, and is the

@@ -309,13 +309,32 @@ def _make_source_grid(lat: np.ndarray, lon: np.ndarray) -> xr.Dataset:
 _REGRIDDER_CACHE: dict = {}
 
 
+def _load_regrid_weights(weights_path: str):
+    """Resolve ``--regrid_weights`` to something xESMF accepts.
+
+    xESMF takes a local filesystem path or an in-memory Dataset, not a URL, so
+    a ``gs://`` path has to be read here. Without this every worker recomputes
+    the 8.8 M-cell conservative weights, which costs ~3.5 min and ~10 GB each;
+    reading the 158 MB file instead is seconds.
+    """
+    if "://" not in weights_path:
+        return weights_path
+    import fsspec
+
+    with fsspec.open(weights_path, "rb") as f:
+        return xr.open_dataset(f).load()
+
+
 def _get_regridder(output_grid: str, source_grid: xr.Dataset, weights_path: str | None):
     key = (output_grid, len(source_grid["lat"]), len(source_grid["lon"]))
     if key not in _REGRIDDER_CACHE:
         dst = _make_target_grid(output_grid)
         kwargs = {}
         if weights_path:
-            kwargs = {"weights": weights_path, "reuse_weights": True}
+            kwargs = {
+                "weights": _load_regrid_weights(weights_path),
+                "reuse_weights": True,
+            }
         _REGRIDDER_CACHE[key] = xe.Regridder(
             source_grid, dst, "conservative", periodic=True, **kwargs
         )

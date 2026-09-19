@@ -38,7 +38,12 @@ DATAFLOW_ARGS=(
     --sdk_container_image us-central1-docker.pkg.dev/vcm-ml/full-model/glorys-ingest-dataflow:latest
     --num_workers 1
     --disk_size_gb 100
-    --max_num_workers 200
+    # The binding constraint is CloudFerro egress, not compute: a single worker
+    # sustained ~40 MB/s on the test run. Workers past the point where their
+    # aggregate saturates the source sit idle waiting on I/O and are billed
+    # anyway, so autoscaling far beyond it buys no wall time and multiplies
+    # cost. Raise only after confirming per-worker throughput holds.
+    --max_num_workers ${MAX_NUM_WORKERS:-20}
     --machine_type n2d-custom-2-49152-ext
     --worker_disk_type "compute.googleapis.com/projects/vcm-ml/zones/us-central1-c/diskTypes/pd-ssd"
     --number_of_worker_harness_threads 1
