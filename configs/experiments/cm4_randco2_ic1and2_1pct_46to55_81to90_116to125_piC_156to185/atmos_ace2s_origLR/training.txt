@@ -1,0 +1,5 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origLR|rs0|train|urgent|h100|8|400GiB|3|ai2/ace|seed=0|0
+cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origLR|rs1|train|high|h100|8|400GiB|3|ai2/ace|seed=1|0
+cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origLR|rs2|train|high|h100|8|400GiB|3|ai2/ace|seed=2|0
