@@ -582,10 +582,13 @@ class Trainer:
                 # a full epoch, and re-running the epoch trains nothing: the
                 # subset is empty. Finish the epoch here instead, so the caller
                 # falls through to the validation this checkpoint was written
-                # to get.
+                # to get. That also skips the post-epoch train-evaluation pass,
+                # so this epoch logs no train/* metrics and writes no train
+                # diagnostics: the cost of removing the state.
                 logging.info(
-                    "Resumed from a checkpoint written at an epoch boundary; "
-                    "the epoch is already trained, proceeding to validation."
+                    "The resumed epoch has no batches left to train, so it "
+                    "completed before the checkpoint was written; finishing "
+                    "it and proceeding to validation."
                 )
                 self._epochs_trained += 1
                 self._current_epoch_num_batches_seen = 0
