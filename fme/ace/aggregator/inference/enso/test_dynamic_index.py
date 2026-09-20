@@ -12,6 +12,7 @@ from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.testing import mock_distributed
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import Image as WandBImage
 
 from ..utils import (
     LatLonRegion,
@@ -426,7 +427,9 @@ def test_regional_index_aggregator(variable_name):
 
     metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
-    assert isinstance(logs[metric_name], plt.Figure)
+    # logged as an image, not a figure: wandb's figure->plotly conversion drops
+    # the log-2 period axis the variance-preserving plot depends on
+    assert isinstance(logs[metric_name], WandBImage)
 
     metric_name = f"test/{variable_name}_nino34_index_std"
     assert metric_name in logs
@@ -498,7 +501,9 @@ def test_paired_regional_index_aggregator(variable_name):
 
     metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
-    assert isinstance(logs[metric_name], plt.Figure)
+    # logged as an image, not a figure: wandb's figure->plotly conversion drops
+    # the log-2 period axis the variance-preserving plot depends on
+    assert isinstance(logs[metric_name], WandBImage)
     for metric_name in [
         f"test/{variable_name}_nino34_index_std",
         f"test/{variable_name}_nino34_index_std_norm",

@@ -14,6 +14,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict
+from fme.core.wandb import WandB
 
 from ...plotting import (
     clamp_date_axis,
@@ -37,6 +38,22 @@ from ..utils import (
 
 SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
 MAX_PLOTTED_PERIOD_YEARS = 16.0
+
+
+def _as_image(fig) -> Any:
+    """Rasterize a figure for logging, instead of handing wandb the figure.
+
+    wandb converts a matplotlib figure to a plotly chart, and that conversion
+    drops the log-2 period axis, its octave tick labels and the x limits, and
+    promotes the unlabelled per-member lines to `_childN` legend entries. On a
+    linear period axis the power-per-octave curve is no longer
+    variance-preserving, so the plot has to be logged as an image to mean what
+    it says.
+    """
+    wandb = WandB.get_instance()
+    image = wandb.Image(fig)
+    plt.close(fig)
+    return image
 
 
 def _max_plotted_period(freqs_per_year: np.ndarray) -> float:
@@ -211,11 +228,11 @@ class RegionalIndexAggregator:
                     ax, freq, power_by_sample, "predicted ensemble mean"
                 )
                 ax.set_title("Power Spectrum of Nino3.4 Index")
-                ax.set_ylabel("Power [K$^2$/octave]")
+                ax.set_ylabel("Power [K**2/octave]")
                 format_period_axis(ax, max_period_years=_max_plotted_period(freq))
                 ax.legend()
                 fig.tight_layout()
-                logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_power_spectrum"] = _as_image(fig)
                 logs[f"{sst_name}_nino34_index_power_2_5yr"] = compute_psd_band_power(
                     freq, power_spectrum
                 )
@@ -325,7 +342,7 @@ class PairedRegionalIndexAggregator:
                     "predicted ensemble mean",
                 )
                 ax.set_title("Power Spectrum of Nino3.4 Index")
-                ax.set_ylabel("Power [K$^2$/octave]")
+                ax.set_ylabel("Power [K**2/octave]")
                 format_period_axis(
                     ax,
                     max_period_years=max(
@@ -335,7 +352,7 @@ class PairedRegionalIndexAggregator:
                 )
                 ax.legend()
                 fig.tight_layout()
-                logs[f"{sst_name}_nino34_index_power_spectrum"] = fig
+                logs[f"{sst_name}_nino34_index_power_spectrum"] = _as_image(fig)
                 pred_power_2_5 = compute_psd_band_power(
                     pred_freq, prediction_power_spectrum
                 )
