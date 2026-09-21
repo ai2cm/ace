@@ -1,0 +1,45 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# STAGE 2 of the SPECTRAL-ENERGY-SCORE ablation, long-tail schedule.
+#
+# Resumes ../ocean_wide_stochastic_es's stage-1 best_ckpts -- NOT the patch-ES
+# wave's. The loss is baked into stage 1 (the noise pathway is shaped by
+# whichever score trained it), so this arm cannot reuse
+# ../ocean_wide_stochastic's checkpoints and a stage-2-only swap would not
+# clear the spectral score.
+#
+# One-variable fork of ../ocean_wide_stochastic_longtail/finetuning.txt's two
+# allblocks rows: same schedule, same seeds, same everything, different loss.
+# See finetune-config-template.yaml.
+#
+# NOT LAUNCHABLE YET, and `skip` for two independent reasons:
+#   1. The wandb_id column is empty -- stage 1 has not run, so there are no
+#      checkpoints to resume. Fill each row's id from the stage-1 run before
+#      flipping it to `train`.
+#   2. Launch of the whole ablation waits on the ai2cm/reports#98 review.
+#
+# Read on inference_piC/time_mean_norm/rmse/channel_mean against the patch-ES
+# long-tail allblocks arm's 0.0450 at epoch 24 (both seeds) and the
+# deterministic ocean_wide_ohc_clip-ft baseline's 0.0357-0.0372, then on the
+# two standing rollouts via the evaluator configs in this directory. NOT on
+# val_piC/mean_norm/weighted_rmse/channel_mean -- single-member one-step RMSE,
+# which structurally penalises a CRPS-trained model and degrades over a
+# deep-tail finetune by design.
+#
+# The verdict metric is the band-variance criterion, not either of those:
+# analysis/band_variance_4deg.py on the piC 200-yr rollout, against the
+# patch-ES arm's 0.783 global / ~0.80 in the western boundary currents.
+#
+# min_runtime set on every row -- the Beaker scheduler has required one since
+# 2026-08-28 and uncoupled_finetune.sh otherwise defaults it to 0.
+#
+# Stage-1 wandb ids and final val_piC/mean/loss at epoch 75, to fill in:
+#   allblocks-es rs0 <id> <loss> | rs1 <id> <loss>
+# For reference, the patch-ES stage 1 read:
+#   allblocks    rs0 0yk7nnr7 0.04254 | rs1 ifui1igf 0.04261
+# The two are NOT directly comparable -- different objectives, so the loss
+# magnitudes differ by construction. Compare seed agreement within each arm.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h

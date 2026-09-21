@@ -1,0 +1,38 @@
+# EVALUATION ROWS for the spectral-energy-score ablation, long-tail schedule.
+#
+# EMPTY ON PURPOSE. Rows carry the training experiment's beaker id, and neither
+# stage has run. Add two rows per seed once the stage-2 runs finish, mirroring
+# ../ocean_wide_stochastic_longtail/experiments.txt exactly -- that file's
+# header documents why each field is what it is, and the comparison only holds
+# if these rows match it field for field:
+#
+#   <group>|<tag>|<stage-2 beaker id>|run_piC-200yr-var|best_inference_ckpt|<pri>|--min-runtime 3h||<result dataset>|ai2/ace|jupiter|||20GiB
+#   <group>|<tag>|<stage-2 beaker id>|run_1pct-ic0001-130yr|best_inference_ckpt|<pri>|--min-runtime 3h|data_writer.save_monthly_files=false|<result dataset>|ai2/ace|jupiter|||30GiB
+#
+# group = cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt
+# tag   = rs0 (priority high), rs1 (priority normal)
+#
+# Four things that are load-bearing rather than incidental, all inherited:
+#
+#   best_inference_ckpt, not best_ckpt. Both evaluation records require it, and
+#   on this protocol rollout error is best at the last epoch while
+#   best_val_loss is attained early, so best_ckpt is a different, worse model.
+#
+#   The two evaluator configs in this directory are BYTE-IDENTICAL copies of
+#   the patch-ES wave's, which are themselves byte-identical to the canonical
+#   sources the deterministic baseline ran. That is the whole basis of the
+#   cross-arm comparison -- do not edit them here.
+#
+#   --min-runtime 3h. The piC rollout takes ~65 min and a 1h guarantee expired
+#   minutes before the last step in an earlier wave, losing two of three runs
+#   to preemption at step 14597 of 14598.
+#
+#   data_writer.save_monthly_files=false on the 1pct rows only. The piC "-var"
+#   config already writes the sst_monthly pair that band_variance_sst.py needs
+#   at ~4.5 GiB; leaving save_monthly_files on for 1pct writes ~76 GiB that
+#   nothing reads.
+#
+# results_dataset is pinned per row rather than resolved at launch: preempted
+# runs' final result dataset ids do not share the experiment id's prefix.
+# Verify each pinned dataset contains training_checkpoints/best_inference_ckpt.tar
+# before launching.

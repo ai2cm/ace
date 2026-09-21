@@ -1,0 +1,93 @@
+# Single-IC 200-year piControl rollout at 1deg, written for the internal-variability
+# diagnosis (research investigations/2026-08-25-ocean-variance-damping-diagnosis).
+#
+# Same rollout as the ocean_precorr_clip_maskfill arm's evaluator-config-piC-200yr.yaml
+# -- one IC at the store's first snapshot, 14598 steps x 5 days = 0151-01-06 ->
+# 0350-12-27, the whole piControl record -- and differs from it ONLY in what is
+# written out. Stationary forcing is the point: variance measured over this rollout
+# is not confounded by a moving CO2 ramp, which is why the 1pctCO2 rollouts cannot
+# serve this purpose.
+#
+# Why these outputs and nothing else. The diagnosis needs band-resolved variance
+# ratios for ENSO, the IPO, ocean heat content and the overturning. Global-mean
+# annual series for every channel already come back from the aggregator as plotly
+# artifacts carrying both target and gen, so nothing global needs to be written to
+# disk. Only the *spatial* fields that global means cannot give are written:
+#
+#   sst              monthly, global   -- Nino 3.4 and the IPO pattern
+#   ocean_heat_content monthly, global -- regional OHC variability; a derived
+#                                         variable, computed before the writers
+#                                         see the batch
+#   vo_0..18         monthly, 20-35N   -- the AMOC index at the RAPID latitude.
+#                                         Restricted in latitude on purpose: the
+#                                         full-depth, all-longitude field over the
+#                                         whole globe is ~47 GiB per side, and the
+#                                         26.5N index needs one band.
+#
+# Total is ~4.5 GiB per run, so this stays in the beaker result dataset rather than
+# using the gs:// redirect (ace #1462), whose threshold is 10 GiB+ of monthly files.
+#
+# save_prediction_files and save_monthly_files are both off: they take a single
+# shared `names` list, and these three datasets need different coarsening and
+# extents, so each is a `files:` entry instead.
+#
+# The stepper -- masking, corrector, variable lists -- is restored from the
+# checkpoint, so this one config serves all three ohc_clip-ft seeds unchanged.
+#
+# forward_steps_in_memory (40) comes from this protocol's own train-config inference
+# blocks. Note block_mean time_coarsen is unusable here: it requires the factor to
+# divide both forward_steps_in_memory (40) and n_forward_steps (14598 = 2 * 3^2 * 811),
+# whose only common divisor above 1 is 2. Hence monthly_mean throughout.
+experiment_dir: /results
+n_forward_steps: 14598
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: sst_monthly
+    names: [sst]
+    time_coarsen:
+      method: monthly_mean
+    save_reference: true
+  - label: ohc_monthly
+    names: [ocean_heat_content]
+    time_coarsen:
+      method: monthly_mean
+    save_reference: true
+  - label: vo_monthly_rapid
+    names: [vo_0, vo_1, vo_2, vo_3, vo_4, vo_5, vo_6, vo_7, vo_8, vo_9, vo_10,
+            vo_11, vo_12, vo_13, vo_14, vo_15, vo_16, vo_17, vo_18]
+    lat_extent: [20.0, 35.0]
+    time_coarsen:
+      method: monthly_mean
+    save_reference: true
+aggregator:
+  log_histograms: true
+  # On, unlike the maskfill arm's twin: the index figures are exactly what this
+  # diagnosis is about. The series starts in year 0151, so the year-0001 date-axis
+  # autoscale crash (ace #1439) does not apply. These log as matplotlib images, so
+  # they are read as figures -- the numeric indices are computed offline from
+  # sst_monthly.
+  log_nino34_index: true
+  log_ipo_index: true

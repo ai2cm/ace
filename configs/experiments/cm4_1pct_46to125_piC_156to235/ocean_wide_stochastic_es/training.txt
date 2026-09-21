@@ -1,0 +1,47 @@
+# STAGE 1 (1-step stochastic pretraining) of the SPECTRAL-ENERGY-SCORE
+# ablation at 1 degree. Stage 2 is ../ocean_wide_stochastic_es_longtail.
+#
+# ONE-VARIABLE FORK of ../ocean_wide_stochastic's allblocks rows. Diff the
+# override_args against that file: the only change is
+#
+#   energy_score_weight       0.0 -> 0.1
+#   patch_energy_score_weight 0.1 -> 0.0
+#   patch_energy_score_size   3   -> (dropped; PatchEnergyScoreLoss unused)
+#
+# so this arm trains against crps 0.9 + SPECTRAL energy score 0.1 -- ACE2S's
+# EnsembleLoss, and the loss every coupled finetune in this line already uses
+# for its ocean. See train-config.yaml for why.
+#
+# allblocks ONLY, and long tail only downstream. all_blocks beat bottleneck in
+# every schedule wave and every seed (ERA5, long tail, deep tail), so the
+# injection point is not re-screened under the new loss. The deep-tail twin is
+# a cheap follow-on off these same stage-1 checkpoints if the swap holds.
+#
+# Two seeds, matching the stage-2 arms this is read against (rs0, rs1 --
+# ../ocean_wide_stochastic_longtail held both rs2 rows). Seed spread within an
+# arm at stage 1 was 7e-5 on val_piC/mean/loss for allblocks, so two seeds
+# resolve a real loss effect.
+#
+# checkpoint_strategy: all is required -- allblocks OOMed on all three seeds at
+# 1 degree on 4 GPUs without it (70.8 GiB of a 79 GiB card, ~94% activations).
+# It is set in train-config.yaml, not here.
+#
+# min_runtime set on every row -- the Beaker scheduler has required one since
+# 2026-08-28 and uncoupled_train.sh otherwise defaults it to 0.
+#
+# NOT LAUNCHED. Both rows are `skip`. Launch waits on the ai2cm/reports#98
+# review, since the arm this is read against is the arm that review assesses.
+# Flip both to `train` to launch.
+#
+# Read at stage 1 on val_piC/mean/loss (the one-step metric matched to what
+# stage 1 optimizes) against allblocks' 0.04254 / 0.04261, and on seed
+# agreement -- the cancelled unclipped runs' tell was a spread, not a
+# magnitude. NOT on the 20-yr inline rollout: a one-step model tracking worse
+# over 20 years is the protocol working as designed, and the comparison that
+# means anything is after stage 2.
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
