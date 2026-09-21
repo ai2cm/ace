@@ -25,6 +25,20 @@ class ModuleConfig(abc.ABC):
     allowing us to specify details of the network architecture in a config file.
     """
 
+    compile_unsupported_reason: ClassVar[str | None] = None
+    """Why ``torch.compile`` cannot be used with the modules this builder builds.
+
+    Set to a non-None string in a builder to declare that its modules cannot be
+    compiled, e.g. because the forward pass has data-dependent shapes.
+    :meth:`Module.compile` then raises ``NotImplementedError`` with this reason
+    instead of letting dynamo silently fall back to eager after a long tracing
+    attempt.
+
+    This must be a ``ClassVar`` (or a plain class-level assignment): annotating
+    it without ``ClassVar`` would make it a dataclass field, which would leak
+    into ``ModuleSelector.config`` and into serialized checkpoints.
+    """
+
     @abc.abstractmethod
     def build(
         self,
@@ -77,6 +91,32 @@ CONDITIONAL_BUILDERS = [
 ]
 
 
+def compile_torch_module(module: nn.Module, **kwargs: Any) -> nn.Module:
+    """Compile ``module`` with ``torch.compile``, failing loudly on recompiles.
+
+    Sets the process-global ``torch._dynamo.config.fail_on_recompile_limit_hit``
+    flag: by default, when a compiled region exceeds dynamo's recompile limit,
+    dynamo silently falls back to running it in eager mode, so a configuration
+    that asked for compilation quietly stops being compiled. Since compilation
+    is requested explicitly, a clear error is more useful than that silent
+    fallback. Note the flag is process-global, so it applies to every
+    ``torch.compile``d region in the process, not just this module.
+
+    Varying the batch size does not trip the limit: dynamo recompiles once with
+    dynamic shapes and then reuses that graph, so only genuinely static
+    recompiles count toward the limit.
+
+    Args:
+        module: The module to compile.
+        kwargs: Forwarded to ``torch.compile``.
+
+    Returns:
+        The compiled module.
+    """
+    torch._dynamo.config.fail_on_recompile_limit_hit = True
+    return torch.compile(module, **kwargs)
+
+
 class Module:
     """A built network together with its label encoding.
 
@@ -91,10 +131,12 @@ class Module:
         module: nn.Module,
         label_encoding: LabelEncoding | None,
         forward_module: nn.Module | None = None,
+        compile_unsupported_reason: str | None = None,
     ):
         self._module = module
         self._label_encoding = label_encoding
         self._forward_module = forward_module
+        self._compile_unsupported_reason = compile_unsupported_reason
 
     @property
     def forward_module(self) -> nn.Module:
@@ -130,11 +172,21 @@ class Module:
 
         Args:
             kwargs: Forwarded to ``torch.compile``.
+
+        Raises:
+            NotImplementedError: If the builder declared compilation
+                unsupported via ``ModuleConfig.compile_unsupported_reason``.
         """
+        if self._compile_unsupported_reason is not None:
+            raise NotImplementedError(
+                "torch.compile is not supported for this module: "
+                f"{self._compile_unsupported_reason}"
+            )
         return Module(
             self._module,
             self._label_encoding,
-            forward_module=torch.compile(self._module, **kwargs),
+            forward_module=compile_torch_module(self._module, **kwargs),
+            compile_unsupported_reason=self._compile_unsupported_reason,
         )
 
     @property
@@ -172,7 +224,12 @@ class Module:
         forward_module = (
             callable(self._forward_module) if self._forward_module is not None else None
         )
-        return Module(callable(self._module), self._label_encoding, forward_module)
+        return Module(
+            callable(self._module),
+            self._label_encoding,
+            forward_module,
+            compile_unsupported_reason=self._compile_unsupported_reason,
+        )
 
     def to(self, device: torch.device) -> "Module":
         if self._forward_module is not None:
@@ -180,7 +237,11 @@ class Module:
                 "Module.to must be called before Module.compile; moving a "
                 "compiled module between devices is not supported."
             )
-        return Module(self._module.to(device), self._label_encoding)
+        return Module(
+            self._module.to(device),
+            self._label_encoding,
+            compile_unsupported_reason=self._compile_unsupported_reason,
+        )
 
 
 @dataclasses.dataclass
@@ -267,7 +328,11 @@ class ModuleSelector:
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
         )
-        return Module(module, label_encoding)
+        return Module(
+            module,
+            label_encoding,
+            compile_unsupported_reason=type(self._instance).compile_unsupported_reason,
+        )
 
     @classmethod
     def get_available_types(cls):
