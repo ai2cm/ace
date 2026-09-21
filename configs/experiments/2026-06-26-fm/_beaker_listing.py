@@ -49,6 +49,10 @@ def canonical_name(name: str) -> str:
 
 def job_status(job: dict) -> str:
     status = job.get("status", {})
+    if "failed" in status and "exited" not in status:
+        # Never ran: Beaker could not start the container (a missing dataset
+        # path, an image pull failure). There is no exit code to inspect.
+        return FAILED
     if "exited" not in status and "canceled" not in status:
         return RUNNING
     if status.get("exitCode") == 0:
