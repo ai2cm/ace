@@ -36,22 +36,6 @@ spec:
           template: compute-fme-dataset-individual
           arguments:
             parameters:
-            - name: python_script
-              value: "{{workflow.parameters.python_script}}"
-            - name: stats_script
-              value: "{{workflow.parameters.get_stats_script}}"
-            - name: time_coarsen_script
-              value: "{{workflow.parameters.time_coarsen_script}}"
-            - name: fs_utils_script
-              value: "{{workflow.parameters.fs_utils_script}}"
-            - name: config
-              value: "{{workflow.parameters.config}}"
-            - name: names
-              value: "{{workflow.parameters.names}}"
-            - name: run_directories
-              value: "{{workflow.parameters.run_directories}}"
-            - name: output_directory
-              value: "{{workflow.parameters.output_directory}}"
             - name: run
               value: "{{item}}"
           withSequence:
@@ -118,15 +102,13 @@ spec:
         - effect: NoSchedule
           key: dedicated
           value: highmem-sim-pool
+      # The scripts, config and run lists are read from the workflow parameters
+      # rather than passed as inputs: a template input is stored in the pod's
+      # ARGO_TEMPLATE both as the input and substituted into args, and with
+      # many runs that string exceeds the 128 KiB argument limit ("exec
+      # argoexec: argument list too long", seen with 36 runs).
       inputs:
         parameters:
-          - name: python_script
-          - name: stats_script
-          - name: fs_utils_script
-          - name: config
-          - name: names
-          - name: run_directories
-          - name: output_directory
           - name: run
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
@@ -141,25 +123,25 @@ spec:
         args:
           - |
             cat << EOF > script.py
-            {{inputs.parameters.python_script}}
+            {{workflow.parameters.python_script}}
             EOF
 
             cat << EOF > get_stats.py
-            {{inputs.parameters.stats_script}}
+            {{workflow.parameters.get_stats_script}}
             EOF
 
             cat << EOF > fs_utils.py
-            {{inputs.parameters.fs_utils_script}}
+            {{workflow.parameters.fs_utils_script}}
             EOF
 
             cat << EOF > config.yaml
-            {{inputs.parameters.config}}
+            {{workflow.parameters.config}}
             EOF
 
             run={{inputs.parameters.run}}
-            names=({{inputs.parameters.names}})
-            run_directories=({{inputs.parameters.run_directories}})
-            output_directory={{inputs.parameters.output_directory}}
+            names=({{workflow.parameters.names}})
+            run_directories=({{workflow.parameters.run_directories}})
+            output_directory={{workflow.parameters.output_directory}}
 
             name="${names[${run}]}"
             run_directory="${run_directories[${run}]}"
