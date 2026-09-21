@@ -17,10 +17,11 @@ DESTINATION=hf://buckets/allenai/ai2cm-scratch/abrupt-4xCO2-ensemble/${STORE}
 # Set to 0 to disable it in that case. Overrides the default baked into the image.
 HF_XET_HIGH_PERFORMANCE=${HF_XET_HIGH_PERFORMANCE:-1}
 
-# Pass --ignore-existing so a restarted sync skips files already uploaded rather
-# than re-uploading them. Set to 0 to re-sync everything, e.g. to overwrite files
-# that have changed at the source.
-IGNORE_EXISTING=${IGNORE_EXISTING:-1}
+# Set to 1 to pass --ignore-existing, which skips files already present at the
+# destination rather than re-uploading them. Useful for resuming a failed sync so
+# it doesn't redo completed work. Left off by default so a fresh run performs a
+# full sync (uploading new files and re-uploading any that changed at the source).
+IGNORE_EXISTING=${IGNORE_EXISTING:-0}
 SYNC_ARGS=()
 if [ "${IGNORE_EXISTING}" = "1" ]; then
     SYNC_ARGS+=(--ignore-existing)
