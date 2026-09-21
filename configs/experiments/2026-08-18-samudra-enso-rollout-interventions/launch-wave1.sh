@@ -233,7 +233,9 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
-  if [[ "$arm" == "baseline-ft8" || "$arm" == "hybridresid-ft8" ]]; then
+  if [[ "$arm" == "baseline-ft8" || "$arm" == "hybridresid-ft8" || "$arm" == "hybridresid-ft8-anomohc" ]]; then
+    # hybridresid-ft8-anomohc = hybridresid-ft8 with the heat correction swapped to
+    # anomaly_scaled_temperature; same checkpoint, so it isolates the corrector.
     # 8-step multi-step fine-tune of each matched pretrain; see the config
     # header. Checkpoint differs per arm, everything else identical.
     config="${CONFIG_DIR}/${arm}.yaml"
