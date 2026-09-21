@@ -90,7 +90,11 @@ def _cos_lat_scaled_coords_log(
     if lat_mean is None:
         return None
     n_bands = lat_mean.shape[0]
-    lat_rad = lat_mean.to(relative_coords_base.dtype) * (math.pi / 180.0)
+    # lat_mean may live on the accelerator while the base coordinates are
+    # built on CPU; compute on CPU and let the module's .to() move the buffer.
+    lat_rad = lat_mean.to(
+        device=relative_coords_base.device, dtype=relative_coords_base.dtype
+    ) * (math.pi / 180.0)
     h_coords = relative_coords_base[:, 0]  # (N*N,)
     w_coords = relative_coords_base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(
         1
