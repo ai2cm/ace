@@ -28,7 +28,8 @@ submissions runs several minutes. Never run two ticks at once.
 
 1. `git pull --ff-only origin exp/alexeyfm`, list `ai2/ace`, refresh
    `wandb_to_beaker_map.json`, commit and push if it changed.
-2. For every expected job (3 architectures x cells x stages) that is missing
+2. For every expected job (nc-sfno and nc-swin-v2 x cells x stages; nc-swin-v2.1
+   is excluded via `EXCLUDED_ARCHS`) that is missing
    or failed and whose dependencies succeeded: generate configs, commit, push,
    submit with `--skip-if-in-beaker` on `ai2/jupiter ai2/titan` at priority
    `normal`. Failures are retried up to 5 times; a swin training or fine-tune
