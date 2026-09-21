@@ -2,7 +2,6 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, Literal
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -229,7 +228,6 @@ class Samudra(torch.nn.Module):
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:
-            crop = fts.shape[2:]
             if isinstance(layer, nn.Conv2d):
                 fts = torch.nn.functional.pad(
                     fts, (self.N_pad, self.N_pad, 0, 0), mode=self.pad
@@ -254,18 +252,23 @@ class Samudra(torch.nn.Module):
                     temp.append(fts)
                     count += 1
             elif count >= self.num_steps:
-                if isinstance(
-                    layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
+                # a tuple rather than ``A | B``: dynamo cannot evaluate a
+                # class union inside isinstance and skips the whole frame
+                if isinstance(  # noqa: UP038
+                    layer, (BilinearUpsample, ZonallyPeriodicBilinearUpsample)
                 ):
-                    crop = np.array(fts.shape[2:])
-                    shape = np.array(
-                        temp[int(2 * self.num_steps - count - 1)].shape[2:]
-                    )
-                    pads = shape - crop
-                    pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
-                    pads_tb = (0, 0, pads[0] // 2, pads[0] - pads[0] // 2)
+                    # plain int arithmetic rather than numpy: dynamo traces
+                    # a numpy array of the shape as a tensor, and reading the
+                    # pad widths back out of it is a data-dependent value,
+                    # which breaks the graph. Python's // is floor division,
+                    # as numpy's is, so the padding is unchanged.
+                    skip = temp[int(2 * self.num_steps - count - 1)]
+                    pad_h = skip.shape[2] - fts.shape[2]
+                    pad_w = skip.shape[3] - fts.shape[3]
+                    pads_lr = (pad_w // 2, pad_w - pad_w // 2, 0, 0)
+                    pads_tb = (0, 0, pad_h // 2, pad_h - pad_h // 2)
                     fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
                     fts = nn.functional.pad(fts, pads_tb, mode="constant")
-                    fts += temp[int(2 * self.num_steps - count - 1)]
+                    fts += skip
                     count += 1
         return fts
