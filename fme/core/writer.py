@@ -8,6 +8,7 @@ import fsspec
 import numpy as np
 import xarray as xr
 import zarr
+from zarr.api.asynchronous import open_group
 from zarr.core.sync import sync
 
 from fme.core.distributed import Distributed
@@ -74,7 +75,7 @@ async def _insert_into_zarr_async(
     leaves the store untouched.
     """
     names = list(data)
-    group = await zarr.api.asynchronous.open_group(store=path, mode="r+")
+    group = await open_group(store=path, mode="r+")
     arrays = await asyncio.gather(*(group.getitem(name) for name in names))
     slices_tuples = []
     for name in names:
@@ -115,7 +116,7 @@ async def _read_from_zarr_async(
     names: Sequence[str],
     insert_slices: Mapping[int, slice],
 ) -> dict[str, np.ndarray]:
-    group = await zarr.api.asynchronous.open_group(store=path, mode="r")
+    group = await open_group(store=path, mode="r")
     arrays = await asyncio.gather(*(group.getitem(name) for name in names))
     read_slices = [
         tuple(
