@@ -1,12 +1,18 @@
+import dataclasses
+from unittest import mock
+
 import pytest
 import torch
 
+from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.ocean.m2lines.layers import ConvNeXtBlock, MultiResolutionFiLM
 from fme.ace.models.ocean.m2lines.samudra import Samudra
-from fme.ace.registry.m2lines import SamudraBuilder
+from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 def test_samudra_builder():
@@ -133,3 +139,49 @@ def test_noise_conditioned_samudra_draws_independent_noise_per_sample():
         output = model(x)
     assert not torch.allclose(output[0], output[1])
     assert not torch.allclose(output[1], output[2])
+
+
+def _floenet_dataset_info(height: int, width: int) -> DatasetInfo:
+    """Minimal DatasetInfo for building FloeNet.
+
+    FloeNet needs horizontal coordinates to place its mesh nodes and a 2D mask
+    to select the wet points, and nothing else. Duplicated in spirit from
+    fme/ace/models/graphcast/test_graphcast.py, which tests the network itself.
+    """
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.linspace(-90, 90, height),
+            lon=torch.linspace(0, 360, width + 1)[:-1],
+        ),
+        spatial_mask_provider=SpatialMaskProvider(
+            masks={"mask_2d": torch.ones(height, width, dtype=torch.bool)}
+        ),
+    )
+
+
+def test_floenet_compile_unsupported_reason_is_not_a_dataclass_field():
+    """The reason is a ClassVar, not a field: as a field it would be written
+    into ModuleSelector.config and so into serialized checkpoint configs."""
+    field_names = {field.name for field in dataclasses.fields(FloeNetBuilder)}
+    assert "compile_unsupported_reason" not in field_names
+
+
+@pytest.mark.skipif(not GRAPHCAST_AVAIL, reason="trimesh/rtree are not available")
+def test_floenet_rejects_compile_without_tracing():
+    """FloeNet cannot be traced by dynamo, and an attempted trace takes minutes
+    before failing, so asking to compile it must raise immediately instead."""
+    selector = ModuleSelector(
+        type="FloeNet",
+        config={"latent_dimension": 8, "meshes": 6, "M0": 0, "processor_steps": 1},
+    )
+    module = selector.build(
+        n_in_channels=2,
+        n_out_channels=2,
+        dataset_info=_floenet_dataset_info(9, 18),
+    )
+    with mock.patch("torch.compile") as mock_compile:
+        with pytest.raises(NotImplementedError) as err:
+            module.compile()
+    mock_compile.assert_not_called()
+    assert "FloeNet" in str(err.value)
+    assert "data-dependent" in str(err.value)
