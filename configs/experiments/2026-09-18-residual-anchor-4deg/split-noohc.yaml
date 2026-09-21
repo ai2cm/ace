@@ -310,21 +310,21 @@ stepper:
             - sfdsi
             - UI
             - VI
-      residual_prediction: true
-      residual_normalized_prediction: true
-      residual_prediction_names:
-      - thetao_0
-      - thetao_1
-      - thetao_2
-      - thetao_3
-      - thetao_4
-      - thetao_5
-      - thetao_6
-      - thetao_7
-      - thetao_8
-      - thetao_9
-      - thetao_10
-      - thetao_11
+      residual_prediction:
+        normalized: true
+        names:
+        - thetao_0
+        - thetao_1
+        - thetao_2
+        - thetao_3
+        - thetao_4
+        - thetao_5
+        - thetao_6
+        - thetao_7
+        - thetao_8
+        - thetao_9
+        - thetao_10
+        - thetao_11
       next_step_forcing_names:
       - DLWRFsfc
       - DSWRFsfc

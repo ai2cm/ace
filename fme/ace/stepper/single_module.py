@@ -65,7 +65,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.output import StepOutput
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import (
@@ -319,7 +319,9 @@ class SingleModuleStepperConfig:
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
             prescribed_prognostic_names=self.prescribed_prognostic_names,
-            residual_prediction=self.residual_prediction,
+            residual_prediction=(
+                ResidualPredictionConfig() if self.residual_prediction else None
+            ),
             global_mean_removal=self.global_mean_removal,
         )
 
@@ -691,14 +693,14 @@ class StepperConfig:
         return self.step.loss_names
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """Names of variables which are required as inputs."""
         return self.step.input_names
 
     @property
-    def all_names(self) -> set[str]:
+    def all_names(self) -> frozenset[str]:
         """Names of all variables."""
-        return set(self.input_names).union(self.output_names)
+        return frozenset(set(self.input_names).union(self.output_names))
 
     @property
     def next_step_forcing_names(self) -> list[str]:
@@ -710,12 +712,12 @@ class StepperConfig:
         return self.step.get_next_step_forcing_names()
 
     @property
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         """Names of variables which both inputs and outputs."""
         return self.step.prognostic_names
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
         return self.step.output_names
 
@@ -1043,11 +1045,11 @@ class Stepper:
         return self._parameter_initializer.base_weights
 
     @property
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         return self._step_obj.prognostic_names
 
     @property
-    def out_names(self) -> list[str]:
+    def out_names(self) -> frozenset[str]:
         return self._step_obj.output_names
 
     @property

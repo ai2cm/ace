@@ -354,5 +354,5 @@ stepper:
       - tauuo
       - tauvo
       - wfo
-      residual_prediction: true
+      residual_prediction: {}
 seed: 1

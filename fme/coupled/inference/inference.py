@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Literal
 
 import cftime
@@ -89,8 +89,8 @@ class CoupledInitialConditionConfig:
 
     def get_initial_condition(
         self,
-        ocean_prognostic_names: Sequence[str],
-        atmosphere_prognostic_names: Sequence[str],
+        ocean_prognostic_names: Collection[str],
+        atmosphere_prognostic_names: Collection[str],
         n_ensemble_per_ic: int,
     ) -> CoupledPrognosticState:
         ocean = self.ocean.get_dataset(self.start_indices)

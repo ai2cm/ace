@@ -1,0 +1,47 @@
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_coupled_steps: 128
+coupled_steps_in_memory: 1
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023-t12shift.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2004-12-31T12:00:00'
+    - '2005-01-30T12:00:00'
+    - '2005-02-24T12:00:00'
+    - '2005-03-31T12:00:00'
+    - '2005-04-30T12:00:00'
+    - '2005-05-30T12:00:00'
+    - '2005-06-29T12:00:00'
+    - '2005-07-29T12:00:00'
+    - '2005-08-28T12:00:00'
+    - '2005-09-27T12:00:00'
+    - '2005-10-27T12:00:00'
+    - '2005-11-26T12:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: true
+    names:
+    - sst
+    - thetao_0
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm

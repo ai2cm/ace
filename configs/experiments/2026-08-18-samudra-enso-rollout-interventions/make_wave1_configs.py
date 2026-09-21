@@ -244,15 +244,16 @@ def arm_residfixft(c: dict) -> dict:
 
     The ocean stepper mirrors the residfix pretraining exactly: residual
     prediction with the forward path in residual-normalized units
-    (residual_normalized_prediction) and the tendency-scaled loss via the
+    (residual_prediction.normalized) and the tendency-scaled loss via the
     residual normalization block. Weights come from the residfix pretrain
     snapshot mounted at /ocean_ckpt.tar; everything else matches the shared
     coupled-FT base.
     """
     step = c["stepper"]["ocean"]["stepper"]["step"]["config"]
     assert not step.get("residual_prediction")
-    step["residual_prediction"] = True
-    step["residual_normalized_prediction"] = True
+    # main's convention since ai2cm/ace#1487: options live on the
+    # residual_prediction block itself
+    step["residual_prediction"] = {"normalized": True}
     norm = step["normalization"]
     assert "residual" not in norm and "loss" not in norm
     norm["residual"] = {
@@ -346,7 +347,7 @@ def make_resid_pretrain(seed: int) -> dict:
     step = c["stepper"]["step"]["config"]
     assert not any(n.startswith("nino34_lead") for n in step["out_names"])
     assert not step.get("residual_prediction")
-    step["residual_prediction"] = True
+    step["residual_prediction"] = {}  # every prognostic, full-field normalized
     # residual_prediction MUST pair with tendency-scaled loss normalization
     # (the shield-som and 2025-03-17 residual configs both do this). Without
     # it the loss normalizes tendencies by full-field stds; slow interior
@@ -376,14 +377,14 @@ def make_residfix_pretrain(seed: int) -> dict:
     180,000x. Validation loss fell four orders of magnitude and every one of
     150 epoch-end rollouts was NaN.
 
-    residual_normalized_prediction fixes the forward path: the network's
+    residual_prediction.normalized fixes the forward path: the network's
     prognostic outputs are treated as tendencies in residual-normalized units
     (one unit of output = one std of the true 5-day tendency), added to the
     input in physical units. The loss (residual block) then measures errors
     in the same units end to end.
     """
     c = make_resid_pretrain(seed)
-    c["stepper"]["step"]["config"]["residual_normalized_prediction"] = True
+    c["stepper"]["step"]["config"]["residual_prediction"] = {"normalized": True}
     return c
 
 

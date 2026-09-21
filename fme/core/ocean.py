@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import datetime
+from collections.abc import Collection
 
 import torch
 
@@ -108,8 +109,8 @@ class OceanConfig:
 
     def build(
         self,
-        in_names: list[str],
-        out_names: list[str],
+        in_names: Collection[str],
+        out_names: Collection[str],
         timestep: datetime.timedelta,
     ) -> "Ocean":
         if not (
