@@ -30,7 +30,11 @@ from fme.core.step.global_mean_removal import (
 )
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.output import StepOutput
-from fme.core.step.secondary_decoder import SecondaryDecoderConfig
+from fme.core.step.secondary_decoder import (
+    NoSecondaryDecoder,
+    SecondaryDecoder,
+    SecondaryDecoderConfig,
+)
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
     ResidualPredictionConfig,
@@ -2573,3 +2577,64 @@ def test_single_module_step_compile_flag():
         torch.testing.assert_close(
             compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
         )
+
+
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag_compiles_secondary_decoder():
+    """compile=True compiles every module the step owns, including the
+    secondary decoder, without changing the checkpoint state or the outputs.
+
+    The backend is forced to ``aot_eager`` from the outside (the config only
+    exposes ``compile: bool``) to keep the test within the suite's timeouts
+    while still exercising dynamo tracing.
+    """
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    eager_selector = get_single_module_noise_conditioned_selector()
+    compiled_selector = StepSelector(
+        type="single_module", config=dict(eager_selector.config, compile=True)
+    )
+    eager_step = get_step(eager_selector, img_shape)
+    with compile_backend("aot_eager"):
+        compiled_step = get_step(compiled_selector, img_shape)
+    assert isinstance(compiled_step, SingleModuleStep)
+    assert isinstance(eager_step, SingleModuleStep)
+    compiled_decoder = compiled_step.secondary_decoder
+    eager_decoder = eager_step.secondary_decoder
+    # narrows the SecondaryDecoder | NoSecondaryDecoder union for the type
+    # checker, and asserts this selector really does build a decoder
+    assert isinstance(compiled_decoder, SecondaryDecoder)
+    assert isinstance(eager_decoder, SecondaryDecoder)
+    # the decoder does not expose its Module, which is what tracks compilation
+    assert compiled_decoder._module.is_compiled
+    assert not eager_decoder._module.is_compiled
+
+    eager_state = eager_step.get_state()
+    compiled_step.load_state(eager_state)
+    compiled_state = compiled_step.get_state()
+    assert compiled_state.keys() == eager_state.keys()
+    for key in eager_state:
+        assert compiled_state[key].keys() == eager_state[key].keys()
+
+    n_samples = 2
+    args = StepArgs(
+        input=get_tensor_dict(eager_step.input_names, img_shape, n_samples),
+        next_step_input_data=get_tensor_dict(
+            eager_step.next_step_input_names, img_shape, n_samples
+        ),
+        labels=None,
+    )
+    with torch.no_grad():
+        torch.manual_seed(1)
+        eager_out = eager_step.step(args).output
+        torch.manual_seed(1)
+        compiled_out = compiled_step.step(args).output
+    assert "diagnostic_rad" in eager_out  # produced by the secondary decoder
+    for name in eager_out:
+        torch.testing.assert_close(
+            compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
+        )
+
+
+def test_no_secondary_decoder_compile_is_noop():
+    NoSecondaryDecoder().compile()

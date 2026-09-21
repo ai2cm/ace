@@ -126,12 +126,16 @@ class SingleModuleStepConfig(StepConfigABC):
             ``optimize_last_step_only``, or the trailing steps under
             ``evaluate_all_steps``) run unmasked, as does inference
             (eval mode).
-        compile: Whether to run the network's forward pass through
-            ``torch.compile``. Applied after distributed wrapping; the
-            parameters and state dict are unchanged so checkpoints are
-            unaffected. Compilation happens on the first forward for each new
-            input shape, so inference loaders with many distinct batch shapes
-            may trigger recompiles.
+        compile: Whether to run forward passes through ``torch.compile``.
+            Applied after distributed wrapping, so distributed data parallel is
+            inside the compiled graph, and to every module the step owns (the
+            main module and the secondary decoder). State dict keys are
+            unchanged, so checkpoints stay compatible with uncompiled runs.
+            Enabling this sets a process-global dynamo flag so that hitting the
+            static-shape recompile limit raises instead of silently falling
+            back to eager (varying the batch size uses dynamic shapes and does
+            not trip it). Module builders that declare compilation unsupported
+            raise ``NotImplementedError`` at step construction.
     """
 
     builder: ModuleSelector
@@ -467,9 +471,10 @@ class SingleModuleStep(StepABC):
         self._no_optimization = NullOptimization()
 
         self.module = self.module.wrap_module(dist.wrap_module)
+        self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
         if config.compile:
             self.module = self.module.compile()
-        self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
+            self.secondary_decoder.compile()
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector
