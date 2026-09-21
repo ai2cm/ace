@@ -43,6 +43,7 @@ from .step_diagnostics import StepDiagnosticsAggregator, StepDiagnosticsMetricCo
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
 from .trend import TrendMetricConfig
 from .utils import LatLonRegion
+from .variability_ratio import VariabilityRatioMetricConfig
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
 
@@ -69,6 +70,7 @@ MetricConfig = (
     | IpoIndexMetricConfig
     | TrendMetricConfig
     | NearZeroFractionMetricConfig
+    | VariabilityRatioMetricConfig
 )
 
 
@@ -203,7 +205,10 @@ class InferenceEvaluatorAggregatorConfig:
         mean_denorm: Global-mean time-series metrics on denormalized data.
         mean_norm: Global-mean time-series metrics on normalized data.
         step_means: Per-step snapshot metrics.
-            Defaults to step-20 denorm and norm.
+            Defaults to steps 6 and 18 denorm and step 20 denorm and norm. The
+            shorter steps exist so that a stepper which discards its subsurface
+            initial condition within the first steps is caught: on a 5-day
+            ocean step they are one and three months.
         ensembles: Ensemble spread metrics.
             Defaults to step-20.  Silently skipped when ``n_ensemble <= 1``.
         power_spectrum: Spherical power spectrum metrics.
@@ -219,6 +224,10 @@ class InferenceEvaluatorAggregatorConfig:
         ipo_index: Interdecadal Pacific Oscillation index metrics.
         trend: Per-grid-cell linear trend (slope vs. time) map metrics.
             Disabled by default.
+        variability_ratio: Area-averaged deseasonalized temporal variance of the
+            prediction divided by the target's, per variable, over the whole
+            rollout. Near 1 is healthy; well below 1 is a field whose
+            variability the emulator damps, which time-mean metrics cannot see.
         near_zero_fraction: Area-weighted fraction of cells at or below a
             small non-negative ``eps`` per variable, reported for prediction and
             its difference from the target. Optionally (``include_maps``) also
@@ -241,6 +250,8 @@ class InferenceEvaluatorAggregatorConfig:
     )
     step_means: list[StepMeanMetricConfig] = dataclasses.field(
         default_factory=lambda: [
+            StepMeanMetricConfig(step=6, target="denorm"),
+            StepMeanMetricConfig(step=18, target="denorm"),
             StepMeanMetricConfig(step=20, target="denorm"),
             StepMeanMetricConfig(step=20, target="norm"),
         ]
@@ -280,6 +291,9 @@ class InferenceEvaluatorAggregatorConfig:
     trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
     near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
         default_factory=NearZeroFractionMetricConfig
+    )
+    variability_ratio: VariabilityRatioMetricConfig = dataclasses.field(
+        default_factory=VariabilityRatioMetricConfig
     )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
@@ -326,6 +340,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.ipo_index,
             self.trend,
             self.near_zero_fraction,
+            self.variability_ratio,
         ]
         return [m for m in all_metrics if m.enabled]
 
