@@ -262,25 +262,28 @@ MISSING_DATASETS = {
         available=True,  # copied to weka 2026-09-16
     ),
     "abrupt-ensemble": MissingDataset(
-        path=_MISSING_ROOT + "abrupt-4xCO2-ensemble-fme-dataset",
+        path=(
+            "/climate-default/2026-09-21-vertically-resolved-4deg-daily-c96-shield-"
+            "som-abrupt-4xCO2-ensemble-fme-dataset"
+        ),
         purpose=(
             "SHiELD's own 36-member abrupt-4xCO2 spread: the data-only rows of "
             "figure 8 and the per-member prescribed-SST evaluators"
         ),
         source=(
             "gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-"
-            "4xCO2-ensemble/regridded-zarrs/gaussian_grid_180_by_360/"
-            "abrupt-4xCO2-ic_00NN (1deg only; no 4deg regrid exists)"
+            "4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/"
+            "abrupt-4xCO2-ic_00NN (45x90 regrid of 2026-09-21)"
         ),
         how=(
-            "regrid to gaussian_grid_45_by_90, then clone scripts/data_process/"
-            "configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-8layer.yaml to 4deg "
-            "with a daily time_coarsen"
+            "make shield_som_abrupt_4xco2_ensemble_c96_dataset RESOLUTION=4deg in "
+            "scripts/data_process (argo), then copy_zarrs_to_weka.py"
         ),
         kinds=(
             "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
             "somabruptens-abrupt-4xCO2-ens-sstprescribed-eval",
         ),
+        available=True,  # copied to weka 2026-09-21
     ),
 }
 

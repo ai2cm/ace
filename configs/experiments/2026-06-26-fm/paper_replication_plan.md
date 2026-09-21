@@ -42,12 +42,14 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   2026-09-21 can be resubmitted with `--skip-if-in-beaker` once a v2.1
   checkpoint exists (or pointed at `best_ckpt.tar` if that is what is wanted:
   `submit_paper_jobs.CHECKPOINT_PATH`).
-- Not submitted yet, **now unblocked upstream** (Spencer, 2026-09-21): the two
-  D3 kinds `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` and
-  `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`, and the three extra
-  `som-eq-dataCO2-10yr-sstdata-dataonly` jobs for 3xCO2 `ic_0003-0005`. Both
-  raw 45x90 regrids are on GCS; neither has been processed into an fme store
-  or copied to weka. See "Instructions for the next agent".
+- **D3 on weka (2026-09-21)**: processed by argo `compute-fme-dataset-ensemble-kf56p`
+  (36 members, 90 daily labels each, 2031-01-02T00 .. 2031-04-01T00) and copied
+  by 36 gantry jobs, all exit 0; `MISSING_DATASETS["abrupt-ensemble"]` points at
+  it. The first argo attempt (`tbbqd`) failed on every pod with "argument list
+  too long", fixed in `compute_dataset_argo_workflow.yaml` (scripts and config
+  were stored twice in the per-run pod template). The two D3 kinds are next to
+  submit. The three extra `som-eq-dataCO2-10yr-sstdata-dataonly` jobs for 3xCO2
+  `ic_0003-0005` wait on argo `compute-fme-dataset-ensemble-wtnfg`.
 - Fixes made during the campaign, all on `exp/alexeyfm` and pushed: start
   times moved to the stores' real 00Z day-2 labels (every daily store labels a
   day's mean at the following 00Z; the first submission's 164 jobs died on
@@ -191,7 +193,7 @@ See `MISSING_DATASETS.md` for full detail.
 |---|---|---|---|
 | D1 | `2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr` | `som-abrupt-4xCO2-10yr-{slab-eval,sst-eval,data-only}` | ✅ on weka |
 | D2 | `2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-ensemble-spin-up-fme-dataset/{climate}-spin-up-ic_000N.zarr` | `som-eq-dataCO2-10yr-sstslab-inference` | ✅ on weka |
-| D3 | `TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`, `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | 🚧 Spencer regrid; processing config not written |
+| D3 | `2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`, `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | ✅ on weka (2026-09-21) |
 | 3x members | new-dated SOM ensemble store with 3xCO2 `ic_0003-0005` | 3 more `som-eq-dataCO2-10yr-sstdata-dataonly` jobs | 🚧 Spencer regrid; config not written |
 | D4 | daily increasing-CO2 | `2pct*` | ❌ not planned |
 | AMIP `ic_0002`, `AMIP-p4K`, `AMIP-p2K`, ramped `ic_0003`, ERA5 | see `generate_paper_configs.AMIP_VARIANTS` / `RAMPED_DATASET` / `ERA5_DATASET` | prescribed-SST kinds | ✅ (p2k/p4k copied in July via `amip_p2k_p4k_transfer.yaml`, not re-verified) |

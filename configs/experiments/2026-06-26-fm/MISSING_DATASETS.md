@@ -16,26 +16,6 @@ To bring one online: produce the dataset, copy it to weka with
 
 ## Still missing
 
-### D3 — daily 4deg abrupt-4xCO2 36-member ensemble — RAW REGRID LANDED, PROCESSING PENDING
-
-- Placeholder: `/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr`
-- Needed by: `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` — SHiELD's own 90-day
-  abrupt-4xCO2 spread, the target for the model's `som-abrupt-4xCO2-ens-sstslab-eval`
-  runs (paper figures 8, 10) — and `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`, the
-  prescribed-SST version of the same figure:
-  one evaluator per member with SST, sea ice and CO2 read from it (36 jobs per
-  training run; `--ens-member` narrows).
-- Source: 1deg only —
-  `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_180_by_360/abrupt-4xCO2-ic_00NN`.
-  Spencer's 45x90 regrid landed 2026-09-21 at
-  `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/`
-  (36 members `abrupt-4xCO2-ic_00NN`).
-- How: clone
-  `scripts/data_process/configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-8layer.yaml`
-  to 4deg with a daily `time_coarsen` (pattern: the D1 config below), run it
-  on argo, copy to weka, name the store in `MISSING_DATASETS["abrupt-ensemble"]`
-  and flip `available`. Heaviest of the datasets (36 members).
-
 ### 3xCO2 `ic_0003-0005` of the SOM ensemble — RAW REGRID LANDED, PROCESSING PENDING
 
 - Not a `MISSING_DATASETS` entry: the 2026-06-08 SOM ensemble store simply has
@@ -54,6 +34,27 @@ To bring one online: produce the dataset, copy it to weka with
 
 - Needed by the paper's `2pct*` scripts. A 6-hourly 4deg processing from the
   old pipeline exists (`2024-07-16-…`); no daily version and no kind written.
+
+## Landed (2026-09-21)
+
+### D3 — daily 4deg abrupt-4xCO2 36-member ensemble
+
+- Path: `/climate-default/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr`,
+  90 daily labels each, 2031-01-02T00 .. 2031-04-01T00 (so
+  `n_forward_steps` = 89, `ABRUPT_ENSEMBLE_N_STEPS - 1`, unchanged). Same 99
+  arrays as the SOM ensemble daily store.
+- Unblocked: `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` (36 jobs) and
+  `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` (36 per training run).
+- Produced by argo `compute-fme-dataset-ensemble-kf56p` from
+  `scripts/data_process/configs/shield-som-abrupt4xCO2-ensemble-c96-4deg-8layer.yaml`
+  (Spencer's 45x90 regrid of
+  `2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble`, landed 2026-09-21). The
+  first attempt died on every pod with "argument list too long": the per-run
+  argo pod template stored the scripts and config twice, fixed in
+  `compute_dataset_argo_workflow.yaml`. Six-hourly sibling store
+  `2026-09-21-vertically-resolved-4deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
+  on GCS, not copied to weka. Copied to weka by 36 gantry jobs
+  (`gcs-to-weka-abrupt4xCO2-ic_00NN.zarr`, all exit 0).
 
 ## Landed (2026-09-16)
 

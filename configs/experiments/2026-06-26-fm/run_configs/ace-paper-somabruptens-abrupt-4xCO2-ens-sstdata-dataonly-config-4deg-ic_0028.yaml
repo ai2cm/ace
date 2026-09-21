@@ -13,7 +13,7 @@ logging:
   log_to_wandb: true
 loader:
   dataset:
-    data_path: /climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+    data_path: /climate-default/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
     file_pattern: abrupt4xCO2-ic_0028.zarr
     engine: zarr
   start_indices: &id001
@@ -22,7 +22,7 @@ loader:
   num_data_workers: 8
 prediction_loader:
   dataset:
-    data_path: /climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+    data_path: /climate-default/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
     file_pattern: abrupt4xCO2-ic_0028.zarr
     engine: zarr
   start_indices: *id001
