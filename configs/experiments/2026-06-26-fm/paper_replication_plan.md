@@ -42,19 +42,31 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   2026-09-21 can be resubmitted with `--skip-if-in-beaker` once a v2.1
   checkpoint exists (or pointed at `best_ckpt.tar` if that is what is wanted:
   `submit_paper_jobs.CHECKPOINT_PATH`).
-- **D3 on weka (2026-09-21)**: processed by argo `compute-fme-dataset-ensemble-kf56p`
-  (36 members, 90 daily labels each, 2031-01-02T00 .. 2031-04-01T00) and copied
-  by 36 gantry jobs, all exit 0; `MISSING_DATASETS["abrupt-ensemble"]` points at
-  it. The first argo attempt (`tbbqd`) failed on every pod with "argument list
-  too long", fixed in `compute_dataset_argo_workflow.yaml` (scripts and config
-  were stored twice in the per-run pod template). The two D3 kinds are next to
-  submit.
+- **Submitted 2026-09-21, the D3 kinds and the 3xCO2 members, all
+  succeeded**: `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` 36/36 ok,
+  `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` 900/900 ok on the 25
+  `nc-sfno` / `nc-swin-v2` arm cells (`--arm a1 a2 a3 --arch nc-sfno
+  nc-swin-v2 --skip-if-in-beaker`; the 19 `nc-swin-v2.1` SHiELD cells, 684
+  jobs, were not submitted, see above), and `som-eq-dataCO2-10yr-sstdata-dataonly`
+  now 20/20 ok with the three new 3xCO2 members (`--member 3 4 5`, a new
+  submitter flag, since `--skip-if-in-beaker` cannot see data-only names).
+  One gantry call of the eval batch failed with `UnpushedChangesError`
+  because it ran in the seconds between the 3xCO2 commit and its push; the
+  submitter carried on and the job was resubmitted with `--run … --ens-member 21`.
+  The 3347 + 939 experiments are all in `ai2/ace`, wandb group
+  `ace2-fm-paper-2026-06-26`.
+- **D3 on weka (2026-09-21)**: argo `compute-fme-dataset-ensemble-kf56p`
+  (36 members, 90 daily labels each, 2031-01-02T00 .. 2031-04-01T00, so
+  `ABRUPT_ENSEMBLE_N_STEPS - 1` = 89 forward steps was already right) and 36
+  gantry copies, all exit 0. The first argo attempt (`tbbqd`) failed on every
+  pod with "exec argoexec: argument list too long": the per-run pod template
+  stored the scripts and config twice (as inputs and substituted into args)
+  and 36 runs pushed that past 128 KiB; `compute_dataset_argo_workflow.yaml`
+  now reads them from the workflow parameters.
 - **3xCO2 `ic_0003-0005` on weka (2026-09-21)**: argo
   `compute-fme-dataset-ensemble-wtnfg` wrote them into the existing 2026-06-08
-  SOM store (3653 daily labels each), three gantry copies exit 0,
-  `SOM_MEMBERS["3xCO2"]` lists five members; the three extra
-  `som-eq-dataCO2-10yr-sstdata-dataonly` jobs are next to submit
-  (`--member 3 4 5`, a new submitter flag).
+  SOM store (3653 daily labels each, no `--stats`), three gantry copies exit 0,
+  `SOM_MEMBERS["3xCO2"]` lists five members.
 - Fixes made during the campaign, all on `exp/alexeyfm` and pushed: start
   times moved to the stores' real 00Z day-2 labels (every daily store labels a
   day's mean at the following 00Z; the first submission's 164 jobs died on
@@ -67,14 +79,9 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   listing helper now counts a never-started job as failed. Lesson: do not
   commit locally while a submission driver is running unless commit and push
   are back to back, since gantry refuses a HEAD that is not on the remote.
-- Data: D1 and D2 on weka (argo `xwpb9` / `26c2p`, copied 2026-09-16). Raw
-  45x90 regrids landed 2026-09-21: D3 at
-  `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/`
-  (36 members `abrupt-4xCO2-ic_00NN`) and the 3xCO2 `ic_0003-0005`
-  equilibrium members at
-  `gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/`
-  (pulled from tape). Not yet verified from this machine (gsutil needs
-  `gcloud auth login --update-adc`).
+- Data: every dataset the paper kinds need is on weka (D1, D2 2026-09-16;
+  D3 and the 3xCO2 members 2026-09-21; see the datasets table and
+  `MISSING_DATASETS.md`). Only D4 (`2pct*`) is not planned.
 
 ## Kind naming
 
@@ -115,8 +122,7 @@ Job names are `{run}-{kind}[-{climate}][-ic{n}]` for per-run kinds and
 
 ## Experiment inventory
 
-Legend: ✅ runnable (data on weka) · 🚧 blocked on Spencer's regrid ·
-❌ not planned. "Paper" names the script in `ACE-experiments/inference`; "ours"
+Legend: ✅ runnable (data on weka) · ❌ not planned. "Paper" names the script in `ACE-experiments/inference`; "ours"
 marks experiments the paper does not have.
 
 ### Slab-ocean (SHiELD-SOM)
@@ -126,12 +132,12 @@ marks experiments the paper does not have.
 | `run-ace-equilibrium-climate-inference.sh` (spin-up 2030 → 10 yr main, 4 climates × 5 ICs) | `som-eq-dataCO2-10yr-sstslab-inference` | D2 spin-up member, then SOM paper member | 2030-01-02T00 + ic stagger, `364 - offset` steps; restart at 2031-01-01T00, 3652 steps on spin-up + member symlink dir | 20 (two-stage) | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
 | — single-stage variant (ours) | `som-eqnospinup-dataCO2-10yr-sstslab-inference` | SOM paper member | 2031-01-02T00 + ic stagger, `3652 - offset` steps | 20 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
 | `run-ace-1000-year-equilibrium-climate-inference.sh` | `som-eq-dataCO2-1000yr-sstslab-inference` | SOM 1x member tiled ×101, CO2 → climate | 2032-01-01T00, 365250 steps | 4 | `som` | none | ✅ (long) |
-| `run-ace-data-only-equilibrium-climate-evaluator.sh` | `som-eq-dataCO2-10yr-sstdata-dataonly` | every SOM member vs itself (3x has `ic_0001-2` only) | 2031-01-02T00, 3652 steps | 17 total; +3 🚧 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
+| `run-ace-data-only-equilibrium-climate-evaluator.sh` | `som-eq-dataCO2-10yr-sstdata-dataonly` | every SOM member vs itself | 2031-01-02T00, 3652 steps | 20 total | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
 | — free variant (ours) | `som-abrupt-4xCO2-10yr-sstslab-inference` | SOM 1x member, CO2 → 4x | 2031-01-02T00, 3652 steps | 1 | `som` | monthly netCDF | ✅ |
 | `run-ace-abrupt-4xCO2-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstslab-eval` | D1 `abrupt-4xCO2` | 2020-01-02T00, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
 | `run-ace-abrupt-4xCO2-data-only-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstdata-dataonly` | D1 vs itself | same | 1 total | `som` | monthly netCDF | ✅ |
 | `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` | `som-abrupt-4xCO2-ens-sstslab-eval` | SOM 1x member, CO2 → 4x | 2nd of each month 2031-01 … 2033-12 at 00Z, 90 steps | 1 | `som` | none | ✅ |
-| `run-ace-abrupt-4xCO2-ensemble-data-only-evaluator.sh` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` | D3 member vs itself | 89 steps from each member's start | 36 total (`--ens-member`) | `som` | none | 🚧 |
+| `run-ace-abrupt-4xCO2-ensemble-data-only-evaluator.sh` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` | D3 member vs itself | 89 steps from each member's start | 36 total (`--ens-member`) | `som` | none | ✅ |
 | `run-seven-day-1xCO2-and-abrupt-4xCO2-inference-ensemble.sh` | `som-control-dataCO2-7day-sstslab-inference`, `som-abrupt-4xCO2-7day-sstslab-inference` | SOM 1x member; CO2 as is / → 4x | same 36 starts, 7 steps | 1 + 1 | `som` | none | ✅ |
 | `run-ace-2pctCO2-*.sh` | — | D4 increasing-CO2 daily | — | — | — | — | ❌ |
 
@@ -149,7 +155,7 @@ evaluator settings (default aggregator, `forward_steps_in_memory: 1`).
 | — control for the equilibrium runs (ours) | `som-eq-dataCO2-10yr-sstprescribed-eval` | SOM paper member per climate | 2031-01-02T00 + ic stagger, `3652 - offset` steps, 5 ICs | 20 | `som` | daily `PRATEsfc` zarr, 1x/3x | ✅ |
 | — abrupt evaluator with SHiELD's SST instead of the slab (ours) | `somabrupt-abrupt-4xCO2-10yr-sstprescribed-eval` | D1 `abrupt-4xCO2`, its SST and CO2 | 2020-01-02T00, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
 | — CO2 step with SST held at 1x (ours) | `som-abrupt-4xCO2-10yr-sstprescribed-eval` | SOM 1x member SST, CO2 → 4x, vs 1x member | 2031-01-02T00, 3652 steps | 1 | `som` | monthly netCDF | ✅ |
-| — ensemble with SST from SHiELD's 4xCO2 members (ours) | `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | D3 member per job, SST/sea ice/CO2 from it | 89 steps from each member's start | 36 (`--ens-member`) | `som` | none | 🚧 |
+| — ensemble with SST from SHiELD's 4xCO2 members (ours) | `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | D3 member per job, SST/sea ice/CO2 from it | 89 steps from each member's start | 36 (`--ens-member`) | `som` | none | ✅ |
 | — ensemble CO2 step with SST held at 1x (ours) | `som-abrupt-4xCO2-ens-sstprescribed-eval` | SOM 1x member SST, CO2 → 4x, vs 1x member | same 36 starts, 90 steps | 1 | `som` | none | ✅ |
 | — control ensemble (ours) | `som-control-dataCO2-ens-sstprescribed-eval` | SOM 1x member as is | same | 1 | `som` | none | ✅ |
 | `run-ace-split-amip-ensemble-inference.sh`, `…-single-member-split-amip-inference-daily-PRATEsfc.sh` | `amip-control-dataCO2-43yr-sstprescribed-eval` | AMIP `ic_0002` (held out) | 1979-01-02T00, 15689 steps (to 2021-12-16) | 1 | `amip` | daily `PRATEsfc` zarr | ✅ |
@@ -236,19 +242,22 @@ python submit_paper_jobs.py --kind som-abrupt-4xCO2-10yr-sstslab-inference somab
 python submit_paper_jobs.py --kind som-control-dataCO2-7day-sstslab-inference som-abrupt-4xCO2-7day-sstslab-inference --arm a1 a2 a3
 python submit_paper_jobs.py --kind som-eqnospinup-dataCO2-10yr-sstslab-inference som-eq-dataCO2-10yr-sstslab-inference --arm a1 a2 a3 --skip-if-in-wandb
 python submit_paper_jobs.py --kind som-eq-dataCO2-1000yr-sstslab-inference --arm a1 --arch nc-swin-v2
-# After D3
+# D3 ensemble (submitted 2026-09-21 for the nc-sfno / nc-swin-v2 arm cells)
 python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstdata-dataonly
-python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstprescribed-eval --arm a1 --ens-member 1 2 3   # 36/run
+python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstprescribed-eval --arm a1 a2 a3 --arch nc-sfno nc-swin-v2 --skip-if-in-beaker   # 36/run
+# Data-only rows for members added later (--skip-if-in-beaker cannot see data-only names)
+python submit_paper_jobs.py --kind som-eq-dataCO2-10yr-sstdata-dataonly --climate 3xCO2 --member 3 4 5
 ```
 
 Per-run job counts on SHiELD data (53 fm/c96 runs, 41 with `--arm`, after
 the nc-swin-v2.1 cells landed): slab-ocean 49 (`eq` 20, `eqnospinup` 20,
-`1000yr` 4, abrupt 10yr 2, ens 1, 7day 2), prescribed 30 (`eq` sst 20, abrupt
-10yr 2, ens 2, amip 3, ramped 3) plus 36 `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` after
-D3. On ERA5 (39 fm/era5 runs, 29 with `--arm`): 3. Data-only 21 now, +36 with
-D3. Everything ≈ 4300 jobs now, ≈ 6300 with D3; the arms alone
-≈ 3300. Submit by kind and arm; run the per-member D3 kind on a subset
-(`--run`, `--ens-member`).
+`1000yr` 4, abrupt 10yr 2, ens 1, 7day 2), prescribed 66 (`eq` sst 20, abrupt
+10yr 2, ens 2, amip 3, ramped 3, `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` 36).
+On ERA5 (39 fm/era5 runs, 29 with `--arm`): 3. Data-only 60 (20 `som-eq`, 36
+`somabruptens`, 1 `somabrupt`, 3 AMIP). Everything ≈ 6300 jobs; the arms alone
+≈ 4300 (3347 + 939 submitted so far, the v2.1 cells' 1540 + 684 pending).
+Submit by kind and arm; run the per-member D3 kind on a subset (`--run`,
+`--ens-member`).
 
 The slab is forward-Euler at a daily step, untested here (paper was 6-hourly):
 run one `som-eqnospinup-dataCO2-10yr-sstslab-inference` 1xCO2 job and check SST drift
@@ -256,108 +265,35 @@ before submitting the rest of the slab kinds.
 
 ## Instructions for the next agent
 
-Both remaining datasets landed on GCS as raw 45x90 regrids on 2026-09-21. The
-work is: process each into a 4deg daily fme store on argo, copy to weka, point
-the generator at it, submit. Do the D3 ensemble first (it feeds figure 8), the
-3xCO2 members second. Run everything from `configs/experiments/2026-06-26-fm`
-in the `fme` env (`/Users/alexeyy/mamba/envs/fme/bin/python`; `gantry`,
-`beaker`, `argo`, `gsutil` need `PATH=/Users/alexeyy/mamba/envs/fme/bin:/Users/alexeyy/.local/bin:$PATH`).
-If `gsutil` says "Reauthentication required", have the user run
-`gcloud auth login --update-adc`. Never commit while a submission is running
-unless you push immediately after (gantry refuses a HEAD not on the remote).
+Everything the paper kinds need is on weka and every kind has run on every
+`nc-sfno` / `nc-swin-v2` arm cell (status above). What remains:
 
-### A. D3: 36-member abrupt-4xCO2 ensemble
-
-1. Verify the upload: `gsutil ls gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/`
-   should list 36 `abrupt-4xCO2-ic_00NN/` directories, each with
-   `fluxes_2d.zarr`, `full_state.zarr`, `ocean_forcing.zarr` etc. like the
-   1deg ones.
-2. Write `scripts/data_process/configs/shield-som-abrupt4xCO2-ensemble-c96-4deg-8layer.yaml`
-   by cloning the 1deg file next to it: `gaussian_grid_180_by_360` →
-   `gaussian_grid_45_by_90` in every run path; `data_output_directory` →
-   `gs://vcm-ml-intermediate/2026-09-21-vertically-resolved-4deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`;
-   stats directories renamed the same way and every run listed under
-   `stats.exclude_runs` (no stats are needed; D1's 4deg config does this);
-   append the `time_coarsen` block from
-   `shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml` verbatim except its
-   two output directories, which become
-   `…/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
-   (+ `-stats`). Keep the run keys `abrupt4xCO2-ic_00NN`: the generator reads
-   `abrupt4xCO2-{member}.zarr`.
-3. Add a Makefile target next to `shield_som_abrupt_co2_increase_c96_dataset`:
-   `shield_som_abrupt_4xco2_ensemble_c96_dataset` running
-   `./compute_dataset.sh --dataset $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/shield-som-abrupt4xCO2-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml`.
-   Commit + push (data_process files).
-4. `cd scripts/data_process && make shield_som_abrupt_4xco2_ensemble_c96_dataset RESOLUTION=4deg`
-   (argo cluster `gke_vcm-ml_us-central1-c_ml-cluster-dev`, needs
-   `brew install python-yq`); 36 pods, expect ~1 h. Watch with `argo list`.
-5. When Succeeded: check one member's daily time axis (copy `time/` with
-   `gsutil -m cp -r`, open with `zarr`, decode with `cftime`): expect labels at
-   00Z starting the day after the run start, ~90 of them. If the count is not
-   90 or 91, adjust `ABRUPT_ENSEMBLE_N_STEPS - 1` in
-   `_abrupt_ensemble_member_configs` so `n_forward_steps` = labels − 1.
-6. Copy to weka: `PATH=… python scripts/data_process/copy_zarrs_to_weka.py gs://vcm-ml-intermediate/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
-   (36 gantry jobs in `ai2/climate-titan`); confirm exit 0 with
-   `beaker experiment get <id> --format json`.
-7. In `generate_paper_configs.py`, `MISSING_DATASETS["abrupt-ensemble"]`: set
-   `path` to `/climate-default/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
-   and `available=True`; `python generate_paper_configs.py`; validate one config
-   with `PYTHONPATH=<repo root> python -m fme.ace.validate_config --config_type evaluator run_configs/ace-paper-somabruptens-abrupt-4xCO2-ens-sstprescribed-eval-config-4deg-ic_0001.yaml`;
-   update `MISSING_DATASETS.md` and this file; commit; push.
-8. Submit:
-   ```bash
-   python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstdata-dataonly --skip-if-in-beaker
-   python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstprescribed-eval --arm a1 a2 a3 --skip-if-in-beaker
-   ```
-   36 + 36 × 22 = 828 jobs (`nc-swin-v2.1` cells will fail to start until they
-   have `best_inference_ckpt.tar`; pass `--arch nc-sfno nc-swin-v2` to skip
-   them). Run the submitter detached (`nohup … &`) and log to a file; it takes
-   ~1 h.
-9. Monitor with a 20-minute cron: list `ai2/ace` via
-   `_beaker_listing.fetch_experiments_by_name("ai2/ace", "-sst")`, keep only
-   names containing a kind from `generate_paper_configs.KINDS`, tally by
-   `status`; read logs of any `failed`, resubmit infrastructure failures with
-   `--run <run> --ens-member N`, record anything else here.
-
-### B. 3xCO2 equilibrium members ic_0003-0005
-
-1. Verify: `gsutil ls gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/`
-   now lists `3xCO2-ic_0003/`, `3xCO2-ic_0004/`, `3xCO2-ic_0005/`.
-2. Write `scripts/data_process/configs/shield-som-ensemble-3xco2-members-c96-4deg-8layer.yaml`:
-   a copy of `shield-som-ensemble-c96-4deg-8layer.yaml` whose `runs` contain
-   only the three new members (they are already there, commented out) and
-   whose output directories are **unchanged** (the existing
-   `2026-06-08-…-4deg-c96-shield-som-ensemble-fme-dataset` and its `-daily-`
-   sibling), so the three zarrs land next to the 17 existing ones and
-   `SOM_DATASET` needs no change. List the three under `stats.exclude_runs`;
-   do not pass `--stats` (the training stats must not change). Makefile
-   target `shield_som_ensemble_3xco2_members_c96_dataset` running
-   `./compute_dataset.sh --dataset --time-coarsen --config configs/shield-som-ensemble-3xco2-members-c96-$(RESOLUTION)-$(LAYERS).yaml`.
-   Commit + push; run with `RESOLUTION=4deg`; 3 pods.
-3. Copy the three daily zarrs to weka with `copy_zarrs_to_weka.py <daily dir>/3xCO2-ic_000{3,4,5}.zarr`
-   (pass the three `.zarr` paths, not the directory, or the 17 existing zarrs
-   are recopied).
-4. `SOM_MEMBERS["3xCO2"]` → `("ic_0001", …, "ic_0005")` in
-   `generate_paper_configs.py`; regenerate (three new
-   `som-eq-dataCO2-10yr-sstdata-dataonly` configs appear, nothing else
-   changes: `CLIMATES["3xCO2"].member` stays `ic_0002`, the paper's choice);
-   update `MISSING_DATASETS.md` ("3x members" section) and this file; commit;
-   push.
-5. `python submit_paper_jobs.py --kind som-eq-dataCO2-10yr-sstdata-dataonly --climate 3xCO2 --skip-if-in-beaker`
-   — `--skip-if-in-beaker` does not see data-only names (no `ace2-fm-` prefix),
-   so restrict to the new members by checking the two existing 3xCO2 jobs are
-   in Beaker and passing nothing else; if the submitter offers no member
-   filter, add `--member` or submit the three configs by hand with
-   `run-ace-evaluator.sh`.
-
-### C. Afterwards
-
-- Update the status section: counts per kind, D3 and 3x rows in the datasets
-  table to ✅, and remove the 🚧 legend entries if nothing is blocked.
-- The `nc-swin-v2.1` cells stay blocked until their trainings produce
-  `best_inference_ckpt.tar` (see status); re-running the seven submit
-  commands in "How to run" with `--skip-if-in-beaker` fills them in once it
-  exists.
+- **`nc-swin-v2.1` cells** (19 SHiELD-eligible, 13 ERA5-eligible runs): the
+  1540 jobs of the 25 non-D3 kinds and the 684 `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`
+  jobs wait on a `best_inference_ckpt.tar` (or a decision to use
+  `best_ckpt.tar` via `submit_paper_jobs.CHECKPOINT_PATH`). Once it exists,
+  re-run the submit commands in "How to run" with `--skip-if-in-beaker`
+  (drop `--arch`); the listing skips every finished or running job, so only
+  the v2.1 cells are submitted.
+- **Monitoring**: list `ai2/ace` via
+  `_beaker_listing.fetch_experiments_by_name("ai2/ace", "-sst")`, keep the
+  names containing a kind from `generate_paper_configs.KINDS`, tally by
+  `status`; resubmit infrastructure failures with `--run <run>
+  --ens-member N` / `--climate … --ic N` / `--member N` and
+  `--skip-if-in-beaker`. Beaker, not wandb, is the source of truth.
+- Run from `configs/experiments/2026-06-26-fm` in the `fme` env
+  (`/Users/alexeyy/mamba/envs/fme/bin/python`; `gantry`, `beaker`, `argo`,
+  `gsutil` need `PATH=/Users/alexeyy/mamba/envs/fme/bin:/Users/alexeyy/.local/bin:$PATH`).
+  Never commit while a submission is running unless you push immediately
+  after: gantry refuses a HEAD not on the remote, and on 2026-09-21 one job
+  of 900 hit exactly that window.
+- Processing a new SHiELD store: clone a `scripts/data_process/configs/*-4deg-8layer.yaml`,
+  add a Makefile target, `make <target> RESOLUTION=4deg` (argo, cluster
+  `gke_vcm-ml_us-central1-c_ml-cluster-dev`, needs `python-yq`), check the
+  daily time axis (00Z labels from the day after the run start), then
+  `scripts/data_process/copy_zarrs_to_weka.py <daily dir or .zarr paths>`
+  (one gantry job per zarr in `ai2/climate-titan`). Argo runs the per-run
+  pods nine at a time; a 36-run config takes ~45 min per stage.
 
 ## Decisions log
 
