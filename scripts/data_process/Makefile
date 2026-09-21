@@ -200,6 +200,10 @@ shield_som_ensemble_c96_dataset:
 shield_som_abrupt_co2_increase_c96_dataset:
 	./compute_dataset.sh --dataset $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/shield-som-abrupt-co2-increase-c96-$(RESOLUTION)-$(LAYERS).yaml
 
+.PHONY: shield_som_abrupt_4xco2_ensemble_c96_dataset
+shield_som_abrupt_4xco2_ensemble_c96_dataset:
+	./compute_dataset.sh --dataset $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/shield-som-abrupt4xCO2-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
+
 .PHONY: shield_som_increasing_co2_c96_dataset
 shield_som_c96_increasing_co2_dataset:
 	./compute_dataset.sh --config configs/shield-som-increasing-co2-c96-$(RESOLUTION)-$(LAYERS).yaml
