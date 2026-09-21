@@ -391,7 +391,20 @@ class TrainOutput(TrainOutputABC):
         """
         flattened_data, n_ensemble = fold_ensemble_dim(data)
         if n_ensemble > 1:
-            ensemble_forcing_data = add_ensemble_dim(forcing_data, repeats=n_ensemble)
+            # Folding the ensemble dimension into the sample dimension is a
+            # copy, not a view (see fold_sized_ensemble_dim), so broadcasting
+            # the forcing across members materializes n_ensemble copies of the
+            # whole forcing window. Per the DeriveFnABC contract the derive
+            # function reads forcing_data only for names absent from data, so
+            # copy only those: in coupled training the atmosphere forcing
+            # window is the full dataset while data holds every generated
+            # name, leaving a handful of exogenous forcings to broadcast.
+            forcing_to_broadcast = {
+                k: v for k, v in forcing_data.items() if k not in flattened_data
+            }
+            ensemble_forcing_data = add_ensemble_dim(
+                forcing_to_broadcast, repeats=n_ensemble
+            )
             flattened_forcing_data = fold_sized_ensemble_dim(
                 ensemble_forcing_data, n_ensemble
             )
@@ -402,6 +415,27 @@ class TrainOutput(TrainOutputABC):
         )
         derived_data = self.derive_func(flattened_data, flattened_forcing_data)
         return unfold_ensemble_dim(derived_data, n_ensemble)
+
+    def select_first_timesteps(self, n_timesteps: int) -> "TrainOutput":
+        """A view of this output restricted to its first ``n_timesteps``.
+
+        The tensor slices are views, so this costs nothing; it lets a consumer
+        that only reads the start of the window avoid copying (or normalizing)
+        the rest of it. A window shorter than ``n_timesteps`` is returned whole.
+        """
+        return TrainOutput(
+            metrics=self.metrics,
+            gen_data=EnsembleTensorDict(
+                {k: v[:, :, :n_timesteps] for k, v in self.gen_data.items()}
+            ),
+            target_data=EnsembleTensorDict(
+                {k: v[:, :, :n_timesteps] for k, v in self.target_data.items()}
+            ),
+            time=self.time[:, :n_timesteps],
+            normalize=self.normalize,
+            derive_func=self.derive_func,
+            per_channel_losses=self.per_channel_losses,
+        )
 
     def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
         return TrainOutput(

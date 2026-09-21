@@ -2235,6 +2235,10 @@ class CoupledTrainStepper(
         ocean_gen_data, atmos_gen_data = _process_ensemble_output_list(
             output_list
         )  # NOTE: must call AFTER optimization.step_weights()
+        # The stacked copies above hold everything the per-step tensors did;
+        # keeping the list alive doubles generated-data memory for the rest of
+        # the call, which for a deep coupled window is many GiB.
+        del output_list
 
         ocean_stepped = TrainOutput(
             metrics=metrics.get_ocean_metrics(),
@@ -2258,6 +2262,10 @@ class CoupledTrainStepper(
             ocean=ocean_stepped,
             atmosphere=atmos_stepped,
         )
+        # prepend_initial_condition below concatenates into fresh tensors, so
+        # these pre-prepend references would otherwise pin a second full copy
+        # of the generated window through the rest of the call.
+        del ocean_stepped, atmos_stepped, ocean_gen_data, atmos_gen_data
 
         # prepend initial conditions
         ocean_data = data.ocean_data
