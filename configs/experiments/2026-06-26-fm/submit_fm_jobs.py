@@ -45,6 +45,8 @@ ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1")
 def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
     # Training configs only: cooldown configs are submitted by
     # submit_cooldown_jobs.py, and eval suites use a different prefix.
+    # `-diag` configs are one-off diagnostics submitted by hand via
+    # run-ace-train.sh; they are short runs that would waste a slot here.
     arch_prefixes = tuple(f"{CONFIG_PREFIX}{DATASET_TAG}{arch}-" for arch in archs)
     return sorted(
         path.name
@@ -54,6 +56,7 @@ def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
         and not path.name.endswith("-finetune.yaml")
         and not path.name.endswith("-cooldown.yaml")
         and not path.name.endswith("-bestinfcooldown.yaml")
+        and not path.name.endswith("-diag.yaml")
     )
 
 
