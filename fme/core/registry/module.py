@@ -78,9 +78,34 @@ CONDITIONAL_BUILDERS = [
 
 
 class Module:
-    def __init__(self, module: nn.Module, label_encoding: LabelEncoding | None):
+    """A built network together with its label encoding.
+
+    ``module`` owns the parameters and state; ``forward_module``, when given,
+    is what is actually called on the forward pass (e.g. a ``torch.compile``d
+    view of ``module``). Keeping the two separate means compilation never
+    changes the state dict, so checkpoints are unaffected.
+    """
+
+    def __init__(
+        self,
+        module: nn.Module,
+        label_encoding: LabelEncoding | None,
+        forward_module: nn.Module | None = None,
+    ):
         self._module = module
         self._label_encoding = label_encoding
+        self._forward_module = forward_module
+
+    @property
+    def forward_module(self) -> nn.Module:
+        """The module actually called on the forward pass.
+
+        This is the compiled view when :meth:`compile` has been applied, and
+        the parameter-owning module otherwise.
+        """
+        if self._forward_module is None:
+            return self._module
+        return self._forward_module
 
     def __call__(
         self, input: torch.Tensor, labels: BatchLabels | None = None
@@ -92,9 +117,29 @@ class Module:
             if labels is None:
                 raise TypeError("Labels are required for conditional models")
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
-            return self._module(input, labels=encoded_labels.tensor)
+            return self.forward_module(input, labels=encoded_labels.tensor)
         else:
-            return self._module(input)
+            return self.forward_module(input)
+
+    def compile(self, **kwargs: Any) -> "Module":
+        """Return a Module whose forward pass runs through ``torch.compile``.
+
+        The underlying module (parameters, state dict, ``torch_module``) is
+        unchanged; only the callable used in ``__call__`` is compiled. Call
+        after any distributed wrapping so the compiled graph includes it.
+
+        Args:
+            kwargs: Forwarded to ``torch.compile``.
+        """
+        return Module(
+            self._module,
+            self._label_encoding,
+            forward_module=torch.compile(self._module, **kwargs),
+        )
+
+    @property
+    def is_compiled(self) -> bool:
+        return self._forward_module is not None
 
     @property
     def torch_module(self) -> nn.Module:
@@ -123,9 +168,18 @@ class Module:
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
-        return Module(callable(self._module), self._label_encoding)
+        """Wrap the underlying module (and the forward callable, if it differs)."""
+        forward_module = (
+            callable(self._forward_module) if self._forward_module is not None else None
+        )
+        return Module(callable(self._module), self._label_encoding, forward_module)
 
     def to(self, device: torch.device) -> "Module":
+        if self._forward_module is not None:
+            raise RuntimeError(
+                "Module.to must be called before Module.compile; moving a "
+                "compiled module between devices is not supported."
+            )
         return Module(self._module.to(device), self._label_encoding)
 
 

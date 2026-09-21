@@ -126,6 +126,12 @@ class SingleModuleStepConfig(StepConfigABC):
             ``optimize_last_step_only``, or the trailing steps under
             ``evaluate_all_steps``) run unmasked, as does inference
             (eval mode).
+        compile: Whether to run the network's forward pass through
+            ``torch.compile``. Applied after distributed wrapping; the
+            parameters and state dict are unchanged so checkpoints are
+            unaffected. Compilation happens on the first forward for each new
+            input shape, so inference loaders with many distinct batch shapes
+            may trigger recompiles.
     """
 
     builder: ModuleSelector
@@ -143,6 +149,7 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
+    compile: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -460,6 +467,8 @@ class SingleModuleStep(StepABC):
         self._no_optimization = NullOptimization()
 
         self.module = self.module.wrap_module(dist.wrap_module)
+        if config.compile:
+            self.module = self.module.compile()
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
         self._timestep = dataset_info.timestep
 
