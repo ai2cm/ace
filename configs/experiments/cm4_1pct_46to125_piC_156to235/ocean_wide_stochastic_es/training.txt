@@ -29,9 +29,10 @@
 # min_runtime set on every row -- the Beaker scheduler has required one since
 # 2026-08-28 and uncoupled_train.sh otherwise defaults it to 0.
 #
-# NOT LAUNCHED. Both rows are `skip`. Launch waits on the ai2cm/reports#98
-# review, since the arm this is read against is the arm that review assesses.
-# Flip both to `train` to launch.
+# LAUNCHED 2026-09-21 on elynn's green light, ahead of the ai2cm/reports#98
+# review rather than after it: the arm this is read against is already
+# measured, so the review can only change how its result is written up, not
+# what this arm is compared to.
 #
 # Read at stage 1 on val_piC/mean/loss (the one-step metric matched to what
 # stage 1 optimizes) against allblocks' 0.04254 / 0.04261, and on seed
@@ -42,6 +43,6 @@
 
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
