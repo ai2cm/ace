@@ -11,3 +11,5 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAY
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|run_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|training|best_inference_ckpt|normal|--min-runtime 8h
