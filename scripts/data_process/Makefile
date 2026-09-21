@@ -196,6 +196,10 @@ shield_som_c96_spin_up_dataset:
 shield_som_ensemble_c96_dataset:
 	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-som-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
 
+.PHONY: shield_som_ensemble_3xco2_members_c96_dataset
+shield_som_ensemble_3xco2_members_c96_dataset:
+	./compute_dataset.sh --dataset --time-coarsen --config configs/shield-som-ensemble-3xco2-members-c96-$(RESOLUTION)-$(LAYERS).yaml
+
 .PHONY: shield_som_abrupt_co2_increase_c96_dataset
 shield_som_abrupt_co2_increase_c96_dataset:
 	./compute_dataset.sh --dataset $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/shield-som-abrupt-co2-increase-c96-$(RESOLUTION)-$(LAYERS).yaml
