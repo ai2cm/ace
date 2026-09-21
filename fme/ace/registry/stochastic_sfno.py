@@ -260,7 +260,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             training and, in eval, the latent is shifted so that mean falls
             within the observed envelope (no-op when it already does).
             Bounds the global-mean of the latent the transformer blocks see
-            at inference to the range observed in training.
+            at inference to the range observed in training. The eval-time
+            check of the tracked envelope is a data-dependent branch that
+            dynamo cannot trace through, so under torch.compile the model
+            runs as three graphs with two graph breaks around that check;
+            results are still correct. With this option disabled the model
+            compiles to a single graph.
     """
 
     spectral_transform: Literal["sht"] = "sht"
