@@ -1,2 +1,4 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs0|01M3307J8RAC4VP280SN2CTSZS|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|01M3307VF942N2RV8C2GX3HHVH|training|best_inference_ckpt|normal|--min-runtime 8h
