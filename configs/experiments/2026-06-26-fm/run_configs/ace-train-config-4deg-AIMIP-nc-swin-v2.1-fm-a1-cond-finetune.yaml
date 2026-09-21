@@ -1,4 +1,4 @@
-# arg: --dataset 01M1N6H4QZS1RH8RD4C84SRVTK:/checkpoints
+# arg: --dataset 01M2T5J16DWHEYTVQRR87ANJF0:/checkpoints
 seed: 1
 experiment_dir: /results
 save_checkpoint: true
@@ -626,7 +626,6 @@ validation:
         - era5
 optimization:
   enable_automatic_mixed_precision: false
-  max_consecutive_non_finite_losses: 5
   lr: 1.0e-05
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
@@ -640,6 +639,8 @@ optimization:
         total_iters: 10
       step_each_iteration: false
     milestones: []
+  float32_matmul_precision: high
+  max_consecutive_non_finite_losses: 5
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
@@ -657,13 +658,13 @@ stepper:
   step:
     type: single_module
     config:
-      residual_prediction: false
+      residual_prediction: true
       builder:
         type: NoiseConditionedSwinTransformer
         config:
-          embed_dim: 256
+          embed_dim: 128
           noise_embed_dim: 32
-          depth_multiplier: 4
+          depth_multiplier: 1
           num_heads:
           - 4
           - 8
@@ -672,9 +673,14 @@ stepper:
           window_size:
           - 4
           - 8
+          patch_size:
+          - 1
+          - 1
+          num_levels: 1
           mlp_ratio: 4.0
-          drop_path_rate: 0.2
+          drop_path_rate: 0.1
           use_skip: true
+          skip_projection: true
           mlp_layer: swiglu
           padding_conf:
             activate: true
@@ -685,6 +691,7 @@ stepper:
             pad_lon:
             - 3
             - 3
+        conditional: true
       normalization:
         network:
           global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/centering.nc
@@ -817,6 +824,7 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
+      compile: true
 train_aggregator:
   ensemble_metrics: true
 ema_checkpoint_save_epochs:

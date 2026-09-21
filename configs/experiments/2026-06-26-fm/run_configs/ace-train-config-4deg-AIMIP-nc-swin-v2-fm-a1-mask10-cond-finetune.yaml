@@ -1,5 +1,5 @@
-# arg: --dataset 01M1N6H4QZS1RH8RD4C84SRVTK:/checkpoints
-seed: 1
+# arg: --dataset 01M2SZPF0PM5QYMP31VMBTFEEZ:/checkpoints
+seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -685,6 +685,7 @@ stepper:
             pad_lon:
             - 3
             - 3
+        conditional: true
       normalization:
         network:
           global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/centering.nc
@@ -817,6 +818,7 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
+      include_channel_mask_inputs: true
 train_aggregator:
   ensemble_metrics: true
 ema_checkpoint_save_epochs:
