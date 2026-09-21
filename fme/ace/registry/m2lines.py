@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
@@ -124,6 +124,12 @@ class FloeNetBuilder(ModuleConfig):
     """
     Configuration for the M2Lines FloeNet architecture.
     """
+
+    compile_unsupported_reason: ClassVar[str] = (
+        "FloeNet rebuilds its mesh graphs from numpy and uses boolean-mask "
+        "indexing in forward, producing data-dependent shapes torch.compile "
+        "cannot trace."
+    )
 
     latent_dimension: int = 256
     activation: str = "SiLU"
