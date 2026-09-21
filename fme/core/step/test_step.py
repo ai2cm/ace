@@ -2348,9 +2348,14 @@ def test_multi_call_step_forwards_train_eval():
     wrapped_step.train.assert_called_once_with(True)
 
 
+@pytest.mark.medium_duration
 def test_single_module_step_compile_flag():
     """compile=True runs the forward through torch.compile while leaving the
-    checkpoint state identical in structure to the uncompiled step."""
+    checkpoint state identical in structure to the uncompiled step.
+
+    The cold inductor compile takes several seconds on CI, over the
+    ``--very-fast`` per-test budget, so the test runs only in the fast and
+    full suites."""
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
     eager_selector = get_single_module_selector()
