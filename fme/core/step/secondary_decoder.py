@@ -3,6 +3,7 @@
 import copy
 import dataclasses
 from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch import nn
@@ -100,6 +101,18 @@ class SecondaryDecoder:
         wrapped._module = self._module.wrap_module(wrapper)
         return wrapped
 
+    def compile(self, **kwargs: Any) -> None:
+        """Compile the decoder's forward pass in place.
+
+        Call after any distributed wrapping so the compiled graph includes it.
+        The underlying parameters and state dict are unchanged, so checkpoints
+        are unaffected.
+
+        Args:
+            kwargs: Forwarded to ``torch.compile``.
+        """
+        self._module = self._module.compile(**kwargs)
+
     def to(self, device) -> "SecondaryDecoder":
         """Move the module to the specified device."""
         self._module = self._module.to(device)
@@ -149,6 +162,10 @@ class NoSecondaryDecoder:
     ) -> "NoSecondaryDecoder":
         """No-op for wrapping module."""
         return self
+
+    def compile(self, **kwargs: Any) -> None:
+        """No-op: there is no module to compile."""
+        pass
 
     @property
     def torch_modules(self) -> nn.ModuleList:

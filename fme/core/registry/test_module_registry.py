@@ -2,7 +2,8 @@ import dataclasses
 import datetime
 import pathlib
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, ClassVar
+from unittest import mock
 
 import dacite
 import pytest
@@ -14,7 +15,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
-from fme.core.registry.module import Module
+from fme.core.registry.module import Module, compile_torch_module
 from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse in this module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
@@ -393,3 +394,85 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
 
     with pytest.raises(RuntimeError, match="before Module.compile"):
         compiled.to(fme.get_device())
+
+
+@ModuleSelector.register("mock_compile_unsupported")
+@dataclasses.dataclass
+class MockModuleBuilderCompileUnsupported(ModuleConfig):
+    """Mock builder that declares torch.compile unsupported."""
+
+    compile_unsupported_reason: ClassVar[str] = (
+        "the mock module's forward pass is not traceable"
+    )
+
+    param_shapes: list[tuple[int, ...]]
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
+    def build(self, n_in_channels, n_out_channels, dataset_info):
+        return MockModule(self.param_shapes)
+
+
+def _build_compile_unsupported_module() -> Module:
+    selector = ModuleSelector(
+        type="mock_compile_unsupported", config={"param_shapes": [(2, 3)]}
+    )
+    return selector.build(n_in_channels=1, n_out_channels=1, dataset_info=DatasetInfo())
+
+
+def test_compile_unsupported_builder_raises_without_tracing():
+    """A builder declaring compilation unsupported must fail fast: compile()
+    raises with the declared reason and never reaches torch.compile, since
+    tracing an untraceable module can take minutes before falling back."""
+    module = _build_compile_unsupported_module()
+    with mock.patch("torch.compile") as mock_compile:
+        with pytest.raises(NotImplementedError, match="not traceable"):
+            module.compile()
+    mock_compile.assert_not_called()
+
+
+def test_compile_unsupported_reason_survives_wrapping_and_to():
+    """The reason must follow the Module through the transformations a step
+    applies before compiling it (device placement, distributed wrapping)."""
+    module = _build_compile_unsupported_module().to(fme.get_device())
+    module = module.wrap_module(lambda m: m)
+    with pytest.raises(NotImplementedError, match="not traceable"):
+        module.compile()
+
+
+@pytest.mark.medium_duration
+def test_compile_sets_fail_on_recompile_limit_hit():
+    """Compiling must opt out of dynamo's silent eager fallback, so that a
+    compiled run which hits the recompile limit raises instead of quietly
+    running uncompiled."""
+    torch._dynamo.config.fail_on_recompile_limit_hit = False
+    net = _LinearNet().to(fme.get_device())
+    Module(net, label_encoding=None).compile(backend="aot_eager")
+    assert torch._dynamo.config.fail_on_recompile_limit_hit is True
+
+
+@pytest.mark.medium_duration
+def test_compile_torch_module_compiles_and_sets_flag():
+    torch._dynamo.config.fail_on_recompile_limit_hit = False
+    net = _LinearNet().to(fme.get_device())
+    compiled = compile_torch_module(net, backend="aot_eager")
+    # isinstance is the assertion here: the contract of compile_torch_module is
+    # that it returns torch.compile's wrapper type, not the original module.
+    assert isinstance(compiled, torch._dynamo.eval_frame.OptimizedModule)
+    assert compiled._orig_mod is net
+    assert torch._dynamo.config.fail_on_recompile_limit_hit is True
+
+
+@pytest.mark.parametrize("selector_name", sorted(ModuleSelector.get_available_types()))
+def test_compile_unsupported_reason_is_not_a_dataclass_field(selector_name: str):
+    """compile_unsupported_reason must be a ClassVar on every builder.
+
+    If a builder annotated it without ClassVar it would become a dataclass
+    field, and so would leak into ModuleSelector.config and into serialized
+    checkpoint configs.
+    """
+    builder_cls = ModuleSelector.registry._types[selector_name]
+    field_names = {field.name for field in dataclasses.fields(builder_cls)}
+    assert "compile_unsupported_reason" not in field_names
