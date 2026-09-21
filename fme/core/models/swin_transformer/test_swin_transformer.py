@@ -393,8 +393,10 @@ def test_cpb_lat_coords_changes_output():
     assert not torch.allclose(out_low, out_high), "lat_coords should change output"
 
 
-def test_cpb_backward_with_lat_coords():
-    """Gradients reach cpb_mlp when lat_coords is provided."""
+@pytest.mark.parametrize("window_size", [(4, 4), (4, 8)])
+def test_cpb_backward_with_lat_coords(window_size: tuple[int, int]):
+    """Gradients reach cpb_mlp when lat_coords is provided, including with a
+    non-square window whose window-row ordering the band index must match."""
     in_chans, out_chans = 4, 2
     img_shape = (16, 32)
     n = 2
@@ -407,7 +409,7 @@ def test_cpb_backward_with_lat_coords():
         embed_dim=32,
         depth_multiplier=1,
         num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
+        window_size=window_size,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         lat_coords=lat_coords,
@@ -530,17 +532,16 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
     # The block precomputes per-window mean latitudes from the padded lat
     # coordinates; recover the padded lat rows from them to check the padding.
     Ht, Wt = net.token_shape
-    n_win_w = Wt // 4
     expected_lat_mean = window_lat_mean(expected, (Ht, Wt), (4, 4), shift=0)
     block = net.layer1.blocks[0]
-    actual_lat_mean = _lat_mean_from_coords_log(block.attn, n_win_w)
+    actual_lat_mean = _lat_mean_from_coords_log(block.attn)
     # Inverting cos/log in float32 costs a few 1e-4 degrees of precision.
     torch.testing.assert_close(actual_lat_mean, expected_lat_mean, atol=1e-2, rtol=0)
 
 
-def _lat_mean_from_coords_log(attn: WindowAttention2D, n_win_w: int) -> torch.Tensor:
+def _lat_mean_from_coords_log(attn: WindowAttention2D) -> torch.Tensor:
     """Invert the cos(lat) scaling of the precomputed CPB coordinates to
-    recover each window's mean latitude in degrees."""
+    recover each window-row's mean latitude in degrees."""
     assert attn.coords_log is not None
     # Pick an offset pair with unit longitude displacement and zero latitude
     # displacement: its scaled log-coordinate is log(1 + cos(lat)).
@@ -570,6 +571,27 @@ def test_earth_padding_cln_forward():
     )
 
 
+def _per_window_position_bias(
+    attn: WindowAttention2D,
+    lat_mean_per_window: torch.Tensor,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Position bias with the CPB MLP evaluated separately for every window,
+    as implemented before the per-latitude-band deduplication. The module
+    precomputes its coordinates in float32 at construction; ``dtype`` is the
+    dtype they are cast to before the MLP."""
+    N = attn.window_size[0] * attn.window_size[1]
+    nW = lat_mean_per_window.shape[0]
+    base = attn.relative_coords_base.float()
+    lat_rad = lat_mean_per_window.float() * (torch.pi / 180.0)
+    h_coords = base[:, 0]
+    w_coords = base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(1)
+    coords = torch.stack([h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1)
+    coords_log = (torch.sign(coords) * torch.log(1.0 + coords.abs())).to(dtype)
+    bias = 16.0 * torch.sigmoid(attn.cpb_mlp(coords_log))
+    return bias.permute(0, 2, 1).reshape(nW, attn.num_heads, N, N)
+
+
 def _reference_window_attention(
     attn: WindowAttention2D,
     x: torch.Tensor,
@@ -577,7 +599,12 @@ def _reference_window_attention(
     lat_mean: torch.Tensor | None,
 ) -> torch.Tensor:
     """Explicit-logits cosine attention, as implemented before the switch to
-    ``F.scaled_dot_product_attention``. Shares parameters with ``attn``."""
+    ``F.scaled_dot_product_attention``. Shares parameters with ``attn``.
+
+    Operates on the original flattened layout ``x: (B * nW, N, C)`` with a
+    per-window ``lat_mean`` of shape ``(nW,)``, so it also checks the
+    per-band CPB evaluation against the per-window one.
+    """
     B_, N, C = x.shape
     qkv = (
         attn.qkv(x)
@@ -595,15 +622,7 @@ def _reference_window_attention(
         logits = logits + bias.unsqueeze(0)
     else:
         nW = lat_mean.shape[0]
-        # The module precomputes these coordinates in float32 at construction.
-        base = attn.relative_coords_base.float()
-        lat_rad = lat_mean.float() * (torch.pi / 180.0)
-        h_coords = base[:, 0]
-        w_coords = base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(1)
-        coords = torch.stack([h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1)
-        coords_log = (torch.sign(coords) * torch.log(1.0 + coords.abs())).to(x.dtype)
-        bias = 16.0 * torch.sigmoid(attn.cpb_mlp(coords_log))
-        bias = bias.permute(0, 2, 1).reshape(nW, attn.num_heads, N, N)
+        bias = _per_window_position_bias(attn, lat_mean, dtype=x.dtype)
         logits = logits.view(B_ // nW, nW, attn.num_heads, N, N) + bias.unsqueeze(0)
         logits = logits.view(B_, attn.num_heads, N, N)
     if mask is not None:
@@ -626,14 +645,17 @@ def test_window_attention_matches_explicit_logits(use_mask: bool, use_lat: bool)
     torch.manual_seed(0)
     dim, num_heads, window_size = 16, 4, (4, 4)
     H, W, B = 8, 16, 2
-    nW = (H // window_size[0]) * (W // window_size[1])
+    nH_win, nW_win = H // window_size[0], W // window_size[1]
+    nW = nH_win * nW_win
     lat_mean = (
-        torch.linspace(-60.0, 60.0, nW, device=device, dtype=torch.float64)
+        torch.linspace(-60.0, 60.0, nH_win, device=device, dtype=torch.float64)
         if use_lat
         else None
     )
     attn = (
-        WindowAttention2D(dim, window_size, num_heads, lat_mean=lat_mean)
+        WindowAttention2D(
+            dim, window_size, num_heads, lat_mean=lat_mean, num_windows_w=nW_win
+        )
         .to(device)
         .double()
     )
@@ -642,15 +664,21 @@ def test_window_attention_matches_explicit_logits(use_mask: bool, use_lat: bool)
             param.normal_()
         attn.tau.abs_().add_(0.1)
     x = torch.randn(B, H, W, dim, device=device, dtype=torch.float64)
-    x = window_partition_2d(x, *window_size).view(-1, 16, dim).requires_grad_(True)
+    x = window_partition_2d(x, *window_size).view(B, nW, 16, dim).requires_grad_(True)
     mask = None
     if use_mask:
         mask = torch.zeros(nW, 16, 16, device=device, dtype=torch.float64)
         mask[:, :8, 8:] = -100.0
         mask[:, 8:, :8] = -100.0
     out = attn(x, mask=mask)
+    assert out.shape == (B, nW, 16, dim)
     grads = torch.autograd.grad(out.square().sum(), [x, *attn.parameters()])
-    ref = _reference_window_attention(attn, x, mask, lat_mean)
+    lat_mean_per_window = (
+        lat_mean.repeat_interleave(nW_win) if lat_mean is not None else None
+    )
+    ref = _reference_window_attention(
+        attn, x.reshape(B * nW, 16, dim), mask, lat_mean_per_window
+    ).view(B, nW, 16, dim)
     ref_grads = torch.autograd.grad(ref.square().sum(), [x, *attn.parameters()])
     torch.testing.assert_close(out, ref, atol=1e-10, rtol=1e-10)
     for g, g_ref in zip(grads, ref_grads):
@@ -658,20 +686,67 @@ def test_window_attention_matches_explicit_logits(use_mask: bool, use_lat: bool)
 
 
 def test_window_lat_mean_matches_rolled_window_means():
-    """Precomputed per-window latitudes equal the mean of the (shifted)
-    latitude rows in each window, in window-partition order."""
+    """Precomputed per-window-row latitudes equal the mean of the (shifted)
+    latitude rows in each window row, top to bottom."""
     H, W = 8, 16
     ws = (4, 4)
     lat = torch.linspace(-70.0, 70.0, H)
     for shift in (0, 2):
         lat_mean = window_lat_mean(lat, (H, W), ws, shift)
         assert lat_mean is not None
-        assert lat_mean.shape == ((H // ws[0]) * (W // ws[1]),)
+        assert lat_mean.shape == (H // ws[0],)
         rolled = torch.roll(lat, -shift)
-        expected_rows = rolled.reshape(H // ws[0], ws[0]).mean(1)
-        expected = expected_rows.repeat_interleave(W // ws[1])
+        expected = rolled.reshape(H // ws[0], ws[0]).mean(1)
         torch.testing.assert_close(lat_mean, expected)
     assert window_lat_mean(None, (H, W), ws, 0) is None
+
+
+def test_window_attention_requires_num_windows_w_with_lat_mean():
+    """Omitting the windows-per-row count is a construction-time error, not a
+    forward-time shape mismatch."""
+    with pytest.raises(ValueError, match="num_windows_w"):
+        WindowAttention2D(16, (4, 4), 4, lat_mean=torch.zeros(3))
+    # Without latitude scaling the count is not needed.
+    WindowAttention2D(16, (4, 4), 4)
+
+
+@pytest.mark.parametrize("use_lat", [False, True])
+def test_position_bias_matches_per_window_evaluation(use_lat: bool):
+    """Evaluating the CPB MLP once per latitude band and gathering to windows
+    gives the same bias as evaluating it for every window, and windows in the
+    same window-row share identical bias rows. Without latitude scaling the
+    bias has no window dimension at all."""
+    device = get_device()
+    torch.manual_seed(0)
+    dim, num_heads, window_size = 16, 4, (4, 4)
+    N = window_size[0] * window_size[1]
+    nH_win, nW_win = 3, 5
+    lat_mean = torch.linspace(-75.0, 75.0, nH_win, device=device) if use_lat else None
+    attn = WindowAttention2D(
+        dim, window_size, num_heads, lat_mean=lat_mean, num_windows_w=nW_win
+    ).to(device)
+    with torch.no_grad():
+        for param in attn.cpb_mlp.parameters():
+            param.normal_()
+    bias = attn._position_bias()
+    if not use_lat:
+        assert attn.coords_log is None
+        assert attn.band_index is None
+        assert bias.shape == (num_heads, N, N)
+        expected = 16.0 * torch.sigmoid(attn.cpb_mlp(attn.relative_coords_log))
+        expected = expected.permute(1, 0).reshape(num_heads, N, N)
+        torch.testing.assert_close(bias, expected)
+        return
+    assert lat_mean is not None
+    assert attn.coords_log.shape == (nH_win, N * N, 2)
+    assert attn.band_index.shape == (nH_win * nW_win,)
+    assert bias.shape == (nH_win * nW_win, num_heads, N, N)
+    expected = _per_window_position_bias(attn, lat_mean.repeat_interleave(nW_win))
+    torch.testing.assert_close(bias, expected)
+    bias_by_row = bias.view(nH_win, nW_win, num_heads, N, N)
+    assert torch.equal(bias_by_row, bias_by_row[:, :1].expand_as(bias_by_row))
+    # Distinct latitude bands do give distinct biases.
+    assert not torch.equal(bias_by_row[0, 0], bias_by_row[1, 0])
 
 
 def test_blocks_precompute_cpb_coords_per_shift():
@@ -692,15 +767,21 @@ def test_blocks_precompute_cpb_coords_per_shift():
         lat_coords=lat,
     ).to(get_device())
     regular, shifted = net.layer1.blocks[0].attn, net.layer1.blocks[1].attn
-    n_windows = (img_shape[0] // 4) * (img_shape[1] // 4)
+    n_bands = img_shape[0] // 4
+    n_windows = n_bands * (img_shape[1] // 4)
     for attn in (regular, shifted):
         assert attn.coords_log is not None
-        assert attn.coords_log.shape == (n_windows, 16 * 16, 2)
+        assert attn.coords_log.shape == (n_bands, 16 * 16, 2)
         assert attn.coords_log.device.type == get_device().type
+        assert attn.band_index.shape == (n_windows,)
+        assert attn.band_index.device.type == get_device().type
     assert not torch.equal(regular.coords_log, shifted.coords_log)
-    assert "coords_log" not in {k.split(".")[-1] for k in net.state_dict()}
+    state_keys = {k.split(".")[-1] for k in net.state_dict()}
+    assert "coords_log" not in state_keys
+    assert "band_index" not in state_keys
     net_no_lat = _build_net(4, 2, img_shape)
     assert net_no_lat.layer1.blocks[0].attn.coords_log is None
+    assert net_no_lat.layer1.blocks[0].attn.band_index is None
 
 
 @pytest.mark.parametrize("patch_size", [(2, 2), (2, 4)])
