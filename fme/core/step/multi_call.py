@@ -154,7 +154,11 @@ class MultiCallStepConfig(StepConfigABC):
             for output_name in self.config.output_names:
                 for name in self.config.get_multi_called_names(output_name):
                     extra_names.append(name)
-                    if output_name in self.wrapped_step.input_names:
+                    # A variant is scored in the same units as its base
+                    # variable, which follows the wrapped step's residual
+                    # convention (not mere prognostic-ness: a hybrid step
+                    # predicts some prognostics full-field).
+                    if output_name in self.wrapped_step.residual_names:
                         extra_residual_scaled_names.append(name)
         return self.wrapped_step.get_loss_normalizer(
             extra_names=extra_names,
