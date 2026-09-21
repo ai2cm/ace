@@ -48,8 +48,13 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   it. The first argo attempt (`tbbqd`) failed on every pod with "argument list
   too long", fixed in `compute_dataset_argo_workflow.yaml` (scripts and config
   were stored twice in the per-run pod template). The two D3 kinds are next to
-  submit. The three extra `som-eq-dataCO2-10yr-sstdata-dataonly` jobs for 3xCO2
-  `ic_0003-0005` wait on argo `compute-fme-dataset-ensemble-wtnfg`.
+  submit.
+- **3xCO2 `ic_0003-0005` on weka (2026-09-21)**: argo
+  `compute-fme-dataset-ensemble-wtnfg` wrote them into the existing 2026-06-08
+  SOM store (3653 daily labels each), three gantry copies exit 0,
+  `SOM_MEMBERS["3xCO2"]` lists five members; the three extra
+  `som-eq-dataCO2-10yr-sstdata-dataonly` jobs are next to submit
+  (`--member 3 4 5`, a new submitter flag).
 - Fixes made during the campaign, all on `exp/alexeyfm` and pushed: start
   times moved to the stores' real 00Z day-2 labels (every daily store labels a
   day's mean at the following 00Z; the first submission's 164 jobs died on
@@ -194,7 +199,7 @@ See `MISSING_DATASETS.md` for full detail.
 | D1 | `2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-abrupt-co2-increase-fme-dataset/abrupt-{2x,3x,4x}CO2.zarr` | `som-abrupt-4xCO2-10yr-{slab-eval,sst-eval,data-only}` | ✅ on weka |
 | D2 | `2026-09-16-vertically-resolved-4deg-daily-c96-shield-som-ensemble-spin-up-fme-dataset/{climate}-spin-up-ic_000N.zarr` | `som-eq-dataCO2-10yr-sstslab-inference` | ✅ on weka |
 | D3 | `2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`, `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | ✅ on weka (2026-09-21) |
-| 3x members | new-dated SOM ensemble store with 3xCO2 `ic_0003-0005` | 3 more `som-eq-dataCO2-10yr-sstdata-dataonly` jobs | 🚧 Spencer regrid; config not written |
+| 3x members | `2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset/3xCO2-ic_000{3,4,5}.zarr` | 3 more `som-eq-dataCO2-10yr-sstdata-dataonly` jobs | ✅ on weka (2026-09-21) |
 | D4 | daily increasing-CO2 | `2pct*` | ❌ not planned |
 | AMIP `ic_0002`, `AMIP-p4K`, `AMIP-p2K`, ramped `ic_0003`, ERA5 | see `generate_paper_configs.AMIP_VARIANTS` / `RAMPED_DATASET` / `ERA5_DATASET` | prescribed-SST kinds | ✅ (p2k/p4k copied in July via `amip_p2k_p4k_transfer.yaml`, not re-verified) |
 

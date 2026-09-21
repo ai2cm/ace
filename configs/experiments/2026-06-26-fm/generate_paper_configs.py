@@ -181,7 +181,8 @@ PAPER_CONFIG_PREFIX = "ace-paper-"
 CHECKPOINT_PATH = "/ckpt.tar"
 
 # The 4deg daily SHiELD-SOM ensemble the FM and c96 regimes train on. Members are
-# 1x/2x/4xCO2 ic_0001-ic_0005 and 3xCO2 ic_0001-ic_0002, each 3653 daily steps.
+# ic_0001-ic_0005 of every climate, each 3653 daily steps (3xCO2 ic_0003-0005
+# were added 2026-09-21 and are out of sample for every run).
 # Every 4deg daily store labels a day's mean at the following 00Z, so the first
 # label is 2031-01-02T00 (the mean of 2031-01-01) and the last 2041-01-01T00;
 # fme matches initial-condition timestamps exactly, so every start time below
@@ -196,7 +197,7 @@ SOM_N_STEPS = 3652  # ten years at one step per day
 SOM_MEMBERS = {
     "1xCO2": ("ic_0001", "ic_0002", "ic_0003", "ic_0004", "ic_0005"),
     "2xCO2": ("ic_0001", "ic_0002", "ic_0003", "ic_0004", "ic_0005"),
-    "3xCO2": ("ic_0001", "ic_0002"),
+    "3xCO2": ("ic_0001", "ic_0002", "ic_0003", "ic_0004", "ic_0005"),
     "4xCO2": ("ic_0001", "ic_0002", "ic_0003", "ic_0004", "ic_0005"),
 }
 

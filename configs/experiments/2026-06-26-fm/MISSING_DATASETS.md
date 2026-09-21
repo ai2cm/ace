@@ -16,20 +16,6 @@ To bring one online: produce the dataset, copy it to weka with
 
 ## Still missing
 
-### 3xCO2 `ic_0003-0005` of the SOM ensemble — RAW REGRID LANDED, PROCESSING PENDING
-
-- Not a `MISSING_DATASETS` entry: the 2026-06-08 SOM ensemble store simply has
-  only `ic_0001-2` for 3xCO2, so `SOM_MEMBERS["3xCO2"]` lists two members and
-  `som-eq-dataCO2-10yr-sstdata-dataonly` runs 17 jobs instead of 20.
-- Source: pulled from tape and regridded by Spencer, landed 2026-09-21 at
-  `gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/3xCO2-ic_000{3,4,5}`.
-- How: a copy of `shield-som-ensemble-c96-4deg-8layer.yaml` listing only the
-  three members (already present there, commented out) with the *existing*
-  2026-06-08 output directories, run with `--dataset --time-coarsen` and no
-  `--stats`; copy the three daily zarrs to weka; extend `SOM_MEMBERS["3xCO2"]`;
-  regenerate `som-eq-dataCO2-10yr-sstdata-dataonly`. Step-by-step in the
-  plan's "Instructions for the next agent".
-
 ### D4 — daily 4deg increasing-CO2 (2%/yr) — NOT PLANNED
 
 - Needed by the paper's `2pct*` scripts. A 6-hourly 4deg processing from the
@@ -55,6 +41,22 @@ To bring one online: produce the dataset, copy it to weka with
   `2026-09-21-vertically-resolved-4deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
   on GCS, not copied to weka. Copied to weka by 36 gantry jobs
   (`gcs-to-weka-abrupt4xCO2-ic_00NN.zarr`, all exit 0).
+
+### 3xCO2 `ic_0003-0005` of the SOM ensemble
+
+- Path: the existing SOM store,
+  `/climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset/3xCO2-ic_000{3,4,5}.zarr`,
+  3653 daily labels each, 2031-01-02T00 .. 2041-01-01T00, 99 arrays like the
+  17 members already there. `SOM_MEMBERS["3xCO2"]` now lists five members, so
+  `som-eq-dataCO2-10yr-sstdata-dataonly` has 20 jobs; nothing else changes
+  (`CLIMATES["3xCO2"].member` stays `ic_0002`, the paper's choice, and the
+  training stats were not recomputed).
+- Produced by argo `compute-fme-dataset-ensemble-wtnfg` from
+  `scripts/data_process/configs/shield-som-ensemble-3xco2-members-c96-4deg-8layer.yaml`
+  (Spencer's 45x90 regrid, pulled from tape, landed 2026-09-21), run with
+  `--dataset --time-coarsen` and no `--stats`; copied to weka by three gantry
+  jobs (`gcs-to-weka-3xCO2-ic_000N.zarr`, all exit 0). Six-hourly siblings in
+  `2026-06-08-vertically-resolved-4deg-c96-shield-som-ensemble-fme-dataset` on GCS.
 
 ## Landed (2026-09-16)
 
