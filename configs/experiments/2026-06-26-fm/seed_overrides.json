@@ -1,0 +1,6 @@
+{
+  "nc-swin-v2-fm-a1-finetune": {
+    "reason": "non-finite loss in experiment 01M2PBRRP4BHW73Y6F0Y40GZ0A, attempt 1",
+    "seed": 1
+  }
+}
