@@ -42,8 +42,12 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   2026-09-21 can be resubmitted with `--skip-if-in-beaker` once a v2.1
   checkpoint exists (or pointed at `best_ckpt.tar` if that is what is wanted:
   `submit_paper_jobs.CHECKPOINT_PATH`).
-- Not submitted (D3, Spencer's regrid): `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`,
-  `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`.
+- Not submitted yet, **now unblocked upstream** (Spencer, 2026-09-21): the two
+  D3 kinds `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` and
+  `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`, and the three extra
+  `som-eq-dataCO2-10yr-sstdata-dataonly` jobs for 3xCO2 `ic_0003-0005`. Both
+  raw 45x90 regrids are on GCS; neither has been processed into an fme store
+  or copied to weka. See "Instructions for the next agent".
 - Fixes made during the campaign, all on `exp/alexeyfm` and pushed: start
   times moved to the stores' real 00Z day-2 labels (every daily store labels a
   day's mean at the following 00Z; the first submission's 164 jobs died on
@@ -56,9 +60,14 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   listing helper now counts a never-started job as failed. Lesson: do not
   commit locally while a submission driver is running unless commit and push
   are back to back, since gantry refuses a HEAD that is not on the remote.
-- Data: D1 and D2 on weka (argo `xwpb9` / `26c2p`, copied 2026-09-16). D3 and
-  the 3xCO2 `ic_0003-0005` regrids: nothing in
-  `gs://vcm-ml-raw-flexible-retention` as of 2026-09-21.
+- Data: D1 and D2 on weka (argo `xwpb9` / `26c2p`, copied 2026-09-16). Raw
+  45x90 regrids landed 2026-09-21: D3 at
+  `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/`
+  (36 members `abrupt-4xCO2-ic_00NN`) and the 3xCO2 `ic_0003-0005`
+  equilibrium members at
+  `gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/`
+  (pulled from tape). Not yet verified from this machine (gsutil needs
+  `gcloud auth login --update-adc`).
 
 ## Kind naming
 
@@ -238,23 +247,110 @@ The slab is forward-Euler at a daily step, untested here (paper was 6-hourly):
 run one `som-eqnospinup-dataCO2-10yr-sstslab-inference` 1xCO2 job and check SST drift
 before submitting the rest of the slab kinds.
 
-## Next steps
+## Instructions for the next agent
 
-1. Submit the prescribed-SST kinds (SHiELD, then ERA5), then the data-only
-   rows. Slab kinds after the drift check.
-2. When Spencer's 45x90 stores land: write the D3 processing config (clone
-   `shield-som-abrupt4xCO2-ensemble-c96-1deg-8layer.yaml` to 4deg + daily
-   `time_coarsen`, as `shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml`
-   did for D1) and the 3xCO2 `ic_0003-0005` processing (new-dated store; ask
-   Spencer whether he runs the argo step). Then name the store in
-   `MISSING_DATASETS["abrupt-ensemble"]`, flip `available`, extend
-   `SOM_MEMBERS["3xCO2"]`, regenerate, submit the two D3 kinds and the three
-   new `som-eq-dataCO2-10yr-sstdata-dataonly` jobs.
-3. Analysis: the AMIP windows (discard 1979; 1980-2011 train/validate;
-   2012-2020 test) are cut from the single `amip-control-dataCO2-43yr-sstprescribed-eval` runs at analysis
-   time; figure-8 ensemble means over the per-member D3 jobs likewise.
-4. Slab ocean on ERA5: needs mixed-layer depth and q-flux fields for ERA5,
-   which do not exist. Spencer: "eventually".
+Both remaining datasets landed on GCS as raw 45x90 regrids on 2026-09-21. The
+work is: process each into a 4deg daily fme store on argo, copy to weka, point
+the generator at it, submit. Do the D3 ensemble first (it feeds figure 8), the
+3xCO2 members second. Run everything from `configs/experiments/2026-06-26-fm`
+in the `fme` env (`/Users/alexeyy/mamba/envs/fme/bin/python`; `gantry`,
+`beaker`, `argo`, `gsutil` need `PATH=/Users/alexeyy/mamba/envs/fme/bin:/Users/alexeyy/.local/bin:$PATH`).
+If `gsutil` says "Reauthentication required", have the user run
+`gcloud auth login --update-adc`. Never commit while a submission is running
+unless you push immediately after (gantry refuses a HEAD not on the remote).
+
+### A. D3: 36-member abrupt-4xCO2 ensemble
+
+1. Verify the upload: `gsutil ls gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/`
+   should list 36 `abrupt-4xCO2-ic_00NN/` directories, each with
+   `fluxes_2d.zarr`, `full_state.zarr`, `ocean_forcing.zarr` etc. like the
+   1deg ones.
+2. Write `scripts/data_process/configs/shield-som-abrupt4xCO2-ensemble-c96-4deg-8layer.yaml`
+   by cloning the 1deg file next to it: `gaussian_grid_180_by_360` →
+   `gaussian_grid_45_by_90` in every run path; `data_output_directory` →
+   `gs://vcm-ml-intermediate/2026-09-21-vertically-resolved-4deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`;
+   stats directories renamed the same way and every run listed under
+   `stats.exclude_runs` (no stats are needed; D1's 4deg config does this);
+   append the `time_coarsen` block from
+   `shield-som-abrupt-co2-increase-c96-4deg-8layer.yaml` verbatim except its
+   two output directories, which become
+   `…/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
+   (+ `-stats`). Keep the run keys `abrupt4xCO2-ic_00NN`: the generator reads
+   `abrupt4xCO2-{member}.zarr`.
+3. Add a Makefile target next to `shield_som_abrupt_co2_increase_c96_dataset`:
+   `shield_som_abrupt_4xco2_ensemble_c96_dataset` running
+   `./compute_dataset.sh --dataset $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/shield-som-abrupt4xCO2-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml`.
+   Commit + push (data_process files).
+4. `cd scripts/data_process && make shield_som_abrupt_4xco2_ensemble_c96_dataset RESOLUTION=4deg`
+   (argo cluster `gke_vcm-ml_us-central1-c_ml-cluster-dev`, needs
+   `brew install python-yq`); 36 pods, expect ~1 h. Watch with `argo list`.
+5. When Succeeded: check one member's daily time axis (copy `time/` with
+   `gsutil -m cp -r`, open with `zarr`, decode with `cftime`): expect labels at
+   00Z starting the day after the run start, ~90 of them. If the count is not
+   90 or 91, adjust `ABRUPT_ENSEMBLE_N_STEPS - 1` in
+   `_abrupt_ensemble_member_configs` so `n_forward_steps` = labels − 1.
+6. Copy to weka: `PATH=… python scripts/data_process/copy_zarrs_to_weka.py gs://vcm-ml-intermediate/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
+   (36 gantry jobs in `ai2/climate-titan`); confirm exit 0 with
+   `beaker experiment get <id> --format json`.
+7. In `generate_paper_configs.py`, `MISSING_DATASETS["abrupt-ensemble"]`: set
+   `path` to `/climate-default/2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset`
+   and `available=True`; `python generate_paper_configs.py`; validate one config
+   with `PYTHONPATH=<repo root> python -m fme.ace.validate_config --config_type evaluator run_configs/ace-paper-somabruptens-abrupt-4xCO2-ens-sstprescribed-eval-config-4deg-ic_0001.yaml`;
+   update `MISSING_DATASETS.md` and this file; commit; push.
+8. Submit:
+   ```bash
+   python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstdata-dataonly --skip-if-in-beaker
+   python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstprescribed-eval --arm a1 a2 a3 --skip-if-in-beaker
+   ```
+   36 + 36 × 22 = 828 jobs (`nc-swin-v2.1` cells will fail to start until they
+   have `best_inference_ckpt.tar`; pass `--arch nc-sfno nc-swin-v2` to skip
+   them). Run the submitter detached (`nohup … &`) and log to a file; it takes
+   ~1 h.
+9. Monitor with a 20-minute cron: list `ai2/ace` via
+   `_beaker_listing.fetch_experiments_by_name("ai2/ace", "-sst")`, keep only
+   names containing a kind from `generate_paper_configs.KINDS`, tally by
+   `status`; read logs of any `failed`, resubmit infrastructure failures with
+   `--run <run> --ens-member N`, record anything else here.
+
+### B. 3xCO2 equilibrium members ic_0003-0005
+
+1. Verify: `gsutil ls gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/`
+   now lists `3xCO2-ic_0003/`, `3xCO2-ic_0004/`, `3xCO2-ic_0005/`.
+2. Write `scripts/data_process/configs/shield-som-ensemble-3xco2-members-c96-4deg-8layer.yaml`:
+   a copy of `shield-som-ensemble-c96-4deg-8layer.yaml` whose `runs` contain
+   only the three new members (they are already there, commented out) and
+   whose output directories are **unchanged** (the existing
+   `2026-06-08-…-4deg-c96-shield-som-ensemble-fme-dataset` and its `-daily-`
+   sibling), so the three zarrs land next to the 17 existing ones and
+   `SOM_DATASET` needs no change. List the three under `stats.exclude_runs`;
+   do not pass `--stats` (the training stats must not change). Makefile
+   target `shield_som_ensemble_3xco2_members_c96_dataset` running
+   `./compute_dataset.sh --dataset --time-coarsen --config configs/shield-som-ensemble-3xco2-members-c96-$(RESOLUTION)-$(LAYERS).yaml`.
+   Commit + push; run with `RESOLUTION=4deg`; 3 pods.
+3. Copy the three daily zarrs to weka with `copy_zarrs_to_weka.py <daily dir>/3xCO2-ic_000{3,4,5}.zarr`
+   (pass the three `.zarr` paths, not the directory, or the 17 existing zarrs
+   are recopied).
+4. `SOM_MEMBERS["3xCO2"]` → `("ic_0001", …, "ic_0005")` in
+   `generate_paper_configs.py`; regenerate (three new
+   `som-eq-dataCO2-10yr-sstdata-dataonly` configs appear, nothing else
+   changes: `CLIMATES["3xCO2"].member` stays `ic_0002`, the paper's choice);
+   update `MISSING_DATASETS.md` ("3x members" section) and this file; commit;
+   push.
+5. `python submit_paper_jobs.py --kind som-eq-dataCO2-10yr-sstdata-dataonly --climate 3xCO2 --skip-if-in-beaker`
+   — `--skip-if-in-beaker` does not see data-only names (no `ace2-fm-` prefix),
+   so restrict to the new members by checking the two existing 3xCO2 jobs are
+   in Beaker and passing nothing else; if the submitter offers no member
+   filter, add `--member` or submit the three configs by hand with
+   `run-ace-evaluator.sh`.
+
+### C. Afterwards
+
+- Update the status section: counts per kind, D3 and 3x rows in the datasets
+  table to ✅, and remove the 🚧 legend entries if nothing is blocked.
+- The `nc-swin-v2.1` cells stay blocked until their trainings produce
+  `best_inference_ckpt.tar` (see status); re-running the seven submit
+  commands in "How to run" with `--skip-if-in-beaker` fills them in once it
+  exists.
 
 ## Decisions log
 

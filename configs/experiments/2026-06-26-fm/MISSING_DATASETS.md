@@ -16,7 +16,7 @@ To bring one online: produce the dataset, copy it to weka with
 
 ## Still missing
 
-### D3 — daily 4deg abrupt-4xCO2 36-member ensemble — BLOCKED
+### D3 — daily 4deg abrupt-4xCO2 36-member ensemble — RAW REGRID LANDED, PROCESSING PENDING
 
 - Placeholder: `/climate-default/TBD-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/abrupt4xCO2-ic_00NN.zarr`
 - Needed by: `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` — SHiELD's own 90-day
@@ -27,23 +27,28 @@ To bring one online: produce the dataset, copy it to weka with
   training run; `--ens-member` narrows).
 - Source: 1deg only —
   `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_180_by_360/abrupt-4xCO2-ic_00NN`.
-  Spencer is regridding to `gaussian_grid_45_by_90` on Gaea (Snakemake, not
-  argo); nothing has landed as of 2026-09-16.
-- How, once the 45x90 regrid lands: clone
+  Spencer's 45x90 regrid landed 2026-09-21 at
+  `gs://vcm-ml-raw-flexible-retention/2025-02-03-C96-SHiELD-SOM-abrupt-4xCO2-ensemble/regridded-zarrs/gaussian_grid_45_by_90/`
+  (36 members `abrupt-4xCO2-ic_00NN`).
+- How: clone
   `scripts/data_process/configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-8layer.yaml`
   to 4deg with a daily `time_coarsen` (pattern: the D1 config below), run it
   on argo, copy to weka, name the store in `MISSING_DATASETS["abrupt-ensemble"]`
   and flip `available`. Heaviest of the datasets (36 members).
 
-### 3xCO2 `ic_0003-0005` of the SOM ensemble — BLOCKED
+### 3xCO2 `ic_0003-0005` of the SOM ensemble — RAW REGRID LANDED, PROCESSING PENDING
 
 - Not a `MISSING_DATASETS` entry: the 2026-06-08 SOM ensemble store simply has
   only `ic_0001-2` for 3xCO2, so `SOM_MEMBERS["3xCO2"]` lists two members and
   `som-eq-dataCO2-10yr-sstdata-dataonly` runs 17 jobs instead of 20.
-- Source: Spencer's 45x90 regrid, same batch as D3, not landed.
-- How: process into a new-dated SOM ensemble store (ask Spencer whether he runs
-  the argo step), copy to weka, extend `SOM_MEMBERS["3xCO2"]`, regenerate
-  `som-eq-dataCO2-10yr-sstdata-dataonly`.
+- Source: pulled from tape and regridded by Spencer, landed 2026-09-21 at
+  `gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_45_by_90/3xCO2-ic_000{3,4,5}`.
+- How: a copy of `shield-som-ensemble-c96-4deg-8layer.yaml` listing only the
+  three members (already present there, commented out) with the *existing*
+  2026-06-08 output directories, run with `--dataset --time-coarsen` and no
+  `--stats`; copy the three daily zarrs to weka; extend `SOM_MEMBERS["3xCO2"]`;
+  regenerate `som-eq-dataCO2-10yr-sstdata-dataonly`. Step-by-step in the
+  plan's "Instructions for the next agent".
 
 ### D4 — daily 4deg increasing-CO2 (2%/yr) — NOT PLANNED
 
