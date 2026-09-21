@@ -42,6 +42,8 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
+    compile_backend,
+    dynamo_hygiene,  # noqa: F401  autouse in this module
     get_dataset_info,
     trivial_network_and_loss_normalization,
     trivial_normalization,
@@ -2529,3 +2531,45 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     # each variant matches its base variable's convention
     assert stds["a_double"] == pytest.approx(res_stds["a"])
     assert stds["b_double"] == pytest.approx(field_stds["b"])
+
+
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag():
+    """compile=True runs the forward through torch.compile while leaving the
+    checkpoint state identical in structure to the uncompiled step.
+
+    The step config only exposes ``compile: bool``, so the backend is forced
+    to ``aot_eager`` from the outside to keep the test within the suite's
+    timeouts while still exercising dynamo tracing.
+    """
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    eager_selector = get_single_module_selector()
+    compiled_config = dict(eager_selector.config, compile=True)
+    compiled_selector = StepSelector(type="single_module", config=compiled_config)
+    eager_step = get_step(eager_selector, img_shape)
+    with compile_backend("aot_eager"):
+        compiled_step = get_step(compiled_selector, img_shape)
+    assert isinstance(compiled_step, SingleModuleStep)
+    assert isinstance(eager_step, SingleModuleStep)
+    assert compiled_step.module.is_compiled
+    assert not eager_step.module.is_compiled
+    compiled_step.load_state(eager_step.get_state())
+    assert compiled_step.get_state()["module"].keys() == (
+        eager_step.get_state()["module"].keys()
+    )
+    n_samples = 2
+    input_data = get_tensor_dict(eager_step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        eager_step.next_step_input_names, img_shape, n_samples
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    with torch.no_grad():
+        eager_out = eager_step.step(args).output
+        compiled_out = compiled_step.step(args).output
+    for name in eager_out:
+        torch.testing.assert_close(
+            compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
+        )
