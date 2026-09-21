@@ -46,6 +46,10 @@ class VariabilityRatioMetricConfig:
             variable with a target.
         deseasonalize: subtract the calendar-month climatology's variance.
         name: log prefix and wandb key prefix.
+        log_channel_mean: also log the mean ratio over variables as
+            ``<name>/channel_mean``. Off where two components' logs are merged
+            under one namespace (the coupled evaluator), since the key would
+            collide.
         enabled: master toggle for the metric.
         strict: raise if the metric can't be built.
     """
@@ -53,6 +57,7 @@ class VariabilityRatioMetricConfig:
     variables: list[str] | None = None
     deseasonalize: bool = True
     name: str = "variability_ratio"
+    log_channel_mean: bool = True
     enabled: bool = True
     strict: bool = False
 
@@ -64,6 +69,7 @@ class VariabilityRatioMetricConfig:
             gridded_operations=ctx.ops,
             deseasonalize=self.deseasonalize,
             horizontal_dims=ctx.horizontal_coordinates.dims,
+            log_channel_mean=self.log_channel_mean,
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
 
@@ -163,9 +169,11 @@ class VariabilityRatioAggregator:
         gridded_operations: GriddedOperations,
         deseasonalize: bool = True,
         horizontal_dims: Sequence[str] | None = None,
+        log_channel_mean: bool = True,
     ):
         self._ops = gridded_operations
         self._deseasonalize = deseasonalize
+        self._log_channel_mean = log_channel_mean
         self._horizontal_dims = (
             list(horizontal_dims) if horizontal_dims else ["lat", "lon"]
         )
@@ -249,7 +257,7 @@ class VariabilityRatioAggregator:
         prefix = f"{label}/" if label else ""
         logs = {f"{prefix}{name}": value for name, value in ratios.items()}
         finite = [v for v in ratios.values() if np.isfinite(v)]
-        if finite:
+        if finite and self._log_channel_mean:
             logs[f"{prefix}channel_mean"] = float(np.mean(finite))
         return logs
 

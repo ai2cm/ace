@@ -35,6 +35,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
 from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
+from fme.ace.aggregator.inference.variability_ratio import VariabilityRatioMetricConfig
 from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.core.dataset.data_typing import VariableMetadata
@@ -268,6 +269,16 @@ class InferenceEvaluatorAggregatorConfig:
             metrics.append(MeanMetricConfig(target="denorm"))
         if self.log_global_mean_norm_time_series:
             metrics.append(MeanMetricConfig(target="norm"))
+        # short-lead per-variable errors: on a 5-day ocean step these are one and
+        # three months, where a stepper that discards its subsurface initial
+        # condition shows it long before the step-20 channel mean does
+        for step in (6, 18):
+            if n_timesteps >= step:
+                metrics.append(
+                    StepMeanMetricConfig(
+                        step=step, name=f"mean_step_{step}", target="denorm"
+                    )
+                )
         if n_timesteps >= 20:
             metrics.append(
                 StepMeanMetricConfig(step=20, name="mean_step_20", target="denorm")
@@ -275,6 +286,9 @@ class InferenceEvaluatorAggregatorConfig:
             metrics.append(
                 StepMeanMetricConfig(step=20, name="mean_step_20_norm", target="norm")
             )
+        # prediction / target deseasonalized temporal variance per variable, so a
+        # component that damps variability is visible next to its time-mean error
+        metrics.append(VariabilityRatioMetricConfig(log_channel_mean=False))
         metrics.append(PowerSpectrumMetricConfig())
         if log_zonal_mean_images:
             metrics.append(
