@@ -43,9 +43,11 @@ def irfft(
     if n is None:
         n = 2 * (x.size(dim) - 1)
 
-    x[..., 0].imag = 0.0
+    # written through view_as_real because torch.compile (dynamo) cannot trace
+    # Tensor.imag setattr
+    torch.view_as_real(x[..., 0])[..., 1] = 0.0
     if (n % 2 == 0) and (n // 2 < x.size(dim)):
-        x[..., n // 2].imag = 0.0
+        torch.view_as_real(x[..., n // 2])[..., 1] = 0.0
 
     x = fft.irfft(x, n=n, dim=dim, **kwargs)
     return x
