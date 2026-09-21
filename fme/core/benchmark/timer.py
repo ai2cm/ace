@@ -1,5 +1,8 @@
 import collections
+import contextlib
 import dataclasses
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from typing import Literal, Protocol, Self
 
 import torch
@@ -46,14 +49,20 @@ class TimerResult:
 
 
 class Timer(Protocol):
-    def child(self, name: str) -> Self: ...
+    def child(self, name: str) -> AbstractContextManager["Timer"]: ...
     def __enter__(self) -> Self: ...
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]: ...
 
 
 class NullTimer:
-    def child(self, name: str) -> "Self":
-        return self
+    # child is a generator-based context manager because torch.compile's dynamo
+    # tracer graph-breaks on arbitrary objects used as context managers, but can
+    # trace through @contextlib.contextmanager generators. Do not replace this
+    # with contextlib.nullcontext(self): dynamo 2.7.1 traces that as yielding
+    # None, which silently breaks nested `with timer.child(...) as t` usage.
+    @contextlib.contextmanager
+    def child(self, name: str) -> Iterator["NullTimer"]:
+        yield self
 
     def __enter__(self) -> "Self":
         return self
