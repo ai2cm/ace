@@ -12,6 +12,20 @@ STORE=abrupt4xCO2-ic_0001.zarr
 SOURCE=/climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset/${STORE}
 DESTINATION=hf://buckets/allenai/ai2cm-scratch/abrupt-4xCO2-ensemble/${STORE}
 
+# HF_XET_HIGH_PERFORMANCE maximizes upload parallelism (see Dockerfile), but for
+# stores containing multiple large (>4GB) files this can cause upload timeouts.
+# Set to 0 to disable it in that case. Overrides the default baked into the image.
+HF_XET_HIGH_PERFORMANCE=${HF_XET_HIGH_PERFORMANCE:-1}
+
+# Pass --ignore-existing so a restarted sync skips files already uploaded rather
+# than re-uploading them. Set to 0 to re-sync everything, e.g. to overwrite files
+# that have changed at the source.
+IGNORE_EXISTING=${IGNORE_EXISTING:-1}
+SYNC_ARGS=()
+if [ "${IGNORE_EXISTING}" = "1" ]; then
+    SYNC_ARGS+=(--ignore-existing)
+fi
+
 gantry run \
     --name "${JOB_NAME}" \
     --description 'Sync dataset on WEKA with a Hugging Face bucket' \
@@ -20,10 +34,11 @@ gantry run \
     --priority high \
     --cluster ai2/phobos \
     --env-secret HF_TOKEN=hugging-face-token \
+    --env HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE}" \
     --gpus 0 \
     --shared-memory 64GiB \
     --min-runtime 8h \
     --no-python \
     --allow-dirty \
     --weka climate-default:/climate-default \
-    -- hf sync "${SOURCE}" "${DESTINATION}"
+    -- hf sync "${SYNC_ARGS[@]}" "${SOURCE}" "${DESTINATION}"
