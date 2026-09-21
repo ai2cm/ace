@@ -19,7 +19,8 @@ hand-written runs), and --run/--arch/--regime narrow further. --climate applies
 to the kinds that span climates (``som-eq-*`` and ``ramped-*``), --ic to the
 staggered-IC kinds (``som-eq-dataCO2-10yr-*``, ``som-eqnospinup-*``), and
 --ens-member to the per-member abrupt-4xCO2 ensemble kinds
-(``somabruptens-*``), which otherwise expand to all 36 members.
+(``somabruptens-*``), which otherwise expand to all 36 members, and --member
+to the SOM ensemble members of ``som-eq-dataCO2-10yr-sstdata-dataonly``.
 
 Job names are the wandb run names: ``{run}-{kind}[-{climate}][-ic{n}]`` for
 the per-run kinds and ``{kind}-{member}`` for the data-only kinds.
@@ -43,7 +44,7 @@ Usage:
                               [--run RUN ...] [--arch ARCH ...]
                               [--regime {fm,c96,era5} ...] [--arm {a1,a2,a3} ...]
                               [--climate CLIMATE ...] [--ic IC ...]
-                              [--ens-member N ...]
+                              [--ens-member N ...] [--member N ...]
                               [--version {v1,v2,v3}]
                               [--data-only-run RUN]
                               [--skip-if-in-wandb] [--skip-if-in-beaker]
@@ -205,9 +206,17 @@ def _run_script(kind: str) -> pathlib.Path:
 
 
 def _expand(
-    kind: str, climates: list[str], ics: list[int], ens_members: list[int]
+    kind: str,
+    climates: list[str],
+    ics: list[int],
+    ens_members: list[int],
+    members: list[str] | None = None,
 ) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
-    """(job-name parts, config filenames) for every job of a kind."""
+    """(job-name parts, config filenames) for every job of a kind.
+
+    ``members`` restricts ``som-eq-dataCO2-10yr-sstdata-dataonly`` to those SOM
+    ensemble members (``ic_000N``); None means every member of each climate.
+    """
     if kind in CLIMATE_IC_KINDS:
         if kind == TWO_STAGE_KIND:
             return [
@@ -239,6 +248,7 @@ def _expand(
             )
             for climate in climates
             for member in SOM_MEMBERS[climate]
+            if members is None or member in members
         ]
     if kind == "ramped-control-dataCO2-5yr-sstprescribed-eval":
         return [
@@ -288,12 +298,13 @@ def data_only_jobs(
     data_only_run: str,
     climates: list[str],
     ens_members: list[int],
+    members: list[str] | None = None,
 ) -> list[Job]:
     """Jobs of a data-only kind: one per reference member, fixed checkpoint."""
     dataset_id = TRAINING_RESULT_DATASETS[data_only_run]
     return [
         Job("-".join((kind, *parts)), EVALUATOR_RUN_SCRIPT, configs, dataset_id)
-        for parts, configs in _expand(kind, climates, [], ens_members)
+        for parts, configs in _expand(kind, climates, [], ens_members, members)
     ]
 
 
@@ -421,6 +432,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--member",
+        nargs="+",
+        type=int,
+        default=None,
+        choices=range(1, 6),
+        metavar="N",
+        help=(
+            "Restrict som-eq-dataCO2-10yr-sstdata-dataonly to these SOM ensemble "
+            "members ic_000N (default: every member of each climate)."
+        ),
+    )
+    parser.add_argument(
         "--data-only-run",
         default=DEFAULT_DATA_ONLY_RUN,
         help=(
@@ -452,6 +475,7 @@ def main() -> None:
     climates = args.climate or list(CLIMATES)
     ics = args.ic or list(range(1, N_INITIAL_CONDITIONS + 1))
     ens_members = args.ens_member or list(range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1))
+    members = [f"ic_{n:04d}" for n in args.member] if args.member else None
 
     runs = paper_runs(args.version)
     if args.run is not None:
@@ -482,7 +506,9 @@ def main() -> None:
     used_runs: set[str] = set()
     for kind in args.kind:
         if kind in DATA_ONLY_KINDS:
-            jobs.extend(data_only_jobs(kind, args.data_only_run, climates, ens_members))
+            jobs.extend(
+                data_only_jobs(kind, args.data_only_run, climates, ens_members, members)
+            )
         else:
             for run_name in runs_for_kind(kind, runs):
                 used_runs.add(run_name)
