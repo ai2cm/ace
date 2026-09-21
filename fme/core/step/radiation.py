@@ -51,6 +51,16 @@ class SeparateRadiationStepConfig(StepConfigABC):
             passing it to the main model. The radiation outputs returned by
             .step() will not be detached.
         residual_prediction: Whether to use residual prediction.
+        compile: Whether to run forward passes through ``torch.compile``.
+            Applied after distributed wrapping, so distributed data parallel is
+            inside the compiled graph, and to every module the step owns (the
+            main module and the radiation module). State dict keys are
+            unchanged, so checkpoints stay compatible with uncompiled runs.
+            Enabling this sets a process-global dynamo flag so that hitting the
+            static-shape recompile limit raises instead of silently falling
+            back to eager (varying the batch size uses dynamic shapes and does
+            not trip it). Module builders that declare compilation unsupported
+            raise ``NotImplementedError`` at step construction.
     """
 
     builder: ModuleSelector
@@ -68,6 +78,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     )
     detach_radiation: bool = False
     residual_prediction: bool = False
+    compile: bool = False
 
     def __post_init__(self):
         seen_names: dict[str, str] = {}
@@ -305,6 +316,9 @@ class SeparateRadiationStep(StepABC):
         dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
         self.radiation_module = self.radiation_module.wrap_module(dist.wrap_module)
+        if config.compile:
+            self.module = self.module.compile()
+            self.radiation_module = self.radiation_module.compile()
         self._timestep = timestep
         self._corrector = corrector
 
