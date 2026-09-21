@@ -17,23 +17,38 @@ docstrings of `generate_paper_configs.py` / `submit_paper_jobs.py`, then check
 the status section below against `argo list`, `beaker`, and the GCS paths
 (weka is not mounted on the submitting machine).
 
-## Status (2026-09-16, end of day)
+## Status (2026-09-21)
 
-- 25 kinds written, all validated; every kind but the two on D3
-  (`somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`, `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`) is
-  submittable. No experiment jobs submitted yet; wandb group
-  `ace2-fm-paper-2026-06-26` is empty.
-- Commits on `exp/alexeyfm` today: `593aa955e` (rename to paper-wide names),
-  `792e0788c` (AMIP / ramped / eq prescribed-SST kinds), `62f3366e6` (D1/D2
-  available), `c4159803c` (figure-8 ensemble kinds), then the kind-naming
-  scheme with the ERA5 and fixed-SST abrupt kinds, plus docs. Pushed.
-- Argo (`gke_vcm-ml_us-central1-c_ml-cluster-dev`): `xwpb9` (D1) and
-  `26c2p` (D2) succeeded. Seven `gcs-to-weka-*` gantry copy jobs
-  (`01M2P5FQ…` … `01M2P5GA…`, workspace `ai2/climate-titan`) finished with
-  exit 0; D1 and D2 are on weka.
-- Spencer's 45x90 regrids (Gaea/Snakemake): the 36-member abrupt-4xCO2
-  ensemble (D3) and 3xCO2 `ic_0003-0005`. Nothing in
-  `gs://vcm-ml-raw-flexible-retention` yet.
+- **Submitted 2026-09-17, all 25 non-D3 kinds for the A1/A2/A3 cells**
+  (`--arm a1 a2 a3`, workspace `ai2/ace`, clusters jupiter + titan, priority
+  normal, wandb group `ace2-fm-paper-2026-06-26`): 3347 experiments, exactly
+  the expected count per kind. **1807 succeeded, 0 failed at run time**, on
+  every `nc-sfno` and `nc-swin-v2` cell in the fm, c96 and era5 regimes.
+- **Blocked: the 1540 jobs on `nc-swin-v2.1` cells** (19 SHiELD-eligible and
+  13 ERA5-eligible runs). Their training result datasets hold `best_ckpt.tar`,
+  `ckpt.tar` and EMA checkpoints but no
+  `training_checkpoints/best_inference_ckpt.tar`, so Beaker could not create
+  the container ("path does not exist"). The experiments were deleted
+  2026-09-21. Once the v2.1 trainings write that file, re-run the seven
+  submit commands under "How to run" with `--skip-if-in-beaker` appended:
+  only the v2.1 jobs are missing and will be submitted.
+- Not submitted (D3, Spencer's regrid): `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`,
+  `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`.
+- Fixes made during the campaign, all on `exp/alexeyfm` and pushed: start
+  times moved to the stores' real 00Z day-2 labels (every daily store labels a
+  day's mean at the following 00Z; the first submission's 164 jobs died on
+  this); the two-stage `eq` main stage reads forcing through a weka symlink
+  directory (`EQ_FORCING_DIR`, created by gantry job `01M2PG8TRA76QYRJ9BPN6EBREQ`)
+  because spin-up and member stores live in different directories;
+  `run-ace-som-two-stage.sh` given its executable bit; the submitter validates
+  against this checkout (`PYTHONPATH`), skips jobs already in Beaker
+  (`--skip-if-in-beaker`), and survives a failed gantry call; the Beaker
+  listing helper now counts a never-started job as failed. Lesson: do not
+  commit locally while a submission driver is running unless commit and push
+  are back to back, since gantry refuses a HEAD that is not on the remote.
+- Data: D1 and D2 on weka (argo `xwpb9` / `26c2p`, copied 2026-09-16). D3 and
+  the 3xCO2 `ic_0003-0005` regrids: nothing in
+  `gs://vcm-ml-raw-flexible-retention` as of 2026-09-21.
 
 ## Kind naming
 
