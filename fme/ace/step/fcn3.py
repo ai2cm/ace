@@ -21,6 +21,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
+from fme.core.registry.module import compile_torch_module
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
@@ -158,6 +159,18 @@ class FCN3StepConfig(StepConfigABC):
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         residual_prediction: Whether to use residual prediction.
+        compile: Whether to run forward passes through ``torch.compile``.
+            Applied after distributed wrapping, so distributed data parallel is
+            inside the compiled graph, and to the single module this step owns.
+            State dict keys are unchanged, so checkpoints stay compatible with
+            uncompiled runs. Enabling this sets a process-global dynamo flag so
+            that hitting the static-shape recompile limit raises instead of
+            silently falling back to eager (varying the batch size uses dynamic
+            shapes and does not trip it). Note the discrete-continuous
+            spherical convolutions this network uses are implemented with
+            sparse tensors, which ``torch.compile`` cannot trace, so the
+            compiled step runs with graph breaks around those operations: it is
+            still correct, but it is not a single fused graph.
     """
 
     builder: FCN3Selector
@@ -175,6 +188,7 @@ class FCN3StepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
+    compile: bool = False
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -386,6 +400,13 @@ class FCN3Step(StepABC):
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
+        # The compiled module is held as a second reference to the same
+        # wrapped module rather than replacing self.module: state dict keys,
+        # device handling and train/eval toggling all continue to go through
+        # self.module, so checkpoints are identical to an uncompiled run.
+        self._forward_module = (
+            compile_torch_module(self.module) if config.compile else self.module
+        )
         self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -453,9 +474,9 @@ class FCN3Step(StepABC):
             surface_tensor = self.surface_input_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            atmosphere_output_tensor, surface_output_tensor = wrapper(self.module)(
-                atmosphere_tensor, surface_tensor, forcing_tensor
-            )
+            atmosphere_output_tensor, surface_output_tensor = wrapper(
+                self._forward_module
+            )(atmosphere_tensor, surface_tensor, forcing_tensor)
             atmosphere_output = self.atmosphere_output_packer.unpack(
                 atmosphere_output_tensor, axis=self.CHANNEL_DIM
             )
