@@ -28,10 +28,20 @@ the status section below against `argo list`, `beaker`, and the GCS paths
   13 ERA5-eligible runs). Their training result datasets hold `best_ckpt.tar`,
   `ckpt.tar` and EMA checkpoints but no
   `training_checkpoints/best_inference_ckpt.tar`, so Beaker could not create
-  the container ("path does not exist"). The experiments were deleted
-  2026-09-21. Once the v2.1 trainings write that file, re-run the seven
-  submit commands under "How to run" with `--skip-if-in-beaker` appended:
-  only the v2.1 jobs are missing and will be submitted.
+  the container ("path does not exist"). The trainings did finish (150
+  epochs, exit 0, e.g. `ace2-fm-nc-swin-v2.1-fm-a3` =
+  https://beaker.org/ex/01M2HEKMW51M14JRD0BXZCFNZ1, dataset
+  `01M2HEKMWCCH2MJ2J9NX3PX8WX`); the file is missing because **every inline
+  weighted inference of every v2.1 run scored NaN** ("Inference error: nan"
+  at all 15 inference epochs of fm-a3, all 9 of c96-a1
+  https://beaker.org/ex/01M2HEH9DRW3HM2C0QYKVPQFXD, all 75 of era5-a1
+  https://beaker.org/ex/01M2HEJB25ZYGRBTDZP24T3KZK), so
+  `best_inference_error` stayed `inf` and fme never wrote the checkpoint.
+  fm-a3 also skipped 21 non-finite training losses. This is an nc-swin-v2.1
+  model problem, not a submission problem; the paper experiments deleted
+  2026-09-21 can be resubmitted with `--skip-if-in-beaker` once a v2.1
+  checkpoint exists (or pointed at `best_ckpt.tar` if that is what is wanted:
+  `submit_paper_jobs.CHECKPOINT_PATH`).
 - Not submitted (D3, Spencer's regrid): `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly`,
   `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`.
 - Fixes made during the campaign, all on `exp/alexeyfm` and pushed: start
