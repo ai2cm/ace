@@ -84,3 +84,4 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] Automated `run_` to `ran_` in `experiments.txt`
 - [FEAT] Document `*.txt` headers in each launcher script `--help`.
 - [FEAT] `--dry-run` skip header / comments / whitespace
+- [FEAT] Validate job name <= 128 characters (beaker max) 
