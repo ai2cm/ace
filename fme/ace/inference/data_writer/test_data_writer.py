@@ -19,6 +19,7 @@ from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
+from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorMapping
 
 CALENDAR_CFTIME = {
@@ -687,6 +688,39 @@ class TestDataWriter:
                 assert "temp" in ds
                 assert ds.pressure.shape == (n_timesteps, n_lat, n_lon)
                 np.testing.assert_equal(ds.time.values, expected_time)
+
+
+def test_default_netcdf_writers_record_data_writer_io(tmp_path):
+    """The default config writes netCDF only, so its storage calls must be timed
+    for the data_writer breakdown to account for them."""
+    n_initial_conditions, n_times = 2, 3
+    shape = (n_initial_conditions, n_times, 4, 5)
+    initial_condition_times = get_initial_condition_times(
+        (2020, 1, 1, 0, 0, 0), "julian", n_initial_conditions
+    )
+    batch_time = xr.DataArray(
+        np.array(
+            [[cftime.DatetimeJulian(2020, 1, 1) + i * TIMESTEP for i in range(n_times)]]
+            * n_initial_conditions
+        ),
+        dims=["sample", "time"],
+    )
+    writer = DataWriterConfig().build(
+        experiment_dir=str(tmp_path),
+        initial_condition_times=initial_condition_times,
+        n_timesteps=n_times,
+        timestep=TIMESTEP,
+        variable_metadata={},
+        coords={"lat": np.arange(4), "lon": np.arange(5)},
+        dataset_metadata=DatasetMetadata.from_env(),
+    )
+    data = {"var": torch.rand(shape, device=get_device())}
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        writer.append_batch(get_paired_data(data, {}, batch_time))
+        writer.finalize()
+        durations = timer.get_durations()
+    assert durations["data_writer_io"] > 0.0
 
 
 def test_data_writer_validate_filenames_duplicate():
