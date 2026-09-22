@@ -41,4 +41,40 @@ group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_me
 # -- without it prepare_directory DELETES the wandb_run_id file and a new run
 # is started. The ocean/atmos datasets are the arm's original inits; their
 # mounts are inert on resume but must exist for build_trainer.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-coupled-cm4|2thyv9bz|train|high|jupiter|8||0|ai2/ace|resume_results.resume_wandb=true|01M2SCEWH2RV1VAX1HSWRKKXAB|01M0WRMWP63YT6K5YCJBC5CRJK|01M0VTG1SJQK69WWN5A651RXZY|8h|MALLOC_ARENA_MAX=4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc8_a2s-fto|o2a0rs0|ace-samudra-coupled-cm4|2thyv9bz|skip|high|jupiter|8||0|ai2/ace|resume_results.resume_wandb=true|01M2SCEWH2RV1VAX1HSWRKKXAB|01M0WRMWP63YT6K5YCJBC5CRJK|01M0VTG1SJQK69WWN5A651RXZY|8h|MALLOC_ARENA_MAX=4
+
+# --- owclt: resume past the epoch-5 boundary after preemption ---
+#
+# 01M2P6YCD4QJV7AGPQTSM721EY ran 100 h (5 epochs of training, 7300 batches) and
+# was preempted 2026-09-21 21:58 UTC by an urgent job, mid-inference for epoch 5.
+# Its last ckpt.tar is the 12:04 UTC end-of-epoch save, "4 complete epochs and
+# 1460 additional batches" -- the exact boundary checkpoint that killed owc8lt's
+# two retries above: _epochs_trained is incremented AFTER the save, so re-entering
+# the epoch yields "Subsetted train loader created, has 0 batches" and the
+# train-summary gather fails. The post-validation save never ran (preempted
+# first), so there is no mid-epoch checkpoint to fall back to.
+#
+# This row therefore REQUIRES the trainer fix (0766ab4f6, on this branch; ace#1510
+# to main). On 2c13d9911 -- the SHA the run itself trained on -- the resume fails
+# deterministically, which is why the beaker auto-resume was cancelled rather than
+# left to run. 2c13d9911 -> this branch touches only trainer.py, its test,
+# job_runner/ and configs; no fme/ model or optimizer code, so ckpt.tar is
+# compatible.
+#
+# With the fix the resume skips epoch 5's (already-trained) batches and falls
+# straight into the validation the checkpoint was written to get. No training is
+# lost; epoch 5's validation (~8.5 h) and inference (~1.5 h) are redone, and
+# epoch 5 logs no train/* metrics -- the documented cost of clearing the state.
+#
+# results_dataset is the preempted job's (01M2P6YCDGR8NXZ4SZAPNVS2XH); verified to
+# hold training_checkpoints/ckpt.tar (7.005 GiB, written 12:16 UTC) and
+# wandb_run_id. resume_wandb=true keeps run oe98nyrg -- the arm has 5 epochs of
+# history under it and prepare_directory deletes the id file without this.
+# retries 0: the ~260 GB host-RAM cost of a resume is still unfixed, so an
+# auto-retry can still be OOM-killed, and beaker keeps auto-resume on regardless.
+# MALLOC_ARENA_MAX=4 matches owc8lt -- unproven (it did not lower the resumed
+# floor) but inert, and this is a resume, which is where every -9 has happened.
+# NCCL stays at the WARN default; lib.sh now gives each rank its own debug file,
+# and the epoch-boundary gather is understood, so INFO would only add noise.
+# The ocean/atmos datasets are owclt's original inits (owc, not owc8).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|ace-samudra-coupled-cm4|oe98nyrg|train|high|jupiter|8||0|ai2/ace|resume_results.resume_wandb=true|01M2P6YCDGR8NXZ4SZAPNVS2XH|01M0KJWNJ6VDBN5P2WX8RCQ0DR|01M0VTG1SJQK69WWN5A651RXZY|8h|MALLOC_ARENA_MAX=4
