@@ -129,6 +129,8 @@ while read TRAIN_EXPER; do
         continue
     fi
 
+    require_job_name_length "$JOB_NAME"
+
     if [[ -z $PRIORITY ]]; then
         PRIORITY=normal
     fi

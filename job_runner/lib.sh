@@ -313,6 +313,26 @@ build_job_name() {
     fi
 }
 
+# Longest experiment name the beaker server accepts. gantry passes --name
+# through unchecked, so an over-long name only fails at submission.
+MAX_JOB_NAME_LENGTH=128
+
+# Stop the submission loop if JOB_NAME is longer than MAX_JOB_NAME_LENGTH.
+# Runs in dry-run mode too, so an over-long name is caught before launch.
+# Args: JOB_NAME
+require_job_name_length() {
+    local JOB_NAME="$1"
+    local LENGTH=${#JOB_NAME}
+
+    if (( LENGTH > MAX_JOB_NAME_LENGTH )); then
+        echo >&2
+        echo "Error: job name is ${LENGTH} characters, $((LENGTH - MAX_JOB_NAME_LENGTH)) over the ${MAX_JOB_NAME_LENGTH}-character beaker limit:" >&2
+        echo "  ${JOB_NAME}" >&2
+        echo "This job and any remaining jobs in the input file were not submitted." >&2
+        exit 1
+    fi
+}
+
 # Append experiment result to experiments.txt and commit
 # Args:
 #   $1 - EXPERIMENT_DIR (e.g., "experiments/2025-08-08-jamesd/coupled")

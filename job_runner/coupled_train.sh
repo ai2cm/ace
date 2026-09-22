@@ -108,6 +108,7 @@ while read PRETRAINING; do
 
     JOB_GROUP="${GROUP}"
     JOB_NAME=$(build_job_name "$JOB_GROUP" "$TAG" "train")
+    require_job_name_length "$JOB_NAME"
 
     # Get experiment IDs and datasets
     ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")

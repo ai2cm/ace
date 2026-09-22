@@ -95,6 +95,7 @@ while read TRAINING; do
 
     JOB_GROUP="${GROUP}"
     JOB_NAME=$(build_job_name "$JOB_GROUP" "$TAG" "train")
+    require_job_name_length "$JOB_NAME"
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
