@@ -1,4 +1,4 @@
-# arg: --dataset brianhenn/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-snow-masked-naive-stats:/statsdata
+# arg: --dataset brianhenn/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked-stats:/statsdata
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -27,7 +27,7 @@ inference:
         file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
         engine: zarr
       - data_path: /climate-default
-        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-snow-masked.zarr
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
         engine: zarr
     num_data_workers: 8
   aggregator:
@@ -115,7 +115,7 @@ train_loader:
       subset:
         stop_time: '0306-01-01T00:00:00'
     - data_path: /climate-default
-      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-snow-masked.zarr
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
       engine: zarr
       subset:
         stop_time: '0306-01-01T00:00:00'
@@ -133,7 +133,7 @@ validation:
           start_time: '0306-01-01T00:00:00'
           stop_time: '0311-01-01T00:00:00'
       - data_path: /climate-default
-        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-snow-masked.zarr
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
         engine: zarr
         subset:
           start_time: '0306-01-01T00:00:00'

@@ -81,7 +81,10 @@ run_training() {
 # 1-step pre-training of the control and masked-naive arms on both datasets, with
 # the anomaly_memory and snow_season aggregators in the inline inference.
 # To run a subset, comment out the ones you don't want.
-run_training "cm4-control-1-step-pretrain-daily.yaml"       "ace2s-snowmetrics-cm4-daily-control-1-step-pretrain-rs0"       "seed=0"
-run_training "cm4-masked-naive-1-step-pretrain-daily.yaml"  "ace2s-snowmetrics-cm4-daily-masked-naive-1-step-pretrain-rs0"  "seed=0"
-run_training "era5-control-1-step-pretrain-daily.yaml"      "ace2s-snowmetrics-era5-daily-control-1-step-pretrain-rs0"      "seed=0"
-run_training "era5-masked-naive-1-step-pretrain-daily.yaml" "ace2s-snowmetrics-era5-daily-masked-naive-1-step-pretrain-rs0" "seed=0"
+# The controls finished 2026-09-21 and are not relaunched. The masked-naive arms are
+# relaunched on the per-land-area snow channels (see README), under new job names so
+# the first runs, trained on the per-cell-area ERA5 data, keep theirs.
+# run_training "cm4-control-1-step-pretrain-daily.yaml"       "ace2s-snowmetrics-cm4-daily-control-1-step-pretrain-rs0"       "seed=0"
+run_training "cm4-masked-naive-1-step-pretrain-daily.yaml"  "ace2s-snowmetrics-cm4-daily-masked-naive-land-snow-1-step-pretrain-rs0"  "seed=0"
+# run_training "era5-control-1-step-pretrain-daily.yaml"      "ace2s-snowmetrics-era5-daily-control-1-step-pretrain-rs0"      "seed=0"
+run_training "era5-masked-naive-1-step-pretrain-daily.yaml" "ace2s-snowmetrics-era5-daily-masked-naive-land-snow-1-step-pretrain-rs0" "seed=0"

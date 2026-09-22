@@ -12,9 +12,9 @@ splits and seed. The arms are test material for the evaluation methods, not fina
 | run | data | arm | recreates |
 |---|---|---|---|
 | cm4-control | CM4 piControl daily | no prognostic snow | `exp/ace2s-cm4-piControl-train` daily control |
-| cm4-masked-naive | CM4 piControl daily + masked snow sidecar | prognostic snow, mean/std scaling | `2026-08-12-ace2s-snow-masked-daily` cm4 masked-naive |
+| cm4-masked-naive | CM4 piControl daily + `-land-snow-masked` channels (merged) | prognostic snow, mean/std scaling | `2026-08-12-ace2s-snow-masked-daily` cm4 masked-naive |
 | era5-control | ERA5 daily (2026-08-07 store) | no prognostic snow | `config/ace2s-era5-daily-baseline` daily control |
-| era5-masked-naive | ERA5 daily + masked snow sidecar | prognostic snow, mean/std scaling | `2026-08-12-ace2s-snow-masked-daily` era5 masked-naive |
+| era5-masked-naive | ERA5 daily + `-land-snow-masked` channels (merged) | prognostic snow, mean/std scaling | `2026-08-12-ace2s-snow-masked-daily` era5 masked-naive |
 
 ## What differs from the original runs
 
@@ -38,6 +38,19 @@ splits and seed. The arms are test material for the evaluation methods, not fina
 `exp/ace2s-snow-inline-metrics-train`, created from `exp/ace2s-snow-memory-inline-check`: the
 `exp/ace2s-snow-prognostic-daily` code base (main as of 2026-07-31 plus the snow work) with the
 two aggregators cherry-picked on. The controls are trained from the same code as the treatments.
+
+## Corrected snow channels (2026-09-21)
+
+The first masked-naive runs (`ace2s-snowmetrics-{cm4,era5}-daily-masked-naive-1-step-pretrain-rs0`,
+finished 2026-09-21) used the 2026-08-12 masked stores, in which ERA5 snow amount and cover are
+per unit **cell** area (diluted by land fraction in coastal cells) while CM4's are per unit
+**land** area, and CM4 cover is in percent. Those runs stay as the record of that definition and
+are superseded. The masked-naive configs now read the `-land-snow-masked` stores and stats
+(`scripts/data_process/snow_masked_channels/` on `scripts/snow-masked-channels-per-land-area`):
+both datasets per unit land area, cover as a fraction in [0, 1]; ERA5 divided by land fraction
+with cover clipped at 1, CM4 cover divided by 100. The relaunched runs carry `-land-snow` in
+their names. The controls are unaffected (no snow channels; their normalization entries are
+identical in the old and new stats datasets) and are not relaunched.
 
 ## Launch
 
