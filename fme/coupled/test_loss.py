@@ -9,7 +9,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
-from fme.core.loss import LossOutput, StandardLoss, StepLoss
+from fme.core.loss import LossOutput, StandardLoss, StepOutputLoss, StepOutputLossOutput
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 from .loss import ComponentLossSchedule
@@ -21,7 +21,7 @@ from .stepper import (
 
 
 def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
-    """Wrap a scalar tensor as a LossOutput for mocking StepLoss."""
+    """Wrap a scalar tensor as a LossOutput for mocking StepOutputLoss."""
     return LossOutput(
         losses=[StandardLoss(value.unsqueeze(0).unsqueeze(0))],
         channel_names=["mock"],
@@ -29,10 +29,11 @@ def _wrap_as_loss_output(value: torch.Tensor) -> LossOutput:
 
 
 def _mock_step_loss(fn):
-    """Create a Mock(spec=StepLoss) whose forward returns LossOutput."""
-    mock = Mock(spec=StepLoss)
-    mock.side_effect = lambda data, target, step: _wrap_as_loss_output(
-        fn(data, target, step)
+    """Create a Mock(spec=StepOutputLoss) whose forward returns a
+    StepOutputLossOutput built from ``fn(data, target, step)``."""
+    mock = Mock(spec=StepOutputLoss)
+    mock.side_effect = lambda data, target, step, deltas=None: StepOutputLossOutput(
+        main=_wrap_as_loss_output(fn(data, target, step))
     )
     return mock
 
@@ -93,8 +94,8 @@ def assert_tensor_dicts_close(
 
 
 def _build_coupled_loss(
-    ocean_loss: StepLoss,
-    atmosphere_loss: StepLoss,
+    ocean_loss: StepOutputLoss,
+    atmosphere_loss: StepOutputLoss,
     ocean_n_steps=None,
     atmos_n_steps=None,
     ocean_weight=1.0,
@@ -475,8 +476,8 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
     ocean_schedule = MagicMock(spec=ComponentLossSchedule)
     atmos_schedule = MagicMock(spec=ComponentLossSchedule)
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=Mock(spec=StepLoss),
-        atmosphere_loss=Mock(spec=StepLoss),
+        ocean_loss=Mock(spec=StepOutputLoss),
+        atmosphere_loss=Mock(spec=StepOutputLoss),
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
@@ -528,8 +529,8 @@ def test_coupled_stepper_train_loss_set_train_eval_delegates():
     ocean_schedule = MagicMock(spec=ComponentLossSchedule)
     atmos_schedule = MagicMock(spec=ComponentLossSchedule)
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=MagicMock(spec=StepLoss),
-        atmosphere_loss=MagicMock(spec=StepLoss),
+        ocean_loss=MagicMock(spec=StepOutputLoss),
+        atmosphere_loss=MagicMock(spec=StepOutputLoss),
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
@@ -632,8 +633,8 @@ def test_coupled_stepper_train_loss_n_required_outer_steps(
     ocean_schedule.n_required_forward_steps.return_value = ocean_required
     atmos_schedule.n_required_forward_steps.return_value = atmos_required
     coupled_loss = CoupledStepperTrainLoss(
-        ocean_loss=Mock(spec=StepLoss),
-        atmosphere_loss=Mock(spec=StepLoss),
+        ocean_loss=Mock(spec=StepOutputLoss),
+        atmosphere_loss=Mock(spec=StepOutputLoss),
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
@@ -835,3 +836,53 @@ def test_single_component_eval_reproducible_after_seed_eval():
     second = _draw_sequence()
     assert first == second
     assert set(first) == {"ocean", "atmosphere"}
+
+
+def test_coupled_loss_forwards_each_realms_deltas():
+    ocean_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(1.0))
+    atmos_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(1.0))
+    loss_obj = _build_coupled_loss(
+        ocean_loss=ocean_loss_obj, atmosphere_loss=atmos_loss_obj
+    )
+    ocean_deltas = EnsembleTensorDict({"o": torch.rand(1, 1, 1, 3)})
+    atmos_deltas = EnsembleTensorDict({"a": torch.rand(1, 1, 1, 3)})
+    ocean_step = ComponentEnsembleStepPrediction(
+        realm="ocean",
+        data=EnsembleTensorDict({"o": torch.rand(1, 1, 1, 3)}),
+        step=0,
+        deltas=ocean_deltas,
+    )
+    atmos_step = ComponentEnsembleStepPrediction(
+        realm="atmosphere",
+        data=EnsembleTensorDict({"a": torch.rand(1, 1, 1, 3)}),
+        step=0,
+        deltas=atmos_deltas,
+    )
+    target = {"o": torch.zeros(1, 1, 1, 3), "a": torch.zeros(1, 1, 1, 3)}
+    loss_obj(ocean_step, target)
+    loss_obj(atmos_step, target)
+    loss_obj.compute_loss(ocean_step, target)
+    loss_obj.compute_loss(atmos_step, target)
+    assert ocean_loss_obj.call_count == 2
+    assert atmos_loss_obj.call_count == 2
+    for call in ocean_loss_obj.call_args_list:
+        assert call.kwargs["deltas"] is ocean_deltas
+    for call in atmos_loss_obj.call_args_list:
+        assert call.kwargs["deltas"] is atmos_deltas
+
+
+def test_ensemble_step_prediction_deltas_default_empty_and_detach():
+    step = ComponentEnsembleStepPrediction(
+        realm="ocean", data=EnsembleTensorDict({"o": torch.rand(1, 1, 1, 3)}), step=0
+    )
+    assert dict(step.deltas) == {}
+    deltas = EnsembleTensorDict({"o": torch.rand(1, 1, 1, 3, requires_grad=True)})
+    step = ComponentEnsembleStepPrediction(
+        realm="ocean",
+        data=EnsembleTensorDict({"o": torch.rand(1, 1, 1, 3)}),
+        step=0,
+        deltas=deltas,
+    )
+    detached = step.detach()
+    assert not detached.deltas["o"].requires_grad
+    torch.testing.assert_close(detached.deltas["o"], deltas["o"])
