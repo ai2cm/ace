@@ -7,6 +7,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
@@ -95,10 +96,15 @@ class OceanHeatContentBudgetConfig:
     """Configuration for ocean heat content budget correction.
 
     Parameters:
-        method: Method to use for OHC budget correction. The available option is
-            "scaled_temperature", which enforces conservation of heat content
-            by scaling the predicted potential temperature by a vertically and
-            horizontally uniform correction factor.
+        method: Method to use for OHC budget correction. Both options enforce
+            the same column heat content budget and differ only in how the
+            correction is distributed in the vertical:
+
+            - "scaled_temperature": multiply the predicted potential
+              temperature by a globally uniform factor, depositing heat in
+              proportion to ``T_k * dz_k``.
+            - "uniform_temperature": add a globally uniform temperature
+              increment, depositing heat in proportion to ``dz_k`` alone.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
@@ -107,7 +113,7 @@ class OceanHeatContentBudgetConfig:
 
     """
 
-    method: Literal["scaled_temperature"]
+    method: Literal["scaled_temperature", "uniform_temperature"]
     constant_unaccounted_heating: float = 0.0
 
 
@@ -207,7 +213,7 @@ class OceanHeatContentCorrection:
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
-    method: Literal["scaled_temperature"]
+    method: Literal["scaled_temperature", "uniform_temperature"]
     unaccounted_heating: float
 
     def __call__(
@@ -423,10 +429,19 @@ def _force_conserve_ocean_heat_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["scaled_temperature"] = "scaled_temperature",
+    method: Literal["scaled_temperature", "uniform_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
 ) -> TensorDict:
-    if method != "scaled_temperature":
+    """Adjust the generated potential temperature so the global-mean column
+    ocean heat content matches the input value plus the heat the surface and
+    geothermal fluxes deposit over one timestep.
+
+    Both methods hit the same target and differ only in the vertical profile of
+    the heat they deposit: ``scaled_temperature`` multiplies every level by one
+    global ratio, depositing heat as ``T_k * dz_k``; ``uniform_temperature``
+    adds one global increment to every valid level, depositing heat as ``dz_k``.
+    """
+    if method not in ("scaled_temperature", "uniform_temperature"):
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
         )
@@ -477,17 +492,54 @@ def _force_conserve_ocean_heat_content(
     expected_change_ocean_heat_content = (
         energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
-    heat_content_correction_ratio = (
+    target_ocean_heat_content = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
-    ) / global_gen_ocean_heat_content
-    # apply same temperature correction to all vertical layers
+    )
     out: TensorDict = {}
-    n_levels = gen.sea_water_potential_temperature.shape[-1]
-    for k in range(n_levels):
-        name = f"thetao_{k}"
-        out[name] = gen.data[name] * heat_content_correction_ratio
-    if "sst" in gen.data:
-        out["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    gen_potential_temperature = gen.sea_water_potential_temperature
+    n_levels = gen_potential_temperature.shape[-1]
+    if method == "scaled_temperature":
+        heat_content_correction_ratio = (
+            target_ocean_heat_content / global_gen_ocean_heat_content
+        )
+        # apply same temperature correction to all vertical layers
+        for k in range(n_levels):
+            name = f"thetao_{k}"
+            out[name] = gen.data[name] * heat_content_correction_ratio
+        if "sst" in gen.data:
+            out["sst"] = (  # assuming sst in Kelvin
+                gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
+            ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    else:
+        # must come from depth_integral over the same columns as the heat
+        # content, or conservation is off by the difference between the two
+        heat_capacity_per_area = area_weighted_mean(
+            vertical_coordinate.depth_integral(
+                torch.ones_like(gen_potential_temperature)
+                * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+                * DENSITY_OF_SEA_WATER_CM4
+            ),
+            keepdim=True,
+            name="ocean_heat_content",
+        )
+        temperature_increment = (
+            target_ocean_heat_content - global_gen_ocean_heat_content
+        ) / heat_capacity_per_area
+        # shift every cell the store marks valid, including the zero-thickness
+        # ones, which are scored but absorb no heat. dz is itself mask-weighted,
+        # so dz * (mask > 0) == dz, which is what makes conservation exact.
+        is_masked_valid = (vertical_coordinate.mask > 0.0).to(
+            dtype=gen_potential_temperature.dtype
+        )
+        for k in range(n_levels):
+            name = f"thetao_{k}"
+            out[name] = gen.data[name] + temperature_increment * is_masked_valid.select(
+                -1, k
+            )
+        if "sst" in gen.data:
+            # no Kelvin offset needed, unlike the multiplicative path; sst is
+            # not in the heat content integral
+            out["sst"] = gen.data[
+                "sst"
+            ] + temperature_increment * is_masked_valid.select(-1, 0)
     return out

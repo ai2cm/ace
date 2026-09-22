@@ -37,6 +37,17 @@ class HasOceanDepthIntegral(Protocol):
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
+    @property
+    def mask(self) -> torch.Tensor:
+        """Per-level validity: 1 where a layer holds data, 0 elsewhere.
+
+        The last dimension is the vertical; any leading dimensions are
+        horizontal and broadcast against the integrand. More permissive than
+        the bathymetry: a cell can be valid and still have zero thickness, so
+        ``mask > 0`` and ``dz > 0`` are different cell sets.
+        """
+        ...
+
 
 class HasCellAreaInMetersSquared(Protocol):
     """Protocol for objects that can provide cell areas in square meters."""
