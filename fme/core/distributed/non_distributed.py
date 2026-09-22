@@ -138,3 +138,6 @@ class NonDistributed(DistributedBackend):
 
     def shutdown(self):
         return
+
+    def abort(self):
+        return

@@ -46,12 +46,12 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         pass
 
     @property
     @abc.abstractmethod
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
         """
@@ -59,7 +59,7 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -67,8 +67,17 @@ class StepConfigABC(abc.ABC):
 
     @property
     @final
-    def prognostic_names(self) -> list[str]:
-        return list(set(self.input_names).intersection(self.output_names))
+    def prognostic_names(self) -> frozenset[str]:
+        return frozenset(set(self.input_names).intersection(self.output_names))
+
+    @property
+    def residual_names(self) -> frozenset[str]:
+        """
+        Names whose loss errors are scored in residual (tendency) units when a
+        residual loss normalization is configured. Every prognostic, unless a
+        step type narrows the set.
+        """
+        return self.prognostic_names
 
     @property
     @abc.abstractmethod
@@ -132,9 +141,20 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
-    @abc.abstractmethod
+    @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
-        pass
+        state = cls.remove_deprecated_keys(state)
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
+    @classmethod
+    @abc.abstractmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove or transform deprecated keys from a serialized config.
+
+        Called by ``from_state`` before the dict is loaded via dacite.
+        Implementations must return a new dict and never mutate the input.
+        When there is nothing to remove, implement as ``return dict(state)``.
+        """
 
 
 @dataclasses.dataclass
@@ -182,18 +202,22 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.get_next_step_forcing_names()
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self._step_config_instance.input_names
 
     @property
-    def output_names(self) -> list[str]:
+    def residual_names(self) -> frozenset[str]:
+        return self._step_config_instance.residual_names
+
+    @property
+    def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
         """
         return self._step_config_instance.output_names
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -239,8 +263,8 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
     @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 class StepABC(abc.ABC):
@@ -290,17 +314,17 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self.config.input_names
 
     @property
     @final
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         return self.config.output_names
 
     @property
     @final
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         return self.config.prognostic_names
 
     @property
@@ -320,7 +344,7 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """

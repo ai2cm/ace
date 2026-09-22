@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import logging
 from math import ceil
@@ -216,18 +217,22 @@ class CoupledForcingDataLoaderConfig:
         self,
         start_indices: ExplicitIndices,
     ):
+        # the built loader takes ownership of its dataset configs and updates
+        # the atmosphere subset in place to align it with the ocean start, so
+        # hand out copies to leave this user-provided config untouched (e.g.
+        # for reuse by the following segments of a segmented run)
         if self.ocean is None:
             return InferenceDataLoaderConfig(
                 dataset=CoupledDatasetWithOptionalOceanConfig(
-                    atmosphere=self.atmosphere.dataset,
+                    atmosphere=copy.deepcopy(self.atmosphere.dataset),
                 ),
                 start_indices=start_indices,
                 num_data_workers=self.num_data_workers,
             )
         return InferenceDataLoaderConfig(
             dataset=CoupledDatasetWithOptionalOceanConfig(
-                atmosphere=self.atmosphere.dataset,
-                ocean=self.ocean.dataset,
+                atmosphere=copy.deepcopy(self.atmosphere.dataset),
+                ocean=copy.deepcopy(self.ocean.dataset),
             ),
             start_indices=start_indices,
             num_data_workers=self.num_data_workers,

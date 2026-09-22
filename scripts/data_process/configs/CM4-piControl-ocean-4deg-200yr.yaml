@@ -1,0 +1,10 @@
+# make cm4_piControl_ocean_stats RESOLUTION=4deg
+runs:
+  2026-07-15-om4-picontrol-4deg-ocean-5daily: ""  # store produced by scripts/gfdl_om4 xrbeam Dataflow pipeline
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-4deg-ocean-5daily-stats
+  data_type: CM4
+  beaker_dataset: 2026-07-15-om4-picontrol-4deg-ocean-5daily-stats
+  start_date: "0151-01-01"
+  end_date: "0351-01-01"

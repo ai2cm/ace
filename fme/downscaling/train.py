@@ -184,7 +184,9 @@ class Trainer:
             region_sampling=self.config.region_sampling,
         )
         outputs = None
+        dist = Distributed.get_instance()
         for i, batch in enumerate(train_batch_generator):
+            dist.park_if_terminating()
             self.num_batches_seen += 1
             if i % 10 == 0:
                 logging.info(f"Training on batch {i + 1}")
@@ -265,6 +267,7 @@ class Trainer:
                 self.validation_data, random_offset=False, shuffle=False
             )
             for batch in validation_batch_generator:
+                Distributed.get_instance().park_if_terminating()
                 outputs = self.model.train_on_batch(
                     batch,
                     self.null_optimization,

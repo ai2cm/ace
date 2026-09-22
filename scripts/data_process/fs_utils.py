@@ -1,0 +1,56 @@
+"""Filesystem helpers shared by the data processing scripts.
+
+The filesystem is resolved from the path's URL scheme via fsspec, so callers
+use a single code path for local paths and remote URLs (e.g. ``gs://``).
+"""
+
+import fsspec
+from fsspec.implementations.local import LocalFileSystem
+
+
+def _fs_and_path(path: str) -> tuple[fsspec.AbstractFileSystem, str]:
+    """Resolve a path to its filesystem, dropping any cached listing for it.
+
+    ``url_to_fs`` returns a cached, long-lived instance whose directory
+    listing cache is not invalidated by writes made through other instances
+    (e.g. zarr writes via a separate asynchronous instance). Callers use these
+    helpers to decide whether to overwrite an existing store, so a stale
+    negative would silently clobber data rather than raise.
+    """
+    fs, fs_path = fsspec.core.url_to_fs(path)
+    fs.invalidate_cache(fs_path)
+    return fs, fs_path
+
+
+def path_exists(path: str) -> bool:
+    """Return whether a file, directory, or object-store prefix exists."""
+    fs, fs_path = _fs_and_path(path)
+    return fs.exists(fs_path)
+
+
+def is_dir(path: str) -> bool:
+    """Return whether the path is a directory (or object-store prefix)."""
+    fs, fs_path = _fs_and_path(path)
+    return fs.isdir(fs_path)
+
+
+def makedirs(path: str) -> None:
+    """Create a directory if it doesn't exist.
+
+    Object stores have implicit directories, so this does nothing for a
+    prefix within an existing bucket. It is not unconditionally a no-op on
+    them: gcsfs attempts to create a bucket that doesn't exist, which raises
+    if the caller lacks permission. Existing data is never overwritten.
+    """
+    fs, fs_path = _fs_and_path(path)
+    fs.makedirs(fs_path, exist_ok=True)
+
+
+def is_local(path: str) -> bool:
+    """Return whether the path resolves to the local filesystem.
+
+    isinstance is used because fsspec dispatches filesystem behavior by
+    class, and local-vs-remote is exactly that distinction.
+    """
+    fs, _ = _fs_and_path(path)
+    return isinstance(fs, LocalFileSystem)

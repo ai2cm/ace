@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+from collections.abc import Callable
 
 import torch
 
@@ -54,6 +55,103 @@ class LogUniformNoiseDistribution(NoiseDistribution):
             shape=(batch_size, 1, 1, 1),
             dtype=torch.float32,
         ).to(device)
+
+
+def uniform_frame_times(n_timesteps: int) -> torch.Tensor:
+    """Normalized times of ``n_timesteps`` uniformly spaced frames on ``[0, 1]``.
+
+    Endpoints land exactly on 0 and 1; interior frames on ``k / (T - 1)``.
+    """
+    return torch.linspace(0.0, 1.0, n_timesteps, dtype=torch.float64)
+
+
+def brownian_bridge_mixing_matrix(tau: torch.Tensor) -> torch.Tensor:
+    """Temporal mixing matrix for endpoint-pinned, `Brownian-bridge`_-correlated
+    noise.
+
+    .. _Brownian-bridge: https://en.wikipedia.org/wiki/Brownian_bridge
+
+    Because every entry depends only on its own pair ``(tau_i, tau_j)``, the
+    matrix built for any *subset* of frame times equals the full-grid matrix
+    restricted to those frames. Generating a subset of frames therefore draws
+    from the exact *marginal* of the full-window bridge -- the noise obeys the
+    same process whether or not the other frames are requested.
+
+    Args:
+        tau: Normalized frame times, shape ``(T,)`` with ``T >= 3``, sorted with
+            endpoints at 0 and 1 and interior values in ``(0, 1)``.
+
+    Returns:
+        A ``(T, T)`` float32 tensor on ``tau``'s device.
+    """
+
+    def _bridge_corr(s: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        cov = torch.minimum(s, t) - s * t
+        return cov / torch.sqrt((s - s**2) * (t - t**2))
+
+    return _interior_cholesky_mixing_matrix(tau, _bridge_corr)
+
+
+def _interior_cholesky_mixing_matrix(
+    tau: torch.Tensor, corr_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+) -> torch.Tensor:
+    """Shared scaffold for endpoint-pinned mixing matrices: builds the
+    unit-diagonal interior correlation matrix via ``corr_fn(tau_i, tau_j)``,
+    Cholesky-factors it, and embeds it in a zero-padded ``(T, T)`` matrix
+    (endpoint rows/cols zero). Used by ``brownian_bridge_mixing_matrix``,
+    ``ou_mixing_matrix``, and ``rbf_mixing_matrix`` -- they differ only in
+    ``corr_fn``.
+    """
+    if tau.ndim != 1 or tau.shape[0] < 3:
+        raise ValueError(
+            "Endpoint-pinned noise needs at least 3 frames (2 endpoints + 1 "
+            f"interior); got tau with shape {tuple(tau.shape)}."
+        )
+    n_timesteps = tau.shape[0]
+    n_interior = n_timesteps - 2
+    tau_i = tau[1:-1].to(torch.float64)
+    s = tau_i.reshape(-1, 1)
+    t = tau_i.reshape(1, -1)
+    corr = corr_fn(s, t)
+    chol = torch.linalg.cholesky(corr)  # lower-triangular, corr == chol @ chol.T
+    mixing = torch.zeros(
+        n_timesteps, n_timesteps, dtype=torch.float64, device=tau.device
+    )
+    mixing[1 : 1 + n_interior, 1 : 1 + n_interior] = chol
+    return mixing.to(torch.float32)
+
+
+def ou_mixing_matrix(tau: torch.Tensor, length_scale: float) -> torch.Tensor:
+    """Temporal mixing matrix for endpoint-pinned, Ornstein-Uhlenbeck-
+    correlated noise: ``corr(s, t) = exp(-|s - t| / length_scale)``.
+
+    Args:
+        tau: Normalized frame times, shape ``(T,)``, as in
+            ``brownian_bridge_mixing_matrix``.
+        length_scale: OU decorrelation length, in the same units as ``tau``
+            (hours, for this codebase's frame times).
+    """
+    return _interior_cholesky_mixing_matrix(
+        tau, lambda s, t: torch.exp(-torch.abs(s - t) / length_scale)
+    )
+
+
+def rbf_mixing_matrix(tau: torch.Tensor, length_scale: float) -> torch.Tensor:
+    """Temporal mixing matrix for endpoint-pinned, RBF/squared-exponential-
+    correlated noise: ``corr(s, t) = exp(-(s - t)^2 / (2 * length_scale^2))``.
+
+    **Caution:** RBF kernels become numerically near-singular fast as
+    ``length_scale`` grows relative to the frame spacing -- verify ``det``
+    isn't degenerate before using this in training.
+
+    Args:
+        tau: Normalized frame times, shape ``(T,)``, as in
+            ``brownian_bridge_mixing_matrix``.
+        length_scale: RBF length scale, in the same units as ``tau``.
+    """
+    return _interior_cholesky_mixing_matrix(
+        tau, lambda s, t: torch.exp(-((s - t) ** 2) / (2 * length_scale**2))
+    )
 
 
 def condition_with_noise_for_training(

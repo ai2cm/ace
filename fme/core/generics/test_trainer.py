@@ -1,6 +1,5 @@
 import contextlib
 import os
-import signal
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
 
@@ -9,7 +8,6 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.distributed.shutdown import handle_termination_signals
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -591,29 +589,6 @@ def fail_after_calls_patch(object, method: str, call_count: int):
             pass
 
 
-@contextlib.contextmanager
-def preempt_after_calls_patch(object, method: str, call_count: int):
-    total_calls = 0
-    original_method = getattr(object, method)
-
-    def wrapper(*args, **kwargs):
-        nonlocal total_calls
-        total_calls += 1
-        if total_calls >= call_count:
-            signal.raise_signal(signal.SIGTERM)
-        return original_method(*args, **kwargs)
-
-    with unittest.mock.patch.object(object, method) as mock:
-        mock.side_effect = wrapper
-        # the handler that turns SIGTERM into a restart checkpoint is installed
-        # by Distributed.context() around the whole job in production
-        with handle_termination_signals(shutdown=lambda: None):
-            try:
-                yield mock
-            except SystemExit:
-                pass
-
-
 @pytest.mark.parametrize(
     "interrupt_method",
     ["train_one_epoch", "_validation_callback", "_inference_callback"],
@@ -670,19 +645,21 @@ def get_batch_indices(batches) -> list[int]:
     ["preempt", "fail"],
 )
 def test_resume_after_interrupted_training_during_epoch(
-    tmp_path: str, interrupt_method: Literal["preempt", "fail"]
+    tmp_path: str, interrupt_method: Literal["preempt", "fail"], monkeypatch
 ):
-    if interrupt_method == "preempt":
-        patch_func = preempt_after_calls_patch
-    else:
-        patch_func = fail_after_calls_patch
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
     checkpoint_every_n_batches = 20
     batches_before_interrupt = 25
     if interrupt_method == "preempt":
-        # saves checkpoint gracefully during interrupt
+        # the post-abort callback preserves mid-epoch progress
         n_checkpointed_batches = batches_before_interrupt
     else:
-        # exception leads to immediate termination without checkpointing
+        # an exception kills the process without checkpointing, so resumption
+        # starts from the last every-n-batches checkpoint
         n_checkpointed_batches = (
             batches_before_interrupt
             // checkpoint_every_n_batches
@@ -703,10 +680,17 @@ def test_resume_after_interrupted_training_during_epoch(
             trainer, "_log_first_batch_metrics", return_value=None
         ),
     ):  # would throw off count for actual training batches seen
-        with patch_func(
+        with fail_after_calls_patch(
             trainer.stepper, "train_on_batch", batches_before_interrupt + 1
         ):
             trainer.train()
+    if interrupt_method == "preempt":
+        # the real preemption path exits the process from the listener thread
+        # (see fme/core/distributed/test_shutdown.py), so it cannot run
+        # in-process; invoke the trainer's registered callback as the listener
+        # would after the abort
+        (save_on_terminate,) = registered_callbacks
+        save_on_terminate()
     assert isinstance(trainer.stepper, TrainStepper)
     stepper = cast(TrainStepper, trainer.stepper)
     pre_interrupt_batches = stepper.train_batches_seen
@@ -748,74 +732,6 @@ def test_resume_after_interrupted_training_during_epoch(
     assert set(stepper.train_batches_seen).intersection(repeated_batches) == set(
         repeated_batches
     )
-
-
-@pytest.mark.parametrize("evaluate_before_training", [True, False])
-def test_resume_after_preemption_during_validation(
-    tmp_path: str, evaluate_before_training: bool
-):
-    checkpoint_every_n_batches = 20
-    n_train_batches = checkpoint_every_n_batches * 2
-    stepper_state = {"foo": "bar"}
-    n_validation_batches = 4
-    config, trainer = get_trainer(
-        tmp_path,
-        stepper_state=stepper_state,
-        checkpoint_save_epochs=Slice(start=0, stop=0),
-        max_epochs=1,
-        n_train_batches=n_train_batches,
-        checkpoint_every_n_batches=checkpoint_every_n_batches,
-        evaluate_before_training=evaluate_before_training,
-        n_validation_batches=n_validation_batches,
-    )
-    with (
-        unittest.mock.patch.object(
-            trainer, "_log_first_batch_metrics", return_value=None
-        ),
-    ):  # would throw off count for actual training batches seen
-        with preempt_after_calls_patch(
-            trainer,
-            "_validation_callback",
-            1 + int(evaluate_before_training),
-        ):
-            trainer.train()
-    assert isinstance(trainer.stepper, TrainStepper)
-    stepper = cast(TrainStepper, trainer.stepper)
-    assert len(stepper.train_batches_seen) == n_train_batches
-    assert (
-        len(stepper.validation_batches_seen)
-        == int(evaluate_before_training) * n_validation_batches
-        + config.train_evaluation_batches
-    )
-    paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.latest_checkpoint_path)
-    assert not os.path.exists(
-        paths.best_checkpoint_path
-    )  # requires end-of-epoch validation loss
-    _, trainer = get_trainer(
-        tmp_path,
-        checkpoint_save_epochs=Slice(start=0, stop=0),
-        max_epochs=1,
-        n_train_batches=n_train_batches,
-        stepper_state=stepper_state,
-    )
-    with (
-        unittest.mock.patch.object(
-            trainer,
-            "_validation_callback",
-            return_value=({"val/mean/loss": 0.0}, 0.0),
-        ) as validate_mock,
-    ):
-        assert trainer._epochs_trained == 0
-        trainer.train()
-        assert validate_mock.call_count == 1
-        assert trainer._epochs_trained == 1
-    stepper = cast(TrainStepper, trainer.stepper)
-    assert len(stepper.train_batches_seen) == 0  # empty epoch after preemption
-    assert (
-        len(stepper.validation_batches_seen) == config.train_evaluation_batches
-    )  # already did evaluate_before_training before pre-emption
-    assert os.path.exists(paths.best_checkpoint_path)
 
 
 @pytest.mark.parametrize("ema_decay", [0.05, 0.99])
@@ -1099,6 +1015,54 @@ def test_save_best_inference_epoch_ckpts(tmp_path: str):
         weights_only=False,
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.2
+    assert best_inference_checkpoint["epoch"] == 3
+
+
+def test_nan_inference_error_does_not_mask_best(tmp_path: str):
+    """A diverged epoch must not erase the best inference error we report.
+
+    min(nan, x) is nan, so an epoch whose inference error diverged used to be
+    logged as the best-so-far, and wandb's run summary keeps the last logged
+    value.
+    """
+    max_epochs = 4
+    n_train_batches = 5
+    train_losses = np.array([0.5, 0.4, 0.3, 0.2])
+    val_losses = np.array([0.6, 0.5, 0.4, 0.3])
+    inference_losses = np.array([0.1, np.nan, 0.05, np.nan])
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            train_losses=train_losses,
+            validation_losses=val_losses,
+            inference_losses=inference_losses,
+            n_train_batches=n_train_batches,
+            validate_using_ema=False,
+        )
+        trainer.train()
+        epoch_logs = [
+            logs for logs in wandb.get_logs() if "best_inference_error" in logs
+        ]
+
+    assert [logs["best_inference_error"] for logs in epoch_logs] == [
+        0.1,
+        0.1,
+        0.05,
+        0.05,
+    ]
+    assert trainer._best_inference_error == 0.05
+
+    best_inference_checkpoint = torch.load(
+        CheckpointPaths(config.checkpoint_dir).best_inference_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert best_inference_checkpoint["best_inference_error"] == 0.05
     assert best_inference_checkpoint["epoch"] == 3
 
 

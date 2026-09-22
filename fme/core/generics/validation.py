@@ -5,6 +5,7 @@ from typing import TypeVar
 
 import torch
 
+from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.generics.data import GriddedDataABC
@@ -58,8 +59,10 @@ def run_validation_loop(
     )
     no_opt = NullOptimization()
     n_batches = len(valid_data.loader)
+    dist = Distributed.get_instance()
     with torch.no_grad(), ema_context:
         for i, batch in enumerate(valid_data.loader):
+            dist.park_if_terminating()
             if log_progress:
                 logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
             stepped = stepper.train_on_batch(

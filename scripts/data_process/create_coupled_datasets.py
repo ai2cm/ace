@@ -18,6 +18,7 @@ from coupled_dataset_utils import (
     compute_coupled_ocean,
     compute_coupled_sea_ice,
 )
+from fs_utils import path_exists
 from get_stats import ClimateDataType, StatsConfig, get_stats
 from merge_stats import MergeStatsConfig, merge_stats
 from writer_utils import OutputWriterConfig
@@ -61,7 +62,7 @@ def _get_stats(
     # Check if stats directory already exists
     run_name = os.path.basename(input_zarr_path).replace(".zarr", "-stats")
     stats_dir = os.path.join(os.path.dirname(input_zarr_path), run_name)
-    if os.path.exists(stats_dir):
+    if path_exists(stats_dir):
         logging.info(
             f"Stats directory {stats_dir} already exists. Skipping stats computation."
         )
@@ -121,7 +122,7 @@ def _merge_stats(
 
     # uncoupled atmosphere training (coupled_sea_ice + uncoupled_atmos)
     output_dir = os.path.join(output_directory, "uncoupled_atmosphere")
-    if not os.path.exists(output_dir):
+    if not path_exists(output_dir):
         logging.info("Merging stats for uncoupled atmosphere training")
         logging.info(f"  Input: {sea_ice_dir}")
         logging.info(f"  Input: {uncoupled_atmos_dir}")
@@ -145,7 +146,7 @@ def _merge_stats(
             return
 
         output_dir = os.path.join(output_directory, output_subdir)
-        if os.path.exists(output_dir):
+        if path_exists(output_dir):
             logging.info(
                 f"Merged {label} stats already exist at {output_dir}, skipping"
             )
@@ -212,7 +213,7 @@ def _combine_ensemble_stats(
         stats_roots = []
         for run_name in run_names:
             category_dir = os.path.join(ensemble_stats_dir, run_name, category)
-            if os.path.exists(category_dir):
+            if path_exists(category_dir):
                 # combine_stats uses string concatenation (root + filename),
                 # so paths must end with "/"
                 stats_roots.append(category_dir + "/")
@@ -483,9 +484,9 @@ class CoupledDatasetsConfig:
         logging.info("=" * 80)
 
         # Check if outputs already exist (unless in debug mode)
-        sea_ice_exists = not debug and os.path.exists(sea_ice_output_store)
-        ocean_exists = not debug and os.path.exists(ocean_output_store)
-        atmos_exists = not debug and os.path.exists(atmosphere_output_store)
+        sea_ice_exists = not debug and path_exists(sea_ice_output_store)
+        ocean_exists = not debug and path_exists(ocean_output_store)
+        atmos_exists = not debug and path_exists(atmosphere_output_store)
 
         compute_ocean = self.coupled_sea_surface is not None
         compute_atmos = self.coupled_ts is not None

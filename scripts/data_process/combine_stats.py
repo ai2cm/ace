@@ -41,6 +41,7 @@ class TimeCoarsenConfig:
 
     data_output_directory: str
     stats_output_directory: str
+    output_names: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -183,8 +184,20 @@ def main(config_yaml: str):
     )
 
     if config.time_coarsen is not None:
+        unknown_keys = set(config.time_coarsen.output_names) - set(config.runs)
+        if unknown_keys:
+            raise ValueError(
+                f"time_coarsen.output_names keys not found in runs: {unknown_keys}"
+            )
+        if config.time_coarsen.stats_output_directory.endswith("/"):
+            config.time_coarsen.stats_output_directory = (
+                config.time_coarsen.stats_output_directory[:-1]
+            )
         stats_roots = [
-            config.time_coarsen.stats_output_directory + "/" + run + "/"
+            config.time_coarsen.stats_output_directory
+            + "/"
+            + config.time_coarsen.output_names.get(run, run)
+            + "/"
             for run in config.runs.keys()
             if run not in config.stats.exclude_runs
         ]

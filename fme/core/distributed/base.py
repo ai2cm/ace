@@ -120,6 +120,17 @@ class DistributedBackend(ABC):
     def shutdown(self): ...
 
     @abstractmethod
+    def abort(self):
+        """Locally release the backend's communicators so this process can
+        exit without faulting its peers.
+
+        Unlike `shutdown`, this is not collective, and it must be callable
+        from a non-main thread while the main thread is blocked in a
+        collective.
+        """
+        ...
+
+    @abstractmethod
     def get_sht(
         self,
         nlat: int,

@@ -8,43 +8,58 @@ from combine_stats import Config as CombineStatsConfig
 from create_coupled_datasets import CreateCoupledDatasetsConfig
 from create_coupled_ic import CreateCoupledICConfig
 from get_stats import Config as GetStatsConfig
+from time_coarsen import Config as TimeCoarsenConfig
 from upload_stats import Config as UploadStatsConfig
 from upload_stats import _upload_specs
 
 DIRNAME = os.path.abspath(os.path.dirname(__file__))
-# list files in DIRNAME/config
-APPEND_CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith(".yaml") and "append" in f
-]
-COUPLED_CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith("-coupled.yaml")
-]
-IGNORE_CONFIGS_WITH_SUFFIX = [
-    "-append.yaml",
-    "-coupled.yaml",
-    "-vertical-coarsen.yaml",
-    "-coupled-ic.yaml",
-]
-COUPLED_IC_CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith("-coupled-ic.yaml")
-]
+CONFIGS_DIR = os.path.join(DIRNAME, "configs")
+
+# Configs whose schema has no test here; any other unclassified config fails
+# test_every_config_is_classified.
+UNTESTED_CONFIG_SUFFIXES = ("-vertical-coarsen.yaml",)
 
 
-def _ignore_config(fname: str) -> bool:
-    return any([fname.endswith(suffix) for suffix in IGNORE_CONFIGS_WITH_SUFFIX])
+def _config_kind(path: str) -> str:
+    """Classify a config by its top-level keys, not its filename."""
+    with open(path) as f:
+        keys = set(yaml.load(f, Loader=yaml.CLoader))
+    if "coupled_datasets" in keys:
+        return "coupled"
+    if "coupled_config_path" in keys:
+        return "coupled-ic"
+    if "variable_sources" in keys:
+        return "append"
+    if "runs" in keys:
+        return "stats"
+    return "other"
 
 
-CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith(".yaml") and not _ignore_config(f)
+ALL_CONFIG_YAMLS = [
+    os.path.join(CONFIGS_DIR, f)
+    for f in sorted(os.listdir(CONFIGS_DIR))
+    if f.endswith(".yaml")
 ]
+CONFIG_KINDS = {path: _config_kind(path) for path in ALL_CONFIG_YAMLS}
+
+
+def _configs_of_kind(kind: str) -> list[str]:
+    return [path for path, k in CONFIG_KINDS.items() if k == kind]
+
+
+CONFIG_YAMLS = _configs_of_kind("stats")
+APPEND_CONFIG_YAMLS = _configs_of_kind("append")
+COUPLED_CONFIG_YAMLS = _configs_of_kind("coupled")
+COUPLED_IC_CONFIG_YAMLS = _configs_of_kind("coupled-ic")
+
+
+def test_every_config_is_classified():
+    unclassified = [
+        os.path.basename(path)
+        for path in _configs_of_kind("other")
+        if not path.endswith(UNTESTED_CONFIG_SUFFIXES)
+    ]
+    assert unclassified == []
 
 
 @pytest.mark.parametrize(
@@ -190,3 +205,27 @@ def test_upload_config_rejects_no_datasets_requested():
 def test_upload_config_rejects_no_datasets_without_time_coarsen():
     with pytest.raises(ValueError, match="No Beaker dataset to upload"):
         _upload_stats_config(stats_beaker_dataset=None)
+
+
+OUTPUT_NAMES_CONFIG_YAMLS = [
+    f for f in CONFIG_YAMLS if "output_names" in open(f).read()
+]
+
+
+@pytest.mark.parametrize("filename", OUTPUT_NAMES_CONFIG_YAMLS)
+def test_output_names_resolve_to_distinct_paths(filename):
+    with open(filename) as f:
+        config_data = yaml.load(f, Loader=yaml.CLoader)
+    config = dacite.from_dict(data_class=TimeCoarsenConfig, data=config_data)
+    data_dir = config.data_output_directory.rstrip("/")
+    tc_dir = config.time_coarsen.data_output_directory.rstrip("/")
+    for run_name in config.runs:
+        output_name = config.time_coarsen.output_names.get(run_name, run_name)
+        input_zarr = data_dir + "/" + run_name + ".zarr"
+        output_zarr = tc_dir + "/" + output_name + ".zarr"
+        assert (
+            input_zarr != output_zarr
+        ), f"Coarsened output path equals input: {input_zarr}"
+        assert (
+            output_name != run_name
+        ), f"output_names should give run {run_name!r} a distinct name"

@@ -1,4 +1,6 @@
+import dataclasses
 import re
+from collections.abc import Iterable
 
 
 class NameAndPrefixMatcher:
@@ -34,3 +36,39 @@ class NameAndPrefixMatcher:
         if self._regex is None:
             return False
         return bool(re.match(self._regex, name))
+
+
+@dataclasses.dataclass(frozen=True)
+class NameAndPrefixSelection:
+    """A name-and-prefix selection that keeps its entries reportable.
+
+    ``NameAndPrefixMatcher`` has no per-entry reporting; keeping the entry
+    tuple alongside the matcher enables per-entry validation
+    (``unmatched_entries``) without adding state to the matcher itself.
+
+    Parameters:
+        entries: Names and prefixes following the ``NameAndPrefixMatcher``
+            matching convention.
+    """
+
+    entries: tuple[str, ...]
+
+    @property
+    def matcher(self) -> NameAndPrefixMatcher:
+        """A matcher over all of the selection's entries."""
+        return NameAndPrefixMatcher(list(self.entries))
+
+    def matched(self, names: Iterable[str]) -> list[str]:
+        """Names (sorted) that match any entry."""
+        matcher = self.matcher
+        return sorted(name for name in names if matcher.match(name))
+
+    def unmatched_entries(self, names: Iterable[str]) -> list[str]:
+        """Entries that match none of ``names``."""
+        names = list(names)
+        matchers = [(entry, NameAndPrefixMatcher([entry])) for entry in self.entries]
+        return [
+            entry
+            for entry, matcher in matchers
+            if not any(matcher.match(name) for name in names)
+        ]

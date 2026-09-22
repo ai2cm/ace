@@ -6,6 +6,7 @@ from typing import Protocol
 
 import torch
 
+from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
@@ -117,7 +118,9 @@ def run_lr_tuning_trial(
 
     baseline_stepper.set_train()
     candidate_stepper.set_train()
+    dist = Distributed.get_instance()
     for batch in train_data.subset_loader(stop_batch=config.num_batches):
+        dist.park_if_terminating()
         baseline_stepper.train_on_batch(batch, baseline_opt)
         baseline_ema(baseline_stepper.modules)
 

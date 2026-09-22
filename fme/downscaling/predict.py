@@ -219,6 +219,7 @@ class Downscaler:
         generation_model = self._get_generation_model()
         aggregator: NoTargetAggregator | None = None
         for i, batch in enumerate(self.data.get_generator()):
+            Distributed.get_instance().park_if_terminating()
             if aggregator is None:
                 fine_coords = generation_model.get_fine_coords_for_batch(batch)
                 aggregator = NoTargetAggregator(

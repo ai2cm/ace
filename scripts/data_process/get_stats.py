@@ -15,6 +15,7 @@ import dacite
 import fsspec
 import xarray as xr
 import yaml
+from fs_utils import is_local, makedirs, path_exists
 
 # these are auxiliary variables that exist in dataset for convenience, e.g. to do
 # masking or to more easily compute vertical integrals. But they are not inputs
@@ -98,6 +99,7 @@ class TimeCoarsenConfig:
     data_output_directory: str
     stats_output_directory: str
     factor: int
+    output_names: dict[str, str] = dataclasses.field(default_factory=dict)
     beaker_dataset: str | None = None
 
 
@@ -111,11 +113,7 @@ class Config:
 
 def _out_dir_exists(out_dir: str) -> bool:
     """Check if the stats output directory already has results."""
-    if out_dir.startswith("gs:"):
-        fs = fsspec.filesystem("gs")
-        return fs.exists(out_dir + "/centering.nc")
-    else:
-        return os.path.exists(os.path.join(out_dir, "centering.nc"))
+    return path_exists(os.path.join(out_dir, "centering.nc"))
 
 
 def get_stats(
@@ -198,15 +196,14 @@ def get_stats(
             f"Standard deviation computed over all variables: {all_var_stddev.values}"
         )
     else:
-        if out_dir.startswith("gs:"):
+        if is_local(out_dir):
+            makedirs(out_dir)
+            local_dir = out_dir
+            remote_dir: Optional[str] = None
+        else:
             temp_dir = tempfile.TemporaryDirectory()
             local_dir = temp_dir.name
-            remote_dir: Optional[str] = out_dir
-        else:
-            if not os.path.isdir(out_dir):
-                os.makedirs(out_dir)
-            local_dir = out_dir
-            remote_dir = None
+            remote_dir = out_dir
 
         centering.to_netcdf(os.path.join(local_dir, "centering.nc"))
         if remote_dir is not None:
@@ -278,11 +275,25 @@ def main(config_yaml: str, run: int, debug: bool):
         debug=debug,
     )
     if config.time_coarsen is not None:
+        unknown_keys = set(config.time_coarsen.output_names) - set(config.runs)
+        if unknown_keys:
+            raise ValueError(
+                f"time_coarsen.output_names keys not found in runs: {unknown_keys}"
+            )
+        if config.time_coarsen.data_output_directory.endswith("/"):
+            config.time_coarsen.data_output_directory = (
+                config.time_coarsen.data_output_directory[:-1]
+            )
+        if config.time_coarsen.stats_output_directory.endswith("/"):
+            config.time_coarsen.stats_output_directory = (
+                config.time_coarsen.stats_output_directory[:-1]
+            )
+        output_name = config.time_coarsen.output_names.get(run_name, run_name)
         time_coarsened_zarr = (
-            config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+            config.time_coarsen.data_output_directory + "/" + output_name + ".zarr"
         )
         time_coarsened_out_dir = (
-            config.time_coarsen.stats_output_directory + "/" + run_name
+            config.time_coarsen.stats_output_directory + "/" + output_name
         )
         get_stats(
             config=config.stats,

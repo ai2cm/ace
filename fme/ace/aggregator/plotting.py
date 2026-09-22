@@ -196,6 +196,18 @@ def _stitch_data_panels(data: list[list[np.ndarray]], fill_value) -> np.ndarray:
     return stitched_data
 
 
+def clamp_date_axis(ax: Any):
+    """Pin an axes' x limits to the plotted data, for a matplotlib *date* axis.
+
+    Matplotlib dates must lie between year 0001 and 9999, but autoscale pads the
+    limits ~5% beyond the data. A long rollout starting near year 0001 therefore
+    autoscales to a lower bound before year 0001 and raises when the figure is
+    drawn. Setting the x margin to zero removes the padding, so the limits are
+    exactly the range of the plotted dates.
+    """
+    ax.margins(x=0)
+
+
 def plot_mean_and_samples(
     ax: Any,
     data: xr.DataArray,
