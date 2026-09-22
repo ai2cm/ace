@@ -8,3 +8,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs1|01M0GA67MS560DCTCNXVASD7
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs2|01M0GA6N3S73718Z2ZAXYWN5HY|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs2|01M0GA6N3S73718Z2ZAXYWN5HY|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs0|01M357H6ND4YJ3DEMN155STSZA|training|best_inference_ckpt|normal|--min-runtime 8h
