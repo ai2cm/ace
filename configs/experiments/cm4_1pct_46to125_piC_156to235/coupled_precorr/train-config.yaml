@@ -364,7 +364,6 @@ stepper:
                   - sfdsi
                   - UI
                   - VI
-              corrector_disabled_epochs: 1
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
