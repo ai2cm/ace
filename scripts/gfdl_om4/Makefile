@@ -90,6 +90,18 @@ smoke_test_1pctco2_1deg:
 smoke_test_1pctco2_4deg:
 	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-4deg-5daily.yaml
 
+smoke_test_picontrol_1deg_1daily:
+	$(MAKE) smoke_test CONFIG=configs/cm4-piControl-1deg-1daily.yaml
+
+smoke_test_picontrol_4deg_1daily:
+	$(MAKE) smoke_test CONFIG=configs/cm4-piControl-4deg-1daily.yaml
+
+smoke_test_1pctco2_1deg_1daily:
+	$(MAKE) smoke_test CONFIG=configs/cm4-1pctCO2-1deg-1daily.yaml
+
+smoke_test_1pctco2_4deg_1daily:
+	$(MAKE) smoke_test CONFIG=configs/cm4-1pctCO2-4deg-1daily.yaml
+
 # A repeat run against an already-written output store must refuse to
 # initialize into it (runs a smoke test first if its store is absent).
 smoke_test_repeat_fails:
@@ -111,6 +123,18 @@ check_wetmask_equivalence:
 smoke_tests: check_wetmask_equivalence smoke_test_picontrol_1deg \
 	smoke_test_picontrol_4deg smoke_test_1pctco2_1deg \
 	smoke_test_1pctco2_4deg smoke_test_repeat_fails
+
+# The 1-daily configs carry the 5-daily wetmask sources verbatim, so this
+# guards that pinning rather than the 1-daily streams themselves.
+check_wetmask_equivalence_1daily:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_wetmask_equivalence \
+		configs/cm4-piControl-1deg-1daily.yaml \
+		configs/cm4-1pctCO2-1deg-1daily.yaml
+
+smoke_tests_1daily: check_wetmask_equivalence_1daily \
+	smoke_test_picontrol_1deg_1daily smoke_test_picontrol_4deg_1daily \
+	smoke_test_1pctco2_1deg_1daily smoke_test_1pctco2_4deg_1daily
+	$(MAKE) smoke_test_repeat_fails CONFIG=configs/cm4-piControl-1deg-1daily.yaml
 
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
@@ -139,11 +163,28 @@ dataflow_1pctco2_1deg:
 dataflow_1pctco2_4deg:
 	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-4deg-5daily.yaml
 
+dataflow_picontrol_1deg_1daily:
+	$(MAKE) dataflow CONFIG=configs/cm4-piControl-1deg-1daily.yaml
+
+dataflow_picontrol_4deg_1daily:
+	$(MAKE) dataflow CONFIG=configs/cm4-piControl-4deg-1daily.yaml
+
+dataflow_1pctco2_1deg_1daily:
+	$(MAKE) dataflow CONFIG=configs/cm4-1pctCO2-1deg-1daily.yaml
+
+dataflow_1pctco2_4deg_1daily:
+	$(MAKE) dataflow CONFIG=configs/cm4-1pctCO2-4deg-1daily.yaml
+
 .PHONY: create_environment generate_weights generate_weights_one_degree \
 	generate_weights_four_degree generate_face_masks \
 	generate_face_masks_picontrol generate_face_masks_1pctco2 smoke_test \
 	smoke_test_picontrol_1deg smoke_test_picontrol_4deg \
 	smoke_test_1pctco2_1deg smoke_test_1pctco2_4deg \
 	smoke_test_repeat_fails check_wetmask_equivalence smoke_tests \
+	smoke_test_picontrol_1deg_1daily smoke_test_picontrol_4deg_1daily \
+	smoke_test_1pctco2_1deg_1daily smoke_test_1pctco2_4deg_1daily \
+	check_wetmask_equivalence_1daily smoke_tests_1daily \
 	build_dataflow push_dataflow enter dataflow dataflow_picontrol_1deg \
-	dataflow_picontrol_4deg dataflow_1pctco2_1deg dataflow_1pctco2_4deg
+	dataflow_picontrol_4deg dataflow_1pctco2_1deg dataflow_1pctco2_4deg \
+	dataflow_picontrol_1deg_1daily dataflow_picontrol_4deg_1daily \
+	dataflow_1pctco2_1deg_1daily dataflow_1pctco2_4deg_1daily

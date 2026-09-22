@@ -14,6 +14,7 @@ https://github.com/ai2cm/full-model/compare/job_runner
   configs
 - [FEAT] Default `SHARED_MEM` of `N_GPUS` / `N_TOTAL_GPUS_ON_NODE` times 80% the
   node total RAM
+- [FEAT] Validate job name <= 128 characters (beaker max)
 
 ### Changed
 

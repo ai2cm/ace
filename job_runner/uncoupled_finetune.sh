@@ -102,6 +102,7 @@ while read FINETUNING; do
 
     JOB_GROUP="${GROUP}"
     JOB_NAME=$(build_job_name "$JOB_GROUP" "$TAG" "train")
+    require_job_name_length "$JOB_NAME"
 
     # Get experiment dataset
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then
