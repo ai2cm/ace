@@ -91,6 +91,11 @@ while read PRETRAINING; do
     WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
     MIN_RUNTIME=$(echo "$PRETRAINING" | cut -d"|" -f17)
+    # Space-separated KEY=VALUE pairs passed through to gantry as --env, as
+    # resume.sh's own env column does. Needed for process-level settings (e.g.
+    # MALLOC_ARENA_MAX) that are not config and so cannot ride in the override
+    # column. Optional: rows that omit it are unaffected.
+    EXTRA_ENV=$(echo "$PRETRAINING" | cut -d"|" -f18)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -119,6 +124,12 @@ while read PRETRAINING; do
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
     build_stats_dataset_args
+
+    # Reset per iteration so one row's env does not leak into the next
+    EXTRA_ENV_ARGS=()
+    for ENV_KV in $EXTRA_ENV; do
+        EXTRA_ENV_ARGS+=(--env "$ENV_KV")
+    done
 
     # Create config from template
     bash "$SCRIPT_DIR/create_coupled_train_config.sh" \
@@ -157,6 +168,7 @@ while read PRETRAINING; do
         echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"
         echo " - Shared memory: ${SHARED_MEM}"
+        echo " - Extra env: ${EXTRA_ENV:-(none)}"
         echo " - Override: ${OVERRIDE_ARGS}"
     fi
 

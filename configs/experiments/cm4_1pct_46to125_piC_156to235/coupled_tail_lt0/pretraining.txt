@@ -1,0 +1,47 @@
+# COUPLED TAIL SCHEDULE ON THE NOISE-CONDITIONED OCEAN -- arm `lt0lt_a2s`.
+#
+# One row. The ocean init is jshu3e8a, the stage-2 long-tail all_blocks rs0
+# stochastic Samudra -- the same checkpoint lt0_a2s used, chosen within its
+# lineage by best_inference_error (0.08905 over rs1's 0.09045). The atmosphere
+# is James's frozen ACE2S j0ng1tw3, as in every arm.
+#
+# Why this arm: lt0_a2s trained coupled at a FIXED 4 steps and regressed --
+# lowest 4-step validation loss of any arm at every epoch while its inline
+# 20-yr rollout skill fell 0.0959 -> 0.1089. See train-config-template.yaml.
+#
+# HARDWARE: 8xH100 jupiter, not 4xB200. This is not a preference, it is what
+# the owclt post-mortem settled. batch_size is a GLOBAL batch, so 4 ranks means
+# 2 samples/GPU and ~300 GiB per-rank host RSS against 8 ranks' ~158; and 4 of
+# 8 GPUs is a half-node claim sharing host RAM with a co-tenant. owclt was
+# killed three times on 4xB200 by the HOST OOM killer (exit -9, never
+# torch.OutOfMemoryError) before moving here.
+#
+# MEMORY: cap 16, and this arm's peak is UNMEASURED. Calibration on 8xH100 at
+# 1 sample/GPU: mae2n (noise-conditioned, cap 4) 50.0 GiB; owc8lt
+# (deterministic, cap 16) 79.18 GiB = 99.4% of the card. Implied bases match
+# (18.0 vs 18.2), so cap 16 should land near 79 GiB -- but that is an inference
+# across two architectures onto a 0.42 GiB margin. READ THE PEAK AT
+# evaluate_before_training BEFORE LETTING IT RIDE; if it exceeds ~99%, cancel
+# and re-scope to cap 12 (projects ~69.5 GiB = 87% at the measured
+# 2.43 GiB/cap-step). Cap 20 is known not to fit -- both original tail arms
+# OOMed there.
+#
+# shared_mem left blank so default_shared_mem derives 1494GiB from
+# job_runner/node_caps.txt for 8 of jupiter's 8 H100s. Hard-coding 500GiB, as
+# older rows do, would be a third of the node's allowance -- and the cap-16
+# loader window is 401 atmosphere + 21 ocean timesteps on EVERY batch.
+#
+# retries 3, unlike owc8lt's deliberate 0: that was launched as a memory probe,
+# this is a production run. The branch carries the epoch-boundary resume fix
+# (ace#1510's trainer.py, byte-identical), so a preemption at an epoch-boundary
+# checkpoint resumes instead of dying at the train-summary NCCL gather.
+#
+# env MALLOC_ARENA_MAX=4 (column 18, added to coupled_train.sh in this commit
+# mirroring resume.sh's). Its verdict is honestly MIXED -- it did not lower the
+# resumed memory floor (87.7% median against ~78% fresh) -- but no exit -9
+# occurred in ~17 h across three attempts, every -9 to date has been on a
+# resume, and it is numerically inert, so it cannot affect comparability.
+
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|env
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto|o0a0rs0|ace-samudra-cm4|jshu3e8a|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
