@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Literal
 from unittest.mock import Mock
 
+import dacite
 import pytest
 import torch
 
@@ -20,6 +21,12 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.loss_config import (
+    CorrectorLossConfig,
+    CorrectorRegularizationConfig,
+    PreCorrectorOptimizationConfig,
+)
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -32,6 +39,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.typing_ import TensorDict
 from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
@@ -51,6 +59,7 @@ from .stepper import (
     CoupledParameterInitConfig,
     CoupledStepper,
     CoupledStepperConfig,
+    CoupledTrainOutput,
     CoupledTrainStepper,
     CoupledTrainStepperConfig,
 )
@@ -1222,6 +1231,8 @@ def get_stepper_config(
     ocean_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
+    ocean_corrector: CorrectorSelector | None = None,
+    atmosphere_corrector: CorrectorSelector | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1246,6 +1257,14 @@ def get_stepper_config(
     ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
     atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
 
+    if ocean_corrector is None:
+        ocean_corrector = CorrectorSelector("ocean_corrector", {})
+    atmosphere_corrector_config: AtmosphereCorrectorConfig | CorrectorSelector
+    if atmosphere_corrector is None:
+        atmosphere_corrector_config = AtmosphereCorrectorConfig()
+    else:
+        atmosphere_corrector_config = atmosphere_corrector
+
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
@@ -1266,6 +1285,7 @@ def get_stepper_config(
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
                             input_dropout=atmosphere_input_dropout,
+                            corrector=atmosphere_corrector_config,
                         ),
                     ),
                 ),
@@ -1286,7 +1306,7 @@ def get_stepper_config(
                             normalization=trivial_network_and_loss_normalization(
                                 ocean_norm_names
                             ),
-                            corrector=CorrectorSelector("ocean_corrector", {}),
+                            corrector=ocean_corrector,
                         ),
                     ),
                 ),
@@ -2499,3 +2519,390 @@ def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
         assert {len(keys) for keys in atmos_key_sets} == {1, 4}
         for keys in atmos_key_sets:
             assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
+
+
+def _get_coupler_and_ic_for_step_diagnostics(
+    ocean_offset: float | None,
+    atmosphere_offset: float | None,
+    n_forward_times_ocean: int = 2,
+    n_forward_times_atmosphere: int = 4,
+    n_samples: int = 2,
+):
+    """Build a coupler and initial condition for step-diagnostics tests,
+    injecting a constant-offset corrector on each realm whose offset is
+    not None. The atmosphere corrector targets "a_prog" rather than the
+    prescribed surface-temperature variable, which the SST prescription
+    (running after the corrector) forbids.
+    """
+    from fme.core.corrector.registry import CorrectionSequence
+    from fme.core.corrector.test_registry import ConstantOffsetCorrection
+    from fme.core.step.single_module import SingleModuleStep
+
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["a_prog", "surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["a_prog", "surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=n_samples,
+    )
+    if ocean_offset is not None:
+        assert isinstance(coupler.ocean._step_obj, SingleModuleStep)
+        coupler.ocean._step_obj._corrector = CorrectionSequence(
+            [ConstantOffsetCorrection("sst", ocean_offset)]
+        )
+    if atmosphere_offset is not None:
+        assert isinstance(coupler.atmosphere._step_obj, SingleModuleStep)
+        coupler.atmosphere._step_obj._corrector = CorrectionSequence(
+            [ConstantOffsetCorrection("a_prog", atmosphere_offset)]
+        )
+    data = coupled_data.data
+    ic = CoupledPrognosticState(
+        ocean_data=data.ocean_data.get_start(
+            coupler.ocean.prognostic_names, n_ic_timesteps=1
+        ),
+        atmosphere_data=data.atmosphere_data.get_start(
+            coupler.atmosphere.prognostic_names, n_ic_timesteps=1
+        ),
+    )
+    return coupler, data, ic
+
+
+@pytest.mark.parametrize("corrected_realm", ["ocean", "atmosphere"])
+def test_predict_paired_attaches_step_diagnostics_for_corrected_realm(
+    corrected_realm: str,
+):
+    offset = 1.5
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=offset if corrected_realm == "ocean" else None,
+        atmosphere_offset=offset if corrected_realm == "atmosphere" else None,
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    if corrected_realm == "ocean":
+        corrected, silent = paired_data.ocean_data, paired_data.atmosphere_data
+        name, n_steps = "sst", 2
+    else:
+        corrected, silent = paired_data.atmosphere_data, paired_data.ocean_data
+        name, n_steps = "a_prog", 4
+    assert silent.step_diagnostics is None
+    assert corrected.step_diagnostics is not None
+    assert set(corrected.step_diagnostics.delta) == {name}
+    delta = corrected.step_diagnostics.delta[name]
+    # forward-step aligned with that realm's prediction series
+    assert delta.shape == corrected.prediction[name].shape
+    assert delta.shape[1] == n_steps
+    torch.testing.assert_close(delta, torch.full_like(delta, offset))
+
+
+def test_predict_paired_step_diagnostics_both_realms():
+    ocean_offset, atmosphere_offset = 1.5, -0.5
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=ocean_offset,
+        atmosphere_offset=atmosphere_offset,
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    ocean_diagnostics = paired_data.ocean_data.step_diagnostics
+    atmos_diagnostics = paired_data.atmosphere_data.step_diagnostics
+    assert ocean_diagnostics is not None
+    assert atmos_diagnostics is not None
+    ocean_delta = ocean_diagnostics.delta["sst"]
+    atmos_delta = atmos_diagnostics.delta["a_prog"]
+    # each realm's own step count: outer ocean steps vs inner atmosphere steps
+    assert ocean_delta.shape[1] == 2
+    assert atmos_delta.shape[1] == 4
+    torch.testing.assert_close(ocean_delta, torch.full_like(ocean_delta, ocean_offset))
+    torch.testing.assert_close(
+        atmos_delta, torch.full_like(atmos_delta, atmosphere_offset)
+    )
+
+
+def test_predict_attaches_step_diagnostics():
+    # CoupledStepper.predict has no production call sites today (only
+    # predict_paired is used), but _predict now serves both and the attach
+    # ordering (after get_end) is easy to break.
+    offset = 2.0
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=offset, atmosphere_offset=None
+    )
+    prediction, prognostic_state = coupler.predict(initial_condition=ic, forcing=data)
+    assert prediction.ocean_data.step_diagnostics is not None
+    delta = prediction.ocean_data.step_diagnostics.delta["sst"]
+    torch.testing.assert_close(delta, torch.full_like(delta, offset))
+    assert prediction.atmosphere_data.step_diagnostics is None
+    # the prognostic state is taken before the attach and stays usable
+    ocean_end = prognostic_state.ocean_data.as_batch_data()
+    assert ocean_end.n_timesteps == 1
+    assert set(ocean_end.data) == set(coupler.ocean.prognostic_names)
+
+
+def test_predict_paired_without_corrector_has_no_step_diagnostics():
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=None, atmosphere_offset=None
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    assert paired_data.ocean_data.step_diagnostics is None
+    assert paired_data.atmosphere_data.step_diagnostics is None
+
+
+def test_predict_paired_step_diagnostics_zero_for_unchanged_variable():
+    # a corrector that declares a name but leaves it unchanged still yields a
+    # non-None series of exact zeros (declared-names semantics)
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=0.0, atmosphere_offset=None
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    ocean_diagnostics = paired_data.ocean_data.step_diagnostics
+    assert ocean_diagnostics is not None
+    delta = ocean_diagnostics.delta["sst"]
+    torch.testing.assert_close(delta, torch.zeros_like(delta))
+
+
+def test_prediction_generator_yields_corrector_diagnostics():
+    ocean_offset, atmosphere_offset = 1.5, -0.5
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=ocean_offset,
+        atmosphere_offset=atmosphere_offset,
+    )
+    predictions = list(coupler.get_prediction_generator(ic, data, NullOptimization()))
+    assert {x.realm for x in predictions} == {"ocean", "atmosphere"}
+    for prediction in predictions:
+        if prediction.realm == "ocean":
+            name, offset = "sst", ocean_offset
+        else:
+            name, offset = "a_prog", atmosphere_offset
+        delta = prediction.corrector_diagnostics.delta[name]
+        torch.testing.assert_close(delta, torch.full_like(delta, offset))
+
+
+def _corrector_loss_train_stepper(
+    stepper_config: CoupledStepperConfig,
+    dataset_info: CoupledDatasetInfo,
+    realm: Literal["ocean", "atmosphere"],
+    offset: float | None,
+    corrector_loss: CorrectorLossConfig | None,
+) -> CoupledTrainStepper:
+    """Build a CoupledTrainStepper with MSE losses, ``corrector_loss`` set on
+    ``realm`` only, and a ConstantOffsetCorrection of ``offset`` installed on
+    ``realm`` when the offset is not None (on "sst" for the ocean, "a_prog"
+    for the atmosphere, as in ``_get_coupler_and_ic_for_step_diagnostics``).
+    """
+    from fme.core.corrector.registry import CorrectionSequence
+    from fme.core.corrector.test_registry import ConstantOffsetCorrection
+    from fme.core.step.single_module import SingleModuleStep
+
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            corrector_loss=corrector_loss if realm == "ocean" else None,
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            corrector_loss=corrector_loss if realm == "atmosphere" else None,
+        ),
+    )
+    train_stepper = train_stepper_config.get_train_stepper(stepper_config, dataset_info)
+    if offset is not None:
+        component = (
+            train_stepper.ocean if realm == "ocean" else train_stepper.atmosphere
+        )
+        name = "sst" if realm == "ocean" else "a_prog"
+        assert isinstance(component._step_obj, SingleModuleStep)
+        component._step_obj._corrector = CorrectionSequence(
+            [ConstantOffsetCorrection(name, offset)]
+        )
+    return train_stepper
+
+
+def _corrector_loss_stepper_config_and_batch():
+    _, coupled_data, config, dataset_info = get_stepper_and_batch(
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["a_prog", "surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["a_prog", "surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=2,
+    )
+    return config, dataset_info, coupled_data.data
+
+
+def _realm_metrics(output: CoupledTrainOutput, realm: str) -> TensorDict:
+    return output.ocean.metrics if realm == "ocean" else output.atmosphere.metrics
+
+
+def _other_realm(realm: str) -> str:
+    return "atmosphere" if realm == "ocean" else "ocean"
+
+
+def test_component_training_config_corrector_loss_round_trip():
+    base = {
+        "n_coupled_steps": 1,
+        "ocean": {"loss": {"type": "MSE"}},
+        "atmosphere": {"loss": {"type": "MSE"}},
+    }
+    config = dacite.from_dict(
+        CoupledTrainStepperConfig, base, config=dacite.Config(strict=True)
+    )
+    assert config.ocean.corrector_loss is None
+    assert config.atmosphere.corrector_loss is None
+    with_corrector_loss = {
+        **base,
+        "ocean": {
+            "loss": {"type": "MSE"},
+            "corrector_loss": {
+                "precorrector_optimization": {"names_and_prefixes": ["sst"]}
+            },
+        },
+        "atmosphere": {
+            "loss": {"type": "MSE"},
+            "corrector_loss": {
+                "regularization": {
+                    "names_and_prefixes": ["a_prog"],
+                    "norm": "L2",
+                    "weight": 0.5,
+                }
+            },
+        },
+    }
+    config = dacite.from_dict(
+        CoupledTrainStepperConfig,
+        with_corrector_loss,
+        config=dacite.Config(strict=True),
+    )
+    assert config.ocean.corrector_loss == CorrectorLossConfig(
+        precorrector_optimization=PreCorrectorOptimizationConfig(
+            names_and_prefixes=["sst"]
+        )
+    )
+    assert config.atmosphere.corrector_loss == CorrectorLossConfig(
+        regularization=CorrectorRegularizationConfig(
+            names_and_prefixes=["a_prog"], norm="L2", weight=0.5
+        )
+    )
+
+
+@pytest.mark.parametrize("realm", ["ocean", "atmosphere"])
+def test_train_on_batch_corrector_loss_inert(realm):
+    torch.manual_seed(0)
+    config, dataset_info, data = _corrector_loss_stepper_config_and_batch()
+    name = "sst" if realm == "ocean" else "a_prog"
+    corrector_loss = CorrectorLossConfig(
+        precorrector_optimization=PreCorrectorOptimizationConfig(
+            names_and_prefixes=[name]
+        ),
+        regularization=CorrectorRegularizationConfig(
+            names_and_prefixes=[name], norm="L2", weight=0.5
+        ),
+    )
+    baseline = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=None, corrector_loss=None
+    )
+    configured = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=None, corrector_loss=corrector_loss
+    )
+    baseline_out = baseline.train_on_batch(data, optimization=NullOptimization())
+    configured_out = configured.train_on_batch(data, optimization=NullOptimization())
+    torch.testing.assert_close(
+        configured_out.total_metrics["loss"], baseline_out.total_metrics["loss"]
+    )
+    for which in ("ocean", "atmosphere"):
+        expected = _realm_metrics(baseline_out, which)
+        actual = _realm_metrics(configured_out, which)
+        assert actual.keys() == expected.keys()
+        for key in expected:
+            torch.testing.assert_close(actual[key], expected[key])
+
+
+@pytest.mark.parametrize("realm", ["ocean", "atmosphere"])
+def test_train_on_batch_pre_corrector_equivalence(realm):
+    torch.manual_seed(0)
+    config, dataset_info, data = _corrector_loss_stepper_config_and_batch()
+    name = "sst" if realm == "ocean" else "a_prog"
+    offset = 3.0
+    corrector_loss = CorrectorLossConfig(
+        precorrector_optimization=PreCorrectorOptimizationConfig(
+            names_and_prefixes=[name]
+        )
+    )
+    baseline = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=None, corrector_loss=None
+    )
+    corrected_only = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=offset, corrector_loss=None
+    )
+    corrected = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=offset, corrector_loss=corrector_loss
+    )
+    baseline_out = baseline.train_on_batch(data, optimization=NullOptimization())
+    corrected_only_out = corrected_only.train_on_batch(
+        data, optimization=NullOptimization()
+    )
+    corrected_out = corrected.train_on_batch(data, optimization=NullOptimization())
+    # the first step of the corrected realm is scored on the pre-corrector
+    # output, matching a stepper with no corrector at all; later steps take
+    # the corrected output as input, so only the first step is comparable
+    torch.testing.assert_close(
+        _realm_metrics(corrected_out, realm)[f"loss/{realm}_step_0"],
+        _realm_metrics(baseline_out, realm)[f"loss/{realm}_step_0"],
+    )
+    # the other realm's losses are those of the corrector alone
+    other = _other_realm(realm)
+    expected = _realm_metrics(corrected_only_out, other)
+    actual = _realm_metrics(corrected_out, other)
+    assert actual.keys() == expected.keys()
+    for key in expected:
+        torch.testing.assert_close(actual[key], expected[key])
+    # the returned predictions stay fully corrected
+    gen = corrected_out.ocean if realm == "ocean" else corrected_out.atmosphere
+    gen_only = (
+        corrected_only_out.ocean if realm == "ocean" else corrected_only_out.atmosphere
+    )
+    torch.testing.assert_close(gen.gen_data[name], gen_only.gen_data[name])
+    gen_base = baseline_out.ocean if realm == "ocean" else baseline_out.atmosphere
+    torch.testing.assert_close(
+        gen.gen_data[name][:, :, 1], gen_base.gen_data[name][:, :, 1] + offset
+    )
+
+
+@pytest.mark.parametrize("realm", ["ocean", "atmosphere"])
+def test_train_on_batch_corrector_penalty(realm):
+    torch.manual_seed(0)
+    config, dataset_info, data = _corrector_loss_stepper_config_and_batch()
+    name = "sst" if realm == "ocean" else "a_prog"
+    offset = 2.0
+    weight = 0.5
+    corrector_loss = CorrectorLossConfig(
+        regularization=CorrectorRegularizationConfig(
+            names_and_prefixes=[name], norm="L2", weight=weight
+        )
+    )
+    corrected_only = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=offset, corrector_loss=None
+    )
+    regularized = _corrector_loss_train_stepper(
+        config, dataset_info, realm, offset=offset, corrector_loss=corrector_loss
+    )
+    base_out = corrected_only.train_on_batch(data, optimization=NullOptimization())
+    reg_out = regularized.train_on_batch(data, optimization=NullOptimization())
+    # a constant-offset delta in trivial (std 1) loss normalization gives an
+    # exact MSE penalty of offset**2 at every step of the corrected realm
+    base_metrics = _realm_metrics(base_out, realm)
+    reg_metrics = _realm_metrics(reg_out, realm)
+    step_keys = [k for k in base_metrics if k.startswith(f"loss/{realm}_step_")]
+    assert len(step_keys) > 0
+    for key in step_keys:
+        torch.testing.assert_close(
+            reg_metrics[key], base_metrics[key] + weight * offset**2
+        )
+    torch.testing.assert_close(
+        reg_out.total_metrics["loss"],
+        base_out.total_metrics["loss"] + len(step_keys) * weight * offset**2,
+    )
+    other = _other_realm(realm)
+    expected = _realm_metrics(base_out, other)
+    actual = _realm_metrics(reg_out, other)
+    assert actual.keys() == expected.keys()
+    for key in expected:
+        torch.testing.assert_close(actual[key], expected[key])
