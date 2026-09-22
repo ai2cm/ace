@@ -36,13 +36,14 @@ from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
 from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
+from fme.core.corrector.loss_config import CorrectorLossConfig
 from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.loss import StepLoss, StepLossConfig
+from fme.core.loss import StepLossConfig, StepOutputLoss
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
@@ -1461,17 +1462,29 @@ class CoupledStepper:
 
 
 class ComponentEnsembleStepPrediction:
-    """Like ComponentStepPrediction but with an explicit ensemble dimension."""
+    """Like ComponentStepPrediction but with an explicit ensemble dimension.
+
+    Parameters:
+        realm: The component that produced this step.
+        data: The (corrected) step output, with an ensemble dimension.
+        step: The component step index.
+        deltas: The corrector's per-variable correction deltas for this step,
+            with an ensemble dimension. Empty when the corrector was inactive.
+    """
 
     def __init__(
         self,
         realm: Literal["ocean", "atmosphere"],
         data: EnsembleTensorDict,
         step: int,
+        deltas: EnsembleTensorDict | None = None,
     ):
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
+        self._deltas: EnsembleTensorDict = (
+            deltas if deltas is not None else EnsembleTensorDict({})
+        )
 
     @property
     def realm(self) -> Literal["ocean", "atmosphere"]:
@@ -1485,11 +1498,16 @@ class ComponentEnsembleStepPrediction:
     def step(self) -> int:
         return self._step
 
+    @property
+    def deltas(self) -> EnsembleTensorDict:
+        return self._deltas
+
     def detach_if_using_gradient_accumulation(
         self, optimizer: OptimizationABC
     ) -> "ComponentEnsembleStepPrediction":
-        """Eagerly detach the data tensor map from the computational graph
-        if already consumed in backprop, i.e. when using gradient accumulation.
+        """Eagerly detach the data and delta tensor maps from the computational
+        graph if already consumed in backprop, i.e. when using gradient
+        accumulation.
 
         """
         return ComponentEnsembleStepPrediction(
@@ -1498,17 +1516,21 @@ class ComponentEnsembleStepPrediction:
                 optimizer.detach_if_using_gradient_accumulation(self.data)
             ),
             step=self.step,
+            deltas=EnsembleTensorDict(
+                optimizer.detach_if_using_gradient_accumulation(self.deltas)
+            ),
         )
 
     def detach(self) -> "ComponentEnsembleStepPrediction":
-        """Detach the data tensor map from the computation graph. Should only be
-        called after backprop has finished.
+        """Detach the data and delta tensor maps from the computation graph.
+        Should only be called after backprop has finished.
 
         """
         return ComponentEnsembleStepPrediction(
             realm=self.realm,
             data=EnsembleTensorDict({k: v.detach() for k, v in self.data.items()}),
             step=self.step,
+            deltas=EnsembleTensorDict({k: v.detach() for k, v in self.deltas.items()}),
         )
 
 
@@ -1546,13 +1568,13 @@ class CoupledStepperTrainLoss:
 
     def __init__(
         self,
-        ocean_loss: StepLoss,
-        atmosphere_loss: StepLoss,
+        ocean_loss: StepOutputLoss,
+        atmosphere_loss: StepOutputLoss,
         ocean_schedule: ComponentLossSchedule,
         atmosphere_schedule: ComponentLossSchedule,
         optimize_single_component_per_batch: bool = False,
     ):
-        self._loss_objs: dict[str, StepLoss] = {
+        self._loss_objs: dict[str, StepOutputLoss] = {
             "ocean": ocean_loss,
             "atmosphere": atmosphere_loss,
         }
@@ -1712,7 +1734,7 @@ class CoupledStepperTrainLoss:
         if not self._schedules[realm].step_is_optimized(prediction.step):
             return torch.tensor(0.0, device=fme.get_device())
         loss_output = self._loss_objs[realm](
-            prediction.data, target_data, prediction.step
+            prediction.data, target_data, prediction.step, deltas=prediction.deltas
         )
         return weight * loss_output.total()
 
@@ -1729,7 +1751,7 @@ class CoupledStepperTrainLoss:
         if not self.step_is_optimized(realm, prediction.step):
             return None
         loss_output = self._loss_objs[realm](
-            prediction.data, target_data, prediction.step
+            prediction.data, target_data, prediction.step, deltas=prediction.deltas
         )
         return self._weights[realm] * loss_output.total()
 
@@ -1751,6 +1773,8 @@ class ComponentTrainingConfig:
             contributes to the loss and has gradients enabled).
         loss_weight: Weight applied to the loss for this component.
         parameter_init: Component-level parameter initialization.
+        corrector_loss: Optional configuration for consuming this component's
+            corrector correction deltas in its loss.
     """
 
     loss: StepLossConfig
@@ -1760,6 +1784,7 @@ class ComponentTrainingConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    corrector_loss: CorrectorLossConfig | None = None
 
     @property
     def n_steps_max(self) -> int | None:
@@ -1923,8 +1948,14 @@ class CoupledTrainStepperConfig:
     def _build_loss(
         self, stepper: CoupledStepper, n_coupled_steps: int
     ) -> CoupledStepperTrainLoss:
-        ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
-        atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
+        ocean_step_loss = StepOutputLoss(
+            stepper.ocean.build_loss(self.ocean.loss),
+            stepper.ocean.build_corrector_loss(self.ocean.corrector_loss),
+        )
+        atmos_step_loss = StepOutputLoss(
+            stepper.atmosphere.build_loss(self.atmosphere.loss),
+            stepper.atmosphere.build_corrector_loss(self.atmosphere.corrector_loss),
+        )
         n_steps_limit_ocean = n_coupled_steps
         n_steps_limit_atmos = n_coupled_steps * stepper.n_inner_steps
         ocean_schedule = ComponentLossSchedule(
@@ -2101,6 +2132,9 @@ class CoupledTrainStepper(
             realm=gen_step.realm,
             data=unfold_ensemble_dim(gen_step.data, n_ensemble),
             step=gen_step.step,
+            deltas=unfold_ensemble_dim(
+                dict(gen_step.corrector_diagnostics.delta), n_ensemble
+            ),
         )
         target_step_ensemble = add_ensemble_dim(target_step)
         if evaluate_all_steps:
