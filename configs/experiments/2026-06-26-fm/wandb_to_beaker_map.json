@@ -2965,5 +2965,7 @@
   "ace2-fm-nc-swin-v2-fm-a3-somabruptens-abrupt-4xCO2-ens-sstprescribed-eval-ic7": "01M32SWFVD1SFBDVPHZR3FH2RP",
   "ace2-fm-nc-swin-v2-fm-a3-somabruptens-abrupt-4xCO2-ens-sstprescribed-eval-ic8": "01M32SWKVY7D4B13HEGJWHYXAZ",
   "ace2-fm-nc-swin-v2-fm-a3-somabruptens-abrupt-4xCO2-ens-sstprescribed-eval-ic9": "01M32SWQHFTSR6044RTZKZ7PXT",
-  "ace2-fm-nc-swin-v2.1-c96-a1-h1-noresid-diag": "01M32F8ME2K7KDJKG47VDJAHNG"
+  "ace2-fm-nc-swin-v2.1-c96-a1-h1-noresid-diag": "01M32F8ME2K7KDJKG47VDJAHNG",
+  "ace2-fm-nc-swin-v2-c96-a1-mask10": "01M32Z4JSS0RM60VG36PWZZJEP",
+  "ace2-fm-nc-swin-v2.1-c96-a1-h2-numerics-diag": "01M32Z4JKRAZHSC9VT4WWD91RW"
 }
