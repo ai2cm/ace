@@ -1,7 +1,9 @@
 #!/bin/bash
 # Submit create_coupled_datasets.py to argo via
-# create_coupled_datasets_argo_workflow.yaml. Every module in the entry point's
-# transitive sibling-import closure is passed as a workflow parameter.
+# create_coupled_datasets_argo_workflow.yaml, which then uploads the merged
+# stats to the config's stats.beaker_dataset with upload_coupled_stats.py. Every
+# module in the two entry points' transitive sibling-import closures is passed
+# as a workflow parameter.
 
 set -e
 
@@ -42,6 +44,8 @@ args=(create_coupled_datasets_argo_workflow.yaml
     -p combine_stats_script="$(< combine_stats.py)"
     -p writer_utils_script="$(< writer_utils.py)"
     -p fs_utils_script="$(< fs_utils.py)"
+    -p upload_coupled_stats_script="$(< upload_coupled_stats.py)"
+    -p upload_stats_script="$(< upload_stats.py)"
     -p config="$(< "${CONFIG}")"
     -p debug="${DEBUG}"
     -p subsample="${SUBSAMPLE}")

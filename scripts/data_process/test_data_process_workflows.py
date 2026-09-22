@@ -15,7 +15,10 @@ DIRNAME = os.path.abspath(os.path.dirname(__file__))
 
 COUPLED_WORKFLOW = os.path.join(DIRNAME, "create_coupled_datasets_argo_workflow.yaml")
 COUPLED_SUBMIT_SCRIPT = os.path.join(DIRNAME, "create_coupled_datasets.sh")
-COUPLED_ENTRY_POINT = os.path.join(DIRNAME, "create_coupled_datasets.py")
+COUPLED_ENTRY_POINTS = [
+    os.path.join(DIRNAME, "create_coupled_datasets.py"),
+    os.path.join(DIRNAME, "upload_coupled_stats.py"),
+]
 
 WORKFLOW_YAMLS = [
     COUPLED_WORKFLOW,
@@ -88,8 +91,9 @@ def test_workflow_parameters_are_declared(path):
     assert referenced - declared == set()
 
 
-def test_coupled_submit_script_passes_every_local_import():
-    closure = _sibling_import_closure(COUPLED_ENTRY_POINT)
+@pytest.mark.parametrize("entry_point", COUPLED_ENTRY_POINTS, ids=os.path.basename)
+def test_coupled_submit_script_passes_every_local_import(entry_point):
+    closure = _sibling_import_closure(entry_point)
     passed = set(SCRIPT_PARAMETER_FLAG.findall(_read(COUPLED_SUBMIT_SCRIPT)))
     declared = set(_declared_parameters(COUPLED_WORKFLOW))
     expected = {module + "_script" for module in closure}
@@ -124,3 +128,16 @@ def test_coupled_workflow_heredocs_quote_the_delimiter():
         if opener.group("quote") != "'"
     ]
     assert unquoted == []
+
+
+def test_coupled_workflow_uploads_stats_after_creating_them():
+    manifest = yaml.safe_load(_read(COUPLED_WORKFLOW))
+    templates = {t["name"]: t for t in manifest["spec"]["templates"]}
+    steps = templates[manifest["spec"]["entrypoint"]]["steps"]
+    assert [[step["template"] for step in group] for group in steps] == [
+        ["create-coupled-datasets"],
+        ["upload-coupled-stats"],
+    ]
+    when = steps[1][0]["when"]
+    assert "{{workflow.parameters.debug}} == false" in when
+    assert "{{workflow.parameters.subsample}} == false" in when

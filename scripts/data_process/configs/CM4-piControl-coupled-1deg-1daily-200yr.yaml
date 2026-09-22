@@ -54,3 +54,5 @@ input_datasets:
   stats:
     atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats/combined
     ocean_dir: gs://vcm-ml-intermediate/2026-09-02-cm4-piControl-1deg-ocean-1daily-stats/2026-09-02-cm4-piControl-1deg-ocean-1daily
+stats:
+  beaker_dataset: 2026-09-09-cm4-piControl-1deg-coupled-1daily-stats

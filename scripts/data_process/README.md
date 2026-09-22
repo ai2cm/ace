@@ -56,3 +56,12 @@ The argo flavour is offered only where the config's input and output stores are
 on GCS: `E3SMv3-piControl-100yr-coupled.yaml` writes to NERSC scratch and
 `CM4-like-AM4-random-CO2-ensemble-coupled.yaml` to weka, neither of which the
 workflow mounts, so those two are local-only.
+
+When the config sets `stats.beaker_dataset`, the argo workflow's second step,
+`upload_coupled_stats.py`, uploads the merged stats to that Beaker dataset in
+the `ai2/ace` workspace, one subdirectory per category
+(`uncoupled_atmosphere`, `coupled_atmosphere`, `ocean`); an ensemble config
+uploads its `combined` stats. The step is skipped for `--debug` and
+`--subsample` runs, and when the dataset already exists. It runs on the
+atmosphere processing image, which has `beaker-py`; override with
+`-p upload_image=...`.
