@@ -52,13 +52,44 @@ with cover clipped at 1, CM4 cover divided by 100. The relaunched runs carry `-l
 their names. The controls are unaffected (no snow channels; their normalization entries are
 identical in the old and new stats datasets) and are not relaunched.
 
+## Multi-step fine-tuning
+
+`{cm4,era5}-control-multi-step-finetune-daily.yaml` fine-tune the finished controls with the
+ERA5 daily baseline's recipe (`configs/baselines/era5/ace-train-config-multi-step-finetuning-daily.yaml`
+on `exp/ace2s-era5-daily-finetune`): weights and stepper from `training_checkpoints/best_ckpt.tar`
+of the 1-step run, mounted at `/weights`; forward steps drawn from {1: 0.6, 2: 0.2, 3: 0.1,
+4: 0.05, 5: 0.05} days with the loss on the last step only; validation batch 32; same epochs,
+learning rate, loss, data splits and inline metrics as the 1-step configs. The checkpoint dataset
+is not in the config: `run-ace-finetune.sh` takes it as an argument and mounts it, so the
+committed files describe every launch and the Beaker job records which checkpoint it used.
+
+| fine-tune launch | arm | stage-1 result dataset (mounted at /weights) | job |
+|---|---|---|---|
+| 2026-09-21 | cm4-control | `01M2VVJ5A75WKXQXJVS4XEMT4Y` (resumed job of `01M2TZC6YYH9TVRTQ7BHPH250K`) | `ace2s-snowmetrics-cm4-daily-control-multi-step-finetune-rs0` |
+| 2026-09-21 | era5-control | `01M2TZCJAT224Z4KBKJFJB8TGQ` | `ace2s-snowmetrics-era5-daily-control-multi-step-finetune-rs0` |
+
+The treatment fine-tunes will use the same recipe from the relaunched 1-step runs, with their
+own `<arm>-multi-step-finetune-daily.yaml` configs.
+
 ## Launch
 
+Stage 1, all four arms or a subset (`launch-common.sh` holds the shared gantry call):
+
 ```bash
-./run-ace-train.sh                    # all four, ai2/jupiter (8 GPUs)
-CLUSTER=ai2/titan ./run-ace-train.sh  # 4 GPUs
+./run-ace-train.sh                                   # all four, ai2/jupiter (8 GPUs)
+./run-ace-train.sh era5-masked-naive cm4-masked-naive
+CLUSTER=ai2/titan ./run-ace-train.sh                 # 4 GPUs
 ```
 
-Each invocation validates its config with `fme.ace.validate_config` before submitting. Jobs are
-non-preemptible for their first 8 hours (`--min-runtime 8h`) and resume from their checkpoints
-if interrupted after that.
+Stage 2, from the result dataset of each finished stage-1 job:
+
+```bash
+./run-ace-finetune.sh cm4-control 01M2VVJ5A75WKXQXJVS4XEMT4Y era5-control 01M2TZCJAT224Z4KBKJFJB8TGQ
+```
+
+Both scripts validate each config with `fme.ace.validate_config` before submitting, and print the
+gantry command instead of running it when `DRY_RUN=1`. Jobs are non-preemptible for their first
+8 hours (`--min-runtime 8h`) and resume from their checkpoints if interrupted after that.
+Launched so far: stage 1 of all four arms (2026-09-18, treatments on the per-cell-area stores),
+stage 1 of both treatments on the corrected stores (2026-09-21), and the two control fine-tunes
+(2026-09-21).
