@@ -101,11 +101,10 @@ class OceanHeatContentBudgetConfig:
             correction is distributed in the vertical:
 
             - "scaled_temperature": multiply the predicted potential
-              temperature by a vertically and horizontally uniform correction
-              factor, so the heat is deposited in proportion to ``T_k * dz_k``.
-            - "uniform_temperature": add a vertically and horizontally uniform
-              temperature increment, so the heat is deposited in proportion to
-              ``dz_k`` alone.
+              temperature by a globally uniform factor, depositing heat in
+              proportion to ``T_k * dz_k``.
+            - "uniform_temperature": add a globally uniform temperature
+              increment, depositing heat in proportion to ``dz_k`` alone.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
@@ -430,60 +429,10 @@ def _force_conserve_ocean_heat_content(
     ocean heat content matches the input value plus the heat the surface and
     geothermal fluxes deposit over one timestep.
 
-    Both methods conserve the same budget and differ only in the vertical
-    profile of the heat they deposit:
-
-    scaled_temperature
-        Multiply every level by one global ratio, depositing heat in proportion
-        to ``T_k * dz_k``.
-    uniform_temperature
-        Add one global temperature increment to every valid level, depositing
-        heat in proportion to ``dz_k`` alone. The increment is
-        ``(target - global_gen_ohc) / heat_capacity_per_area``, where the
-        denominator is the area-weighted global mean of the column integral of
-        ``rho * cp``.
-
-    ``uniform_temperature`` conserves exactly because its denominator is the
-    same integral that weights the heat it deposits. Adding ``delta_T`` at
-    every level raises the column integral of ``rho * cp * T`` by ``delta_T``
-    times the column integral of ``rho * cp``, and ``heat_capacity_per_area``
-    is the area-weighted mean of exactly that column integral, taken through
-    ``vertical_coordinate.depth_integral`` over the same columns. So the
-    denominator must keep coming from ``depth_integral``: a nominal ``dz`` sum,
-    or a mean over a different set of columns, would leave the corrected heat
-    content off by the difference between the two integrals.
-
-    Which cells the increment lands on is a separate concern and does not
-    affect conservation. It lands on every cell ``vertical_coordinate.mask``
-    marks valid. ``dz > 0`` is not the right test for this and is not the same
-    cell set: the mask is more permissive than the bathymetry, so a cell can be
-    marked valid and still have zero thickness. On the 1 degree ocean store
-    that is 4.6% of all valid-marked cells and 60% of the bottom level's. Those
-    cells hold real data, the output masker keeps them and the metrics score
-    them, so restricting the increment to ``dz > 0`` would split a scored level
-    into shifted and unshifted cells along a mask/bathymetry inconsistency in
-    the store rather than along anything physical, leaving the unshifted
-    majority of a deep level tied to neither the budget nor its neighbors.
-    Shifting them costs the budget nothing, because zero thickness means they
-    absorb no heat either way.
-
-    The test is ``mask > 0`` rather than ``mask == 1`` because ``dz`` is itself
-    ``mask``-weighted, so ``dz_k`` is zero wherever ``mask_k`` is zero and
-    ``dz_k * (mask_k > 0)`` equals ``dz_k`` cell for cell whatever values the
-    mask takes. That identity is exactly what makes the deposited heat equal
-    ``delta_T * heat_capacity_per_area``. ``mask == 1`` would only hold it for
-    a strictly 0/1 mask, which is what ``DepthCoordinate`` documents but not
-    what it enforces -- the mask is read straight out of the store's
-    ``mask_<k>`` variables.
-
-    Cells the mask excludes are a different matter and are left alone: they hold
-    fill rather than data, and nothing necessarily overwrites them after the
-    corrector runs -- the output masker skips any variable it has no matching
-    mask for, so e.g. ``sst`` is left as the corrector wrote it on a store with
-    per-level masks but no ``mask_sst`` or ``mask_2d``. There ``+ delta_T``
-    would drift away from the fill value where ``* ratio`` keeps a zero fill at
-    zero. ``scaled_temperature`` rescales every cell regardless, which is
-    pre-existing behavior and not something the budget needs.
+    Both methods hit the same target and differ only in the vertical profile of
+    the heat they deposit: ``scaled_temperature`` multiplies every level by one
+    global ratio, depositing heat as ``T_k * dz_k``; ``uniform_temperature``
+    adds one global increment to every valid level, depositing heat as ``dz_k``.
     """
     if method not in ("scaled_temperature", "uniform_temperature"):
         raise NotImplementedError(
@@ -555,9 +504,8 @@ def _force_conserve_ocean_heat_content(
                 gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
             ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
     else:
-        # this must stay a depth_integral over the same columns as the heat
-        # content itself, or conservation is off by the difference; see the
-        # docstring
+        # must come from depth_integral over the same columns as the heat
+        # content, or conservation is off by the difference between the two
         heat_capacity_per_area = area_weighted_mean(
             vertical_coordinate.depth_integral(
                 torch.ones_like(gen_potential_temperature)
@@ -570,12 +518,9 @@ def _force_conserve_ocean_heat_content(
         temperature_increment = (
             target_ocean_heat_content - global_gen_ocean_heat_content
         ) / heat_capacity_per_area
-        # every cell the store marks valid is shifted, including the ones the
-        # bathymetry puts at zero thickness -- they hold data and are scored, and
-        # shifting them adds no heat. Cells outside the mask hold fill, so they
-        # are left alone. Not interchangeable with dz > 0; see the docstring.
-        # ``> 0`` rather than ``== 1`` because dz is mask-weighted, so this is
-        # the indicator for which dz * indicator == dz; see the docstring.
+        # shift every cell the store marks valid, including the zero-thickness
+        # ones, which are scored but absorb no heat. dz is itself mask-weighted,
+        # so dz * (mask > 0) == dz, which is what makes conservation exact.
         is_masked_valid = (vertical_coordinate.mask > 0.0).to(
             dtype=gen_potential_temperature.dtype
         )
@@ -585,11 +530,8 @@ def _force_conserve_ocean_heat_content(
                 -1, k
             )
         if "sst" in gen.data:
-            # an increment needs no Kelvin offset, unlike the multiplicative
-            # path. sst is not in the heat content integral, so shifting it by
-            # the same increment as thetao_0 is a consistency choice, not a
-            # budget requirement; the surface level's mask is the wet-column
-            # indicator depth_integral itself uses.
+            # no Kelvin offset needed, unlike the multiplicative path; sst is
+            # not in the heat content integral
             out["sst"] = gen.data[
                 "sst"
             ] + temperature_increment * is_masked_valid.select(-1, 0)

@@ -653,21 +653,11 @@ _SEA_FLOOR_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
 def _make_sea_floor_fixture(nsamples: int = 2, seed: int = 0):
     """Build a masked multi-level ocean fixture with a non-trivial sea floor.
 
-    Four of the nine columns are special:
-
-    - (0, 0) is all land.
-    - (0, 1) has only its surface layer in the water.
-    - (1, 1) has two of its three layers.
-    - (2, 0) is marked valid at all three levels but its ``deptho`` puts the
-      bottom one below the sea floor, so that cell has ``mask == 1`` and
-      ``dz == 0``. This is how the 1 degree ocean store actually is -- the mask
-      is uniformly more permissive than the bathymetry -- and it is the case
-      that separates ``mask > 0`` from ``dz > 0``.
-
-    Every other wet column's deepest valid layer is a partial bottom cell
-    (``deptho`` falls inside it), so the effective thickness is neither the
-    nominal layer thickness nor a 0/1 multiple of it, and a correction derived
-    from a hand-rolled nominal ``dz`` sum would not conserve heat.
+    Four of the nine columns are special: (0, 0) is all land, (0, 1) is wet
+    only at the surface, (1, 1) has two of its three layers, and (2, 0) is
+    marked valid at all three but its ``deptho`` puts the bottom one below the
+    sea floor, giving ``mask == 1`` with ``dz == 0`` as the real store does.
+    Every other wet column ends in a partial bottom cell.
 
     Returns:
         ``(ops, depth_coordinate, input_data, gen_data, forcing_data)``.
@@ -729,11 +719,8 @@ def _global_mean_ohc(ops, depth_coordinate, data: TensorMapping) -> torch.Tensor
 
 @pytest.mark.parametrize("unaccounted_heating", [0.0, 0.1])
 def test_uniform_temperature_conserves_ocean_heat_content(unaccounted_heating):
-    # The additive correction must hit the same budget the multiplicative one
-    # does. This is what pins the increment's denominator: if it came from
-    # anything other than depth_integral over the same columns as the heat
-    # content (a nominal dz sum, or a mean including the dry columns) the
-    # corrected heat content would miss the target.
+    # pins the increment's denominator: from anything other than depth_integral
+    # over the same columns as the heat content, the corrected OHC misses
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -751,10 +738,8 @@ def test_uniform_temperature_conserves_ocean_heat_content(unaccounted_heating):
 
 
 def test_uniform_temperature_conserves_with_an_unmasked_depth_coordinate():
-    # A dataset with no mask_0 gets a DepthCoordinate whose mask is 1-D and no
-    # spatial mask provider (see fme.core.dataset.xarray), so dz carries no
-    # horizontal dimensions and the valid-cell mask is a scalar per level. The
-    # increment has to broadcast against that without changing shape.
+    # a dataset with no mask_0 gets a 1-D mask and no spatial mask provider, so
+    # the increment has to broadcast against it without changing shape
     nlat, nlon, nz, nsamples = 4, 4, 3, 2
     depth_coordinate = DepthCoordinate(_SEA_FLOOR_IDEPTH, torch.ones(nz, device=DEVICE))
     assert depth_coordinate.mask.shape == (nz,)
@@ -794,8 +779,8 @@ def test_uniform_temperature_conserves_with_an_unmasked_depth_coordinate():
 
 
 def test_uniform_temperature_deposits_heat_proportional_to_thickness():
-    # The property the whole experiment turns on: uniform_temperature deposits
-    # heat in proportion to dz_k, scaled_temperature in proportion to T_k * dz_k.
+    # the property the experiment turns on: uniform_temperature deposits heat
+    # as dz_k, scaled_temperature as T_k * dz_k
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -813,8 +798,8 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
     uniform_increment = [
         uniform[f"thetao_{k}"] - gen_data[f"thetao_{k}"] for k in range(nz)
     ]
-    # one global increment per sample, read off a column where every level is
-    # valid; the correction is per-sample, so keep the sample dimension
+    # one global increment per sample, read off a fully valid column; the
+    # correction is per-sample, so keep the sample dimension
     delta_temperature = uniform_increment[0][:, 2:3, 2:3]
     heat_capacity = SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
     for k in range(nz):
@@ -822,8 +807,8 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
             shifted[..., k], delta_temperature, torch.zeros_like(delta_temperature)
         ).expand(uniform_increment[k].shape)
         torch.testing.assert_close(uniform_increment[k], expected, rtol=1e-5, atol=1e-8)
-        # so the heat added at each level is cp * rho * dz_k * delta_T: the only
-        # k dependence is dz_k
+        # heat added at each level is cp * rho * dz_k * delta_T: the only k
+        # dependence is dz_k
         heat_added = heat_capacity * dz[..., k] * uniform_increment[k]
         torch.testing.assert_close(
             heat_added,
@@ -835,8 +820,8 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
     scaled_increment = [
         scaled[f"thetao_{k}"] - gen_data[f"thetao_{k}"] for k in range(nz)
     ]
-    # contrast: the multiplicative increment is (ratio - 1) * T_k, so the heat
-    # added at each level goes as T_k * dz_k
+    # contrast: the multiplicative increment is (ratio - 1) * T_k, so heat is
+    # added as T_k * dz_k
     ratio_minus_one = (
         scaled_increment[0][:, 2:3, 2:3] / gen_data["thetao_0"][:, 2:3, 2:3]
     )
@@ -852,10 +837,8 @@ def test_uniform_temperature_deposits_heat_proportional_to_thickness():
 
 
 def test_uniform_temperature_leaves_cells_outside_the_mask_unchanged():
-    # Cells the mask excludes hold fill rather than data, and with no spatial
-    # mask provider nothing overwrites them after the corrector, so the
-    # increment must not shift them. This is the assertion the mask exists for;
-    # conservation holds with or without it.
+    # cells outside the mask hold fill rather than data and are not necessarily
+    # overwritten after the corrector, so the increment must not shift them
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -881,14 +864,10 @@ def test_uniform_temperature_leaves_cells_outside_the_mask_unchanged():
 
 
 def test_uniform_temperature_shifts_valid_zero_thickness_cells():
-    # The 1 degree ocean store marks cells valid that its bathymetry puts below
-    # the sea floor: 4.6% of all valid-marked cells, and 60% of the bottom
-    # level's. They hold real data, the output masker keeps them and every
-    # metric scores them, so the increment has to reach them -- otherwise a
-    # scored level splits into shifted and unshifted cells along a
-    # mask/bathymetry inconsistency, and the unshifted ones are tied to
-    # neither the budget nor their neighbors over a long rollout. Shifting
-    # them adds no heat, so the budget still closes exactly.
+    # the 1 degree ocean store marks cells valid that its bathymetry puts below
+    # the sea floor (4.6% of valid cells, 60% of the bottom level's); they are
+    # scored, so the increment has to reach them, and they absorb no heat, so
+    # the budget still closes
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -927,13 +906,9 @@ def test_uniform_temperature_shifts_valid_zero_thickness_cells():
 
 
 def test_uniform_temperature_conserves_under_a_fractional_mask():
-    # Why the valid-cell test is mask > 0 and not mask == 1. dz is itself
-    # mask-weighted, so dz * (mask > 0) == dz cell for cell whatever values the
-    # mask takes, which is the identity conservation rests on. DepthCoordinate
-    # documents a 0/1 mask but does not enforce one -- it is read straight out
-    # of the store's mask_<k> variables -- and under mask == 1 a fractional
-    # cell would carry integral weight while going unshifted, so the budget
-    # would miss.
+    # why the valid-cell test is mask > 0 and not mask == 1: DepthCoordinate
+    # documents a 0/1 mask but does not enforce one, and under mask == 1 a
+    # fractional cell would carry integral weight while going unshifted
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -958,8 +933,8 @@ def test_uniform_temperature_conserves_under_a_fractional_mask():
 
 @pytest.mark.parametrize("method", ["scaled_temperature", "uniform_temperature"])
 def test_ocean_heat_content_correction_is_differentiable(method):
-    # The correction runs inside the training loop and the loss differentiates
-    # through it, so the corrected output must stay on the autograd graph.
+    # the correction runs inside the training loop, so the corrected output
+    # must stay on the autograd graph
     ops, depth_coordinate, input_data, gen_data, forcing_data = (
         _make_sea_floor_fixture()
     )
@@ -973,8 +948,7 @@ def test_ocean_heat_content_correction_is_differentiable(method):
     for k in range(_SEA_FLOOR_NZ):
         loss = loss + corrected[f"thetao_{k}"].sum()
     loss.backward()
-    # the temperature levels and the surface heat flux the budget reads all
-    # carry gradient
+    # the temperature levels and the surface heat flux all carry gradient
     for name in [f"thetao_{k}" for k in range(_SEA_FLOOR_NZ)] + ["hfds"]:
         grad = network_output[name].grad
         assert grad is not None, f"no gradient reached {name}"
