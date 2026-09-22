@@ -290,4 +290,7 @@ def run_segments(
                 run_segment(segment_dir)
             # Finish so the next segment starts a fresh wandb run.
             WandB.get_instance().finish()
+        # Under multi-GPU, root writes the restart; barrier ensures all ranks
+        # see the file before the next segment (or set_initial_condition) reads it.
+        Distributed.get_instance().barrier()
         set_initial_condition(restart_paths)
