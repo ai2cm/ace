@@ -1,0 +1,15 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# Rows are not hand-written, but this file is hand-edited. experiment_id is a
+# Beaker id that exists only after submission, and the job runner appends one
+# row per launched job (see append_to_experiments_file in job_runner/lib.sh,
+# called from job_runner/uncoupled_train.sh and job_runner/uncoupled_finetune.sh).
+
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs0|01M1JX8R8VYSAFW376757HKJM6|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs0|01M1JX8R8VYSAFW376757HKJM6|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 1h
+
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs1|01M1KYG25W4SP8RE4C3JW69RF3|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs1|01M1KYG25W4SP8RE4C3JW69RF3|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 1h
+
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs2|01M1KYGFE8E5T6YB96N7PNK8CW|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs2|01M1KYGFE8E5T6YB96N7PNK8CW|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 1h
