@@ -98,7 +98,7 @@ from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
-from fme.core.step.single_module import SingleModuleStep
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStep
 from fme.core.stepper_state import StepperState
 from fme.core.testing import (
     get_dataset_info,
@@ -1553,7 +1553,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         ["a", "b"],
         ["a", "c"],
         norm_mean=norm_mean,
-        residual_prediction=residual_prediction,
+        residual_prediction=(
+            ResidualPredictionConfig() if residual_prediction else None
+        ),
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
@@ -3678,3 +3680,175 @@ def test_corrector_loss_errors_at_the_first_active_step(selected, trains):
     else:
         with pytest.raises(ValueError, match="match none of the correction deltas"):
             train_stepper.train_on_batch(data, optimization=NullOptimization())
+
+
+def _residual_stepper_config(
+    normalization: NetworkAndLossNormalizationConfig,
+    residual_prediction: ResidualPredictionConfig | None,
+    names: list[str],
+) -> StepperConfig:
+    """Single-module stepper config for the residual-prediction tests; the
+    module adds one in normalized space."""
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _AddOne()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=normalization,
+                    residual_prediction=residual_prediction,
+                )
+            ),
+        ),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+
+
+@pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
+def test_legacy_residual_prediction_bool_checkpoint_steps_identically(
+    tmp_path: pathlib.Path, legacy: bool
+):
+    """A checkpoint written when residual_prediction was a bool must keep
+    stepping exactly as it did. Config-level loading is not enough to promise
+    that: this goes through torch.save and load_stepper, the way inference
+    reaches a real checkpoint, and compares against the equivalent config
+    built the current way.
+    """
+
+    normalization = NetworkAndLossNormalizationConfig(
+        network=trivial_normalization(["a"]), residual=trivial_normalization(["a"])
+    )
+    current = _residual_stepper_config(
+        normalization, ResidualPredictionConfig() if legacy else None, names=["a"]
+    )
+    state = current.get_stepper(get_dataset_info()).get_state()
+    # Exactly what a pre-ResidualPredictionConfig checkpoint holds.
+    state["config"]["step"]["config"]["residual_prediction"] = legacy
+
+    path = tmp_path / "legacy_stepper"
+    torch.save({"stepper": state}, path)
+    loaded = load_stepper(path)
+
+    input_data = {"a": torch.rand(2, 5, 5).to(DEVICE)}
+    args = StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    expected = current.get_stepper(get_dataset_info()).step(args).output["a"]
+    torch.testing.assert_close(loaded.step(args).output["a"], expected)
+
+
+def test_step_residual_normalized_prediction():
+    """A unit network output must correspond to one residual std, added to
+    the input in physical units; residual means are never applied (the stats
+    convention pairs full-field centering with tendency stds)."""
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means=field_means, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.5, "b": 0.1}, stds=res_stds),
+        ),
+        ResidualPredictionConfig(normalized=True),
+        names,
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        expected = input_data[n] + res_stds[n] * network_output
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_step_hybrid_residual_normalized_prediction():
+    """The production case: one prognostic stepped as a residual-normalized
+    tendency while the other is predicted full-field, in the same step."""
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means=field_means, stds=field_stds),
+            residual=NormalizationConfig(means={n: 0.0 for n in names}, stds=res_stds),
+        ),
+        ResidualPredictionConfig(names=["a"], normalized=True),
+        names,
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        if n == "a":
+            expected = input_data[n] + res_stds[n] * network_output
+        else:
+            expected = network_output * field_stds[n] + field_means[n]
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
+    """Residual-stepped names are scored in tendency-std units and full-field
+    names in full-field-std units; scoring a full-field state error in tendency
+    units would inflate it by (field_std / tendency_std)^2."""
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=res_stds),
+        ),
+        residual_prediction=ResidualPredictionConfig(names=["a"]),
+    )
+    stds = config.get_loss_normalizer().stds
+    assert stds["a"].item() == pytest.approx(res_stds["a"])
+    assert stds["b"].item() == pytest.approx(field_stds["b"])
+
+
+def test_normalized_residual_prediction_rejects_explicit_loss_normalization():
+    """residual_prediction.normalized needs a residual block, which cannot
+    coexist with an explicit loss block, so the option commits the loss to the
+    tendency convention. Say that here rather than sending the user round the
+    two-step dead end of 'add a residual block' then 'residual conflicts with
+    loss', neither of which names the option that forced it."""
+    with pytest.raises(ValueError, match="cannot be combined with normalization.loss"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=trivial_normalization(["a"]),
+                loss=trivial_normalization(["a"], std=2.0),
+            ),
+            residual_prediction=ResidualPredictionConfig(normalized=True),
+        )
+
+
+def test_normalized_residual_prediction_requires_residual_block():
+    with pytest.raises(ValueError, match="normalization.residual"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=trivial_normalization(["a"]),
+            ),
+            residual_prediction=ResidualPredictionConfig(normalized=True),
+        )
