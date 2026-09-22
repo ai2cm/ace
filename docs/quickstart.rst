@@ -12,7 +12,7 @@ Quickstart
 
     New to ACE? See the `ACE workshop notebooks <https://ai2cm.github.io/ace/>`_ for a
     guided walkthrough of how to run ACE, SamudrACE, and HiRO-ACE on free Google
-    Colab GPUs --- no local install required.
+    Colab GPUs --- no local install required. a
 
 Install
 =======
