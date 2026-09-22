@@ -1,0 +1,18 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# naming conventions:
+# - exper: cm4_1pct_46to125_piC_156to235
+# - subdir: coupled
+# - stage: fto
+# - group: <exper>-<subdir>-<ocean>_<atmos>-<stage>
+
+# ocean codes:
+# - opcc1 = ocean_precorr_cde1
+
+# atmos codes:
+# - a2s = atmos_ace2s
+
+# tags: o0a0rs0 = ocean rs0 + atmos rs0 + coupled rs0
+
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_precorr-opcc1_a2s-fto|o0a0rs0|ace-samudra-cm4|1t2gojtc|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0|4h
