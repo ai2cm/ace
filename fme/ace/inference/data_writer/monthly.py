@@ -31,6 +31,7 @@ from fme.ace.inference.data_writer.utils import (
 )
 from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.timing import GlobalTimer
 from fme.core.writer import DATETIME_ENCODING_UNITS
 
 
@@ -247,13 +248,7 @@ class MonthlyDataWriter:
         old_size = self.dataset.variables[LEAD_TIME_DIM].size
         new_size = month_min + month_range
 
-        self._extend_lead_time(old_size, new_size)
-        self._extend_valid_time(old_size, new_size)
-        self._extend_variable(COUNTS, old_size, new_size, initial_value=0)
-
-        count_data = self.dataset.variables[COUNTS][
-            :, month_min : month_min + month_range
-        ]
+        arrays = {}
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -271,33 +266,49 @@ class MonthlyDataWriter:
                 self.dataset.variables[variable_name].coordinates = " ".join(
                     [INIT_TIME, VALID_TIME, COUNTS]
                 )
+            arrays[variable_name] = data[variable_name].detach().cpu().numpy()
 
-            array = data[variable_name].detach().cpu().numpy()
-
-            # Add the data to the variable totals
+        timer = GlobalTimer.get_instance()
+        month_data = {}
+        with timer.context("data_writer_io"):
+            self._extend_lead_time(old_size, new_size)
+            self._extend_valid_time(old_size, new_size)
+            self._extend_variable(COUNTS, old_size, new_size, initial_value=0)
+            count_data = self.dataset.variables[COUNTS][
+                :, month_min : month_min + month_range
+            ]
             # Have to extract the data and write it back as `.at` does not play nicely
             # with netCDF4
             # We pull just the month subset we need for speed reasons
-            self._extend_variable(variable_name, old_size, new_size, initial_value=0.0)
-            month_data = self.dataset.variables[variable_name][
-                :, month_min : month_min + month_range
-            ]
+            for variable_name in arrays:
+                self._extend_variable(
+                    variable_name, old_size, new_size, initial_value=0.0
+                )
+                month_data[variable_name] = self.dataset.variables[variable_name][
+                    :, month_min : month_min + month_range
+                ]
+
+        # Add the data to the variable totals
+        for variable_name, array in arrays.items():
             add_data(
-                target=month_data,
+                target=month_data[variable_name],
                 target_start_counts=count_data,
                 source=array,
                 months_elapsed=months - month_min,
             )
-            self.dataset.variables[variable_name][
-                :, month_min : month_min + month_range
-            ] = month_data
-        # counts must be added after data, as we use the base counts when updating means
-        for i_sample in range(n_samples_data):
-            self.dataset.variables[COUNTS][i_sample] += np.bincount(
-                months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
-            )
 
-        self.dataset.sync()
+        with timer.context("data_writer_io"):
+            for variable_name in arrays:
+                self.dataset.variables[variable_name][
+                    :, month_min : month_min + month_range
+                ] = month_data[variable_name]
+            # counts must be added after data, as we use the base counts when
+            # updating means
+            for i_sample in range(n_samples_data):
+                self.dataset.variables[COUNTS][i_sample] += np.bincount(
+                    months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
+                )
+            self.dataset.sync()
 
     def flush(self):
         """
