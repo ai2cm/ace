@@ -1,5 +1,11 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=1
-cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.corrector_disabled_epochs=1
-cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.corrector_disabled_epochs=1
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=1
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs1|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.corrector_disabled_epochs=1
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs2|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.corrector_disabled_epochs=1
+
+# ocean_precorr_so_uniformdt_cde1: ocean_precorr_so_cde1 with the additive
+# (uniform_temperature) OHC correction in place of the multiplicative
+# (scaled_temperature) one; every other token held. ace#1479.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature'|3h
