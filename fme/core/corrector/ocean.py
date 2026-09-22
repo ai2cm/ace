@@ -112,6 +112,39 @@ class OceanHeatContentBudgetConfig:
 
 
 @dataclasses.dataclass
+class OceanSaltContentBudgetConfig:
+    """Configuration for ocean salt content budget correction.
+
+    Unlike heat, global ocean salt content has no surface flux source:
+    precipitation, evaporation and runoff move water, not salt. The only
+    genuine exchange is with the sea-ice reservoir, and the model predicts
+    the ice volume, so the expected change is computable from the model's
+    own outputs with no external forcing data.
+
+    Parameters:
+        method: The available option is "scaled_salinity", which enforces
+            the salt budget by scaling the predicted salinity by a
+            vertically and horizontally uniform correction factor.
+        ice_volume_salt_slope_psu: Empirical slope of the global column
+            salt content change against the change in global-mean sea ice
+            volume: ``expected_change = slope * delta_ice_volume``. Simple
+            bookkeeping (ice exporting salt at its own salinity) suggests a
+            small negative slope, but CM4's brine-rejection plumbing
+            measures +5.85 psu on the 1pctCO2 dataset - calibrate against
+            the target data rather than assuming. Set to 0 to ignore the
+            ice exchange and hold salt content fixed.
+        constant_unaccounted_salting: Area-weighted global mean rate of
+            column salt content change, in psu m / s, added to the expected
+            change at every step. Useful when the target data's salt budget
+            has a small measured residual.
+    """
+
+    method: Literal["scaled_salinity"]
+    ice_volume_salt_slope_psu: float = 0.0
+    constant_unaccounted_salting: float = 0.0
+
+
+@dataclasses.dataclass
 class SurfaceEnergyFluxCorrectionConfig:
     """Configuration for correcting the generated hfds using
     atmosphere-derived surface energy fluxes and ocean_fraction.
@@ -241,6 +274,47 @@ class OceanHeatContentCorrection:
         return corrected, corrector_state
 
 
+@dataclasses.dataclass
+class OceanSaltContentCorrection:
+    """Correction that conserves ocean salt content."""
+
+    area_weighted_mean: AreaWeightedMean
+    vertical_coordinate: HasOceanDepthIntegral | None
+    timestep_seconds: float
+    method: Literal["scaled_salinity"]
+    ice_volume_salt_slope_psu: float
+    unaccounted_salting: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the salinity at every depth level).
+        """
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "Ocean salt content correction is turned on, but no vertical "
+                "coordinate is available."
+            )
+        corrected = _force_conserve_ocean_salt_content(
+            input_data,
+            gen_data,
+            self.area_weighted_mean,
+            self.vertical_coordinate,
+            self.timestep_seconds,
+            self.method,
+            self.ice_volume_salt_slope_psu,
+            self.unaccounted_salting,
+        )
+        return corrected, corrector_state
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -256,6 +330,10 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             flux correction to the generated hfds.
         ocean_heat_content_correction: Optional configuration for an ocean heat
             content correction.
+        ocean_salt_content_correction: Optional configuration for an ocean salt
+            content budget correction (scales every salinity level so the global
+            column salt content changes only by the sea-ice exchange and a
+            constant unaccounted rate).
         keep_gradient_through_clamps: If True, apply the corrector's hard clamps
             (the ``force_positive_names`` clamp and the
             ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
@@ -268,6 +346,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
 
     @classmethod
@@ -339,6 +418,17 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                )
+            )
+        if self.ocean_salt_content_correction is not None:
+            corrections.append(
+                OceanSaltContentCorrection(
+                    area_weighted_mean,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    self.ocean_salt_content_correction.method,
+                    self.ocean_salt_content_correction.ice_volume_salt_slope_psu,
+                    self.ocean_salt_content_correction.constant_unaccounted_salting,
                 )
             )
         return OceanCorrector(corrections)
@@ -490,4 +580,62 @@ def _force_conserve_ocean_heat_content(
         out["sst"] = (  # assuming sst in Kelvin
             gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
         ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    return out
+
+
+def _force_conserve_ocean_salt_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    area_weighted_mean: AreaWeightedMean,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    method: Literal["scaled_salinity"] = "scaled_salinity",
+    ice_volume_salt_slope_psu: float = 0.0,
+    unaccounted_salting: float = 0.0,
+) -> TensorDict:
+    """Scale the predicted salinity so global column salt content changes
+    only by the sea-ice exchange plus any constant unaccounted rate.
+
+    Salt has no surface flux source (freshwater fluxes move water, not
+    salt), so no forcing data is required: the ice term uses the model's
+    own predicted sea ice volume, mirroring how the heat correction anchors
+    to the predicted surface heat flux.
+    """
+    if method != "scaled_salinity":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean salt content conservation"
+        )
+    input = OceanData(input_data, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
+    salinity = gen.sea_water_salinity
+    global_gen_salt = area_weighted_mean(
+        vertical_coordinate.depth_integral(salinity),
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    global_input_salt = area_weighted_mean(
+        vertical_coordinate.depth_integral(input.sea_water_salinity),
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    expected_change = torch.zeros_like(global_input_salt)
+    if ice_volume_salt_slope_psu != 0.0:
+        try:
+            ice_change = area_weighted_mean(
+                gen.sea_ice_volume - input.sea_ice_volume,
+                keepdim=True,
+                name="ocean_salt_content",
+            )
+            expected_change = expected_change + ice_volume_salt_slope_psu * ice_change
+        except KeyError:
+            pass  # no sea ice volume in this model: no ice exchange term
+    expected_change = expected_change + unaccounted_salting * timestep_seconds
+    salt_content_correction_ratio = (
+        global_input_salt + expected_change
+    ) / global_gen_salt
+    out: TensorDict = {}
+    n_levels = salinity.shape[-1]
+    for k in range(n_levels):
+        name = f"so_{k}"
+        out[name] = gen.data[name] * salt_content_correction_ratio
     return out
