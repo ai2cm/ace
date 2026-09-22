@@ -23,7 +23,7 @@
 # split-ohc        thetao_0..11         on
 # split-noohc      thetao_0..11         off     <- the one that matters
 #
-# THIS ARM: resid-anomohc
+# THIS ARM: resid-anomohc-precorr  (resid-anomohc + corrector_loss precorrector_optimization; see stepper_training.corrector_loss)
 # 4deg port of ../../cm4_1pct_46to125_piC_156to235/ocean_wide, with the
 # ohc_clip arm's two settings baked in, as the deterministic control for the
 # stochastic-Samudra screen (tasks/2026-08-26-stochastic-samudra-4deg-screen).
@@ -221,6 +221,13 @@ stepper_training:
   n_forward_steps: 4
   loss:
     type: MSE
+  corrector_loss:
+    # Pre-corrector optimization: for sst and every thetao level the main loss
+    # is taken on the network's own output, before the OHC corrector rescales
+    # it, so the network is trained to be right on its own and the corrector
+    # acts only at inference.
+    precorrector_optimization:
+      names_and_prefixes: ["sst", "thetao_"]
 stepper:
   input_masking:
     mask_value: 0

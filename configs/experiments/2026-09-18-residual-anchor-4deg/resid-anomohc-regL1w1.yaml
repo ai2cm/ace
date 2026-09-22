@@ -23,7 +23,7 @@
 # split-ohc        thetao_0..11         on
 # split-noohc      thetao_0..11         off     <- the one that matters
 #
-# THIS ARM: resid-anomohc
+# THIS ARM: resid-anomohc-regL1w1  (resid-anomohc + corrector_loss regularization L1 weight 1; see stepper_training.corrector_loss)
 # 4deg port of ../../cm4_1pct_46to125_piC_156to235/ocean_wide, with the
 # ohc_clip arm's two settings baked in, as the deterministic control for the
 # stochastic-Samudra screen (tasks/2026-08-26-stochastic-samudra-4deg-screen).
@@ -221,6 +221,14 @@ stepper_training:
   n_forward_steps: 4
   loss:
     type: MSE
+  corrector_loss:
+    # Corrector regularization: penalize the OHC corrector's per-step delta on
+    # sst and every thetao level (mean absolute normalized delta, weight 1),
+    # so the network learns to need less correction.
+    regularization:
+      names_and_prefixes: ["sst", "thetao_"]
+      norm: L1
+      weight: 1.0
 stepper:
   input_masking:
     mask_value: 0

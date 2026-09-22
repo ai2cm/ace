@@ -23,7 +23,7 @@
 # split-ohc        thetao_0..11         on
 # split-noohc      thetao_0..11         off     <- the one that matters
 #
-# THIS ARM: resid-anomohc
+# THIS ARM: ff-ohc-regL1w100  (ff-ohc + corrector_loss regularization L1 weight 100; see stepper_training.corrector_loss)
 # 4deg port of ../../cm4_1pct_46to125_piC_156to235/ocean_wide, with the
 # ohc_clip arm's two settings baked in, as the deterministic control for the
 # stochastic-Samudra screen (tasks/2026-08-26-stochastic-samudra-4deg-screen).
@@ -221,6 +221,14 @@ stepper_training:
   n_forward_steps: 4
   loss:
     type: MSE
+  corrector_loss:
+    # Corrector regularization, weight 100: the OHC delta is a ~1e-5 relative
+    # rescaling per step, tiny in normalized units, so weight 1 may be
+    # invisible against the main loss; this brackets it.
+    regularization:
+      names_and_prefixes: ["sst", "thetao_"]
+      norm: L1
+      weight: 100.0
 stepper:
   input_masking:
     mask_value: 0
@@ -270,9 +278,6 @@ stepper:
         network:
           global_means_path: /ocean_stats/centering.nc
           global_stds_path: /ocean_stats/scaling-full-field.nc
-        residual:
-          global_means_path: /ocean_stats/centering.nc
-          global_stds_path: /ocean_stats/scaling-residual.nc
       corrector:
         type: ocean_corrector
         config:
@@ -281,28 +286,7 @@ stepper:
           # The "ohc" of the 1deg ocean_wide_ohc_clip arm, likewise stated here
           # rather than passed as an override_arg.
           ocean_heat_content_correction:
-            method: anomaly_scaled_temperature
-            max_anomaly_contraction: 0.1
-            reference_temperature:
-            - 14.1366
-            - 14.0327
-            - 13.667
-            - 13.0223
-            - 12.1456
-            - 11.0038
-            - 9.7479
-            - 8.5461
-            - 7.353
-            - 6.123
-            - 4.9795
-            - 3.9804
-            - 3.1132
-            - 2.4814
-            - 2.0186
-            - 1.5866
-            - 1.2214
-            - 1.1271
-            - 1.1318
+            method: scaled_temperature
           force_positive_names:
           - so_0
           - so_1
@@ -333,28 +317,6 @@ stepper:
             - sfdsi
             - UI
             - VI
-      residual_prediction:
-        normalized: true
-        names:
-        - thetao_0
-        - thetao_1
-        - thetao_2
-        - thetao_3
-        - thetao_4
-        - thetao_5
-        - thetao_6
-        - thetao_7
-        - thetao_8
-        - thetao_9
-        - thetao_10
-        - thetao_11
-        - thetao_12
-        - thetao_13
-        - thetao_14
-        - thetao_15
-        - thetao_16
-        - thetao_17
-        - thetao_18
       next_step_forcing_names:
       - DLWRFsfc
       - DSWRFsfc
