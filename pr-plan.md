@@ -17,7 +17,7 @@ class ComponentEnsembleStepPrediction:
         realm: Literal["ocean", "atmosphere"],
         data: EnsembleTensorDict,
         step: int,
-        deltas: EnsembleTensorDict,  # NEW — required, not defaulted: this is the seam where the component step's deltas would otherwise be dropped (as `ComponentStepPrediction.corrector_diagnostics` is). Empty when the corrector was inactive.
+        deltas: EnsembleTensorDict | None = None,  # NEW — defaults to empty, as StepOutput.corrector_diagnostics does; empty when the corrector was inactive
     ): ...
 
     @property
@@ -90,9 +90,6 @@ class CoupledTrainStepper:
 def _mock_step_loss(fn):  # CHANGED — Mock(spec=StepOutputLoss); side effect accepts the `deltas` kwarg and returns a StepOutputLossOutput
     ...
 
-def step_and_target_gen(n_atmos_per_ocean=2):  # CHANGED — constructs ComponentEnsembleStepPrediction with empty deltas
-    ...
-
 def test_coupled_loss_forwards_each_realms_deltas():
     # GOAL: the ocean StepOutputLoss receives the ocean prediction's deltas and
     # the atmosphere StepOutputLoss the atmosphere's, in both __call__ and
@@ -136,11 +133,3 @@ def test_train_on_batch_corrector_penalty(realm):
     # losses are unchanged.
     ...
 ```
-
----
-
-## Open Questions
-
-- `ComponentEnsembleStepPrediction.deltas` required (mirrors the
-  `ComponentStepPrediction.corrector_diagnostics` precedent) or defaulted to
-  empty, which leaves existing constructor sites in tests untouched?
