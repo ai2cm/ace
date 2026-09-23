@@ -2972,5 +2972,9 @@
   "ace2-fm-nc-swin-v2-c96-a1-mask10-sst-c96-p2k": "01M337F566GBM48N1Q2TDBQPFQ",
   "ace2-fm-nc-swin-v2-c96-a1-mask10-sst-c96-p4k": "01M337F9NQQ945J3Y5Q090WJJX",
   "ace2-fm-nc-sfno-c96-a1-mask10-cond-finetune": "01M32ZQN47J32TEG4M1KG7WZN0",
-  "ace2-fm-nc-sfno-c96-a1-mask10-finetune": "01M32YNVHRQ5VXB9PGWZPF85QN"
+  "ace2-fm-nc-sfno-c96-a1-mask10-finetune": "01M32YNVHRQ5VXB9PGWZPF85QN",
+  "ace2-fm-nc-swin-v2-c96-a1-mask10-cond": "01M35EVY6XYY84WMY6NC5J9M6Q",
+  "ace2-fm-nc-swin-v2-c96-a1-mask10-finetune": "01M34XZ28ZSGDTBJYJ5MY3YERQ",
+  "ace2-fm-nc-swin-v2-fm-a1-finetune": "01M34XZ2312H1D3QQG2S69685J",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-finetune": "01M35EVYEG6SC1KTX7Z81NY8CF"
 }
