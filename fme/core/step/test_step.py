@@ -2580,7 +2580,8 @@ def test_single_module_step_compile_flag_compiles_secondary_decoder():
 
 
 def test_no_secondary_decoder_compile_is_noop():
-    NoSecondaryDecoder().compile()
+    decoder = NoSecondaryDecoder()
+    assert decoder.compile() is decoder
 
 
 def _get_eager_and_compiled_steps(
