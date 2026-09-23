@@ -25,7 +25,8 @@ data
     abrupt-4xCO2 run (MISSING_DATASETS["abrupt"]); ``somabruptens``: SHiELD's
     36-member abrupt-4xCO2 ensemble (MISSING_DATASETS["abrupt-ensemble"]);
     ``amip``, ``amipp4k``, ``amipp2k``: the SHiELD AMIP run on the held-out
-    member and SHiELD's AMIP runs with SST +4 K / +2 K; ``ramped``: the
+    member and SHiELD's AMIP runs with SST +4 K / +2 K; ``amipconstco2``:
+    SHiELD's AMIP run with CO2 held constant; ``ramped``: the
     ramped-climatological-SST random-CO2 runs; ``era5``: ERA5 reanalysis.
 experiment
     ``eq`` (equilibrium climate, paper protocol with spin-up),
@@ -95,6 +96,9 @@ Slab-ocean kinds (SHiELD-SOM)
     Paper's abrupt-4xCO2 ensemble evaluator: 36 monthly 1xCO2 initial
     conditions, 90 days each, CO2 overwritten to 4x, scored against the 1xCO2
     member so the metrics are the response (figures 8 and 10).
+``som-control-dataCO2-ens-sstslab-eval``
+    The same slab ensemble with the 1xCO2 forcing as is (ours): ACE's own slab
+    control, so the slab response of figures 8 and 10 is ACE minus ACE.
 ``somabruptens-abrupt-4xCO2-ens-sstdata-dataonly``
     SHiELD's 36-member abrupt-4xCO2 ensemble evaluated against itself. Needs
     the daily 4deg abrupt-4xCO2 ensemble dataset
@@ -103,6 +107,15 @@ Slab-ocean kinds (SHiELD-SOM)
 ``som-abrupt-4xCO2-7day-sstslab-inference``
     Paper's seven-day ensemble inference from the same 36 initial conditions,
     with the 1xCO2 forcing as is and with CO2 overwritten to 4x (figure 9).
+``som-control-dataCO2-7day-sstdata-dataonly``,
+``somabruptens-abrupt-4xCO2-7day-sstdata-dataonly``
+    SHiELD's own seven-day means for figure 9: the 1xCO2 member at the same 36
+    initial conditions, and the first seven days of each abrupt-4xCO2 ensemble
+    member (36 jobs), both evaluated against themselves. Their difference is
+    SHiELD's 7-day response, as the paper's notebook computes it from the raw
+    stores. Member ic_00NN branches from the 1xCO2 member at the NNth initial
+    condition. The time mean excludes the initial condition, as it does for
+    the seven-day inference kinds, so both cover days 1-7.
 
 Prescribed-SST kinds (SHiELD)
 -----------------------------
@@ -134,9 +147,12 @@ Prescribed-SST kinds (SHiELD)
     (spin-up 1979 / train-validate 1980-2011 / test 2012-2020): restart
     chaining gives the identical trajectory, so the windows are an analysis
     cut. Write the paper's daily-PRATEsfc zarr.
-``amip-control-dataCO2-42yr-sstdata-dataonly``, ``amipp4k-…``, ``amipp2k-…``
-    AMIP ic_0002, +4 K and +2 K evaluated against themselves from 1980-01-01
-    (the paper's data-only evaluators skip the spin-up year).
+``amipconstco2-control-dataCO2-43yr-sstprescribed-eval``
+    The same evaluator on SHiELD's constant-CO2 AMIP run (figure 5).
+``amip-control-dataCO2-42yr-sstdata-dataonly``, ``amipp4k-…``, ``amipp2k-…``,
+``amipconstco2-…``
+    AMIP ic_0002, +4 K, +2 K and constant CO2 evaluated against themselves
+    from 1980-01-01 (the paper's data-only evaluators skip the spin-up year).
 ``ramped-control-dataCO2-5yr-sstprescribed-eval``
     Paper's random-CO2 evaluator on the held-out member ic_0003 of the
     ramped-SST random-CO2 runs, 1x/2x/4xCO2, 2019-10-01 to the store's end.
@@ -148,11 +164,15 @@ fields, so ``sstprescribed`` only. "4x" is four times ERA5's own global-mean CO2
 at the start date (2015-01-01), held constant, as the paper's 4x is four times
 the SOM control's constant. The reference is ERA5 itself, whose CO2 keeps
 rising through the window, so the response is measured against a slowly
-drifting baseline; SHiELD's is flat. ERA5's ten-year control needs no kind:
-the eval suites' ``10year`` entry runs the same window.
+drifting baseline; SHiELD's is flat.
 
 ``era5-abrupt-4xCO2-10yr-sstprescribed-eval``
     2015-01-01, ten years, observed SST, CO2 overwritten to 4x 2015.
+``era5-control-dataCO2-10yr-sstprescribed-eval``
+    The same window with CO2 as observed: the ten-year control. The eval
+    suites' inline ``10year`` entry runs the same window, but on training
+    checkpoints and under different metric names, so it is not a like-for-like
+    control.
 ``era5-abrupt-4xCO2-ens-sstprescribed-eval``
     36 monthly initial conditions 2015-01 .. 2017-12, 90 days, same CO2.
 ``era5-control-dataCO2-ens-sstprescribed-eval``
@@ -283,6 +303,7 @@ MISSING_DATASETS = {
         kinds=(
             "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
             "somabruptens-abrupt-4xCO2-ens-sstprescribed-eval",
+            "somabruptens-abrupt-4xCO2-7day-sstdata-dataonly",
         ),
         available=True,  # copied to weka 2026-09-21
     ),
@@ -393,10 +414,14 @@ class PrescribedSstDataset(NamedTuple):
 
 # AMIP family, prescribed observed SST: the SHiELD AMIP ensemble (the norm-
 # ablation cells trained on ic_0001 and held out ic_0002) and SHiELD's AMIP
-# runs with the SST uniformly +2 K / +4 K. The +2 K / +4 K stores run
-# 1979-01-02T00 .. 2021-12-16T00 (15690 daily labels); the ensemble members start
-# in 1939 and end the same day.
+# runs with the SST uniformly +2 K / +4 K, and with CO2 held constant. The
+# +2 K / +4 K stores run 1979-01-02T00 .. 2021-12-16T00 (15690 daily labels); the
+# ensemble members start in 1939 and end the same day. The constant-CO2 store
+# starts no later than 1979-01-01T00 and reaches 2021-12-16T00: the training
+# configs' inline long_43year_constant_co2 entry runs 15683 steps from
+# 1979-01-01 .. 1979-01-08 on it.
 AMIP_LABEL = "amip"
+AMIP_CONSTANT_CO2 = "constco2"
 AMIP_HELD_OUT_MEMBER = "ic_0002"
 AMIP_VARIANTS = {
     AMIP_HELD_OUT_MEMBER: PrescribedSstDataset(
@@ -413,6 +438,11 @@ AMIP_VARIANTS = {
         "/climate-default/"
         "2026-07-09-vertically-resolved-c96-4deg-daily-shield-amip-p2k-dataset",
         "AMIP-p2K.zarr",
+    ),
+    AMIP_CONSTANT_CO2: PrescribedSstDataset(
+        "/climate-default/"
+        "2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset",
+        "AMIP-constant-CO2.zarr",
     ),
 }
 # Paper's AMIP inference starts 1979-01-01 and its data-only evaluator
@@ -467,9 +497,12 @@ KINDS = (
     "somabrupt-abrupt-4xCO2-10yr-sstslab-eval",
     "somabrupt-abrupt-4xCO2-10yr-sstdata-dataonly",
     "som-abrupt-4xCO2-ens-sstslab-eval",
+    "som-control-dataCO2-ens-sstslab-eval",
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
     "som-control-dataCO2-7day-sstslab-inference",
     "som-abrupt-4xCO2-7day-sstslab-inference",
+    "som-control-dataCO2-7day-sstdata-dataonly",
+    "somabruptens-abrupt-4xCO2-7day-sstdata-dataonly",
     # prescribed SST, SHiELD
     "som-eq-dataCO2-10yr-sstprescribed-eval",
     "somabrupt-abrupt-4xCO2-10yr-sstprescribed-eval",
@@ -480,12 +513,15 @@ KINDS = (
     "amip-control-dataCO2-43yr-sstprescribed-eval",
     "amipp4k-control-dataCO2-43yr-sstprescribed-eval",
     "amipp2k-control-dataCO2-43yr-sstprescribed-eval",
+    "amipconstco2-control-dataCO2-43yr-sstprescribed-eval",
     "amip-control-dataCO2-42yr-sstdata-dataonly",
     "amipp4k-control-dataCO2-42yr-sstdata-dataonly",
     "amipp2k-control-dataCO2-42yr-sstdata-dataonly",
+    "amipconstco2-control-dataCO2-42yr-sstdata-dataonly",
     "ramped-control-dataCO2-5yr-sstprescribed-eval",
     # prescribed SST, ERA5
     "era5-abrupt-4xCO2-10yr-sstprescribed-eval",
+    "era5-control-dataCO2-10yr-sstprescribed-eval",
     "era5-abrupt-4xCO2-ens-sstprescribed-eval",
     "era5-control-dataCO2-ens-sstprescribed-eval",
 )
@@ -869,14 +905,19 @@ def _ensemble_evaluator_config(
     initial_times: list[str],
     slab: bool,
     label: str = SOM_LABEL,
+    n_forward_steps: int = ABRUPT_ENSEMBLE_N_STEPS,
+    data_only: bool = False,
 ) -> dict:
-    """The paper's 36-monthly-IC, 90-day ensemble evaluator (one job)."""
+    """The paper's 36-monthly-IC, 90-day ensemble evaluator (one job), or
+    (data_only) the loader's store evaluated against itself at the same ICs.
+    """
     return _evaluator_config(
-        n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS,
+        n_forward_steps=n_forward_steps,
         forward_steps_in_memory=ENSEMBLE_FORWARD_STEPS_IN_MEMORY,
         loader_dataset=loader_dataset,
         start_indices={"times": list(initial_times)},
         data_writer=_no_files(),
+        prediction_dataset=copy.deepcopy(loader_dataset) if data_only else None,
         slab=slab,
         label=label,
     )
@@ -893,14 +934,25 @@ def build_som_abrupt_4xco2_ens_slab_eval_configs() -> dict[str, dict]:
     }
 
 
-def _abrupt_ensemble_member_configs(kind: str, data_only: bool) -> dict[str, dict]:
+def build_som_control_ens_slab_eval_configs() -> dict[str, dict]:
+    kind = "som-control-dataCO2-ens-sstslab-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _control_dataset(), ENSEMBLE_INITIAL_TIMES, slab=True
+        )
+    }
+
+
+def _abrupt_ensemble_member_configs(
+    kind: str, data_only: bool, n_forward_steps: int = ABRUPT_ENSEMBLE_N_STEPS - 1
+) -> dict[str, dict]:
     """One evaluator per member of SHiELD's abrupt-4xCO2 ensemble."""
     configs = {}
     for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
         member = f"ic_{n:04d}"
         dataset = _abrupt_ensemble_member_dataset(member)
         configs[paper_config_filename(kind, member)] = _evaluator_config(
-            n_forward_steps=ABRUPT_ENSEMBLE_N_STEPS - 1,
+            n_forward_steps=n_forward_steps,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
             loader_dataset=dataset,
             start_indices={"list": [0]},
@@ -940,6 +992,27 @@ def build_som_abrupt_4xco2_7day_slab_inference_configs() -> dict[str, dict]:
     return {
         paper_config_filename(kind): _seven_day_config(co2=CLIMATES[ABRUPT_CLIMATE].co2)
     }
+
+
+def build_som_control_7day_data_only_configs() -> dict[str, dict]:
+    kind = "som-control-dataCO2-7day-sstdata-dataonly"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _control_dataset(),
+            ENSEMBLE_INITIAL_TIMES,
+            slab=False,
+            n_forward_steps=SEVEN_DAY_N_STEPS,
+            data_only=True,
+        )
+    }
+
+
+def build_som_abrupt_4xco2_7day_data_only_configs() -> dict[str, dict]:
+    return _abrupt_ensemble_member_configs(
+        "somabruptens-abrupt-4xCO2-7day-sstdata-dataonly",
+        data_only=True,
+        n_forward_steps=SEVEN_DAY_N_STEPS,
+    )
 
 
 # --- prescribed-SST kinds, SHiELD ---------------------------------------------
@@ -1064,6 +1137,15 @@ def build_amip_p2k_sst_eval_configs() -> dict[str, dict]:
     return {paper_config_filename(kind): _amip_evaluator_config("p2k", data_only=False)}
 
 
+def build_amip_constant_co2_sst_eval_configs() -> dict[str, dict]:
+    kind = "amipconstco2-control-dataCO2-43yr-sstprescribed-eval"
+    return {
+        paper_config_filename(kind): _amip_evaluator_config(
+            AMIP_CONSTANT_CO2, data_only=False
+        )
+    }
+
+
 def build_amip_data_only_configs() -> dict[str, dict]:
     kind = "amip-control-dataCO2-42yr-sstdata-dataonly"
     return {
@@ -1081,6 +1163,15 @@ def build_amipp4k_data_only_configs() -> dict[str, dict]:
 def build_amipp2k_data_only_configs() -> dict[str, dict]:
     kind = "amipp2k-control-dataCO2-42yr-sstdata-dataonly"
     return {paper_config_filename(kind): _amip_evaluator_config("p2k", data_only=True)}
+
+
+def build_amipconstco2_data_only_configs() -> dict[str, dict]:
+    kind = "amipconstco2-control-dataCO2-42yr-sstdata-dataonly"
+    return {
+        paper_config_filename(kind): _amip_evaluator_config(
+            AMIP_CONSTANT_CO2, data_only=True
+        )
+    }
 
 
 def build_ramped_random_co2_sst_eval_configs() -> dict[str, dict]:
@@ -1105,16 +1196,20 @@ def build_ramped_random_co2_sst_eval_configs() -> dict[str, dict]:
 # --- prescribed-SST kinds, ERA5 -----------------------------------------------
 
 
+def _era5_10yr_config(co2: float | None) -> dict:
+    return _abrupt_10yr_sst_fixed_config(
+        _era5_dataset(co2=co2), ERA5_ABRUPT_FIRST_TIME, ERA5_ABRUPT_N_STEPS, ERA5_LABEL
+    )
+
+
 def build_era5_abrupt_4xco2_10yr_sst_fixed_eval_configs() -> dict[str, dict]:
     kind = "era5-abrupt-4xCO2-10yr-sstprescribed-eval"
-    return {
-        paper_config_filename(kind): _abrupt_10yr_sst_fixed_config(
-            _era5_dataset(co2=ERA5_CO2_4X),
-            ERA5_ABRUPT_FIRST_TIME,
-            ERA5_ABRUPT_N_STEPS,
-            ERA5_LABEL,
-        )
-    }
+    return {paper_config_filename(kind): _era5_10yr_config(co2=ERA5_CO2_4X)}
+
+
+def build_era5_control_10yr_sst_eval_configs() -> dict[str, dict]:
+    kind = "era5-control-dataCO2-10yr-sstprescribed-eval"
+    return {paper_config_filename(kind): _era5_10yr_config(co2=None)}
 
 
 def build_era5_abrupt_4xco2_ens_sst_fixed_eval_configs() -> dict[str, dict]:
@@ -1157,6 +1252,7 @@ BUILDERS = {
         build_som_abrupt_4xco2_10yr_data_only_configs
     ),
     "som-abrupt-4xCO2-ens-sstslab-eval": (build_som_abrupt_4xco2_ens_slab_eval_configs),
+    "som-control-dataCO2-ens-sstslab-eval": (build_som_control_ens_slab_eval_configs),
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly": (
         build_som_abrupt_4xco2_ens_data_only_configs
     ),
@@ -1165,6 +1261,12 @@ BUILDERS = {
     ),
     "som-abrupt-4xCO2-7day-sstslab-inference": (
         build_som_abrupt_4xco2_7day_slab_inference_configs
+    ),
+    "som-control-dataCO2-7day-sstdata-dataonly": (
+        build_som_control_7day_data_only_configs
+    ),
+    "somabruptens-abrupt-4xCO2-7day-sstdata-dataonly": (
+        build_som_abrupt_4xco2_7day_data_only_configs
     ),
     "som-eq-dataCO2-10yr-sstprescribed-eval": (build_som_eq_10yr_sst_eval_configs),
     "somabrupt-abrupt-4xCO2-10yr-sstprescribed-eval": (
@@ -1189,14 +1291,23 @@ BUILDERS = {
     "amipp2k-control-dataCO2-43yr-sstprescribed-eval": (
         build_amip_p2k_sst_eval_configs
     ),
+    "amipconstco2-control-dataCO2-43yr-sstprescribed-eval": (
+        build_amip_constant_co2_sst_eval_configs
+    ),
     "amip-control-dataCO2-42yr-sstdata-dataonly": (build_amip_data_only_configs),
     "amipp4k-control-dataCO2-42yr-sstdata-dataonly": (build_amipp4k_data_only_configs),
     "amipp2k-control-dataCO2-42yr-sstdata-dataonly": (build_amipp2k_data_only_configs),
+    "amipconstco2-control-dataCO2-42yr-sstdata-dataonly": (
+        build_amipconstco2_data_only_configs
+    ),
     "ramped-control-dataCO2-5yr-sstprescribed-eval": (
         build_ramped_random_co2_sst_eval_configs
     ),
     "era5-abrupt-4xCO2-10yr-sstprescribed-eval": (
         build_era5_abrupt_4xco2_10yr_sst_fixed_eval_configs
+    ),
+    "era5-control-dataCO2-10yr-sstprescribed-eval": (
+        build_era5_control_10yr_sst_eval_configs
     ),
     "era5-abrupt-4xCO2-ens-sstprescribed-eval": (
         build_era5_abrupt_4xco2_ens_sst_fixed_eval_configs

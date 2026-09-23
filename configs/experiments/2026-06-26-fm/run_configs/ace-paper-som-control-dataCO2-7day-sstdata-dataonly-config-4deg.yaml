@@ -1,0 +1,67 @@
+experiment_dir: /results
+n_forward_steps: 7
+forward_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+labels:
+- som
+logging:
+  project: FM
+  entity: ai2cm
+  log_to_screen: true
+  log_to_file: true
+  log_to_wandb: true
+loader:
+  dataset:
+    data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0005.zarr
+    engine: zarr
+  start_indices: &id001
+    times:
+    - '2031-01-02T00:00:00'
+    - '2031-02-02T00:00:00'
+    - '2031-03-02T00:00:00'
+    - '2031-04-02T00:00:00'
+    - '2031-05-02T00:00:00'
+    - '2031-06-02T00:00:00'
+    - '2031-07-02T00:00:00'
+    - '2031-08-02T00:00:00'
+    - '2031-09-02T00:00:00'
+    - '2031-10-02T00:00:00'
+    - '2031-11-02T00:00:00'
+    - '2031-12-02T00:00:00'
+    - '2032-01-02T00:00:00'
+    - '2032-02-02T00:00:00'
+    - '2032-03-02T00:00:00'
+    - '2032-04-02T00:00:00'
+    - '2032-05-02T00:00:00'
+    - '2032-06-02T00:00:00'
+    - '2032-07-02T00:00:00'
+    - '2032-08-02T00:00:00'
+    - '2032-09-02T00:00:00'
+    - '2032-10-02T00:00:00'
+    - '2032-11-02T00:00:00'
+    - '2032-12-02T00:00:00'
+    - '2033-01-02T00:00:00'
+    - '2033-02-02T00:00:00'
+    - '2033-03-02T00:00:00'
+    - '2033-04-02T00:00:00'
+    - '2033-05-02T00:00:00'
+    - '2033-06-02T00:00:00'
+    - '2033-07-02T00:00:00'
+    - '2033-08-02T00:00:00'
+    - '2033-09-02T00:00:00'
+    - '2033-10-02T00:00:00'
+    - '2033-11-02T00:00:00'
+    - '2033-12-02T00:00:00'
+  num_data_workers: 8
+prediction_loader:
+  dataset:
+    data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0005.zarr
+    engine: zarr
+  start_indices: *id001
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

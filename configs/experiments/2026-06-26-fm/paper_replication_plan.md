@@ -82,6 +82,21 @@ the status section below against `argo list`, `beaker`, and the GCS paths
 - Data: every dataset the paper kinds need is on weka (D1, D2 2026-09-16;
   D3 and the 3xCO2 members 2026-09-21; see the datasets table and
   `MISSING_DATASETS.md`). Only D4 (`2pct*`) is not planned.
+- **Added 2026-09-23, configs generated, not yet submitted: six control and
+  reference kinds** that fill holes in the Spencer-figures notebooks
+  (`explore2/alexeyy/foundation-model/2026-09-21-spencer-figures-*.ipynb`):
+  `som-control-dataCO2-ens-sstslab-eval` (ACE slab control, Fig 8/10 slab
+  response), `era5-control-dataCO2-10yr-sstprescribed-eval` (ERA5 10-year
+  control), `amipconstco2-control-dataCO2-43yr-sstprescribed-eval` and
+  `amipconstco2-control-dataCO2-42yr-sstdata-dataonly` (paper Fig 5),
+  `som-control-dataCO2-7day-sstdata-dataonly` and
+  `somabruptens-abrupt-4xCO2-7day-sstdata-dataonly` (SHiELD's 7-day response,
+  Fig 9/11 column 2). Dry run on `--arch nc-sfno nc-swin-v2`: 73 per-run jobs
+  (26 + 21 + 26) and 38 data-only (1 + 1 + 36). The SHiELD and prescribed
+  10-year controls need no kind: `som-eqnospinup-dataCO2-10yr-sstslab-inference`
+  and `som-eq-dataCO2-10yr-sstprescribed-eval` at 1xCO2 `ic1` differ from
+  `som-abrupt-4xCO2-10yr-{sstslab-inference,sstprescribed-eval}` only in the CO2
+  overwrite and the file writer.
 
 ## Kind naming
 
@@ -116,6 +131,20 @@ versus `somabrupt-…` / `somabruptens-…` (SST from SHiELD's own 4xCO2 run,
 CO2 from the store: the response given SHiELD's surface warming, scorable).
 ERA5 has no slab fields, so ERA5 kinds are `sstprescribed` only.
 
+CO2 is constant in time in every `4xCO2` kind, so the step is abrupt at t=0
+and never ramps. Overwritten kinds use `loader.dataset.overwrite.constant`,
+which fills `global_mean_co2` with one value at every step, IC and member
+(`fme/core/dataset/xarray.py` `OverwriteConfig`): 0.0014537 on SHiELD stores,
+1.5945e-3 on ERA5. The kinds that read CO2 from a store get the same SHiELD
+value: `global_mean_co2` is 0.0014537 at every time of the abrupt-4xCO2
+ensemble member stores (checked `ic_0001`, `ic_0018`, `ic_0036`, 2026-09-23),
+and the SOM `1xCO2` members hold 0.00036343 throughout. Member `ic_00NN`
+starts on the NNth of the 36 monthly slab-ensemble start dates (`ic_0001`
+2031-01-02, `ic_0018` 2032-06-02, `ic_0036` 2033-12-02), so the per-member
+kinds and the 36-IC kinds share start dates. Only ERA5 references drift in
+CO2: the store's observed CO2, which the control and target follow, rises
+about 26 ppm over 2015–2024.
+
 Job names are `{run}-{kind}[-{climate}][-ic{n}]` for per-run kinds and
 `{kind}[-{member}]` for data-only kinds. Config files are
 `run_configs/ace-paper-{kind}-config-4deg[-{parts}].yaml`.
@@ -137,8 +166,10 @@ marks experiments the paper does not have.
 | `run-ace-abrupt-4xCO2-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstslab-eval` | D1 `abrupt-4xCO2` | 2020-01-02T00, 3651 steps | 1 | `som` | monthly netCDF | ✅ |
 | `run-ace-abrupt-4xCO2-data-only-evaluator.sh` | `somabrupt-abrupt-4xCO2-10yr-sstdata-dataonly` | D1 vs itself | same | 1 total | `som` | monthly netCDF | ✅ |
 | `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` | `som-abrupt-4xCO2-ens-sstslab-eval` | SOM 1x member, CO2 → 4x | 2nd of each month 2031-01 … 2033-12 at 00Z, 90 steps | 1 | `som` | none | ✅ |
+| — slab control for the ensemble (ours) | `som-control-dataCO2-ens-sstslab-eval` | SOM 1x member as is | same | 1 | `som` | none | ✅ (not submitted) |
 | `run-ace-abrupt-4xCO2-ensemble-data-only-evaluator.sh` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` | D3 member vs itself | 89 steps from each member's start | 36 total (`--ens-member`) | `som` | none | ✅ |
 | `run-seven-day-1xCO2-and-abrupt-4xCO2-inference-ensemble.sh` | `som-control-dataCO2-7day-sstslab-inference`, `som-abrupt-4xCO2-7day-sstslab-inference` | SOM 1x member; CO2 as is / → 4x | same 36 starts, 7 steps | 1 + 1 | `som` | none | ✅ |
+| `figures-09-11-S09-S10.ipynb`'s SHiELD response (paper reads the raw zarrs) | `som-control-dataCO2-7day-sstdata-dataonly`, `somabruptens-abrupt-4xCO2-7day-sstdata-dataonly` | SOM 1x member vs itself at the 36 starts; D3 member vs itself | 7 steps (time mean over days 1–7, as the 7-day inference kinds) | 1 + 36 total | `som` | none | ✅ (not submitted) |
 | `run-ace-2pctCO2-*.sh` | — | D4 increasing-CO2 daily | — | — | — | — | ❌ |
 
 D1 also holds `abrupt-2xCO2` and `abrupt-3xCO2`; no kind uses them (paper is
@@ -160,9 +191,9 @@ evaluator settings (default aggregator, `forward_steps_in_memory: 1`).
 | — control ensemble (ours) | `som-control-dataCO2-ens-sstprescribed-eval` | SOM 1x member as is | same | 1 | `som` | none | ✅ |
 | `run-ace-split-amip-ensemble-inference.sh`, `…-single-member-split-amip-inference-daily-PRATEsfc.sh` | `amip-control-dataCO2-43yr-sstprescribed-eval` | AMIP `ic_0002` (held out) | 1979-01-02T00, 15689 steps (to 2021-12-16) | 1 | `amip` | daily `PRATEsfc` zarr | ✅ |
 | `run-ace-split-amip-plus-4K-inference.sh` (+ daily PRATEsfc) | `amipp4k-control-dataCO2-43yr-sstprescribed-eval`, `amipp2k-control-dataCO2-43yr-sstprescribed-eval` | `AMIP-p4K.zarr`, `AMIP-p2K.zarr`, IC from own 1979 state | same | 1 + 1 | `amip` | daily `PRATEsfc` zarr | ✅ |
-| `run-ace-amip-split-data-only-evaluator.sh`, `run-ace-amip-variant-data-only-evaluator.sh` | `amip-control-dataCO2-42yr-sstdata-dataonly`, `amipp4k-…`, `amipp2k-…` | `ic_0002`, `AMIP-p4K`, `AMIP-p2K` vs themselves | 1980-01-01T00, 15325 steps | 1 + 1 + 1 total | `amip` | daily `PRATEsfc` zarr | ✅ |
+| `run-ace-amip-split-data-only-evaluator.sh`, `run-ace-amip-variant-data-only-evaluator.sh` | `amip-control-dataCO2-42yr-sstdata-dataonly`, `amipp4k-…`, `amipp2k-…`, `amipconstco2-…` | `ic_0002`, `AMIP-p4K`, `AMIP-p2K`, `AMIP-constant-CO2` vs themselves | 1980-01-01T00, 15325 steps | 1 + 1 + 1 + 1 total | `amip` | daily `PRATEsfc` zarr | ✅ (`amipconstco2` not submitted) |
 | `run-ace-random-CO2-evaluator.sh` | `ramped-control-dataCO2-5yr-sstprescribed-eval` | ramped `ic_0003` (held out), 1x/2x/4x | 2019-10-02T00, 1918 steps | 3 | `ramped` | none | ✅ |
-| `run-ace-amip-constant-CO2-inference.sh` | — | `AMIP-constant-CO2.zarr` | — | — | — | — | ❌ eval suites' `*_constant_co2` entries cover it |
+| `run-ace-amip-constant-CO2-inference.sh` (paper Fig 5) | `amipconstco2-control-dataCO2-43yr-sstprescribed-eval` | `2026-07-01-…-shield-amip-constant-co2-dataset/AMIP-constant-CO2.zarr` | 1979-01-02T00, 15689 steps | 1 | `amip` | daily `PRATEsfc` zarr | ✅ (not submitted). The eval suites' inline `long_43year_constant_co2` runs on training checkpoints, not `best_inference_ckpt.tar` |
 
 ### Prescribed-SST (ERA5)
 
@@ -177,7 +208,8 @@ cells only; c96 cells never saw ERA5.
 
 | Paper script | Our kind | Data (4deg daily) | Window | Jobs / run | Label | Output | Status |
 |---|---|---|---|---|---|---|---|
-| `run-ace-abrupt-4xCO2-evaluator.sh` transferred | `era5-abrupt-4xCO2-10yr-sstprescribed-eval` | ERA5 1940–2025, observed SST, CO2 → 1.5945e-3 | 2015-01-01T00, 3652 steps (the eval suites' `10year` window, so the control run exists already) | 1 | `era5` | monthly netCDF | ✅ |
+| `run-ace-abrupt-4xCO2-evaluator.sh` transferred | `era5-abrupt-4xCO2-10yr-sstprescribed-eval` | ERA5 1940–2025, observed SST, CO2 → 1.5945e-3 | 2015-01-01T00, 3652 steps (the eval suites' `10year` window) | 1 | `era5` | monthly netCDF | ✅ |
+| — ten-year control (ours) | `era5-control-dataCO2-10yr-sstprescribed-eval` | same, CO2 as observed | same | 1 | `era5` | monthly netCDF | ✅ (not submitted) |
 | `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` transferred | `era5-abrupt-4xCO2-ens-sstprescribed-eval` | same | 36 ICs, 1st of each month 2015-01 … 2017-12, 90 steps | 1 | `era5` | none | ✅ |
 | — control ensemble (ours; mirrors `som-control-dataCO2-ens-sstprescribed-eval`) | `era5-control-dataCO2-ens-sstprescribed-eval` | ERA5, CO2 as observed | same | 1 | `era5` | none | ✅ |
 
@@ -190,6 +222,7 @@ the paper notebook `figures-08-10.ipynb`.
 | Line | slab (paper) | SHiELD prescribed | ERA5 prescribed |
 |---|---|---|---|
 | ACE 4xCO2 | `som-abrupt-4xCO2-ens-sstslab-eval` | `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` (SHiELD's SST, D3) and `som-abrupt-4xCO2-ens-sstprescribed-eval` (1x SST) | `era5-abrupt-4xCO2-ens-sstprescribed-eval` |
+| ACE 1xCO2 control (subtracted for the response) | `som-control-dataCO2-ens-sstslab-eval` | `som-control-dataCO2-ens-sstprescribed-eval` | `era5-control-dataCO2-ens-sstprescribed-eval` |
 | SHiELD / ERA5 4xCO2 | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` (D3) | target of `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval` | none exists |
 | 1xCO2 dashed | target of the slab job | target of `som-control-dataCO2-ens-sstprescribed-eval` | target of `era5-control-dataCO2-ens-sstprescribed-eval` |
 
@@ -247,6 +280,9 @@ python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstdata-dataonl
 python submit_paper_jobs.py --kind somabruptens-abrupt-4xCO2-ens-sstprescribed-eval --arm a1 a2 a3 --arch nc-sfno nc-swin-v2 --skip-if-in-beaker   # 36/run
 # Data-only rows for members added later (--skip-if-in-beaker cannot see data-only names)
 python submit_paper_jobs.py --kind som-eq-dataCO2-10yr-sstdata-dataonly --climate 3xCO2 --member 3 4 5
+# Control and reference kinds added 2026-09-23 (73 per-run jobs, then 38 data-only)
+python submit_paper_jobs.py --kind som-control-dataCO2-ens-sstslab-eval era5-control-dataCO2-10yr-sstprescribed-eval amipconstco2-control-dataCO2-43yr-sstprescribed-eval --arm a1 a2 a3 --arch nc-sfno nc-swin-v2 --skip-if-in-beaker
+python submit_paper_jobs.py --kind amipconstco2-control-dataCO2-42yr-sstdata-dataonly som-control-dataCO2-7day-sstdata-dataonly somabruptens-abrupt-4xCO2-7day-sstdata-dataonly
 ```
 
 Per-run job counts on SHiELD data (53 fm/c96 runs, 41 with `--arm`, after
@@ -352,9 +388,17 @@ Everything the paper kinds need is on weka and every kind has run on every
   `som-…-sstprescribed` ensembles (control SST, CO2 → 4x) isolate the direct
   CO2 response and have no SHiELD counterpart. No aggregator override for the ensemble kinds, as the paper's
   ensemble evaluator config.
-- `amip-constant-co2` skipped: eval suites already run AMIP `ic_0001` with
-  constant CO2. `amip-control-dataCO2-43yr-sstprescribed-eval` on `ic_0002` is kept because the suites never
+- `amip-constant-co2` skipped at first (eval suites already run the
+  constant-CO2 store inline); reversed 2026-09-23 with
+  `amipconstco2-control-dataCO2-43yr-sstprescribed-eval` plus its data-only
+  row, because paper Fig 5 needs it on `best_inference_ckpt.tar` in the
+  evaluator's file format. `amip-control-dataCO2-43yr-sstprescribed-eval` on `ic_0002` is kept because the suites never
   touch a held-out AMIP member.
+- Controls (2026-09-23): every 4xCO2 figure line is paired with an ACE control
+  run of the same shape and ocean, and responses are ACE minus ACE, never ACE
+  gen minus SHiELD target. Where an existing kind already is that control
+  (the 10-year SOM slab and prescribed runs at 1xCO2 `ic1`), no new kind is
+  added. The `somabrupt-*` 10-year runs (2020 start) have no 1x counterpart.
 - D1 recomputed from raw with the current pipeline rather than coarsening the
   2024-08-14 six-hourly store (which lacks `total_frozen_precipitation_rate`
   and `PRMSL` and would fail the SOM `time_coarsen` name lists).

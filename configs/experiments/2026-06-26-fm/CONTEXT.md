@@ -64,9 +64,13 @@ numbers, no file inventory.
   both).
 - **Prescribed-SST evaluation** — an evaluator run with the training-time
   ocean (SST and sea ice read from the reference at every step) scored against
-  that reference: the SOM member (`som-eq-dataCO2-10yr-sstprescribed-eval`), an AMIP or AMIP +2 K / +4 K
-  run, or a ramped-SST random-CO2 run. The paper's AMIP inference plus
-  data-only evaluator, in one job.
+  that reference: the SOM member (`som-eq-dataCO2-10yr-sstprescribed-eval`), an AMIP, AMIP +2 K / +4 K
+  or constant-CO2 AMIP run, or a ramped-SST random-CO2 run. The paper's AMIP
+  inference plus data-only evaluator, in one job.
+- **Control run** — the ACE run a 4xCO2 kind is paired with: same store,
+  initial conditions, length and ocean, CO2 as stored. A response is the 4xCO2
+  run minus its control, model minus model, so the model's own bias cancels;
+  a reference response is the matching SHiELD data minus SHiELD data.
 - **Held-out member** — an ensemble member the norm-ablation cells did not
   train on: AMIP `ic_0002`, ramped `ic_0003`, SOM `ic_0005` (3xCO2 `ic_0002`).
   The hand-written `fm-random-v1/v3` and `fm-0.x-v1` runs trained on the first
