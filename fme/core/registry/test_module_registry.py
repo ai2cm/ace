@@ -388,9 +388,12 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
 
     assert compiled.forward_module is not compiled.torch_module
 
-    wrapped = compiled.wrap_module(lambda m: m)
+    # a wrapper with an observable effect, so this checks the wrapper really
+    # sits on the compiled forward callable rather than only that the
+    # compiled flag survives wrapping
+    wrapped = compiled.wrap_module(lambda m: (lambda *args: 2 * m(*args)))
     assert wrapped.is_compiled
-    torch.testing.assert_close(wrapped(x), module(x))
+    torch.testing.assert_close(wrapped(x), 2 * module(x))
 
     with pytest.raises(RuntimeError, match="before Module.compile"):
         compiled.to(fme.get_device())
