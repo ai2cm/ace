@@ -12,6 +12,8 @@ coupled_datasets:
     ocean_extra_fill_values:
       UI: 0.0
       VI: 0.0
+    # the ocean store is 1-daily; the default (120h) is for 5-daily stores
+    timedelta: 24h
     surface_flux_window_avg:
       window_timedelta: 24h
       # The ocean store labels its 1-day intervals at the interval end, so the
