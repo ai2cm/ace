@@ -26,6 +26,13 @@ spec:
     - name: upload_coupled_stats_script
     - name: upload_stats_script
     - name: config
+    # a config that reads the config's outputs (e.g. the 1pctCO2 coupled
+    # config's precomputed_sea_ice_mask names the piControl coupled ocean
+    # store); run_dependent is "true" exactly when one is passed
+    - name: dependent_config
+      value: ""
+    - name: run_dependent
+      value: "false"
     - name: image
       value: "us-central1-docker.pkg.dev/vcm-ml/full-model/coupled-processing:v2026.09.0"
     # the upload step needs beaker-py, which the atmosphere image has and the
@@ -37,15 +44,46 @@ spec:
     - name: subsample
       value: "false"  # default value, can be overridden
   templates:
+    # create -> upload, and create -> create-dependent -> upload-dependent: the
+    # dependent config starts only after the config's datasets are written
     - name: create-coupled-datasets-and-upload-stats
-      steps:
-      - - name: create-coupled-datasets
+      dag:
+        tasks:
+        - name: create
           template: create-coupled-datasets
-      # debug and subsample runs write no stats to upload
-      - - name: upload-coupled-stats
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.config}}"
+        # debug and subsample runs write no stats to upload
+        - name: upload
+          depends: create
           when: "{{workflow.parameters.debug}} == false && {{workflow.parameters.subsample}} == false"
           template: upload-coupled-stats
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.config}}"
+        - name: create-dependent
+          depends: create
+          when: "{{workflow.parameters.run_dependent}} == true"
+          template: create-coupled-datasets
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.dependent_config}}"
+        - name: upload-dependent
+          depends: create-dependent
+          when: "{{workflow.parameters.run_dependent}} == true && {{workflow.parameters.debug}} == false && {{workflow.parameters.subsample}} == false"
+          template: upload-coupled-stats
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.dependent_config}}"
     - name: create-coupled-datasets
+      inputs:
+        parameters:
+        - name: config
       tolerations:
         - effect: NoSchedule
           key: dedicated
@@ -99,7 +137,7 @@ spec:
             EOF
 
             cat << 'EOF' > config.yaml
-            {{workflow.parameters.config}}
+            {{inputs.parameters.config}}
             EOF
 
             flags=()
@@ -120,6 +158,9 @@ spec:
           - mountPath: /secret/gcp-credentials
             name: gcp-key-secret
     - name: upload-coupled-stats
+      inputs:
+        parameters:
+        - name: config
       tolerations:
         - effect: NoSchedule
           key: dedicated
@@ -181,7 +222,7 @@ spec:
             EOF
 
             cat << 'EOF' > config.yaml
-            {{workflow.parameters.config}}
+            {{inputs.parameters.config}}
             EOF
 
             python -u upload_coupled_stats.py config.yaml

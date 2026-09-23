@@ -409,6 +409,16 @@ cm4_1pctCO2_coupled_1daily:
 cm4_1pctCO2_coupled_1daily_argo:
 	./create_coupled_datasets.sh --config $(CONFIG_CM4_1PCTCO2_COUPLED_1DAILY) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
+# The 1pctCO2 coupled configs read their sea ice mask from the piControl
+# coupled ocean store, so one workflow runs piControl then 1pctCO2.
+.PHONY: cm4_coupled_argo
+cm4_coupled_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_PICONTROL_COUPLED) --dependent-config $(CONFIG_CM4_1PCTCO2_COUPLED) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+
+.PHONY: cm4_coupled_1daily_argo
+cm4_coupled_1daily_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_PICONTROL_COUPLED_1DAILY) --dependent-config $(CONFIG_CM4_1PCTCO2_COUPLED_1DAILY) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
 	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_E3SMV3_PICONTROL_COUPLED)

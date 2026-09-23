@@ -300,3 +300,41 @@ def test_argo_coupled_targets_only_name_gcs_backed_configs():
         if stores:
             off_gcs[path] = stores
     assert off_gcs == {}
+
+
+ARGO_TARGET_DEPENDENT_PAIR = re.compile(
+    r"create_coupled_datasets\.sh --config \$\((CONFIG_[A-Z0-9_]+)\) "
+    r"--dependent-config \$\((CONFIG_[A-Z0-9_]+)\)"
+)
+
+
+def _coupled_config(path: str) -> CreateCoupledDatasetsConfig:
+    with open(os.path.join(DIRNAME, path)) as f:
+        config_data = yaml.load(f, Loader=yaml.CLoader)
+    return dacite.from_dict(data_class=CreateCoupledDatasetsConfig, data=config_data)
+
+
+def _dependent_pairs() -> list[tuple[str, str]]:
+    variables = _config_variables()
+    pairs = sorted(set(ARGO_TARGET_DEPENDENT_PAIR.findall(_makefile_text())))
+    assert pairs, "no Makefile target submits a --dependent-config"
+    return [
+        (upstream, dependent)
+        for upstream_name, dependent_name in pairs
+        for upstream, dependent in zip(
+            _expand(variables[upstream_name]), _expand(variables[dependent_name])
+        )
+    ]
+
+
+@pytest.mark.parametrize("upstream, dependent", _dependent_pairs())
+def test_dependent_config_reads_its_upstream_ocean_store(upstream, dependent):
+    """A --dependent-config pair is chained because the dependent's sea ice mask
+    is the upstream's coupled ocean output; the paths must agree."""
+    sea_surface = _coupled_config(dependent).coupled_datasets.coupled_sea_surface
+    assert sea_surface is not None
+    assert sea_surface.precomputed_sea_ice_mask is not None
+    assert (
+        sea_surface.precomputed_sea_ice_mask.zarr_path
+        == _coupled_config(upstream).ocean_output_store
+    )
