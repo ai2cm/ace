@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import pathlib
 import tempfile
@@ -21,6 +22,7 @@ from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
+from fme.core.optimization import Checkpoint
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
@@ -30,7 +32,11 @@ from fme.core.step.global_mean_removal import (
 )
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.output import StepOutput
-from fme.core.step.secondary_decoder import SecondaryDecoderConfig
+from fme.core.step.secondary_decoder import (
+    NoSecondaryDecoder,
+    SecondaryDecoder,
+    SecondaryDecoderConfig,
+)
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
     ResidualPredictionConfig,
@@ -42,6 +48,8 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
+    compile_backend,
+    dynamo_hygiene,  # noqa: F401  autouse in this module
     get_dataset_info,
     trivial_network_and_loss_normalization,
     trivial_normalization,
@@ -2529,3 +2537,312 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     # each variant matches its base variable's convention
     assert stds["a_double"] == pytest.approx(res_stds["a"])
     assert stds["b_double"] == pytest.approx(field_stds["b"])
+
+
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag():
+    """compile=True runs the forward through torch.compile while leaving the
+    checkpoint state identical in structure to the uncompiled step.
+    """
+    torch.manual_seed(0)
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        get_single_module_selector
+    )
+    assert isinstance(compiled_step, SingleModuleStep)
+    assert isinstance(eager_step, SingleModuleStep)
+    assert compiled_step.module.is_compiled
+    assert not eager_step.module.is_compiled
+    _assert_compiled_step_matches_eager(eager_step, compiled_step)
+
+
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag_compiles_secondary_decoder():
+    """compile=True compiles every module the step owns, including the
+    secondary decoder, without changing the checkpoint state or the outputs.
+    """
+    torch.manual_seed(0)
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        get_single_module_noise_conditioned_selector
+    )
+    assert isinstance(compiled_step, SingleModuleStep)
+    assert isinstance(eager_step, SingleModuleStep)
+    compiled_decoder = compiled_step.secondary_decoder
+    eager_decoder = eager_step.secondary_decoder
+    # narrows the SecondaryDecoder | NoSecondaryDecoder union for the type
+    # checker, and asserts this selector really does build a decoder
+    assert isinstance(compiled_decoder, SecondaryDecoder)
+    assert isinstance(eager_decoder, SecondaryDecoder)
+    # the decoder does not expose its Module, which is what tracks compilation
+    assert compiled_decoder._module.is_compiled
+    assert not eager_decoder._module.is_compiled
+    eager_out = _assert_compiled_step_matches_eager(eager_step, compiled_step)
+    assert "diagnostic_rad" in eager_out  # produced by the secondary decoder
+
+
+def test_no_secondary_decoder_compile_is_noop():
+    decoder = NoSecondaryDecoder()
+    assert decoder.compile() is decoder
+
+
+def _get_eager_and_compiled_steps(
+    selector_getter: Callable[[], StepSelector],
+    compile_path: tuple[str, ...] = ("compile",),
+    img_shape: tuple[int, int] = DEFAULT_IMG_SHAPE,
+) -> tuple[StepABC, StepABC]:
+    """Build the same step twice, eager and with ``compile=True``.
+
+    The compiled step is built under the ``aot_eager`` backend (the step
+    configs only expose ``compile: bool``, so the backend has to be forced from
+    the outside to stay within the suite's timeouts) and is loaded with the
+    eager step's state, so the two steps differ only in whether their forward
+    passes run through ``torch.compile``.
+
+    Args:
+        selector_getter: Returns the eager step selector.
+        compile_path: Key path to the ``compile`` field within the selector
+            config, e.g. ``("wrapped_step", "config", "compile")`` when the
+            flag belongs to a wrapped step.
+        img_shape: Image shape of the dataset the steps are built for.
+
+    Returns:
+        The eager step and the compiled step, in that order.
+    """
+    eager_selector = selector_getter()
+    compiled_config = copy.deepcopy(eager_selector.config)
+    target = compiled_config
+    for key in compile_path[:-1]:
+        target = target[key]
+    target[compile_path[-1]] = True
+    compiled_selector = StepSelector(type=eager_selector.type, config=compiled_config)
+    eager_step = get_step(eager_selector, img_shape)
+    with compile_backend("aot_eager"):
+        compiled_step = get_step(compiled_selector, img_shape)
+    compiled_step.load_state(eager_step.get_state())
+    return eager_step, compiled_step
+
+
+def _assert_compiled_step_matches_eager(
+    eager_step: StepABC,
+    compiled_step: StepABC,
+    img_shape: tuple[int, int] = DEFAULT_IMG_SHAPE,
+    n_samples: int = 2,
+) -> TensorDict:
+    """Assert a compiled step saves the same state and predicts the same fields.
+
+    Returns:
+        The eager step's output, for further assertions.
+    """
+    eager_state = eager_step.get_state()
+    compiled_state = compiled_step.get_state()
+    assert compiled_state.keys() == eager_state.keys()
+    assert len(eager_state) > 0
+    for key in eager_state:
+        assert compiled_state[key].keys() == eager_state[key].keys()
+    args = StepArgs(
+        input=get_tensor_dict(eager_step.input_names, img_shape, n_samples),
+        next_step_input_data=get_tensor_dict(
+            eager_step.next_step_input_names, img_shape, n_samples
+        ),
+        labels=None,
+    )
+    with torch.no_grad():
+        torch.manual_seed(1)
+        eager_out = eager_step.step(args).output
+        torch.manual_seed(1)
+        compiled_out = compiled_step.step(args).output
+    assert compiled_out.keys() == eager_out.keys()
+    for name in eager_out:
+        torch.testing.assert_close(
+            compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
+        )
+    return eager_out
+
+
+@pytest.mark.medium_duration
+def test_secondary_module_step_compile_flag():
+    """compile=True on a secondary-module step compiles every module it owns
+    while leaving the checkpoint state and the predictions unchanged.
+    """
+    torch.manual_seed(0)
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        get_secondary_module_selector
+    )
+    state = compiled_step.get_state()
+    assert state["module"] and state["secondary_module"]  # both groups non-empty
+    _assert_compiled_step_matches_eager(eager_step, compiled_step)
+
+
+@pytest.mark.medium_duration
+def test_separate_radiation_step_compile_flag():
+    """compile=True on a separate-radiation step compiles both the main and the
+    radiation module while leaving the checkpoint state and the predictions
+    unchanged.
+    """
+    torch.manual_seed(0)
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        get_separate_radiation_selector
+    )
+    state = compiled_step.get_state()
+    assert state["module"] and state["radiation_module"]  # both groups non-empty
+    _assert_compiled_step_matches_eager(eager_step, compiled_step)
+
+
+@pytest.mark.medium_duration
+def test_multi_call_step_inherits_wrapped_step_compile():
+    """A multi-call step owns no modules of its own, so compilation is
+    configured on the wrapped step and inherited: the repeated forward passes
+    go through the compiled modules and the state keys are unchanged.
+    """
+    torch.manual_seed(0)
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        get_multi_call_selector,
+        compile_path=("wrapped_step", "config", "compile"),
+    )
+    eager_out = _assert_compiled_step_matches_eager(eager_step, compiled_step)
+    # the perturbed-forcing outputs, i.e. the extra calls really happened
+    assert [name for name in eager_out if name.endswith("double")]
+
+
+_COMPILE_ORDERING_CASES = [
+    pytest.param(get_single_module_selector, ["module"], id="single_module"),
+    pytest.param(
+        get_secondary_module_selector,
+        ["module", "secondary_module"],
+        id="secondary_module",
+    ),
+    pytest.param(
+        get_separate_radiation_selector,
+        ["module", "radiation_module"],
+        id="separate_radiation",
+    ),
+]
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize("selector_getter,module_attrs", _COMPILE_ORDERING_CASES)
+def test_step_compiles_after_distributed_wrapping(
+    selector_getter: Callable[[], StepSelector], module_attrs: list[str]
+):
+    """torch.compile is applied on top of the distributed wrapper, for every
+    module the step owns, so the wrapper is inside the compiled graph.
+
+    At single rank ``Distributed.wrap_module`` returns a ``DummyWrapper``;
+    finding that wrapper directly underneath the compiled callable is the
+    ordering contract under test, which is why this asserts on the concrete
+    wrapper type rather than on behavior.
+    """
+    torch.manual_seed(0)
+    eager_step, compiled_step = _get_eager_and_compiled_steps(selector_getter)
+    for attr in module_attrs:
+        module = getattr(compiled_step, attr)
+        assert module.is_compiled
+        assert not getattr(eager_step, attr).is_compiled
+        assert isinstance(module.torch_module, DummyWrapper)
+        # _orig_mod is how torch._dynamo's OptimizedModule exposes the module
+        # torch.compile was called on
+        assert module.forward_module._orig_mod is module.torch_module
+
+
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag_trains():
+    """A compiled step trains: with activation checkpointing around the
+    compiled module, the backward pass produces finite gradients that match the
+    eager step's.
+    """
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        get_single_module_selector, img_shape=img_shape
+    )
+    args = StepArgs(
+        input=get_tensor_dict(eager_step.input_names, img_shape, n_samples),
+        next_step_input_data=get_tensor_dict(
+            eager_step.next_step_input_names, img_shape, n_samples
+        ),
+        labels=None,
+    )
+    grads: dict[str, dict[str, torch.Tensor | None]] = {}
+    for label, step in (("eager", eager_step), ("compiled", compiled_step)):
+        step.train(True)
+        torch.manual_seed(1)
+        output = step.step(args=args, wrapper=Checkpoint({})).output
+        loss = torch.stack([tensor.sum() for tensor in output.values()]).sum()
+        loss.backward()
+        grads[label] = {
+            name: parameter.grad for name, parameter in step.modules.named_parameters()
+        }
+    assert len(grads["eager"]) > 0
+    assert grads["compiled"].keys() == grads["eager"].keys()
+    for name, grad in grads["compiled"].items():
+        eager_grad = grads["eager"][name]
+        assert grad is not None, name
+        assert eager_grad is not None, name
+        assert torch.isfinite(grad).all(), name
+        torch.testing.assert_close(grad, eager_grad, rtol=1e-4, atol=1e-4)
+
+
+def _get_single_module_mlp_selector() -> StepSelector:
+    """A single-module step whose network acts pointwise in space.
+
+    The SFNO used by ``get_single_module_selector`` cannot run on a spatial
+    shard of its input, while an MLP maps channels independently at each point
+    and so runs unchanged on whatever the local rank holds.
+    """
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(type="MLP", config={}),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=trivial_network_and_loss_normalization(
+                    [
+                        "forcing_shared",
+                        "forcing_rad",
+                        "diagnostic_main",
+                        "diagnostic_rad",
+                    ]
+                ),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parallel
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag_distributed():
+    """compile=True works with the distributed wrapper the parallel test matrix
+    installs, which torch.compile then traces through: same state keys and same
+    predictions as the eager step.
+    """
+    torch.manual_seed(0)
+    dist = Distributed.get_instance()
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 1
+    eager_step, compiled_step = _get_eager_and_compiled_steps(
+        _get_single_module_mlp_selector, img_shape=img_shape
+    )
+    eager_state = eager_step.get_state()
+    compiled_state = compiled_step.get_state()
+    assert compiled_state.keys() == eager_state.keys()
+    for key in eager_state:
+        assert compiled_state[key].keys() == eager_state[key].keys()
+    input_data = dist.scatter_spatial(
+        get_tensor_dict(eager_step.input_names, img_shape, n_samples), img_shape
+    )
+    next_step_input_data = dist.scatter_spatial(
+        get_tensor_dict(eager_step.next_step_input_names, img_shape, n_samples),
+        img_shape,
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    with torch.no_grad():
+        eager_out = eager_step.step(args).output
+        compiled_out = compiled_step.step(args).output
+    assert compiled_out.keys() == eager_out.keys()
+    for name in eager_out:
+        torch.testing.assert_close(
+            compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
+        )

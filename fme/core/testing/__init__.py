@@ -1,3 +1,4 @@
+from .compile import compile_backend, dynamo_hygiene
 from .dataset_info import get_dataset_info
 from .distributed import mock_distributed
 from .normalization import trivial_network_and_loss_normalization, trivial_normalization

@@ -25,6 +25,20 @@ class ModuleConfig(abc.ABC):
     allowing us to specify details of the network architecture in a config file.
     """
 
+    compile_unsupported_reason: ClassVar[str | None] = None
+    """Why ``torch.compile`` cannot be used with the modules this builder builds.
+
+    Set to a non-None string in a builder to declare that its modules cannot be
+    compiled, e.g. because the forward pass has data-dependent shapes.
+    :meth:`Module.compile` then raises ``NotImplementedError`` with this reason
+    instead of letting dynamo silently fall back to eager after a long tracing
+    attempt.
+
+    This must be a ``ClassVar`` (or a plain class-level assignment): annotating
+    it without ``ClassVar`` would make it a dataclass field, which would leak
+    into ``ModuleSelector.config`` and into serialized checkpoints.
+    """
+
     @abc.abstractmethod
     def build(
         self,
@@ -77,10 +91,63 @@ CONDITIONAL_BUILDERS = [
 ]
 
 
+def compile_torch_module(module: nn.Module, **kwargs: Any) -> nn.Module:
+    """Compile ``module`` with ``torch.compile``, failing loudly on recompiles.
+
+    Sets the process-global ``torch._dynamo.config.fail_on_recompile_limit_hit``
+    flag: by default, when a compiled region exceeds dynamo's recompile limit,
+    dynamo silently falls back to running it in eager mode, so a configuration
+    that asked for compilation quietly stops being compiled. Since compilation
+    is requested explicitly, a clear error is more useful than that silent
+    fallback. Note the flag is process-global, so it applies to every
+    ``torch.compile``d region in the process, not just this module.
+
+    Varying the batch size does not trip the limit: dynamo recompiles once with
+    dynamic shapes and then reuses that graph, so only genuinely static
+    recompiles count toward the limit.
+
+    Args:
+        module: The module to compile.
+        kwargs: Forwarded to ``torch.compile``.
+
+    Returns:
+        The compiled module.
+    """
+    torch._dynamo.config.fail_on_recompile_limit_hit = True
+    return torch.compile(module, **kwargs)
+
+
 class Module:
-    def __init__(self, module: nn.Module, label_encoding: LabelEncoding | None):
+    """A built network together with its label encoding.
+
+    ``module`` owns the parameters and state; ``forward_module``, when given,
+    is what is actually called on the forward pass (e.g. a ``torch.compile``d
+    view of ``module``). Keeping the two separate means compilation never
+    changes the state dict, so checkpoints are unaffected.
+    """
+
+    def __init__(
+        self,
+        module: nn.Module,
+        label_encoding: LabelEncoding | None,
+        forward_module: nn.Module | None = None,
+        compile_unsupported_reason: str | None = None,
+    ):
         self._module = module
         self._label_encoding = label_encoding
+        self._forward_module = forward_module
+        self._compile_unsupported_reason = compile_unsupported_reason
+
+    @property
+    def forward_module(self) -> nn.Module:
+        """The module actually called on the forward pass.
+
+        This is the compiled view when :meth:`compile` has been applied, and
+        the parameter-owning module otherwise.
+        """
+        if self._forward_module is None:
+            return self._module
+        return self._forward_module
 
     def __call__(
         self, input: torch.Tensor, labels: BatchLabels | None = None
@@ -92,9 +159,39 @@ class Module:
             if labels is None:
                 raise TypeError("Labels are required for conditional models")
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
-            return self._module(input, labels=encoded_labels.tensor)
+            return self.forward_module(input, labels=encoded_labels.tensor)
         else:
-            return self._module(input)
+            return self.forward_module(input)
+
+    def compile(self, **kwargs: Any) -> "Module":
+        """Return a Module whose forward pass runs through ``torch.compile``.
+
+        The underlying module (parameters, state dict, ``torch_module``) is
+        unchanged; only the callable used in ``__call__`` is compiled. Call
+        after any distributed wrapping so the compiled graph includes it.
+
+        Args:
+            kwargs: Forwarded to ``torch.compile``.
+
+        Raises:
+            NotImplementedError: If the builder declared compilation
+                unsupported via ``ModuleConfig.compile_unsupported_reason``.
+        """
+        if self._compile_unsupported_reason is not None:
+            raise NotImplementedError(
+                "torch.compile is not supported for this module: "
+                f"{self._compile_unsupported_reason}"
+            )
+        return Module(
+            self._module,
+            self._label_encoding,
+            forward_module=compile_torch_module(self._module, **kwargs),
+            compile_unsupported_reason=self._compile_unsupported_reason,
+        )
+
+    @property
+    def is_compiled(self) -> bool:
+        return self._forward_module is not None
 
     @property
     def torch_module(self) -> nn.Module:
@@ -123,10 +220,36 @@ class Module:
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
-        return Module(callable(self._module), self._label_encoding)
+        """Wrap the underlying module (and the forward callable, if it differs).
+
+        On a compiled Module, ``callable`` is invoked twice, once on each, and
+        the forward callable's wrapper sits outside the compiled graph. That
+        suits per-call wrappers such as activation checkpointing, but a
+        wrapper that must be inside the graph or must wrap the parameters
+        exactly once (e.g. distributed data parallel) has to be applied before
+        :meth:`compile`.
+        """
+        forward_module = (
+            callable(self._forward_module) if self._forward_module is not None else None
+        )
+        return Module(
+            callable(self._module),
+            self._label_encoding,
+            forward_module,
+            compile_unsupported_reason=self._compile_unsupported_reason,
+        )
 
     def to(self, device: torch.device) -> "Module":
-        return Module(self._module.to(device), self._label_encoding)
+        if self._forward_module is not None:
+            raise RuntimeError(
+                "Module.to must be called before Module.compile; moving a "
+                "compiled module between devices is not supported."
+            )
+        return Module(
+            self._module.to(device),
+            self._label_encoding,
+            compile_unsupported_reason=self._compile_unsupported_reason,
+        )
 
 
 @dataclasses.dataclass
@@ -213,7 +336,11 @@ class ModuleSelector:
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
         )
-        return Module(module, label_encoding)
+        return Module(
+            module,
+            label_encoding,
+            compile_unsupported_reason=type(self._instance).compile_unsupported_reason,
+        )
 
     @classmethod
     def get_available_types(cls):
