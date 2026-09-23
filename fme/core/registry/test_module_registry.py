@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import pathlib
 import unittest.mock
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import dacite
@@ -34,12 +34,12 @@ class MockModule(torch.nn.Module):
 class MockModuleBuilder(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
 
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
     def build(self, n_in_channels, n_out_channels, dataset_info):
         return MockModule(self.param_shapes)
-
-    @classmethod
-    def from_state(cls, state):
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
     def get_state(self):
         return {
@@ -53,8 +53,75 @@ class MockModuleBuilderWithDefault(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
     pad: str = "reflect"
 
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
     def build(self, n_in_channels, n_out_channels, dataset_info):
         return MockModule(self.param_shapes)
+
+
+@ModuleSelector.register("mock_with_deprecation")
+@dataclasses.dataclass
+class MockModuleBuilderWithDeprecation(ModuleConfig):
+    """Mock builder whose hook drops one key and renames another."""
+
+    param_shapes: list[tuple[int, ...]]
+    new_name: str = "default"
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(state)
+        result.pop("old_dropped_key", None)
+        if "old_name" in result:
+            result["new_name"] = result.pop("old_name")
+        return result
+
+    def build(self, n_in_channels, n_out_channels, dataset_info):
+        return MockModule(self.param_shapes)
+
+
+def test_remove_deprecated_keys_drops_and_renames():
+    """A builder whose hook drops one deprecated key and renames another
+    should build successfully, applying the renamed value."""
+    config = {
+        "param_shapes": [(2, 3)],
+        "old_dropped_key": "garbage",
+        "old_name": "renamed_value",
+    }
+    selector = ModuleSelector(type="mock_with_deprecation", config=config)
+    module_config = selector.module_config
+    assert isinstance(module_config, MockModuleBuilderWithDeprecation)
+    assert module_config.new_name == "renamed_value"
+
+
+def test_remove_deprecated_keys_preserves_selector_config():
+    """ModuleSelector.config should be the raw dict passed in (after
+    normalization to defaults), not the cleaned dict."""
+    raw_config: dict[str, Any] = {
+        "param_shapes": [(2, 3)],
+        "old_dropped_key": "garbage",
+        "old_name": "renamed_value",
+    }
+    selector = ModuleSelector(type="mock_with_deprecation", config=raw_config)
+    # After __post_init__, selector.config is normalized from the built
+    # dataclass (dataclasses.asdict), so it should contain the current field
+    # names, not the deprecated ones.
+    assert "old_dropped_key" not in selector.config
+    assert "old_name" not in selector.config
+    assert selector.config["new_name"] == "renamed_value"
+
+
+def test_remove_deprecated_keys_does_not_mutate_input():
+    """The hook must not mutate the input mapping."""
+    original: dict[str, Any] = {
+        "param_shapes": [(2, 3)],
+        "old_dropped_key": "garbage",
+        "old_name": "renamed_value",
+    }
+    original_copy = dict(original)
+    ModuleSelector(type="mock_with_deprecation", config=original)
+    assert original == original_copy
 
 
 def test_module_selector_config_includes_defaults():
