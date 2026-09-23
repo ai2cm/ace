@@ -220,7 +220,15 @@ class Module:
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
-        """Wrap the underlying module (and the forward callable, if it differs)."""
+        """Wrap the underlying module (and the forward callable, if it differs).
+
+        On a compiled Module, ``callable`` is invoked twice, once on each, and
+        the forward callable's wrapper sits outside the compiled graph. That
+        suits per-call wrappers such as activation checkpointing, but a
+        wrapper that must be inside the graph or must wrap the parameters
+        exactly once (e.g. distributed data parallel) has to be applied before
+        :meth:`compile`.
+        """
         forward_module = (
             callable(self._forward_module) if self._forward_module is not None else None
         )
