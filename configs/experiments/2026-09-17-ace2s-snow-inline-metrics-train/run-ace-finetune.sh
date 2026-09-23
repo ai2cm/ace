@@ -14,15 +14,23 @@ if [[ $# -eq 0 || $(( $# % 2 )) -ne 0 ]]; then
   echo "usage: $0 ARM CHECKPOINT_DATASET [ARM CHECKPOINT_DATASET ...]" >&2; exit 1
 fi
 
+# Job names mirror stage 1: the masked-naive arms carry "-land-snow" because their
+# 1-step runs were trained on the per-land-area snow channels.
+job_name_for() {
+  local dataset="${1%%-*}" treatment="${1#*-}"
+  case "$treatment" in
+    control)      echo "ace2s-snowmetrics-$dataset-daily-control-multi-step-finetune-rs0" ;;
+    masked-naive) echo "ace2s-snowmetrics-$dataset-daily-masked-naive-land-snow-multi-step-finetune-rs0" ;;
+    *) return 1 ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   arm="$1"; ckpt="$2"; shift 2
-  dataset="${arm%%-*}"        # cm4 or era5
-  treatment="${arm#*-}"       # control or masked-naive
   config="$arm-multi-step-finetune-daily.yaml"
   if [[ ! -f "$SCRIPT_PATH/$config" ]]; then
     echo "no fine-tuning config $config for arm $arm" >&2; exit 1
   fi
-  run_training "$config" \
-    "ace2s-snowmetrics-$dataset-daily-$treatment-multi-step-finetune-rs0" \
-    --ckpt "$ckpt" "seed=0"
+  job_name_for "$arm" >/dev/null || { echo "unknown arm $arm" >&2; exit 1; }
+  run_training "$config" "$(job_name_for "$arm")" --ckpt "$ckpt" "seed=0"
 done

@@ -1,0 +1,172 @@
+# arg: --dataset brianhenn/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked-stats:/statsdata
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 50
+save_per_epoch_diagnostics: true
+ema:
+  decay: 0.999
+inference:
+- n_forward_steps: 7300
+  forward_steps_in_memory: 20
+  loader:
+    start_indices:
+      times:
+      - '0151-01-02T00:00:00'
+      - '0171-01-01T00:00:00'
+      - '0191-01-01T00:00:00'
+      - '0211-01-01T00:00:00'
+      - '0231-01-01T00:00:00'
+      - '0251-01-01T00:00:00'
+      - '0271-01-01T00:00:00'
+      - '0291-01-01T00:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
+        engine: zarr
+    num_data_workers: 8
+  aggregator:
+    histogram:
+      enabled: true
+    time_mean_reference_data: /statsdata/time-mean.nc
+    anomaly_memory:
+      enabled: true
+      # Snow-relevant fields; the controls have no snow channels and skip them.
+      variables:
+      - USWRFsfc
+      - TMP2m
+      - surface_temperature
+      - surface_snow_amount_masked
+      - surface_snow_area_fraction_masked
+      report_lags: [7, 14]
+      # Leading times: extended cold season per hemisphere.
+      months_northern: [11, 12, 1, 2, 3, 4, 5]
+      months_southern: [5, 6, 7, 8, 9, 10, 11]
+      regions:
+        - name: Siberia
+          lat: [50, 68]
+          lon: [60, 140]
+        - name: Canada
+          lat: [50, 65]
+          lon: [250, 285]
+        - name: N_Europe
+          lat: [55, 68]
+          lon: [5, 40]
+        - name: Tibet
+          lat: [30, 38]
+          lon: [80, 100]
+        - name: Great_Plains
+          lat: [32, 49]
+          lon: [255, 265]
+        - name: Rockies
+          lat: [38, 45]
+          lon: [249, 256]
+        - name: Andes
+          lat: [-35, -15]
+          lon: [287, 293]
+        - name: north_of_40S
+          lat: [-40, 90]
+          lon: [0, 360]
+    snow_season:
+      enabled: true
+      variable: surface_snow_amount_masked
+      regions:
+        - name: Siberia
+          lat: [50, 68]
+          lon: [60, 140]
+        - name: Canada
+          lat: [50, 65]
+          lon: [250, 285]
+        - name: N_Europe
+          lat: [55, 68]
+          lon: [5, 40]
+        - name: Tibet
+          lat: [30, 38]
+          lon: [80, 100]
+        - name: Great_Plains
+          lat: [32, 49]
+          lon: [255, 265]
+        - name: Rockies
+          lat: [38, 45]
+          lon: [249, 256]
+        - name: Andes
+          lat: [-35, -15]
+          lon: [287, 293]
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01T00:00:00'
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
+      engine: zarr
+      subset:
+        stop_time: '0306-01-01T00:00:00'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 4
+    prefetch_factor: 4
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0306-01-01T00:00:00'
+          stop_time: '0311-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
+        engine: zarr
+        subset:
+          start_time: '0306-01-01T00:00:00'
+          stop_time: '0311-01-01T00:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 3
+        probability: 0.1
+      - steps: 4
+        probability: 0.05
+      - steps: 5
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

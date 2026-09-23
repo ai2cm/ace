@@ -67,9 +67,12 @@ committed files describe every launch and the Beaker job records which checkpoin
 |---|---|---|---|
 | 2026-09-21 | cm4-control | `01M2VVJ5A75WKXQXJVS4XEMT4Y` (resumed job of `01M2TZC6YYH9TVRTQ7BHPH250K`) | `ace2s-snowmetrics-cm4-daily-control-multi-step-finetune-rs0` |
 | 2026-09-21 | era5-control | `01M2TZCJAT224Z4KBKJFJB8TGQ` | `ace2s-snowmetrics-era5-daily-control-multi-step-finetune-rs0` |
+| 2026-09-23 | era5-masked-naive | `01M33R5QR1GJSNNRVRJ1A8MW36` (relaunched 1-step run, per-land-area channels) | `ace2s-snowmetrics-era5-daily-masked-naive-land-snow-multi-step-finetune-rs0` |
+| pending | cm4-masked-naive | result dataset of `01M33R5HBHR5XQWPFZ7JSHF4TW` once finished | `ace2s-snowmetrics-cm4-daily-masked-naive-land-snow-multi-step-finetune-rs0` |
 
-The treatment fine-tunes will use the same recipe from the relaunched 1-step runs, with their
-own `<arm>-multi-step-finetune-daily.yaml` configs.
+`{cm4,era5}-masked-naive-multi-step-finetune-daily.yaml` apply the same recipe to the masked-naive
+1-step configs (per-land-area channels merged from the `-land-snow-masked` stores, their stats
+mount, the same inline metrics); the stepper, including input masking, comes from the checkpoint.
 
 ## Launch
 
