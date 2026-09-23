@@ -32,6 +32,8 @@ from fme.ace.stepper import (
     StepperOverrideConfig,
     load_stepper,
     load_stepper_config_with_override,
+    load_stepper_ensemble,
+    load_stepper_ensemble_config,
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
@@ -165,6 +167,21 @@ class ValidationConfig:
 
 
 @dataclasses.dataclass
+class WeightedCheckpointPath:
+    """
+    A stepper checkpoint and its weight in an ensemble of checkpoints.
+
+    Parameters:
+        path: Path to the stepper checkpoint.
+        weight: Weight applied to this checkpoint's step output in the
+            weighted sum, used as given (not normalized).
+    """
+
+    path: str
+    weight: float
+
+
+@dataclasses.dataclass
 class InferenceEvaluatorConfig:
     """
     Configuration for running inference including comparison to reference data.
@@ -194,7 +211,11 @@ class InferenceEvaluatorConfig:
                 written to a local ``experiment_dir``.
 
         n_forward_steps: Number of steps to run the model forward for.
-        checkpoint_path: Path to stepper checkpoint to load.
+        checkpoint_path: Path to stepper checkpoint to load, or a list of
+            weighted checkpoint paths. Given a list, the loaded stepper
+            predicts each step as the weighted sum of the checkpoints' steps
+            (see :class:`fme.core.step.EnsembleStepConfig`), so e.g. residual
+            and non-residual models can be mixed.
         logging: configuration for logging.
         loader: Configuration for data to be used as initial conditions, forcing, and
             target in inference.
@@ -228,7 +249,7 @@ class InferenceEvaluatorConfig:
 
     experiment_dir: str
     n_forward_steps: int
-    checkpoint_path: str
+    checkpoint_path: str | list[WeightedCheckpointPath]
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     forward_steps_in_memory: int
@@ -251,6 +272,10 @@ class InferenceEvaluatorConfig:
             self.forward_steps_in_memory,
             self.n_forward_steps,
         )
+        # checkpoint_path is a dacite union, resolved by isinstance here and in
+        # load_stepper / load_stepper_config below.
+        if not isinstance(self.checkpoint_path, str) and not self.checkpoint_path:
+            raise ValueError("checkpoint_path list must not be empty")
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -260,12 +285,24 @@ class InferenceEvaluatorConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        if isinstance(self.checkpoint_path, str):
+            return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper_ensemble(
+            [checkpoint.path for checkpoint in self.checkpoint_path],
+            [checkpoint.weight for checkpoint in self.checkpoint_path],
+            self.stepper_override,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config_with_override(
-            self.checkpoint_path, self.stepper_override
+        if isinstance(self.checkpoint_path, str):
+            return load_stepper_config_with_override(
+                self.checkpoint_path, self.stepper_override
+            )
+        return load_stepper_ensemble_config(
+            [checkpoint.path for checkpoint in self.checkpoint_path],
+            [checkpoint.weight for checkpoint in self.checkpoint_path],
+            self.stepper_override,
         )
 
     def get_data_writer(
