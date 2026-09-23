@@ -6,7 +6,7 @@ cm4_1pct_46to125_piC_156to235-ocean_corrregL1w1_cc1|rs0|01M35KB64E81HHJA0PQS6TMN
 
 cm4_1pct_46to125_piC_156to235-ocean_corrregL1w10_cc1|rs0|01M35KBJ3A5RN499RJYT0MEXCH|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|01M35KBWTV0C26EZ9E48BXP9CN|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w0p1_cc1|rs0|01M35KBWTV0C26EZ9E48BXP9CN|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|01M35KC807HFZ1GTCCQ1PP0NV7|training|best_inference_ckpt|normal|--min-runtime 8h
 

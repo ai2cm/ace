@@ -8,7 +8,7 @@ cm4_1pct_46to125_piC_156to235-ocean_corrregL1w1_cc1|rs0|train|high|jupiter|4|500
 
 cm4_1pct_46to125_piC_156to235-ocean_corrregL1w10_cc1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper_training.corrector_loss.regularization.norm=L1 stepper_training.corrector_loss.regularization.weight=10.0|4h
 
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper_training.corrector_loss.regularization.norm=L2 stepper_training.corrector_loss.regularization.weight=0.1|4h
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w0p1_cc1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper_training.corrector_loss.regularization.norm=L2 stepper_training.corrector_loss.regularization.weight=0.1|4h
 
 cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper_training.corrector_loss.regularization.norm=L2 stepper_training.corrector_loss.regularization.weight=1.0|4h
 
