@@ -41,3 +41,36 @@ The output will be written to the `/climate-default` file directory on weka.
 Example bare usage: `cd full-model/scripts/data_process && make healpix_ace_dataset`. You may also want to run in the background using nohup: `nohup make healpix_ace_dataset > compute_hpx.log 2>&1 &`.
 
 Example bare session creation (use your own ssh secrets): `beaker session create --name annad/dlwp-ace-datapipe --image beaker://annad/dlwp-datapipe --remote --cluster ai2/phobos-cirrascale --bare --mount src=weka,ref=climate-default,dst=/climate-default  --mount src=weka,ref=climate-default,subpath=annad,dst=/root --workdir=/root --mount src=secret,ref=ssh-key,dst=/secret-files/.ssh/id_ed25519     --mount src=secret,ref=git-config,dst=/secret-files/.gitconfig --budget ai2/atec-climate --shared-memory 120GiB`
+
+## Coupled datasets
+
+The coupled targets (e.g. `make cm4_piControl_coupled_1daily`) run
+`create_coupled_datasets.py` locally in the `create_coupled_datasets` conda
+environment, created by `make create_coupled_datasets_env`.
+
+The four CM4 config families also have an `_argo` sibling (e.g. `make
+cm4_piControl_coupled_1daily_argo`) that submits the same config to argo through
+`create_coupled_datasets.sh`, and can be run on your Google VM. Push the image
+first with `make build_coupled_processing_image push_coupled_processing_image`.
+The argo flavour is offered only where the config's input and output stores are
+on GCS: `E3SMv3-piControl-100yr-coupled.yaml` writes to NERSC scratch and
+`CM4-like-AM4-random-CO2-ensemble-coupled.yaml` to weka, neither of which the
+workflow mounts, so those two are local-only.
+
+The CM4 1pctCO2 coupled configs read their sea ice mask
+(`precomputed_sea_ice_mask`) from the piControl coupled ocean store, so submit
+each pair as one workflow: `make cm4_coupled_1daily_argo` (or `make
+cm4_coupled_argo`) runs `create_coupled_datasets.sh --config <piControl>
+--dependent-config <1pctCO2>`, and the workflow starts the 1pctCO2 run once the
+piControl run has written its datasets. `--dependent-config` cannot be combined
+with `--debug` or `--subsample`, which leave no piControl store for 1pctCO2 to
+read. A mask read from a store that is not fully written fails the run.
+
+When the config sets `stats.beaker_dataset`, the argo workflow's upload step,
+`upload_coupled_stats.py`, uploads the merged stats to that Beaker dataset in
+the `ai2/ace` workspace, one subdirectory per category
+(`uncoupled_atmosphere`, `coupled_atmosphere`, `ocean`); an ensemble config
+uploads its `combined` stats. The step is skipped for `--debug` and
+`--subsample` runs, and when the dataset already exists. It runs on the
+atmosphere processing image, which has `beaker-py`; override with
+`-p upload_image=...`.
