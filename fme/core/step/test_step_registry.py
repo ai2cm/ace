@@ -207,6 +207,9 @@ class DeprecatingMockStepConfig(StepConfigABC):
     in_names: list[str] = dataclasses.field(default_factory=list)
     out_names: list[str] = dataclasses.field(default_factory=list)
 
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        pass
+
     def get_step(
         self, dataset_info: DatasetInfo, init_weights: Callable[[list[nn.Module]], None]
     ):
