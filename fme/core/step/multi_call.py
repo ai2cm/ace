@@ -207,6 +207,9 @@ class MultiCallStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.wrapped_step.get_prescribed_prognostic_names()
 
+    def replace_compile(self, compile: bool) -> None:
+        self.wrapped_step.replace_compile(compile)
+
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call
 

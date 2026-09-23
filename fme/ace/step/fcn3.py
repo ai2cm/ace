@@ -304,6 +304,12 @@ class FCN3StepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
 
+    def replace_compile(self, compile: bool) -> None:
+        raise ValueError(
+            f"{type(self).__name__} has no compile option; the compile override "
+            "only applies to single_module steps"
+        )
+
     def get_step(
         self,
         dataset_info: DatasetInfo,
