@@ -145,3 +145,6 @@ run_training "ace2s-pretrain-deterministic.yaml" "1deg-daily-ace2s-det-pretrain-
 run_training "ace2s-pretrain-crps-only.yaml" "1deg-daily-ace2s-crps-only-pretrain-rs0" 8
 run_training "ace2s-pretrain-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck-pretrain-rs0" 8
 run_training "ace2s-pretrain-6hourly.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
+
+# 4-degree arm (one GPU; needs the regenerated 2026-09-08 4-degree daily store on weka)
+run_training "ace2s-pretrain-4deg.yaml" "4deg-daily-ace2s-pretrain-rs0" 1

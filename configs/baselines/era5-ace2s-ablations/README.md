@@ -22,10 +22,8 @@ every 10 epochs (`ema_checkpoint_save_epochs`).
 | `ace2s-pretrain-crps-only.yaml` | loss split 1.0 CRPS / 0.0 energy score (recipe: 0.9 / 0.1) |
 | `ace2s-pretrain-no-bottleneck.yaml` | `filter_num_groups` and `spectral_ratio` dropped |
 | `ace2s-pretrain-6hourly.yaml` | Troy's 6-hourly 2026-03-19 store and stats, 54 outputs (no `*_mean`); evaluation horizons in steps x4, 81-year rollout at epochs 10/20/30/40 |
-
-A 4-degree arm is pending a regenerated 4-degree daily store that carries the
-`*_mean` fields together with PRMSL and the surface stresses.
+| `ace2s-pretrain-4deg.yaml` | 4-degree: the regenerated `2026-09-08-era5-4deg-8layer-daily-1940-2025` store (`*_mean` fields plus PRMSL and the surface stresses in one store, from main's `scripts/data_process/configs/era5-4deg-8layer-1940-2025.yaml`); one GPU, batch size 8, loader parameters from the 4-degree daily v2 config; spectral bottleneck kept |
 
 Launch with `./run-train.sh [<filter> ...]` from this directory: workspace
 `ai2/ace`, beaker priority `normal`, no `CM_PRIORITY` label, 8 GPUs on
-jupiter, `--min-runtime 8h`.
+jupiter (1 GPU for the 4-degree arm), `--min-runtime 8h`.
