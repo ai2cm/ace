@@ -354,7 +354,7 @@ class SecondaryModuleStep(StepABC):
         if config.compile:
             self.module = self.module.compile()
             self.secondary_module = self.secondary_module.compile()
-            self.secondary_decoder.compile()
+            self.secondary_decoder = self.secondary_decoder.compile()
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector
