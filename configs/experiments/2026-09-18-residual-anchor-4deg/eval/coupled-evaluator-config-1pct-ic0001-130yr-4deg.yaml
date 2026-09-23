@@ -8,7 +8,7 @@
 # with the four zarr names swapped for their 4deg counterparts.
 experiment_dir: /results
 n_coupled_steps: 9488
-coupled_steps_in_memory: 18
+coupled_steps_in_memory: 16  # must divide n_coupled_steps (9488 = 2^4 x 593)
 checkpoint_path:
   ocean:
     timedelta: 5D

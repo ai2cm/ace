@@ -2,7 +2,7 @@
 # but from a single coupled checkpoint (the output of a coupled fine-tune) mounted at /ckpt.tar.
 experiment_dir: /results
 n_coupled_steps: 9488
-coupled_steps_in_memory: 18
+coupled_steps_in_memory: 16  # must divide n_coupled_steps (9488 = 2^4 x 593)
 checkpoint_path: /ckpt.tar
 data_writer:
   ocean:
