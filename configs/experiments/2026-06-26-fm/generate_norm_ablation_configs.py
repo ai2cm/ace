@@ -205,6 +205,18 @@ ARCH_SOURCES = {
 # the module, so it travels with the builder that sets it.
 ARCH_STEP_CONFIG_KEYS = ["builder", "residual_prediction", "in_names", "compile"]
 
+# Step-config values forced for an architecture after ARCH_STEP_CONFIG_KEYS are
+# copied, overriding its architecture source.
+#
+# nc-swin-v2.1 with residual prediction scores NaN at every inline inference
+# (the whole 2026-09 v2.1 campaign and the H2 diagnostic, which ruled out
+# torch.compile and TF32), so fme never writes best_inference_ckpt.tar. The H1
+# diagnostic, identical but for residual_prediction: false, scored finite
+# inference errors (0.79 falling to 0.10 over six epochs).
+ARCH_STEP_CONFIG_OVERRIDES: dict[str, dict[str, Any]] = {
+    "nc-swin-v2.1": {"residual_prediction": False},
+}
+
 # Keys copied from the architecture source's `optimization` block, under the
 # same absent-means-leave-alone rule. float32_matmul_precision is here for the
 # same reason as compile: TF32 matmuls are a speed choice made for a backbone
@@ -546,6 +558,7 @@ def build_config(
     for key in ARCH_STEP_CONFIG_KEYS:
         if key in arch_step_config:
             step_config[key] = copy.deepcopy(arch_step_config[key])
+    step_config.update(copy.deepcopy(ARCH_STEP_CONFIG_OVERRIDES.get(arch, {})))
     arch_optimization = arch_base.get("optimization", {})
     for key in ARCH_OPTIMIZATION_KEYS:
         if key in arch_optimization:
