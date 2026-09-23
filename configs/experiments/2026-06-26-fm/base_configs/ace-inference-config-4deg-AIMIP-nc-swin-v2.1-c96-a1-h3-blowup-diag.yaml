@@ -1,0 +1,37 @@
+# H3: locate the nc-swin-v2.1 residual-prediction rollout blowup.
+#
+# Every inline inference of the residual nc-swin-v2.1 runs scored NaN: in the
+# H2 diagnostic's long runs the year-1 annual means are realistic, then every
+# ensemble member runs away in year 2 (PRESsfc 1e10-4e15 Pa) and is NaN from
+# year 3. This reruns H2's long_43year_constant_co2 inline inference for one
+# initial condition from H2's best_ckpt.tar (result dataset
+# 01M32Z4JKRAZHSC9VT4WWD91RW), covering three years of daily steps, and writes
+# every step so the onset step, variable and location can be found offline.
+checkpoint_path: /ckpt.tar
+experiment_dir: /results
+n_forward_steps: 1095
+forward_steps_in_memory: 73
+n_ensemble_per_ic: 1
+labels:
+- amip
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: true
+initial_condition:
+  path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset/AMIP-constant-CO2.zarr
+  engine: zarr
+  start_indices:
+    times:
+    - '1979-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+    file_pattern: AMIP-constant-CO2.zarr
+    engine: zarr
+  num_data_workers: 4
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: FM
+  entity: ai2cm
