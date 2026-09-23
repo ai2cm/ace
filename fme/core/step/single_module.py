@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Callable, Collection, Mapping
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch import nn
@@ -132,6 +132,17 @@ class SingleModuleStepConfig(StepConfigABC):
             unaffected. Compilation happens on the first forward for each new
             input shape, so inference loaders with many distinct batch shapes
             may trigger recompiles.
+        float32_matmul_precision: If set, passed to
+            ``torch.set_float32_matmul_precision`` when the step is built, so
+            it applies to both training and inference. ``"high"`` enables
+            TensorFloat-32 for float32 matrix multiplies (``nn.Linear``,
+            ``torch.matmul``) on Ampere and newer GPUs, giving tensor-core
+            throughput at the cost of rounding the matmul inputs to a 10-bit
+            mantissa; accumulation stays in float32. Convolutions already use
+            TensorFloat-32 by default in PyTorch, so this mostly matters for
+            transformer-style models. ``None`` (default) leaves the
+            process-wide PyTorch setting untouched. Has no effect when
+            automatic mixed precision is enabled.
     """
 
     builder: ModuleSelector
@@ -150,6 +161,7 @@ class SingleModuleStepConfig(StepConfigABC):
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
     compile: bool = False
+    float32_matmul_precision: Literal["highest", "high", "medium"] | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -439,6 +451,12 @@ class SingleModuleStep(StepABC):
             )
         else:
             self.ocean = None
+        if config.float32_matmul_precision is not None:
+            logging.info(
+                "Setting torch float32 matmul precision to "
+                f"'{config.float32_matmul_precision}'"
+            )
+            torch.set_float32_matmul_precision(config.float32_matmul_precision)
         module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
