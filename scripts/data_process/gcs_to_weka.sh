@@ -10,14 +10,14 @@ to a local Weka directory.
 
 Arguments:
   GS_PATH     The source gs:// path to copy (e.g. gs://vcm-ml-intermediate/data/foo).
-  WEKA_PATH   The destination path on Weka (default: /climate-default).
-              The GCS directory name will be appended to this path.
+  WEKA_PATH   The destination path on Weka (e.g. /climate-default/foo).
+              The contents of GS_PATH are synced into this directory.
 
 Options:
   -h, --help  Show this help message and exit.
 
 Example:
-  $(basename "$0") gs://vcm-ml-intermediate/2024-03-01-era5-1deg/train.zarr /climate-default/my-data
+  $(basename "$0") gs://vcm-ml-intermediate/2024-03-01-era5-1deg/train.zarr /climate-default/my-data/train.zarr
 EOF
 }
 
@@ -50,9 +50,9 @@ cd "$REPO_ROOT" && gantry run \
     --task-name "$JOB_NAME" \
     --description "Copy $GS_PATH to weka at $WEKA_PATH" \
     --docker-image 'google/cloud-sdk:slim' \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority urgent \
-    --not-preemptible \
+    --min-runtime 8h \
     --cluster ai2/phobos \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus 0 \
