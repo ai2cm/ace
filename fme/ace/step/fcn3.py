@@ -163,10 +163,12 @@ class FCN3StepConfig(StepConfigABC):
             Applied after distributed wrapping, so distributed data parallel is
             inside the compiled graph, and to the single module this step owns.
             State dict keys are unchanged, so checkpoints stay compatible with
-            uncompiled runs. Enabling this sets a process-global dynamo flag so
-            that hitting the static-shape recompile limit raises instead of
-            silently falling back to eager (varying the batch size uses dynamic
-            shapes and does not trip it). Note the discrete-continuous
+            uncompiled runs. The flag is saved in the step config, so inference
+            from a checkpoint trained with it enabled also compiles. Enabling
+            this sets a process-global dynamo flag so that hitting the
+            static-shape recompile limit raises instead of silently falling
+            back to eager (varying the batch size uses dynamic shapes and does
+            not trip it). Note the discrete-continuous
             spherical convolutions this network uses are implemented with
             sparse tensors, which ``torch.compile`` cannot trace, so the
             compiled step runs with graph breaks around those operations: it is

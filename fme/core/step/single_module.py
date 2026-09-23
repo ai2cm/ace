@@ -131,6 +131,8 @@ class SingleModuleStepConfig(StepConfigABC):
             inside the compiled graph, and to every module the step owns (the
             main module and the secondary decoder). State dict keys are
             unchanged, so checkpoints stay compatible with uncompiled runs.
+            The flag is saved in the step config, so inference from a
+            checkpoint trained with it enabled also compiles.
             Enabling this sets a process-global dynamo flag so that hitting the
             static-shape recompile limit raises instead of silently falling
             back to eager (varying the batch size uses dynamic shapes and does
