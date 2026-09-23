@@ -13,9 +13,12 @@ that must cover the backend production actually uses (inductor) are kept to a
 single tiny network (:func:`test_inductor_compiled_mlp_matches_eager`) and a
 single rollout (:func:`test_compiled_rollout_matches_eager`).
 
-Graph-break counts are deliberately not asserted here: they are a property of
-the torch version as much as of our code, so they are tabulated in the pull
-request instead.
+Per-builder graph-break counts are deliberately not asserted here: for whole
+networks they are a property of the torch version as much as of our code, so
+they are tabulated in the pull request instead. The specific breaks removed
+for traceability (``irfft``, ``NullTimer.child``, ``CappedGELU``, Samudra) are
+pinned down by zero-break tests next to each fix, since each of those targets
+one construct we control.
 """
 
 import dataclasses
