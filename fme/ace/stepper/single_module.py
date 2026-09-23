@@ -65,7 +65,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.output import StepOutput
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import (
@@ -319,7 +319,9 @@ class SingleModuleStepperConfig:
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
             prescribed_prognostic_names=self.prescribed_prognostic_names,
-            residual_prediction=self.residual_prediction,
+            residual_prediction=(
+                ResidualPredictionConfig() if self.residual_prediction else None
+            ),
             global_mean_removal=self.global_mean_removal,
         )
 
