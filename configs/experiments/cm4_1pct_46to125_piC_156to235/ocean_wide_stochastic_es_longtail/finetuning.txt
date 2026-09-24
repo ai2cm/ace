@@ -12,11 +12,7 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # allblocks rows: same schedule, same seeds, same everything, different loss.
 # See finetune-config-template.yaml.
 #
-# NOT LAUNCHABLE YET, and `skip` for two independent reasons:
-#   1. The wandb_id column is empty -- stage 1 has not run, so there are no
-#      checkpoints to resume. Fill each row's id from the stage-1 run before
-#      flipping it to `train`.
-#   2. Launch of the whole ablation waits on the ai2cm/reports#98 review.
+# LAUNCHED 2026-09-23, rs0 ONLY. rs1 IS DELIBERATELY HELD -- see below.
 #
 # Read on inference_piC/time_mean_norm/rmse/channel_mean against the patch-ES
 # long-tail allblocks arm's 0.0450 at epoch 24 (both seeds) and the
@@ -33,13 +29,40 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # min_runtime set on every row -- the Beaker scheduler has required one since
 # 2026-08-28 and uncoupled_finetune.sh otherwise defaults it to 0.
 #
-# Stage-1 wandb ids and final val_piC/mean/loss at epoch 75, to fill in:
-#   allblocks-es rs0 <id> <loss> | rs1 <id> <loss>
-# For reference, the patch-ES stage 1 read:
-#   allblocks    rs0 0yk7nnr7 0.04254 | rs1 ifui1igf 0.04261
-# The two are NOT directly comparable -- different objectives, so the loss
-# magnitudes differ by construction. Compare seed agreement within each arm.
+# Stage-1 outcome, both seeds finished 75/75 exit 0 on 2026-09-23:
+#
+#   allblocks-es rs0 silm932h 0.04837 | rs1 7wx3n420 0.04845   (val_piC/mean/loss)
+#   allblocks    rs0 0yk7nnr7 0.04254 | rs1 ifui1igf 0.04261   (patch-ES, reference)
+#
+# Those magnitudes are NOT comparable across the two losses -- different
+# objectives -- but the SEED SPREAD within each arm is: 7.7e-5 here against the
+# patch-ES wave's 7.5e-5. Validation descent is monotone to epoch 75 in both ES
+# seeds with no NaN. On the three watched stage-1 conditions, both seeds pass.
+#
+# BUT rs1's INLINE ROLLOUTS DIVERGE, and that is why it is held.
+# From epoch 53 on, 7wx3n420 logs 17 finite values above 1.0 in
+# inference_{piC,1pct}/time_mean_norm/rmse/channel_mean, peaking at 2.6e14.
+# Across the other four runs in this comparison -- ES rs0 and all THREE patch-ES
+# seeds -- there is not a single finite value above 1.0; they top out at
+# 0.50/0.53/0.53/0.94. So this is specific to rs1, not a property of the
+# protocol or of the spectral score (rs0 is clean).
+#
+# It matters because ckpt_type is best_ckpt, selected on best_val_loss, and
+# rs1's validation loss descends monotonically to epoch 75 -- so its best_ckpt
+# is from INSIDE the diverging regime, written 2026-09-23 02:07. There is no
+# pre-divergence epoch checkpoint to fall back on: `checkpoint_strategy: all`
+# in the builder config is ACTIVATION checkpointing, not training checkpoints,
+# and the result dataset holds only best_ckpt / best_inference_ckpt / ckpt.tar.
+# rs1's best_inference_ckpt does predate the divergence (written 2026-09-21
+# 23:30, ~1 h into a 2.5-day run) but selecting on a different criterion than
+# rs0 and the incumbent wave would break the paired comparison.
+#
+# n=2 cannot separate "bad seed" from "the spectral score is less
+# rollout-stable"; the incumbent's 0-for-3 is suggestive but not decisive.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|ace-samudra-cm4|silm932h|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+# rs1 HELD: stage-1 inline rollouts diverged from epoch 53 (see header). Its
+# wandb id is 7wx3n420 and the row is otherwise ready; flip to `train` only
+# once the divergence is resolved or deliberately accepted.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
