@@ -2,5 +2,5 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 
 # override 'stepper_training.loss.kwargs=[{crps_weight: 0.9, energy_score_weight: 0.1}]' required to remove pretraining ckpt's 'stepper_training.loss.kwargs.patch_energy_score'
 
-cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs0|ace-samudra-cm4|silm932h|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.checkpoint_strategy=null 'stepper_training.loss.kwargs={crps_weight: 0.9, energy_score_weight: 0.1}'||3h
-cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.checkpoint_strategy=null 'stepper_training.loss.kwargs={crps_weight: 0.9, energy_score_weight: 0.1}'||3h
+cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs0|ace-samudra-cm4|silm932h|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.checkpoint_strategy=null||3h
+cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.checkpoint_strategy=null||3h
