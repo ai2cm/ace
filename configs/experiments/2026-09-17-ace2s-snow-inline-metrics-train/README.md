@@ -63,12 +63,18 @@ learning rate, loss, data splits and inline metrics as the 1-step configs. The c
 is not in the config: `run-ace-finetune.sh` takes it as an argument and mounts it, so the
 committed files describe every launch and the Beaker job records which checkpoint it used.
 
-| fine-tune launch | arm | stage-1 result dataset (mounted at /weights) | job |
-|---|---|---|---|
-| 2026-09-21 | cm4-control | `01M2VVJ5A75WKXQXJVS4XEMT4Y` (resumed job of `01M2TZC6YYH9TVRTQ7BHPH250K`) | `ace2s-snowmetrics-cm4-daily-control-multi-step-finetune-rs0` |
-| 2026-09-21 | era5-control | `01M2TZCJAT224Z4KBKJFJB8TGQ` | `ace2s-snowmetrics-era5-daily-control-multi-step-finetune-rs0` |
-| 2026-09-23 | era5-masked-naive | `01M33R5QR1GJSNNRVRJ1A8MW36` (relaunched 1-step run, per-land-area channels) | `ace2s-snowmetrics-era5-daily-masked-naive-land-snow-multi-step-finetune-rs0` |
-| pending | cm4-masked-naive | result dataset of `01M33R5HBHR5XQWPFZ7JSHF4TW` once finished | `ace2s-snowmetrics-cm4-daily-masked-naive-land-snow-multi-step-finetune-rs0` |
+| fine-tune launch | arm | stage-1 result dataset (mounted at /weights) | job | status |
+|---|---|---|---|---|
+| 2026-09-21 | cm4-control | `01M2VVJ5A75WKXQXJVS4XEMT4Y` (resumed job of `01M2TZC6YYH9TVRTQ7BHPH250K`) | `ace2s-snowmetrics-cm4-daily-control-multi-step-finetune-rs0` | stopped 2026-09-23 after epoch 24 of 50; best-inference epoch 16 |
+| 2026-09-21 | era5-control | `01M2TZCJAT224Z4KBKJFJB8TGQ` | `ace2s-snowmetrics-era5-daily-control-multi-step-finetune-rs0` | stopped 2026-09-23 after epoch 31 of 40; best-inference epoch 13 |
+| 2026-09-23 | era5-masked-naive | `01M33R5QR1GJSNNRVRJ1A8MW36` (relaunched 1-step run, per-land-area channels) | `ace2s-snowmetrics-era5-daily-masked-naive-land-snow-multi-step-finetune-rs0` | running |
+| 2026-09-23 | cm4-masked-naive | `01M33R5HC7EP6N8KAWJNAZ8XMA` (relaunched 1-step run `01M33R5HBHR5XQWPFZ7JSHF4TW`, per-land-area channels) | `ace2s-snowmetrics-cm4-daily-masked-naive-land-snow-multi-step-finetune-rs0` | running |
+
+The control fine-tunes were stopped deliberately to free cluster slots for the treatment
+fine-tunes: their best-inference metric (`inference/time_mean_norm/rmse/channel_mean`) had not
+improved for 8 (CM4) and 18 (ERA5) epochs, so the best-inference checkpoints, which downstream
+work uses, were already set. Multi-step fine-tuning left every memory metric unchanged from the
+1-step endpoints. Either run can be continued later from the `ckpt.tar` in its result dataset.
 
 `{cm4,era5}-masked-naive-multi-step-finetune-daily.yaml` apply the same recipe to the masked-naive
 1-step configs (per-land-area channels merged from the `-land-snow-masked` stores, their stats
