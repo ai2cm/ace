@@ -12,7 +12,9 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # allblocks rows: same schedule, same seeds, same everything, different loss.
 # See finetune-config-template.yaml.
 #
-# LAUNCHED 2026-09-23, rs0 ONLY. rs1 IS DELIBERATELY HELD -- see below.
+# LAUNCHED 2026-09-23. rs0 first, rs1 second on elynn's call -- see below.
+# Both rows flip to `skip` once launched, so re-running this file does not
+# resubmit them.
 #
 # Read on inference_piC/time_mean_norm/rmse/channel_mean against the patch-ES
 # long-tail allblocks arm's 0.0450 at epoch 24 (both seeds) and the
@@ -39,7 +41,7 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # patch-ES wave's 7.5e-5. Validation descent is monotone to epoch 75 in both ES
 # seeds with no NaN. On the three watched stage-1 conditions, both seeds pass.
 #
-# BUT rs1's INLINE ROLLOUTS DIVERGE, and that is why it is held.
+# rs1's INLINE ROLLOUTS DIVERGED AT STAGE 1, and it is launched anyway.
 # From epoch 53 on, 7wx3n420 logs 17 finite values above 1.0 in
 # inference_{piC,1pct}/time_mean_norm/rmse/channel_mean, peaking at 2.6e14.
 # Across the other four runs in this comparison -- ES rs0 and all THREE patch-ES
@@ -47,22 +49,34 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # 0.50/0.53/0.53/0.94. So this is specific to rs1, not a property of the
 # protocol or of the spectral score (rs0 is clean).
 #
-# It matters because ckpt_type is best_ckpt, selected on best_val_loss, and
-# rs1's validation loss descends monotonically to epoch 75 -- so its best_ckpt
-# is from INSIDE the diverging regime, written 2026-09-23 02:07. There is no
-# pre-divergence epoch checkpoint to fall back on: `checkpoint_strategy: all`
-# in the builder config is ACTIVATION checkpointing, not training checkpoints,
-# and the result dataset holds only best_ckpt / best_inference_ckpt / ckpt.tar.
-# rs1's best_inference_ckpt does predate the divergence (written 2026-09-21
-# 23:30, ~1 h into a 2.5-day run) but selecting on a different criterion than
-# rs0 and the incumbent wave would break the paired comparison.
+# ckpt_type is best_ckpt, selected on best_val_loss, and rs1's validation loss
+# descends monotonically to epoch 75 -- so its best_ckpt is from inside the
+# diverging regime, written 2026-09-23 02:07.
 #
-# n=2 cannot separate "bad seed" from "the spectral score is less
-# rollout-stable"; the incumbent's 0-for-3 is suggestive but not decisive.
+# DECISION (elynn, 2026-09-23): launch rs1 from best_ckpt regardless. Inline
+# inference skill is not what stage 1 is for, and multi-step training is what
+# fixes rollout behaviour -- the long-tail schedule optimises at depths up to
+# 20 and is precisely the stage that teaches free-running stability. A stage-1
+# checkpoint that is calibrated one-step (which rs1 is: val loss 0.04845,
+# 7.7e-5 from its sibling) and unstable in a 20-year free rollout is the normal
+# input to stage 2, not a broken one. Holding it would have cost the wave its
+# seed spread for a defect stage 2 exists to repair.
+#
+# best_ckpt, NOT best_inference_ckpt -- that is what rs0 and the whole
+# incumbent wave use, and switching criterion for one seed would break the
+# paired comparison the ablation rests on.
+#
+# What to check when it finishes: whether rs1's finetuned inline rollouts come
+# back into range. If they do, the stage-1 divergence was exactly the
+# transient this decision assumed. If they do NOT -- if finite values above 1.0
+# survive the finetune -- then stage 2 did not repair it, and with the
+# incumbent at 0-for-3 that becomes evidence about the spectral score's
+# rollout stability rather than about one seed.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|ace-samudra-cm4|silm932h|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+# rs0 LAUNCHED 2026-09-23 as 01M38QM5S04WB0S5RRW3QE6EHF; flipped to skip so
+# a rerun of this file does not resubmit it.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|ace-samudra-cm4|silm932h|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
 
-# rs1 HELD: stage-1 inline rollouts diverged from epoch 53 (see header). Its
-# wandb id is 7wx3n420 and the row is otherwise ready; flip to `train` only
-# once the divergence is resolved or deliberately accepted.
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+# rs1: stage-1 inline rollouts diverged from epoch 53; launched from best_ckpt
+# anyway on elynn's call (see header).
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
