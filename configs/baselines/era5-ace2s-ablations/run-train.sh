@@ -151,3 +151,6 @@ run_training "ace2s-pretrain-6hourly-resume.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
 
 # 4-degree arm (one GPU; needs the regenerated 2026-09-08 4-degree daily store on weka)
 run_training "ace2s-pretrain-4deg.yaml" "4deg-daily-ace2s-pretrain-rs0" 1
+
+# 4-degree arm, stage 2: 3-step detached fine-tune of the 4-degree pretrain
+run_training "ace2s-finetune-4deg.yaml" "4deg-daily-ace2s-ft3-detached-rs0" 1

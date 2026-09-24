@@ -1,0 +1,156 @@
+# arg: --dataset 01M38HBSRAQ02QY797HG3P7QP8:/weights
+#
+# 4-degree arm, stage 2: the paper model's 3-step DETACHED fine-tune recipe
+# (configs/baselines/era5/ace-train-config-ft3-detached-daily-fg16-sr0p125-
+# no-corr-mean.yaml on experiment/no-corr-mean-outputs at d90cd549) applied
+# to the 4-degree pretrain from ace2s-pretrain-4deg.yaml (beaker
+# 01M38HBSR3YZ7M85J14QW7PXQE, wandb xqwmeho5; its result dataset is mounted at
+# /weights). use_gradient_accumulation=true detaches gradients between steps.
+# Architecture, normalization and the corrector come from the donor checkpoint
+# via stepper.checkpoint_path; parameter_init warm-starts from the same
+# best_ckpt.tar (best validation loss), as every paper fine-tune does.
+#
+# 10 epochs (the ablation fine-tune length; the paper model is the epoch-10 EMA
+# checkpoint of its fine-tune). Full and EMA checkpoints at epochs 5 and 10.
+# Store, stats, loader and memory parameters are the 4-degree pretrain's.
+# Evaluation matches the pretrain: 5-year inline inference every epoch
+# (8 ICs x 3 members) and the 81-year rollout (8 ICs, weight 0) at epochs 5
+# and 10.
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_save_epochs:
+  step: 5
+ema_checkpoint_save_epochs:
+  step: 5
+validate_using_ema: true
+max_epochs: 10
+ema:
+  decay: 0.999
+inference:
+  - name: inference
+    n_forward_steps: 1825
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 3
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-02-15T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-05-15T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-08-15T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1996-11-15T00:00:00'
+      dataset:
+        data_path: /climate-default
+        file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+        - step: 5
+          target: norm
+      ensembles:
+        - step: 5
+      histogram:
+        enabled: true
+      time_mean_reference_data: /climate-default/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019/2026-09-08-era5-4deg-8layer-daily-1940-2025/time-mean.nc
+  - name: long_81year
+    weight: 0.0
+    epochs:
+      start: 4
+      step: 5
+    n_forward_steps: 29565
+    forward_steps_in_memory: 73
+    loader:
+      start_indices:
+        times:
+          - '1940-01-03T00:00:00'
+          - '1940-01-04T00:00:00'
+          - '1940-01-05T00:00:00'
+          - '1940-01-06T00:00:00'
+          - '1940-01-07T00:00:00'
+          - '1940-01-08T00:00:00'
+          - '1940-01-09T00:00:00'
+          - '1940-01-10T00:00:00'
+      dataset:
+        data_path: /climate-default
+        file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means: []
+      ensembles: []
+      histogram:
+        enabled: true
+      time_mean_reference_data: /climate-default/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019/2026-09-08-era5-4deg-8layer-daily-1940-2025/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 8
+  time_buffer_pool_size: 32
+  dataset:
+    concat:
+    - data_path: /climate-default
+      file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        stop_time: '1995-12-31'
+    - data_path: /climate-default
+      file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2011-01-01'
+        stop_time: '2019-12-31'
+    - data_path: /climate-default
+      file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2021-01-01'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 8
+    prefetch_factor: 2
+    time_buffer: 16
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1996-01-01'
+        stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 3
+  optimize_last_step_only: false
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  loss:
+    type: EnsembleLoss
+    weights:
+      h500: 5.0
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
