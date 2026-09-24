@@ -38,3 +38,5 @@
 # before launching.
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|01M38X5HTGQ359BM50D9Y6WRC4|training|best_inference_ckpt|normal|--min-runtime 8h
