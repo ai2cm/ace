@@ -1188,7 +1188,27 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
+        atmosphere_forced_by_target_ocean: bool = False,
     ) -> Generator[ComponentStepPrediction, None, None]:
+        """Step the coupled system, yielding one prediction per component step.
+
+        Args:
+            initial_condition: Prognostic initial state of both components.
+            forcing_data: Forcing (and, in training, target) data for both
+                components over the rollout.
+            optimizer: Optimization object controlling gradient handling.
+            atmosphere_forced_by_target_ocean: Training-only option. If True,
+                the atmosphere is forced at each coupled step by the *target*
+                ocean surface state (SST, sea-ice fraction and any other
+                ocean-supplied atmosphere forcing) read from ``forcing_data``
+                at that step's initial time, instead of by the ocean
+                component's own prediction. The ocean is still stepped with
+                the atmosphere's output, so it trains against an interactive
+                atmosphere that has not been corrupted by the ocean's early
+                errors. Requires the ocean-supplied forcing names to be
+                present in ``forcing_data.ocean_data``, which the training
+                loader guarantees and the inference loader does not.
+        """
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
             != self.atmosphere.n_ic_timesteps
@@ -1212,6 +1232,18 @@ class CoupledStepper:
         ocean_ic_state = initial_condition.ocean_data
 
         n_outer_steps = forcing_data.ocean_data.n_timesteps - self.n_ic_timesteps
+        if atmosphere_forced_by_target_ocean:
+            missing = sorted(
+                set(self._ocean_to_atmosphere_forcing_names)
+                - set(forcing_data.ocean_data.data)
+            )
+            if missing:
+                raise ValueError(
+                    "atmosphere_forced_by_target_ocean needs the ocean-supplied "
+                    "atmosphere forcings in the ocean batch data, but these are "
+                    f"missing: {missing}. This option is for training, where the "
+                    "ocean targets are loaded; it is not available in inference."
+                )
 
         for i_outer in range(n_outer_steps):
             # get the atmosphere window for the initial coupled step
@@ -1221,10 +1253,22 @@ class CoupledStepper:
                     (i_outer + 1) * self.n_inner_steps + self.atmosphere.n_ic_timesteps,
                 )
             )
+            ocean_state_for_atmos: TensorMapping
+            if atmosphere_forced_by_target_ocean:
+                # the true ocean surface at this coupled step's initial time
+                ocean_state_for_atmos = {
+                    k: v
+                    for k, v in forcing_data.ocean_data.select_time_slice(
+                        slice(i_outer, i_outer + self.n_ic_timesteps)
+                    ).data.items()
+                    if k in self._ocean_to_atmosphere_forcing_names
+                }
+            else:
+                ocean_state_for_atmos = ocean_ic_state.as_batch_data().data
             atmos_forcings = BatchData(
                 data=self._get_atmosphere_forcings(
                     atmos_window.data,
-                    ocean_ic_state.as_batch_data().data,
+                    ocean_state_for_atmos,
                 ),
                 time=atmos_window.time,
                 labels=atmos_window.labels,
@@ -1822,6 +1866,14 @@ class CoupledTrainStepperConfig:
             Requires both realms to be non-null (validated in __post_init__).
         parameter_init: The coupled parameter initialization configuration for
             fine-tuning a previously-trained coupled stepper.
+        atmosphere_forced_by_target_ocean: If True, during training (and the
+            training-style validation loss) the atmosphere is forced by the
+            target ocean surface state at each coupled step rather than by the
+            ocean component's prediction; the ocean is still forced by the
+            atmosphere's output. Use when training an ocean from scratch
+            inside the coupled system, so the atmosphere is never driven by an
+            untrained ocean's surface. Inline inference is unaffected and
+            remains fully coupled. Default False.
     """
 
     n_coupled_steps: int
@@ -1832,6 +1884,7 @@ class CoupledTrainStepperConfig:
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
     )
+    atmosphere_forced_by_target_ocean: bool = False
 
     def __post_init__(self):
         """Validate that parameter_init is not specified in conflicting ways.
@@ -2163,6 +2216,9 @@ class CoupledTrainStepper(
             input_data,
             data_ensemble,
             optimization,
+            atmosphere_forced_by_target_ocean=(
+                self._config.atmosphere_forced_by_target_ocean
+            ),
         )
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []

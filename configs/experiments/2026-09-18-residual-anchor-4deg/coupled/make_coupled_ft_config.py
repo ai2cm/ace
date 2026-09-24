@@ -61,7 +61,17 @@ def main() -> None:
         "coupled system, with the ocean-only arms' 75-epoch / lr 1e-4 schedule "
         "(writes <arm>-coupled-scratch.yaml)",
     )
+    ap.add_argument(
+        "--target-ocean-atmosphere",
+        action="store_true",
+        help="with --from-scratch: force the atmosphere with the TRUE ocean surface "
+        "during training (stepper_training.atmosphere_forced_by_target_ocean), so "
+        "it is never driven by the untrained ocean's SST; the ocean still sees the "
+        "interactive atmosphere (writes <arm>-coupled-scratch-trueocean.yaml)",
+    )
     args = ap.parse_args()
+    if args.target_ocean_atmosphere and not args.from_scratch:
+        ap.error("--target-ocean-atmosphere requires --from-scratch")
 
     cfg = yaml.safe_load(TEMPLATE.read_text())
     ocean = yaml.safe_load((ARMS_DIR / f"{args.arm}.yaml").read_text())["stepper"]
@@ -98,7 +108,7 @@ def main() -> None:
         cfg["max_epochs"] = ocean_train["max_epochs"]
         cfg["optimization"]["lr"] = ocean_train["optimization"]["lr"]
         cfg["evaluate_before_training"] = False
-        out = HERE / f"{arm}-coupled-scratch.yaml"
+        variant = "scratch"
         lines = [
             f"{arm}-coupled-scratch: 4deg '{arm}' ocean arm trained FROM SCRATCH",
             "inside the coupled system, against the frozen stochastic 4deg ACE2S",
@@ -108,6 +118,24 @@ def main() -> None:
             f"ocean-only arm's max_epochs ({cfg['max_epochs']}) and",
             f"lr ({cfg['optimization']['lr']}).",
         ]
+        if args.target_ocean_atmosphere:
+            # Troy (2026-09-24): don't let the untrained ocean's SST corrupt the
+            # atmosphere; drive ACE with the true ocean surface while the ocean
+            # trains against ACE's interactive output. Inline inference is
+            # still fully coupled.
+            st["atmosphere_forced_by_target_ocean"] = True
+            variant = "scratch-trueocean"
+            lines[0] = f"{arm}-coupled-scratch-trueocean: as {arm}-coupled-scratch, but"
+            lines.insert(
+                1,
+                "with the atmosphere forced by the TRUE ocean surface during training",
+            )
+            lines.insert(
+                2,
+                "(stepper_training.atmosphere_forced_by_target_ocean: true); the",
+            )
+            lines.insert(3, "ocean still sees the interactive atmosphere. Otherwise:")
+        out = HERE / f"{arm}-coupled-{variant}.yaml"
     else:
         out = HERE / f"{arm}-coupled-ft.yaml"
         lines = [

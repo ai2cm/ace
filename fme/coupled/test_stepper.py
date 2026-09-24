@@ -1499,6 +1499,114 @@ def test_coupled_training_with_input_dropout_runs():
     assert "surface_temperature" in output.atmosphere.gen_data
 
 
+@pytest.mark.parametrize("forced_by_target", [False, True])
+def test_atmosphere_forced_by_target_ocean(forced_by_target):
+    """With the option on, the atmosphere at coupled step i is forced by the
+    target ocean surface at that step's initial time; off, by the ocean's own
+    prediction (which differs from the target for an untrained ocean)."""
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=2,
+    )
+    data = coupled_data.data
+    seen: list[dict] = []
+    original = coupler._get_atmosphere_forcings
+
+    def spy(atmos_data, ocean_ic):
+        seen.append({k: v.clone() for k, v in ocean_ic.items()})
+        return original(atmos_data, ocean_ic)
+
+    coupler._get_atmosphere_forcings = spy  # type: ignore[method-assign]
+    ic = CoupledPrognosticState(
+        atmosphere_data=data.atmosphere_data.get_start(
+            coupler.atmosphere.prognostic_names, coupler.atmosphere.n_ic_timesteps
+        ),
+        ocean_data=data.ocean_data.get_start(
+            coupler.ocean.prognostic_names, coupler.n_ic_timesteps
+        ),
+    )
+    list(
+        coupler.get_prediction_generator(
+            ic,
+            data,
+            NullOptimization(),
+            atmosphere_forced_by_target_ocean=forced_by_target,
+        )
+    )
+    assert len(seen) == 2
+    target_sst_step1 = data.ocean_data.data["sst"].select(coupler.ocean.TIME_DIM, 1)
+    fed_sst_step1 = seen[1]["sst"].select(coupler.ocean.TIME_DIM, 0)
+    if forced_by_target:
+        torch.testing.assert_close(fed_sst_step1, target_sst_step1)
+    else:
+        assert not torch.allclose(fed_sst_step1, target_sst_step1)
+
+
+def test_atmosphere_forced_by_target_ocean_requires_ocean_targets():
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=1,
+    )
+    data = coupled_data.data
+    ic = CoupledPrognosticState(
+        atmosphere_data=data.atmosphere_data.get_start(
+            coupler.atmosphere.prognostic_names, coupler.atmosphere.n_ic_timesteps
+        ),
+        ocean_data=data.ocean_data.get_start(
+            coupler.ocean.prognostic_names, coupler.n_ic_timesteps
+        ),
+    )
+    ocean_without_sst = BatchData(
+        data={k: v for k, v in data.ocean_data.data.items() if k != "sst"},
+        time=data.ocean_data.time,
+        labels=data.ocean_data.labels,
+    )
+    forcing = CoupledBatchData(
+        ocean_data=ocean_without_sst, atmosphere_data=data.atmosphere_data
+    )
+    with pytest.raises(ValueError, match="atmosphere_forced_by_target_ocean"):
+        list(
+            coupler.get_prediction_generator(
+                ic, forcing, NullOptimization(), atmosphere_forced_by_target_ocean=True
+            )
+        )
+
+
+def test_train_on_batch_atmosphere_forced_by_target_ocean_runs():
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=CoupledTrainStepperConfig(
+            n_coupled_steps=2,
+            ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+            atmosphere=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"), n_steps=0, loss_weight=0.0
+            ),
+            atmosphere_forced_by_target_ocean=True,
+        ),
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=2,
+    )
+    output = train_stepper.train_on_batch(
+        data=coupled_data.data, optimization=NullOptimization()
+    )
+    assert "sst" in output.ocean.gen_data
+    assert torch.isfinite(output.total_metrics["loss"])
+
+
 @pytest.mark.parametrize(
     "ocean_fraction_prediction, sea_ice_frac_is_ocean_prog",
     [
