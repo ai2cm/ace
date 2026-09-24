@@ -620,6 +620,12 @@ def _force_conserve_ocean_salt_content(
     )
     expected_change = torch.zeros_like(global_input_salt)
     if ice_volume_salt_slope_psu != 0.0:
+        # TODO: sea_ice_volume is per-cell (extensive, e.g. m^3/cell), so the
+        # slope is in psu m per (volume unit per cell) rather than psu, and
+        # must be re-measured for every grid and ice-volume unit. Dividing by cell area before the
+        # mean (e.g. an areacello static field, or the grid's area weights
+        # in m^2) would give a mean ice thickness in m and a slope in psu
+        # that transfers across grids and resolutions.
         try:
             ice_change = area_weighted_mean(
                 gen.sea_ice_volume - input.sea_ice_volume,
