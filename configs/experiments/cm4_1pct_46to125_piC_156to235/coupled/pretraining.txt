@@ -12,9 +12,10 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # - owc8 = ocean_wide_ohc_clip-ft
 
 # atmos codes:
-# - ab  = atmos_baseline
-# - a2s = atmos_ace2s
-# - a2sLR = atmos_ace2s_origLR
+# - ab  = atmos_baseline-ft
+# - a2s = atmos_ace2s-ft
+# - a2sLR = atmos_ace2s_origLR-ft
+# - randco2 = cm4_randco2_ic1and2_1pct_46to125_piC_156to235/atmos_ace2s-ft
 
 # tags: o0a0rs0 = ocean rs0 + atmos rs0 + coupled rs0
 
@@ -22,7 +23,7 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|trained|urgent|b200|4|500GiB|3|ai2/ace|seed=0|
 
 # coupled_clip-owc_a2s
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
 
 
 # coupled-owc8_a2s
@@ -40,3 +41,6 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|ace-samudra-
 
 # coupled-owc8_a2sLR
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2sLR-fto|o2a2rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|cancelled|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_coupled_steps=8 stepper_training.ocean.n_steps=8|2h
+
+# coupled-owc_randco2
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_randco2-fto|o2a2rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|w2f9erep|best_inference_ckpt|train|urgent|b200|4|500GiB|3|ai2/ace|seed=0|8h
