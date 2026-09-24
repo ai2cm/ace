@@ -36,3 +36,5 @@
 # runs' final result dataset ids do not share the experiment id's prefix.
 # Verify each pinned dataset contains training_checkpoints/best_inference_ckpt.tar
 # before launching.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|training|best_inference_ckpt|normal|--min-runtime 8h
