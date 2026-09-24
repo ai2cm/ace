@@ -195,7 +195,6 @@ stepper_training:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
-      patch_energy_score_weight: 0.0
   parameter_init:
     weights_path: /ckpt.tar
 stepper:
