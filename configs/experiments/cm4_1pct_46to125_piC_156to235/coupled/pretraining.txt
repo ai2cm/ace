@@ -39,4 +39,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|ace-samudra-
 
 
 # coupled-owc8_a2sLR
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2sLR-fto|o2a2rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|training|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_coupled_steps=8 stepper_training.ocean.n_steps=8|2h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2sLR-fto|o2a2rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|cancelled|normal|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_coupled_steps=8 stepper_training.ocean.n_steps=8|2h
