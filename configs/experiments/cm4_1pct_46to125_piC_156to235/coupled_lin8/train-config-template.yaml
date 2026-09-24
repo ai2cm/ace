@@ -232,7 +232,7 @@ optimization:
       end_factor: 1
       total_iters: 1460 # ~1 epoch
 stepper_training:
-  n_coupled_steps: 4
+  n_coupled_steps: 8
   # Required, not incidental: the ocean's stochasticity is supplied by the
   # atmosphere, so the ensemble must run through both realms even while the
   # atmosphere is frozen and contributes no loss.
