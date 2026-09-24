@@ -3,7 +3,8 @@ import torch
 
 from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
 from fme.core.device import get_device
-from fme.core.loss import StepLossConfig
+from fme.core.loss import CorrectorLoss, StepLossConfig, StepOutputLoss
+from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean_eos import G_EARTH, RHO_0, wright97_anomaly
 from fme.core.optimized_derived import (
@@ -207,3 +208,86 @@ def test_loss_weights_on_derived_names_rejected():
 def test_config_validation(kwargs):
     with pytest.raises(ValueError):
         OptimizedDerivedVariableConfig(**kwargs)
+
+
+# A corrector that changes thetao: thetao_c = A * thetao_net + B on every level.
+_A, _B = 0.5, 1.0
+THETAO_NAMES = [f"thetao_{k}" for k in range(N_LEVELS)]
+
+
+def _corrected(net):
+    corrected = dict(net)
+    for name in THETAO_NAMES:
+        corrected[name] = _A * net[name] + _B
+    deltas = {name: corrected[name] - net[name] for name in THETAO_NAMES}
+    return corrected, deltas
+
+
+def _step_output_loss(weights=None):
+    step_loss = StepLossConfig(type="MSE", weights=weights or {}).build(
+        gridded_ops=None,
+        out_names=NAMES,
+        normalizer=_normalizer(),
+        channel_dim=-3,
+        derived=_build(),
+    )
+    corrector_loss = CorrectorLoss(
+        precorrector_selection=NameAndPrefixSelection(("thetao_",)),
+        regularizer=None,
+    )
+    return step_loss, StepOutputLoss(step_loss, corrector_loss)
+
+
+def test_precorrector_rho_from_corrected_thetao():
+    """precorrector_optimization on thetao_: the thetao channels see the network
+    output, the rho channels see W97 of the corrected thetao."""
+    step_loss, loss = _step_output_loss()
+    net, target = _data(seed=1), _data(seed=0)
+    corrected, deltas = _corrected(net)
+    derived_inputs = []
+    derive = step_loss._derive
+    assert derive is not None
+
+    def recording_derive(data):
+        derived_inputs.append(data)
+        return derive(data)
+
+    step_loss._derive = recording_derive
+    channels = loss(corrected, target, step=0, deltas=deltas).get_channel_losses()
+    step_loss._derive = derive
+    # the prediction's derived fields are W97(so, thetao_c), computed from corrected
+    assert derived_inputs[0] is corrected
+    on_corrected = step_loss(corrected, target, step=0).get_channel_losses()
+    on_net = step_loss(net, target, step=0).get_channel_losses()
+    for name in _build().names:
+        torch.testing.assert_close(channels[name].loss, on_corrected[name].loss)
+        assert not torch.allclose(channels[name].loss, on_net[name].loss)
+    for name in NAMES:
+        torch.testing.assert_close(channels[name].loss, on_net[name].loss)
+
+
+def test_precorrector_rho_gradient_through_corrector():
+    """Only rho weighted: dL/d thetao_net = A * dL/d thetao_c, and
+    dL/d so_net = dL/d so_c, i.e. the rho gradient passes through the corrector."""
+    _, loss = _step_output_loss(weights={n: 0.0 for n in NAMES})
+    step_loss, _ = _step_output_loss(weights={n: 0.0 for n in NAMES})
+    target = _data(seed=0)
+    net = {k: v.clone().requires_grad_() for k, v in _data(seed=1).items()}
+    corrected, deltas = _corrected(net)
+    loss(corrected, target, step=0, deltas=deltas).total().backward()
+    # reference: the same rho-only loss taken directly on the corrected fields
+    corrected_leaf = {
+        k: v.detach().clone().requires_grad_() for k, v in corrected.items()
+    }
+    step_loss(corrected_leaf, target, step=0).total().backward()
+    # and on the network output with no corrector
+    net_leaf = {k: v.detach().clone().requires_grad_() for k, v in net.items()}
+    step_loss(net_leaf, target, step=0).total().backward()
+    for k in range(N_LEVELS):
+        g_net = net[f"thetao_{k}"].grad
+        g_c = corrected_leaf[f"thetao_{k}"].grad
+        assert g_net is not None and g_c is not None
+        assert (g_c != 0).any()
+        torch.testing.assert_close(g_net, _A * g_c)
+        assert not torch.allclose(g_net, net_leaf[f"thetao_{k}"].grad)
+        torch.testing.assert_close(net[f"so_{k}"].grad, corrected_leaf[f"so_{k}"].grad)

@@ -908,6 +908,7 @@ class StepLoss(torch.nn.Module):
         target_dict: TensorMapping,
         step: int,
         data_mask: TensorMapping | None = None,
+        derive_from: TensorMapping | None = None,
     ) -> LossOutput:
         """
         Args:
@@ -916,13 +917,18 @@ class StepLoss(torch.nn.Module):
             step: The step number, indexed from 0 for the first step.
             data_mask: Optional per-variable boolean masks forwarded to
                 the underlying :class:`WeightedMappingLoss`.
+            derive_from: Optional. The prediction the derived fields are
+                computed from, ``predict_dict`` by default. ``StepOutputLoss``
+                passes the corrected output here while ``predict_dict`` holds
+                pre-corrector outputs.
 
         Returns:
             A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
         if self._derive is not None:
-            predict_dict = {**predict_dict, **self._derive(predict_dict)}
+            source = predict_dict if derive_from is None else derive_from
+            predict_dict = {**predict_dict, **self._derive(source)}
             target_dict = {**target_dict, **self._derive(target_dict)}
         return self.loss(predict_dict, target_dict, data_mask=data_mask).scale(
             step_weight
@@ -1320,9 +1326,13 @@ class StepOutputLoss(torch.nn.Module):
                 main=self.step_loss(predict_dict, target_dict, step, data_mask)
             )
         self.corrector_loss.resolve_names(deltas.keys())
-        # Pre-corrector outputs first, so StepLoss never sees a delta.
+        # Pre-corrector outputs first, so StepLoss never sees a delta. Derived
+        # fields (e.g. rho) come from the corrected output, so their gradient
+        # flows through the corrector.
         net_output = self.corrector_loss.pre_corrector_outputs(predict_dict, deltas)
-        main = self.step_loss(net_output, target_dict, step, data_mask)
+        main = self.step_loss(
+            net_output, target_dict, step, data_mask, derive_from=predict_dict
+        )
         return StepOutputLossOutput(
             main=main,
             corrector_penalty=self.corrector_loss.penalty(deltas, data_mask),
