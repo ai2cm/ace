@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235-4deg-ocean_sal_correct|rs0|01M3AE8E7YH0GKCTJ1PRDQVNBJ|training|best_inference_ckpt|normal|--min-runtime 8h
