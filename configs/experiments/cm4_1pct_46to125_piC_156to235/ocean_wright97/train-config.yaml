@@ -177,7 +177,7 @@ optimization:
     fused: true
     weight_decay: 0.01
 stepper_training:
-  n_forward_steps: 4
+  n_forward_steps: 1
   loss:
     type: MSE
   # rho_wright97_k = Wright97(so_k, thetao_k, p_k) - RHO_0 on every level, from both

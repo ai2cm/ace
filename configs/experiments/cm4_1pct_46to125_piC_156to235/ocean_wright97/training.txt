@@ -2,8 +2,8 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 
 # w = weight of each rho_wright97_k channel
 
-cm4_1pct_46to125_piC_156to235-ocean_wright97w0p1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 0.1}]'|8h
+cm4_1pct_46to125_piC_156to235-ocean_wright97w0p1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 0.1}]'|30m
 
-cm4_1pct_46to125_piC_156to235-ocean_wright97w1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1|8h
+cm4_1pct_46to125_piC_156to235-ocean_wright97w1|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1|30m
 
-cm4_1pct_46to125_piC_156to235-ocean_wright97w10|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 10.0}]'|8h
+cm4_1pct_46to125_piC_156to235-ocean_wright97w10|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 10.0}]'|30m
