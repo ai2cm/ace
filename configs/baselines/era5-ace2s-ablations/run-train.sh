@@ -154,3 +154,8 @@ run_training "ace2s-pretrain-4deg.yaml" "4deg-daily-ace2s-pretrain-rs0" 1
 
 # 4-degree arm, stage 2: 3-step detached fine-tune of the 4-degree pretrain
 run_training "ace2s-finetune-4deg.yaml" "4deg-daily-ace2s-ft3-detached-rs0" 1
+
+# 4-degree arm, seed replicates 1-3 (one GPU each)
+run_training "ace2s-pretrain-4deg-rs1.yaml" "4deg-daily-ace2s-pretrain-rs1" 1
+run_training "ace2s-pretrain-4deg-rs2.yaml" "4deg-daily-ace2s-pretrain-rs2" 1
+run_training "ace2s-pretrain-4deg-rs3.yaml" "4deg-daily-ace2s-pretrain-rs3" 1

@@ -23,6 +23,7 @@ every 10 epochs (`ema_checkpoint_save_epochs`).
 | `ace2s-pretrain-no-bottleneck.yaml` | `filter_num_groups` and `spectral_ratio` dropped |
 | `ace2s-pretrain-6hourly.yaml` | Troy's 6-hourly 2026-03-19 store and stats, 54 outputs (no `*_mean`); evaluation horizons in steps x4, 81-year rollout at epochs 10/20/30/40 |
 | `ace2s-pretrain-4deg.yaml` | 4-degree: the regenerated `2026-09-08-era5-4deg-8layer-daily-1940-2025` store (`*_mean` fields plus PRMSL and the surface stresses in one store, from main's `scripts/data_process/configs/era5-4deg-8layer-1940-2025.yaml`); one GPU, batch size 8, loader parameters from the 4-degree daily v2 config; spectral bottleneck kept |
+| `ace2s-pretrain-4deg-rs{1,2,3}.yaml` | the 4-degree arm with seeds 1-3 (a 4-member seed ensemble at 4 degrees, since one-GPU runs are cheap) |
 | `ace2s-finetune-4deg.yaml` | the 4-degree arm's 10-epoch 3-step detached fine-tune (paper fine-tune recipe: `n_forward_steps: 3`, `use_gradient_accumulation: true`, warm start from the pretrain's `best_ckpt.tar` mounted at `/weights`); full and EMA checkpoints at epochs 5 and 10 |
 
 Launch with `./run-train.sh [<filter> ...]` from this directory: workspace
