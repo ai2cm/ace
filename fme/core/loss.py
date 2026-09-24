@@ -2,7 +2,7 @@ import abc
 import dataclasses
 import logging
 from collections.abc import Callable, Collection, Mapping
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 import torch.linalg
@@ -15,6 +15,9 @@ from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
+
+if TYPE_CHECKING:
+    from fme.core.optimized_derived import OptimizedDerivedVariables
 
 
 @dataclasses.dataclass
@@ -876,11 +879,23 @@ class LossConfig:
 
 class StepLoss(torch.nn.Module):
     def __init__(
-        self, loss: WeightedMappingLoss, sqrt_loss_decay_constant: float = 0.0
+        self,
+        loss: WeightedMappingLoss,
+        sqrt_loss_decay_constant: float = 0.0,
+        derive: Callable[[TensorMapping], TensorDict] | None = None,
     ):
+        """
+        Args:
+            loss: The per-variable loss, over the output names plus any names
+                ``derive`` produces.
+            sqrt_loss_decay_constant: The step decay constant.
+            derive: Optional. Computes extra (optimized derived) fields, added
+                to both prediction and target before the loss.
+        """
         super().__init__()
         self.loss = loss
         self.sqrt_loss_decay_constant = sqrt_loss_decay_constant
+        self._derive = derive
 
     @property
     def _normalizer(self) -> StandardNormalizer:
@@ -906,6 +921,9 @@ class StepLoss(torch.nn.Module):
             A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
+        if self._derive is not None:
+            predict_dict = {**predict_dict, **self._derive(predict_dict)}
+            target_dict = {**target_dict, **self._derive(target_dict)}
         return self.loss(predict_dict, target_dict, data_mask=data_mask).scale(
             step_weight
         )
@@ -963,19 +981,42 @@ class StepLossConfig:
         out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
+        derived: "OptimizedDerivedVariables | None" = None,
     ) -> StepLoss:
+        """
+        Args:
+            gridded_ops: The gridded operations.
+            out_names: The output names the loss is taken over.
+            normalizer: The loss normalizer.
+            channel_dim: The channel dimension.
+            derived: Optional optimized derived variables, whose names are
+                appended to ``out_names`` with their own weights and loss
+                scales.
+        """
         loss = self.loss_config.build(
             gridded_operations=gridded_ops,
         )
+        weights = self.weights
+        if derived is not None:
+            overlap = set(self.weights).intersection(derived.names)
+            if overlap:
+                raise ValueError(
+                    f"loss weights set for optimized derived names {sorted(overlap)}; "
+                    "set their weight on the optimized derived variable instead."
+                )
+            out_names = list(out_names) + derived.names
+            weights = {**self.weights, **derived.weights}
+            normalizer = derived.extend_normalizer(normalizer)
         return StepLoss(
             WeightedMappingLoss(
                 loss=loss,
-                weights=self.weights,
+                weights=weights,
                 out_names=out_names,
                 channel_dim=channel_dim,
                 normalizer=normalizer,
             ),
             sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
+            derive=derived,
         )
 
 

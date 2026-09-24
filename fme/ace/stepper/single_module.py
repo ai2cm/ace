@@ -50,6 +50,10 @@ from fme.core.normalizer import (
 )
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.optimized_derived import (
+    OptimizedDerivedVariableConfig,
+    build_optimized_derived_variables,
+)
 from fme.core.rand import use_generator
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_masking import (
@@ -878,23 +882,46 @@ class Stepper:
         self._dataset_info = dataset_info
         self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
+    def build_loss(
+        self,
+        loss_config: StepLossConfig,
+        optimized_derived_variables: list[OptimizedDerivedVariableConfig] | None = None,
+    ) -> StepLoss:
         """Build a StepLoss from the given config using this stepper's normalizer
         and dataset info.
 
         Args:
             loss_config: The loss configuration to build from.
+            optimized_derived_variables: Optional derived variables computed
+                from prediction and target and added to the loss.
 
         Returns:
             A StepLoss built using this stepper's loss normalizer, gridded
             operations, loss variable names, and channel dimension.
         """
         loss_normalizer = self._step_obj.get_loss_normalizer()
+        derived = None
+        if optimized_derived_variables:
+            derived = build_optimized_derived_variables(
+                optimized_derived_variables,
+                vertical_coordinate=self._dataset_info.vertical_coordinate,
+                network_normalizer=self.normalizer,
+                loss_normalizer=loss_normalizer,
+                loss_names=self.loss_names,
+            )
+            logging.info(
+                "optimized derived variables in the loss: "
+                + ", ".join(
+                    f"{n} (weight {derived.weights[n]}, std {derived.stds[n]:.4g})"
+                    for n in derived.names
+                )
+            )
         return loss_config.build(
             self._dataset_info.gridded_operations,
             out_names=self.loss_names,
             channel_dim=self.CHANNEL_DIM,
             normalizer=loss_normalizer,
+            derived=derived,
         )
 
     def build_corrector_loss(
@@ -1535,6 +1562,10 @@ class TrainStepperConfig:
         parameter_init: The parameter initialization configuration for fine-tuning.
         corrector_loss: Optional configuration for consuming the corrector's
             correction deltas in the loss.
+        optimized_derived_variables: Optional derived variables (e.g. ocean
+            density ``rho_wright97_k``) computed from both prediction and target and
+            added to the loss as extra channels. See
+            ``fme.core.optimized_derived``.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1545,6 +1576,7 @@ class TrainStepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     corrector_loss: CorrectorLossConfig | None = None
+    optimized_derived_variables: list[OptimizedDerivedVariableConfig] | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1668,7 +1700,7 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = StepOutputLoss(
-            self._stepper.build_loss(config.loss),
+            self._stepper.build_loss(config.loss, config.optimized_derived_variables),
             self._stepper.build_corrector_loss(config.corrector_loss),
         )
 

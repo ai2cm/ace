@@ -45,6 +45,7 @@ from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
+from fme.core.optimized_derived import OptimizedDerivedVariableConfig
 from fme.core.step.output import StepOutput
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
@@ -1731,6 +1732,10 @@ class ComponentTrainingConfig:
             contributes to the loss and has gradients enabled).
         loss_weight: Weight applied to the loss for this component.
         parameter_init: Component-level parameter initialization.
+        optimized_derived_variables: Optional derived variables computed from
+            both prediction and target and added to this component's loss
+            (``rho_wright97`` needs the ocean's depth coordinate). See
+            ``fme.core.optimized_derived``.
     """
 
     loss: StepLossConfig
@@ -1740,6 +1745,7 @@ class ComponentTrainingConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    optimized_derived_variables: list[OptimizedDerivedVariableConfig] | None = None
 
     @property
     def n_steps_max(self) -> int | None:
@@ -1903,8 +1909,12 @@ class CoupledTrainStepperConfig:
     def _build_loss(
         self, stepper: CoupledStepper, n_coupled_steps: int
     ) -> CoupledStepperTrainLoss:
-        ocean_step_loss = stepper.ocean.build_loss(self.ocean.loss)
-        atmos_step_loss = stepper.atmosphere.build_loss(self.atmosphere.loss)
+        ocean_step_loss = stepper.ocean.build_loss(
+            self.ocean.loss, self.ocean.optimized_derived_variables
+        )
+        atmos_step_loss = stepper.atmosphere.build_loss(
+            self.atmosphere.loss, self.atmosphere.optimized_derived_variables
+        )
         n_steps_limit_ocean = n_coupled_steps
         n_steps_limit_atmos = n_coupled_steps * stepper.n_inner_steps
         ocean_schedule = ComponentLossSchedule(
