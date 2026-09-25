@@ -128,6 +128,14 @@ class StepConfigABC(abc.ABC):
         step configs (e.g. multi-call) delegate to the wrapped config.
         """
 
+    @abc.abstractmethod
+    def replace_compile(self, compile: bool) -> None:
+        """Replace whether the network forward pass runs through ``torch.compile``.
+
+        Used at inference to override the value serialized in a checkpoint.
+        Step types without a compile option raise ``ValueError``.
+        """
+
     @property
     @abc.abstractmethod
     def allow_missing_variables(self) -> bool:
@@ -253,6 +261,10 @@ class StepSelector(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._step_config_instance.get_prescribed_prognostic_names()
+
+    def replace_compile(self, compile: bool) -> None:
+        self._step_config_instance.replace_compile(compile)
+        self.config = dataclasses.asdict(self._step_config_instance)
 
     @property
     def allow_missing_variables(self) -> bool:

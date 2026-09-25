@@ -167,6 +167,12 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def replace_compile(self, compile: bool) -> None:
+        raise ValueError(
+            f"{type(self).__name__} has no compile option; the compile override "
+            "only applies to single_module steps"
+        )
+
     @property
     def allow_missing_variables(self) -> bool:
         return False

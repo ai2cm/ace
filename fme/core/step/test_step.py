@@ -2348,6 +2348,70 @@ def test_multi_call_step_forwards_train_eval():
     wrapped_step.train.assert_called_once_with(True)
 
 
+@pytest.mark.medium_duration
+def test_single_module_step_compile_flag():
+    """compile=True runs the forward through torch.compile while leaving the
+    checkpoint state identical in structure to the uncompiled step.
+
+    The cold inductor compile takes several seconds on CI, over the
+    ``--very-fast`` per-test budget, so the test runs only in the fast and
+    full suites."""
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    eager_selector = get_single_module_selector()
+    compiled_config = dict(eager_selector.config, compile=True)
+    compiled_selector = StepSelector(type="single_module", config=compiled_config)
+    eager_step = get_step(eager_selector, img_shape)
+    compiled_step = get_step(compiled_selector, img_shape)
+    assert isinstance(compiled_step, SingleModuleStep)
+    assert isinstance(eager_step, SingleModuleStep)
+    assert compiled_step.module.is_compiled
+    assert not eager_step.module.is_compiled
+    compiled_step.load_state(eager_step.get_state())
+    assert compiled_step.get_state()["module"].keys() == (
+        eager_step.get_state()["module"].keys()
+    )
+    n_samples = 2
+    input_data = get_tensor_dict(eager_step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        eager_step.next_step_input_names, img_shape, n_samples
+    )
+    args = StepArgs(
+        input=input_data, next_step_input_data=next_step_input_data, labels=None
+    )
+    with torch.no_grad():
+        eager_out = eager_step.step(args).output
+        compiled_out = compiled_step.step(args).output
+    for name in eager_out:
+        torch.testing.assert_close(
+            compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
+        )
+
+
+def test_single_module_step_float32_matmul_precision_default_is_untouched():
+    """With the default (None) the process-wide matmul precision is left alone."""
+    original = torch.get_float32_matmul_precision()
+    get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+    assert torch.get_float32_matmul_precision() == original
+
+
+@pytest.mark.parametrize("precision", ["highest", "high", "medium"])
+def test_single_module_step_sets_float32_matmul_precision(precision: str):
+    """Building the step with float32_matmul_precision applies the torch
+    setting, so it takes effect at inference as well as training."""
+    original = torch.get_float32_matmul_precision()
+    try:
+        config = dict(
+            get_single_module_selector().config, float32_matmul_precision=precision
+        )
+        selector = StepSelector(type="single_module", config=config)
+        step = get_step(selector, DEFAULT_IMG_SHAPE)
+        assert isinstance(step, SingleModuleStep)
+        assert torch.get_float32_matmul_precision() == precision
+    finally:
+        torch.set_float32_matmul_precision(original)
+
+
 def test_step_with_adjustments_hybrid_residual_names():
     """residual_names restricts the residual add to a subset of prognostics:
     listed names step as input + output, the rest are full-field."""

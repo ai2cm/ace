@@ -50,10 +50,34 @@ class SwinTransformerBuilder(ModuleConfig):
         embed_dim: Channel dimension of the first/last U-Net stage.
         depth_multiplier: Scales the per-stage depths ``[2, 6, 6, 2]``.
         num_heads: Attention heads for each of the four stages (length-4 list).
-        window_size: ``[ws_h, ws_w]`` attention window.
+        window_size: ``[ws_h, ws_w]`` attention window, measured in tokens.
+        patch_size: ``[p_h, p_w]`` pixels per token. The token grid the U-Net
+            runs on is the padded pixel grid divided by ``patch_size``, and
+            ``window_size`` counts tokens, not pixels. This is the knob for
+            running a 1-degree (180x360) model at the token-grid cost of a
+            4-degree (45x90) one. Default ``[1, 1]`` is one token per pixel
+            and reproduces the previous network exactly.
+        num_levels: Number of U-Net downsampling levels above the bottleneck.
+            Each level beyond the first inserts a dim-preserving encoder stage
+            (with its own merge) between the first stage and the bottleneck,
+            and a mirrored decoder stage (with its own expand and skip) on the
+            way back up. Because the inserted stages keep the channel dimension
+            at ``embed_dim``, the bottleneck stages keep the same parameter
+            count and per-token cost; they just run on a ``2**num_levels``
+            times coarser token grid. The intended 1-degree recipe is
+            ``patch_size: [2, 2]`` with ``num_levels: 2``, which puts the
+            bottleneck on the same token grid as the 4-degree model's
+            (nominally 22x45, before padding up to whole attention windows).
+            Default 1 builds no extra levels and reproduces the previous
+            network exactly.
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        skip_projection: Project the concatenated skip back to ``embed_dim``
+            before the decoder stage so it runs at ``embed_dim`` rather than
+            ``2 * embed_dim`` channels. Cuts roughly a quarter of the FLOPs.
+            Requires ``use_skip``; default False keeps existing checkpoints
+            loadable.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         embed_dim_scalar: Scalar conditioning dimension. AdaLN conditioning on
             a scalar embedding requires a wrapper that populates
@@ -69,9 +93,12 @@ class SwinTransformerBuilder(ModuleConfig):
     depth_multiplier: int = 1
     num_heads: list[int] = dataclasses.field(default_factory=lambda: [3, 6, 6, 3])
     window_size: list[int] = dataclasses.field(default_factory=lambda: [4, 8])
+    patch_size: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    num_levels: int = 1
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
+    skip_projection: bool = False
     mlp_layer: str = "mlp"
     embed_dim_scalar: int = 0
     cpb_hidden_dim: int = 64
@@ -85,6 +112,14 @@ class SwinTransformerBuilder(ModuleConfig):
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
             self.padding_conf = TensorPaddingConfig(**self.padding_conf)
+        if self.skip_projection and not self.use_skip:
+            raise ValueError("skip_projection=True requires use_skip=True")
+        if len(self.patch_size) != 2:
+            raise ValueError(f"patch_size must have length 2, got {self.patch_size}")
+        if any(p < 1 for p in self.patch_size):
+            raise ValueError(f"patch_size entries must be >= 1, got {self.patch_size}")
+        if self.num_levels < 1:
+            raise ValueError(f"num_levels must be >= 1, got {self.num_levels}")
 
     def build(
         self,
@@ -123,6 +158,8 @@ class SwinTransformerBuilder(ModuleConfig):
             depth_multiplier=self.depth_multiplier,
             num_heads=tuple(self.num_heads),
             window_size=(self.window_size[0], self.window_size[1]),
+            patch_size=(self.patch_size[0], self.patch_size[1]),
+            num_levels=self.num_levels,
             mlp_ratio=self.mlp_ratio,
             drop_path_rate=self.drop_path_rate,
             use_skip=self.use_skip,
@@ -131,6 +168,7 @@ class SwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            skip_projection=self.skip_projection,
         )
         return _ContextWrappedModule(net)
 
@@ -149,10 +187,34 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
         embed_dim: Channel dimension of the first/last U-Net stage.
         depth_multiplier: Scales the per-stage depths ``[2, 6, 6, 2]``.
         num_heads: Attention heads for each of the four stages (length-4 list).
-        window_size: ``[ws_h, ws_w]`` attention window.
+        window_size: ``[ws_h, ws_w]`` attention window, measured in tokens.
+        patch_size: ``[p_h, p_w]`` pixels per token. The token grid the U-Net
+            runs on is the padded pixel grid divided by ``patch_size``, and
+            ``window_size`` counts tokens, not pixels. This is the knob for
+            running a 1-degree (180x360) model at the token-grid cost of a
+            4-degree (45x90) one. Default ``[1, 1]`` is one token per pixel
+            and reproduces the previous network exactly.
+        num_levels: Number of U-Net downsampling levels above the bottleneck.
+            Each level beyond the first inserts a dim-preserving encoder stage
+            (with its own merge) between the first stage and the bottleneck,
+            and a mirrored decoder stage (with its own expand and skip) on the
+            way back up. Because the inserted stages keep the channel dimension
+            at ``embed_dim``, the bottleneck stages keep the same parameter
+            count and per-token cost; they just run on a ``2**num_levels``
+            times coarser token grid. The intended 1-degree recipe is
+            ``patch_size: [2, 2]`` with ``num_levels: 2``, which puts the
+            bottleneck on the same token grid as the 4-degree model's
+            (nominally 22x45, before padding up to whole attention windows).
+            Default 1 builds no extra levels and reproduces the previous
+            network exactly.
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        skip_projection: Project the concatenated skip back to ``embed_dim``
+            before the decoder stage so it runs at ``embed_dim`` rather than
+            ``2 * embed_dim`` channels. Cuts roughly a quarter of the FLOPs.
+            Requires ``use_skip``; default False keeps existing checkpoints
+            loadable.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         noise_embed_dim: Dimension of the Gaussian noise field injected through
             each block's ``ConditionalLayerNorm``.
@@ -170,9 +232,12 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     depth_multiplier: int = 1
     num_heads: list[int] = dataclasses.field(default_factory=lambda: [3, 6, 6, 3])
     window_size: list[int] = dataclasses.field(default_factory=lambda: [4, 8])
+    patch_size: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    num_levels: int = 1
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
+    skip_projection: bool = False
     mlp_layer: str = "mlp"
     noise_embed_dim: int = 256
     label_embed_dim: int = 0
@@ -187,6 +252,14 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
             self.padding_conf = TensorPaddingConfig(**self.padding_conf)
+        if self.skip_projection and not self.use_skip:
+            raise ValueError("skip_projection=True requires use_skip=True")
+        if len(self.patch_size) != 2:
+            raise ValueError(f"patch_size must have length 2, got {self.patch_size}")
+        if any(p < 1 for p in self.patch_size):
+            raise ValueError(f"patch_size entries must be >= 1, got {self.patch_size}")
+        if self.num_levels < 1:
+            raise ValueError(f"num_levels must be >= 1, got {self.num_levels}")
 
     def build(
         self,
@@ -227,6 +300,8 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             depth_multiplier=self.depth_multiplier,
             num_heads=tuple(self.num_heads),
             window_size=(self.window_size[0], self.window_size[1]),
+            patch_size=(self.patch_size[0], self.patch_size[1]),
+            num_levels=self.num_levels,
             mlp_ratio=self.mlp_ratio,
             drop_path_rate=self.drop_path_rate,
             use_skip=self.use_skip,
@@ -236,6 +311,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            skip_projection=self.skip_projection,
         )
         return NoiseConditionedModel(
             net,

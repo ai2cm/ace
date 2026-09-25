@@ -754,6 +754,10 @@ class StepperConfig:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.step.get_prescribed_prognostic_names()
 
+    def replace_compile(self, compile: bool) -> None:
+        """Replace whether the step's forward pass runs through ``torch.compile``."""
+        self.step.replace_compile(compile)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1024,6 +1028,23 @@ class Stepper:
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._config.get_prescribed_prognostic_names()
+
+    def replace_compile(self, compile: bool) -> None:
+        """
+        Replace whether the network forward pass runs through ``torch.compile``.
+
+        Rebuilds the step from the updated config and reloads its state; the
+        parameters and state dict are unaffected by compilation.
+
+        Args:
+            compile: Whether to compile the forward pass.
+        """
+        self._config.replace_compile(compile)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
@@ -1908,12 +1929,20 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        compile: Whether to run the network forward pass through
+            ``torch.compile``, overriding the ``compile`` option of the
+            serialized ``single_module`` step. Use ``false`` to run a
+            checkpoint trained with ``compile: true`` eagerly, e.g. when
+            inference batch shapes vary and recompilation would dominate.
+            Only ``single_module`` steps (possibly wrapped in ``multi_call``)
+            support this override.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    compile: Literal["keep"] | bool = "keep"
 
 
 def load_stepper_config(
@@ -2006,6 +2035,9 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.compile != "keep":
+        logging.info("Overriding compile with %s.", override_config.compile)
+        stepper.replace_compile(override_config.compile)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2045,3 +2077,6 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.compile != "keep":
+        logging.info("Overriding compile with %s.", override_config.compile)
+        stepper_config.replace_compile(override_config.compile)

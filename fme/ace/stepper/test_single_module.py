@@ -2220,6 +2220,54 @@ def validate_stepper_prescribed_prognostic_names(
     assert config.prescribed_prognostic_names == expected
 
 
+def _get_inner_single_module_step(stepper: Stepper) -> SingleModuleStep:
+    """Get the built SingleModuleStep from a stepper (MultiCallStep or single)."""
+    from fme.core.step.multi_call import MultiCallStep
+
+    step = stepper._step_obj
+    if isinstance(step, MultiCallStep):
+        step = step._wrapped_step
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+@pytest.mark.parametrize(
+    "saved_compile, override_compile", [(True, False), (False, True)]
+)
+def test_load_stepper_with_compile_override(
+    tmp_path: pathlib.Path, saved_compile: bool, override_compile: bool
+):
+    """StepperOverrideConfig(compile=...) overrides the compile option
+    serialized in the checkpoint, both on the built step and on the
+    config returned by load_stepper_config_with_override."""
+    in_names = ["var", "a"]
+    out_names = ["var", "a"]
+    stepper_path = tmp_path / "stepper"
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=[9, 4, 8],
+        compile=saved_compile,
+    )
+
+    stepper = load_stepper(stepper_path)
+    assert _get_inner_single_module_config(stepper).compile == saved_compile
+    assert _get_inner_single_module_step(stepper).module.is_compiled == saved_compile
+
+    stepper_override = StepperOverrideConfig(compile=override_compile)
+    stepper = load_stepper(stepper_path, stepper_override)
+    assert _get_inner_single_module_config(stepper).compile == override_compile
+    assert _get_inner_single_module_step(stepper).module.is_compiled == override_compile
+
+    stepper_config = load_stepper_config_with_override(stepper_path, stepper_override)
+    assert stepper_config.step.config["wrapped_step"]["config"]["compile"] == (
+        override_compile
+    )
+
+
 @pytest.mark.medium_duration
 def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path):
     """Loading with StepperOverrideConfig(prescribed_prognostic_names=...) applies the
