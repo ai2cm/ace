@@ -1,7 +1,7 @@
 # ACE2S snow treatment: holdout rollouts of the fine-tuned checkpoints, 1-deg daily
 
 Offline evaluation of the two fine-tuned treatment models at their best-inference epochs, the
-nominal final products of the `2026-09-17-ace2s-snow-inline-metrics-train` round, over each
+nominal final products, and of their controls, of the `2026-09-17-ace2s-snow-inline-metrics-train` round, over each
 dataset's holdout period with overlapping members to sample ensemble variability. The inline
 five-year rollout during training rests on a few initial conditions; these runs confirm its
 time-mean climate, memory and snow-season statistics on independent dates and save daily fields
@@ -13,6 +13,13 @@ for offline analysis.
 |---|---|---|---|
 | cm4-masked-naive | `01M38TTH492G0WT71YFAEH0V58` | 13 of 21 run (the run destabilised after epoch 14; see the training README) | 0.016 |
 | era5-masked-naive | `01M37GMA67V8201AN8NVASX7ZP` | best of 40 | 0.037-0.040 |
+| cm4-control | `01M33SZ16PFWP822C663RN42Z7` | 16 of 24 run (stopped) | 0.016 |
+| era5-control | `01M33SZ7WVXC0CFZ8HSY113E08` | 13 of 31 run (stopped) | 0.037-0.040 |
+
+The controls run the same members from their own fine-tuned best-inference checkpoints, so the
+non-snow comparison (time-mean error of every variable, temperature memory) is like for like.
+They carry no snow channels: their configs read the base store only, write no snow fields and no
+target (the treatment run of the same dataset writes the shared target), and skip `snow_season`.
 
 ## Initial conditions
 
@@ -40,6 +47,6 @@ and daily fields (the 2026-09-13 snow-memory set plus `PRATEsfc`) as zarr, cropp
 
 ```
 cd configs/experiments/2026-09-25-ace2s-snow-ft-rollouts
-./run-ace-evaluator.sh          # both arms; W&B group ace2s-snow-inline-metrics, like the training jobs
-./run-ace-evaluator.sh cm4      # one arm
+./run-ace-evaluator.sh          # all four; W&B group ace2s-snow-inline-metrics, like the training jobs
+./run-ace-evaluator.sh control  # the two controls (the treatments were launched 2026-09-25 14:22 PDT)
 ```

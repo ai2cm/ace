@@ -1,11 +1,12 @@
 #!/bin/bash
-# Holdout rollouts of the fine-tuned treatment checkpoints (best-inference epoch of the
-# multi-step fine-tunes), eight overlapping five-year members each, logged to the
-# training jobs' W&B group.
+# Holdout rollouts of the fine-tuned checkpoints (best-inference epoch of the multi-step
+# fine-tunes), treatment and control on each dataset, with the same overlapping members,
+# logged to the training jobs' W&B group.
 #
 # Usage:
-#   ./run-ace-evaluator.sh              # submit both
+#   ./run-ace-evaluator.sh              # submit all four
 #   ./run-ace-evaluator.sh cm4          # optional substring filter on the job name
+#   ./run-ace-evaluator.sh control      # the two controls
 
 set -e
 
@@ -33,7 +34,7 @@ run_evaluator() {
     gantry run \
         --name $job_name \
         --task-name $job_name \
-        --description "ACE2S fine-tuned treatment holdout rollout: $arm" \
+        --description "ACE2S fine-tuned holdout rollout: $arm" \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority normal \
@@ -58,3 +59,5 @@ run_evaluator() {
 
 run_evaluator cm4-masked-naive   01M38TTH492G0WT71YFAEH0V58
 run_evaluator era5-masked-naive  01M37GMA67V8201AN8NVASX7ZP
+run_evaluator cm4-control        01M33SZ16PFWP822C663RN42Z7
+run_evaluator era5-control       01M33SZ7WVXC0CFZ8HSY113E08
