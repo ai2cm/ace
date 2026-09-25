@@ -194,9 +194,9 @@ def HI(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Recover sea ice thickness (HI) in meters from sea ice volume in 1000 * km^3.
+    """Recover sea ice thickness (HI) in meters from sea ice volume in m^3.
 
-    HI = sea_ice_volume * 1e9 / (area_weights_m2 * sea_ice_frac)
+    HI = sea_ice_volume/ (area_weights_m2 * sea_ice_frac)
     """
     return data.sea_ice_thickness
 
