@@ -23,21 +23,24 @@ Verified against the scheduler source (allenai/beaker, `scheduling/internal/sort
 
 - Each budget has two numbers per cluster (`beaker allocation list <cluster> --org ai2`): a
   runtime quota percentage, whose share of the cluster's slots is its **target**, and a
-  `slotLimit`, the **burst cap** it may reach when slots are free. A budget can run over target
-  but never over the cap. Budgets do not compete with each other for those slots.
+  `slotLimit`, the **cap**. A budget can run over target but never over the cap, and running over
+  target has a price: its jobs rank behind every under-target group's jobs, from any budget, and
+  become fair game for preemption once past their minimum runtime.
 - Jobs submitted with a minimum runtime are **allocated**. They compete only with the same
   budget's other allocated jobs for its quota. Jobs with no minimum runtime are **unallocated**
   backfill: a separate, age-ordered, preemptible queue that never explains why an allocated job
   waits.
-- The allocated queue sorts by allocation balance at the workspace-group level, then at the
-  workspace level, then priority, then age. Balance is (quota − usage) / quota over a decaying
-  multi-day window. A balance criterion is an entity boundary: priority and age only ever order
-  jobs within one workspace. When every waiting job of the budget is in one workspace the balance
-  keys tie and the order is priority, then age; the script checks this and says which case applies.
+- The allocated queue sorts by allocation balance at the workspace-group level across the whole
+  cluster, then at the workspace level, then priority, then age. Balance is (quota − usage) / quota
+  over a decaying multi-day window. A balance criterion is an entity boundary: priority and age
+  only ever order jobs within one group. Within a budget whose waiting jobs share one workspace the
+  balance keys tie and the order is priority, then age; the script checks this and says which case
+  applies. The header's decay-weighted standing approximates the scheduler's balance; a preemption
+  message (`canceledFor` on the job) quotes the exact one.
 - A running allocated job is protected only for its minimum runtime. After that it is
-  interruptible: a queued allocated job of higher priority in the same workspace can preempt it,
-  as can one whose workspace is further under its target when the victim's workspace is over
-  target. Ranking ahead only by age never licenses preemption. The script prints each running job's
+  interruptible: a queued allocated job of higher priority in the same group can preempt it, and so
+  can any under-target group's job, from any budget, while the victim's group is over target.
+  Ranking ahead only by age never licenses preemption. The script prints each running job's
   minimum runtime left; blank means it has elapsed and the job is interruptible now.
 - Allocated means minimum runtime > 0, for running and queued jobs alike (`Allocated()` in
   `msg/job.go`; the same test in the `cluster usage` SQL). `beaker job list --cluster X` returns
@@ -49,8 +52,8 @@ Verified against the scheduler source (allenai/beaker, `scheduling/internal/sort
 
 ## Reporting
 
-The script prints markdown: a header with the budget's slots in use, its target and burst cap, and
-its usage over the scheduler's lookback window against target (undecayed, so approximate), then
+The script prints markdown: a header with the budget's slots in use, its target and cap, and its
+decay-weighted standing against target over the scheduler's lookback window (approximate), then
 two tables: the
 budget's allocated jobs running on the cluster with their minimum runtime left, and its allocated
 jobs scheduled or queued in scheduling order. With `--include-unallocated` the same two tables
