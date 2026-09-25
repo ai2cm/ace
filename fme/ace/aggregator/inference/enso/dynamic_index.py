@@ -14,7 +14,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict
-from fme.core.wandb import WandB
+from fme.core.wandb import Image, WandB
 
 from ...plotting import (
     clamp_date_axis,
@@ -40,7 +40,7 @@ SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
 MAX_PLOTTED_PERIOD_YEARS = 16.0
 
 
-def _as_image(fig) -> Any:
+def _as_image(fig: plt.Figure) -> Image:
     """Rasterize a figure for logging, instead of handing wandb the figure.
 
     wandb converts a matplotlib figure to a plotly chart, and that conversion
