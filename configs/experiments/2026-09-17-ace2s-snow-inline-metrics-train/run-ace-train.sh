@@ -15,6 +15,7 @@ job_name_for() {
   case "$1" in
     cm4-control)       echo "ace2s-snowmetrics-cm4-daily-control-1-step-pretrain-rs0" ;;
     cm4-masked-naive)  echo "ace2s-snowmetrics-cm4-daily-masked-naive-land-snow-1-step-pretrain-rs0" ;;
+    cm4-masked-naive-soil-temperature) echo "ace2s-snowmetrics-cm4-daily-masked-naive-land-snow-soil-temperature-1-step-pretrain-rs0" ;;
     era5-control)      echo "ace2s-snowmetrics-era5-daily-control-1-step-pretrain-rs0" ;;
     era5-masked-naive) echo "ace2s-snowmetrics-era5-daily-masked-naive-land-snow-1-step-pretrain-rs0" ;;
     *) return 1 ;;
@@ -27,7 +28,7 @@ if [[ ${#ARMS[@]} -eq 0 ]]; then
 fi
 for arm in "${ARMS[@]}"; do
   job_name_for "$arm" >/dev/null || {
-    echo "unknown arm $arm; choose from cm4-control cm4-masked-naive era5-control era5-masked-naive" >&2
+    echo "unknown arm $arm; choose from cm4-control cm4-masked-naive cm4-masked-naive-soil-temperature era5-control era5-masked-naive" >&2
     exit 1
   }
 done
