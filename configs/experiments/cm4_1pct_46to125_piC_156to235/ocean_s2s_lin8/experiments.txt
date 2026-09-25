@@ -1,1 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs0|01M3B5K08B4PF3H9XZEAVDP10Y|training|best_inference_ckpt|normal|--min-runtime 8h
