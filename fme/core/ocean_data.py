@@ -1,4 +1,3 @@
-import math
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
@@ -251,8 +250,7 @@ class OceanData:
                 float("nan"),
                 torch.nan_to_num(
                     torch.exp(
-                        9 * math.log(10)
-                        + torch.log(sea_ice_vol)
+                        torch.log(sea_ice_vol)
                         - torch.log(cell_area)
                         - torch.log(sea_ice_frac)
                     )

@@ -19,6 +19,8 @@ pip install fme
 
 See complete documentation [here](https://ai2-climate-emulator.readthedocs.io/en/latest/) and a quickstart guide [here](https://ai2-climate-emulator.readthedocs.io/en/latest/quickstart.html).
 
+New to ACE? See our previous [workshop notebooks](https://ai2cm.github.io/ace/) giving a step-by-step walkthrough of running ACE, SamudrACE, and HiRO-ACE on free Colab GPUs.
+
 ## Model checkpoints
 
 Pretrained model checkpoints are available in the [ACE Hugging Face](https://huggingface.co/collections/allenai/ace-67327d822f0f0d8e0e5e6ca4) collection.

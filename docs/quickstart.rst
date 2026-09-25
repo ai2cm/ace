@@ -8,6 +8,12 @@ Quickstart
     This page documents usage of **uncoupled** models like ACE, SamudraI or FloeNet.
     For information on using coupled atmosphere-ocean models, see the :ref:`Coupled Inference <coupled>` section.
 
+.. seealso::
+
+    New to ACE? See the `ACE workshop notebooks <https://ai2cm.github.io/ace/>`_ for a
+    guided walkthrough of how to run ACE, SamudrACE, and HiRO-ACE on free Google
+    Colab GPUs --- no local install required.
+
 Install
 =======
 
