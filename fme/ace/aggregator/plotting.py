@@ -282,9 +282,17 @@ def format_period_axis(
     max_period_years: float,
     min_period_years: float = 0.5,
 ):
-    """Format an axes' x axis as a period in years on a base-2 log scale."""
+    """Format an axes' x axis as a period in years on a log scale.
+
+    The scale is base 10 even though the ticks are octaves, because wandb
+    renders a logged figure by converting it to plotly, and plotly can only
+    represent a base-10 log axis: given any other base it silently falls back
+    to a linear axis, which would stop the power-per-octave curve being
+    variance-preserving. The tick *placement* is unaffected by the base, so the
+    figure still reads in octaves wherever it is drawn by matplotlib.
+    """
     max_period_years = max(max_period_years, 2 * min_period_years)
-    ax.set_xscale("log", base=2)
+    ax.set_xscale("log")
     ax.set_xlim(min_period_years, max_period_years)
     ticks = [
         tick

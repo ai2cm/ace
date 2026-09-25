@@ -184,3 +184,25 @@ def test_format_period_axis_drops_ticks_beyond_a_short_record():
         assert labels == ["0.5", "1.0", "2.0"]
     finally:
         plt.close(fig)
+
+
+def test_format_period_axis_survives_wandb_plotly_conversion():
+    """Regression: the period axis must stay logarithmic in wandb.
+
+    wandb renders a logged matplotlib figure by converting it to plotly, and
+    plotly represents only base-10 log axes -- given any other base it silently
+    falls back to linear, which would stop the power-per-octave curve being
+    variance-preserving. Assert on the converted figure rather than on the base,
+    so the test states the property we actually depend on.
+    """
+    plotly_tools = pytest.importorskip("plotly.tools")
+
+    fig, ax = plt.subplots(1, 1)
+    try:
+        ax.plot([0.5, 1.0, 2.0, 4.0], [1.0, 2.0, 3.0, 4.0])
+        format_period_axis(ax, max_period_years=16.0)
+        converted = plotly_tools.mpl_to_plotly(fig)
+    finally:
+        plt.close(fig)
+
+    assert converted.layout.xaxis.type == "log"
