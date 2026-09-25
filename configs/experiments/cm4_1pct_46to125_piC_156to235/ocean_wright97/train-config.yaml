@@ -186,6 +186,13 @@ stepper_training:
   optimized_derived_variables:
     - name: rho_wright97
       weight: 1.0
+    # Hydrostatic bottom pressure anomaly, couples zos to thetao/so (globally demeaned):
+    #   pbo_wright97 = RHO_0 g zos + g sum_k rho_wright97_k dz_k - <.>
+    # std defaults to PBO_WRIGHT97_STD.
+    # - name: pbo_wright97
+    #   weight: 1.0
+    # - name: steric_height_wright97
+    #   weight: 1.0
 stepper:
   input_masking:
     mask_value: 0
