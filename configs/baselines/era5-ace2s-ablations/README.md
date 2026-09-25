@@ -25,6 +25,9 @@ every 10 epochs (`ema_checkpoint_save_epochs`).
 | `ace2s-pretrain-4deg.yaml` | 4-degree: the regenerated `2026-09-08-era5-4deg-8layer-daily-1940-2025` store (`*_mean` fields plus PRMSL and the surface stresses in one store, from main's `scripts/data_process/configs/era5-4deg-8layer-1940-2025.yaml`); one GPU, batch size 8, loader parameters from the 4-degree daily v2 config; spectral bottleneck kept |
 | `ace2s-pretrain-4deg-rs{1,2,3}.yaml` | the 4-degree arm with seeds 1-3 (a 4-member seed ensemble at 4 degrees, since one-GPU runs are cheap) |
 | `ace2s-finetune-4deg.yaml` | the 4-degree arm's 10-epoch 3-step detached fine-tune (paper fine-tune recipe: `n_forward_steps: 3`, `use_gradient_accumulation: true`, warm start from the pretrain's `best_ckpt.tar` mounted at `/weights`); full and EMA checkpoints at epochs 5 and 10 |
+| `ace2s-finetune-4deg-rs{1,2,3}.yaml` | the same fine-tune for the 4-degree seed replicates (seed N pretrain at `/weights`, `seed: N`) |
+| `ace2s-finetune-rs1.yaml` | the 1-degree seed-1 replicate's 10-epoch 3-step detached fine-tune (paper fine-tune recipe, seed 1) |
+| `ace2s-finetune-deterministic.yaml` | the deterministic arm's fine-tune: paper detached recipe with the arm's MSE loss (ACE2 weight table, single member) and 1-member inline inference |
 
 Launch with `./run-train.sh [<filter> ...]` from this directory: workspace
 `ai2/ace`, beaker priority `normal`, no `CM_PRIORITY` label, 8 GPUs on

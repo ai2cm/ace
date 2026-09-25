@@ -159,3 +159,10 @@ run_training "ace2s-finetune-4deg.yaml" "4deg-daily-ace2s-ft3-detached-rs0" 1
 run_training "ace2s-pretrain-4deg-rs1.yaml" "4deg-daily-ace2s-pretrain-rs1" 1
 run_training "ace2s-pretrain-4deg-rs2.yaml" "4deg-daily-ace2s-pretrain-rs2" 1
 run_training "ace2s-pretrain-4deg-rs3.yaml" "4deg-daily-ace2s-pretrain-rs3" 1
+
+# Stage-2 fine-tunes of the finished pretrains (paper detached recipe, 10 epochs)
+run_training "ace2s-finetune-rs1.yaml" "1deg-daily-ace2s-ft3-detached-rs1" 8
+run_training "ace2s-finetune-deterministic.yaml" "1deg-daily-ace2s-det-ft3-detached-rs0" 8
+run_training "ace2s-finetune-4deg-rs1.yaml" "4deg-daily-ace2s-ft3-detached-rs1" 1
+run_training "ace2s-finetune-4deg-rs2.yaml" "4deg-daily-ace2s-ft3-detached-rs2" 1
+run_training "ace2s-finetune-4deg-rs3.yaml" "4deg-daily-ace2s-ft3-detached-rs3" 1
