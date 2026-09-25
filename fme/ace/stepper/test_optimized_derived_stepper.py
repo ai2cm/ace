@@ -71,16 +71,16 @@ def _dataset_info(with_spatial_masks: bool = False) -> DatasetInfo:
     )
 
 
-def _stepper_config(module: torch.nn.Module) -> StepperConfig:
+def _stepper_config(module: torch.nn.Module, names=NAMES) -> StepperConfig:
     return StepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
                 SingleModuleStepConfig(
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
-                    in_names=NAMES,
-                    out_names=NAMES,
-                    normalization=trivial_network_and_loss_normalization(NAMES),
+                    in_names=names,
+                    out_names=names,
+                    normalization=trivial_network_and_loss_normalization(names),
                     corrector=CorrectorSelector("ocean_corrector", {}),
                 )
             ),
@@ -88,9 +88,9 @@ def _stepper_config(module: torch.nn.Module) -> StepperConfig:
     )
 
 
-def _data(n_timesteps: int = 3, seed: int = 0) -> BatchData:
+def _data(n_timesteps: int = 3, seed: int = 0, names=NAMES) -> BatchData:
     data = BatchData.new_for_testing(
-        names=NAMES, n_samples=2, n_timesteps=n_timesteps, img_shape=IMG_SHAPE
+        names=names, n_samples=2, n_timesteps=n_timesteps, img_shape=IMG_SHAPE
     )
     g = torch.Generator().manual_seed(seed)
     shape = data.data[NAMES[0]].shape
@@ -100,9 +100,9 @@ def _data(n_timesteps: int = 3, seed: int = 0) -> BatchData:
     return data
 
 
-def _train_stepper(module: torch.nn.Module, **train_config_kwargs):
+def _train_stepper(module: torch.nn.Module, names=NAMES, **train_config_kwargs):
     return TrainStepperConfig(**train_config_kwargs).get_train_stepper(
-        _stepper_config(module), _dataset_info()
+        _stepper_config(module, names), _dataset_info()
     )
 
 
@@ -433,3 +433,39 @@ def test_rho_gradient_through_ocean_heat_content_corrector():
     assert grads[False][i_hfds] == 0.0
     i_thetao = [OHC_NAMES.index(f"thetao_{k}") for k in range(N_LEVELS)]
     assert not torch.allclose(grads[True][i_thetao], grads[False][i_thetao])
+
+
+COLUMN_NAMES = NAMES + ["zos"]
+
+
+def test_train_on_batch_with_pbo():
+    """pbo_wright97 alone carries loss weight: its gradient moves the zos, so and
+    thetao channels, and TrainOutput's derived gen and target data carry it."""
+    torch.manual_seed(0)
+    stepper = _train_stepper(
+        _AddBias(len(COLUMN_NAMES)),
+        names=COLUMN_NAMES,
+        loss=StepLossConfig(type="MSE", weights={n: 0.0 for n in COLUMN_NAMES}),
+        optimized_derived_variables=[
+            OptimizedDerivedVariableConfig(
+                name="pbo_wright97", stds={"pbo_wright97": 100.0}
+            )
+        ],
+    )
+    optimization = OptimizationConfig(lr=1e-2).build(
+        modules=stepper.modules, max_epochs=1
+    )
+    stepped = stepper.train_on_batch(
+        _data(names=COLUMN_NAMES),
+        optimization=optimization,
+        compute_derived_variables=True,
+    )
+    assert stepped.per_channel_losses is not None
+    assert set(stepped.per_channel_losses) == set(COLUMN_NAMES + ["pbo_wright97"])
+    assert stepped.per_channel_losses["pbo_wright97"].loss > 0.0
+    (bias,) = [p for p in stepper.modules.parameters()]
+    assert (bias.detach().flatten() != 0).all()
+    wet = _dataset_info().vertical_coordinate.mask[..., 0] > 0  # type: ignore
+    for data in (stepped.gen_data, stepped.target_data):
+        pbo = data["pbo_wright97"]
+        assert pbo[..., ~wet].isnan().all() and pbo[..., wet].isfinite().all()

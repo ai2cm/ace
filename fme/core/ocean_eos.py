@@ -18,9 +18,11 @@ ai2cm workspace (``wright97_anomaly``, ``boussinesq_pressure``,
 
 import torch
 
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, GRAVITY
+
 # Boussinesq constants of the CM4 runs (MOM6 ``RHO_0``, ``G_EARTH``).
-RHO_0 = 1035.0  # [kg m-3]
-G_EARTH = 9.8  # [m s-2]
+RHO_0 = DENSITY_OF_SEA_WATER_CM4  # [kg m-3]
+G_EARTH = GRAVITY  # [m s-2]
 
 # Reduced-range fit, -2<T<30 degC, 28<S<38 PSU, 0<p<5e7 Pa.
 _A0, _A1, _A2 = 7.057924e-4, 3.480336e-7, -1.112733e-7

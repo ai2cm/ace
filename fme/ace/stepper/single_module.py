@@ -940,6 +940,7 @@ class Stepper:
                 network_normalizer=self.normalizer,
                 loss_normalizer=loss_normalizer,
                 loss_names=self.loss_names,
+                gridded_operations=self._dataset_info.gridded_operations,
             )
             logging.info(
                 "optimized derived variables in the loss: "

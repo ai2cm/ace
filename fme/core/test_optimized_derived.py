@@ -3,12 +3,15 @@ import torch
 
 from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import CorrectorLoss, StepLossConfig, StepOutputLoss
 from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean_eos import G_EARTH, RHO_0, wright97_anomaly
 from fme.core.optimized_derived import (
+    PBO_WRIGHT97_STD,
     SO_CLAMP_RANGE,
+    STERIC_HEIGHT_WRIGHT97_STD,
     THETAO_CLAMP_RANGE,
     OptimizedDerivedVariableConfig,
     build_optimized_derived_variables,
@@ -360,3 +363,192 @@ def test_clamp_gradient_finite_at_pole_adjacent_inputs():
         outside = (x < lo) | (x > hi)
         assert outside.any() and (grad[outside] == 0).all()
         assert (grad[~outside] != 0).any()
+
+
+# ---------------------------------------------------------------- column variables
+# pbo_wright97 = P - <P>,  P = RHO_0 g zos + g sum_k rho_k dz_k
+# steric_height_wright97 = -(C - <C>) / RHO_0
+
+DEPTHO = torch.full((N_LAT, N_LON), 1000.0)
+DEPTHO[2, :] = 400.0  # partial bottom cell at level 1
+DEPTHO[1, :] = 10.0  # level 1 dry (mask[1, :, 1] == 0)
+COLUMN_NAMES = NAMES + ["zos"]
+
+
+def _ops() -> LatLonOperations:
+    # non-uniform in latitude, uniform in longitude
+    area = torch.linspace(1.0, 2.0, N_LAT)[:, None].expand(N_LAT, N_LON).clone()
+    return LatLonOperations(area)
+
+
+def _build_column(names=("pbo_wright97",), loss_names=COLUMN_NAMES, ops="default"):
+    return build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig(name=n, stds={n: 1.0}) for n in names],
+        vertical_coordinate=DepthCoordinate(IDEPTH, _mask(), DEPTHO),
+        network_normalizer=_normalizer(),
+        loss_normalizer=_normalizer(),
+        loss_names=list(loss_names),
+        gridded_operations=_ops() if ops == "default" else ops,
+    )
+
+
+def _column_data(seed=0):
+    data = _data(seed=seed)
+    g = torch.Generator().manual_seed(seed + 100)
+    data["zos"] = (0.5 * torch.randn((2, 1, N_LAT, N_LON), generator=g)).to(
+        get_device()
+    )
+    return data
+
+
+def _expected_column(data):
+    """Hand computation: dz from idepth and deptho, uniform-in-lon area mean
+    over mask_0."""
+    mask = _mask().to(get_device())
+    C = torch.zeros_like(data["zos"])
+    for k in range(N_LEVELS):
+        z_top, z_bot = float(IDEPTH[k]), float(IDEPTH[k + 1])
+        dz = (DEPTHO.clamp(z_top, z_bot) - z_top).to(get_device()) * mask[..., k]
+        p = torch.tensor(RHO_0 * G_EARTH * 0.5 * (z_top + z_bot))
+        rho = wright97_anomaly(data[f"so_{k}"], data[f"thetao_{k}"], p, RHO_0)
+        C = C + torch.where(mask[..., k] > 0, rho * dz, 0.0)
+    wet = (mask[..., 0] > 0).expand_as(C)
+    w = (_ops()._cpu_area.to(get_device()) * wet).to(C.dtype)
+
+    def demean(x):
+        return x - (x * w).sum((-2, -1), keepdim=True) / w.sum((-2, -1), keepdim=True)
+
+    P = RHO_0 * G_EARTH * data["zos"] + G_EARTH * C
+    return (
+        torch.where(wet, demean(P), torch.nan),
+        torch.where(wet, -demean(C) / RHO_0, torch.nan),
+    )
+
+
+def test_column_values_and_mask():
+    derived = _build_column(("pbo_wright97", "steric_height_wright97"))
+    assert derived.names == ["pbo_wright97", "steric_height_wright97"]
+    data = _column_data()
+    out = derived(data)
+    pbo, steric = _expected_column(data)
+    torch.testing.assert_close(out["pbo_wright97"], pbo, equal_nan=True)
+    torch.testing.assert_close(out["steric_height_wright97"], steric, equal_nan=True)
+    assert out["pbo_wright97"][:, :, 0].isnan().all()  # land row
+    assert out["pbo_wright97"][:, :, 1:].isfinite().all()
+    # partial bottom cell: row 2 differs from a full-cell column
+    full = build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig(name="pbo_wright97", stds={"pbo_wright97": 1})],
+        vertical_coordinate=DepthCoordinate(IDEPTH, _mask()),
+        network_normalizer=_normalizer(),
+        loss_normalizer=_normalizer(),
+        loss_names=COLUMN_NAMES,
+        gridded_operations=_ops(),
+    )(data)["pbo_wright97"]
+    assert not torch.allclose(full[:, :, 2], out["pbo_wright97"][:, :, 2])
+
+
+def test_column_global_mean_removed():
+    derived = _build_column(("pbo_wright97", "steric_height_wright97"))
+    data = _column_data()
+    out = derived(data)
+    w = _ops()._cpu_area.to(get_device()) * (_mask().to(get_device())[..., 0] > 0)
+    for name in derived.names:
+        mean = (out[name].nan_to_num() * w).sum((-2, -1)) / w.sum()
+        torch.testing.assert_close(mean, torch.zeros_like(mean), atol=1e-2, rtol=0)
+    # uniform zos shift and a uniform NaN off-mask do not change pbo
+    shifted = dict(data, zos=data["zos"] + 0.3)
+    shifted["zos"][:, :, 0] = torch.nan
+    torch.testing.assert_close(
+        derived(shifted)["pbo_wright97"],
+        out["pbo_wright97"],
+        equal_nan=True,
+        atol=1e-2,  # float32 at |P| ~ 1e3 Pa
+        rtol=0,
+    )
+
+
+def test_column_gradient_reaches_zos_thetao_so():
+    derived = _build_column(("pbo_wright97",))
+    step_loss = StepLossConfig(
+        type="MSE", weights={n: 0.0 for n in COLUMN_NAMES}
+    ).build(
+        gridded_ops=None,
+        out_names=COLUMN_NAMES,
+        normalizer=StandardNormalizer(
+            means={n: torch.tensor(0.0) for n in COLUMN_NAMES},
+            stds={n: torch.tensor(1.0) for n in COLUMN_NAMES},
+        ),
+        channel_dim=-3,
+        derived=derived,
+    )
+    mask = _mask().to(get_device()) > 0
+    target = _column_data(seed=0)
+    for k in range(N_LEVELS):  # NaN off-mask, as in the ocean datasets
+        for v in ("so", "thetao"):
+            target[f"{v}_{k}"] = torch.where(
+                mask[..., k], target[f"{v}_{k}"], torch.nan
+            )
+    target["zos"] = torch.where(mask[..., 0], target["zos"], torch.nan)
+    predict = {k: v.clone().requires_grad_() for k, v in _column_data(seed=1).items()}
+    with torch.no_grad():  # NaN predictions at masked points
+        predict["thetao_0"][0, 0, 0, 0] = torch.nan
+        predict["zos"][0, 0, 0, 1] = torch.nan
+    output = step_loss(predict, target, step=0)
+    assert "pbo_wright97" in output.get_channel_losses()
+    total = output.total()
+    assert total.isfinite() and total > 0
+    total.backward()
+    for name in COLUMN_NAMES:
+        grad = predict[name].grad
+        assert grad is not None and grad.isfinite().all(), name
+        k = 0 if name == "zos" else int(name.split("_")[-1])
+        valid = mask[..., k].expand_as(grad)
+        assert (grad[valid] != 0).any(), name
+        assert (grad[~valid] == 0).all(), name
+
+
+def test_column_default_stds():
+    derived = build_optimized_derived_variables(
+        [
+            OptimizedDerivedVariableConfig(name="pbo_wright97"),
+            OptimizedDerivedVariableConfig(name="steric_height_wright97", weight=0.5),
+        ],
+        vertical_coordinate=DepthCoordinate(IDEPTH, _mask(), DEPTHO),
+        network_normalizer=_normalizer(),
+        loss_normalizer=_normalizer(),
+        loss_names=COLUMN_NAMES,
+        gridded_operations=_ops(),
+    )
+    assert derived.stds == {
+        "pbo_wright97": PBO_WRIGHT97_STD,
+        "steric_height_wright97": STERIC_HEIGHT_WRIGHT97_STD,
+    }
+    assert derived.weights == {"pbo_wright97": 1.0, "steric_height_wright97": 0.5}
+    assert derived.means == {"pbo_wright97": 0.0, "steric_height_wright97": 0.0}
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"loss_names": NAMES}, "zos"),
+        ({"loss_names": ["zos", "so_0", "thetao_0", "so_1"]}, "thetao_1"),
+        ({"ops": None}, "gridded"),
+        ({"loss_names": COLUMN_NAMES + ["pbo_wright97"]}, "not unique"),
+    ],
+)
+def test_column_build_validation(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        _build_column(**kwargs)
+
+
+def test_steric_height_does_not_need_zos():
+    derived = _build_column(("steric_height_wright97",), loss_names=NAMES)
+    data = _column_data()
+    del data["zos"]
+    assert set(derived(data)) == {"steric_height_wright97"}
+
+
+@pytest.mark.parametrize("name", ["pbo_wright97", "steric_height_wright97"])
+def test_column_config_rejects_levels(name):
+    with pytest.raises(ValueError, match="levels"):
+        OptimizedDerivedVariableConfig(name=name, levels=[0])

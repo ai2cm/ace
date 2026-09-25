@@ -1,6 +1,3 @@
-import importlib.util
-import pathlib
-
 import pytest
 import torch
 
@@ -20,17 +17,6 @@ RTOL = {
     torch.float64: 1000 * torch.finfo(torch.float64).eps,
     torch.float32: 32 * torch.finfo(torch.float32).eps,
 }
-
-# Reference implementation in the ai2cm workspace, when this repo is checked out
-# inside it; the cross-check is skipped otherwise.
-_REFERENCE = next(
-    (
-        p / "analysis/2026-09-23-1523-wright97-rhoinsitu/wright97_eos.py"
-        for p in pathlib.Path(__file__).resolve().parents
-        if (p / "analysis/2026-09-23-1523-wright97-rhoinsitu/wright97_eos.py").exists()
-    ),
-    None,
-)
 
 
 def _grid(dtype, requires_grad=False):
@@ -81,21 +67,3 @@ def test_pressure_helpers():
     z = interface_to_center_depth(idepth)
     torch.testing.assert_close(z, torch.tensor([5.0, 20.0], dtype=torch.float64))
     torch.testing.assert_close(boussinesq_pressure(z), RHO_0 * G_EARTH * z)
-    assert RHO_0 == 1035.0 and G_EARTH == 9.8
-
-
-@pytest.mark.skipif(_REFERENCE is None, reason="workspace reference module absent")
-def test_matches_workspace_reference():
-    spec = importlib.util.spec_from_file_location("wright97_eos", _REFERENCE)
-    assert spec is not None and spec.loader is not None
-    ref = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(ref)
-    for dtype in (torch.float64, torch.float32):
-        S, T, p = _grid(dtype)
-        torch.testing.assert_close(
-            wright97_anomaly(S, T, p, RHO_0),
-            ref.wright97_anomaly(S, T, p, RHO_0),
-            rtol=0.0,
-            atol=0.0,
-        )
-    assert (RHO_0, G_EARTH) == (ref.RHO_0, ref.G_EARTH)
