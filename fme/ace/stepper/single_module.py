@@ -1915,6 +1915,78 @@ class StepperOverrideConfig:
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
 
+    # TODO(corrector override): design notes for adding a ``corrector`` override,
+    # so a trained checkpoint can be evaluated with a different (e.g. salinity)
+    # corrector via ``--override stepper_override.corrector.type=ocean_corrector
+    # stepper_override.corrector.config.ocean_salt_content_thickness_correction.
+    # method=scaled_salinity ...``. Follow the ``ocean`` override, which is the
+    # closest existing case (a config-only replacement, no weights).
+    #
+    # 1. Field here::
+    #
+    #        corrector: Literal["keep"] | CorrectorSelector | AtmosphereCorrectorConfig
+    #            = "keep"
+    #
+    #    ``CorrectorSelector`` covers ``ocean_corrector`` (and any registered
+    #    type); ``AtmosphereCorrectorConfig`` is the untyped default in
+    #    ``SingleModuleStepConfig.corrector`` so keep the same union there.
+    #    Dacite resolves ``{type, config}`` to the selector. A dotlist override
+    #    can only set leaf keys, so the YAML config for the run should carry the
+    #    full baseline corrector (force_positive_names, sea-ice, heat-content
+    #    corrections) and the dotlist toggles the salinity method/params on top.
+    #    Note the override REPLACES the checkpoint corrector rather than merging
+    #    with it; document that in the docstring. If a "merge with the trained
+    #    corrector config" behavior is wanted, do it explicitly in
+    #    ``apply_stepper_override`` by reading ``stepper.get_corrector()`` and
+    #    ``dataclasses.replace``-ing the changed sub-configs.
+    #
+    # 2. ``StepConfigABC`` (fme/core/step/step.py): add abstract
+    #    ``replace_corrector(corrector)`` / ``get_corrector()`` next to
+    #    ``replace_ocean`` / ``get_ocean``. Implement on every config that
+    #    has a ``corrector`` field (core/step/single_module.py,
+    #    core/step/secondary_module.py, core/step/radiation.py,
+    #    ace/step/fcn3.py) as a plain attribute swap, and delegate on the
+    #    wrappers (core/step/multi_call.py -> ``wrapped_step``,
+    #    ``StepSelector`` in step.py -> ``_step_config_instance`` plus
+    #    ``self.config = dataclasses.asdict(...)`` so the serialized selector
+    #    stays in sync, exactly as ``replace_ocean`` does there).
+    #
+    # 3. ``StepperConfig.replace_corrector`` in this module: delegate to
+    #    ``self.step.replace_corrector``, mirroring ``replace_ocean`` above.
+    #
+    # 4. ``Stepper.replace_corrector``: same rebuild-and-reload pattern as
+    #    ``Stepper.replace_ocean``: update ``self._config``, ``get_stepper(
+    #    dataset_info=self._dataset_info)``, ``load_state(self._step_obj
+    #    .get_state())``, swap ``_step_obj``. The step state only carries a
+    #    ``"corrector"`` key when ``corrector.get_state()`` is non-empty; the
+    #    ocean corrector has no state, so an ocean->ocean swap round-trips
+    #    cleanly. If a corrector with state is ever swapped for one without,
+    #    ``load_state`` should tolerate the stale key (it currently uses
+    #    ``state.get("corrector", {})``, which only covers the opposite
+    #    direction). ``dataset_info`` must carry what the new corrector's
+    #    ``build`` needs (vertical coords / gridded ops / timestep for the
+    #    ocean corrector); it is the same info the checkpoint corrector was
+    #    built from, so this holds when swapping among ocean correctors.
+    #
+    # 5. ``apply_stepper_override`` and
+    #    ``apply_stepper_override_to_stepper_config`` (bottom of this module):
+    #    add the ``!= "keep"`` branch with a ``logging.info`` line, as for
+    #    ``ocean``. The config-only variant is what the evaluator uses to
+    #    compute data requirements before loading weights, so it must be
+    #    updated too or the corrector's forcing needs (e.g. ``hfds``,
+    #    ``sfdsi`` for the salt budget) will not be requested from the loader.
+    #    Also check ``fme/coupled`` for any parallel override plumbing
+    #    (``StepperOverrideConfig`` is imported there for component steppers).
+    #
+    # 6. Tests: in test_single_module.py, next to the existing ``replace_ocean``
+    #    / override tests, (a) load a stepper, override with a different
+    #    corrector, assert ``stepper._config.step.get_corrector()`` is the new
+    #    one and that a forward step still runs with weights unchanged;
+    #    (b) assert ``apply_stepper_override_to_stepper_config`` gives the
+    #    same ``get_forcing_window_data_requirements`` as the full-stepper
+    #    path; (c) round-trip: overridden stepper -> ``get_state`` ->
+    #    ``from_state`` keeps the new corrector.
+
 
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path,

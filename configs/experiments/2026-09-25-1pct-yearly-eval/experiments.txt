@@ -1,0 +1,2 @@
+group|tag|exper_id|status|ckpt|priority|min_runtime|override_args|existing_results_dataset|workspace|cluster|existing_results_ocean_dataset|existing_results_atmos_dataset|shared_mem
+cm4_1pct_46to125_piC_156to235-1deg-ocean|rs0|01M0KKRX04CH990SBRT1PX638N|run_1pct_yearly|best_inference_ckpt|normal|--min-runtime 8h

@@ -1,0 +1,47 @@
+# Single 139-year rollout over the full 1pctCO2 dataset, writing monthly means.
+#
+# The 1pct zarrs hold 10220 5-daily snapshots from 0001-01-06 to 0141-01-01
+# (noleap, 73 steps per year). Starting from 0002-01-01, 139 * 73 = 10147 steps
+# ends exactly on the last snapshot, so every calendar year 0002..0140 is
+# complete. Year 1 is dropped because there is no 0001-01-01 snapshot to start
+# from.
+experiment_dir: /results
+n_forward_steps: 10147
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0002-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  # monthly_mean_predictions.nc / monthly_mean_target.nc; the 5-daily raw
+  # output would be ~10k steps of 1deg 3D fields, so it is off.
+  save_prediction_files: false
+  save_monthly_files: true
+  # The corrector's correction deltas (corrected - network output, spatial
+  # fields for the variables the corrector touched), written to
+  # step_diagnostics/correction_deltas.nc for comparing salinity correctors
+  # applied via stepper_override. This writer has no monthly option, so the
+  # fields are block-averaged to yearly (73 steps) to avoid a spatial field at
+  # every step; coarsen_factor must divide forward_steps_in_memory and
+  # n_forward_steps. Per-step global-mean scalars of the same deltas
+  # (weighted_correction_magnitude / _std per variable) are logged to wandb by
+  # the aggregator's default `step_diagnostics.correction_scalars: true`.
+  save_step_diagnostics: true
+  time_coarsen:
+    coarsen_factor: 73
