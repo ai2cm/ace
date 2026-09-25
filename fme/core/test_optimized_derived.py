@@ -8,6 +8,8 @@ from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean_eos import G_EARTH, RHO_0, wright97_anomaly
 from fme.core.optimized_derived import (
+    SO_CLAMP_RANGE,
+    THETAO_CLAMP_RANGE,
     OptimizedDerivedVariableConfig,
     build_optimized_derived_variables,
 )
@@ -203,6 +205,9 @@ def test_loss_weights_on_derived_names_rejected():
         {"levels": []},
         {"levels": [0, 0]},
         {"stds": {"rho_wright97_0": 0.0}},
+        {"thetao_clamp": [1.0]},
+        {"thetao_clamp": [5.0, 5.0]},
+        {"so_clamp": [45.0, 0.0]},
     ],
 )
 def test_config_validation(kwargs):
@@ -291,3 +296,67 @@ def test_precorrector_rho_gradient_through_corrector():
         torch.testing.assert_close(g_net, _A * g_c)
         assert not torch.allclose(g_net, net_leaf[f"thetao_{k}"].grad)
         torch.testing.assert_close(net[f"so_{k}"].grad, corrected_leaf[f"so_{k}"].grad)
+
+
+def test_config_defaults():
+    config = OptimizedDerivedVariableConfig()
+    assert config.thetao_clamp == list(THETAO_CLAMP_RANGE)
+    assert config.so_clamp == list(SO_CLAMP_RANGE)
+
+
+# T* = W97 denominator zero at level 0, S = 35, near -81.5 degC
+_T_SCAN = torch.linspace(-120.0, 20.0, 1401, dtype=torch.float32)
+
+
+def test_unclamped_eos_gradient_blows_up_near_pole():
+    """Reference for the clamp test: without the clamp the scan crosses T*."""
+    p = torch.tensor(RHO_0 * G_EARTH * 5.0)
+    T = _T_SCAN.clone().requires_grad_()
+    rho = wright97_anomaly(torch.full_like(T, 35.0), T, p)
+    (grad,) = torch.autograd.grad(rho.sum(), T)
+    assert not grad.isfinite().all() or grad.abs().max() > 1e6
+
+
+def test_clamp_gradient_finite_at_pole_adjacent_inputs():
+    """thetao scanned across T*: loss and gradients finite, and zero rho
+    gradient outside the clamp box; so above the box likewise."""
+    shape = (1, 1, 1, _T_SCAN.numel())
+    mask = torch.ones(1, _T_SCAN.numel(), N_LEVELS)
+    derived = build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig()],
+        vertical_coordinate=DepthCoordinate(IDEPTH, mask),
+        network_normalizer=_normalizer(),
+        loss_normalizer=_normalizer(),
+        loss_names=NAMES,
+    )
+    step_loss = StepLossConfig(type="MSE", weights={n: 0.0 for n in NAMES}).build(
+        gridded_ops=None,
+        out_names=NAMES,
+        normalizer=_normalizer(),
+        channel_dim=-3,
+        derived=derived,
+    )
+    device = get_device()
+    target = {
+        **{f"so_{k}": torch.full(shape, 35.0) for k in range(N_LEVELS)},
+        **{f"thetao_{k}": torch.full(shape, 10.0) for k in range(N_LEVELS)},
+    }
+    target = {k: v.to(device) for k, v in target.items()}
+    predict = {k: v.clone() for k, v in target.items()}
+    predict["thetao_0"] = _T_SCAN.reshape(shape).to(device)
+    predict["so_1"] = torch.linspace(20.0, 200.0, _T_SCAN.numel()).reshape(shape)
+    predict["so_1"] = predict["so_1"].to(device)
+    predict = {k: v.clone().requires_grad_() for k, v in predict.items()}
+    total = step_loss(predict, target, step=0).total()
+    assert total.isfinite()
+    total.backward()
+    for name, lo, hi in (
+        ("thetao_0", *THETAO_CLAMP_RANGE),
+        ("so_1", *SO_CLAMP_RANGE),
+    ):
+        x = predict[name].detach()
+        grad = predict[name].grad
+        assert grad is not None and grad.isfinite().all()
+        outside = (x < lo) | (x > hi)
+        assert outside.any() and (grad[outside] == 0).all()
+        assert (grad[~outside] != 0).any()

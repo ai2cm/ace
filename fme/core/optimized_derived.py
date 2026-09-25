@@ -13,6 +13,7 @@ Registered variables:
                    EOS = Wright (1997) reduced range (fme.core.ocean_eos)
                    p_k = RHO_0 * G_EARTH * (idepth[k] + idepth[k+1]) / 2
                    NaN where mask_k == 0 or so_k / thetao_k is NaN
+                   inputs clamped to thetao_clamp x so_clamp before the EOS
 
 Loss scale of a derived name, unless given in ``stds``, is the linearization
 
@@ -44,6 +45,14 @@ from fme.core.typing_ import TensorDict, TensorMapping
 _SAFE_SALINITY = 35.0
 _SAFE_THETA = 10.0
 
+# Default EOS input clamp box [degC], [PSU]: contains the training data's
+# thetao/so range with margin, and the Wright (1997) denominator stays far from
+# its zero here (.scratch/2026-09-24-0145-rho-eos-loss/06a_clamp_bounds.yaml
+# box_recommended, from 06a_clamp_bounds.py). Outside it the rho term gives no
+# gradient.
+THETAO_CLAMP_RANGE = (-5.0, 42.0)
+SO_CLAMP_RANGE = (0.0, 73.0)
+
 
 @dataclasses.dataclass
 class OptimizedDerivedVariableConfig:
@@ -59,12 +68,21 @@ class OptimizedDerivedVariableConfig:
         levels: Levels ``k`` to produce; all levels of the depth coordinate by
             default.
         stds: Per-name loss scale overriding the linearized default.
+        thetao_clamp: ``[min, max]`` [degC] ``thetao_k`` is clamped to before
+            the EOS, for prediction and target.
+        so_clamp: ``[min, max]`` [PSU] ``so_k`` is clamped to before the EOS.
     """
 
     name: Literal["rho_wright97"] = "rho_wright97"
     weight: float = 1.0
     levels: list[int] | None = None
     stds: dict[str, float] = dataclasses.field(default_factory=dict)
+    thetao_clamp: list[float] = dataclasses.field(
+        default_factory=lambda: list(THETAO_CLAMP_RANGE)
+    )
+    so_clamp: list[float] = dataclasses.field(
+        default_factory=lambda: list(SO_CLAMP_RANGE)
+    )
 
     def __post_init__(self):
         if self.weight < 0:
@@ -80,6 +98,10 @@ class OptimizedDerivedVariableConfig:
         bad = {k: v for k, v in self.stds.items() if not v > 0}
         if bad:
             raise ValueError(f"stds must be positive, got {bad}")
+        for field in ("thetao_clamp", "so_clamp"):
+            bounds = getattr(self, field)
+            if len(bounds) != 2 or not bounds[0] < bounds[1]:
+                raise ValueError(f"{field} must be [min, max], min < max, got {bounds}")
 
 
 class OptimizedDerivedVariables:
@@ -130,8 +152,17 @@ class OptimizedDerivedVariables:
 class _RhoDerivation:
     """``rho_wright97_k`` from ``so_k``, ``thetao_k`` on a depth coordinate."""
 
-    def __init__(self, levels: list[int], idepth: torch.Tensor, mask: torch.Tensor):
+    def __init__(
+        self,
+        levels: list[int],
+        idepth: torch.Tensor,
+        mask: torch.Tensor,
+        thetao_clamp: tuple[float, float] = THETAO_CLAMP_RANGE,
+        so_clamp: tuple[float, float] = SO_CLAMP_RANGE,
+    ):
         self.levels = levels
+        self.thetao_clamp = thetao_clamp
+        self.so_clamp = so_clamp
         self.pressure = boussinesq_pressure(
             interface_to_center_depth(idepth.to(torch.float64))
         )
@@ -151,8 +182,8 @@ class _RhoDerivation:
             valid = self._level_mask(k, S.device) & S.isfinite() & T.isfinite()
             p = self.pressure[k].to(dtype=S.dtype, device=S.device)
             rho = wright97_anomaly(
-                torch.where(valid, S, _SAFE_SALINITY),
-                torch.where(valid, T, _SAFE_THETA),
+                torch.where(valid, S, _SAFE_SALINITY).clamp(*self.so_clamp),
+                torch.where(valid, T, _SAFE_THETA).clamp(*self.thetao_clamp),
                 p,
                 RHO_0,
             )
@@ -227,7 +258,11 @@ def build_optimized_derived_variables(
                 f"the loss names, with normalization constants: {missing}."
             )
         derivation = _RhoDerivation(
-            levels, vertical_coordinate.idepth, vertical_coordinate.mask
+            levels,
+            vertical_coordinate.idepth,
+            vertical_coordinate.mask,
+            thetao_clamp=(config.thetao_clamp[0], config.thetao_clamp[1]),
+            so_clamp=(config.so_clamp[0], config.so_clamp[1]),
         )
         names = [f"rho_wright97_{k}" for k in levels]
         unknown = sorted(set(config.stds) - set(names))
