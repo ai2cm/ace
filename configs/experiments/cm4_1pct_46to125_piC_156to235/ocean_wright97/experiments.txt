@@ -15,3 +15,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wright97w1|rs0|01M3BJ3H7Z6DGDH86CFP5T5YNA|tr
 cm4_1pct_46to125_piC_156to235-ocean_wright97w0p1|rs0|01M3BJQ86RKQWJ7AF629TBWQEH|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wright97w1|rs0|01M3BJQMAKKVAN62Y3YXVW5T8E|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w0p1|rs0|01M3CNPRG4MKKREEF3334RPA7T|training|best_inference_ckpt|normal|--min-runtime 8h
