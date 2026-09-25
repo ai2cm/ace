@@ -504,10 +504,21 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "num_data_workers, force_forkserver",
-    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium_duration)],
+    "num_data_workers, force_forkserver, force_zarr_engine_used",
+    [
+        (0, False, False),
+        (0, True, False),
+        (0, False, True),
+        (3, False, False),
+        pytest.param(3, True, False, marks=pytest.mark.medium_duration),
+    ],
 )
-def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
+def test_inference_data_loader(
+    tmp_path,
+    num_data_workers: int,
+    force_forkserver: bool,
+    force_zarr_engine_used: bool,
+):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -521,6 +532,9 @@ def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver
         ),
         num_data_workers=num_data_workers,
     )
+    if force_zarr_engine_used:
+        assert hasattr(config, "_zarr_engine_used")
+        config._zarr_engine_used = True
     n_forward_steps_in_memory = 3
     window_requirements = DataRequirements(
         names=["foo", "bar"],
