@@ -6,8 +6,17 @@
 # header documents why each field is what it is, and the comparison only holds
 # if these rows match it field for field:
 #
-#   <group>|<tag>|<stage-2 beaker id>|run_piC-200yr-var|best_inference_ckpt|<pri>|--min-runtime 3h||<result dataset>|ai2/ace|jupiter|||20GiB
-#   <group>|<tag>|<stage-2 beaker id>|run_1pct-ic0001-130yr|best_inference_ckpt|<pri>|--min-runtime 3h|data_writer.save_monthly_files=false|<result dataset>|ai2/ace|jupiter|||30GiB
+#   fields, pipe-separated: group, tag, stage-2 beaker id, run_piC-200yr-var
+#   (or run_1pct-ic0001-130yr), best_inference_ckpt, priority,
+#   "--min-runtime 3h", override (empty for piC;
+#   data_writer.save_monthly_files=false for 1pct), pinned result dataset,
+#   ai2/ace, jupiter, two empty fields, then 20GiB (piC) or 30GiB (1pct).
+#
+#   NOT written here as a pipe-separated example on purpose: evaluate.sh does
+#   NOT skip lines beginning with '#'. It splits every line on '|' and launches
+#   anything whose 4th field starts with run_, so a commented template row is
+#   submitted as a real job -- caught in a dry run here, which reported 6 jobs
+#   for 4 rows.
 #
 # group = cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt
 # tag   = rs0 (priority high), rs1 (priority normal)
