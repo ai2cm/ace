@@ -42,14 +42,41 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # jupiter at high priority in ai2/ace, matching the 2026-09-16 wave. urgent
 # preempts others' jobs and is opt-in only.
 
+# ---------------------------------------------------------------------
+# 2026-09-26 RELAUNCH of the two rows that were PREEMPTED.
+#
+# Four of the six finished exit 0; their rows are marked done_<tag> so this
+# file can be re-run without relaunching them (evaluate.sh launches every row
+# whose status starts with run_, and nothing else):
+#
+#   owc8v4  1pct  01M3E16JHSWJDKXDKKW9DA8YEH  exit 0, 4.91 h
+#   owc8v4  piC   01M3E178X8V582GQZNR96Z21T2  exit 0, 8.46 h
+#   mae2ftn piC   01M3E17FQ4HV6CY4Z511SSF14P  exit 0, 7.28 h
+#   owclt   1pct  01M3E171QJT1ZCR4AXN33QTTM9  exit 0, 4.75 h
+#
+# The two still marked run_ were killed by preemption (exit 143, canceled),
+# not by a failure of their own:
+#
+#   mae2ftn 1pct  01M3E16THDQJ865GJVZENXXPY5  preempted at 2.71 h
+#   owclt   piC   01M3E17QJ9VJN8NV372DS9YP60  preempted at 4.45 h
+#
+# Both had cleared their --min-runtime (2 h / 3 h) and became preemptible
+# while still hours from finishing -- the four that survived ran 4.75-8.46 h.
+# min_runtime raised to 8 h on both, which covers the longest observed job.
+# evaluate.sh passes --no-auto-resume and an evaluation restarts from its
+# initial condition, so these are fresh jobs, not resumes; nothing is lost
+# beyond the compute already spent.
+#
+# ---------------------------------------------------------------------
+
 # --- 1pct-ic0001-130yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
 
 # --- piC-ic0151-200yr ---
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
