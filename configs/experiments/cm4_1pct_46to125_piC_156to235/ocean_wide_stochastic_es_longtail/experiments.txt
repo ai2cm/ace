@@ -40,3 +40,44 @@
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|01M38X5HTGQ359BM50D9Y6WRC4|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ---------------------------------------------------------------------------
+# EVALUATION ROWS (status run_*), added 2026-09-25 once both finetunes
+# finished 24/24 exit 0 with gap-free epoch coverage 0-24.
+#
+# Field for field the same as ../ocean_wide_stochastic_longtail/experiments.txt,
+# which is what makes the arms comparable; that file's header carries the full
+# reasoning. Restating only what is load-bearing:
+#
+#   best_inference_ckpt, not best_ckpt. Both evaluation records require it, and
+#   on this protocol rollout error is best at the last epoch while
+#   best_val_loss is attained early.
+#
+#   The two evaluator configs in this directory are BYTE-IDENTICAL to the
+#   patch-ES wave's (verified with cmp at launch), which are themselves
+#   byte-identical to the canonical sources the deterministic baseline ran.
+#
+#   --min-runtime 3h. The piC rollout takes ~65 min and a 1h guarantee expired
+#   minutes before the last step in an earlier wave, losing two of three runs
+#   to preemption at step 14597 of 14598.
+#
+#   data_writer.save_monthly_files=false on the 1pct rows ONLY. The piC "-var"
+#   config already writes the sst_monthly pair band_variance_sst.py reads at
+#   ~4.5 GiB; leaving it on for 1pct writes ~76 GiB nothing reads.
+#
+# results_dataset is PINNED per row, and rs1 is exactly why: it took two
+# exit-1 attempts before succeeding, so its final result dataset
+# (01M3DMCRNGGG8TQZ9Z5RG4HW04) does NOT share its experiment id's prefix and a
+# lookup-at-launch would resolve the wrong one. Both pinned datasets were
+# verified to contain training_checkpoints/best_inference_ckpt.tar.
+#
+# Priority rs0 high / rs1 normal, as the training waves ran.
+# ---------------------------------------------------------------------------
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 3h||01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false|01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|01M38X5HTGQ359BM50D9Y6WRC4|run_piC-200yr-var|best_inference_ckpt|normal|--min-runtime 3h||01M3DMCRNGGG8TQZ9Z5RG4HW04|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|01M38X5HTGQ359BM50D9Y6WRC4|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 3h|data_writer.save_monthly_files=false|01M3DMCRNGGG8TQZ9Z5RG4HW04|ai2/ace|jupiter|||30GiB
