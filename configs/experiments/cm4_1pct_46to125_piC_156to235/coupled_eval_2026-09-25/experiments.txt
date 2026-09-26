@@ -1,0 +1,55 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# =====================================================================
+# EVALUATION of the three coupled arms that reached epoch 8 AFTER the
+# 2026-09-16 nine-arm wave. This EXTENDS that table -- it supersedes
+# nothing. Same two evaluations, same shared config dir, same checkpoint
+# selection rule (best_inference_ckpt), so the twelve arms are one table.
+#
+#   job_runner/evaluate.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_eval_2026-09-25 . \
+#     --config-dir configs/experiments/cm4_eval/coupled
+#
+# The rows live in their own directory rather than in coupled_stoch/ so the
+# 2026-09-16 wave's ledger is left intact: evaluate.sh launches EVERY row
+# whose status starts with run_, so appending there would relaunch all 18.
+#
+# The arms:
+#
+#   owc8v4_a2s        owc8 init @ 4 fixed coupled steps -- James's template
+#                     verbatim, the control that isolates the finetuned ocean
+#                     init at crps4's unroll depth.
+#                     wandb jc8l3r1d, 8 epochs, best_inference_error 0.0827
+#   mae2ftn_a2s       MAE 8-step-finetuned init + noise injection -- the empty
+#                     cell of the MAE 2x2 (Arm E).
+#                     wandb gtudt89r, 8 epochs, best_inference_error 0.0756
+#   coupled_tail-owc  owc init @ the long-tail schedule, cap 16, mean depth
+#                     8.05 (the arm the records call owclt_a2s).
+#                     wandb oe98nyrg, 8 epochs, best_inference_error 0.0679
+#
+# best_inference_ckpt is the epoch-8 checkpoint in all three: each arm's
+# best_inference_error falls monotonically across all 8 epochs. That also
+# settles the one worry specific to owclt, which finished on a resume --
+# its best_inference_ckpt.tar was written during the resumed epochs, not
+# inherited from a job whose result dataset is not mounted here.
+#
+# results_dataset (field 9) is pinned on every row rather than left to
+# evaluate.sh's jobs[-1].result lookup. owclt's training history spans four
+# beaker experiments (two preemptions, one host-RAM wave); the pinned id is
+# the exit-0 resume that reached epoch 8. owc8lt_a2s is deliberately absent:
+# it is still at epoch 7, on its sixth attempt.
+#
+# jupiter at high priority in ai2/ace, matching the 2026-09-16 wave. urgent
+# preempts others' jobs and is opt-in only.
+
+# --- 1pct-ic0001-130yr ---
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
+
+# --- piC-ic0151-200yr ---
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
