@@ -26,11 +26,18 @@ days, and never exceeds the noise floor in the other hemisphere within 30 days. 
 above the noise floor at day 1, or remote growth not preceded by local and near-field growth, is
 the non-physical signature. The analysis lives in the explore2 round.
 
+The checkpoint is a noise-conditioned SFNO, so every case sets `seed: 0`: with the same seed and
+batch shape all six runs draw the same noise sequence and the difference between two runs is the
+perturbation's effect alone. Without it the difference between any two runs is the model's own
+stochastic spread (about 0.65 K RMS in day-1 2 m temperature far from any box), which swamps the
+signal.
+
 ## Output
 
-`gs://vcm-ml-intermediate/2026-09-26-ace2s-snow-perturbation-runs/<case>/`: full daily prediction
-fields for all eight members and 30 lead times, as `predictions.zarr` (netCDF prediction files
-cannot be written to GCS).
+`gs://vcm-ml-intermediate/2026-09-26-ace2s-snow-perturbation-runs/<case>-seed0/`: full daily
+prediction fields for all eight members and 30 lead times, as `predictions_predictions.zarr`
+(netCDF prediction files cannot be written to GCS). The `<case>/` directories without the suffix
+hold an earlier unseeded set of the same runs, kept as a measure of the stochastic spread.
 
 ## Launch
 

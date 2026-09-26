@@ -1,4 +1,5 @@
-experiment_dir: gs://vcm-ml-intermediate/2026-09-26-ace2s-snow-perturbation-runs/control
+experiment_dir: gs://vcm-ml-intermediate/2026-09-26-ace2s-snow-perturbation-runs/control-seed0
+seed: 0
 n_forward_steps: 30
 forward_steps_in_memory: 10
 checkpoint_path: /ckpt.tar
