@@ -1,0 +1,30 @@
+experiment_dir: gs://vcm-ml-intermediate/2026-09-26-ace2s-snow-perturbation-runs/nh-removed
+n_forward_steps: 30
+forward_steps_in_memory: 10
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+initial_condition:
+  path: /ics/nh-removed.nc
+  engine: netcdf4
+forcing_loader:
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: predictions
+    format:
+      name: zarr
