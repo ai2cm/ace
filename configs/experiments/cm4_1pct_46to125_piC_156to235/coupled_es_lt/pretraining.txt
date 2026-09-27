@@ -1,0 +1,33 @@
+# SPECTRAL-ES OCEAN, LONG-TAIL COUPLED SCHEDULE -- arm `es0lt_a2s`. One row.
+#
+# Ocean init 19yl0189: stage-2 long-tail all_blocks rs0, pretrained against
+# CRPS 0.9 + SPECTRAL energy score 0.1. rs0 over rs1 by best_inference_error
+# (0.07158 vs 0.07417) -- the same within-lineage selection rule that picked
+# jshu3e8a for lt0lt_a2s. Atmosphere is James's frozen ACE2S j0ng1tw3, as in
+# every arm.
+#
+# The one-variable twin of lt0lt_a2s: identical template, identical hardware,
+# the pretraining loss is the only thing that moves. Run alongside es0v4_a2s
+# (../coupled_es_v4), the same init at a fixed 4.
+#
+# MEMORY: cap 16 on 8xH100, MEASURED for this architecture -- lt0lt_a2s ran
+# this template with a noise-conditioned ocean and peaked at 79.18 GiB, 99.5%
+# of the card, matching owc8lt's deterministic 79.18. No pre-flight re-scope
+# contingency is needed this time; the cap-12 fallback in coupled_tail_lt0's
+# row existed because that peak was unmeasured.
+#
+# HARDWARE: 8xH100 jupiter, not 4xB200 -- batch_size is a GLOBAL batch, so 4
+# ranks means 2 samples/GPU and ~2x the per-rank host RSS, and a half-node
+# claim shares host RAM with a co-tenant. owclt died three times that way.
+#
+# shared_mem blank so default_shared_mem derives 1494GiB from node_caps.txt.
+# retries 3; the branch carries the epoch-boundary resume fix (ace#1510's
+# trainer.py, byte-identical), so an epoch-boundary preemption resumes instead
+# of dying at the train-summary NCCL gather.
+#
+# MALLOC_ARENA_MAX=4 as on lt0lt_a2s. Numerically inert, so it cannot affect
+# the comparison it is being run for.
+
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|env
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es0lt_a2s-fto|o0a0rs0|ace-samudra-cm4|19yl0189|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
