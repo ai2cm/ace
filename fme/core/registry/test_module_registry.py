@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import pathlib
 from collections.abc import Iterable, Mapping
-from typing import Any, ClassVar
+from typing import Any
 from unittest import mock
 
 import dacite
@@ -402,11 +402,11 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
 class MockModuleBuilderCompileUnsupported(ModuleConfig):
     """Mock builder that declares torch.compile unsupported."""
 
-    compile_unsupported_reason: ClassVar[str] = (
-        "the mock module's forward pass is not traceable"
-    )
-
     param_shapes: list[tuple[int, ...]]
+
+    @classmethod
+    def compile_unsupported_reason(cls) -> str | None:
+        return "the mock module's forward pass is not traceable"
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -464,19 +464,6 @@ def test_compile_torch_module_compiles_and_sets_flag():
     assert isinstance(compiled, torch._dynamo.eval_frame.OptimizedModule)
     assert compiled._orig_mod is net
     assert torch._dynamo.config.fail_on_recompile_limit_hit is True
-
-
-@pytest.mark.parametrize("selector_name", sorted(ModuleSelector.get_available_types()))
-def test_compile_unsupported_reason_is_not_a_dataclass_field(selector_name: str):
-    """compile_unsupported_reason must be a ClassVar on every builder.
-
-    If a builder annotated it without ClassVar it would become a dataclass
-    field, and so would leak into ModuleSelector.config and into serialized
-    checkpoint configs.
-    """
-    builder_cls = ModuleSelector.registry._types[selector_name]
-    field_names = {field.name for field in dataclasses.fields(builder_cls)}
-    assert "compile_unsupported_reason" not in field_names
 
 
 def _ncsfno_config_with_legacy_keys() -> dict[str, Any]:
