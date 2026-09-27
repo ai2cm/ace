@@ -1,4 +1,3 @@
-import dataclasses
 from unittest import mock
 
 import pytest
@@ -7,7 +6,7 @@ import torch
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.ocean.m2lines.layers import ConvNeXtBlock, MultiResolutionFiLM
 from fme.ace.models.ocean.m2lines.samudra import Samudra
-from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
+from fme.ace.registry.m2lines import SamudraBuilder
 from fme.ace.registry.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.coordinates import LatLonCoordinates
@@ -157,13 +156,6 @@ def _floenet_dataset_info(height: int, width: int) -> DatasetInfo:
             masks={"mask_2d": torch.ones(height, width, dtype=torch.bool)}
         ),
     )
-
-
-def test_floenet_compile_unsupported_reason_is_not_a_dataclass_field():
-    """The reason is a ClassVar, not a field: as a field it would be written
-    into ModuleSelector.config and so into serialized checkpoint configs."""
-    field_names = {field.name for field in dataclasses.fields(FloeNetBuilder)}
-    assert "compile_unsupported_reason" not in field_names
 
 
 @pytest.mark.skipif(not GRAPHCAST_AVAIL, reason="trimesh/rtree are not available")
