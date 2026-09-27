@@ -46,7 +46,7 @@ from fme.core.labels import BatchLabels
 from fme.core.registry.module import Module, ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.args import StepArgs
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
     dynamo_hygiene,  # noqa: F401  autouse in this module
@@ -483,6 +483,28 @@ def _sum_of_squares(output: torch.Tensor) -> torch.Tensor:
     return output.square().sum()
 
 
+INDUCTOR_BACKWARD_ON_CUDA = frozenset(
+    {"SwinTransformer", "NoiseConditionedSwinTransformer"}
+)
+"""Builders whose backward test uses the inductor backend on CUDA.
+
+``aot_eager`` runs the traced backward graph op by op, and that graph freezes
+each ``view`` against the strides the fake tensors had at trace time. On CUDA
+the attention and normalization kernels the Swin blocks use hand back
+gradients with different strides, so the frozen ``aten.view`` in the backward
+raises "view size is not compatible with input tensor's size and stride".
+Inductor lowers those views against its own buffer layouts and does not hit
+this, and is also the backend production training uses; the price is
+inductor's compile time, which only these two builders pay.
+"""
+
+
+def _backward_backend(case: BuilderCase) -> str:
+    if get_device().type == "cuda" and case.name in INDUCTOR_BACKWARD_ON_CUDA:
+        return "inductor"
+    return "aot_eager"
+
+
 def _grads_missing(module: nn.Module) -> set[str]:
     return {
         name
@@ -504,7 +526,7 @@ def test_compiled_module_backward_matches_eager(case: BuilderCase):
     """
     module = _build_module(case)
     module.torch_module.train()
-    compiled = module.compile(backend="aot_eager")
+    compiled = module.compile(backend=_backward_backend(case))
     x = _make_input(case)
     labels = _make_labels(case)
 
@@ -618,7 +640,7 @@ def _rollout_step_selector(case: RolloutCase, compile: bool) -> StepSelector:
                 in_names=all_names,
                 out_names=list(ROLLOUT_PROGNOSTIC_NAMES),
                 normalization=trivial_network_and_loss_normalization(all_names),
-                residual_prediction=True,
+                residual_prediction=ResidualPredictionConfig(),
                 compile=compile,
             )
         ),
