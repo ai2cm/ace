@@ -72,11 +72,34 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # --- 1pct-ic0001-130yr ---
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|done_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 2h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
 
 # --- piC-ic0151-200yr ---
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2KGZR2EPV0GG3Q6RTZ5DBMZ|ai2/ace|jupiter
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-owc_a2s-fto|o2a0rs0|01M338Z2KC317YJG541DVV1FYF|done_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M338Z2KGRXPV2Q35GYE912DC|ai2/ace|jupiter
+
+# ---------------------------------------------------------------------
+# 2026-09-26 — the two relaunches above finished exit 0 (mae2ftn 1pct
+# 01M3FAWNYFTVY9DRQQAZ6SK4DH in 4.39 h, owclt piC 01M3FAWYJAVDQ3W2KYD534K0JJ
+# in 6.82 h), so all six of the original wave are done and retired to
+# done_<tag>.
+#
+# ADDED: lt0lt_a2s, the fourth tail-wave arm, which finished training the same
+# day -- 01M339VK884YE3B2M5YM1RQ966 / wandb bi0pnggk, 8 epochs exit 0 on its
+# fourth attempt (three preemptions before it). best_inference_error falls
+# monotonically 0.08271 -> 0.07488 across all 8 epochs, so best_inference_ckpt
+# is the epoch-8 checkpoint and was written by the final job, whose result
+# dataset is the one pinned here.
+#
+# Note the tag is o0a0rs0, not the o2a0rs0 the other three carry.
+#
+# min_runtime 8h from the start on both rows.
+# ---------------------------------------------------------------------
+
+# --- lt0lt_a2s ---
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto|o0a0rs0|01M339VK884YE3B2M5YM1RQ966|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M3DN0NDP94TNHZ4M3VWVSAM4|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto|o0a0rs0|01M339VK884YE3B2M5YM1RQ966|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M3DN0NDP94TNHZ4M3VWVSAM4|ai2/ace|jupiter
