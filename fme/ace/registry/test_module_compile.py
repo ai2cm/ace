@@ -21,14 +21,16 @@ pinned down by zero-break tests next to each fix, since each of those targets
 one construct we control.
 """
 
+import contextlib
 import dataclasses
 import functools
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 from unittest import mock
 
 import pytest
 import torch
+import torch._inductor.config
 from torch import nn
 
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
@@ -505,6 +507,28 @@ def _backward_backend(case: BuilderCase) -> str:
     return "aot_eager"
 
 
+@contextlib.contextmanager
+def _inductor_backward_workarounds(case: BuilderCase) -> Iterator[None]:
+    """Turn off inductor's mix-order reduction fusion for the inductor cases.
+
+    torch 2.10's inductor fuses pairs of reductions whose loop orders are
+    swapped (``triton.mix_order_reduction``, on by default). Scoring that
+    fusion for the SwinTransformer backward trips an assertion inside the
+    scheduler (``has_mix_reduction_orders``: "32 v.s. 16"), so compilation
+    fails before any kernel runs. The option is patched off around the
+    compiled forward and backward, since inductor reads it when it compiles
+    the backward graph on the first ``backward()`` call. Users who hit the same
+    assertion can set ``TORCHINDUCTOR_MIX_ORDER_REDUCTION=0``.
+    """
+    if _backward_backend(case) != "inductor" or not hasattr(
+        torch._inductor.config.triton, "mix_order_reduction"
+    ):
+        yield
+        return
+    with torch._inductor.config.patch({"triton.mix_order_reduction": False}):
+        yield
+
+
 def _grads_missing(module: nn.Module) -> set[str]:
     return {
         name
@@ -531,7 +555,8 @@ def test_compiled_module_backward_matches_eager(case: BuilderCase):
     labels = _make_labels(case)
 
     module.torch_module.zero_grad(set_to_none=True)
-    _sum_of_squares(_seeded_forward(compiled, x, labels)).backward()
+    with _inductor_backward_workarounds(case):
+        _sum_of_squares(_seeded_forward(compiled, x, labels)).backward()
     compiled_missing = _grads_missing(module.torch_module)
     for name, parameter in module.torch_module.named_parameters():
         assert parameter.grad is None or torch.isfinite(parameter.grad).all(), name
