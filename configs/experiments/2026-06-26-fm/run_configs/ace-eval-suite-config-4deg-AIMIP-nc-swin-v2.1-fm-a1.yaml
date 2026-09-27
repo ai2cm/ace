@@ -1,5 +1,5 @@
 # source_run: ace2-fm-nc-swin-v2.1-fm-a1
-# source_dataset: 01M2HEJKD0RQ3R41S24RCPK9S8
+# source_dataset: 01M3BWJ7TGWR7C85JQ3HNSA7F6
 experiment_dir: /results
 logging:
   log_to_screen: true

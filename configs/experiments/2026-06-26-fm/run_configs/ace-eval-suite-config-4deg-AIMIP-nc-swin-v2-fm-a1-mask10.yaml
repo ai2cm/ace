@@ -1,5 +1,5 @@
-# source_run: ace2-fm-nc-swin-v2.1-fm-a1-cond
-# source_dataset: 01M3CYECSV3JMAY9ZMWK3699KH
+# source_run: ace2-fm-nc-swin-v2-fm-a1-mask10
+# source_dataset: 01M32YMVSDNNGCEW2KBW4M8RS9
 experiment_dir: /results
 logging:
   log_to_screen: true
@@ -37,10 +37,6 @@ inferences:
         engine: zarr
         labels:
         - era5
-        constant_field_override:
-          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
       persistence_names:
       - global_mean_co2
@@ -50,9 +46,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: 10year
   config:
     experiment_dir: /results/10year
@@ -82,10 +75,6 @@ inferences:
         engine: zarr
         labels:
         - era5
-        constant_field_override:
-          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -165,9 +154,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: weather_2024
   config:
     experiment_dir: /results/weather_2024
@@ -197,10 +183,6 @@ inferences:
         engine: zarr
         labels:
         - era5
-        constant_field_override:
-          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -294,9 +276,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: weather_1994
   config:
     experiment_dir: /results/weather_1994
@@ -326,10 +305,6 @@ inferences:
         engine: zarr
         labels:
         - era5
-        constant_field_override:
-          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -423,9 +398,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: long_46year
   config:
     experiment_dir: /results/long_46year
@@ -455,10 +427,6 @@ inferences:
         engine: zarr
         labels:
         - era5
-        constant_field_override:
-          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means: []
@@ -538,9 +506,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: 7year_oosample_ensemble_varying_co2
   config:
     experiment_dir: /results/7year_oosample_ensemble_varying_co2
@@ -570,10 +535,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -653,9 +614,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: 7year_oosample_ensemble_constant_co2
   config:
     experiment_dir: /results/7year_oosample_ensemble_constant_co2
@@ -685,10 +643,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -768,9 +722,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: 10year_insample_ensemble_varying_co2
   config:
     experiment_dir: /results/10year_insample_ensemble_varying_co2
@@ -800,10 +751,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -883,9 +830,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: 10year_insample_ensemble_constant_co2
   config:
     experiment_dir: /results/10year_insample_ensemble_constant_co2
@@ -915,10 +859,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -998,9 +938,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: weather_1994_ensemble_varying_co2
   config:
     experiment_dir: /results/weather_1994_ensemble_varying_co2
@@ -1030,10 +967,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -1127,9 +1060,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: weather_1994_ensemble_constant_co2
   config:
     experiment_dir: /results/weather_1994_ensemble_constant_co2
@@ -1159,10 +1089,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means:
@@ -1256,9 +1182,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: long_43year_ensemble_varying_co2
   config:
     experiment_dir: /results/long_43year_ensemble_varying_co2
@@ -1288,10 +1211,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means: []
@@ -1371,9 +1290,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
 - name: long_43year_constant_co2
   config:
     experiment_dir: /results/long_43year_constant_co2
@@ -1403,10 +1319,6 @@ inferences:
         engine: zarr
         labels:
         - amip
-        constant_field_override:
-          path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/time-mean.nc
-          names:
-          - specific_total_water_0
       num_data_workers: 4
     aggregator:
       step_means: []
@@ -1486,6 +1398,3 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-    stepper_override:
-      prescribed_prognostic_names:
-      - specific_total_water_0
