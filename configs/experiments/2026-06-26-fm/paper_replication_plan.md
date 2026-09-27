@@ -17,7 +17,21 @@ docstrings of `generate_paper_configs.py` / `submit_paper_jobs.py`, then check
 the status section below against `argo list`, `beaker`, and the GCS paths
 (weka is not mounted on the submitting machine).
 
-## Status (2026-09-21)
+## Status (2026-09-27)
+
+- **2026-09-27, the paper kinds are now a stage of the job watcher**
+  (`watch_fm_jobs.py`, stage `paper`): every per-run kind on every
+  norm-ablation cell of the three architectures, submitted once the cell's
+  training has succeeded, retried up to five times, prescribed-SST kinds
+  first and `som-eq-dataCO2-1000yr-sstslab-inference` last. The data-only
+  rows (98, all succeeded) are not tracked by the watcher. Gaps at that
+  date: the `nc-swin-v2` mask10 A1 cells (436 jobs, trained after the
+  September campaign) and every `nc-swin-v2.1` cell (1678 jobs). The
+  `nc-swin-v2.1` cells were retrained 2026-09-23..25 with residual
+  prediction off (`ARCH_STEP_CONFIG_OVERRIDES`); all 16 finished with a
+  finite best inference error and wrote `best_inference_ckpt.tar`, so the
+  block below is lifted. The six `nc-swin-v2.1` non-A1 mask10 entries were
+  pruned from the run map (out of scope, no live experiment).
 
 - **Submitted 2026-09-17, all 25 non-D3 kinds for the A1/A2/A3 cells**
   (`--arm a1 a2 a3`, workspace `ai2/ace`, clusters jupiter + titan, priority
@@ -304,13 +318,10 @@ before submitting the rest of the slab kinds.
 Everything the paper kinds need is on weka and every kind has run on every
 `nc-sfno` / `nc-swin-v2` arm cell (status above). What remains:
 
-- **`nc-swin-v2.1` cells** (19 SHiELD-eligible, 13 ERA5-eligible runs): the
-  1540 jobs of the 25 non-D3 kinds and the 684 `somabruptens-abrupt-4xCO2-ens-sstprescribed-eval`
-  jobs wait on a `best_inference_ckpt.tar` (or a decision to use
-  `best_ckpt.tar` via `submit_paper_jobs.CHECKPOINT_PATH`). Once it exists,
-  re-run the submit commands in "How to run" with `--skip-if-in-beaker`
-  (drop `--arch`); the listing skips every finished or running job, so only
-  the v2.1 cells are submitted.
+- **Per-run kinds are the watcher's job** (2026-09-27): `/fm-job-watch`
+  every 30 minutes submits whatever is missing on any cell whose training
+  succeeded, so the "How to run" commands are only for hand-written runs,
+  data-only rows, or a one-off resubmission.
 - **Monitoring**: list `ai2/ace` via
   `_beaker_listing.fetch_experiments_by_name("ai2/ace", "-sst")`, keep the
   names containing a kind from `generate_paper_configs.KINDS`, tally by
