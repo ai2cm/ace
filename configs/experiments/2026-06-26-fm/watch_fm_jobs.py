@@ -8,24 +8,34 @@ does three things:
    that read its checkpoints are generated (eval, fixed-variable suites,
    fine-tune configs), committed, pushed and submitted: evaluator runs on
    three checkpoints, the SST-perturbation sweep, the specific_total_water_0
-   own and swapped suites (fm cells), the ERA5 fine-tune, and epoch 0 of the
-   fine-tune SST sweep. For every fine-tune that has succeeded, epochs 1-10 of
-   its SST sweep. Training runs not yet started (the mask10 A1 baselines) are
-   submitted too.
+   own and swapped suites (fm cells), the ERA5 fine-tune, epoch 0 of the
+   fine-tune SST sweep, and every per-run paper-replication kind
+   (generate_paper_configs.KINDS minus the data-only rows, prescribed-SST
+   kinds first, the 1000-year slab runs last). For every fine-tune that has
+   succeeded, epochs 1-10 of its SST sweep. Training runs not yet started
+   (the mask10 A1 baselines) are submitted too.
 2. **Failure scan.** A job whose experiment ended without an exit-0 job and
    without a user cancel is resubmitted, up to RETRY_LIMIT times. A swin
    training or fine-tune job whose log shows a non-finite loss is resubmitted
    at seed + 1 through seed_overrides.json, so it does not retrace the same
    trajectory. A job at the limit is marked exhausted, never touched again,
-   and reported on a `NOTIFY:` line for the caller to forward.
-3. **Report.** A summary of what was submitted, skipped and exhausted.
+   and reported on a `NOTIFY:` line for the caller to forward. A job the
+   user canceled is terminal: never resubmitted, not even as a sibling of a
+   job that is.
+3. **Report.** A summary of what was submitted, skipped and exhausted. Once
+   every expected job other than the 1000-year slab runs has succeeded or
+   been canceled, a `DONE:` line says so (with the canceled names and the
+   1000-year tally) for the caller to act on.
 
-Submission goes through the six submit_*.py scripts with --skip-if-in-beaker
-and --exclude-job, so a name already succeeded or running is never queued
-twice and an exhausted one is held back even when its suite's siblings go.
+Submission goes through the seven submit_*.py scripts with
+--skip-if-in-beaker and --exclude-job, so a name already succeeded or
+running is never queued twice and an exhausted or canceled one is held back
+even when its suite's siblings go.
 
 State (attempt counts, exhausted names, last seen statuses) lives in
-job_watch_state.json next to this file and is not committed.
+job_watch_state.json next to this file and is not committed. A tick holds
+job_watch.lock for its whole run; a tick started while another holds it
+exits at once, so a cron may fire while a long submission is still going.
 
 Usage:
     python watch_fm_jobs.py [--dry-run] [--no-git] [--stage STAGE ...]
@@ -35,8 +45,10 @@ Usage:
 """
 
 import argparse
+import collections
 import dataclasses
 import datetime
+import fcntl
 import json
 import pathlib
 import subprocess
@@ -68,13 +80,22 @@ from generate_norm_ablation_finetune_configs import (
     UNMASKED,
 )
 from generate_norm_ablation_finetune_configs import REGIMES as FINETUNE_REGIMES
+from generate_paper_configs import (
+    ABRUPT_ENSEMBLE_N_MEMBERS,
+    CLIMATES,
+    DATA_ONLY_KINDS,
+    KINDS,
+    N_INITIAL_CONDITIONS,
+)
 from generate_sst_configs import SST_PERTURBATIONS
+from submit_paper_jobs import model_job_names, runs_for_kind
 from update_beaker_map import DEFAULT_MAP, refresh_map
 
 HERE = pathlib.Path(__file__).parent
 REPO_ROOT = HERE.parents[2]
 RUN_CONFIGS_DIR = HERE / "run_configs"
 STATE_FILE = HERE / "job_watch_state.json"
+LOCK_FILE = HERE / "job_watch.lock"
 
 REMOTE = "origin"
 REMOTE_BRANCH = "exp/alexeyfm"
@@ -93,6 +114,30 @@ LEVELS = tuple(SST_PERTURBATIONS)
 EPOCHS = tuple(range(0, DEFAULT_EPOCHS + 1))
 FIXED_VARIABLE = "specific_total_water_0"
 FIXED_VARIANT_PARTS = ("", "swapped-")
+
+#: The 1000-year slab runs take weeks; they are expected and retried like any
+#: other paper job but do not hold up the DONE line.
+LONG_RUNNING_KIND = "som-eq-dataCO2-1000yr-sstslab-inference"
+
+
+def _paper_kind_rank(kind: str) -> int:
+    """Submission order: prescribed-SST kinds, then slab, the 1000-year last."""
+    if kind == LONG_RUNNING_KIND:
+        return 2
+    if "-sstprescribed-" in kind:
+        return 0
+    return 1
+
+
+#: Per-run paper kinds in submission order (stable within a rank, so the
+#: generator's order is kept). Data-only kinds run once per reference member
+#: on a fixed checkpoint and are not tracked here.
+PAPER_KINDS = tuple(
+    sorted((k for k in KINDS if k not in DATA_ONLY_KINDS), key=_paper_kind_rank)
+)
+PAPER_CLIMATES = tuple(CLIMATES)
+PAPER_ICS = tuple(range(1, N_INITIAL_CONDITIONS + 1))
+PAPER_ENS_MEMBERS = tuple(range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1))
 
 RETRY_LIMIT = 5
 NON_FINITE_MARKERS = ("non-finite", "nan")
@@ -116,6 +161,7 @@ STAGE_SCRIPTS = {
     "q0": "submit_fixed_var_jobs.py",
     "finetune": "submit_norm_ablation_finetune_jobs.py",
     "ft-sst": "submit_sst_epoch_jobs.py",
+    "paper": "submit_paper_jobs.py",
 }
 
 
@@ -275,7 +321,26 @@ def expected_jobs() -> list[Job]:
                                 ),
                             )
                         )
+        for kind in PAPER_KINDS:
+            if not runs_for_kind(kind, [cell.run]):
+                continue
+            for name in model_job_names(
+                kind, cell.run, PAPER_CLIMATES, PAPER_ICS, PAPER_ENS_MEMBERS
+            ):
+                jobs.append(
+                    Job(
+                        name,
+                        "paper",
+                        cell,
+                        needs=(cell.run,),
+                        select=("--kind", kind, "--run", cell.run),
+                    )
+                )
     return jobs
+
+
+def is_long_running(job: Job) -> bool:
+    return job.stage == "paper" and f"-{LONG_RUNNING_KIND}-" in job.name
 
 
 # --- state -----------------------------------------------------------------
@@ -497,11 +562,16 @@ def generate_dependents(
 
 
 def submit(
-    to_submit: dict[str, list[Job]], exhausted: Sequence[str], dry_run: bool
+    to_submit: dict[str, list[Job]], held_back: Sequence[str], dry_run: bool
 ) -> dict[str, int]:
-    """Run each stage's submit script once per distinct selection."""
+    """Run each stage's submit script once per distinct selection.
+
+    `held_back` names are passed as --exclude-job: the exhausted jobs and the
+    user-canceled ones, which a selection would otherwise sweep up alongside
+    the sibling it was made for.
+    """
     counts: dict[str, int] = {}
-    exclude = ["--exclude-job", *exhausted] if exhausted else []
+    exclude = ["--exclude-job", *held_back] if held_back else []
     common = [*BEAKER_ARGS, "--skip-if-in-beaker", *exclude]
     if dry_run:
         common.append("--dry-run")
@@ -559,6 +629,19 @@ def _merge_selections(stage: str, jobs: list[Job]) -> list[tuple[str, ...]]:
             ("--run", *sorted(runs), "--epoch", *epochs)
             for epochs, runs in sorted(by_epochs.items())
         ]
+    if stage == "paper":
+        # One invocation; the kinds keep PAPER_KINDS order so the cheap
+        # prescribed-SST jobs queue before the slab and 1000-year ones.
+        kinds = {job.select[1] for job in jobs}
+        runs = {job.cell.run for job in jobs}
+        return [
+            (
+                "--kind",
+                *(kind for kind in PAPER_KINDS if kind in kinds),
+                "--run",
+                *sorted(runs),
+            )
+        ]
     raise ValueError(stage)
 
 
@@ -580,6 +663,26 @@ def report(
     print("submitted this tick:", counts or "nothing")
     if state["exhausted"]:
         print("exhausted:", ", ".join(state["exhausted"]))
+    pending = [
+        job
+        for job in jobs
+        if not is_long_running(job)
+        and status_of(job.name, listing) not in (OK, CANCELED)
+    ]
+    if not pending:
+        canceled = sorted(
+            job.name for job in jobs if status_of(job.name, listing) == CANCELED
+        )
+        long_running = collections.Counter(
+            status_of(job.name, listing) for job in jobs if is_long_running(job)
+        )
+        print(
+            "DONE: every expected FM job has succeeded or been canceled"
+            f" ({len(canceled)} canceled); {LONG_RUNNING_KIND}: "
+            + ", ".join(f"{k} {v}" for k, v in sorted(long_running.items()))
+        )
+        for name in canceled:
+            print(f"  canceled: {name}")
 
 
 def main() -> None:
@@ -597,6 +700,13 @@ def main() -> None:
     stages = set(args.stage or STAGE_SCRIPTS)
     git = Git(enabled=not args.no_git and not args.dry_run)
 
+    lock = LOCK_FILE.open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"tick already running ({LOCK_FILE.name} is held); nothing done")
+        return
+
     git.pull()
     listing = fetch_experiments_by_name()
     if refresh_map(DEFAULT_MAP, listing, dry_run=args.dry_run):
@@ -607,7 +717,8 @@ def main() -> None:
     to_submit = plan(jobs, listing, state, stages, git, args.dry_run)
     if not args.dry_run:
         generate_dependents(to_submit, git, args.dry_run)
-    counts = submit(to_submit, state["exhausted"], args.dry_run)
+    canceled = [job.name for job in jobs if status_of(job.name, listing) == CANCELED]
+    counts = submit(to_submit, [*state["exhausted"], *canceled], args.dry_run)
     if not args.dry_run:
         save_state(state)
     report(jobs, listing, counts, state)

@@ -1,2 +1,3 @@
 wandb_configs/
 job_watch_state.json
+job_watch.lock

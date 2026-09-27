@@ -61,6 +61,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from typing import NamedTuple
 
 from _submit_common import (
@@ -277,6 +278,22 @@ def _expand(
         ]
     # Single-config kinds.
     return [((), (paper_config_filename(kind),))]
+
+
+def model_job_names(
+    kind: str,
+    run_name: str,
+    climates: Sequence[str],
+    ics: Sequence[int],
+    ens_members: Sequence[int],
+) -> list[str]:
+    """Job names of a per-training-run kind for one run, whether or not the
+    run has a result dataset yet (the job watcher expects them ahead of it).
+    """
+    return [
+        "-".join((run_name, kind, *parts))
+        for parts, _ in _expand(kind, list(climates), list(ics), list(ens_members))
+    ]
 
 
 def model_jobs(
