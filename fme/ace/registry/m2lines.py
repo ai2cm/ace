@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
@@ -125,12 +125,6 @@ class FloeNetBuilder(ModuleConfig):
     Configuration for the M2Lines FloeNet architecture.
     """
 
-    compile_unsupported_reason: ClassVar[str] = (
-        "FloeNet rebuilds its mesh graphs from numpy and uses boolean-mask "
-        "indexing in forward, producing data-dependent shapes torch.compile "
-        "cannot trace."
-    )
-
     latent_dimension: int = 256
     activation: str = "SiLU"
     meshes: int = 6
@@ -141,6 +135,14 @@ class FloeNetBuilder(ModuleConfig):
     processor_steps: int = 4
     residual: bool = True
     is_ocean: bool = True
+
+    @classmethod
+    def compile_unsupported_reason(cls) -> str | None:
+        return (
+            "FloeNet rebuilds its mesh graphs from numpy and uses boolean-mask "
+            "indexing in forward, producing data-dependent shapes torch.compile "
+            "cannot trace."
+        )
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:

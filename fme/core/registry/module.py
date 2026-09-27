@@ -25,19 +25,24 @@ class ModuleConfig(abc.ABC):
     allowing us to specify details of the network architecture in a config file.
     """
 
-    compile_unsupported_reason: ClassVar[str | None] = None
-    """Why ``torch.compile`` cannot be used with the modules this builder builds.
+    @classmethod
+    def compile_unsupported_reason(cls) -> str | None:
+        """Why ``torch.compile`` cannot be used with the modules this builder builds.
 
-    Set to a non-None string in a builder to declare that its modules cannot be
-    compiled, e.g. because the forward pass has data-dependent shapes.
-    :meth:`Module.compile` then raises ``NotImplementedError`` with this reason
-    instead of letting dynamo silently fall back to eager after a long tracing
-    attempt.
+        Override to return a string in a builder whose modules cannot be
+        compiled, e.g. because the forward pass has data-dependent shapes.
+        :meth:`Module.compile` then raises ``NotImplementedError`` with this
+        reason instead of letting dynamo silently fall back to eager after a
+        long tracing attempt. Returns None, meaning compilation is supported,
+        unless overridden.
 
-    This must be a ``ClassVar`` (or a plain class-level assignment): annotating
-    it without ``ClassVar`` would make it a dataclass field, which would leak
-    into ``ModuleSelector.config`` and into serialized checkpoints.
-    """
+        This is a classmethod rather than a ``ClassVar`` so that it is not a
+        dataclass field (which would leak into ``ModuleSelector.config`` and
+        serialized checkpoints) and adds no annotation: the sphinx docs build
+        copies inherited annotations onto each builder subclass as strings,
+        after which ``dacite`` can no longer resolve the subclass's type hints.
+        """
+        return None
 
     @abc.abstractmethod
     def build(
@@ -175,7 +180,7 @@ class Module:
 
         Raises:
             NotImplementedError: If the builder declared compilation
-                unsupported via ``ModuleConfig.compile_unsupported_reason``.
+                unsupported via ``ModuleConfig.compile_unsupported_reason()``.
         """
         if self._compile_unsupported_reason is not None:
             raise NotImplementedError(
@@ -339,7 +344,7 @@ class ModuleSelector:
         return Module(
             module,
             label_encoding,
-            compile_unsupported_reason=type(self._instance).compile_unsupported_reason,
+            compile_unsupported_reason=self._instance.compile_unsupported_reason(),
         )
 
     @classmethod
