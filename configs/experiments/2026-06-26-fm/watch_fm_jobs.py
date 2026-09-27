@@ -79,11 +79,11 @@ STATE_FILE = HERE / "job_watch_state.json"
 REMOTE = "origin"
 REMOTE_BRANCH = "exp/alexeyfm"
 
-#: nc-swin-v2.1 is out of the watcher's scope: its cells are held back while
-#: the instability the H1/H2 diagnostic configs probe is understood, and the
-#: watcher must neither submit their dependent stages nor retry their stopped
-#: jobs. Drop the name here to bring it back.
-EXCLUDED_ARCHS = ("nc-swin-v2.1",)
+#: Architectures held out of the watcher: their cells get no dependent stages
+#: and their stopped jobs are not retried. nc-swin-v2.1 sat here 2026-09-21 to
+#: 2026-09-27 while its NaN inline inference was diagnosed; it came back once
+#: the cells were retrained with residual prediction off.
+EXCLUDED_ARCHS: tuple[str, ...] = ()
 ARCHS = tuple(arch for arch in ARCH_SOURCES if arch not in EXCLUDED_ARCHS)
 REGIMES = ("era5", "c96", "fm")
 ARMS = ("a1", "a2", "a3")
