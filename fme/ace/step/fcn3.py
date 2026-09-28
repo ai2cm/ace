@@ -320,6 +320,9 @@ class FCN3StepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
 
+    def replace_compile(self, compile: bool) -> None:
+        self.compile = compile
+
     def get_step(
         self,
         dataset_info: DatasetInfo,

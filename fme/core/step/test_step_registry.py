@@ -135,6 +135,9 @@ class MockStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def replace_compile(self, compile: bool) -> None:
+        pass
+
     @property
     def allow_missing_variables(self) -> bool:
         return False
@@ -257,6 +260,9 @@ class DeprecatingMockStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
+
+    def replace_compile(self, compile: bool) -> None:
+        pass
 
     @property
     def allow_missing_variables(self) -> bool:
