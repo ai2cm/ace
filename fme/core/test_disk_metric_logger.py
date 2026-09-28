@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import os
 
@@ -82,6 +83,21 @@ def test_resume_catches_up_then_continues(log_dir):
     assert len(records) == 2
     assert records[0] == {"step": 5, "a": 1}
     assert records[1] == {"step": 6, "a": 3}
+
+
+def test_skipped_steps_warn_once(log_dir, caplog):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"a": 1}, step=5)
+    logger.close()
+
+    logger = DiskMetricLogger(log_dir)
+    with caplog.at_level(logging.WARNING):
+        for step in range(6):
+            logger.log({"a": 2}, step=step)
+    logger.close()
+
+    assert len(caplog.records) == 1
+    assert "high-water mark 5" in caplog.records[0].getMessage()
 
 
 def test_non_scalar_values_are_skipped(log_dir):

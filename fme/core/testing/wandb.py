@@ -17,6 +17,7 @@ class MockWandB:
         self._configured = False
         self._logs: dict[int, dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
+        self._last_received_step: int | None = None
         self._id: str | None = None
         self._disk_logger: DiskMetricLogger | None = None
         self._runs: list[dict[str, Any]] = []
@@ -101,6 +102,12 @@ class MockWandB:
     def set_id(self, id: str):
         self._id = id
 
+    def set_last_received_step(self, step: int):
+        """Simulate resuming a wandb run that received logs through ``step``
+        in a previous job, whose logs this mock does not hold.
+        """
+        self._last_received_step = step
+
     def finish(self):
         # Reset per-run state so the next init starts fresh; the env-name
         # snapshot persists, mirroring wandb's setup singleton across finish().
@@ -134,7 +141,10 @@ class MockWandB:
         if not self._enabled or self._disk_logger is None:
             return
         # like wandb, a resumed run continues after the last step received
-        next_step = max(self._logs) + 1 if self._logs else 0
+        received_steps = list(self._logs)
+        if self._last_received_step is not None:
+            received_steps.append(self._last_received_step)
+        next_step = max(received_steps, default=-1) + 1
         wandb.log_recovered_metrics(
             read_metrics_by_step(self._disk_logger.directory, next_step, max_step),
             self._log_recovered,

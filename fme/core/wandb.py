@@ -242,12 +242,14 @@ def log_recovered_metrics(
     log: Callable[[dict[str, Any], int], None],
 ):
     for step, data in metrics_by_step.items():
-        if "epoch" in data:
-            logging.info(
-                f"Recovered wandb logs for epoch {data['epoch']} at step {step} "
-                "from disk"
-            )
         log(data, step)
+    if metrics_by_step:
+        steps = list(metrics_by_step)
+        epochs = [data["epoch"] for data in metrics_by_step.values() if "epoch" in data]
+        logging.info(
+            f"Recovered wandb logs for {len(steps)} steps from disk "
+            f"(steps {steps[0]} to {steps[-1]}, epochs {epochs})"
+        )
 
 
 def scale_image(

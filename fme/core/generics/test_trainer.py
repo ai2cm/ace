@@ -651,8 +651,8 @@ def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str, caplog):
         )
         trainer.train()
 
-    def n_recovered_epochs() -> int:
-        return sum("Recovered wandb logs" in m for m in caplog.messages)
+    def recovery_messages() -> list[str]:
+        return [m for m in caplog.messages if "Recovered wandb logs" in m]
 
     with mock_wandb() as wandb, caplog.at_level(logging.INFO):
         resume_training()
@@ -663,10 +663,13 @@ def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str, caplog):
         caplog.clear()
         resume_training()
         assert wandb.get_logs()[last_epoch_step] == last_epoch_logs
-        assert n_recovered_epochs() == 1
+        assert recovery_messages() == [
+            f"Recovered wandb logs for 1 steps from disk "
+            f"(steps {last_epoch_step} to {last_epoch_step}, epochs [{max_epochs}])"
+        ]
         caplog.clear()
         resume_training()
-        assert n_recovered_epochs() == 0
+        assert recovery_messages() == []
 
 
 def get_batch_indices(batches) -> list[int]:

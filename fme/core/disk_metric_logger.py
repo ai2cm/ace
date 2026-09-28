@@ -24,6 +24,7 @@ class DiskMetricLogger:
         self.directory = directory
         self._path = os.path.join(directory, METRICS_FILENAME)
         self._high_water_mark: int | None = None
+        self._warned_skip = False
         self._file: io.TextIOWrapper | None = None
         self._read_high_water_mark()
         self._file = open(self._path, "a")
@@ -53,12 +54,23 @@ class DiskMetricLogger:
         the call is silently skipped.  Non-serializable values are dropped.
         """
         if self._high_water_mark is not None and step <= self._high_water_mark:
-            logging.warning(
-                "DiskMetricLogger: skipping log for step %d "
-                "(at or below high-water mark %d)",
-                step,
-                self._high_water_mark,
-            )
+            if self._warned_skip:
+                logging.debug(
+                    "DiskMetricLogger: skipping log for step %d "
+                    "(at or below high-water mark %d)",
+                    step,
+                    self._high_water_mark,
+                )
+            else:
+                logging.warning(
+                    "DiskMetricLogger: skipping logs for steps at or below "
+                    "high-water mark %d, already in %s from a previous run "
+                    "(first skipped step: %d)",
+                    self._high_water_mark,
+                    self._path,
+                    step,
+                )
+                self._warned_skip = True
             return
         scalars = _extract_serializable(data)
         if not scalars:

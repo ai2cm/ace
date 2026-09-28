@@ -301,13 +301,13 @@ class Trainer:
         self._aggregator_builder = aggregator_builder
         self._ema = build_ema(stepper.modules)  # build before restore_checkpoint
 
+        wandb = WandB.get_instance()
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
-            WandB.get_instance().log_unsynced_from_disk(max_step=self.num_batches_seen)
+            wandb.log_unsynced_from_disk(max_step=self.num_batches_seen)
 
-        wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
 
         n_params = count_parameters(self.stepper.modules)
