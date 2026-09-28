@@ -2038,7 +2038,7 @@
   "ace2-fm-nc-swin-v2.1-fm-a1-mask10-cond-finetune": "01M2PBW7BHYJ3DR5GHG815SPF6",
   "ace2-fm-nc-swin-v2.1-fm-a1-mask10-finetune": "01M2SDRD4J0NGBDTJS3X4PXY0H",
   "ace2-fm-nc-swin-v2.1-fm-a2-cond-finetune": "01M2RS6F08KV59CHM02MKSA5SD",
-  "ace2-fm-nc-swin-v2.1-fm-a2-finetune": "01M2RSJ211NS5XFTYW18GSVZF9",
+  "ace2-fm-nc-swin-v2.1-fm-a2-finetune": "01M3JMK2FKWQN7H8AG6MA18XAA",
   "ace2-fm-nc-swin-v2.1-fm-a3-cond-finetune": "01M2PBVQ65V1DKHXWDP5Z93A04",
   "ace2-fm-nc-swin-v2.1-fm-a3-finetune": "01M2RW2XQ8DBA542MSRYGKV493",
   "ace2-fm-nc-sfno-c96-a1-cond-somabruptens-abrupt-4xCO2-ens-sstprescribed-eval-ic1": "01M32N79X9T0C0KNWBY7Q4ETFV",
@@ -3351,5 +3351,7 @@
   "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic4": "01M3JQR174HCJMX48AHDVXTNFG",
   "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic5": "01M3JQR1B8ZVMGM8G02CR68SEX",
   "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic1": "01M3JQR13S9H50GKZPN97H4K40",
-  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic2": "01M3JQR0SF19D7NGH2PYHEM390"
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic2": "01M3JQR0SF19D7NGH2PYHEM390",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic3": "01M3JQJN2KX45VGSY2622749AJ",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic4": "01M3JQJMVEWKK5E4H8KWSR64Z1"
 }
