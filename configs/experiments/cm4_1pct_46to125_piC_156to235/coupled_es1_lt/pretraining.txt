@@ -1,0 +1,20 @@
+# STAGE-1 SPECTRAL-ES OCEAN, LONG-TAIL COUPLED SCHEDULE -- arm `es1lt_a2s`.
+# One row.
+#
+# Ocean init silm932h: STAGE-1 (1-step, 75 epochs) all_blocks rs0 stochastic
+# Samudra, CRPS 0.9 + SPECTRAL energy score 0.1, best_ckpt -- the checkpoint
+# stage 2 (19yl0189, es0lt's init) resumed from. best_ckpt, not
+# best_inference_ckpt: stage 1 selects on 1-step validation, and every stage-2
+# resume in this lineage mounted best_ckpt. rs0 over rs1: rs1's stage-1 inline
+# rollouts diverge from epoch 53. Atmosphere is James's frozen ACE2S j0ng1tw3,
+# as in every arm.
+#
+# Twin of es0lt_a2s (../coupled_es_lt): same template except max_epochs 16 and
+# evaluate_before_training false; the ocean init skips stage 2.
+#
+# Hardware, shared_mem, retries, MALLOC_ARENA_MAX as es0lt_a2s (see its
+# pretraining.txt).
+
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|env
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es1lt_a2s-fto|o0a0rs0|ace-samudra-cm4|silm932h|best_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
