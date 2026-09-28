@@ -4,11 +4,6 @@ experiment_dir: /results
 n_coupled_steps: 14598
 coupled_steps_in_memory: 18
 checkpoint_path: /ckpt.tar
-# Monthly-mean SST over six variability regions, for the regional SST
-# variability diagnostics without save_monthly_files: the boxes total 8100 cells
-# against the global 64800, ~80 MB per source over 200 years. The e_equatorial_pacific
-# box spans 190-270E so it contains both Nino 3 (210-270E) and ace's Nino 3.4
-# (190-240E, fme/ace/aggregator/inference/enso/dynamic_index.py).
 data_writer:
   ocean:
     save_prediction_files: false

@@ -23,11 +23,6 @@ loader:
       file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
       engine: zarr
   num_data_workers: 4
-# Monthly-mean SST over six variability regions, for the regional SST
-# variability diagnostics without save_monthly_files: the boxes total 8100 cells
-# against the global 64800, ~80 MB per source over 200 years. The e_equatorial_pacific
-# box spans 190-270E so it contains both Nino 3 (210-270E) and ace's Nino 3.4
-# (190-240E, fme/ace/aggregator/inference/enso/dynamic_index.py).
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
