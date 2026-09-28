@@ -90,8 +90,12 @@ def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch, c
     )
     wandb = WandB()
     wandb.configure(log_to_wandb=True, metrics_log_dir=log_dir)
-    with caplog.at_level(logging.INFO):
-        wandb.log_unsynced_from_disk(max_step=20)
+    try:
+        with caplog.at_level(logging.INFO):
+            wandb.log_unsynced_from_disk(max_step=20)
+    finally:
+        # reconfiguring closes the disk logger's file
+        wandb.configure(log_to_wandb=False, metrics_log_dir=None)
     assert logged == [({"batch_loss": 0.4, "val_loss": 0.3, "epoch": 2}, 20, True)]
     assert (
         "Recovered wandb logs for 1 steps from disk (steps 20 to 20, epochs [2])"

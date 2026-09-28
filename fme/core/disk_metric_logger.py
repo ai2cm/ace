@@ -91,7 +91,7 @@ class DiskMetricLogger:
         archived_path = f"{self._path}.{time.strftime('%Y%m%dT%H%M%S')}"
         os.rename(self._path, archived_path)
         logging.warning(
-            f"Moved metrics from a previous run in this directory to {archived_path}"
+            "Moved metrics from a previous run in this directory to %s", archived_path
         )
         self._high_water_mark = None
         self._warned_skip = False
