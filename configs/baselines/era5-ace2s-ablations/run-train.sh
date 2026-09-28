@@ -166,3 +166,9 @@ run_training "ace2s-finetune-deterministic.yaml" "1deg-daily-ace2s-det-ft3-detac
 run_training "ace2s-finetune-4deg-rs1.yaml" "4deg-daily-ace2s-ft3-detached-rs1" 1
 run_training "ace2s-finetune-4deg-rs2.yaml" "4deg-daily-ace2s-ft3-detached-rs2" 1
 run_training "ace2s-finetune-4deg-rs3.yaml" "4deg-daily-ace2s-ft3-detached-rs3" 1
+
+# Stage-2 fine-tunes of the pretrains that finished 2026-09-26/27 (same recipe)
+run_training "ace2s-finetune-rs2.yaml" "1deg-daily-ace2s-ft3-detached-rs2" 8
+run_training "ace2s-finetune-rs3.yaml" "1deg-daily-ace2s-ft3-detached-rs3" 8
+run_training "ace2s-finetune-crps-only.yaml" "1deg-daily-ace2s-crps-only-ft3-detached-rs0" 8
+run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck-ft3-detached-rs0" 8
