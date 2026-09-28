@@ -1,5 +1,4 @@
 import contextlib
-import logging
 import os
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
@@ -637,7 +636,7 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert len(stepper.loaded_state) == 2
 
 
-def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str, caplog):
+def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str):
     max_epochs = 2
     n_train_batches = 5
     last_epoch_step = max_epochs * n_train_batches
@@ -651,25 +650,14 @@ def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str, caplog):
         )
         trainer.train()
 
-    def recovery_messages() -> list[str]:
-        return [m for m in caplog.messages if "Recovered wandb logs" in m]
-
-    with mock_wandb() as wandb, caplog.at_level(logging.INFO):
+    with mock_wandb() as wandb:
         resume_training()
         last_epoch_logs = wandb.get_logs()[last_epoch_step]
         assert last_epoch_logs["epoch"] == max_epochs
         # the job is killed after its last log, before wandb uploads it
         wandb.drop_logs_after(last_epoch_step - 1)
-        caplog.clear()
         resume_training()
         assert wandb.get_logs()[last_epoch_step] == last_epoch_logs
-        assert recovery_messages() == [
-            f"Recovered wandb logs for 1 steps from disk "
-            f"(steps {last_epoch_step} to {last_epoch_step}, epochs [{max_epochs}])"
-        ]
-        caplog.clear()
-        resume_training()
-        assert recovery_messages() == []
 
 
 def get_batch_indices(batches) -> list[int]:

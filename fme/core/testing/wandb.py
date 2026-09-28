@@ -145,14 +145,11 @@ class MockWandB:
         if self._last_received_step is not None:
             received_steps.append(self._last_received_step)
         next_step = max(received_steps, default=-1) + 1
-        wandb.log_recovered_metrics(
-            read_metrics_by_step(self._disk_logger.directory, next_step, max_step),
-            self._log_recovered,
-        )
-
-    def _log_recovered(self, data: dict[str, Any], step: int):
-        self._last_step = step
-        self._logs[step].update(data)
+        for step, data in read_metrics_by_step(
+            self._disk_logger.directory, next_step, max_step
+        ).items():
+            self._last_step = step
+            self._logs[step].update(data)
 
     def drop_logs_after(self, step: int):
         """Simulate wandb never receiving logs after ``step``, e.g. because

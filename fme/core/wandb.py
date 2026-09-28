@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -202,10 +202,20 @@ class WandB:
         """
         if not self._enabled or self._disk_logger is None or wandb.run is None:
             return
-        log_recovered_metrics(
-            read_metrics_by_step(self._disk_logger.directory, wandb.run.step, max_step),
-            lambda data, step: wandb.log(data, step=step, commit=True),
+        metrics_by_step = read_metrics_by_step(
+            self._disk_logger.directory, wandb.run.step, max_step
         )
+        for step, data in metrics_by_step.items():
+            wandb.log(data, step=step, commit=True)
+        if metrics_by_step:
+            steps = list(metrics_by_step)
+            epochs = [
+                data["epoch"] for data in metrics_by_step.values() if "epoch" in data
+            ]
+            logging.info(
+                f"Recovered wandb logs for {len(steps)} steps from disk "
+                f"(steps {steps[0]} to {steps[-1]}, epochs {epochs})"
+            )
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
@@ -235,21 +245,6 @@ class WandB:
 
 
 singleton: WandB | None = None
-
-
-def log_recovered_metrics(
-    metrics_by_step: Mapping[int, dict[str, Any]],
-    log: Callable[[dict[str, Any], int], None],
-):
-    for step, data in metrics_by_step.items():
-        log(data, step)
-    if metrics_by_step:
-        steps = list(metrics_by_step)
-        epochs = [data["epoch"] for data in metrics_by_step.values() if "epoch" in data]
-        logging.info(
-            f"Recovered wandb logs for {len(steps)} steps from disk "
-            f"(steps {steps[0]} to {steps[-1]}, epochs {epochs})"
-        )
 
 
 def scale_image(

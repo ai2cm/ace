@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import numpy as np
@@ -71,7 +72,7 @@ class TestDiskLoggingIntegration:
         assert records[0] == {"step": 0, "loss": 0.5}
 
 
-def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch):
+def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch, caplog):
     log_dir = str(tmp_path / "metrics")
     previous_job = DiskMetricLogger(log_dir)
     previous_job.log({"batch_loss": 0.5}, step=10)
@@ -89,5 +90,10 @@ def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch):
     )
     wandb = WandB()
     wandb.configure(log_to_wandb=True, metrics_log_dir=log_dir)
-    wandb.log_unsynced_from_disk(max_step=20)
+    with caplog.at_level(logging.INFO):
+        wandb.log_unsynced_from_disk(max_step=20)
     assert logged == [({"batch_loss": 0.4, "val_loss": 0.3, "epoch": 2}, 20, True)]
+    assert (
+        "Recovered wandb logs for 1 steps from disk (steps 20 to 20, epochs [2])"
+        in (caplog.messages)
+    )
