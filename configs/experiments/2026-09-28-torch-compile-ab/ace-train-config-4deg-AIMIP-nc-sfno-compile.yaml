@@ -498,6 +498,7 @@ stepper:
       compile: true
       builder:
         type: NoiseConditionedSFNO
+        conditional: true
         config:
           embed_dim: 512
           noise_embed_dim: 32
