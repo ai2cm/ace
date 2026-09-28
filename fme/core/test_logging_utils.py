@@ -43,11 +43,11 @@ def test_no_metrics_written_for_non_local_experiment_dir():
     with mock_wandb() as wandb:
         wandb.configure(
             log_to_wandb=False,
-            metrics_log_dir=LoggingConfig()._get_metrics_log_dir("gs://bucket/exp"),
+            metrics_log_dir=LoggingConfig()._get_metrics_log_dir("memory://bucket/exp"),
         )
         assert wandb._disk_logger is None
 
 
 def test_non_local_metrics_log_dir_raises():
     with pytest.raises(ValueError, match="local file system"):
-        LoggingConfig(metrics_log_dir="gs://bucket/metrics")
+        LoggingConfig(metrics_log_dir="memory://bucket/metrics")
