@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-import logging
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 
@@ -8,6 +7,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    EARTH_RADIUS,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
@@ -19,7 +19,9 @@ from fme.core.corrector.registry import (
 )
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
-from fme.core.dataset.data_typing import VariableMetadata
+
+# DELETE LATER: only used by the old salt content corrections.
+# from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -28,7 +30,9 @@ from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
-_SEA_ICE_VOLUME_M3_UNITS = frozenset({"m^3", "m3", "m**3"})
+# DELETE LATER: old salt content correction, replaced by the total one.
+# _SEA_ICE_VOLUME_M3_UNITS = frozenset({"m^3", "m3", "m**3"})
+_SPHERE_AREA_M2 = 4 * torch.pi * EARTH_RADIUS**2
 
 
 def _local_sea_ice_volume_valid(
@@ -54,6 +58,9 @@ class AreaWeightedMean(Protocol):
     def __call__(
         self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
     ) -> torch.Tensor: ...
+
+
+AreaWeightedSum = AreaWeightedMean  # same call signature
 
 
 @dataclasses.dataclass
@@ -136,149 +143,179 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+# DELETE LATER: old salt content correction, replaced by the total one.
+# @dataclasses.dataclass
+# class OceanSaltContentBudgetConfig:
+#     """Configuration for ocean salt content budget correction.
+#
+#     Unlike heat, global ocean salt content has no surface flux source:
+#     precipitation, evaporation and runoff move water, not salt. The only
+#     genuine exchange is with the sea-ice reservoir, and the model predicts
+#     the ice volume, so the expected change is computable from the model's
+#     own outputs with no external forcing data.
+#
+#     Parameters:
+#         method: The available option is "scaled_salinity", which enforces
+#             the salt budget by scaling the predicted salinity by a
+#             vertically and horizontally uniform correction factor.
+#         ice_volume_salt_slope_psu: Empirical slope of the global column
+#             salt content change against the change in global-mean sea ice
+#             volume: ``expected_change = slope * delta_ice_volume``. Simple
+#             bookkeeping (ice exporting salt at its own salinity) suggests a
+#             small negative slope, but CM4's brine-rejection plumbing
+#             measures +5.85 psu on the 1pctCO2 dataset - calibrate against
+#             the target data rather than assuming. Set to 0 to ignore the
+#             ice exchange and hold salt content fixed.
+#         constant_unaccounted_salting: Area-weighted global mean rate of
+#             column salt content change, in psu m / s, added to the expected
+#             change at every step. Useful when the target data's salt budget
+#             has a small measured residual.
+#
+#     Cells outside the dataset's mask for ``sea_ice_volume`` (e.g.
+#     ``mask_sea_ice_volume``) are left out of the ice term, as in
+#     ``OceanSaltContentThicknessBudgetConfig``.
+#     """
+#
+#     method: Literal["scaled_salinity"]
+#     ice_volume_salt_slope_psu: float = 0.0
+#     constant_unaccounted_salting: float = 0.0
+#
+#
+# @dataclasses.dataclass
+# class OceanSaltContentThicknessBudgetConfig:
+#     """Configuration for an ocean salt content budget correction whose ice term
+#     uses cell-average sea ice thickness rather than per-cell ice volume.
+#
+#     Same as ``OceanSaltContentBudgetConfig``, except that each cell's change in
+#     ``sea_ice_volume`` is divided by its cell area before the global mean. The
+#     cell area is the grid's ``area_weights_m2``, i.e. the same area weights the
+#     area-weighted mean (and so the heat and salt content integrals) uses,
+#     scaled to m^2. The ice term is then the change in global-mean cell-average
+#     ice thickness in m, which equals the total ice volume change divided by
+#     the masked ocean area, so the slope is in psu and doesn't depend on grid
+#     resolution or on the ice-volume unit. Cells outside the dataset's mask for
+#     ``sea_ice_volume`` (e.g. ``mask_sea_ice_volume``) are left out of the ice
+#     term, since the step input there is filled with 0 but the prediction is
+#     unconstrained.
+#
+#     Parameters:
+#         method: The available option is "scaled_salinity", which enforces
+#             the salt budget by scaling the predicted salinity by a
+#             vertically and horizontally uniform correction factor.
+#         ice_thickness_salt_slope_psu: Empirical slope of the global column
+#             salt content change (psu m) against the change in global-mean
+#             cell-average sea ice thickness (m):
+#             ``expected_change = slope * delta_ice_thickness``. With fixed
+#             layer thicknesses the fresh water removed by freezing also counts
+#             as a salt gain, so the slope is much larger than an ice salinity.
+#             It is about 40 psu for CM4/OM4 at 1 and 4 degrees; calibrate
+#             against the target data. Set to 0 to ignore the ice exchange and
+#             hold salt content fixed.
+#         constant_unaccounted_salting: Area-weighted global mean rate of
+#             column salt content change, in psu m / s, added to the expected
+#             change at every step.
+#         sea_ice_volume_m3_per_unit: Cubic meters per unit of ``sea_ice_volume``.
+#             If None, the dataset's ``sea_ice_volume`` units must be m^3 (or be
+#             absent, in which case m^3 is assumed). Set this, for example to
+#             1e9 for km^3, when the units differ or the units attribute is
+#             wrong.
+#     """
+#
+#     method: Literal["scaled_salinity"]
+#     ice_thickness_salt_slope_psu: float = 0.0
+#     constant_unaccounted_salting: float = 0.0
+#     sea_ice_volume_m3_per_unit: float | None = None
+#
+#     def __post_init__(self):
+#         if (
+#             self.sea_ice_volume_m3_per_unit is not None
+#             and self.sea_ice_volume_m3_per_unit <= 0
+#         ):
+#             raise ValueError(
+#                 "sea_ice_volume_m3_per_unit must be positive, got "
+#                 f"{self.sea_ice_volume_m3_per_unit}"
+#             )
+#
+#     def get_ice_volume_to_thickness(
+#         self,
+#         cell_area_m2: torch.Tensor | None,
+#         variable_metadata: Mapping[str, VariableMetadata],
+#         sea_ice_volume_mask: torch.Tensor | None = None,
+#     ) -> torch.Tensor:
+#         """Per-cell factor converting a ``sea_ice_volume`` value to a
+#         cell-average ice thickness in m, on this rank's spatial slice. It is
+#         zero where the cell area is not positive and outside
+#         ``sea_ice_volume_mask``.
+#
+#         Args:
+#             cell_area_m2: Cell areas in m^2 on the global grid.
+#             variable_metadata: Metadata used to check the units of
+#                 ``sea_ice_volume``.
+#             sea_ice_volume_mask: Optional spatial mask for ``sea_ice_volume``
+#                 on the global grid, 0 where it is not valid data (see
+#                 ``_local_sea_ice_volume_valid``).
+#         """
+#         if cell_area_m2 is None:
+#             raise ValueError(
+#                 "ocean_salt_content_thickness_correction requires cell areas in "
+#                 "m^2, which this grid's horizontal coordinates do not provide."
+#             )
+#         if self.sea_ice_volume_m3_per_unit is None:
+#             units = variable_metadata.get("sea_ice_volume", VariableMetadata()).units
+#             if units is None:
+#                 logging.warning(
+#                     "sea_ice_volume has no units metadata; the ocean salt content "
+#                     "thickness correction assumes m^3."
+#                 )
+#             elif units not in _SEA_ICE_VOLUME_M3_UNITS:
+#                 raise ValueError(
+#                     f"sea_ice_volume has units {units!r}, but the ocean salt "
+#                     "content thickness correction expects m^3. Set "
+#                     "sea_ice_volume_m3_per_unit to convert."
+#                 )
+#             m3_per_unit = 1.0
+#         else:
+#             m3_per_unit = self.sea_ice_volume_m3_per_unit
+#         local_slices = Distributed.get_instance().get_local_slices(cell_area_m2.shape)
+#         cell_area_m2 = cell_area_m2[local_slices].to(get_device())
+#         valid = cell_area_m2 > 0
+#         ice_valid = _local_sea_ice_volume_valid(sea_ice_volume_mask)
+#         if ice_valid is not None:
+#             valid = valid & ice_valid
+#         return torch.where(
+#             valid,
+#             m3_per_unit / cell_area_m2.where(valid, 1.0),
+#             torch.zeros_like(cell_area_m2),
+#         )
+
+
 @dataclasses.dataclass
-class OceanSaltContentBudgetConfig:
+class OceanSaltContentTotalBudgetConfig:
     """Configuration for ocean salt content budget correction.
 
-    Unlike heat, global ocean salt content has no surface flux source:
-    precipitation, evaporation and runoff move water, not salt. The only
-    genuine exchange is with the sea-ice reservoir, and the model predicts
-    the ice volume, so the expected change is computable from the model's
-    own outputs with no external forcing data.
+    Scales the predicted salinity by a vertically and horizontally uniform
+    ratio so the total column salt content changes by the slope times the
+    change in total sea ice volume (m^3), plus a constant rate. Both are
+    global totals, so the slope does not depend on the grid.
 
     Parameters:
-        method: The available option is "scaled_salinity", which enforces
-            the salt budget by scaling the predicted salinity by a
-            vertically and horizontally uniform correction factor.
-        ice_volume_salt_slope_psu: Empirical slope of the global column
-            salt content change against the change in global-mean sea ice
-            volume: ``expected_change = slope * delta_ice_volume``. Simple
-            bookkeeping (ice exporting salt at its own salinity) suggests a
-            small negative slope, but CM4's brine-rejection plumbing
-            measures +5.85 psu on the 1pctCO2 dataset - calibrate against
-            the target data rather than assuming. Set to 0 to ignore the
-            ice exchange and hold salt content fixed.
-        constant_unaccounted_salting: Area-weighted global mean rate of
-            column salt content change, in psu m / s, added to the expected
-            change at every step. Useful when the target data's salt budget
-            has a small measured residual.
-
-    Cells outside the dataset's mask for ``sea_ice_volume`` (e.g.
-    ``mask_sea_ice_volume``) are left out of the ice term, as in
-    ``OceanSaltContentThicknessBudgetConfig``.
+        method: The available option is "scaled_salinity".
+        ice_volume_salt_slope_psu: Empirical slope of the change in total
+            column salt content (psu m^3) against the change in total sea ice
+            volume (m^3), in psu. Calibrate against the target data; set to 0
+            to hold salt content fixed.
+        constant_unaccounted_salting: Area-weighted global mean rate of column
+            salt content change, in psu m / s, added at every step.
+        use_float64: Compute the global sums, expected change and ratio in
+            float64 instead of the data's dtype. The expected change is only a
+            couple of float32 epsilons of the salt content, so in float32 it is
+            applied with a ~25-30% error per step.
     """
 
     method: Literal["scaled_salinity"]
     ice_volume_salt_slope_psu: float = 0.0
     constant_unaccounted_salting: float = 0.0
-
-
-@dataclasses.dataclass
-class OceanSaltContentThicknessBudgetConfig:
-    """Configuration for an ocean salt content budget correction whose ice term
-    uses cell-average sea ice thickness rather than per-cell ice volume.
-
-    Same as ``OceanSaltContentBudgetConfig``, except that each cell's change in
-    ``sea_ice_volume`` is divided by its cell area before the global mean. The
-    cell area is the grid's ``area_weights_m2``, i.e. the same area weights the
-    area-weighted mean (and so the heat and salt content integrals) uses,
-    scaled to m^2. The ice term is then the change in global-mean cell-average
-    ice thickness in m, which equals the total ice volume change divided by
-    the masked ocean area, so the slope is in psu and doesn't depend on grid
-    resolution or on the ice-volume unit. Cells outside the dataset's mask for
-    ``sea_ice_volume`` (e.g. ``mask_sea_ice_volume``) are left out of the ice
-    term, since the step input there is filled with 0 but the prediction is
-    unconstrained.
-
-    Parameters:
-        method: The available option is "scaled_salinity", which enforces
-            the salt budget by scaling the predicted salinity by a
-            vertically and horizontally uniform correction factor.
-        ice_thickness_salt_slope_psu: Empirical slope of the global column
-            salt content change (psu m) against the change in global-mean
-            cell-average sea ice thickness (m):
-            ``expected_change = slope * delta_ice_thickness``. With fixed
-            layer thicknesses the fresh water removed by freezing also counts
-            as a salt gain, so the slope is much larger than an ice salinity.
-            It is about 40 psu for CM4/OM4 at 1 and 4 degrees; calibrate
-            against the target data. Set to 0 to ignore the ice exchange and
-            hold salt content fixed.
-        constant_unaccounted_salting: Area-weighted global mean rate of
-            column salt content change, in psu m / s, added to the expected
-            change at every step.
-        sea_ice_volume_m3_per_unit: Cubic meters per unit of ``sea_ice_volume``.
-            If None, the dataset's ``sea_ice_volume`` units must be m^3 (or be
-            absent, in which case m^3 is assumed). Set this, for example to
-            1e9 for km^3, when the units differ or the units attribute is
-            wrong.
-    """
-
-    method: Literal["scaled_salinity"]
-    ice_thickness_salt_slope_psu: float = 0.0
-    constant_unaccounted_salting: float = 0.0
-    sea_ice_volume_m3_per_unit: float | None = None
-
-    def __post_init__(self):
-        if (
-            self.sea_ice_volume_m3_per_unit is not None
-            and self.sea_ice_volume_m3_per_unit <= 0
-        ):
-            raise ValueError(
-                "sea_ice_volume_m3_per_unit must be positive, got "
-                f"{self.sea_ice_volume_m3_per_unit}"
-            )
-
-    def get_ice_volume_to_thickness(
-        self,
-        cell_area_m2: torch.Tensor | None,
-        variable_metadata: Mapping[str, VariableMetadata],
-        sea_ice_volume_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Per-cell factor converting a ``sea_ice_volume`` value to a
-        cell-average ice thickness in m, on this rank's spatial slice. It is
-        zero where the cell area is not positive and outside
-        ``sea_ice_volume_mask``.
-
-        Args:
-            cell_area_m2: Cell areas in m^2 on the global grid.
-            variable_metadata: Metadata used to check the units of
-                ``sea_ice_volume``.
-            sea_ice_volume_mask: Optional spatial mask for ``sea_ice_volume``
-                on the global grid, 0 where it is not valid data (see
-                ``_local_sea_ice_volume_valid``).
-        """
-        if cell_area_m2 is None:
-            raise ValueError(
-                "ocean_salt_content_thickness_correction requires cell areas in "
-                "m^2, which this grid's horizontal coordinates do not provide."
-            )
-        if self.sea_ice_volume_m3_per_unit is None:
-            units = variable_metadata.get("sea_ice_volume", VariableMetadata()).units
-            if units is None:
-                logging.warning(
-                    "sea_ice_volume has no units metadata; the ocean salt content "
-                    "thickness correction assumes m^3."
-                )
-            elif units not in _SEA_ICE_VOLUME_M3_UNITS:
-                raise ValueError(
-                    f"sea_ice_volume has units {units!r}, but the ocean salt "
-                    "content thickness correction expects m^3. Set "
-                    "sea_ice_volume_m3_per_unit to convert."
-                )
-            m3_per_unit = 1.0
-        else:
-            m3_per_unit = self.sea_ice_volume_m3_per_unit
-        local_slices = Distributed.get_instance().get_local_slices(cell_area_m2.shape)
-        cell_area_m2 = cell_area_m2[local_slices].to(get_device())
-        valid = cell_area_m2 > 0
-        ice_valid = _local_sea_ice_volume_valid(sea_ice_volume_mask)
-        if ice_valid is not None:
-            valid = valid & ice_valid
-        return torch.where(
-            valid,
-            m3_per_unit / cell_area_m2.where(valid, 1.0),
-            torch.zeros_like(cell_area_m2),
-        )
+    use_float64: bool = False
 
 
 @dataclasses.dataclass
@@ -411,17 +448,107 @@ class OceanHeatContentCorrection:
         return corrected, corrector_state
 
 
+# DELETE LATER: old salt content correction, replaced by the total one.
+# @dataclasses.dataclass
+# class OceanSaltContentCorrection:
+#     """Correction that conserves ocean salt content."""
+#
+#     area_weighted_mean: AreaWeightedMean
+#     vertical_coordinate: HasOceanDepthIntegral | None
+#     timestep_seconds: float
+#     method: Literal["scaled_salinity"]
+#     ice_volume_salt_slope_psu: float
+#     unaccounted_salting: float
+#     ice_volume_weight: torch.Tensor | None = None
+#
+#     def __call__(
+#         self,
+#         input_data: TensorMapping,
+#         gen_data: TensorMapping,
+#         forcing_data: TensorMapping,
+#         corrector_state: CorrectorState | None,
+#     ) -> tuple[TensorDict, CorrectorState | None]:
+#         """
+#         Returns:
+#             A tuple whose ``TensorDict`` contains only the fields modified by
+#             this correction (the salinity at every depth level).
+#         """
+#         if self.vertical_coordinate is None:
+#             raise ValueError(
+#                 "Ocean salt content correction is turned on, but no vertical "
+#                 "coordinate is available."
+#             )
+#         corrected = _force_conserve_ocean_salt_content(
+#             input_data,
+#             gen_data,
+#             self.area_weighted_mean,
+#             self.vertical_coordinate,
+#             self.timestep_seconds,
+#             self.method,
+#             self.ice_volume_salt_slope_psu,
+#             self.unaccounted_salting,
+#             ice_volume_weight=self.ice_volume_weight,
+#         )
+#         return corrected, corrector_state
+#
+#
+# @dataclasses.dataclass
+# class OceanSaltContentThicknessCorrection:
+#     """Correction that conserves ocean salt content, with the ice term in
+#     cell-average sea ice thickness.
+#     """
+#
+#     area_weighted_mean: AreaWeightedMean
+#     vertical_coordinate: HasOceanDepthIntegral | None
+#     timestep_seconds: float
+#     method: Literal["scaled_salinity"]
+#     ice_thickness_salt_slope_psu: float
+#     unaccounted_salting: float
+#     ice_volume_to_thickness: torch.Tensor
+#
+#     def __call__(
+#         self,
+#         input_data: TensorMapping,
+#         gen_data: TensorMapping,
+#         forcing_data: TensorMapping,
+#         corrector_state: CorrectorState | None,
+#     ) -> tuple[TensorDict, CorrectorState | None]:
+#         """
+#         Returns:
+#             A tuple whose ``TensorDict`` contains only the fields modified by
+#             this correction (the salinity at every depth level).
+#         """
+#         if self.vertical_coordinate is None:
+#             raise ValueError(
+#                 "Ocean salt content correction is turned on, but no vertical "
+#                 "coordinate is available."
+#             )
+#         corrected = _force_conserve_ocean_salt_content(
+#             input_data,
+#             gen_data,
+#             self.area_weighted_mean,
+#             self.vertical_coordinate,
+#             self.timestep_seconds,
+#             self.method,
+#             self.ice_thickness_salt_slope_psu,
+#             self.unaccounted_salting,
+#             ice_volume_weight=self.ice_volume_to_thickness,
+#         )
+#         return corrected, corrector_state
+
+
 @dataclasses.dataclass
-class OceanSaltContentCorrection:
+class OceanSaltContentTotalCorrection:
     """Correction that conserves ocean salt content."""
 
-    area_weighted_mean: AreaWeightedMean
+    area_weighted_sum: AreaWeightedSum
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
     method: Literal["scaled_salinity"]
     ice_volume_salt_slope_psu: float
     unaccounted_salting: float
-    ice_volume_weight: torch.Tensor | None = None
+    sea_ice_volume_valid: torch.Tensor | None
+    use_float64: bool
 
     def __call__(
         self,
@@ -443,58 +570,14 @@ class OceanSaltContentCorrection:
         corrected = _force_conserve_ocean_salt_content(
             input_data,
             gen_data,
-            self.area_weighted_mean,
+            self.area_weighted_sum,
             self.vertical_coordinate,
             self.timestep_seconds,
             self.method,
             self.ice_volume_salt_slope_psu,
             self.unaccounted_salting,
-            ice_volume_weight=self.ice_volume_weight,
-        )
-        return corrected, corrector_state
-
-
-@dataclasses.dataclass
-class OceanSaltContentThicknessCorrection:
-    """Correction that conserves ocean salt content, with the ice term in
-    cell-average sea ice thickness.
-    """
-
-    area_weighted_mean: AreaWeightedMean
-    vertical_coordinate: HasOceanDepthIntegral | None
-    timestep_seconds: float
-    method: Literal["scaled_salinity"]
-    ice_thickness_salt_slope_psu: float
-    unaccounted_salting: float
-    ice_volume_to_thickness: torch.Tensor
-
-    def __call__(
-        self,
-        input_data: TensorMapping,
-        gen_data: TensorMapping,
-        forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (the salinity at every depth level).
-        """
-        if self.vertical_coordinate is None:
-            raise ValueError(
-                "Ocean salt content correction is turned on, but no vertical "
-                "coordinate is available."
-            )
-        corrected = _force_conserve_ocean_salt_content(
-            input_data,
-            gen_data,
-            self.area_weighted_mean,
-            self.vertical_coordinate,
-            self.timestep_seconds,
-            self.method,
-            self.ice_thickness_salt_slope_psu,
-            self.unaccounted_salting,
-            ice_volume_weight=self.ice_volume_to_thickness,
+            self.sea_ice_volume_valid,
+            self.use_float64,
         )
         return corrected, corrector_state
 
@@ -514,15 +597,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             flux correction to the generated hfds.
         ocean_heat_content_correction: Optional configuration for an ocean heat
             content correction.
-        ocean_salt_content_correction: Optional configuration for an ocean salt
-            content budget correction (scales every salinity level so the global
-            column salt content changes only by the sea-ice exchange and a
-            constant unaccounted rate).
-        ocean_salt_content_thickness_correction: Optional configuration for an
-            ocean salt content budget correction whose ice term uses
-            cell-average ice thickness (``sea_ice_volume`` / cell area), so its
-            slope is independent of grid resolution. Cannot be combined with
-            ``ocean_salt_content_correction``.
+        ocean_salt_content_total_correction: Optional configuration for an
+            ocean salt content correction.
         keep_gradient_through_clamps: If True, apply the corrector's hard clamps
             (the ``force_positive_names`` clamp and the
             ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
@@ -535,22 +611,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
-    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
-    ocean_salt_content_thickness_correction: (
-        OceanSaltContentThicknessBudgetConfig | None
-    ) = None
+    # DELETE LATER: old salt content corrections, replaced by the total one.
+    # ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
+    # ocean_salt_content_thickness_correction: (
+    #     OceanSaltContentThicknessBudgetConfig | None
+    # ) = None
+    ocean_salt_content_total_correction: OceanSaltContentTotalBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
-
-    def __post_init__(self):
-        super().__post_init__()
-        if (
-            self.ocean_salt_content_correction is not None
-            and self.ocean_salt_content_thickness_correction is not None
-        ):
-            raise ValueError(
-                "Only one of ocean_salt_content_correction and "
-                "ocean_salt_content_thickness_correction may be set."
-            )
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -580,14 +647,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
-        cell_area_m2 = None
         sea_ice_volume_mask = None
-        if self.ocean_salt_content_thickness_correction is not None:
-            cell_area_m2 = dataset_info.horizontal_coordinates.area_weights_m2
-        if (
-            self.ocean_salt_content_correction is not None
-            or self.ocean_salt_content_thickness_correction is not None
-        ):
+        if self.ocean_salt_content_total_correction is not None:
             try:
                 sea_ice_volume_mask = (
                     dataset_info.spatial_mask_provider.get_mask_tensor_for(
@@ -600,8 +661,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
-            cell_area_m2=cell_area_m2,
-            variable_metadata=dataset_info.variable_metadata,
             sea_ice_volume_mask=sea_ice_volume_mask,
         )
 
@@ -610,8 +669,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
-        cell_area_m2: torch.Tensor | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         sea_ice_volume_mask: torch.Tensor | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
@@ -645,36 +702,51 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
                 )
             )
-        if self.ocean_salt_content_correction is not None:
-            sea_ice_volume_valid = _local_sea_ice_volume_valid(sea_ice_volume_mask)
+        # DELETE LATER: old salt content correction, replaced by the total one.
+        # if self.ocean_salt_content_correction is not None:
+        #     sea_ice_volume_valid = _local_sea_ice_volume_valid(sea_ice_volume_mask)
+        #     corrections.append(
+        #         OceanSaltContentCorrection(
+        #             area_weighted_mean,
+        #             vertical_coordinate,
+        #             timestep_seconds,
+        #             self.ocean_salt_content_correction.method,
+        #             self.ocean_salt_content_correction.ice_volume_salt_slope_psu,
+        #             self.ocean_salt_content_correction.constant_unaccounted_salting,
+        #             ice_volume_weight=(
+        #                 None
+        #                 if sea_ice_volume_valid is None
+        #                 else sea_ice_volume_valid.to(torch.float32)
+        #             ),
+        #         )
+        #     )
+        # if self.ocean_salt_content_thickness_correction is not None:
+        #     thickness_config = self.ocean_salt_content_thickness_correction
+        #     corrections.append(
+        #         OceanSaltContentThicknessCorrection(
+        #             area_weighted_mean,
+        #             vertical_coordinate,
+        #             timestep_seconds,
+        #             thickness_config.method,
+        #             thickness_config.ice_thickness_salt_slope_psu,
+        #             thickness_config.constant_unaccounted_salting,
+        #             thickness_config.get_ice_volume_to_thickness(
+        #                 cell_area_m2, variable_metadata or {}, sea_ice_volume_mask
+        #             ),
+        #         )
+        #     )
+        if self.ocean_salt_content_total_correction is not None:
+            salt_config = self.ocean_salt_content_total_correction
             corrections.append(
-                OceanSaltContentCorrection(
-                    area_weighted_mean,
+                OceanSaltContentTotalCorrection(
+                    gridded_operations.area_weighted_sum,
                     vertical_coordinate,
                     timestep_seconds,
-                    self.ocean_salt_content_correction.method,
-                    self.ocean_salt_content_correction.ice_volume_salt_slope_psu,
-                    self.ocean_salt_content_correction.constant_unaccounted_salting,
-                    ice_volume_weight=(
-                        None
-                        if sea_ice_volume_valid is None
-                        else sea_ice_volume_valid.to(torch.float32)
-                    ),
-                )
-            )
-        if self.ocean_salt_content_thickness_correction is not None:
-            thickness_config = self.ocean_salt_content_thickness_correction
-            corrections.append(
-                OceanSaltContentThicknessCorrection(
-                    area_weighted_mean,
-                    vertical_coordinate,
-                    timestep_seconds,
-                    thickness_config.method,
-                    thickness_config.ice_thickness_salt_slope_psu,
-                    thickness_config.constant_unaccounted_salting,
-                    thickness_config.get_ice_volume_to_thickness(
-                        cell_area_m2, variable_metadata or {}, sea_ice_volume_mask
-                    ),
+                    salt_config.method,
+                    salt_config.ice_volume_salt_slope_psu,
+                    salt_config.constant_unaccounted_salting,
+                    _local_sea_ice_volume_valid(sea_ice_volume_mask),
+                    salt_config.use_float64,
                 )
             )
         return OceanCorrector(corrections)
@@ -829,31 +901,105 @@ def _force_conserve_ocean_heat_content(
     return out
 
 
+# DELETE LATER: old salt content correction, replaced by the total one.
+# def _force_conserve_ocean_salt_content(
+#     input_data: TensorMapping,
+#     gen_data: TensorMapping,
+#     area_weighted_mean: AreaWeightedMean,
+#     vertical_coordinate: HasOceanDepthIntegral,
+#     timestep_seconds: float,
+#     method: Literal["scaled_salinity"] = "scaled_salinity",
+#     ice_volume_salt_slope_psu: float = 0.0,
+#     unaccounted_salting: float = 0.0,
+#     ice_volume_weight: torch.Tensor | None = None,
+# ) -> TensorDict:
+#     """Scale the predicted salinity so global column salt content changes
+#     only by the sea-ice exchange plus any constant unaccounted rate.
+#
+#     Salt has no surface flux source (freshwater fluxes move water, not
+#     salt), so no forcing data is required: the ice term uses the model's
+#     own predicted sea ice volume, mirroring how the heat correction anchors
+#     to the predicted surface heat flux.
+#
+#     If ``ice_volume_weight`` is given, the per-cell ice volume change is
+#     multiplied by it before the global mean, and cells where it is 0 are left
+#     out of the ice term. A 0/1 mask keeps the ice term the global mean of the
+#     per-cell volume change over valid cells; ``1 / cell area`` (0 outside the
+#     mask) makes it a cell-average thickness change, so
+#     ``ice_volume_salt_slope_psu`` is in psu.
+#     """
+#     if method != "scaled_salinity":
+#         raise NotImplementedError(
+#             f"Method {method!r} not implemented for ocean salt content conservation"
+#         )
+#     input = OceanData(input_data, vertical_coordinate)
+#     gen = OceanData(gen_data, vertical_coordinate)
+#     salinity = gen.sea_water_salinity
+#     global_gen_salt = area_weighted_mean(
+#         vertical_coordinate.depth_integral(salinity),
+#         keepdim=True,
+#         name="ocean_salt_content",
+#     )
+#     global_input_salt = area_weighted_mean(
+#         vertical_coordinate.depth_integral(input.sea_water_salinity),
+#         keepdim=True,
+#         name="ocean_salt_content",
+#     )
+#     expected_change = torch.zeros_like(global_input_salt)
+#     if ice_volume_salt_slope_psu != 0.0:
+#         # Unless ice_volume_weight converts it to a thickness, sea_ice_volume
+#         # is per-cell (extensive, e.g. m^3/cell), so the slope is in psu m per
+#         # (volume unit per cell) and must be re-measured for every grid and
+#         # unit.
+#         try:
+#             ice_volume_change = gen.sea_ice_volume - input.sea_ice_volume
+#             if ice_volume_weight is not None:
+#                 ice_volume_change = torch.where(
+#                     ice_volume_weight != 0,
+#                     ice_volume_change * ice_volume_weight,
+#                     torch.zeros_like(ice_volume_change),
+#                 )
+#             ice_change = area_weighted_mean(
+#                 ice_volume_change,
+#                 keepdim=True,
+#                 name="ocean_salt_content",
+#             )
+#             expected_change = expected_change + ice_volume_salt_slope_psu * ice_change
+#         except KeyError:
+#             pass  # no sea ice volume in this model: no ice exchange term
+#     expected_change = expected_change + unaccounted_salting * timestep_seconds
+#     salt_content_correction_ratio = (
+#         global_input_salt + expected_change
+#     ) / global_gen_salt
+#     out: TensorDict = {}
+#     n_levels = salinity.shape[-1]
+#     for k in range(n_levels):
+#         name = f"so_{k}"
+#         out[name] = gen.data[name] * salt_content_correction_ratio
+#     return out
+
+
 def _force_conserve_ocean_salt_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
-    area_weighted_mean: AreaWeightedMean,
+    area_weighted_sum: AreaWeightedSum,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
     method: Literal["scaled_salinity"] = "scaled_salinity",
     ice_volume_salt_slope_psu: float = 0.0,
     unaccounted_salting: float = 0.0,
-    ice_volume_weight: torch.Tensor | None = None,
+    sea_ice_volume_valid: torch.Tensor | None = None,
+    use_float64: bool = False,
 ) -> TensorDict:
-    """Scale the predicted salinity so global column salt content changes
-    only by the sea-ice exchange plus any constant unaccounted rate.
+    """Scale the predicted salinity so total column salt content changes only
+    by the slope times the change in total sea ice volume, plus a constant rate.
 
-    Salt has no surface flux source (freshwater fluxes move water, not
-    salt), so no forcing data is required: the ice term uses the model's
-    own predicted sea ice volume, mirroring how the heat correction anchors
-    to the predicted surface heat flux.
-
-    If ``ice_volume_weight`` is given, the per-cell ice volume change is
-    multiplied by it before the global mean, and cells where it is 0 are left
-    out of the ice term. A 0/1 mask keeps the ice term the global mean of the
-    per-cell volume change over valid cells; ``1 / cell area`` (0 outside the
-    mask) makes it a cell-average thickness change, so
-    ``ice_volume_salt_slope_psu`` is in psu.
+    ``area_weighted_sum`` weights are cell areas as a fraction of the sphere, so
+    the salt content sums are totals (psu m^3) divided by 4 pi R^2, and the ice
+    total (m^3) is divided by the same factor. With ``use_float64`` the sums,
+    expected change and ratio are computed in float64, otherwise in the
+    salinity's dtype. Ice outside ``sea_ice_volume_valid`` is left out, since
+    the step input is filled with 0 there but the prediction is not.
     """
     if method != "scaled_salinity":
         raise NotImplementedError(
@@ -861,46 +1007,36 @@ def _force_conserve_ocean_salt_content(
         )
     input = OceanData(input_data, vertical_coordinate)
     gen = OceanData(gen_data, vertical_coordinate)
-    salinity = gen.sea_water_salinity
-    global_gen_salt = area_weighted_mean(
-        vertical_coordinate.depth_integral(salinity),
+    dtype = torch.float64 if use_float64 else gen.data["so_0"].dtype
+
+    def global_salt(data: OceanData) -> torch.Tensor:
+        column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
+        return area_weighted_sum(column, keepdim=True, name="ocean_salt_content")
+
+    global_gen_salt = global_salt(gen)
+    global_input_salt = global_salt(input)
+    ocean_fraction = area_weighted_sum(
+        torch.ones_like(gen.data["so_0"], dtype=dtype),
         keepdim=True,
         name="ocean_salt_content",
     )
-    global_input_salt = area_weighted_mean(
-        vertical_coordinate.depth_integral(input.sea_water_salinity),
-        keepdim=True,
-        name="ocean_salt_content",
-    )
-    expected_change = torch.zeros_like(global_input_salt)
+    expected_change = unaccounted_salting * timestep_seconds * ocean_fraction
     if ice_volume_salt_slope_psu != 0.0:
-        # Unless ice_volume_weight converts it to a thickness, sea_ice_volume
-        # is per-cell (extensive, e.g. m^3/cell), so the slope is in psu m per
-        # (volume unit per cell) and must be re-measured for every grid and
-        # unit.
-        try:
-            ice_volume_change = gen.sea_ice_volume - input.sea_ice_volume
-            if ice_volume_weight is not None:
-                ice_volume_change = torch.where(
-                    ice_volume_weight != 0,
-                    ice_volume_change * ice_volume_weight,
-                    torch.zeros_like(ice_volume_change),
-                )
-            ice_change = area_weighted_mean(
-                ice_volume_change,
-                keepdim=True,
-                name="ocean_salt_content",
+        ice_change = gen.sea_ice_volume.to(dtype) - input.sea_ice_volume.to(dtype)
+        if sea_ice_volume_valid is not None:
+            ice_change = torch.where(
+                sea_ice_volume_valid, ice_change, torch.zeros_like(ice_change)
             )
-            expected_change = expected_change + ice_volume_salt_slope_psu * ice_change
-        except KeyError:
-            pass  # no sea ice volume in this model: no ice exchange term
-    expected_change = expected_change + unaccounted_salting * timestep_seconds
-    salt_content_correction_ratio = (
-        global_input_salt + expected_change
-    ) / global_gen_salt
+        total_ice_change = Distributed.get_instance().spatial_reduce_sum(
+            ice_change.sum(dim=(-2, -1), keepdim=True)
+        )
+        expected_change = expected_change + (
+            ice_volume_salt_slope_psu * total_ice_change / _SPHERE_AREA_M2
+        )
+    ratio = (global_input_salt + expected_change) / global_gen_salt
     out: TensorDict = {}
-    n_levels = salinity.shape[-1]
-    for k in range(n_levels):
+    for k in range(gen.sea_water_salinity.shape[-1]):
         name = f"so_{k}"
-        out[name] = gen.data[name] * salt_content_correction_ratio
+        salinity = gen.data[name]
+        out[name] = (salinity.to(dtype) * ratio).to(salinity.dtype)
     return out

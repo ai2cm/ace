@@ -5,17 +5,16 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.constants import EARTH_RADIUS
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
-    OceanSaltContentBudgetConfig,
-    OceanSaltContentThicknessBudgetConfig,
+    OceanSaltContentTotalBudgetConfig,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
 )
-from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
@@ -537,463 +536,745 @@ def test_ocean_heat_content_correction(hfds_type):
     )
 
 
-def test_ocean_salt_content_correction():
-    """Corrected global salt content must equal the input's plus the ice
-    exchange plus the constant unaccounted rate."""
-    config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
-            ice_volume_salt_slope_psu=5.849,
-            constant_unaccounted_salting=1e-9,
-        )
+_SALT_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
+
+
+# DELETE LATER: tests of the old salt content corrections.
+# def test_ocean_salt_content_correction():
+#     """Corrected global salt content must equal the input's plus the ice
+#     exchange plus the constant unaccounted rate."""
+#     config = OceanCorrectorConfig(
+#         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+#             method="scaled_salinity",
+#             ice_volume_salt_slope_psu=5.849,
+#             constant_unaccounted_salting=1e-9,
+#         )
+#     )
+#     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+#     nsamples, nlat, nlon = 4, 3, 3
+#     mask = torch.ones(nsamples, nlat, nlon, 2)
+#     masks = {
+#         "mask_0": mask[:, :, :, 0],
+#         "mask_1": mask[:, :, :, 1],
+#         "mask_2d": mask[:, :, :, 0],
+#     }
+#     spatial_mask_provider = SpatialMaskProvider(masks)
+#     ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
+#     idepth = torch.tensor([2.5, 10, 20])
+#     depth_coordinate = DepthCoordinate(idepth, mask)
+#
+#     input_data_dict = {
+#         "so_0": torch.ones(nsamples, nlat, nlon) * 34.0,
+#         "so_1": torch.ones(nsamples, nlat, nlon) * 35.0,
+#         "sea_ice_volume": torch.ones(nsamples, nlat, nlon) * 1.0,
+#     }
+#     gen_data_dict = {
+#         "so_0": torch.ones(nsamples, nlat, nlon) * 40.0,
+#         "so_1": torch.ones(nsamples, nlat, nlon) * 41.0,
+#         "sea_ice_volume": torch.ones(nsamples, nlat, nlon) * 1.2,
+#     }
+#     corrector = config._build(ops, depth_coordinate, timestep)
+#     result = corrector(input_data_dict, gen_data_dict, {}, None)
+#     corrected = result.corrected
+#     # every salinity level is written; the ice volume is read but not written
+#     assert set(result.modified_names) == {"so_0", "so_1"}
+#     for name, delta in result.diagnostics.delta.items():
+#         torch.testing.assert_close(
+#             delta, result.corrected[name] - gen_data_dict[name], equal_nan=True
+#         )
+#
+#     input_od = OceanData(input_data_dict, depth_coordinate)
+#     corrected_full = dict(gen_data_dict)
+#     corrected_full.update(corrected)
+#     corrected_od = OceanData(corrected_full, depth_coordinate)
+#     input_salt = depth_coordinate.depth_integral(input_od.sea_water_salinity).nanmean(
+#         dim=(-1, -2), keepdim=True
+#     )
+#     corrected_salt = depth_coordinate.depth_integral(
+#         corrected_od.sea_water_salinity
+#     ).nanmean(dim=(-1, -2), keepdim=True)
+#     expected_change = 5.849 * 0.2 + 1e-9 * timestep.total_seconds()
+#     torch.testing.assert_close(
+#         corrected_salt,
+#         input_salt + expected_change,
+#         rtol=1e-5,
+#         atol=1e-4,
+#     )
+#     # the correction is a single uniform ratio: the vertical structure of the
+#     # generated salinity is preserved
+#     ratio = corrected["so_0"] / gen_data_dict["so_0"]
+#     torch.testing.assert_close(corrected["so_1"], gen_data_dict["so_1"] * ratio)
+#
+#
+# def test_ocean_salt_content_correction_ignores_ice_outside_mask():
+#     """Predicted ice outside the sea_ice_volume mask, where the target has no
+#     ice data and the step input is filled with 0, is not an ice change."""
+#     torch.manual_seed(0)
+#     nlat, nlon = 4, 8
+#     lat = torch.tensor([-60.0, -10.0, 10.0, 60.0])
+#     lon = torch.arange(nlon) * 360.0 / nlon
+#     ice_mask = torch.ones(nlat, nlon)
+#     ice_mask[1:3] = 0.0  # tropics
+#     masks = {
+#         "mask_0": torch.ones(nlat, nlon),
+#         "mask_1": torch.ones(nlat, nlon),
+#         "mask_2d": torch.ones(nlat, nlon),
+#         "mask_sea_ice_volume": ice_mask,
+#     }
+#     dataset_info = DatasetInfo(
+#         horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
+#         vertical_coordinate=DepthCoordinate(
+#             torch.tensor([0.0, 10.0, 20.0]), torch.ones(nlat, nlon, 2)
+#         ),
+#         spatial_mask_provider=SpatialMaskProvider(masks),
+#         timestep=_SALT_TIMESTEP,
+#     )
+#     config = OceanCorrectorConfig(
+#         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+#             method="scaled_salinity", ice_volume_salt_slope_psu=5.849
+#         )
+#     )
+#     corrector = config.get_corrector(dataset_info)
+#     input_ice = torch.rand(nlat, nlon) * ice_mask
+#     gen_ice = torch.rand(nlat, nlon) * ice_mask
+#     input_data = _salt_data(input_ice, 34.0)
+#
+#     def corrected_so(gen_ice):
+#         gen_data = _salt_data(gen_ice, 36.0)
+#         return corrector(input_data, gen_data, {}, None).corrected["so_0"]
+#
+#     baseline = corrected_so(gen_ice)
+#     garbage = torch.rand(nlat, nlon) * (1 - ice_mask)
+#     torch.testing.assert_close(corrected_so(gen_ice + garbage), baseline)
+#     # ice inside the mask does count
+#     assert not torch.allclose(corrected_so(gen_ice * 2), baseline)
+#
+#
+# def test_ocean_salt_content_correction_without_ice():
+#     """With no sea ice volume in the model, salt content is held fixed."""
+#     config = OceanCorrectorConfig(
+#         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+#             method="scaled_salinity",
+#         )
+#     )
+#     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+#     nsamples, nlat, nlon = 2, 3, 3
+#     mask = torch.ones(nsamples, nlat, nlon, 1)
+#     spatial_mask_provider = SpatialMaskProvider(
+#         {"mask_0": mask[:, :, :, 0], "mask_2d": mask[:, :, :, 0]}
+#     )
+#     ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
+#     depth_coordinate = DepthCoordinate(torch.tensor([0.0, 10.0]), mask)
+#     input_data_dict = {"so_0": torch.ones(nsamples, nlat, nlon) * 34.0}
+#     gen_data_dict = {"so_0": torch.ones(nsamples, nlat, nlon) * 51.0}
+#     corrector = config._build(ops, depth_coordinate, timestep)
+#     corrected = corrector(input_data_dict, gen_data_dict, {}, None).corrected
+#     torch.testing.assert_close(
+#         corrected["so_0"],
+#         input_data_dict["so_0"],
+#         rtol=1e-5,
+#         atol=1e-5,
+#     )
+#
+#
+# def test_ocean_salt_content_correction_requires_vertical_coordinate():
+#     config = OceanCorrectorConfig(
+#         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+#             method="scaled_salinity",
+#         )
+#     )
+#     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+#     corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+#     gen_data = {"so_0": torch.ones(IMG_SHAPE, device=DEVICE)}
+#     with pytest.raises(ValueError, match="no vertical coordinate"):
+#         corrector(gen_data, gen_data, {}, None)
+#
+#
+#
+#
+# def _salt_grid(
+#     cell_area: torch.Tensor,
+# ) -> tuple[LatLonOperations, DepthCoordinate]:
+#     """All-ocean two-level grid whose area weights are the given cell areas."""
+#     nlat, nlon = cell_area.shape
+#     mask = torch.ones(nlat, nlon, 2, dtype=cell_area.dtype)
+#     masks = {
+#         "mask_0": mask[:, :, 0],
+#         "mask_1": mask[:, :, 1],
+#         "mask_2d": mask[:, :, 0],
+#     }
+#     ops = LatLonOperations(cell_area, SpatialMaskProvider(masks))
+#     idepth = torch.tensor([0.0, 10.0, 20.0], dtype=cell_area.dtype)
+#     return ops, DepthCoordinate(idepth, mask)
+#
+#
+# def _salt_data(sea_ice_volume: torch.Tensor, salinity: float) -> dict:
+#     return {
+#         "so_0": torch.full_like(sea_ice_volume, salinity),
+#         "so_1": torch.full_like(sea_ice_volume, salinity + 1.0),
+#         "sea_ice_volume": sea_ice_volume,
+#     }
+#
+#
+# def _thickness_config(slope: float = 40.0, **kwargs) -> OceanCorrectorConfig:
+#     return OceanCorrectorConfig(
+#         ocean_salt_content_thickness_correction=(
+#             OceanSaltContentThicknessBudgetConfig(
+#                 method="scaled_salinity",
+#                 ice_thickness_salt_slope_psu=slope,
+#                 **kwargs,
+#             )
+#         )
+#     )
+#
+#
+# def _corrected_salt_change(
+#     config: OceanCorrectorConfig,
+#     cell_area: torch.Tensor,
+#     input_ice: torch.Tensor,
+#     gen_ice: torch.Tensor,
+#     variable_metadata: dict | None = None,
+# ) -> torch.Tensor:
+#     """Global-mean column salt content change the corrector imposes, i.e.
+#     its expected change. It is measured as a difference of salt contents
+#     (~700 psu m here), so float32 error is ~1e-4 psu m; keep the expected
+#     change large next to that."""
+#     ops, depth_coordinate = _salt_grid(cell_area)
+#     corrector = config._build(
+#         ops,
+#         depth_coordinate,
+#         _SALT_TIMESTEP,
+#         cell_area_m2=cell_area,
+#         variable_metadata=variable_metadata,
+#     )
+#     input_data = _salt_data(input_ice, 34.0)
+#     gen_data = _salt_data(gen_ice, 36.0)
+#     corrected = dict(gen_data)
+#     corrected.update(corrector(input_data, gen_data, {}, None).corrected)
+#
+#     def salt(data):
+#         salinity = OceanData(data, depth_coordinate).sea_water_salinity
+#         return ops.area_weighted_mean(
+#             depth_coordinate.depth_integral(salinity), name="ocean_salt_content"
+#         )
+#
+#     return salt(corrected) - salt(input_data)
+#
+#
+# def test_ocean_salt_content_thickness_correction_is_resolution_invariant():
+#     """The same ice field on a fine grid and on a grid of 4x4 aggregated cells
+#     (volumes and areas summed) gives the same expected salt change with the
+#     thickness ice term, but not with the per-cell volume ice term."""
+#     torch.manual_seed(0)
+#     nlat, nlon, factor = 8, 8, 4
+#    fine_area = torch.linspace(1.0, 3.0, nlat).unsqueeze(-1).expand(nlat, nlon).clone()
+#
+#     def coarsen(x):
+#        return x.reshape(nlat // factor, factor, nlon // factor, factor).sum(dim=(1, 3))  # noqa: E501
+#
+#     coarse_area = coarsen(fine_area)
+#     input_ice = torch.rand(nlat, nlon) * fine_area
+#     # ice grows everywhere, so the ~16x volume-term factor isn't obscured by
+#     # changes of mixed sign cancelling
+#     gen_ice = input_ice + torch.rand(nlat, nlon) * fine_area
+#
+#     def change(config, area, coarse):
+#         transform = coarsen if coarse else (lambda x: x)
+#         return _corrected_salt_change(
+#             config, area, transform(input_ice), transform(gen_ice)
+#         )
+#
+#     # large slope so the change is well above float32 error in salt content
+#     thickness = _thickness_config(slope=4000.0)
+#     fine = change(thickness, fine_area, coarse=False)
+#     coarse = change(thickness, coarse_area, coarse=True)
+#     assert fine.abs() > 1.0
+#     torch.testing.assert_close(fine, coarse, rtol=1e-4, atol=1e-4)
+#
+#     volume = OceanCorrectorConfig(
+#         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+#             method="scaled_salinity", ice_volume_salt_slope_psu=40.0
+#         )
+#     )
+#     fine_volume = change(volume, fine_area, coarse=False)
+#     coarse_volume = change(volume, coarse_area, coarse=True)
+#     ratio = (coarse_volume / fine_volume).item()
+#     assert 10.0 < ratio < 25.0  # ~16x with 4x4 aggregation
+#
+#
+# def test_ocean_salt_content_thickness_correction_expected_change():
+#     """The expected change is slope * area_weighted_mean(dvol / cell_area) plus
+#     the constant rate; cells with zero area (e.g. a pole row) are ignored."""
+#     torch.manual_seed(0)
+#     nlat, nlon = 3, 4
+#     area_weights = torch.tensor([1.0, 2.0, 1.0]).unsqueeze(-1).expand(nlat, nlon)
+#     cell_area = (area_weights * 1e10).clone()
+#     cell_area[0, :] = 0.0
+#     input_ice = torch.rand(nlat, nlon) * 1e9
+#     gen_ice = torch.rand(nlat, nlon) * 1e9
+#     ops, depth_coordinate = _salt_grid(area_weights)
+#     config = _thickness_config(slope=40.0, constant_unaccounted_salting=1e-9)
+#     corrector = config._build(
+#         ops,
+#         depth_coordinate,
+#         _SALT_TIMESTEP,
+#         cell_area_m2=cell_area,
+#         variable_metadata={"sea_ice_volume": VariableMetadata(units="m^3")},
+#     )
+#     input_data = _salt_data(input_ice, 34.0)
+#     gen_data = _salt_data(gen_ice, 36.0)
+#     corrected = dict(gen_data)
+#     corrected.update(corrector(input_data, gen_data, {}, None).corrected)
+#     for name in ("so_0", "so_1"):
+#         assert torch.isfinite(corrected[name]).all()
+#
+#     def salt(data):
+#         salinity = OceanData(data, depth_coordinate).sea_water_salinity
+#         return ops.area_weighted_mean(
+#             depth_coordinate.depth_integral(salinity), name="ocean_salt_content"
+#         )
+#
+#     valid = cell_area > 0
+#     thickness_change = torch.where(
+#         valid, (gen_ice - input_ice) / cell_area.where(valid, 1.0), 0.0
+#     )
+#     expected = (
+#         40.0 * ops.area_weighted_mean(thickness_change, name="ocean_salt_content")
+#         + 1e-9 * _SALT_TIMESTEP.total_seconds()
+#     )
+#     torch.testing.assert_close(
+#         salt(corrected) - salt(input_data), expected, rtol=1e-4, atol=1e-4
+#     )
+#
+#
+# def test_ocean_salt_content_thickness_correction_units_scale():
+#     """sea_ice_volume in km^3 with a scale of 1e9 matches m^3 with no scale."""
+#     torch.manual_seed(0)
+#     area = torch.full((3, 4), 1e10)
+#     input_ice = torch.rand(3, 4) * 1e9
+#     gen_ice = torch.rand(3, 4) * 1e9
+#     in_m3 = _corrected_salt_change(
+#         _thickness_config(),
+#         area,
+#         input_ice,
+#         gen_ice,
+#         {"sea_ice_volume": VariableMetadata(units="m^3")},
+#     )
+#     in_km3 = _corrected_salt_change(
+#         _thickness_config(sea_ice_volume_m3_per_unit=1e9),
+#         area,
+#         input_ice / 1e9,
+#         gen_ice / 1e9,
+#         {"sea_ice_volume": VariableMetadata(units="1000 km^3")},
+#     )
+#     torch.testing.assert_close(in_m3, in_km3, rtol=1e-4, atol=1e-4)
+#
+#
+# def test_ocean_salt_content_thickness_correction_rejects_non_m3_units():
+#     ops, depth_coordinate = _salt_grid(torch.ones(3, 4))
+#     with pytest.raises(ValueError, match="expects m\\^3"):
+#         _thickness_config()._build(
+#             ops,
+#             depth_coordinate,
+#             _SALT_TIMESTEP,
+#             cell_area_m2=torch.ones(3, 4),
+#             variable_metadata={"sea_ice_volume": VariableMetadata(units="km^3")},
+#         )
+#
+#
+# def test_ocean_salt_content_thickness_correction_requires_cell_area():
+#     ops, depth_coordinate = _salt_grid(torch.ones(3, 4))
+#     with pytest.raises(ValueError, match="requires cell areas"):
+#         _thickness_config()._build(ops, depth_coordinate, _SALT_TIMESTEP)
+#
+#
+# @pytest.mark.parallel
+# def test_ocean_salt_content_thickness_correction_spatial_parallel():
+#     """Under spatial parallelism each rank divides its ice change by its own
+#     slice of the cell areas: the corrected salinity matches a global
+#     single-process computation."""
+#     torch.manual_seed(0)
+#     nlat, nlon = 8, 16
+#     img_shape = (nlat, nlon)
+#     lat = torch.linspace(-80.0, 80.0, nlat)
+#     lon = torch.arange(nlon) * 360.0 / nlon
+#     idepth = torch.tensor([0.0, 10.0, 30.0])
+#     dataset_info = DatasetInfo(
+#         horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
+#         vertical_coordinate=DepthCoordinate(idepth, torch.ones(2)),
+#         timestep=_SALT_TIMESTEP,
+#         variable_metadata={"sea_ice_volume": VariableMetadata(units="m^3")},
+#     )
+#     slope = 40.0
+#     corrector = _thickness_config(slope=slope).get_corrector(dataset_info)
+#
+#     # identical global data on every rank
+#     area = LatLonCoordinates(lat=lat, lon=lon).area_weights_m2
+#     input_data = _salt_data(torch.rand(img_shape) * area, 34.0)
+#     gen_data = _salt_data(torch.rand(img_shape) * area, 36.0)
+#     for data in (input_data, gen_data):
+#         data["so_0"] = data["so_0"] + torch.rand(img_shape)
+#
+#     # global reference computed without any gridded or distributed ops
+#     weights = area / area.sum()
+#
+#     def global_mean(x):
+#         return (x * weights).sum()
+#
+#     def salt(data):
+#         return global_mean(data["so_0"] * 10.0 + data["so_1"] * 20.0)
+#
+#     ice_change = global_mean(
+#         (gen_data["sea_ice_volume"] - input_data["sea_ice_volume"]) / area
+#     )
+#     ratio = (salt(input_data) + slope * ice_change) / salt(gen_data)
+#
+#     dist = Distributed.get_instance()
+#     local = corrector(
+#         dist.scatter_spatial(
+#             {k: v.to(DEVICE) for k, v in input_data.items()}, img_shape
+#         ),
+#        dist.scatter_spatial({k: v.to(DEVICE) for k, v in gen_data.items()}, img_shape),  # noqa: E501
+#         {},
+#         None,
+#     ).corrected
+#     expected = dist.scatter_spatial(
+#         {k: (gen_data[k] * ratio).to(DEVICE) for k in ("so_0", "so_1")}, img_shape
+#     )
+#     for name in ("so_0", "so_1"):
+#         torch.testing.assert_close(local[name], expected[name], rtol=1e-5, atol=1e-5)
+#
+#
+# def test_ocean_salt_content_thickness_correction_ignores_ice_outside_mask():
+#     """Predicted ice outside the sea_ice_volume mask, where the target has no
+#     ice data and the step input is filled with 0, is not an ice change."""
+#     torch.manual_seed(0)
+#     nlat, nlon = 4, 8
+#     lat = torch.tensor([-60.0, -10.0, 10.0, 60.0])
+#     lon = torch.arange(nlon) * 360.0 / nlon
+#     ice_mask = torch.ones(nlat, nlon)
+#     ice_mask[1:3] = 0.0  # tropics
+#     masks = {
+#         "mask_0": torch.ones(nlat, nlon),
+#         "mask_1": torch.ones(nlat, nlon),
+#         "mask_2d": torch.ones(nlat, nlon),
+#         "mask_sea_ice_volume": ice_mask,
+#     }
+#     dataset_info = DatasetInfo(
+#         horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
+#         vertical_coordinate=DepthCoordinate(
+#             torch.tensor([0.0, 10.0, 20.0]), torch.ones(nlat, nlon, 2)
+#         ),
+#         spatial_mask_provider=SpatialMaskProvider(masks),
+#         timestep=_SALT_TIMESTEP,
+#         variable_metadata={"sea_ice_volume": VariableMetadata(units="m^3")},
+#     )
+#     corrector = _thickness_config(slope=4000.0).get_corrector(dataset_info)
+#     area = LatLonCoordinates(lat=lat, lon=lon).area_weights_m2
+#     input_ice = torch.rand(nlat, nlon) * area * ice_mask
+#     gen_ice = torch.rand(nlat, nlon) * area * ice_mask
+#     input_data = _salt_data(input_ice, 34.0)
+#
+#     def corrected_so(gen_ice):
+#         gen_data = _salt_data(gen_ice, 36.0)
+#         return corrector(input_data, gen_data, {}, None).corrected["so_0"]
+#
+#     baseline = corrected_so(gen_ice)
+#     garbage = torch.rand(nlat, nlon) * area * (1 - ice_mask)
+#     torch.testing.assert_close(corrected_so(gen_ice + garbage), baseline)
+#     # ice inside the mask does count
+#     assert not torch.allclose(corrected_so(gen_ice * 2), baseline)
+
+
+def _total_coordinates(nlat: int, nlon: int) -> LatLonCoordinates:
+    return LatLonCoordinates(
+        lat=torch.linspace(-80.0, 80.0, nlat), lon=torch.arange(nlon) * 360.0 / nlon
     )
-    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
-    nsamples, nlat, nlon = 4, 3, 3
-    mask = torch.ones(nsamples, nlat, nlon, 2)
-    masks = {
-        "mask_0": mask[:, :, :, 0],
-        "mask_1": mask[:, :, :, 1],
-        "mask_2d": mask[:, :, :, 0],
-    }
-    spatial_mask_provider = SpatialMaskProvider(masks)
-    ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
-    idepth = torch.tensor([2.5, 10, 20])
-    depth_coordinate = DepthCoordinate(idepth, mask)
-
-    input_data_dict = {
-        "so_0": torch.ones(nsamples, nlat, nlon) * 34.0,
-        "so_1": torch.ones(nsamples, nlat, nlon) * 35.0,
-        "sea_ice_volume": torch.ones(nsamples, nlat, nlon) * 1.0,
-    }
-    gen_data_dict = {
-        "so_0": torch.ones(nsamples, nlat, nlon) * 40.0,
-        "so_1": torch.ones(nsamples, nlat, nlon) * 41.0,
-        "sea_ice_volume": torch.ones(nsamples, nlat, nlon) * 1.2,
-    }
-    corrector = config._build(ops, depth_coordinate, timestep)
-    result = corrector(input_data_dict, gen_data_dict, {}, None)
-    corrected = result.corrected
-    # every salinity level is written; the ice volume is read but not written
-    assert set(result.modified_names) == {"so_0", "so_1"}
-    for name, delta in result.diagnostics.delta.items():
-        torch.testing.assert_close(
-            delta, result.corrected[name] - gen_data_dict[name], equal_nan=True
-        )
-
-    input_od = OceanData(input_data_dict, depth_coordinate)
-    corrected_full = dict(gen_data_dict)
-    corrected_full.update(corrected)
-    corrected_od = OceanData(corrected_full, depth_coordinate)
-    input_salt = depth_coordinate.depth_integral(input_od.sea_water_salinity).nanmean(
-        dim=(-1, -2), keepdim=True
-    )
-    corrected_salt = depth_coordinate.depth_integral(
-        corrected_od.sea_water_salinity
-    ).nanmean(dim=(-1, -2), keepdim=True)
-    expected_change = 5.849 * 0.2 + 1e-9 * timestep.total_seconds()
-    torch.testing.assert_close(
-        corrected_salt,
-        input_salt + expected_change,
-        rtol=1e-5,
-        atol=1e-4,
-    )
-    # the correction is a single uniform ratio: the vertical structure of the
-    # generated salinity is preserved
-    ratio = corrected["so_0"] / gen_data_dict["so_0"]
-    torch.testing.assert_close(corrected["so_1"], gen_data_dict["so_1"] * ratio)
 
 
-def test_ocean_salt_content_correction_ignores_ice_outside_mask():
-    """Predicted ice outside the sea_ice_volume mask, where the target has no
-    ice data and the step input is filled with 0, is not an ice change."""
-    torch.manual_seed(0)
-    nlat, nlon = 4, 8
-    lat = torch.tensor([-60.0, -10.0, 10.0, 60.0])
-    lon = torch.arange(nlon) * 360.0 / nlon
-    ice_mask = torch.ones(nlat, nlon)
-    ice_mask[1:3] = 0.0  # tropics
-    masks = {
-        "mask_0": torch.ones(nlat, nlon),
-        "mask_1": torch.ones(nlat, nlon),
-        "mask_2d": torch.ones(nlat, nlon),
-        "mask_sea_ice_volume": ice_mask,
-    }
-    dataset_info = DatasetInfo(
-        horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
+def _total_cell_area(nlat: int, nlon: int) -> torch.Tensor:
+    """float64 cell areas in m^2 from the same (float32) weights the gridded
+    operations use, so reference totals match the corrector's to float64."""
+    weights = _total_coordinates(nlat, nlon).area_weights.to(DEVICE, torch.float64)
+    return weights * 4 * torch.pi * EARTH_RADIUS**2
+
+
+def _total_dataset_info(
+    ocean: torch.Tensor,
+    ice: torch.Tensor | None = None,
+) -> DatasetInfo:
+    """Lat-lon grid of ocean's shape with two layers (10 m and 20 m thick),
+    and ocean and optional sea_ice_volume masks."""
+    nlat, nlon = ocean.shape
+    masks = {"mask_0": ocean, "mask_1": ocean, "mask_2d": ocean}
+    if ice is not None:
+        masks["mask_sea_ice_volume"] = ice
+    return DatasetInfo(
+        horizontal_coordinates=_total_coordinates(nlat, nlon),
         vertical_coordinate=DepthCoordinate(
-            torch.tensor([0.0, 10.0, 20.0]), torch.ones(nlat, nlon, 2)
+            torch.tensor([0.0, 10.0, 30.0]), torch.stack([ocean, ocean], dim=-1)
         ),
         spatial_mask_provider=SpatialMaskProvider(masks),
         timestep=_SALT_TIMESTEP,
     )
-    config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=5.849
+
+
+def _total_config(slope: float = 40.0, **kwargs) -> OceanCorrectorConfig:
+    return OceanCorrectorConfig(
+        ocean_salt_content_total_correction=OceanSaltContentTotalBudgetConfig(
+            method="scaled_salinity", ice_volume_salt_slope_psu=slope, **kwargs
         )
     )
-    corrector = config.get_corrector(dataset_info)
-    input_ice = torch.rand(nlat, nlon) * ice_mask
-    gen_ice = torch.rand(nlat, nlon) * ice_mask
-    input_data = _salt_data(input_ice, 34.0)
 
-    def corrected_so(gen_ice):
-        gen_data = _salt_data(gen_ice, 36.0)
+
+def _total_data(ocean: torch.Tensor, sea_ice_volume: torch.Tensor, salinity: float):
+    """Salinity near the given value, NaN over land, and the given ice."""
+    so = salinity + torch.rand((2, *ocean.shape), dtype=torch.float64)
+    so = so.where(ocean > 0, float("nan"))
+    return {
+        "so_0": so[0].to(DEVICE),
+        "so_1": so[1].to(DEVICE),
+        "sea_ice_volume": sea_ice_volume.to(DEVICE, torch.float64),
+    }
+
+
+def _total_salt(data: TensorMapping, ocean: torch.Tensor) -> torch.Tensor:
+    """float64 reference: total salt content in psu m^3 over ocean cells."""
+    area = _total_cell_area(*ocean.shape)
+    column = data["so_0"].double() * 10.0 + data["so_1"].double() * 20.0
+    return torch.where(ocean.to(DEVICE) > 0, column * area, 0.0).sum(dim=(-2, -1))
+
+
+def _total_land_and_ice_masks() -> tuple[torch.Tensor, torch.Tensor]:
+    ocean = torch.ones(4, 8)
+    ocean[1, 2] = 0.0  # a land cell
+    ice = ocean.clone()  # as in the data, no ice data over land
+    ice[1:3] = 0.0  # or in the tropics
+    return ocean, ice
+
+
+def test_ocean_salt_content_total_correction_expected_change():
+    """The corrected total salt content is the input total plus the slope times
+    the change in total ice volume plus the constant rate over the ocean area,
+    reached by one uniform ratio applied to every level."""
+    torch.manual_seed(0)
+    ocean, ice = _total_land_and_ice_masks()
+    slope, constant = 40.0, 3e-9
+    config = _total_config(slope=slope, constant_unaccounted_salting=constant)
+    corrector = config.get_corrector(_total_dataset_info(ocean, ice))
+    area = _total_cell_area(*ocean.shape)
+    ocean_area = float(area[ocean.to(DEVICE) > 0].sum())
+    input_ice = torch.rand(ocean.shape, dtype=torch.float64) * 1e10 * ice
+    gen_ice = input_ice + torch.rand(ocean.shape, dtype=torch.float64) * 1e9 * ice
+    input_data = _total_data(ocean, input_ice, 34.0)
+    gen_data = _total_data(ocean, gen_ice, 35.0)
+
+    result = corrector(input_data, gen_data, {}, None)
+
+    assert set(result.modified_names) == {"so_0", "so_1"}
+    assert set(result.diagnostics.delta) == set(result.modified_names)
+    for name, delta in result.diagnostics.delta.items():
+        torch.testing.assert_close(
+            delta, result.corrected[name] - gen_data[name], equal_nan=True
+        )
+    expected_change = (
+        slope * float((gen_ice - input_ice).sum())
+        + constant * _SALT_TIMESTEP.total_seconds() * ocean_area
+    )
+    torch.testing.assert_close(
+        _total_salt(result.corrected, ocean),
+        _total_salt(input_data, ocean) + expected_change,
+        rtol=1e-12,
+        atol=0.0,
+    )
+    ratio = result.corrected["so_0"] / gen_data["so_0"]
+    torch.testing.assert_close(
+        result.corrected["so_1"], gen_data["so_1"] * ratio, equal_nan=True
+    )
+
+
+def test_ocean_salt_content_total_correction_ice_term_is_total_volume():
+    """A given ice volume change has the same effect in a small polar cell as
+    in a large tropical cell: the ice term is a plain sum, with no per-cell
+    area weighting."""
+    ocean = torch.ones(4, 8)
+    corrector = _total_config().get_corrector(_total_dataset_info(ocean))
+    input_data = _total_data(ocean, torch.zeros(4, 8), 34.0)
+
+    def corrected_so(cell: tuple[int, int]):
+        gen_ice = torch.zeros(4, 8, dtype=torch.float64, device=DEVICE)
+        gen_ice[cell] = 1e11
+        gen_data = dict(input_data, sea_ice_volume=gen_ice)
         return corrector(input_data, gen_data, {}, None).corrected["so_0"]
 
+    torch.testing.assert_close(corrected_so((0, 3)), corrected_so((2, 3)))
+
+
+def test_ocean_salt_content_total_correction_ignores_ice_outside_mask():
+    """Predicted ice outside the sea_ice_volume mask, where the target has no
+    ice data and the step input is filled with 0, is not an ice change."""
+    torch.manual_seed(0)
+    ocean, ice = _total_land_and_ice_masks()
+    corrector = _total_config().get_corrector(_total_dataset_info(ocean, ice))
+    gen_ice = torch.rand(ocean.shape, dtype=torch.float64) * 1e10 * ice
+    input_data = _total_data(
+        ocean, torch.rand(ocean.shape, dtype=torch.float64) * 1e10 * ice, 34.0
+    )
+    gen_data = _total_data(ocean, gen_ice, 35.0)
+
+    def corrected_so(gen_ice):
+        data = dict(gen_data, sea_ice_volume=gen_ice.to(DEVICE))
+        return corrector(input_data, data, {}, None).corrected["so_0"]
+
     baseline = corrected_so(gen_ice)
-    garbage = torch.rand(nlat, nlon) * (1 - ice_mask)
-    torch.testing.assert_close(corrected_so(gen_ice + garbage), baseline)
+    garbage = torch.rand(ocean.shape, dtype=torch.float64) * 1e10 * (1 - ice)
+    torch.testing.assert_close(
+        corrected_so(gen_ice + garbage), baseline, equal_nan=True
+    )
     # ice inside the mask does count
-    assert not torch.allclose(corrected_so(gen_ice * 2), baseline)
-
-
-def test_ocean_salt_content_correction_without_ice():
-    """With no sea ice volume in the model, salt content is held fixed."""
-    config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
-        )
-    )
-    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
-    nsamples, nlat, nlon = 2, 3, 3
-    mask = torch.ones(nsamples, nlat, nlon, 1)
-    spatial_mask_provider = SpatialMaskProvider(
-        {"mask_0": mask[:, :, :, 0], "mask_2d": mask[:, :, :, 0]}
-    )
-    ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
-    depth_coordinate = DepthCoordinate(torch.tensor([0.0, 10.0]), mask)
-    input_data_dict = {"so_0": torch.ones(nsamples, nlat, nlon) * 34.0}
-    gen_data_dict = {"so_0": torch.ones(nsamples, nlat, nlon) * 51.0}
-    corrector = config._build(ops, depth_coordinate, timestep)
-    corrected = corrector(input_data_dict, gen_data_dict, {}, None).corrected
-    torch.testing.assert_close(
-        corrected["so_0"],
-        input_data_dict["so_0"],
-        rtol=1e-5,
-        atol=1e-5,
+    assert not torch.allclose(
+        corrected_so(gen_ice * 2), baseline, rtol=0.0, atol=1e-9, equal_nan=True
     )
 
 
-def test_ocean_salt_content_correction_requires_vertical_coordinate():
-    config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
-        )
+def test_ocean_salt_content_total_correction_float32_state_meets_budget():
+    """With float32 salinity at realistic magnitudes (column salt ~1e5 psu m,
+    budget term ~3e-2 psu m per unit area, about 2 float32 epsilons of the
+    total), float64 arithmetic meets the budget to a few percent of the
+    budget term."""
+    torch.manual_seed(0)
+    nlat, nlon = 32, 64
+    ocean = torch.ones(nlat, nlon)
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=_total_coordinates(nlat, nlon),
+        vertical_coordinate=DepthCoordinate(
+            torch.tensor([0.0, 1000.0, 4000.0]), torch.ones(nlat, nlon, 2)
+        ),
+        spatial_mask_provider=SpatialMaskProvider({"mask_2d": ocean}),
+        timestep=_SALT_TIMESTEP,
     )
-    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
-    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
-    gen_data = {"so_0": torch.ones(IMG_SHAPE, device=DEVICE)}
-    with pytest.raises(ValueError, match="no vertical coordinate"):
-        corrector(gen_data, gen_data, {}, None)
-
-
-_SALT_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
-
-
-def _salt_grid(
-    cell_area: torch.Tensor,
-) -> tuple[LatLonOperations, DepthCoordinate]:
-    """All-ocean two-level grid whose area weights are the given cell areas."""
-    nlat, nlon = cell_area.shape
-    mask = torch.ones(nlat, nlon, 2, dtype=cell_area.dtype)
-    masks = {
-        "mask_0": mask[:, :, 0],
-        "mask_1": mask[:, :, 1],
-        "mask_2d": mask[:, :, 0],
+    slope = 40.0
+    corrector = _total_config(slope=slope, use_float64=True).get_corrector(dataset_info)
+    area = _total_cell_area(nlat, nlon)
+    budget_per_area = 3e-2  # psu m
+    gen_ice = torch.zeros(nlat, nlon, device=DEVICE)
+    gen_ice[0, :] = budget_per_area * float(area.sum()) / slope / nlon
+    so_in = 35.0 + torch.rand(2, nlat, nlon, device=DEVICE)
+    # a slightly biased network, so the ratio has work to do
+    so_gen = so_in + 1e-3 + 1e-4 * torch.randn(2, nlat, nlon, device=DEVICE)
+    input_data = {
+        "so_0": so_in[0],
+        "so_1": so_in[1],
+        "sea_ice_volume": torch.zeros(nlat, nlon, device=DEVICE),
     }
-    ops = LatLonOperations(cell_area, SpatialMaskProvider(masks))
-    idepth = torch.tensor([0.0, 10.0, 20.0], dtype=cell_area.dtype)
-    return ops, DepthCoordinate(idepth, mask)
+    gen_data = {"so_0": so_gen[0], "so_1": so_gen[1], "sea_ice_volume": gen_ice}
 
+    corrected = corrector(input_data, gen_data, {}, None).corrected
 
-def _salt_data(sea_ice_volume: torch.Tensor, salinity: float) -> dict:
-    return {
-        "so_0": torch.full_like(sea_ice_volume, salinity),
-        "so_1": torch.full_like(sea_ice_volume, salinity + 1.0),
-        "sea_ice_volume": sea_ice_volume,
-    }
+    def total_salt(data):
+        column = data["so_0"].double() * 1000.0 + data["so_1"].double() * 3000.0
+        return (column * area).sum()
 
-
-def _thickness_config(slope: float = 40.0, **kwargs) -> OceanCorrectorConfig:
-    return OceanCorrectorConfig(
-        ocean_salt_content_thickness_correction=(
-            OceanSaltContentThicknessBudgetConfig(
-                method="scaled_salinity",
-                ice_thickness_salt_slope_psu=slope,
-                **kwargs,
-            )
-        )
+    assert corrected["so_0"].dtype == torch.float32
+    expected_change = slope * float(gen_ice.double().sum())
+    miss = total_salt(dict(gen_data, **corrected)) - (
+        total_salt(input_data) + expected_change
     )
+    assert abs(float(miss)) < 0.05 * expected_change
 
 
-def _corrected_salt_change(
-    config: OceanCorrectorConfig,
-    cell_area: torch.Tensor,
-    input_ice: torch.Tensor,
-    gen_ice: torch.Tensor,
-    variable_metadata: dict | None = None,
-) -> torch.Tensor:
-    """Global-mean column salt content change the corrector imposes, i.e.
-    its expected change. It is measured as a difference of salt contents
-    (~700 psu m here), so float32 error is ~1e-4 psu m; keep the expected
-    change large next to that."""
-    ops, depth_coordinate = _salt_grid(cell_area)
-    corrector = config._build(
-        ops,
-        depth_coordinate,
-        _SALT_TIMESTEP,
-        cell_area_m2=cell_area,
-        variable_metadata=variable_metadata,
-    )
-    input_data = _salt_data(input_ice, 34.0)
-    gen_data = _salt_data(gen_ice, 36.0)
-    corrected = dict(gen_data)
-    corrected.update(corrector(input_data, gen_data, {}, None).corrected)
-
-    def salt(data):
-        salinity = OceanData(data, depth_coordinate).sea_water_salinity
-        return ops.area_weighted_mean(
-            depth_coordinate.depth_integral(salinity), name="ocean_salt_content"
-        )
-
-    return salt(corrected) - salt(input_data)
+def test_ocean_salt_content_total_correction_requires_sea_ice_volume():
+    ocean = torch.ones(4, 8)
+    corrector = _total_config().get_corrector(_total_dataset_info(ocean))
+    data = _total_data(ocean, torch.zeros(4, 8), 35.0)
+    del data["sea_ice_volume"]
+    with pytest.raises(KeyError, match="sea_ice_volume"):
+        corrector(data, data, {}, None)
 
 
-def test_ocean_salt_content_thickness_correction_is_resolution_invariant():
-    """The same ice field on a fine grid and on a grid of 4x4 aggregated cells
-    (volumes and areas summed) gives the same expected salt change with the
-    thickness ice term, but not with the per-cell volume ice term."""
+def test_ocean_salt_content_total_correction_without_ice_holds_salt():
+    """With a zero slope and no sea ice volume, total salt content is held."""
     torch.manual_seed(0)
-    nlat, nlon, factor = 8, 8, 4
-    fine_area = torch.linspace(1.0, 3.0, nlat).unsqueeze(-1).expand(nlat, nlon).clone()
-
-    def coarsen(x):
-        return x.reshape(nlat // factor, factor, nlon // factor, factor).sum(dim=(1, 3))
-
-    coarse_area = coarsen(fine_area)
-    input_ice = torch.rand(nlat, nlon) * fine_area
-    # ice grows everywhere, so the ~16x volume-term factor isn't obscured by
-    # changes of mixed sign cancelling
-    gen_ice = input_ice + torch.rand(nlat, nlon) * fine_area
-
-    def change(config, area, coarse):
-        transform = coarsen if coarse else (lambda x: x)
-        return _corrected_salt_change(
-            config, area, transform(input_ice), transform(gen_ice)
-        )
-
-    # large slope so the change is well above float32 error in salt content
-    thickness = _thickness_config(slope=4000.0)
-    fine = change(thickness, fine_area, coarse=False)
-    coarse = change(thickness, coarse_area, coarse=True)
-    assert fine.abs() > 1.0
-    torch.testing.assert_close(fine, coarse, rtol=1e-4, atol=1e-4)
-
-    volume = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=40.0
-        )
-    )
-    fine_volume = change(volume, fine_area, coarse=False)
-    coarse_volume = change(volume, coarse_area, coarse=True)
-    ratio = (coarse_volume / fine_volume).item()
-    assert 10.0 < ratio < 25.0  # ~16x with 4x4 aggregation
-
-
-def test_ocean_salt_content_thickness_correction_expected_change():
-    """The expected change is slope * area_weighted_mean(dvol / cell_area) plus
-    the constant rate; cells with zero area (e.g. a pole row) are ignored."""
-    torch.manual_seed(0)
-    nlat, nlon = 3, 4
-    area_weights = torch.tensor([1.0, 2.0, 1.0]).unsqueeze(-1).expand(nlat, nlon)
-    cell_area = (area_weights * 1e10).clone()
-    cell_area[0, :] = 0.0
-    input_ice = torch.rand(nlat, nlon) * 1e9
-    gen_ice = torch.rand(nlat, nlon) * 1e9
-    ops, depth_coordinate = _salt_grid(area_weights)
-    config = _thickness_config(slope=40.0, constant_unaccounted_salting=1e-9)
-    corrector = config._build(
-        ops,
-        depth_coordinate,
-        _SALT_TIMESTEP,
-        cell_area_m2=cell_area,
-        variable_metadata={"sea_ice_volume": VariableMetadata(units="m^3")},
-    )
-    input_data = _salt_data(input_ice, 34.0)
-    gen_data = _salt_data(gen_ice, 36.0)
-    corrected = dict(gen_data)
-    corrected.update(corrector(input_data, gen_data, {}, None).corrected)
-    for name in ("so_0", "so_1"):
-        assert torch.isfinite(corrected[name]).all()
-
-    def salt(data):
-        salinity = OceanData(data, depth_coordinate).sea_water_salinity
-        return ops.area_weighted_mean(
-            depth_coordinate.depth_integral(salinity), name="ocean_salt_content"
-        )
-
-    valid = cell_area > 0
-    thickness_change = torch.where(
-        valid, (gen_ice - input_ice) / cell_area.where(valid, 1.0), 0.0
-    )
-    expected = (
-        40.0 * ops.area_weighted_mean(thickness_change, name="ocean_salt_content")
-        + 1e-9 * _SALT_TIMESTEP.total_seconds()
-    )
+    ocean, _ = _total_land_and_ice_masks()
+    corrector = _total_config(slope=0.0).get_corrector(_total_dataset_info(ocean))
+    input_data = _total_data(ocean, torch.zeros(ocean.shape), 34.0)
+    gen_data = _total_data(ocean, torch.zeros(ocean.shape), 36.0)
+    for data in (input_data, gen_data):
+        del data["sea_ice_volume"]
+    corrected = corrector(input_data, gen_data, {}, None).corrected
     torch.testing.assert_close(
-        salt(corrected) - salt(input_data), expected, rtol=1e-4, atol=1e-4
+        _total_salt(corrected, ocean), _total_salt(input_data, ocean)
     )
-
-
-def test_ocean_salt_content_thickness_correction_units_scale():
-    """sea_ice_volume in km^3 with a scale of 1e9 matches m^3 with no scale."""
-    torch.manual_seed(0)
-    area = torch.full((3, 4), 1e10)
-    input_ice = torch.rand(3, 4) * 1e9
-    gen_ice = torch.rand(3, 4) * 1e9
-    in_m3 = _corrected_salt_change(
-        _thickness_config(),
-        area,
-        input_ice,
-        gen_ice,
-        {"sea_ice_volume": VariableMetadata(units="m^3")},
-    )
-    in_km3 = _corrected_salt_change(
-        _thickness_config(sea_ice_volume_m3_per_unit=1e9),
-        area,
-        input_ice / 1e9,
-        gen_ice / 1e9,
-        {"sea_ice_volume": VariableMetadata(units="1000 km^3")},
-    )
-    torch.testing.assert_close(in_m3, in_km3, rtol=1e-4, atol=1e-4)
-
-
-def test_ocean_salt_content_thickness_correction_rejects_non_m3_units():
-    ops, depth_coordinate = _salt_grid(torch.ones(3, 4))
-    with pytest.raises(ValueError, match="expects m\\^3"):
-        _thickness_config()._build(
-            ops,
-            depth_coordinate,
-            _SALT_TIMESTEP,
-            cell_area_m2=torch.ones(3, 4),
-            variable_metadata={"sea_ice_volume": VariableMetadata(units="km^3")},
-        )
-
-
-def test_ocean_salt_content_thickness_correction_requires_cell_area():
-    ops, depth_coordinate = _salt_grid(torch.ones(3, 4))
-    with pytest.raises(ValueError, match="requires cell areas"):
-        _thickness_config()._build(ops, depth_coordinate, _SALT_TIMESTEP)
 
 
 @pytest.mark.parallel
-def test_ocean_salt_content_thickness_correction_spatial_parallel():
-    """Under spatial parallelism each rank divides its ice change by its own
-    slice of the cell areas: the corrected salinity matches a global
-    single-process computation."""
+def test_ocean_salt_content_total_correction_spatial_parallel():
+    """Under spatial parallelism each rank sums its own slice of the salt and
+    ice, and the corrected salinity matches a global single-process
+    computation. No masks: the gridded operations slice their weights but not
+    the mask provider, so spatial masks don't work under spatial parallelism
+    yet (this also affects the heat correction)."""
     torch.manual_seed(0)
-    nlat, nlon = 8, 16
-    img_shape = (nlat, nlon)
-    lat = torch.linspace(-80.0, 80.0, nlat)
-    lon = torch.arange(nlon) * 360.0 / nlon
-    idepth = torch.tensor([0.0, 10.0, 30.0])
+    img_shape = (8, 16)
+    ocean = torch.ones(img_shape)
     dataset_info = DatasetInfo(
-        horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
-        vertical_coordinate=DepthCoordinate(idepth, torch.ones(2)),
+        horizontal_coordinates=_total_coordinates(*img_shape),
+        vertical_coordinate=DepthCoordinate(
+            torch.tensor([0.0, 10.0, 30.0]), torch.ones(2)
+        ),
         timestep=_SALT_TIMESTEP,
-        variable_metadata={"sea_ice_volume": VariableMetadata(units="m^3")},
     )
     slope = 40.0
-    corrector = _thickness_config(slope=slope).get_corrector(dataset_info)
+    corrector = _total_config(slope=slope).get_corrector(dataset_info)
 
     # identical global data on every rank
-    area = LatLonCoordinates(lat=lat, lon=lon).area_weights_m2
-    input_data = _salt_data(torch.rand(img_shape) * area, 34.0)
-    gen_data = _salt_data(torch.rand(img_shape) * area, 36.0)
-    for data in (input_data, gen_data):
-        data["so_0"] = data["so_0"] + torch.rand(img_shape)
-
-    # global reference computed without any gridded or distributed ops
-    weights = area / area.sum()
-
-    def global_mean(x):
-        return (x * weights).sum()
-
-    def salt(data):
-        return global_mean(data["so_0"] * 10.0 + data["so_1"] * 20.0)
-
-    ice_change = global_mean(
-        (gen_data["sea_ice_volume"] - input_data["sea_ice_volume"]) / area
+    input_data = _total_data(ocean, torch.rand(img_shape) * 1e10, 34.0)
+    gen_data = _total_data(ocean, torch.rand(img_shape) * 1e10, 35.0)
+    ice_change = (gen_data["sea_ice_volume"] - input_data["sea_ice_volume"]).sum()
+    ratio = (_total_salt(input_data, ocean) + slope * ice_change) / _total_salt(
+        gen_data, ocean
     )
-    ratio = (salt(input_data) + slope * ice_change) / salt(gen_data)
 
     dist = Distributed.get_instance()
     local = corrector(
-        dist.scatter_spatial(
-            {k: v.to(DEVICE) for k, v in input_data.items()}, img_shape
-        ),
-        dist.scatter_spatial({k: v.to(DEVICE) for k, v in gen_data.items()}, img_shape),
+        dist.scatter_spatial(input_data, img_shape),
+        dist.scatter_spatial(gen_data, img_shape),
         {},
         None,
     ).corrected
     expected = dist.scatter_spatial(
-        {k: (gen_data[k] * ratio).to(DEVICE) for k in ("so_0", "so_1")}, img_shape
+        {k: gen_data[k] * ratio for k in ("so_0", "so_1")}, img_shape
     )
     for name in ("so_0", "so_1"):
-        torch.testing.assert_close(local[name], expected[name], rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(local[name], expected[name], rtol=1e-12, atol=1e-12)
 
 
-def test_ocean_salt_content_thickness_correction_ignores_ice_outside_mask():
-    """Predicted ice outside the sea_ice_volume mask, where the target has no
-    ice data and the step input is filled with 0, is not an ice change."""
-    torch.manual_seed(0)
-    nlat, nlon = 4, 8
-    lat = torch.tensor([-60.0, -10.0, 10.0, 60.0])
-    lon = torch.arange(nlon) * 360.0 / nlon
-    ice_mask = torch.ones(nlat, nlon)
-    ice_mask[1:3] = 0.0  # tropics
-    masks = {
-        "mask_0": torch.ones(nlat, nlon),
-        "mask_1": torch.ones(nlat, nlon),
-        "mask_2d": torch.ones(nlat, nlon),
-        "mask_sea_ice_volume": ice_mask,
-    }
-    dataset_info = DatasetInfo(
-        horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
-        vertical_coordinate=DepthCoordinate(
-            torch.tensor([0.0, 10.0, 20.0]), torch.ones(nlat, nlon, 2)
-        ),
-        spatial_mask_provider=SpatialMaskProvider(masks),
-        timestep=_SALT_TIMESTEP,
-        variable_metadata={"sea_ice_volume": VariableMetadata(units="m^3")},
-    )
-    corrector = _thickness_config(slope=4000.0).get_corrector(dataset_info)
-    area = LatLonCoordinates(lat=lat, lon=lon).area_weights_m2
-    input_ice = torch.rand(nlat, nlon) * area * ice_mask
-    gen_ice = torch.rand(nlat, nlon) * area * ice_mask
-    input_data = _salt_data(input_ice, 34.0)
-
-    def corrected_so(gen_ice):
-        gen_data = _salt_data(gen_ice, 36.0)
-        return corrector(input_data, gen_data, {}, None).corrected["so_0"]
-
-    baseline = corrected_so(gen_ice)
-    garbage = torch.rand(nlat, nlon) * area * (1 - ice_mask)
-    torch.testing.assert_close(corrected_so(gen_ice + garbage), baseline)
-    # ice inside the mask does count
-    assert not torch.allclose(corrected_so(gen_ice * 2), baseline)
-
-
-def test_ocean_salt_content_corrections_are_mutually_exclusive():
-    with pytest.raises(ValueError, match="Only one of"):
-        OceanCorrectorConfig(
-            ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-                method="scaled_salinity"
-            ),
-            ocean_salt_content_thickness_correction=(
-                OceanSaltContentThicknessBudgetConfig(method="scaled_salinity")
-            ),
-        )
+# DELETE LATER: tests of the old salt content corrections.
+# @pytest.mark.parametrize(
+#     "names",
+#     [
+#         ("ocean_salt_content_correction", "ocean_salt_content_thickness_correction"),
+#         ("ocean_salt_content_correction", "ocean_salt_content_total_correction"),
+#         (
+#             "ocean_salt_content_thickness_correction",
+#             "ocean_salt_content_total_correction",
+#         ),
+#     ],
+# )
+# def test_ocean_salt_content_corrections_are_mutually_exclusive(names):
+#     configs: dict[str, Any] = {
+#         "ocean_salt_content_correction": OceanSaltContentBudgetConfig(
+#             method="scaled_salinity"
+#         ),
+#         "ocean_salt_content_thickness_correction": (
+#             OceanSaltContentThicknessBudgetConfig(method="scaled_salinity")
+#         ),
+#         "ocean_salt_content_total_correction": OceanSaltContentTotalBudgetConfig(
+#             method="scaled_salinity"
+#         ),
+#     }
+#     with pytest.raises(ValueError, match="Only one of"):
+#         OceanCorrectorConfig(**{name: configs[name] for name in names})
 
 
 def test_ocean_corrector_config_fields_are_known():
@@ -1005,8 +1286,7 @@ def test_ocean_corrector_config_fields_are_known():
         "sea_ice_fraction_correction",
         "surface_energy_flux_correction",
         "ocean_heat_content_correction",
-        "ocean_salt_content_correction",
-        "ocean_salt_content_thickness_correction",
+        "ocean_salt_content_total_correction",
         "keep_gradient_through_clamps",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
@@ -1062,8 +1342,7 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
 
 
-@pytest.mark.parametrize("salt_ice_term", ["cell_volume", "cell_mean_thickness"])
-def test_ocean_corrector_is_per_member_under_ensemble_folding(salt_ice_term):
+def test_ocean_corrector_is_per_member_under_ensemble_folding():
     """Ensemble training folds the ensemble members into the batch dimension, so
     the corrector sees several members at once. Every correction must act
     per-member: one that coupled across the batch dim (e.g. a global mean taken
@@ -1083,21 +1362,12 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding(salt_ice_term):
             method="scaled_temperature",
             constant_unaccounted_heating=0.1,
         ),
-    )
-    if salt_ice_term == "cell_volume":
-        config.ocean_salt_content_correction = OceanSaltContentBudgetConfig(
+        ocean_salt_content_total_correction=OceanSaltContentTotalBudgetConfig(
             method="scaled_salinity",
-            ice_volume_salt_slope_psu=5.849,
+            ice_volume_salt_slope_psu=40.0,
             constant_unaccounted_salting=1e-9,
-        )
-    else:
-        config.ocean_salt_content_thickness_correction = (
-            OceanSaltContentThicknessBudgetConfig(
-                method="scaled_salinity",
-                ice_thickness_salt_slope_psu=40.0,
-                constant_unaccounted_salting=1e-9,
-            )
-        )
+        ),
+    )
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     mask = torch.ones(nlat, nlon, nlevels)
     mask[0, 0, :] = 0.0
@@ -1110,9 +1380,7 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding(salt_ice_term):
     area = torch.tensor([0.5, 1.0, 1.5]).unsqueeze(-1).expand(nlat, nlon)
     ops = LatLonOperations(area, SpatialMaskProvider(masks))
     depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10.0, 20.0]), mask)
-    corrector = config._build(
-        ops, depth_coordinate, timestep, cell_area_m2=area.clone()
-    )
+    corrector = config._build(ops, depth_coordinate, timestep)
 
     def randoms(shape):
         return torch.randn(shape)
