@@ -30,3 +30,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|01M3K15K8K4
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|01M3K15K8K4WQG3RSSMB666K1X|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3M2KBMVM8AH8N5SG6WE0G4J|ai2/ace|jupiter|||30GiB
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|01M3K15K8K4WQG3RSSMB666K1X|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3M2KBMVM8AH8N5SG6WE0G4J|ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs1|01M3MTPQV4Y2ZXB9ME91Q0G1P1|training|best_inference_ckpt|normal|--min-runtime 8h
