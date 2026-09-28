@@ -2,11 +2,11 @@
 
 set -e
 
-JOB_NAME="ace2s-shieldplus-tuned-xshield-inference-10yr-5ics"
+JOB_NAME="ace2s-shieldplus-tuned-xshield-inference-timing-1y"
 JOB_GROUP=""
 EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # tuned from SHiELD+
 
-CONFIG_FILENAME="inference-ace2s-10yr.yaml"
+CONFIG_FILENAME="inference-ace2s-1yr-timing.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 
@@ -25,8 +25,7 @@ cd $REPO_ROOT && gantry run \
     --description 'Run ACE2S evaluator' \
     --beaker-image $IMAGE \
     --workspace ai2/ace \
-    --priority high \
-    --cluster ai2/titan \
+    --priority urgent \
     --cluster ai2/jupiter \
     --cluster ai2/ceres \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
@@ -43,5 +42,6 @@ cd $REPO_ROOT && gantry run \
     --budget ai2/atec-climate \
     --no-python \
     --install "pip install --no-deps ." \
+    --min-runtime 8h \
     --allow-dirty \
     -- python -I -m fme.ace.inference $CONFIG_PATH
