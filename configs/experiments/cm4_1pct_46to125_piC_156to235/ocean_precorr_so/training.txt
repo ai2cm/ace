@@ -12,4 +12,17 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs2|trained|high|jupiter|4|5
 # wandb yyk5ow7c) and disarmed to "trained". The 8-step fine-tune of it is
 # in finetuning.txt.
 
+#
+# rs1/rs2 added 2026-09-28. The one-seed comparison against the gauge-free
+# `ocean_wide_uniformdt_clip` arm put every heat-placement margin inside one
+# seed standard deviation of the only three-seed arm, so both arms get three
+# seeds. Identical to rs0 in every override token but `seed`.
+#
+# min_runtime 8h, up from rs0's 3h. Scheduling only -- auto-resume preserves
+# progress, so it cannot change the trained model.
+
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature'|3h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature'|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature'|8h

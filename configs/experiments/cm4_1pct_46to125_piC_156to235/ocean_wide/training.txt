@@ -39,4 +39,19 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|50
 # the amplitude unconstrained by a post-corrector loss, and the additive form
 # has no such invariance.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
+#
+# rs0 finished at 75 epochs 2026-09-06 (beaker 01M1N34VDHEEDH5DFZYFJ29T0V,
+# wandb yva51vwg) and is disarmed to "trained". rs1/rs2 added 2026-09-28: the
+# one-seed comparison against the gauge-pinned arm could not resolve its
+# heat-placement margin, so both arms get three seeds. Identical to rs0 in every
+# override token but `seed`.
+#
+# min_runtime 8h, up from rs0's 3h, which cost a 12-hour job to preemption.
+# Scheduling only -- auto-resume preserves progress, so it cannot change the
+# trained model.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|8h
