@@ -4,7 +4,11 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
+from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
+    REFERENCE_SALINITY_PSU,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -24,6 +28,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "net_downward_surface_heat_flux": ["hfds"],
         "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
+        "water_flux_into_sea_water": ["wfo"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
 )
@@ -149,6 +154,23 @@ class OceanData:
         )
 
     @property
+    def ocean_salt_content(self) -> torch.Tensor:
+        """Returns column-integrated ocean salt content in g/m2."""
+        if self._depth_coordinate is None:
+            raise ValueError(
+                "Depth coordinate must be provided to compute column-integrated "
+                "ocean salt content."
+            )
+        return self._depth_coordinate.depth_integral(
+            self.sea_water_salinity * DENSITY_OF_SEA_WATER_CM4
+        )
+
+    @property
+    def water_flux_into_sea_water(self) -> torch.Tensor:
+        """Returns water flux into sea water in kg/m2/s."""
+        return self._get("water_flux_into_sea_water")
+
+    @property
     def sea_surface_fraction(self) -> torch.Tensor:
         """Returns the sea surface fraction."""
         try:
@@ -188,6 +210,19 @@ class OceanData:
         return (
             self.net_downward_surface_heat_flux + self.geothermal_heat_flux
         ) * self.sea_surface_fraction
+
+    @property
+    def net_virtual_salt_flux_into_ocean(self) -> torch.Tensor:
+        """Virtual salt flux into the ocean column (g/m2/s).
+
+        Positive wfo (freshwater in) dilutes salt, giving a negative salt flux.
+        Uses a fixed reference salinity for diagnostic purposes.
+        """
+        return (
+            -REFERENCE_SALINITY_PSU
+            * self.water_flux_into_sea_water
+            * self.sea_surface_fraction
+        )
 
     @property
     def sea_ice_fraction(self) -> torch.Tensor:
