@@ -301,23 +301,13 @@ class Trainer:
         self._aggregator_builder = aggregator_builder
         self._ema = build_ema(stepper.modules)  # build before restore_checkpoint
 
-        wandb = WandB.get_instance()
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
-            self.restore_checkpoint(self.paths.latest_checkpoint_path)
-            # a checkpoint saved after an epoch's training batches but before
-            # its end-of-epoch logs means training logs that epoch again at
-            # num_batches_seen, so those logs are not recovered from disk
-            epoch_logs_pending = (
-                self._current_epoch_num_batches_seen >= self.train_data.n_batches
-            )
-            wandb.log_unsynced_from_disk(
-                max_step=self.num_batches_seen - int(epoch_logs_pending)
-            )
-        else:
-            wandb.archive_disk_metrics()
+            checkpoint = self.restore_checkpoint(self.paths.latest_checkpoint_path)
+            self._restore_disk_metrics(checkpoint)
 
+        wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
 
         n_params = count_parameters(self.stepper.modules)
@@ -719,6 +709,7 @@ class Trainer:
                 "best_inference_error": self._best_inference_error,
                 "stepper": self.stepper.get_state(),
                 "ema": self._ema.get_state(),
+                "disk_metrics_offset": WandB.get_instance().disk_metrics_offset,
             }
             if include_optimization:
                 data["optimization"] = self.optimization.get_state()
@@ -730,14 +721,39 @@ class Trainer:
             if os.path.exists(temporary_location):
                 os.remove(temporary_location)
 
-    def restore_checkpoint(self, checkpoint_path):
+    def restore_checkpoint(self, checkpoint_path) -> Mapping[str, Any]:
         """
         Restore the checkpoint from the given path. This includes the existing state of
         the stepper, optimization, training epoch, and EMA. This is most suitable
         for resuming training from a checkpoint without changing the training schedule,
         i.e., to manage preemption.
+
+        Returns:
+            The loaded checkpoint.
         """
-        _restore_checkpoint(self, checkpoint_path)
+        return _restore_checkpoint(self, checkpoint_path)
+
+    def _restore_disk_metrics(self, checkpoint: Mapping[str, Any]):
+        """Restore the disk metrics logged before the checkpoint being resumed.
+
+        A checkpoint saved after an epoch's training batches but before its
+        end-of-epoch logs means training logs that epoch again at the
+        checkpoint's step.
+        """
+        wandb = WandB.get_instance()
+        epoch_logs_pending = (
+            self._current_epoch_num_batches_seen >= self.train_data.n_batches
+        )
+        if "disk_metrics_offset" in checkpoint:
+            wandb.restore_disk_metrics(
+                checkpoint["disk_metrics_offset"],
+                resume_step=self.num_batches_seen,
+                step_continues=epoch_logs_pending,
+            )
+        else:
+            wandb.restore_disk_metrics_through_step(
+                self.num_batches_seen - int(epoch_logs_pending)
+            )
 
     def _epoch_checkpoint_enabled(self, epoch: int) -> bool:
         return epoch_checkpoint_enabled(
@@ -988,7 +1004,7 @@ def build_inference_callback(
     return inference_callback
 
 
-def _restore_checkpoint(trainer: Trainer, checkpoint_path):
+def _restore_checkpoint(trainer: Trainer, checkpoint_path) -> Mapping[str, Any]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     trainer.stepper.load_state(checkpoint["stepper"])
     trainer.optimization.load_state(checkpoint["optimization"])
@@ -1001,6 +1017,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
+    return checkpoint
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:

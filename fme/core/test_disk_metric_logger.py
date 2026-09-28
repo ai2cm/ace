@@ -5,7 +5,12 @@ import os
 
 import pytest
 
-from fme.core.disk_metric_logger import METRICS_FILENAME, DiskMetricLogger, read_metrics
+from fme.core.disk_metric_logger import (
+    METRICS_FILENAME,
+    DiskMetricLogger,
+    read_metrics,
+    read_metrics_by_step,
+)
 
 
 @pytest.fixture
@@ -41,80 +46,160 @@ def test_log_flushes_each_line(log_dir):
     logger.close()
 
 
-def test_resume_skips_steps_at_or_below_high_water_mark(log_dir):
+def _log_steps(log_dir: str, steps: range) -> list[int]:
+    """Log one record per step and return the offset after each."""
     logger = DiskMetricLogger(log_dir)
-    logger.log({"loss": 0.5}, step=0)
-    logger.log({"loss": 0.4}, step=1)
-    logger.log({"loss": 0.3}, step=2)
+    offsets = []
+    for step in steps:
+        logger.log({"loss": float(step)}, step=step)
+        offsets.append(logger.offset)
     logger.close()
-
-    # Simulate resume: re-create logger, re-log steps 1 and 2,
-    # then continue with step 3
-    logger = DiskMetricLogger(log_dir)
-    logger.log({"loss": 0.45}, step=1)  # skipped
-    logger.log({"loss": 0.35}, step=2)  # skipped
-    logger.log({"loss": 0.2}, step=3)  # written
-    logger.close()
-
-    records = read_metrics(log_dir)
-    assert len(records) == 4
-    # Original steps preserved
-    assert records[0]["step"] == 0
-    assert records[1]["step"] == 1
-    assert records[1]["loss"] == 0.4  # original, not overwritten
-    assert records[2]["step"] == 2
-    assert records[2]["loss"] == 0.3  # original, not overwritten
-    # New step appended
-    assert records[3] == {"step": 3, "loss": 0.2}
+    return offsets
 
 
-def test_resume_catches_up_then_continues(log_dir):
-    """Steps exactly at the high-water mark are skipped; one above is written."""
-    logger = DiskMetricLogger(log_dir)
-    logger.log({"a": 1}, step=5)
-    logger.close()
+def _other_files(log_dir: str) -> list[str]:
+    return sorted(name for name in os.listdir(log_dir) if name != METRICS_FILENAME)
+
+
+def _read_lines(path: str) -> list[dict]:
+    with open(path) as f:
+        return [json.loads(line) for line in f]
+
+
+def test_previous_job_metrics_are_moved_aside(log_dir):
+    _log_steps(log_dir, range(3))
 
     logger = DiskMetricLogger(log_dir)
-    logger.log({"a": 2}, step=5)  # skipped (== high water mark)
-    logger.log({"a": 3}, step=6)  # written
+    logger.log({"loss": 9.0}, step=0)
     logger.close()
 
-    records = read_metrics(log_dir)
-    assert len(records) == 2
-    assert records[0] == {"step": 5, "a": 1}
-    assert records[1] == {"step": 6, "a": 3}
+    assert read_metrics(log_dir) == [{"step": 0, "loss": 9.0}]
+    (previous,) = _other_files(log_dir)
+    assert [r["step"] for r in _read_lines(os.path.join(log_dir, previous))] == [
+        0,
+        1,
+        2,
+    ]
 
 
-def test_skipped_steps_warn_once(log_dir, caplog):
+def test_moved_aside_files_get_unique_names(log_dir):
+    for _ in range(3):
+        _log_steps(log_dir, range(1))
+    DiskMetricLogger(log_dir).close()
+    assert len(_other_files(log_dir)) == 3
+
+
+def test_restore_cuts_at_offset_and_continues(log_dir):
+    offsets = _log_steps(log_dir, range(5))
+
     logger = DiskMetricLogger(log_dir)
-    logger.log({"a": 1}, step=5)
+    assert logger.restore(offsets[2])
+    assert logger.offset == offsets[2]
+    logger.log({"loss": 30.0}, step=3)
     logger.close()
+
+    assert read_metrics(log_dir) == [
+        {"step": 0, "loss": 0.0},
+        {"step": 1, "loss": 1.0},
+        {"step": 2, "loss": 2.0},
+        {"step": 3, "loss": 30.0},
+    ]
+    (discarded,) = _other_files(log_dir)
+    assert ".discarded." in discarded
+    assert _read_lines(os.path.join(log_dir, discarded)) == [
+        {"step": 3, "loss": 3.0},
+        {"step": 4, "loss": 4.0},
+    ]
+
+
+def test_restore_keeps_every_record_at_the_checkpoint_step(log_dir):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"batch_loss": 1.0}, step=5)
+    offset = logger.offset
+    logger.log({"val_loss": 2.0}, step=5)  # logged after the checkpoint
+    logger.close()
+
+    logger = DiskMetricLogger(log_dir)
+    assert logger.restore(offset)
+    logger.log({"val_loss": 3.0}, step=5)
+    logger.close()
+
+    assert read_metrics_by_step(log_dir, first_step=0) == {
+        5: {"batch_loss": 1.0, "val_loss": 3.0}
+    }
+
+
+def test_restore_after_logging_cuts_current_file(log_dir):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"loss": 0.0}, step=0)
+    offset = logger.offset
+    logger.log({"loss": 1.0}, step=1)
+    assert logger.restore(offset)
+    logger.log({"loss": 10.0}, step=1)
+    logger.close()
+
+    assert read_metrics(log_dir) == [
+        {"step": 0, "loss": 0.0},
+        {"step": 1, "loss": 10.0},
+    ]
+
+
+def test_restore_without_previous_file_warns(log_dir, caplog):
+    logger = DiskMetricLogger(log_dir)
+    with caplog.at_level(logging.WARNING):
+        assert not logger.restore(10)
+    logger.close()
+    assert "no disk metrics are restored" in caplog.text
+
+
+def test_restore_from_shorter_file_warns_and_keeps_it_aside(log_dir, caplog):
+    offsets = _log_steps(log_dir, range(2))
 
     logger = DiskMetricLogger(log_dir)
     with caplog.at_level(logging.WARNING):
-        for step in range(6):
-            logger.log({"a": 2}, step=step)
+        assert not logger.restore(offsets[-1] + 1)
+    logger.log({"loss": 5.0}, step=0)
     logger.close()
 
-    assert len(caplog.records) == 1
-    assert "high-water mark 5" in caplog.records[0].getMessage()
+    assert "not the checkpoint's metrics file" in caplog.text
+    assert read_metrics(log_dir) == [{"step": 0, "loss": 5.0}]
+    assert len(_other_files(log_dir)) == 1
 
 
-def test_archive_moves_previous_run_aside(log_dir):
+def test_restore_drops_line_cut_off_mid_write(log_dir):
+    offsets = _log_steps(log_dir, range(2))
+    with open(os.path.join(log_dir, METRICS_FILENAME), "a") as f:
+        f.write('{"step": 2, "lo')
+
     logger = DiskMetricLogger(log_dir)
-    logger.log({"a": 1}, step=5)
+    assert logger.restore(offsets[-1])
+    logger.log({"loss": 2.0}, step=2)
     logger.close()
+
+    assert [r["step"] for r in read_metrics(log_dir)] == [0, 1, 2]
+
+
+def test_restore_through_step(log_dir):
+    _log_steps(log_dir, range(5))
 
     logger = DiskMetricLogger(log_dir)
-    logger.archive()
-    logger.log({"a": 2}, step=0)
+    assert logger.restore_through_step(2)
     logger.close()
 
-    assert read_metrics(log_dir) == [{"step": 0, "a": 2}]
-    archived = [name for name in os.listdir(log_dir) if name != METRICS_FILENAME]
-    assert len(archived) == 1
-    with open(os.path.join(log_dir, archived[0])) as f:
-        assert [json.loads(line) for line in f] == [{"step": 5, "a": 1}]
+    assert [r["step"] for r in read_metrics(log_dir)] == [0, 1, 2]
+
+
+def test_restore_through_step_stops_at_line_cut_off_mid_write(log_dir):
+    _log_steps(log_dir, range(2))
+    with open(os.path.join(log_dir, METRICS_FILENAME), "a") as f:
+        f.write('{"step": 1, "lo')
+
+    logger = DiskMetricLogger(log_dir)
+    assert logger.restore_through_step(5)
+    logger.log({"loss": 2.0}, step=2)
+    logger.close()
+
+    assert [r["step"] for r in read_metrics(log_dir)] == [0, 1, 2]
 
 
 def test_non_scalar_values_are_skipped(log_dir):
@@ -187,26 +272,20 @@ def test_no_existing_file(log_dir):
 
 
 def test_corrupt_line_is_skipped(log_dir):
-    """A corrupt line in the file doesn't prevent reading or resuming."""
+    """Corrupt lines, and lines without an integer step, are skipped."""
     os.makedirs(log_dir, exist_ok=True)
     path = os.path.join(log_dir, METRICS_FILENAME)
     with open(path, "w") as f:
         f.write(json.dumps({"step": 0, "loss": 0.5}) + "\n")
         f.write("NOT VALID JSON\n")
+        f.write(json.dumps({"loss": 0.4}) + "\n")
+        f.write(json.dumps({"step": "1", "loss": 0.4}) + "\n")
+        f.write(json.dumps([1, 2]) + "\n")
         f.write(json.dumps({"step": 2, "loss": 0.3}) + "\n")
 
-    logger = DiskMetricLogger(log_dir)
-    # High water mark should be 2 despite the corrupt line
-    logger.log({"loss": 0.1}, step=2)  # skipped
-    logger.log({"loss": 0.05}, step=3)  # written
-    logger.close()
-
     records = read_metrics(log_dir)
-    # read_metrics also skips corrupt lines
-    assert len(records) == 3
-    assert records[0]["step"] == 0
-    assert records[1]["step"] == 2
-    assert records[2]["step"] == 3
+    assert records == [{"step": 0, "loss": 0.5}, {"step": 2, "loss": 0.3}]
+    assert read_metrics_by_step(log_dir, first_step=1) == {2: {"loss": 0.3}}
 
 
 def test_read_metrics_empty_directory(tmp_path):

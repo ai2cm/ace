@@ -140,24 +140,42 @@ class MockWandB:
         if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
 
-    def log_unsynced_from_disk(self, max_step: int):
+    @property
+    def disk_metrics_offset(self) -> int | None:
+        if self._disk_logger is None:
+            return None
+        return self._disk_logger.offset
+
+    def restore_disk_metrics(
+        self, offset: int | None, resume_step: int, step_continues: bool
+    ):
+        if self._disk_logger is None or offset is None:
+            return
+        if self._disk_logger.restore(offset):
+            self._relog_unsynced_disk_metrics(resume_step, step_continues)
+
+    def restore_disk_metrics_through_step(self, last_step: int):
+        if self._disk_logger is None:
+            return
+        if self._disk_logger.restore_through_step(last_step):
+            self._relog_unsynced_disk_metrics(last_step, step_continues=False)
+
+    def _relog_unsynced_disk_metrics(self, resume_step: int, step_continues: bool):
+        """Mirror wandb: a resumed run continues after the last step it
+        received, and a committed step rejects later logs at that step.
+        """
         if not self._enabled or self._disk_logger is None:
             return
-        # like wandb, a resumed run continues after the last step received
         received_steps = list(self._logs)
         if self._last_received_step is not None:
             received_steps.append(self._last_received_step)
-        next_step = max(received_steps, default=-1) + 1
+        first_step = max(received_steps, default=-1) + 1
         for step, data in read_metrics_by_step(
-            self._disk_logger.directory, next_step, max_step
+            self._disk_logger.directory, first_step
         ).items():
-            # like wandb, a committed log rejects later logs at the same step
-            self._last_step = step + 1
+            commit = not (step_continues and step == resume_step)
+            self._last_step = step + 1 if commit else step
             self._logs[step].update(data)
-
-    def archive_disk_metrics(self):
-        if self._disk_logger is not None:
-            self._disk_logger.archive()
 
     def drop_logs_after(self, step: int):
         """Simulate wandb never receiving logs after ``step``, e.g. because

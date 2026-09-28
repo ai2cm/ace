@@ -40,25 +40,18 @@ class TestDiskLoggingIntegration:
             wandb.log({"loss": 0.5}, step=0)
         assert wandb._disk_logger is None
 
-    def test_disk_logging_resume_skips_old_steps(self, tmp_path):
+    def test_disk_logging_rerun_starts_fresh(self, tmp_path):
         log_dir = str(tmp_path / "metrics")
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True, metrics_log_dir=log_dir)
             wandb.log({"loss": 0.5}, step=0)
             wandb.log({"loss": 0.3}, step=1)
 
-        # Simulate resume
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True, metrics_log_dir=log_dir)
-            wandb.log({"loss": 0.45}, step=0)  # skipped
-            wandb.log({"loss": 0.35}, step=1)  # skipped
-            wandb.log({"loss": 0.2}, step=2)  # written
+            wandb.log({"loss": 0.45}, step=0)
 
-        records = read_metrics(log_dir)
-        assert len(records) == 3
-        assert records[0]["loss"] == 0.5  # original preserved
-        assert records[1]["loss"] == 0.3  # original preserved
-        assert records[2] == {"step": 2, "loss": 0.2}
+        assert read_metrics(log_dir) == [{"step": 0, "loss": 0.45}]
 
     def test_disk_logging_independent_of_wandb_enabled(self, tmp_path):
         """Disk logging works even when log_to_wandb is False."""
@@ -72,17 +65,27 @@ class TestDiskLoggingIntegration:
         assert records[0] == {"step": 0, "loss": 0.5}
 
 
-def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch, caplog):
-    log_dir = str(tmp_path / "metrics")
+def _log_previous_job(log_dir: str, records: list[tuple[dict, int]]) -> list[int]:
+    """Log records as a previous job would, returning the offset after each."""
     previous_job = DiskMetricLogger(log_dir)
-    previous_job.log({"batch_loss": 0.5}, step=10)
-    previous_job.log({"batch_loss": 0.4}, step=20)
-    previous_job.log({"val_loss": 0.3, "epoch": 2}, step=20)
-    previous_job.log({"batch_loss": 0.2}, step=30)  # after the checkpoint
+    offsets = []
+    for data, step in records:
+        previous_job.log(data, step=step)
+        offsets.append(previous_job.offset)
     previous_job.close()
+    return offsets
+
+
+def _resumed_wandb(
+    monkeypatch, log_dir: str, run_step: int, offline: bool = False
+) -> tuple[WandB, list[tuple[dict, int, bool | None]]]:
+    """A WandB whose resumed wandb run continues at ``run_step``, and the list
+    its calls to wandb.log are recorded in.
+    """
     logged: list[tuple[dict, int, bool | None]] = []
-    # wandb received step 10, so the resumed run continues from step 11
-    monkeypatch.setattr(fme.core.wandb.wandb, "run", SimpleNamespace(step=11))
+    monkeypatch.setattr(
+        fme.core.wandb.wandb, "run", SimpleNamespace(step=run_step, offline=offline)
+    )
     monkeypatch.setattr(
         fme.core.wandb.wandb,
         "log",
@@ -90,14 +93,109 @@ def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch, c
     )
     wandb = WandB()
     wandb.configure(log_to_wandb=True, metrics_log_dir=log_dir)
+    return wandb, logged
+
+
+def _close_disk_logger(wandb: WandB):
+    wandb.configure(log_to_wandb=False, metrics_log_dir=None)
+
+
+PREVIOUS_JOB_RECORDS = [
+    ({"batch_loss": 0.5}, 10),
+    ({"batch_loss": 0.4}, 20),
+    ({"val_loss": 0.3, "epoch": 2}, 20),
+    ({"batch_loss": 0.2}, 30),
+]
+
+
+def test_restore_disk_metrics_relogs_rows_wandb_lacks(tmp_path, monkeypatch, caplog):
+    log_dir = str(tmp_path / "metrics")
+    offsets = _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS)
+    # wandb received step 10, and the checkpoint was saved at step 20
+    wandb, logged = _resumed_wandb(monkeypatch, log_dir, run_step=11)
     try:
         with caplog.at_level(logging.INFO):
-            wandb.log_unsynced_from_disk(max_step=20)
+            wandb.restore_disk_metrics(offsets[2], resume_step=20, step_continues=False)
+        assert wandb.disk_metrics_offset == offsets[2]
     finally:
-        # reconfiguring closes the disk logger's file
-        wandb.configure(log_to_wandb=False, metrics_log_dir=None)
+        _close_disk_logger(wandb)
     assert logged == [({"batch_loss": 0.4, "val_loss": 0.3, "epoch": 2}, 20, True)]
     assert (
         "Recovered wandb logs for 1 steps from disk (steps 20 to 20, epochs [2])"
         in caplog.messages
     )
+    assert [r["step"] for r in read_metrics(log_dir)] == [10, 20, 20]
+
+
+def test_restore_disk_metrics_leaves_continued_step_uncommitted(tmp_path, monkeypatch):
+    log_dir = str(tmp_path / "metrics")
+    offsets = _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS)
+    wandb, logged = _resumed_wandb(monkeypatch, log_dir, run_step=0)
+    try:
+        wandb.restore_disk_metrics(offsets[1], resume_step=20, step_continues=True)
+    finally:
+        _close_disk_logger(wandb)
+    assert logged == [
+        ({"batch_loss": 0.5}, 10, True),
+        ({"batch_loss": 0.4}, 20, False),
+    ]
+
+
+def test_restore_disk_metrics_warns_if_wandb_has_continued_step(
+    tmp_path, monkeypatch, caplog
+):
+    log_dir = str(tmp_path / "metrics")
+    offsets = _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS)
+    wandb, logged = _resumed_wandb(monkeypatch, log_dir, run_step=21)
+    try:
+        with caplog.at_level(logging.WARNING):
+            wandb.restore_disk_metrics(offsets[1], resume_step=20, step_continues=True)
+    finally:
+        _close_disk_logger(wandb)
+    assert logged == []
+    assert "wandb already received step 20" in caplog.text
+
+
+def test_restore_disk_metrics_does_not_relog_to_offline_wandb(tmp_path, monkeypatch):
+    log_dir = str(tmp_path / "metrics")
+    offsets = _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS)
+    wandb, logged = _resumed_wandb(monkeypatch, log_dir, run_step=0, offline=True)
+    try:
+        wandb.restore_disk_metrics(offsets[2], resume_step=20, step_continues=False)
+    finally:
+        _close_disk_logger(wandb)
+    assert logged == []
+    assert [r["step"] for r in read_metrics(log_dir)] == [10, 20, 20]
+
+
+def test_restore_disk_metrics_without_offset_warns(tmp_path, monkeypatch, caplog):
+    log_dir = str(tmp_path / "metrics")
+    _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS)
+    wandb, logged = _resumed_wandb(monkeypatch, log_dir, run_step=0)
+    try:
+        with caplog.at_level(logging.WARNING):
+            wandb.restore_disk_metrics(None, resume_step=20, step_continues=False)
+    finally:
+        _close_disk_logger(wandb)
+    assert logged == []
+    assert "disk metric logging disabled" in caplog.text
+    assert read_metrics(log_dir) == []
+
+
+def test_restore_disk_metrics_through_step(tmp_path, monkeypatch, caplog):
+    log_dir = str(tmp_path / "metrics")
+    _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS)
+    wandb, logged = _resumed_wandb(monkeypatch, log_dir, run_step=11)
+    try:
+        with caplog.at_level(logging.WARNING):
+            wandb.restore_disk_metrics_through_step(20)
+    finally:
+        _close_disk_logger(wandb)
+    assert logged == [({"batch_loss": 0.4, "val_loss": 0.3, "epoch": 2}, 20, True)]
+    assert "does not record disk_metrics_offset" in caplog.text
+
+
+def test_disk_metrics_offset_is_none_without_disk_logging():
+    wandb = WandB()
+    wandb.configure(log_to_wandb=False, metrics_log_dir=None)
+    assert wandb.disk_metrics_offset is None

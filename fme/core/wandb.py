@@ -191,29 +191,89 @@ class WandB:
         dist = Distributed.get_instance()
         dist.barrier()
 
-    def log_unsynced_from_disk(self, max_step: int):
-        """Re-log metrics a previous job wrote to disk but wandb never received.
+    @property
+    def disk_metrics_offset(self) -> int | None:
+        """Size in bytes of the disk metrics logged so far, which a checkpoint
+        records so a job resuming from it can ``restore_disk_metrics``. None if
+        disk metric logging is disabled.
+        """
+        if self._disk_logger is None:
+            return None
+        return self._disk_logger.offset
+
+    def restore_disk_metrics(
+        self, offset: int | None, resume_step: int, step_continues: bool
+    ):
+        """Restore the disk metrics a previous job logged before a checkpoint,
+        and re-log to wandb the ones it never received.
 
         wandb uploads logs in the background, so a job killed (e.g. preempted)
-        shortly after logging loses whatever was still queued. A resumed wandb
-        run continues from the step after the last one it received, so disk
-        rows from that step up to ``max_step`` (the step of the checkpoint
-        being resumed from) are re-logged at their original steps. Only scalars
-        are on disk, so figures in those rows stay lost. wandb rejects logs
-        before its current step, so rows missing before the last received step
-        can't be recovered.
+        shortly after logging loses whatever was still queued. Only scalars are
+        on disk, so figures in lost logs stay lost.
+
+        Args:
+            offset: The checkpoint's ``disk_metrics_offset``.
+            resume_step: The checkpoint's step.
+            step_continues: Whether this job logs more metrics at
+                ``resume_step``, in which case the metrics recovered at that
+                step are not committed to wandb, so the new ones join them.
+        """
+        if self._disk_logger is None:
+            return
+        if offset is None:
+            logging.warning(
+                "The checkpoint was saved with disk metric logging disabled, so "
+                "no disk metrics are restored"
+            )
+            return
+        if self._disk_logger.restore(offset):
+            self._relog_unsynced_disk_metrics(resume_step, step_continues)
+
+    def restore_disk_metrics_through_step(self, last_step: int):
+        """Like ``restore_disk_metrics``, for a checkpoint saved before
+        checkpoints recorded ``disk_metrics_offset``.
+
+        Restores the previous job's disk metrics through ``last_step``, which
+        must be a step this job does not log metrics at again.
+        """
+        if self._disk_logger is None:
+            return
+        logging.warning(
+            "The checkpoint does not record disk_metrics_offset, so disk metrics "
+            f"are restored through step {last_step}"
+        )
+        if self._disk_logger.restore_through_step(last_step):
+            self._relog_unsynced_disk_metrics(last_step, step_continues=False)
+
+    def _relog_unsynced_disk_metrics(self, resume_step: int, step_continues: bool):
+        """Re-log the restored disk metrics wandb never received.
+
+        A resumed wandb run continues from the step after the last one it
+        received and rejects logs at earlier steps, so disk metrics from that
+        step on are re-logged at their original steps.
         """
         if not self._enabled or self._disk_logger is None or wandb.run is None:
             return
+        if wandb.run.offline:
+            logging.info(
+                "wandb is offline, so disk metrics are not re-logged: the "
+                "previous job's offline wandb files hold them"
+            )
+            return
+        first_step = wandb.run.step
         logging.info(
             f"Checking disk metrics for steps wandb lacks: wandb resumed at "
-            f"step {wandb.run.step}, checkpoint step {max_step}"
+            f"step {first_step}, checkpoint step {resume_step}"
         )
-        metrics_by_step = read_metrics_by_step(
-            self._disk_logger.directory, wandb.run.step, max_step
-        )
+        if step_continues and first_step > resume_step:
+            logging.warning(
+                f"wandb already received step {resume_step}, so it will reject "
+                "the metrics this job logs at that step"
+            )
+        metrics_by_step = read_metrics_by_step(self._disk_logger.directory, first_step)
         for step, data in metrics_by_step.items():
-            wandb.log(data, step=step, commit=True)
+            commit = not (step_continues and step == resume_step)
+            wandb.log(data, step=step, commit=commit)
         if metrics_by_step:
             steps = list(metrics_by_step)
             epochs = [
@@ -223,13 +283,6 @@ class WandB:
                 f"Recovered wandb logs for {len(steps)} steps from disk "
                 f"(steps {steps[0]} to {steps[-1]}, epochs {epochs})"
             )
-
-    def archive_disk_metrics(self):
-        """Move aside disk metrics a previous run left behind, for a run that
-        starts fresh rather than resuming.
-        """
-        if self._disk_logger is not None:
-            self._disk_logger.archive()
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
