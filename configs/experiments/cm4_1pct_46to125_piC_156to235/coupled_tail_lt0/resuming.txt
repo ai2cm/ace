@@ -1,0 +1,25 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|extra_env
+
+# --- lt0lt: extend the finished 8-epoch run to 16 epochs ---
+#
+# 01M339VK884YE3B2M5YM1RQ966 finished 8 epochs exit 0 (final job
+# 01M3DN0NHH11E3QPR04DQ8RCYW). The goal of the extension is the Nino 3.4
+# spectral shape on the five-block grid; the mean state is already good
+# (inference_1pct ocean RMSE 0.0474, still falling at epoch 8).
+#
+# max_epochs=16 is the only config change: the resume reads
+# /existing-results/config.yaml, whose max_epochs is 8. The LR schedule is a
+# 1-epoch LinearLR warmup then constant, so epochs 9-16 run at the same LR as
+# 2-8; nothing else in the config is keyed to the epoch.
+#
+# results_dataset is the final job's (01M3DN0NDP94TNHZ4M3VWVSAM4); verified to
+# hold training_checkpoints/ckpt.tar (7.032 GiB, written after epoch 8's
+# inference) and wandb_run_id. Launched from this branch, whose fme/ is
+# identical to 7cec76ce1 (the run's SHA; it already carries the epoch-boundary
+# resume fix 0766ab4f6). resume_wandb=true keeps run bi0pnggk; the job name
+# resume.sh builds equals the run's wandb name, so WANDB_NAME does not rename
+# it. retries 0 and MALLOC_ARENA_MAX=4 as for owclt/owc8lt: a resume carries
+# the unfixed ~260 GB host-RAM cost, so an auto-retry can still be
+# OOM-killed. The ocean/atmos datasets are the arm's original inits
+# (jshu3e8a, j0ng1tw3); inert on resume but build_trainer needs the mounts.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto|o0a0rs0|ace-samudra-coupled-cm4|bi0pnggk|train|high|jupiter|8||0|ai2/ace|resume_results.resume_wandb=true max_epochs=16|01M3DN0NDP94TNHZ4M3VWVSAM4|01M1QR55WXH06JT49NBZGN970D|01M0VTG1SJQK69WWN5A651RXZY|8h|MALLOC_ARENA_MAX=4
