@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import os
+import time
 from typing import Any
 
 METRICS_FILENAME = "metrics.jsonl"
@@ -79,6 +80,22 @@ class DiskMetricLogger:
         assert self._file is not None
         self._file.write(json.dumps(record) + "\n")
         self._file.flush()
+
+    def archive(self) -> None:
+        """Move aside metrics a previous run left in this directory, so a
+        fresh run neither skips its own logs nor later replays another run's.
+        """
+        if self._high_water_mark is None:
+            return
+        self.close()
+        archived_path = f"{self._path}.{time.strftime('%Y%m%dT%H%M%S')}"
+        os.rename(self._path, archived_path)
+        logging.warning(
+            f"Moved metrics from a previous run in this directory to {archived_path}"
+        )
+        self._high_water_mark = None
+        self._warned_skip = False
+        self._file = open(self._path, "a")
 
     def close(self):
         if self._file is not None:

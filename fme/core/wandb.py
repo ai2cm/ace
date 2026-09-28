@@ -118,6 +118,9 @@ class WandB:
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
+        if self._disk_logger is not None:
+            self._disk_logger.close()
+            self._disk_logger = None
         if metrics_log_dir is not None and dist.is_root():
             self._disk_logger = DiskMetricLogger(metrics_log_dir)
 
@@ -202,6 +205,10 @@ class WandB:
         """
         if not self._enabled or self._disk_logger is None or wandb.run is None:
             return
+        logging.info(
+            f"Checking disk metrics for steps wandb lacks: wandb resumed at "
+            f"step {wandb.run.step}, checkpoint step {max_step}"
+        )
         metrics_by_step = read_metrics_by_step(
             self._disk_logger.directory, wandb.run.step, max_step
         )
@@ -216,6 +223,13 @@ class WandB:
                 f"Recovered wandb logs for {len(steps)} steps from disk "
                 f"(steps {steps[0]} to {steps[-1]}, epochs {epochs})"
             )
+
+    def archive_disk_metrics(self):
+        """Move aside disk metrics a previous run left behind, for a run that
+        starts fresh rather than resuming.
+        """
+        if self._disk_logger is not None:
+            self._disk_logger.archive()
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):

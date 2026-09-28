@@ -95,5 +95,5 @@ def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch, c
     assert logged == [({"batch_loss": 0.4, "val_loss": 0.3, "epoch": 2}, 20, True)]
     assert (
         "Recovered wandb logs for 1 steps from disk (steps 20 to 20, epochs [2])"
-        in (caplog.messages)
+        in caplog.messages
     )

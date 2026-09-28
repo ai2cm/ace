@@ -100,6 +100,23 @@ def test_skipped_steps_warn_once(log_dir, caplog):
     assert "high-water mark 5" in caplog.records[0].getMessage()
 
 
+def test_archive_moves_previous_run_aside(log_dir):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"a": 1}, step=5)
+    logger.close()
+
+    logger = DiskMetricLogger(log_dir)
+    logger.archive()
+    logger.log({"a": 2}, step=0)
+    logger.close()
+
+    assert read_metrics(log_dir) == [{"step": 0, "a": 2}]
+    archived = [name for name in os.listdir(log_dir) if name != METRICS_FILENAME]
+    assert len(archived) == 1
+    with open(os.path.join(log_dir, archived[0])) as f:
+        assert [json.loads(line) for line in f] == [{"step": 5, "a": 1}]
+
+
 def test_non_scalar_values_are_skipped(log_dir):
     logger = DiskMetricLogger(log_dir)
 

@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
+from fme.core.disk_metric_logger import DiskMetricLogger
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -636,15 +637,19 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert len(stepper.loaded_state) == 2
 
 
+def _configure_resumable_wandb(experiment_dir: str):
+    LoggingConfig(log_to_wandb=True)._configure_wandb(
+        experiment_dir=experiment_dir, config={}, resumable=True
+    )
+
+
 def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str):
     max_epochs = 2
     n_train_batches = 5
     last_epoch_step = max_epochs * n_train_batches
 
     def resume_training():
-        LoggingConfig(log_to_wandb=True)._configure_wandb(
-            experiment_dir=tmp_path, config={}, resumable=True
-        )
+        _configure_resumable_wandb(tmp_path)
         _, trainer = get_trainer(
             tmp_path, max_epochs=max_epochs, n_train_batches=n_train_batches
         )
@@ -665,13 +670,8 @@ def test_resume_does_not_recover_epoch_logs_that_training_redoes(tmp_path: str):
     n_train_batches = 5
     last_epoch_step = max_epochs * n_train_batches
 
-    def configure_wandb():
-        LoggingConfig(log_to_wandb=True)._configure_wandb(
-            experiment_dir=tmp_path, config={}, resumable=True
-        )
-
     with mock_wandb() as wandb:
-        configure_wandb()
+        _configure_resumable_wandb(tmp_path)
         _, trainer = get_trainer(
             tmp_path, max_epochs=max_epochs, n_train_batches=n_train_batches
         )
@@ -680,7 +680,7 @@ def test_resume_does_not_recover_epoch_logs_that_training_redoes(tmp_path: str):
         with fail_after_calls_patch(trainer, "save_all_checkpoints", max_epochs):
             trainer.train()
         wandb.drop_logs_after(last_epoch_step - 1)
-        configure_wandb()
+        _configure_resumable_wandb(tmp_path)
         _, trainer = get_trainer(
             tmp_path, max_epochs=max_epochs, n_train_batches=n_train_batches
         )
@@ -692,6 +692,32 @@ def test_resume_does_not_recover_epoch_logs_that_training_redoes(tmp_path: str):
             trainer.train()
         validation_callback.assert_called_once()
         assert wandb.get_logs()[last_epoch_step]["epoch"] == max_epochs
+
+
+def test_resume_does_not_recover_disk_logs_from_previous_run(tmp_path: str):
+    max_epochs = 2
+    n_train_batches = 5
+    last_epoch_step = max_epochs * n_train_batches
+    # a previous run in this directory left metrics on disk but no checkpoint
+    previous_run = DiskMetricLogger(os.path.join(tmp_path, "metrics"))
+    for step in range(last_epoch_step + 1):
+        previous_run.log({"previous_run_loss": 1.0}, step=step)
+    previous_run.close()
+
+    def resume_training():
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=max_epochs, n_train_batches=n_train_batches
+        )
+        trainer.train()
+
+    with mock_wandb() as wandb:
+        resume_training()
+        last_epoch_logs = wandb.get_logs()[last_epoch_step]
+        # the job is killed after its last log, before wandb uploads it
+        wandb.drop_logs_after(last_epoch_step - 1)
+        resume_training()
+        assert wandb.get_logs()[last_epoch_step] == last_epoch_logs
 
 
 def get_batch_indices(batches) -> list[int]:

@@ -315,6 +315,8 @@ class Trainer:
             wandb.log_unsynced_from_disk(
                 max_step=self.num_batches_seen - int(epoch_logs_pending)
             )
+        else:
+            wandb.archive_disk_metrics()
 
         wandb.watch(self.stepper.modules)
 

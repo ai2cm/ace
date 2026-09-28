@@ -30,6 +30,9 @@ class MockWandB:
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
+        if self._disk_logger is not None:
+            self._disk_logger.close()
+            self._disk_logger = None
         if metrics_log_dir is not None and dist.is_root():
             self._disk_logger = DiskMetricLogger(metrics_log_dir)
 
@@ -151,6 +154,10 @@ class MockWandB:
             # like wandb, a committed log rejects later logs at the same step
             self._last_step = step + 1
             self._logs[step].update(data)
+
+    def archive_disk_metrics(self):
+        if self._disk_logger is not None:
+            self._disk_logger.archive()
 
     def drop_logs_after(self, step: int):
         """Simulate wandb never receiving logs after ``step``, e.g. because
