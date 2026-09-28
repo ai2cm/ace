@@ -29,6 +29,7 @@ every 10 epochs (`ema_checkpoint_save_epochs`).
 | `ace2s-finetune-rs{1,2,3}.yaml` | the 1-degree seed replicates' 10-epoch 3-step detached fine-tunes (paper fine-tune recipe, seed N pretrain at `/weights`, `seed: N`) |
 | `ace2s-finetune-crps-only.yaml` | the CRPS-only arm's fine-tune: paper detached recipe with the arm's 1.0 / 0.0 loss split |
 | `ace2s-finetune-no-bottleneck.yaml` | the no-bottleneck arm's fine-tune: paper detached recipe on the unbottlenecked checkpoint (config otherwise identical to the seed-0 recipe) |
+| `ace2s-finetune-6hourly.yaml` | the 6-hourly arm's fine-tune: paper detached recipe at 3 steps (18 h, not 3 days) on the 6-hourly store and stats, 81-year rollout without zonal-mean images (as the pretrain's resume) |
 | `ace2s-finetune-deterministic.yaml` | the deterministic arm's fine-tune: paper detached recipe with the arm's MSE loss (ACE2 weight table, single member) and 1-member inline inference |
 
 Launch with `./run-train.sh [<filter> ...]` from this directory: workspace

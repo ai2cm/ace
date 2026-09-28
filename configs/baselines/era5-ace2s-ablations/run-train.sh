@@ -172,3 +172,6 @@ run_training "ace2s-finetune-rs2.yaml" "1deg-daily-ace2s-ft3-detached-rs2" 8
 run_training "ace2s-finetune-rs3.yaml" "1deg-daily-ace2s-ft3-detached-rs3" 8
 run_training "ace2s-finetune-crps-only.yaml" "1deg-daily-ace2s-crps-only-ft3-detached-rs0" 8
 run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck-ft3-detached-rs0" 8
+
+# 6-hourly arm, stage 2: 3-step (18 h) detached fine-tune, horizon decided 2026-09-28
+run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
