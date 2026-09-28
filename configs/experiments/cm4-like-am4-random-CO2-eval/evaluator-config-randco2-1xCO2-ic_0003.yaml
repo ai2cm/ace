@@ -1,7 +1,7 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
 #   --config-dir configs/experiments/cm4-like-am4-random-CO2-eval
 experiment_dir: /results
-n_forward_steps: 7668
+n_forward_steps: 7667
 forward_steps_in_memory: 50
 checkpoint_path: /ckpt.tar
 logging:
