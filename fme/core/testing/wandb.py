@@ -148,7 +148,8 @@ class MockWandB:
         for step, data in read_metrics_by_step(
             self._disk_logger.directory, next_step, max_step
         ).items():
-            self._last_step = step
+            # like wandb, a committed log rejects later logs at the same step
+            self._last_step = step + 1
             self._logs[step].update(data)
 
     def drop_logs_after(self, step: int):

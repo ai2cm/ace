@@ -306,7 +306,15 @@ class Trainer:
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
-            wandb.log_unsynced_from_disk(max_step=self.num_batches_seen)
+            # a checkpoint saved after an epoch's training batches but before
+            # its end-of-epoch logs means training logs that epoch again at
+            # num_batches_seen, so those logs are not recovered from disk
+            epoch_logs_pending = (
+                self._current_epoch_num_batches_seen >= self.train_data.n_batches
+            )
+            wandb.log_unsynced_from_disk(
+                max_step=self.num_batches_seen - int(epoch_logs_pending)
+            )
 
         wandb.watch(self.stepper.modules)
 

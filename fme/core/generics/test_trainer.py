@@ -660,6 +660,40 @@ def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str):
         assert wandb.get_logs()[last_epoch_step] == last_epoch_logs
 
 
+def test_resume_does_not_recover_epoch_logs_that_training_redoes(tmp_path: str):
+    max_epochs = 2
+    n_train_batches = 5
+    last_epoch_step = max_epochs * n_train_batches
+
+    def configure_wandb():
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+
+    with mock_wandb() as wandb:
+        configure_wandb()
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=max_epochs, n_train_batches=n_train_batches
+        )
+        # the job is killed after the last epoch's logs, before its checkpoints
+        # are saved and before wandb uploads the logs
+        with fail_after_calls_patch(trainer, "save_all_checkpoints", max_epochs):
+            trainer.train()
+        wandb.drop_logs_after(last_epoch_step - 1)
+        configure_wandb()
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=max_epochs, n_train_batches=n_train_batches
+        )
+        # resuming redoes the last epoch's validation and logs it, rather than
+        # recovering those logs from disk
+        with unittest.mock.patch.object(
+            trainer, "_validation_callback", wraps=trainer._validation_callback
+        ) as validation_callback:
+            trainer.train()
+        validation_callback.assert_called_once()
+        assert wandb.get_logs()[last_epoch_step]["epoch"] == max_epochs
+
+
 def get_batch_indices(batches) -> list[int]:
     return [batch.i for batch in batches]
 
