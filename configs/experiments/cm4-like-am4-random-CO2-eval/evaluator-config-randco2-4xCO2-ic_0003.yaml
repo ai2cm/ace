@@ -19,10 +19,10 @@ loader:
   dataset:
     merge:
       - data_path: /climate-default/2026-08-18-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-2xCO2-ic_0003-sea_ice.zarr
+        file_pattern: random-CO2-4xCO2-ic_0003-sea_ice.zarr
         engine: zarr
       - data_path: /climate-default/2026-06-19-CM4-like-AM4-random-CO2
-        file_pattern: random-CO2-2xCO2-ic_0003.zarr
+        file_pattern: random-CO2-4xCO2-ic_0003.zarr
         engine: zarr
   num_data_workers: 4
 data_writer:
