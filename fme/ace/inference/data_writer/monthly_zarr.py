@@ -29,6 +29,7 @@ from fme.ace.inference.data_writer.utils import (
     get_all_names,
 )
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.timing import GlobalTimer
 from fme.core.writer import DATETIME_ENCODING_UNITS, ZarrWriter
 
 FLOAT_DTYPE = "f4"
@@ -187,7 +188,9 @@ class MonthlyZarrWriter:
 
         # counts is stored as a non-dimension coordinate, so that readers attach
         # it to the data, but it is read back and updated like the data itself.
-        stored = self._writer.read_batch([*names, COUNTS], position_slices)
+        timer = GlobalTimer.get_instance()
+        with timer.context("data_writer_io"):
+            stored = self._writer.read_batch([*names, COUNTS], position_slices)
         start_counts = stored[COUNTS]
         for name in names:
             add_data(
@@ -206,7 +209,8 @@ class MonthlyZarrWriter:
                 for i_sample in range(n_samples_data)
             ]
         )
-        self._writer.record_batch(data=stored, position_slices=position_slices)
+        with timer.context("data_writer_io"):
+            self._writer.record_batch(data=stored, position_slices=position_slices)
 
     def flush(self):
         """No-op: each append_batch writes through to the store."""

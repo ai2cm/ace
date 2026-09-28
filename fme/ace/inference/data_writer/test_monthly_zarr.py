@@ -10,6 +10,7 @@ from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import MonthlyDataWriter
 from fme.ace.inference.data_writer.monthly_zarr import MonthlyZarrWriter
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.timing import GlobalTimer
 
 TIMESTEP = datetime.timedelta(days=5)
 COORDS = {"lat": np.array([0.0, 1.0]), "lon": np.array([0.0, 1.0, 2.0])}
@@ -94,6 +95,25 @@ def test_monthly_zarr_writer_accumulates_across_batches(tmp_path):
     assert ds["init_time"].isel(sample=0).values == np.datetime64("2020-01-17")
     assert ds.attrs["title"] == "ACE monthly data file"
     assert ds.attrs["source.inference_version"] == "1.0"
+
+
+def test_monthly_zarr_writer_records_data_writer_io(tmp_path):
+    initial_condition_times = np.array([cftime.DatetimeProlepticGregorian(2020, 1, 17)])
+    writer = _writer(tmp_path / "monthly.zarr", initial_condition_times, n_timesteps=2)
+    data, times = _batch(
+        [[1.0, 2.0]],
+        [
+            [
+                cftime.DatetimeProlepticGregorian(2020, 1, 22),
+                cftime.DatetimeProlepticGregorian(2020, 1, 27),
+            ]
+        ],
+    )
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        writer.append_batch(data, times)
+        durations = timer.get_durations()
+    assert durations["data_writer_io"] > 0.0
 
 
 def test_monthly_zarr_writer_matches_netcdf_writer(tmp_path):
