@@ -18,6 +18,15 @@ the F90 grid), window-averaged over the 5-day interval that ENDS at each
 output time (the same end-of-window labelling ``scripts/ufs-replay`` and
 the SHiELD-family ``time_coarsen`` configs use).
 
+``--product glo12`` swaps the time-varying fields for the operational
+analysis ``GLOBAL_ANALYSISFORECAST_PHY_001_024`` (2022-06-01 onward; NEMO 3.6,
+LIM3, IFS HRES forcing), served per variable across four stores on the same
+ORCA12 grid and 50 levels. Static geometry stays GLORYS12's -- the 1-D ``e3t``
+behind the vertical remap, ``deptho``, ``hfgeou`` -- so a model sees the same
+static inputs from either product; the mask is additionally intersected with
+GLO12's. GLO12's ``e3t`` is 3-D only because it carries partial bottom cells:
+its nominal profile is GLORYS12's.
+
 Cadence
 -------
 GLORYS publishes daily MEANS, not snapshots. The pipeline reads every
@@ -96,6 +105,31 @@ URL_COORDS = (
 )
 URL_BATHY = f"{_S3}/mdl-arco-time-026/arco/{_PRODUCT}/{_STATIC}--ext--bathy/static.zarr"
 URL_FORCING = "gs://vcm-ml-intermediate/2026-08-13-era5-1deg-8layer-1940-2025.zarr"
+# GLO12, the operational analysis (GLOBAL_ANALYSISFORECAST_PHY_001_024): the
+# same ORCA12 grid and 50 levels as GLORYS12, but each 3-D field in its own
+# store and the 2-D fields in a fourth, where GLORYS12 serves all of them from
+# URL_OCEAN. Only its time-varying fields are used; every static field comes
+# from GLORYS12 (see build_invariants) so the two datasets share geometry.
+_AF = "GLOBAL_ANALYSISFORECAST_PHY_001_024"
+URLS_GLO12 = {
+    "thetao": f"{_S3}/mdl-arco-time-012/arco/{_AF}/"
+    "cmems_mod_glo_phy-thetao_anfc_0.083deg_P1D-m_202406/timeChunked.zarr",
+    "so": f"{_S3}/mdl-arco-time-010/arco/{_AF}/"
+    "cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m_202406/timeChunked.zarr",
+    "cur": f"{_S3}/mdl-arco-time-007/arco/{_AF}/"
+    "cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m_202406/timeChunked.zarr",
+    "2d": f"{_S3}/mdl-arco-time-013/arco/{_AF}/"
+    "cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406/timeChunked.zarr",
+}
+GLO12_STORE_OF = {"thetao": "thetao", "so": "so", "uo": "cur", "vo": "cur"}
+URL_BATHY_GLO12 = (
+    f"{_S3}/mdl-arco-time-014/arco/{_AF}/"
+    "cmems_mod_glo_phy_anfc_0.083deg_static_202211--ext--bathy/static.zarr"
+)
+PRODUCTS = ("glorys12", "glo12")
+# Every product's output states fall on this 5-day grid, so GLORYS12 and GLO12
+# states coincide wherever the records overlap.
+TIME_ORIGIN = "1993-01-01"
 # GLORYS publishes no geothermal heat flux, but the ocean corrector's
 # scaled_temperature heat-content correction requires it in every one of its
 # three flux branches. Take the static CM4 field, which is already on the
@@ -203,10 +237,43 @@ def _make_zarr_store(url: str, read_only: bool = True):
     return url
 
 
-def open_ocean(variables: Sequence[str], times: pd.DatetimeIndex) -> xr.Dataset:
-    ds = open_cmems(URL_OCEAN)[list(variables)]
+def open_ocean(
+    variables: Sequence[str], times: pd.DatetimeIndex, product: str = "glorys12"
+) -> xr.Dataset:
+    if product == "glorys12":
+        ds = open_cmems(URL_OCEAN)[list(variables)]
+    elif product == "glo12":
+        ds = _open_glo12(variables)
+    else:
+        raise ValueError(f"unknown product {product!r}; expected one of {PRODUCTS}")
     ds = ds.sel(time=times)
     return ds.rename({"latitude": "lat", "longitude": "lon"})
+
+
+def _open_glo12(variables: Sequence[str]) -> xr.Dataset:
+    """GLO12 fields gathered from their per-variable stores, on GLORYS12's
+    lat/lon.
+
+    The native coordinates agree with GLORYS12's to float32 noise (~2e-5 deg),
+    which an xarray join on coordinate values would treat as different points,
+    so they are replaced by GLORYS12's by index.
+    """
+    by_store: dict[str, list[str]] = {}
+    for v in variables:
+        by_store.setdefault(GLO12_STORE_OF.get(v, "2d"), []).append(v)
+    parts = []
+    for key, names in by_store.items():
+        part = open_cmems(URLS_GLO12[key])[names]
+        # the 2-D store carries a length-1 elevation dimension no field uses
+        if key == "2d":
+            part = part.drop_dims("elevation", errors="ignore")
+        parts.append(part)
+    ds = xr.merge(parts, join="exact", compat="override")
+    ref = open_cmems(URL_OCEAN)
+    for c in ("latitude", "longitude"):
+        if not np.allclose(ds[c].values, ref[c].values, atol=1e-4):
+            raise ValueError(f"GLO12 {c} does not match GLORYS12's by index")
+    return ds.assign_coords(latitude=ref["latitude"], longitude=ref["longitude"])
 
 
 def open_forcing(times: pd.DatetimeIndex) -> xr.Dataset:
@@ -224,9 +291,23 @@ def open_forcing(times: pd.DatetimeIndex) -> xr.Dataset:
 # ---------------------------------------------------------------------------
 
 
-def output_times(start: datetime.datetime, end: datetime.datetime, stride: int):
-    """Output state times: every ``stride``-th GLORYS day in [start, end]."""
-    return pd.date_range(start, end, freq=f"{stride}D")
+def output_times(
+    start: datetime.datetime,
+    end: datetime.datetime,
+    stride: int,
+    origin: str = TIME_ORIGIN,
+):
+    """Output state times: the days of the ``origin`` + ``stride``-day grid
+    that fall in [start, end].
+
+    Anchoring every run to one origin means a later window, or another product,
+    lands on the same timestamps instead of wherever its start date happens to
+    fall.
+    """
+    t0 = pd.Timestamp(origin)
+    lag = (pd.Timestamp(start) - t0).days
+    first = t0 + pd.Timedelta(days=-(-lag // stride) * stride)
+    return pd.date_range(first, end, freq=f"{stride}D")
 
 
 def forcing_window_times(out_times: pd.DatetimeIndex, stride: int) -> pd.DatetimeIndex:
@@ -524,12 +605,45 @@ def _plume_mask(url: str, reference: xr.DataArray) -> xr.DataArray:
     return mask.assign_coords(lat=reference["lat"], lon=reference["lon"])
 
 
+def _native_masks(mask3: xr.DataArray, weights: np.ndarray) -> xr.Dataset:
+    """Per-level and surface masks on the native grid: a target layer is ocean
+    wherever any native level contributing to it is (max over levels)."""
+    contributes = (weights > 0).astype(np.float32)  # (19, 50)
+    native = xr.Dataset(
+        {
+            f"mask_{k}": (mask3 * contributes[k][:, None, None]).max(VDIM)
+            for k in range(N_LEVELS)
+        }
+    )
+    native["mask_2d"] = mask3.isel({VDIM: int(np.argmax(mask3[VDIM].values))})
+    return native
+
+
+def _product_mask(url: str, reference: xr.DataArray) -> xr.DataArray:
+    """Another product's native 3-D ocean mask, on GLORYS12's coordinates.
+
+    Static fields always come from GLORYS12 -- ``deptho`` is a model input, and
+    GLO12 defines it ~150 m deeper at the same last wet level, which would shift
+    that input with no change in the sea floor. Only the mask is taken from the
+    product, and only to intersect: a cell that is ocean in GLORYS12 but land in
+    the product has no data there, and must not be labelled ocean.
+    """
+    other = open_cmems(url).rename({"latitude": "lat", "longitude": "lon"})["mask"]
+    if other.shape != reference.shape or not np.array_equal(
+        other[VDIM].values, reference[VDIM].values
+    ):
+        raise ValueError(f"the mask at {url} is not on GLORYS12's native grid")
+    m = other.load().astype(np.float32)
+    return m.assign_coords(lat=reference["lat"], lon=reference["lon"])
+
+
 def build_invariants(
     output_grid: str,
     weights: np.ndarray,
     weights_path: str | None,
     intersect_ufs_mask: bool = True,
     plume_mask_url: str | None = None,
+    product_mask_url: str | None = None,
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """Build the time-invariant output fields from the static datasets.
 
@@ -545,13 +659,7 @@ def build_invariants(
     deptho = bathy["deptho"].load().astype(np.float32)
     src = _make_source_grid(mask3["lat"].values, mask3["lon"].values)
 
-    contributes = (weights > 0).astype(np.float32)  # (19, 50)
-    level_masks = {}
-    for k in range(N_LEVELS):
-        lm = (mask3 * contributes[k][:, None, None]).max(VDIM)
-        level_masks[f"mask_{k}"] = lm
-    native = xr.Dataset(level_masks)
-    native["mask_2d"] = mask3.isel({VDIM: int(np.argmax(mask3[VDIM].values))})
+    native = _native_masks(mask3, weights)
     native["deptho"] = deptho.where(native["mask_2d"] > 0)
 
     frac = _regrid_dataset(
@@ -559,18 +667,39 @@ def build_invariants(
     )
     ufs = _ufs_masks(frac["mask_2d"]) if intersect_ufs_mask else None
     plume = _plume_mask(plume_mask_url, frac["mask_2d"]) if plume_mask_url else None
+    # A product's mask acts on the output grid, not the native one: intersected
+    # at 1/12 degree it would change the conservative average of every coastal
+    # cell that loses a sub-cell, shifting deptho and sea_surface_fraction in ~5%
+    # of cells that still have data. On the output grid it removes only the
+    # cells with no product data at all.
+    prod = None
+    if product_mask_url:
+        prod = _regrid_dataset(
+            _native_masks(_product_mask(product_mask_url, mask3), weights),
+            output_grid,
+            src,
+            weights_path,
+            skipna=True,
+            na_thres=1.0,
+        )
     inv = {}
     sea_fraction = frac["mask_2d"].fillna(0.0).clip(0, 1).astype(np.float32)
     if ufs is not None:
         sea_fraction = sea_fraction.where(ufs["mask_2d"] > 0, 0.0).astype(np.float32)
     if plume is not None:
         sea_fraction = sea_fraction.where(plume > 0, 0.0).astype(np.float32)
+    if prod is not None:
+        keep = prod["mask_2d"].fillna(0.0) > 0
+        sea_fraction = sea_fraction.where(keep, 0.0).astype(np.float32)
     for k in range(N_LEVELS):
         m = (frac[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
         if ufs is not None:
             m = (m * (ufs[f"mask_{k}"] > 0).astype(np.float32)).astype(np.float32)
         if plume is not None:
             m = (m * (plume > 0).astype(np.float32)).astype(np.float32)
+        if prod is not None:
+            keep = (prod[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
+            m = (m * keep).astype(np.float32)
         m.attrs = {
             "long_name": f"ocean mask level-{k}",
             "units": "0 if land, 1 if ocean",
@@ -859,6 +988,14 @@ def _get_parser():
         "minutes and several GB",
     )
     p.add_argument(
+        "--product",
+        default="glorys12",
+        choices=PRODUCTS,
+        help="ocean source for the time-varying fields: the GLORYS12 reanalysis, "
+        "or the GLO12 operational analysis. Static geometry is GLORYS12's "
+        "either way, intersected with GLO12's mask for glo12",
+    )
+    p.add_argument(
         "--no_ufs_mask_intersection",
         action="store_true",
         help="keep GLORYS's own land-sea mask instead of intersecting it with "
@@ -904,11 +1041,12 @@ def main():
         weights,
         args.regrid_weights,
         intersect_ufs_mask=not args.no_ufs_mask_intersection,
+        product_mask_url=URL_BATHY_GLO12 if args.product == "glo12" else None,
         plume_mask_url=args.plume_mask or None,
     )
 
-    ds_3d = open_ocean(VARS_3D, out_times)
-    ds_2d = open_ocean(VARS_2D, out_times)
+    ds_3d = open_ocean(VARS_3D, out_times, args.product)
+    ds_2d = open_ocean(VARS_2D, out_times, args.product)
     ds_forcing = open_forcing(forcing_times)
     n_missing = len(forcing_times) - ds_forcing.sizes["time"]
     assert (

@@ -20,9 +20,10 @@ END_DATE_TEST_RUN ?= 2015-12-31
 OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/$(DATE)-glorys-test/ocean-1deg.zarr
 OUTPUT_GRID_TEST_RUN ?= F90
 
-# Local debug parameters (2 states)
+# Local debug parameters (2 states). Output times are anchored to the
+# 1993-01-01 + 5-day grid, so the window must span two grid days.
 START_DATE_LOCAL ?= 2015-11-01
-END_DATE_LOCAL ?= 2015-11-06
+END_DATE_LOCAL ?= 2015-11-07
 OUTPUT_PATH_LOCAL ?= /tmp/glorys-local-test.zarr
 
 create_environment:
@@ -50,6 +51,37 @@ glorys_dataflow:
 		./run-dataflow.sh DataflowRunner \
 		$(OUTPUT_PATH_ONE_DEGREE) $(OUTPUT_GRID_ONE_DEGREE) $(START_DATE) $(END_DATE) \
 		$(DATAFLOW_EXTRA_FLAGS)
+
+# GLO12 operational analysis (--product glo12): time-varying fields from GLO12,
+# static geometry from GLORYS12, on the same 1993-01-01 + 5-day grid, so its
+# states coincide with the GLORYS12 set's. GLO12 starts 2022-06-01; the end is
+# bounded by the ERA5 forcing store, as for GLORYS12 (first state 2022-06-03,
+# last 2025-12-24, 261 states).
+GLO12_DATASET_NAME ?= glo12-ocean-1deg-19level-5day-2022-2025
+GLO12_START_DATE = 2022-06-01
+GLO12_END_DATE = 2025-12-27
+GLO12_OUTPUT_PATH = gs://vcm-ml-intermediate/$(DATE)-$(GLO12_DATASET_NAME).zarr
+GLO12_START_DATE_LOCAL ?= 2023-01-01
+GLO12_END_DATE_LOCAL ?= 2023-01-12
+GLO12_OUTPUT_PATH_LOCAL ?= /tmp/glo12-local-test.zarr
+
+.PHONY: glo12_dataflow
+glo12_dataflow:
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-dataflow.sh DataflowRunner \
+		$(GLO12_OUTPUT_PATH) $(OUTPUT_GRID_ONE_DEGREE) $(GLO12_START_DATE) $(GLO12_END_DATE) \
+		--product glo12 $(DATAFLOW_EXTRA_FLAGS)
+
+.PHONY: glo12_local_debug
+glo12_local_debug:
+	rm -rf $(GLO12_OUTPUT_PATH_LOCAL)
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		python glorys-pipeline.py $(GLO12_OUTPUT_PATH_LOCAL) $(GLO12_START_DATE_LOCAL) \
+		$(GLO12_END_DATE_LOCAL) --product glo12 \
+		--output_grid F90 --runner DirectRunner --save_main_session \
+		--job_server_timeout=3600 $(LOCAL_EXTRA_FLAGS)
 
 .PHONY: glorys_dataflow_test_run
 glorys_dataflow_test_run:
