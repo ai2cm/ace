@@ -180,6 +180,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def replace_compile(self, compile: bool) -> None:
+        self.compile = compile
+
     @property
     def allow_missing_variables(self) -> bool:
         return False

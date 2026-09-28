@@ -85,6 +85,7 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    compile: bool = False,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -129,6 +130,7 @@ def save_plus_one_stepper(
                                         ),
                                     ),
                                     ocean=ocean,
+                                    compile=compile,
                                 ),
                             ),
                         ),
