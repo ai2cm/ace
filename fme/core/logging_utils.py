@@ -42,9 +42,9 @@ class LoggingConfig:
         log_to_wandb: Whether to log to Weights & Biases.
         metrics_log_dir: Directory to write scalar metrics to disk as JSONL,
             so they survive the job being killed before wandb uploads them.
-            Relative paths are resolved against the experiment directory. If
-            None, or if the experiment directory is not local, disk metric
-            logging is disabled.
+            Relative paths are resolved against the experiment directory. Must
+            be on a local file system. If None, or if the experiment directory
+            is not local, disk metric logging is disabled.
         log_format: Format of the log messages.
         level: Sets the logging level.
         wandb_dir_in_experiment_dir: Whether to create the wandb_dir in the
@@ -63,6 +63,11 @@ class LoggingConfig:
     wandb_dir_in_experiment_dir: bool = False
 
     def __post_init__(self):
+        if self.metrics_log_dir is not None and not is_local(self.metrics_log_dir):
+            raise ValueError(
+                "Disk metric logging is only supported on a local file system, "
+                f"got metrics_log_dir={self.metrics_log_dir!r}"
+            )
         self._dist = Distributed.get_instance()
 
     def configure_logging(

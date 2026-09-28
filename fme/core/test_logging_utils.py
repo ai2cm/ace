@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from fme.core.disk_metric_logger import read_metrics
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing.wandb import mock_wandb
@@ -44,3 +46,8 @@ def test_no_metrics_written_for_non_local_experiment_dir():
             metrics_log_dir=LoggingConfig()._get_metrics_log_dir("gs://bucket/exp"),
         )
         assert wandb._disk_logger is None
+
+
+def test_non_local_metrics_log_dir_raises():
+    with pytest.raises(ValueError, match="local file system"):
+        LoggingConfig(metrics_log_dir="gs://bucket/metrics")
