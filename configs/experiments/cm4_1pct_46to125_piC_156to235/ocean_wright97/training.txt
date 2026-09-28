@@ -11,3 +11,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wright97w1|rs0|trained|high|jupiter|4|500GiB
 # ocean_wright97pbo
 
 cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w0p1|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 0.1}, {name: pbo_wright97, weight: 0.1}]'|30m
+
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 1.0}, {name: pbo_wright97, weight: 1.0}]'|30m
