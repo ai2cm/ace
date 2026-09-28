@@ -12,3 +12,18 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_so_cde1|rs2|01M0GA6N3S73718Z2ZAXYWN5
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs0|01M357H6ND4YJ3DEMN155STSZA|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|01M3K15K8K4WQG3RSSMB666K1X|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Centennial rollouts off the 8-step finetune's best_inference_ckpt (epoch
+# 10; best_inference_error fell monotonically to the last epoch). The same
+# two shared protocols the level-resolved heat partition report measured,
+# so these are comparable to the ocean_wide_*-ft rollouts.
+#
+# results_dataset is pinned to the SECOND of the finetune's two result
+# datasets: its first job was killed at 8 h by a cordoned node (Xid 31) and
+# auto-resumed, so the experiment carries two. jobs[-1] is the right one
+# here, but naming it removes the ambiguity.
+#
+# high priority, not the urgent the ocean_precorr_so_cde1 rows above used.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|01M3K15K8K4WQG3RSSMB666K1X|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3M2KBMVM8AH8N5SG6WE0G4J|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|01M3K15K8K4WQG3RSSMB666K1X|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3M2KBMVM8AH8N5SG6WE0G4J|ai2/ace|jupiter|||30GiB
