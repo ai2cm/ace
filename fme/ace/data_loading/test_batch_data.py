@@ -1756,9 +1756,7 @@ class TestGather:
                 np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1)]]),
                 dims=["sample", "time"],
             ),
-            labels=BatchLabels(
-                torch.tensor([[float(rank)]]), names=["label"]
-            ),
+            labels=BatchLabels(torch.tensor([[float(rank)]]), names=["label"]),
         )
         result = local.gather(dist)
         if dist.is_root():
@@ -1787,6 +1785,7 @@ class TestGather:
             assert result.stepper_state is not None
             assert result.stepper_state.corrector_state is not None
             mass = result.stepper_state.corrector_state.global_dry_air_mass
+            assert mass is not None
             assert mass.shape[0] == dist.world_size
 
     def test_none_extras_stay_none(self):
@@ -1804,3 +1803,14 @@ class TestGather:
             assert result.labels is None
             assert result.stepper_state is None
             assert result.data_mask is None
+
+
+def test_gather_covers_all_fields():
+    """Fail if a new field is added to BatchData but not handled by gather."""
+    actual_fields = {f.name for f in dataclasses.fields(BatchData)}
+    covered = _METADATA_FIELDS | _NON_METADATA_FIELDS
+    unknown = actual_fields - covered
+    assert not unknown, (
+        f"BatchData has new fields {unknown} not covered by "
+        f"TestGather. Update gather and add a test for each new field."
+    )

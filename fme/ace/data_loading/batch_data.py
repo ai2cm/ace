@@ -12,13 +12,13 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.ace.requirements import InitialConditionRequirements
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
-from fme.core.corrector.state import CorrectorState
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -900,13 +900,12 @@ class BatchData:
             ),
         )
 
-    def gather(
-        self, dist: Distributed | None = None
-    ) -> "BatchData | None":
+    def gather(self, dist: Distributed | None = None) -> "BatchData | None":
         """Gather per-rank shards to root along the sample dimension.
 
         Returns the full BatchData on root, ``None`` on other ranks.
         """
+        self._raise_if_step_diagnostics("gather")
         if dist is None:
             dist = Distributed.get_instance()
 
@@ -916,9 +915,7 @@ class BatchData:
             rank_tensors = dist.gather(tensor_cpu)
             if dist.is_root():
                 if rank_tensors is None:
-                    raise RuntimeError(
-                        "dist.gather returned None on root"
-                    )
+                    raise RuntimeError("dist.gather returned None on root")
                 gathered_data[name] = torch.cat(rank_tensors, dim=0)
 
         gathered_parts = dist.gather_object(
@@ -935,16 +932,12 @@ class BatchData:
 
         if gathered_parts is None:
             raise RuntimeError("dist.gather_object returned None on root")
-        gathered_time = xr.concat(
-            [p["time"] for p in gathered_parts], dim="sample"
-        )
+        gathered_time = xr.concat([p["time"] for p in gathered_parts], dim="sample")
 
         first_labels = gathered_parts[0]["labels"]
         if first_labels is not None:
             gathered_labels = BatchLabels(
-                tensor=torch.cat(
-                    [p["labels"].tensor for p in gathered_parts], dim=0
-                ),
+                tensor=torch.cat([p["labels"].tensor for p in gathered_parts], dim=0),
                 names=first_labels.names,
             )
         else:
@@ -960,8 +953,7 @@ class BatchData:
                 gathered_corrector = CorrectorState(
                     global_dry_air_mass=torch.cat(
                         [
-                            p["stepper_state"]
-                            .corrector_state.global_dry_air_mass
+                            p["stepper_state"].corrector_state.global_dry_air_mass
                             for p in gathered_parts
                         ],
                         dim=0,
@@ -979,9 +971,7 @@ class BatchData:
         first_mask = gathered_parts[0]["data_mask"]
         if first_mask is not None:
             gathered_mask = {
-                k: torch.cat(
-                    [p["data_mask"][k] for p in gathered_parts], dim=0
-                )
+                k: torch.cat([p["data_mask"][k] for p in gathered_parts], dim=0)
                 for k in first_mask
             }
         else:
@@ -991,7 +981,9 @@ class BatchData:
             data=gathered_data,
             time=gathered_time,
             horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
             labels=gathered_labels,
+            n_ensemble=self.n_ensemble,
             stepper_state=gathered_stepper_state,
             data_mask=gathered_mask,
         )
