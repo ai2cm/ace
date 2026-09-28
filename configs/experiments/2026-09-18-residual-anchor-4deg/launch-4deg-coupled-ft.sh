@@ -6,6 +6,8 @@
 #   ARMS="ff-ohc resid-ohc resid-anomohc" ./launch-4deg-coupled-ft.sh
 set -euo pipefail
 ARMS="${ARMS:-ff-ohc resid-ohc resid-anomohc}"
+VARIANT="${VARIANT:-}"   # e.g. "-ens": use coupled/<arm>-coupled-ft-ens.yaml and name the job ...-coupled-ft-ens
+OCEAN_ARM_SUFFIX="${OCEAN_ARM_SUFFIX:-}"   # e.g. "-stoch": take the ocean checkpoint from samudra-anchor4deg-<arm>-stoch
 COUPLED_STATS="${COUPLED_STATS:-01KY8D816E67NXHP2EB29FHBJM}"   # 4deg cm4 coupled stats: coupled_atmosphere/ + ocean/
 ATMOS_DS="${ATMOS_DS:-01M0YFRM5TKQR6GSNDXKJSBNAS}"           # 4deg atmos_ace2s-ft rs0 results
 ATMOS_CKPT="${ATMOS_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
@@ -20,9 +22,9 @@ cd "$REPO_ROOT"
 ok=0; total=0
 for A in $ARMS; do
   total=$((total+1))
-  OCEAN_DS=$(beaker experiment get "troya/samudra-anchor4deg-${A}" --format json | jq -r '.[0].jobs[-1].result.beaker')
+  OCEAN_DS=$(beaker experiment get "troya/samudra-anchor4deg-${A}${OCEAN_ARM_SUFFIX}" --format json | jq -r '.[0].jobs[-1].result.beaker')
   [ -n "$OCEAN_DS" ] && [ "$OCEAN_DS" != "null" ] || { echo "no results dataset for $A"; continue; }
-  JOB="samudra-anchor4deg-${A}-coupled-ft"
+  JOB="samudra-anchor4deg-${A}${OCEAN_ARM_SUFFIX}-coupled-ft${VARIANT}"
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg anchor arm ${A}: coupled fine-tune (ocean MSE, atmosphere frozen) with the 4deg ACE2S atmosphere" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
@@ -40,7 +42,7 @@ for A in $ARMS; do
     --dataset "${ATMOS_DS}:${ATMOS_CKPT}:/atmos_ckpt.tar" \
     --gpus "$N_GPUS" --shared-memory 200GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
-    -- torchrun --nproc_per_node="${N_GPUS}" -m fme.coupled.train "${SCRIPT_PATH}/coupled/${A}-coupled-ft.yaml" 2>&1)
+    -- torchrun --nproc_per_node="${N_GPUS}" -m fme.coupled.train "${SCRIPT_PATH}/coupled/${A}${OCEAN_ARM_SUFFIX}-coupled-ft${VARIANT}.yaml" 2>&1)
   echo "$out" | grep -qm1 "beaker.org/ex/" && ok=$((ok+1)) || echo "FAILED $JOB: $(echo "$out" | tail -2)"
 done
 echo "coupled FT launched: $ok/$total"
