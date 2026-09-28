@@ -68,10 +68,8 @@ class ResidualPredictionConfig:
     normalized: bool = False
 
     def validate_names(self, prognostic_names: Collection[str]) -> None:
-        # Validated here rather than in a __post_init__: this class sits in a
-        # dacite union with bool, and dacite masks a union member's
-        # __post_init__ error as an unhelpful UnionMatchError; errors raised
-        # by the parent config propagate intact.
+        # Not a __post_init__: dacite masks a union member's __post_init__
+        # error as UnionMatchError, while parent-raised errors survive.
         if self.names is not None and len(self.names) == 0:
             raise ValueError(
                 "residual_prediction.names must not be empty; use names: null "
@@ -108,10 +106,8 @@ class SingleModuleStepConfig(StepConfigABC):
         residual_prediction: When set, predict prognostics as tendencies
             added to the input rather than as states. See
             ``ResidualPredictionConfig`` for the per-variable and normalization
-            options. The deprecated bool spelling means every prognostic
-            (True) or none (False); it is kept as given here and normalized
-            into the private ``_residual_prediction_config`` attribute that
-            all internal readers use.
+            options. A bool is also accepted: True steps every prognostic
+            as a residual, False disables residual prediction.
         include_channel_mask_inputs: Whether to append per-variable mask indicator
             channels to the network input. When True, the network receives
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
@@ -151,9 +147,7 @@ class SingleModuleStepConfig(StepConfigABC):
         self.crps_training = None  # unused, kept for backwards compatibility
         residual_prediction = self.residual_prediction
         if isinstance(residual_prediction, bool):
-            # The deprecated bool spelling, accepted from yaml, checkpoints
-            # and direct construction alike. The public field keeps whatever
-            # was given; only this normalized attribute is read internally.
+            # bool spelling: True = every prognostic, False = disabled
             residual_prediction = (
                 ResidualPredictionConfig() if residual_prediction else None
             )

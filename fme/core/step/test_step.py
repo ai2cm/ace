@@ -2442,7 +2442,7 @@ def test_residual_prediction_names_must_not_be_empty():
 
 @pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
 def test_single_module_step_config_accepts_legacy_bool_directly(legacy):
-    """The config is public API (exported from fme.ace), so the deprecated bool
+    """The config is public API (exported from fme.ace), so the bool spelling
     must keep working for direct construction, not only for serialized state."""
     config = _residual_names_config(residual_prediction=legacy)
     # the public field keeps the given spelling; internal readers use the
