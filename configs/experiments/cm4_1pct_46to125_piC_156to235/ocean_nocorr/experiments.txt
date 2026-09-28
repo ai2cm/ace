@@ -1,7 +1,10 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs0|01M387JKCKWSF73PEW186FXYY6|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs0|01M387JKCKWSF73PEW186FXYY6|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs0|01M387JKCKWSF73PEW186FXYY6|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs1|01M387JY9M1Y3SZ6SAFWGWYP03|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs1|01M387JY9M1Y3SZ6SAFWGWYP03|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs1|01M387JY9M1Y3SZ6SAFWGWYP03|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs2|01M387K91RBC4XH2S6MDNH854H|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs2|01M387K91RBC4XH2S6MDNH854H|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_nocorr|rs2|01M387K91RBC4XH2S6MDNH854H|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
