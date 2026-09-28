@@ -903,27 +903,29 @@ class BatchData:
     def gather(self, dist: Distributed | None = None) -> "BatchData | None":
         """Gather per-rank shards to root along the sample dimension.
 
-        Returns the full BatchData on root, ``None`` on other ranks.
+        Returns a CPU BatchData on root, ``None`` on other ranks.
         """
         self._raise_if_step_diagnostics("gather")
         if dist is None:
             dist = Distributed.get_instance()
+        dist.require_no_spatial_parallelism("BatchData.gather")
 
+        device = get_device()
         gathered_data: dict[str, torch.Tensor] = {}
         for name, tensor in self.data.items():
-            tensor_cpu = tensor.cpu().contiguous()
-            rank_tensors = dist.gather(tensor_cpu)
+            rank_tensors = dist.gather(tensor.to(device).contiguous())
             if dist.is_root():
                 if rank_tensors is None:
                     raise RuntimeError("dist.gather returned None on root")
-                gathered_data[name] = torch.cat(rank_tensors, dim=0)
+                gathered_data[name] = torch.cat(rank_tensors, dim=0).cpu()
 
+        batch_cpu = self.to_cpu()
         gathered_parts = dist.gather_object(
             {
-                "time": self.time,
-                "labels": self.labels,
-                "stepper_state": self.stepper_state,
-                "data_mask": self.data_mask,
+                "time": batch_cpu.time,
+                "labels": batch_cpu.labels,
+                "stepper_state": batch_cpu.stepper_state,
+                "data_mask": batch_cpu.data_mask,
             }
         )
 
