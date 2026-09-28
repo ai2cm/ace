@@ -2028,10 +2028,10 @@
   "ace2-fm-nc-swin-v2-fm-a3-cond-finetune": "01M2TR4MY994YJ7CRZFF3E836P",
   "ace2-fm-nc-swin-v2-fm-a3-finetune": "01M2TR4ANBVG7FRTHVW2EREZ0X",
   "ace2-fm-nc-swin-v2.1-c96-a1-cond-finetune": "01M2PBPD7K24PX3K3GKM8NW6EJ",
-  "ace2-fm-nc-swin-v2.1-c96-a1-finetune": "01M2PBP4V1Y3G0RTF660559KMT",
+  "ace2-fm-nc-swin-v2.1-c96-a1-finetune": "01M3K4MGM7T136GHA6VR39V926",
   "ace2-fm-nc-swin-v2.1-c96-a1-mask10-cond-finetune": "01M3JM6DGKXHEDPNC672FNXZ86",
   "ace2-fm-nc-swin-v2.1-c96-a1-mask10-finetune": "01M3JS9ZKCB7GJBKM7WWV0VHJS",
-  "ace2-fm-nc-swin-v2.1-c96-a3-cond-finetune": "01M2PBPXATHHMVD8K6ZX1V2DGE",
+  "ace2-fm-nc-swin-v2.1-c96-a3-cond-finetune": "01M3JYGS4Q8NMDQGR8YN0XTWWV",
   "ace2-fm-nc-swin-v2.1-c96-a3-finetune": "01M2PBPN5NQYE2PWHPVYXQYG3D",
   "ace2-fm-nc-swin-v2.1-fm-a1-cond": "01M3CYECSV3JMAY9ZMWK3699KH",
   "ace2-fm-nc-swin-v2.1-fm-a1-finetune": "01M2PBTM08V251WZH4XEPM7P8F",
@@ -3368,5 +3368,9 @@
   "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-3xCO2-ic5": "01M3K732F0C6M6388Y3CEMHJHC",
   "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic1": "01M3K732BJRNV3MZEHQV7Y74SP",
   "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic2": "01M3K937P5FETHSSPAS0012MNN",
-  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic3": "01M3K937JHBK3RVHKWZVA8MS7F"
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic3": "01M3K937JHBK3RVHKWZVA8MS7F",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic4": "01M3KGGMDVCRJTK2DR74JCTNXJ",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-10yr-sstprescribed-eval-4xCO2-ic5": "01M3KGGM632KEXFFJ6PKGVGFD2",
+  "ace2-fm-nc-swin-v2.1-c96-a1-cond-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic1": "01M3J750S1Y8G56KANF3PMJ3SV",
+  "ace2-fm-nc-swin-v2.1-c96-a1-cond-som-eq-dataCO2-10yr-sstprescribed-eval-1xCO2-ic2": "01M3J754AMYQADTHKHJQM698GA"
 }
