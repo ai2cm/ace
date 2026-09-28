@@ -603,6 +603,50 @@ def test_ocean_salt_content_correction():
     torch.testing.assert_close(corrected["so_1"], gen_data_dict["so_1"] * ratio)
 
 
+def test_ocean_salt_content_correction_ignores_ice_outside_mask():
+    """Predicted ice outside the sea_ice_volume mask, where the target has no
+    ice data and the step input is filled with 0, is not an ice change."""
+    torch.manual_seed(0)
+    nlat, nlon = 4, 8
+    lat = torch.tensor([-60.0, -10.0, 10.0, 60.0])
+    lon = torch.arange(nlon) * 360.0 / nlon
+    ice_mask = torch.ones(nlat, nlon)
+    ice_mask[1:3] = 0.0  # tropics
+    masks = {
+        "mask_0": torch.ones(nlat, nlon),
+        "mask_1": torch.ones(nlat, nlon),
+        "mask_2d": torch.ones(nlat, nlon),
+        "mask_sea_ice_volume": ice_mask,
+    }
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(lat=lat, lon=lon),
+        vertical_coordinate=DepthCoordinate(
+            torch.tensor([0.0, 10.0, 20.0]), torch.ones(nlat, nlon, 2)
+        ),
+        spatial_mask_provider=SpatialMaskProvider(masks),
+        timestep=_SALT_TIMESTEP,
+    )
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity", ice_volume_salt_slope_psu=5.849
+        )
+    )
+    corrector = config.get_corrector(dataset_info)
+    input_ice = torch.rand(nlat, nlon) * ice_mask
+    gen_ice = torch.rand(nlat, nlon) * ice_mask
+    input_data = _salt_data(input_ice, 34.0)
+
+    def corrected_so(gen_ice):
+        gen_data = _salt_data(gen_ice, 36.0)
+        return corrector(input_data, gen_data, {}, None).corrected["so_0"]
+
+    baseline = corrected_so(gen_ice)
+    garbage = torch.rand(nlat, nlon) * (1 - ice_mask)
+    torch.testing.assert_close(corrected_so(gen_ice + garbage), baseline)
+    # ice inside the mask does count
+    assert not torch.allclose(corrected_so(gen_ice * 2), baseline)
+
+
 def test_ocean_salt_content_correction_without_ice():
     """With no sea ice volume in the model, salt content is held fixed."""
     config = OceanCorrectorConfig(
