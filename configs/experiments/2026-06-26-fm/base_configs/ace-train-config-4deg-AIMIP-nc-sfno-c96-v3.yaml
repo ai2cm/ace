@@ -111,6 +111,9 @@ inference:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *inference_variables
   - name: 7year_oosample_ensemble_constant_co2
     weight: 0.0
     epochs:
@@ -306,7 +309,7 @@ inference:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
+        variables: *inference_variables
       time_mean_denorm:
         target: denorm
         variables: *inference_variables
@@ -319,6 +322,9 @@ inference:
         variables: *inference_variables
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *inference_variables
   - name: long_43year_constant_co2
     weight: 0.0
     epochs:

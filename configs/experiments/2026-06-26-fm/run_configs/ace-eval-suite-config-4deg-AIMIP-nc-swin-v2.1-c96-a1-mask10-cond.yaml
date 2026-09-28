@@ -112,6 +112,9 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id001
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -221,6 +224,9 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id002
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -330,6 +336,9 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id003
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -439,6 +448,9 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id004
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -730,9 +742,6 @@ inferences:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        target: denorm
         variables: &id007
         - PRATEsfc
         - TMP2m
@@ -785,6 +794,9 @@ inferences:
         - northward_wind_6
         - northward_wind_7
         - total_water_path
+      time_mean_denorm:
+        target: denorm
+        variables: *id007
       time_mean_norm:
         target: norm
         variables: *id007
@@ -794,6 +806,9 @@ inferences:
         variables: *id007
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id007
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -839,9 +854,6 @@ inferences:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        target: denorm
         variables: &id008
         - PRATEsfc
         - TMP2m
@@ -894,6 +906,9 @@ inferences:
         - northward_wind_6
         - northward_wind_7
         - total_water_path
+      time_mean_denorm:
+        target: denorm
+        variables: *id008
       time_mean_norm:
         target: norm
         variables: *id008
@@ -903,6 +918,9 @@ inferences:
         variables: *id008
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id008
     data_writer:
       save_prediction_files: false
       save_monthly_files: false

@@ -96,6 +96,8 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -188,6 +190,8 @@ inferences:
       enso_coefficient:
         enabled: false
       histogram:
+        enabled: true
+      trend:
         enabled: true
     data_writer:
       save_prediction_files: false
@@ -448,7 +452,7 @@ inferences:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
+        enabled: true
       time_mean_denorm:
         target: denorm
         variables: &id005
@@ -495,6 +499,8 @@ inferences:
       power_spectrum:
         variables: *id005
       histogram:
+        enabled: true
+      trend:
         enabled: true
     data_writer:
       save_prediction_files: false
@@ -543,7 +549,7 @@ inferences:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
+        enabled: true
       time_mean_denorm:
         target: denorm
         variables: &id006
@@ -590,6 +596,8 @@ inferences:
       power_spectrum:
         variables: *id006
       histogram:
+        enabled: true
+      trend:
         enabled: true
     data_writer:
       save_prediction_files: false

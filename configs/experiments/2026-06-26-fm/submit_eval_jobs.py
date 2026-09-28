@@ -50,7 +50,10 @@ HERE = pathlib.Path(__file__).parent
 RUN_CONFIGS_DIR = HERE / "run_configs"
 RUN_CONFIGS_DIRNAME = RUN_CONFIGS_DIR.name
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
-WANDB_GROUP = "ace2-fm-eval-2026-06-26"
+# The eval generation started 2026-09-28 (generate_eval_configs.
+# EVAL_GENERATION_START); the superseded generation logged to
+# ace2-fm-eval-2026-06-26, which the fixed-variable and orography suites still use.
+WANDB_GROUP = "ace2-fm-eval-2026-09-28"
 
 # Checkpoint file paths paired with the eval run-name suffixes (source of truth
 # in generate_eval_configs.py, kept in the same order as the checkpoints here).

@@ -11,8 +11,10 @@ to one architecture with --arch.
 
 import argparse
 import copy
+import datetime
 import json
 import pathlib
+import re
 from collections.abc import Sequence
 
 import yaml
@@ -54,6 +56,42 @@ DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 # source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
 with open(DEFAULT_SOURCE_MAP) as _f:
     TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
+
+
+# Start of the current generation of norm-ablation eval-suite jobs. The suites
+# were resubmitted from 2026-09-28 with an ERA5 10year_insample entry on the fm
+# cells and zonal-mean and trend output on the long entries. An experiment
+# carrying a norm-ablation eval name and created before this time is
+# superseded: _beaker_listing leaves it out of every listing, so the job
+# watcher sees the name as missing and --skip-if-in-beaker does not skip it.
+# Once the superseded experiments are deleted from Beaker this filters nothing.
+EVAL_GENERATION_START = "2026-09-28T21:15:00+00:00"
+
+# Eval job names of the norm-ablation cells (`ace2-fm-{arch}-{regime}-{arm}
+# [-mask10][-cond]{checkpoint suffix}`). Hand-written runs, fine-tunes and the
+# fixed-variable and orography suites never match.
+_NORM_ABLATION_EVAL_NAME = re.compile(
+    rf"^{re.escape(WANDB_PREFIX)}"
+    rf"({'|'.join(re.escape(arch) for arch in ARCHITECTURES)})"
+    r"-(fm|c96|era5)-a[123](-mask10)?(-cond)?"
+    rf"({'|'.join(re.escape(s) for s in EVAL_CHECKPOINT_NAME_SUFFIXES)})$"
+)
+
+
+def is_norm_ablation_eval_name(job_name: str) -> bool:
+    return _NORM_ABLATION_EVAL_NAME.match(job_name) is not None
+
+
+def is_superseded_eval(job_name: str, created: str) -> bool:
+    """True for a norm-ablation eval experiment of an earlier generation.
+
+    `created` is the experiment's ISO-8601 creation time as Beaker reports it.
+    """
+    if not is_norm_ablation_eval_name(job_name):
+        return False
+    return datetime.datetime.fromisoformat(created) < datetime.datetime.fromisoformat(
+        EVAL_GENERATION_START
+    )
 
 
 def config_arch(config_filename: str) -> str | None:

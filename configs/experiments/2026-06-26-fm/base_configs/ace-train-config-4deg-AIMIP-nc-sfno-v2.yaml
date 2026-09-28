@@ -95,6 +95,8 @@ inference:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
   - name: 10year_insample
     weight: 1.0
     epochs:
@@ -141,6 +143,8 @@ inference:
       enso_coefficient:
         enabled: false
       histogram:
+        enabled: true
+      trend:
         enabled: true
   - name: weather_2024
     weight: 0.0
@@ -292,7 +296,7 @@ inference:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
+        enabled: true
       time_mean_denorm:
         target: denorm
         variables: *inference_variables
@@ -304,6 +308,8 @@ inference:
       power_spectrum:
         variables: *inference_variables
       histogram:
+        enabled: true
+      trend:
         enabled: true
   - name: long_46year_constant_co2
     weight: 0.0
@@ -341,7 +347,7 @@ inference:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
+        enabled: true
       time_mean_denorm:
         target: denorm
         variables: *inference_variables
@@ -353,6 +359,8 @@ inference:
       power_spectrum:
         variables: *inference_variables
       histogram:
+        enabled: true
+      trend:
         enabled: true
 logging:
   log_to_screen: true

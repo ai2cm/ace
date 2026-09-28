@@ -36,6 +36,9 @@ inference:
     num_data_workers: 4
     persistence_names:
     - global_mean_co2
+  aggregator:
+    trend:
+      enabled: true
 - name: 10year
   weight: 1.0
   epochs:
@@ -62,7 +65,7 @@ inference:
       labels:
       - era5
     num_data_workers: 4
-  aggregator:
+  aggregator: &id002
     step_means:
     - step: 5
       target: denorm
@@ -135,6 +138,36 @@ inference:
       enabled: false
     histogram:
       enabled: true
+    trend:
+      enabled: true
+      variables: *id001
+- name: 10year_insample
+  weight: 0.0
+  epochs:
+    start: 0
+    step: 10
+  n_forward_steps: 3652
+  forward_steps_in_memory: 73
+  n_ensemble_per_ic: 1
+  loader:
+    start_indices:
+      times:
+      - '1995-01-01T00:00:00'
+      - '1995-01-02T00:00:00'
+      - '1995-01-03T00:00:00'
+      - '1995-01-04T00:00:00'
+      - '1995-01-05T00:00:00'
+      - '1995-01-06T00:00:00'
+      - '1995-01-07T00:00:00'
+      - '1995-01-08T00:00:00'
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      labels:
+      - era5
+    num_data_workers: 4
+  aggregator: *id002
 - name: weather_2024
   weight: 0.0
   epochs:
@@ -297,7 +330,7 @@ inference:
       enabled: false
       target: norm
     zonal_mean:
-      enabled: false
+      variables: *id001
     time_mean_denorm:
       target: denorm
       variables: *id001
@@ -310,6 +343,9 @@ inference:
       variables: *id001
     histogram:
       enabled: true
+    trend:
+      enabled: true
+      variables: *id001
 - name: 7year_oosample_ensemble_varying_co2
   weight: 0.0
   epochs:
@@ -336,7 +372,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: &id002
+  aggregator: &id003
     step_means:
     - step: 5
       target: denorm
@@ -359,6 +395,9 @@ inference:
       enabled: false
     histogram:
       enabled: true
+    trend:
+      enabled: true
+      variables: *id001
 - name: 7year_oosample_ensemble_constant_co2
   weight: 0.0
   epochs:
@@ -385,7 +424,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: *id002
+  aggregator: *id003
 - name: 10year_insample_ensemble_varying_co2
   weight: 1.0
   epochs:
@@ -412,7 +451,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: *id002
+  aggregator: *id003
 - name: 10year_insample_ensemble_constant_co2
   weight: 0.0
   epochs:
@@ -439,7 +478,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: *id002
+  aggregator: *id003
 - name: weather_1994_ensemble_varying_co2
   weight: 0.0
   epochs:
@@ -466,7 +505,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: &id003
+  aggregator: &id004
     step_means:
     - step: 5
       target: denorm
@@ -529,7 +568,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: *id003
+  aggregator: *id004
 - name: long_43year_ensemble_varying_co2
   weight: 0.0
   epochs:
@@ -556,7 +595,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: &id004
+  aggregator: &id005
     step_means: []
     ensembles: []
     mean_denorm:
@@ -566,7 +605,7 @@ inference:
       enabled: false
       target: norm
     zonal_mean:
-      enabled: false
+      variables: *id001
     time_mean_denorm:
       target: denorm
       variables: *id001
@@ -579,6 +618,9 @@ inference:
       variables: *id001
     histogram:
       enabled: true
+    trend:
+      enabled: true
+      variables: *id001
 - name: long_43year_constant_co2
   weight: 0.0
   epochs:
@@ -605,7 +647,7 @@ inference:
       labels:
       - amip
     num_data_workers: 4
-  aggregator: *id004
+  aggregator: *id005
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -744,6 +786,7 @@ validation:
         - era5
 optimization:
   enable_automatic_mixed_precision: false
+  max_consecutive_non_finite_losses: 5
   lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true

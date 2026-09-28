@@ -32,6 +32,11 @@ Submission goes through the seven submit_*.py scripts with
 running is never queued twice and an exhausted or canceled one is held back
 even when its suite's siblings go.
 
+Norm-ablation eval experiments created before
+generate_eval_configs.EVAL_GENERATION_START belong to a superseded generation
+of the eval suites and are left out of the listing, so their names read as
+missing until the current generation's experiments exist.
+
 State (attempt counts, exhausted names, last seen statuses) lives in
 job_watch_state.json next to this file and is not committed. A tick holds
 job_watch.lock for its whole run; a tick started while another holds it

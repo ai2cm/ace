@@ -19,6 +19,8 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+from generate_eval_configs import is_superseded_eval
+
 DEFAULT_WORKSPACE = "ai2/ace"
 DEFAULT_TEXT = "ace2-fm-"
 
@@ -154,9 +156,18 @@ def _created(experiment: dict) -> str:
 
 
 def experiments_by_name(experiments: list[dict]) -> dict[str, NamedExperiment]:
+    """The experiment standing for each canonical job name.
+
+    Norm-ablation eval experiments of an earlier generation are left out
+    (`generate_eval_configs.EVAL_GENERATION_START`), so a name holding only
+    those reads as missing.
+    """
     grouped: dict[str, list[dict]] = {}
     for experiment in experiments:
-        grouped.setdefault(canonical_name(experiment["name"]), []).append(experiment)
+        name = canonical_name(experiment["name"])
+        if is_superseded_eval(name, experiment["created"]):
+            continue
+        grouped.setdefault(name, []).append(experiment)
     best: dict[str, NamedExperiment] = {}
     for name, group in grouped.items():
         # Newest first, so that min() over the status rank keeps the most

@@ -19,6 +19,16 @@ the status section below against `argo list`, `beaker`, and the GCS paths
 
 ## Status (2026-09-28)
 
+- **2026-09-28, the norm-ablation eval suites are being regenerated and
+  resubmitted** (144 jobs: 48 cells × besttrain/bestinf/lastepoch, wandb
+  group `ace2-fm-eval-2026-09-28`). The regime base configs gained an ERA5
+  `10year_insample` entry on fm (1995–2004, weight 0), zonal-mean output on
+  every long entry and the `trend` aggregator on the long, 10- and 7-year
+  entries (era5 unrestricted, since its variable list skips levels 2/4/5/6).
+  The watcher ignores eval experiments created before
+  `generate_eval_configs.EVAL_GENERATION_START`; the superseded
+  `ace2-fm-eval-2026-06-26` experiments, wandb runs and result datasets are
+  deleted once the new set has succeeded and matches the old scalars.
 - **2026-09-28, the nc-swin-v2.1 blowup diagnostics are all in, and the
   cause is residual prediction on the Swin backbone as such**, not the v2.1
   variant, its size, or numerics. All four ran to completion (exit 0) in

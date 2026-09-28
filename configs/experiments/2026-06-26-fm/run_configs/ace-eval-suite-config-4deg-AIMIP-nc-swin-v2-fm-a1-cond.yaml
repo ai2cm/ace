@@ -40,7 +40,9 @@ inferences:
       num_data_workers: 4
       persistence_names:
       - global_mean_co2
-    aggregator: {}
+    aggregator:
+      trend:
+        enabled: true
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
@@ -149,16 +151,19 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id001
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: weather_2024
+- name: 10year_insample
   config:
-    experiment_dir: /results/weather_2024
-    n_forward_steps: 5
-    forward_steps_in_memory: 5
+    experiment_dir: /results/10year_insample
+    n_forward_steps: 3652
+    forward_steps_in_memory: 73
     checkpoint_path: /ckpt.tar
     logging:
       log_to_screen: true
@@ -169,14 +174,14 @@ inferences:
     loader:
       start_indices:
         times:
-        - '2024-06-01T00:00:00'
-        - '2024-06-02T00:00:00'
-        - '2024-06-03T00:00:00'
-        - '2024-06-04T00:00:00'
-        - '2024-06-05T00:00:00'
-        - '2024-06-06T00:00:00'
-        - '2024-06-07T00:00:00'
-        - '2024-06-08T00:00:00'
+        - '1995-01-01T00:00:00'
+        - '1995-01-02T00:00:00'
+        - '1995-01-03T00:00:00'
+        - '1995-01-04T00:00:00'
+        - '1995-01-05T00:00:00'
+        - '1995-01-06T00:00:00'
+        - '1995-01-07T00:00:00'
+        - '1995-01-08T00:00:00'
       dataset:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -244,41 +249,30 @@ inferences:
         target: norm
         name: day_5_norm
         variables: *id002
-      ensembles:
-      - step: 5
-        name: day_5_ensemble
+      ensembles: []
       mean_denorm:
         enabled: false
         target: denorm
       mean_norm:
         enabled: false
         target: norm
-      power_spectrum:
-        enabled: false
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        enabled: false
-        target: denorm
-      time_mean_norm:
-        enabled: false
-        target: norm
-      annual:
-        enabled: false
       enso_index:
         enabled: false
       enso_coefficient:
         enabled: false
-      ipo_index:
-        enabled: false
+      histogram:
+        enabled: true
+      trend:
+        enabled: true
+        variables: *id002
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
-    n_ensemble_per_ic: 8
+    n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: weather_1994
+- name: weather_2024
   config:
-    experiment_dir: /results/weather_1994
+    experiment_dir: /results/weather_2024
     n_forward_steps: 5
     forward_steps_in_memory: 5
     checkpoint_path: /ckpt.tar
@@ -291,14 +285,14 @@ inferences:
     loader:
       start_indices:
         times:
-        - '1994-06-01T00:00:00'
-        - '1994-06-02T00:00:00'
-        - '1994-06-03T00:00:00'
-        - '1994-06-04T00:00:00'
-        - '1994-06-05T00:00:00'
-        - '1994-06-06T00:00:00'
-        - '1994-06-07T00:00:00'
-        - '1994-06-08T00:00:00'
+        - '2024-06-01T00:00:00'
+        - '2024-06-02T00:00:00'
+        - '2024-06-03T00:00:00'
+        - '2024-06-04T00:00:00'
+        - '2024-06-05T00:00:00'
+        - '2024-06-06T00:00:00'
+        - '2024-06-07T00:00:00'
+        - '2024-06-08T00:00:00'
       dataset:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -398,11 +392,11 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-- name: long_46year
+- name: weather_1994
   config:
-    experiment_dir: /results/long_46year
-    n_forward_steps: 16794
-    forward_steps_in_memory: 73
+    experiment_dir: /results/weather_1994
+    n_forward_steps: 5
+    forward_steps_in_memory: 5
     checkpoint_path: /ckpt.tar
     logging:
       log_to_screen: true
@@ -413,14 +407,14 @@ inferences:
     loader:
       start_indices:
         times:
-        - '1979-01-01T00:00:00'
-        - '1979-01-02T00:00:00'
-        - '1979-01-03T00:00:00'
-        - '1979-01-04T00:00:00'
-        - '1979-01-05T00:00:00'
-        - '1979-01-06T00:00:00'
-        - '1979-01-07T00:00:00'
-        - '1979-01-08T00:00:00'
+        - '1994-06-01T00:00:00'
+        - '1994-06-02T00:00:00'
+        - '1994-06-03T00:00:00'
+        - '1994-06-04T00:00:00'
+        - '1994-06-05T00:00:00'
+        - '1994-06-06T00:00:00'
+        - '1994-06-07T00:00:00'
+        - '1994-06-08T00:00:00'
       dataset:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -429,119 +423,11 @@ inferences:
         - era5
       num_data_workers: 4
     aggregator:
-      step_means: []
-      ensembles: []
-      mean_denorm:
-        enabled: false
-        target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        target: denorm
-        variables: &id004
-        - PRATEsfc
-        - TMP2m
-        - Q2m
-        - UGRD10m
-        - VGRD10m
-        - h500
-        - TMP850
-        - PRESsfc
-        - surface_temperature
-        - ULWRFsfc
-        - DLWRFsfc
-        - USWRFsfc
-        - DSWRFsfc
-        - ULWRFtoa
-        - USWRFtoa
-        - LHTFLsfc
-        - SHTFLsfc
-        - tendency_of_total_water_path_due_to_advection
-        - air_temperature_0
-        - air_temperature_1
-        - air_temperature_2
-        - air_temperature_3
-        - air_temperature_4
-        - air_temperature_5
-        - air_temperature_6
-        - air_temperature_7
-        - specific_total_water_0
-        - specific_total_water_1
-        - specific_total_water_2
-        - specific_total_water_3
-        - specific_total_water_4
-        - specific_total_water_5
-        - specific_total_water_6
-        - specific_total_water_7
-        - eastward_wind_0
-        - eastward_wind_1
-        - eastward_wind_2
-        - eastward_wind_3
-        - eastward_wind_4
-        - eastward_wind_5
-        - eastward_wind_6
-        - eastward_wind_7
-        - northward_wind_0
-        - northward_wind_1
-        - northward_wind_2
-        - northward_wind_3
-        - northward_wind_4
-        - northward_wind_5
-        - northward_wind_6
-        - northward_wind_7
-      time_mean_norm:
-        target: norm
-        variables: *id004
-      annual:
-        variables: *id004
-      power_spectrum:
-        variables: *id004
-      histogram:
-        enabled: true
-    data_writer:
-      save_prediction_files: false
-      save_monthly_files: false
-    n_ensemble_per_ic: 1
-    allow_incompatible_dataset: true
-- name: 7year_oosample_ensemble_varying_co2
-  config:
-    experiment_dir: /results/7year_oosample_ensemble_varying_co2
-    n_forward_steps: 2534
-    forward_steps_in_memory: 73
-    checkpoint_path: /ckpt.tar
-    logging:
-      log_to_screen: true
-      log_to_wandb: true
-      log_to_file: true
-      project: FM
-      entity: ai2cm
-    loader:
-      start_indices:
-        times:
-        - '2015-01-01T00:00:00'
-        - '2015-01-02T00:00:00'
-        - '2015-01-03T00:00:00'
-        - '2015-01-04T00:00:00'
-        - '2015-01-05T00:00:00'
-        - '2015-01-06T00:00:00'
-        - '2015-01-07T00:00:00'
-        - '2015-01-08T00:00:00'
-      dataset:
-        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
-        engine: zarr
-        labels:
-        - amip
-      num_data_workers: 4
-    aggregator:
       step_means:
       - step: 5
         target: denorm
         name: day_5
-        variables: &id005
+        variables: &id004
         - PRATEsfc
         - TMP2m
         - Q2m
@@ -595,7 +481,71 @@ inferences:
       - step: 5
         target: norm
         name: day_5_norm
-        variables: *id005
+        variables: *id004
+      ensembles:
+      - step: 5
+        name: day_5_ensemble
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      power_spectrum:
+        enabled: false
+      zonal_mean:
+        enabled: false
+      time_mean_denorm:
+        enabled: false
+        target: denorm
+      time_mean_norm:
+        enabled: false
+        target: norm
+      annual:
+        enabled: false
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      ipo_index:
+        enabled: false
+    data_writer:
+      save_prediction_files: false
+      save_monthly_files: false
+    n_ensemble_per_ic: 8
+    allow_incompatible_dataset: true
+- name: long_46year
+  config:
+    experiment_dir: /results/long_46year
+    n_forward_steps: 16794
+    forward_steps_in_memory: 73
+    checkpoint_path: /ckpt.tar
+    logging:
+      log_to_screen: true
+      log_to_wandb: true
+      log_to_file: true
+      project: FM
+      entity: ai2cm
+    loader:
+      start_indices:
+        times:
+        - '1979-01-01T00:00:00'
+        - '1979-01-02T00:00:00'
+        - '1979-01-03T00:00:00'
+        - '1979-01-04T00:00:00'
+        - '1979-01-05T00:00:00'
+        - '1979-01-06T00:00:00'
+        - '1979-01-07T00:00:00'
+        - '1979-01-08T00:00:00'
+      dataset:
+        data_path: /climate-default
+        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        labels:
+        - era5
+      num_data_workers: 4
+    aggregator:
+      step_means: []
       ensembles: []
       mean_denorm:
         enabled: false
@@ -603,20 +553,81 @@ inferences:
       mean_norm:
         enabled: false
         target: norm
-      enso_index:
-        enabled: false
-      enso_coefficient:
-        enabled: false
+      zonal_mean:
+        variables: &id005
+        - PRATEsfc
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - h500
+        - TMP850
+        - PRESsfc
+        - surface_temperature
+        - ULWRFsfc
+        - DLWRFsfc
+        - USWRFsfc
+        - DSWRFsfc
+        - ULWRFtoa
+        - USWRFtoa
+        - LHTFLsfc
+        - SHTFLsfc
+        - tendency_of_total_water_path_due_to_advection
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+      time_mean_denorm:
+        target: denorm
+        variables: *id005
+      time_mean_norm:
+        target: norm
+        variables: *id005
+      annual:
+        variables: *id005
+      power_spectrum:
+        variables: *id005
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id005
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: 7year_oosample_ensemble_constant_co2
+- name: 7year_oosample_ensemble_varying_co2
   config:
-    experiment_dir: /results/7year_oosample_ensemble_constant_co2
+    experiment_dir: /results/7year_oosample_ensemble_varying_co2
     n_forward_steps: 2534
     forward_steps_in_memory: 73
     checkpoint_path: /ckpt.tar
@@ -638,8 +649,8 @@ inferences:
         - '2015-01-07T00:00:00'
         - '2015-01-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-        file_pattern: AMIP-constant-CO2.zarr
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
         engine: zarr
         labels:
         - amip
@@ -717,15 +728,18 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id006
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: 10year_insample_ensemble_varying_co2
+- name: 7year_oosample_ensemble_constant_co2
   config:
-    experiment_dir: /results/10year_insample_ensemble_varying_co2
-    n_forward_steps: 3652
+    experiment_dir: /results/7year_oosample_ensemble_constant_co2
+    n_forward_steps: 2534
     forward_steps_in_memory: 73
     checkpoint_path: /ckpt.tar
     logging:
@@ -737,17 +751,17 @@ inferences:
     loader:
       start_indices:
         times:
-        - '1995-01-01T00:00:00'
-        - '1995-01-02T00:00:00'
-        - '1995-01-03T00:00:00'
-        - '1995-01-04T00:00:00'
-        - '1995-01-05T00:00:00'
-        - '1995-01-06T00:00:00'
-        - '1995-01-07T00:00:00'
-        - '1995-01-08T00:00:00'
+        - '2015-01-01T00:00:00'
+        - '2015-01-02T00:00:00'
+        - '2015-01-03T00:00:00'
+        - '2015-01-04T00:00:00'
+        - '2015-01-05T00:00:00'
+        - '2015-01-06T00:00:00'
+        - '2015-01-07T00:00:00'
+        - '2015-01-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
+        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+        file_pattern: AMIP-constant-CO2.zarr
         engine: zarr
         labels:
         - amip
@@ -825,14 +839,17 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id007
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: 10year_insample_ensemble_constant_co2
+- name: 10year_insample_ensemble_varying_co2
   config:
-    experiment_dir: /results/10year_insample_ensemble_constant_co2
+    experiment_dir: /results/10year_insample_ensemble_varying_co2
     n_forward_steps: 3652
     forward_steps_in_memory: 73
     checkpoint_path: /ckpt.tar
@@ -854,8 +871,8 @@ inferences:
         - '1995-01-07T00:00:00'
         - '1995-01-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-        file_pattern: AMIP-constant-CO2.zarr
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
         engine: zarr
         labels:
         - amip
@@ -933,16 +950,19 @@ inferences:
         enabled: false
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id008
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: weather_1994_ensemble_varying_co2
+- name: 10year_insample_ensemble_constant_co2
   config:
-    experiment_dir: /results/weather_1994_ensemble_varying_co2
-    n_forward_steps: 5
-    forward_steps_in_memory: 5
+    experiment_dir: /results/10year_insample_ensemble_constant_co2
+    n_forward_steps: 3652
+    forward_steps_in_memory: 73
     checkpoint_path: /ckpt.tar
     logging:
       log_to_screen: true
@@ -953,17 +973,17 @@ inferences:
     loader:
       start_indices:
         times:
-        - '1994-06-01T00:00:00'
-        - '1994-06-02T00:00:00'
-        - '1994-06-03T00:00:00'
-        - '1994-06-04T00:00:00'
-        - '1994-06-05T00:00:00'
-        - '1994-06-06T00:00:00'
-        - '1994-06-07T00:00:00'
-        - '1994-06-08T00:00:00'
+        - '1995-01-01T00:00:00'
+        - '1995-01-02T00:00:00'
+        - '1995-01-03T00:00:00'
+        - '1995-01-04T00:00:00'
+        - '1995-01-05T00:00:00'
+        - '1995-01-06T00:00:00'
+        - '1995-01-07T00:00:00'
+        - '1995-01-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
+        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+        file_pattern: AMIP-constant-CO2.zarr
         engine: zarr
         labels:
         - amip
@@ -1028,41 +1048,30 @@ inferences:
         target: norm
         name: day_5_norm
         variables: *id009
-      ensembles:
-      - step: 5
-        name: day_5_ensemble
+      ensembles: []
       mean_denorm:
         enabled: false
         target: denorm
       mean_norm:
         enabled: false
         target: norm
-      power_spectrum:
-        enabled: false
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        enabled: false
-        target: denorm
-      time_mean_norm:
-        enabled: false
-        target: norm
-      annual:
-        enabled: false
       enso_index:
         enabled: false
       enso_coefficient:
         enabled: false
-      ipo_index:
-        enabled: false
+      histogram:
+        enabled: true
+      trend:
+        enabled: true
+        variables: *id009
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
-    n_ensemble_per_ic: 8
+    n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
-- name: weather_1994_ensemble_constant_co2
+- name: weather_1994_ensemble_varying_co2
   config:
-    experiment_dir: /results/weather_1994_ensemble_constant_co2
+    experiment_dir: /results/weather_1994_ensemble_varying_co2
     n_forward_steps: 5
     forward_steps_in_memory: 5
     checkpoint_path: /ckpt.tar
@@ -1084,8 +1093,8 @@ inferences:
         - '1994-06-07T00:00:00'
         - '1994-06-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-        file_pattern: AMIP-constant-CO2.zarr
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
         engine: zarr
         labels:
         - amip
@@ -1182,11 +1191,11 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-- name: long_43year_ensemble_varying_co2
+- name: weather_1994_ensemble_constant_co2
   config:
-    experiment_dir: /results/long_43year_ensemble_varying_co2
-    n_forward_steps: 15683
-    forward_steps_in_memory: 73
+    experiment_dir: /results/weather_1994_ensemble_constant_co2
+    n_forward_steps: 5
+    forward_steps_in_memory: 5
     checkpoint_path: /ckpt.tar
     logging:
       log_to_screen: true
@@ -1197,34 +1206,26 @@ inferences:
     loader:
       start_indices:
         times:
-        - '1979-01-01T00:00:00'
-        - '1979-01-02T00:00:00'
-        - '1979-01-03T00:00:00'
-        - '1979-01-04T00:00:00'
-        - '1979-01-05T00:00:00'
-        - '1979-01-06T00:00:00'
-        - '1979-01-07T00:00:00'
-        - '1979-01-08T00:00:00'
+        - '1994-06-01T00:00:00'
+        - '1994-06-02T00:00:00'
+        - '1994-06-03T00:00:00'
+        - '1994-06-04T00:00:00'
+        - '1994-06-05T00:00:00'
+        - '1994-06-06T00:00:00'
+        - '1994-06-07T00:00:00'
+        - '1994-06-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
+        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+        file_pattern: AMIP-constant-CO2.zarr
         engine: zarr
         labels:
         - amip
       num_data_workers: 4
     aggregator:
-      step_means: []
-      ensembles: []
-      mean_denorm:
-        enabled: false
+      step_means:
+      - step: 5
         target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        target: denorm
+        name: day_5
         variables: &id011
         - PRATEsfc
         - TMP2m
@@ -1276,23 +1277,45 @@ inferences:
         - northward_wind_5
         - northward_wind_6
         - northward_wind_7
-      time_mean_norm:
+      - step: 5
         target: norm
+        name: day_5_norm
         variables: *id011
-      annual:
-        variables: *id011
+      ensembles:
+      - step: 5
+        name: day_5_ensemble
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
       power_spectrum:
-        variables: *id011
-      histogram:
-        enabled: true
+        enabled: false
+      zonal_mean:
+        enabled: false
+      time_mean_denorm:
+        enabled: false
+        target: denorm
+      time_mean_norm:
+        enabled: false
+        target: norm
+      annual:
+        enabled: false
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      ipo_index:
+        enabled: false
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
-    n_ensemble_per_ic: 1
+    n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
-- name: long_43year_constant_co2
+- name: long_43year_ensemble_varying_co2
   config:
-    experiment_dir: /results/long_43year_constant_co2
+    experiment_dir: /results/long_43year_ensemble_varying_co2
     n_forward_steps: 15683
     forward_steps_in_memory: 73
     checkpoint_path: /ckpt.tar
@@ -1314,8 +1337,8 @@ inferences:
         - '1979-01-07T00:00:00'
         - '1979-01-08T00:00:00'
       dataset:
-        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-        file_pattern: AMIP-constant-CO2.zarr
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
         engine: zarr
         labels:
         - amip
@@ -1330,9 +1353,6 @@ inferences:
         enabled: false
         target: norm
       zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        target: denorm
         variables: &id012
         - PRATEsfc
         - TMP2m
@@ -1384,6 +1404,9 @@ inferences:
         - northward_wind_5
         - northward_wind_6
         - northward_wind_7
+      time_mean_denorm:
+        target: denorm
+        variables: *id012
       time_mean_norm:
         target: norm
         variables: *id012
@@ -1393,6 +1416,120 @@ inferences:
         variables: *id012
       histogram:
         enabled: true
+      trend:
+        enabled: true
+        variables: *id012
+    data_writer:
+      save_prediction_files: false
+      save_monthly_files: false
+    n_ensemble_per_ic: 1
+    allow_incompatible_dataset: true
+- name: long_43year_constant_co2
+  config:
+    experiment_dir: /results/long_43year_constant_co2
+    n_forward_steps: 15683
+    forward_steps_in_memory: 73
+    checkpoint_path: /ckpt.tar
+    logging:
+      log_to_screen: true
+      log_to_wandb: true
+      log_to_file: true
+      project: FM
+      entity: ai2cm
+    loader:
+      start_indices:
+        times:
+        - '1979-01-01T00:00:00'
+        - '1979-01-02T00:00:00'
+        - '1979-01-03T00:00:00'
+        - '1979-01-04T00:00:00'
+        - '1979-01-05T00:00:00'
+        - '1979-01-06T00:00:00'
+        - '1979-01-07T00:00:00'
+        - '1979-01-08T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+        file_pattern: AMIP-constant-CO2.zarr
+        engine: zarr
+        labels:
+        - amip
+      num_data_workers: 4
+    aggregator:
+      step_means: []
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      zonal_mean:
+        variables: &id013
+        - PRATEsfc
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - h500
+        - TMP850
+        - PRESsfc
+        - surface_temperature
+        - ULWRFsfc
+        - DLWRFsfc
+        - USWRFsfc
+        - DSWRFsfc
+        - ULWRFtoa
+        - USWRFtoa
+        - LHTFLsfc
+        - SHTFLsfc
+        - tendency_of_total_water_path_due_to_advection
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+      time_mean_denorm:
+        target: denorm
+        variables: *id013
+      time_mean_norm:
+        target: norm
+        variables: *id013
+      annual:
+        variables: *id013
+      power_spectrum:
+        variables: *id013
+      histogram:
+        enabled: true
+      trend:
+        enabled: true
+        variables: *id013
     data_writer:
       save_prediction_files: false
       save_monthly_files: false
