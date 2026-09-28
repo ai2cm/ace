@@ -19,7 +19,13 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local job_group="$3"
+  local torch_logs="${4:-}"  # e.g. graph_breaks,recompiles; empty for none
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
+
+  local log_env=()
+  if [ -n "$torch_logs" ]; then
+    log_env=(--env TORCH_LOGS="$torch_logs")
+  fi
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
 
@@ -48,6 +54,7 @@ run_training() {
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP="$job_group" \
     --env WANDB_PROJECT="$WANDB_PROJECT" \
+    "${log_env[@]}" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
@@ -66,4 +73,7 @@ run_training() {
 # A/B: identical configs except `stepper.step.config.compile: true` in the second.
 JOB_GROUP=${JOB_GROUP:-torch-compile-ab}
 run_training "ace-train-config-4deg-AIMIP-nc-sfno.yaml" "torch-compile-ab-4deg-nc-sfno-eager" "$JOB_GROUP"
-run_training "ace-train-config-4deg-AIMIP-nc-sfno-compile.yaml" "torch-compile-ab-4deg-nc-sfno-compile" "$JOB_GROUP"
+# TORCH_LOGS makes dynamo log every graph break with its reason and every
+# recompile with the guard that failed, so the beaker log shows the compiled
+# job's graph structure.
+run_training "ace-train-config-4deg-AIMIP-nc-sfno-compile.yaml" "torch-compile-ab-4deg-nc-sfno-compile" "$JOB_GROUP" "graph_breaks,recompiles"
