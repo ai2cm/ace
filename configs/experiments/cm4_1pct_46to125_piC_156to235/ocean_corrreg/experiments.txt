@@ -1,17 +1,17 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-cm4_1pct_46to125_piC_156to235-ocean_corrregL1w0p1_cc1|rs0|01M35KATC4B0ABJGRQNA5RZF3F|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_corrregL1w0p1_cc1|rs0|01M35KATC4B0ABJGRQNA5RZF3F|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL1w0p1_cc1|rs0|01M35KATC4B0ABJGRQNA5RZF3F|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL1w0p1_cc1|rs0|01M35KATC4B0ABJGRQNA5RZF3F|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_corrregL1w1_cc1|rs0|01M35KB64E81HHJA0PQS6TMNWF|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_corrregL1w10_cc1|rs0|01M35KBJ3A5RN499RJYT0MEXCH|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w0p1_cc1|rs0|01M35KBWTV0C26EZ9E48BXP9CN|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w0p1_cc1|rs0|01M35KBWTV0C26EZ9E48BXP9CN|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w0p1_cc1|rs0|01M35KBWTV0C26EZ9E48BXP9CN|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w0p1_cc1|rs0|01M35KBWTV0C26EZ9E48BXP9CN|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|01M35KC807HFZ1GTCCQ1PP0NV7|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|01M35KC807HFZ1GTCCQ1PP0NV7|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|01M35KC807HFZ1GTCCQ1PP0NV7|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w1_cc1|rs0|01M35KC807HFZ1GTCCQ1PP0NV7|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w10_cc1|rs0|01M35KCKC6HZ39H7WDPBTJSFXS|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_corrregL2w10_cc1|rs0|01M35KCKC6HZ39H7WDPBTJSFXS|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w10_cc1|rs0|01M35KCKC6HZ39H7WDPBTJSFXS|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_corrregL2w10_cc1|rs0|01M35KCKC6HZ39H7WDPBTJSFXS|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
