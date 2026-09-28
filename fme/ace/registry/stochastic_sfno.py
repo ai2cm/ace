@@ -187,10 +187,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     Noise is provided as conditioning input to conditional layer normalization.
 
     Attributes:
-        spectral_transform: Unused, kept for backwards compatibility only.
         filter_type: Type of filter to use.
-        operator_type: Unused, kept for backwards compatibility only.
-            Must be "dhconv".
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
@@ -211,14 +208,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         encoder_layers: Number of encoder layers in the model.
         pos_embed: Whether to use a position embedding.
         big_skip: Whether to use a big skip connection in the model.
-        rank: Unused, kept for backwards compatibility only.
-        factorization: Unused, kept for backwards compatibility only.
-            Must be None.
-        separable: Unused, kept for backwards compatibility only.
-            Must be False.
-        complex_network: Unused, kept for backwards compatibility only.
-        complex_activation: Unused, kept for backwards compatibility only.
-        spectral_layers: Unused, kept for backwards compatibility only.
         checkpointing: Whether to use checkpointing.
         data_grid: Grid type for spherical harmonic transforms.
         filter_residual: Whether to filter residual connections through a
@@ -263,9 +252,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             at inference to the range observed in training.
     """
 
-    spectral_transform: Literal["sht"] = "sht"
     filter_type: Literal["linear", "makani-linear"] = "linear"
-    operator_type: Literal["dhconv"] = "dhconv"
     residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
@@ -280,12 +267,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     encoder_layers: int = 1
     pos_embed: bool = True
     big_skip: bool = True
-    rank: float = 1.0
-    factorization: None = None
-    separable: bool = False
-    complex_network: bool = True
-    complex_activation: str = "real"
-    spectral_layers: int = 1
     checkpointing: int = 0
     # healpix not supported due to assumptions about number of spatial dims
     data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
@@ -305,21 +286,33 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(state)
+        result = dict(state)
+        # These three raised ValueError on non-default values; preserve that.
+        if result.pop("factorization", None) is not None:
+            raise ValueError("The 'factorization' parameter is no longer supported.")
+        if result.pop("separable", False):
+            raise ValueError("The 'separable' parameter is no longer supported.")
+        operator_type = result.pop("operator_type", "dhconv")
+        if operator_type != "dhconv":
+            raise ValueError(
+                "Only 'dhconv' operator_type is supported for "
+                "NoiseConditionedSFNO models."
+            )
+        # Silently drop the remaining deprecated keys.
+        for key in (
+            "spectral_transform",
+            "rank",
+            "complex_network",
+            "complex_activation",
+            "spectral_layers",
+        ):
+            result.pop(key, None)
+        return result
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
             raise ValueError(
                 "context_pos_embed_dim and pos_embed should not both be set"
-            )
-        if self.factorization is not None:
-            raise ValueError("The 'factorization' parameter is no longer supported.")
-        if self.separable:
-            raise ValueError("The 'separable' parameter is no longer supported.")
-        if self.operator_type != "dhconv":
-            raise ValueError(
-                "Only 'dhconv' operator_type is supported for "
-                "NoiseConditionedSFNO models."
             )
         validate_spectral_ratio(
             self.spectral_ratio,
