@@ -62,7 +62,7 @@ data_writer:
       time_coarsen:
         method: monthly_mean
       save_reference: true
-    - label: e_equatorial_pacific_monthly
+    - label: nino3_nino34_monthly
       names: [sst]
       lat_extent: [-5.0, 5.0]
       lon_extent: [190.0, 270.0]
