@@ -305,6 +305,9 @@ class Trainer:
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
+            # the previous job may have been killed before wandb uploaded its
+            # latest logs, e.g. an end-of-epoch log shortly before preemption
+            WandB.get_instance().log_unsynced_from_disk(max_step=self.num_batches_seen)
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)

@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
-from fme.core.disk_metric_logger import read_metrics
+import fme.core.wandb
+from fme.core.disk_metric_logger import DiskMetricLogger, read_metrics
 from fme.core.testing.wandb import mock_wandb
 from fme.core.wandb import DirectInitializationError, Image, WandB
 
@@ -66,3 +69,25 @@ class TestDiskLoggingIntegration:
         records = read_metrics(log_dir)
         assert len(records) == 1
         assert records[0] == {"step": 0, "loss": 0.5}
+
+
+def test_log_unsynced_from_disk_relogs_rows_wandb_lacks(tmp_path, monkeypatch):
+    log_dir = str(tmp_path / "metrics")
+    previous_job = DiskMetricLogger(log_dir)
+    previous_job.log({"batch_loss": 0.5}, step=10)
+    previous_job.log({"batch_loss": 0.4}, step=20)
+    previous_job.log({"val_loss": 0.3, "epoch": 2}, step=20)
+    previous_job.log({"batch_loss": 0.2}, step=30)  # after the checkpoint
+    previous_job.close()
+    logged: list[tuple[dict, int, bool | None]] = []
+    # wandb received step 10, so the resumed run continues from step 11
+    monkeypatch.setattr(fme.core.wandb.wandb, "run", SimpleNamespace(step=11))
+    monkeypatch.setattr(
+        fme.core.wandb.wandb,
+        "log",
+        lambda data, step, commit: logged.append((data, step, commit)),
+    )
+    wandb = WandB()
+    wandb.configure(log_to_wandb=True, metrics_log_dir=log_dir)
+    wandb.log_unsynced_from_disk(max_step=20)
+    assert logged == [({"batch_loss": 0.4, "val_loss": 0.3, "epoch": 2}, 20, True)]

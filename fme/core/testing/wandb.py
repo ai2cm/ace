@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from fme.core import wandb
-from fme.core.disk_metric_logger import DiskMetricLogger
+from fme.core.disk_metric_logger import DiskMetricLogger, read_metrics_by_step
 from fme.core.distributed import Distributed
 
 
@@ -129,6 +129,28 @@ class MockWandB:
             self._logs[step].update(data)
         if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
+
+    def log_unsynced_from_disk(self, max_step: int):
+        if not self._enabled or self._disk_logger is None:
+            return
+        # like wandb, a resumed run continues after the last step received
+        next_step = max(self._logs) + 1 if self._logs else 0
+        wandb.log_recovered_metrics(
+            read_metrics_by_step(self._disk_logger.directory, next_step, max_step),
+            self._log_recovered,
+        )
+
+    def _log_recovered(self, data: dict[str, Any], step: int):
+        self._last_step = step
+        self._logs[step].update(data)
+
+    def drop_logs_after(self, step: int):
+        """Simulate wandb never receiving logs after ``step``, e.g. because
+        the job was killed before its background uploader synced them.
+        """
+        for logged_step in [s for s in self._logs if s > step]:
+            del self._logs[logged_step]
+        self._last_step = min(self._last_step, step)
 
     def get_logs(self) -> list[dict[str, Any]]:
         if len(self._logs) == 0:

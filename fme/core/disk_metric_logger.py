@@ -21,6 +21,7 @@ class DiskMetricLogger:
 
     def __init__(self, directory: str | os.PathLike):
         os.makedirs(directory, exist_ok=True)
+        self.directory = directory
         self._path = os.path.join(directory, METRICS_FILENAME)
         self._high_water_mark: int | None = None
         self._file: io.TextIOWrapper | None = None
@@ -112,3 +113,20 @@ def read_metrics(directory: str | os.PathLike) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
     return records
+
+
+def read_metrics_by_step(
+    directory: str | os.PathLike, first_step: int, last_step: int
+) -> dict[int, dict[str, Any]]:
+    """Read metric records with ``first_step <= step <= last_step``.
+
+    Records logged at the same step are merged, since a step may be logged in
+    several calls. Returns a dict from step to metrics, excluding the "step" key.
+    """
+    by_step: dict[int, dict[str, Any]] = {}
+    for record in read_metrics(directory):
+        record = dict(record)
+        step = record.pop("step")
+        if first_step <= step <= last_step:
+            by_step.setdefault(step, {}).update(record)
+    return dict(sorted(by_step.items()))

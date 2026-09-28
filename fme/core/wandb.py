@@ -1,13 +1,13 @@
 import logging
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
 import wandb
 
-from fme.core.disk_metric_logger import DiskMetricLogger
+from fme.core.disk_metric_logger import DiskMetricLogger, read_metrics_by_step
 from fme.core.distributed import Distributed
 
 WANDB_RUN_ID_FILE = "wandb_run_id"
@@ -188,6 +188,25 @@ class WandB:
         dist = Distributed.get_instance()
         dist.barrier()
 
+    def log_unsynced_from_disk(self, max_step: int):
+        """Re-log metrics a previous job wrote to disk but wandb never received.
+
+        wandb uploads logs in the background, so a job killed (e.g. preempted)
+        shortly after logging loses whatever was still queued. A resumed wandb
+        run continues from the step after the last one it received, so disk
+        rows from that step up to ``max_step`` (the step of the checkpoint
+        being resumed from) are re-logged at their original steps. Only scalars
+        are on disk, so figures in those rows stay lost. wandb rejects logs
+        before its current step, so rows missing before the last received step
+        can't be recovered.
+        """
+        if not self._enabled or self._disk_logger is None or wandb.run is None:
+            return
+        log_recovered_metrics(
+            read_metrics_by_step(self._disk_logger.directory, wandb.run.step, max_step),
+            lambda data, step: wandb.log(data, step=step, commit=True),
+        )
+
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
             data_or_path = scale_image(data_or_path)
@@ -216,6 +235,19 @@ class WandB:
 
 
 singleton: WandB | None = None
+
+
+def log_recovered_metrics(
+    metrics_by_step: Mapping[int, dict[str, Any]],
+    log: Callable[[dict[str, Any], int], None],
+):
+    for step, data in metrics_by_step.items():
+        if "epoch" in data:
+            logging.info(
+                f"Recovered wandb logs for epoch {data['epoch']} at step {step} "
+                "from disk"
+            )
+        log(data, step)
 
 
 def scale_image(
