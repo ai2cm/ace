@@ -1,0 +1,43 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Multi-step fine-tune of the ocean_precorr_so_uniformdt_cde1 pretraining:
+# identical recipe except stepper_training.n_forward_steps 4 -> 8 and
+# max_epochs 75 -> 10, from its own best_ckpt. See
+# finetune-config-template.yaml, which is train-config.yaml with those two
+# edits, evaluate_before_training: true, and the stepper block dropped --
+# uncoupled_finetune.sh merges the stepper in from the pretraining run's saved
+# config.yaml, so the checkpoint's masking, corrector and variable lists are
+# carried over verbatim rather than restated.
+#
+# stepper_training.corrector_loss.precorrector_optimization is NOT carried by
+# that merge -- it lives outside .stepper -- so it stays in the template. It is
+# the defining term of this arm (it is the "precorr" in the name); dropping it
+# would fine-tune against the post-corrector loss and unpin the gauge.
+#
+# The row's three overrides:
+#   seed=0                                  the template has no seed key
+#   ...ocean_heat_content_correction.method belt-and-braces; already in the
+#                                           checkpoint config
+#   ...corrector_disabled_epochs=0          1 -> 0, a deliberate change. The
+#     pretraining's one-epoch warm-up let a from-scratch network learn before
+#     the corrector engaged. The trainer restarts its epoch counter on a
+#     fine-tune (trainer.py: stepper.set_epoch(self._epochs_trained + 1), and
+#     EpochScheduledCorrector disables while epoch <= disabled_epochs), so
+#     carrying the 1 through would train epoch 1 of 10 uncorrected from an
+#     already-converged checkpoint and let best_ckpt select on it.
+#
+# optimization.max_grad_norm is deliberately NOT restated: this arm is
+# unclipped, and the template carries train-config.yaml's optimization block
+# unchanged.
+#
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train", so a
+# completed row must be flipped to "trained" or the next launch from this file
+# resubmits it.
+
+# ocean_precorr_so_uniformdt_cde1 -- pretraining finished at 75 epochs
+# 2026-09-25 (beaker 01M357H6ND4YJ3DEMN155STSZA, wandb yyk5ow7c). One job, one
+# result dataset; it is pinned rather than resolved from wandb so the record
+# names the exact checkpoint source.
+# min_runtime 8h, matching the ocean_wide_uniformdt_clip-ft fine-tune.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs0|ace-samudra-cm4|yyk5ow7c|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M357H6NZRQVW8GQVWAXQ747V|8h
