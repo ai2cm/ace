@@ -1,0 +1,44 @@
+name: github-pages
+
+# Publishes the static workshop landing page in github-pages/ to the project's
+# GitHub Pages site (https://ai2cm.github.io/ace/). Project documentation is
+# hosted separately on ReadTheDocs.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "github-pages/**"
+      - ".github/workflows/github-pages.yaml"
+
+  # Allow manual re-deployment from the Actions tab.
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between the run
+# in-progress and latest queued. Do NOT cancel in-progress runs so deployments
+# are allowed to complete.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Upload github-pages to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: github-pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
