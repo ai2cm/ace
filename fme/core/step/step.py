@@ -71,6 +71,15 @@ class StepConfigABC(abc.ABC):
         return frozenset(set(self.input_names).intersection(self.output_names))
 
     @property
+    def residual_names(self) -> frozenset[str]:
+        """
+        Names whose loss errors are scored in residual (tendency) units when a
+        residual loss normalization is configured. Every prognostic, unless a
+        step type narrows the set.
+        """
+        return self.prognostic_names
+
+    @property
     @abc.abstractmethod
     def loss_names(self) -> list[str]:
         """
@@ -195,6 +204,10 @@ class StepSelector(StepConfigABC):
     @property
     def input_names(self) -> frozenset[str]:
         return self._step_config_instance.input_names
+
+    @property
+    def residual_names(self) -> frozenset[str]:
+        return self._step_config_instance.residual_names
 
     @property
     def output_names(self) -> frozenset[str]:

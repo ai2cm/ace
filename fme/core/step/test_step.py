@@ -32,13 +32,19 @@ from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    ResidualPredictionConfig,
     SingleModuleStep,
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
+    step_with_adjustments,
 )
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
+from fme.core.testing import (
+    get_dataset_info,
+    trivial_network_and_loss_normalization,
+    trivial_normalization,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
@@ -2340,3 +2346,154 @@ def test_multi_call_step_forwards_train_eval():
     wrapped_step.train.reset_mock()
     step.train()
     wrapped_step.train.assert_called_once_with(True)
+
+
+def test_step_with_adjustments_hybrid_residual_names():
+    """residual_names restricts the residual add to a subset of prognostics:
+    listed names step as input + output, the rest are full-field."""
+    names = ["a", "b"]
+    # The normalizer's stats live on get_device(), so the tensors here must
+    # be built there too or the step mixes devices on a GPU box.
+    device = fme.get_device()
+    normalizer = trivial_normalization(names).build(names)
+    input_data = {n: torch.full((1, 4, 4), 2.0, device=device) for n in names}
+    delta = {n: torch.full((1, 4, 4), 0.5, device=device) for n in names}
+
+    def network_calls(input_norm):
+        return dict(delta)
+
+    out = step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=network_calls,
+        normalizer=normalizer,
+        corrector=None,
+        ocean=None,
+        residual_names=["a"],
+    ).output
+    torch.testing.assert_close(
+        out["a"], torch.full((1, 4, 4), 2.5, device=device)
+    )  # residual
+    torch.testing.assert_close(
+        out["b"], torch.full((1, 4, 4), 0.5, device=device)
+    )  # full-field
+
+    # residual_names=None disables the residual add entirely
+    out_off = step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=network_calls,
+        normalizer=normalizer,
+        corrector=None,
+        ocean=None,
+    ).output
+    torch.testing.assert_close(out_off["a"], torch.full((1, 4, 4), 0.5, device=device))
+
+
+def _residual_names_config(**kwargs) -> SingleModuleStepConfig:
+    """A minimal single-module config; `a` is prognostic and `b` diagnostic."""
+    return SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": nn.Identity()}),
+        in_names=["a"],
+        out_names=["a", "b"],
+        normalization=trivial_network_and_loss_normalization(["a", "b"]),
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [pytest.param("b", id="diagnostic_name"), pytest.param("typo", id="unknown_name")],
+)
+def test_residual_prediction_names_must_be_prognostic(name):
+    """A non-prognostic name has no input to add the residual to, so it must be
+    rejected at config time rather than raising deep inside the step."""
+    with pytest.raises(ValueError, match="not prognostic"):
+        _residual_names_config(
+            residual_prediction=ResidualPredictionConfig(names=[name])
+        )
+
+
+@pytest.mark.parametrize(
+    "legacy, expected_names",
+    [
+        pytest.param(True, frozenset({"a"}), id="enabled"),
+        pytest.param(False, frozenset({"a"}), id="disabled"),
+    ],
+)
+def test_single_module_step_config_loads_legacy_residual_prediction_bool(
+    legacy, expected_names
+):
+    """residual_prediction was a bool before it grew options; checkpoints and
+    user yaml written against that shape must still load. Either way the loss
+    keeps scaling every prognostic, which never depended on the bool."""
+    state = _residual_names_config().get_state()
+    state["residual_prediction"] = legacy
+    config = SingleModuleStepConfig.from_state(state)
+    assert (config.residual_prediction is not None) == legacy
+    assert config.residual_names == expected_names
+
+
+def test_residual_prediction_names_must_not_be_empty():
+    """[] would silently disable residual prediction; only None means "all"."""
+    with pytest.raises(ValueError, match="must not be empty"):
+        ResidualPredictionConfig(names=[])
+
+
+@pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
+def test_single_module_step_config_accepts_legacy_bool_directly(legacy):
+    """The config is public API (exported from fme.ace), so the deprecated bool
+    must keep working for direct construction, not only for serialized state."""
+    config = _residual_names_config(residual_prediction=legacy)
+    if legacy:
+        assert config.residual_prediction == ResidualPredictionConfig()
+    else:
+        assert config.residual_prediction is None
+
+
+def test_multi_call_loss_scaling_follows_wrapped_residual_names():
+    """A multi-called variant is scored in the same units as its base variable.
+    With a hybrid wrapped step, a full-field prognostic's variants must use
+    field-std units even though the variable is prognostic."""
+    names = ["a", "b"]
+    field_stds = {"a": 4.0, "b": 3.0, "forcing": 1.0}
+    res_stds = {"a": 0.25, "b": 0.05, "forcing": 1.0}
+    all_stats = list(field_stds)
+    multi_call = MultiCallConfig(
+        forcing_name="forcing",
+        forcing_multipliers={"_double": 2.0},
+        output_names=["a", "b"],
+    )
+    means = {n: 0.0 for n in all_stats}
+    for suffix_name in multi_call.names:
+        base = suffix_name.removesuffix("_double")
+        field_stds[suffix_name] = field_stds[base]
+        res_stds[suffix_name] = res_stds[base]
+        means[suffix_name] = 0.0
+    config = MultiCallStepConfig(
+        wrapped_step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": nn.Identity()}
+                    ),
+                    in_names=names + ["forcing"],
+                    out_names=names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means=means, stds=field_stds),
+                        residual=NormalizationConfig(means=means, stds=res_stds),
+                    ),
+                    residual_prediction=ResidualPredictionConfig(names=["a"]),
+                )
+            ),
+        ),
+        config=multi_call,
+    )
+    stds = {k: float(v) for k, v in config.get_loss_normalizer().stds.items()}
+    # base variables: residual-stepped "a" in tendency units, full-field "b" not
+    assert stds["a"] == pytest.approx(res_stds["a"])
+    assert stds["b"] == pytest.approx(field_stds["b"])
+    # each variant matches its base variable's convention
+    assert stds["a_double"] == pytest.approx(res_stds["a"])
+    assert stds["b_double"] == pytest.approx(field_stds["b"])
