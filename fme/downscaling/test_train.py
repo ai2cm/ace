@@ -288,18 +288,54 @@ def test_resume(default_trainer_config, tmp_path):
                 [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_not_called()
-            # need to persist the id since mock_wandb doesn't
+            # need to persist the id and last step since mock_wandb doesn't
             id = wandb.get_id()
+            last_step = len(wandb.get_logs()) - 1
     with unittest.mock.patch("fme.downscaling.train.restore_checkpoint", new=mock):
         with mock_wandb() as wandb:
             # set the id so that we can check it matches what's in the experiment dir
             wandb.set_id(id)
+            wandb.set_last_received_step(last_step)
             main(config_segment_two_path)
             # resumes at epoch 1 since epoch 0 completed in previous segment
             assert 1 == len(
                 [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_called()
+
+
+@pytest.mark.medium_duration
+def test_resume_recovers_wandb_logs_lost_before_upload(
+    default_trainer_config, tmp_path
+):
+    trainer_config_segment_one = dict(default_trainer_config)
+    trainer_config_segment_one["max_epochs"] = 2
+    trainer_config_segment_one["segment_epochs"] = 1
+    trainer_config_segment_two = dict(default_trainer_config)
+    trainer_config_segment_two["max_epochs"] = 2
+    trainer_config_segment_two["segment_epochs"] = None
+    config_segment_one_path = _store_config(
+        tmp_path, trainer_config_segment_one, "config-segment-one.yaml"
+    )
+    config_segment_two_path = _store_config(
+        tmp_path, trainer_config_segment_two, "config-segment-two.yaml"
+    )
+
+    with mock_wandb() as wandb:
+        main(config_segment_one_path)
+        last_step = len(wandb.get_logs()) - 1
+        last_step_logs = wandb.get_logs()[last_step]
+        assert "epoch" in last_step_logs
+        assert "epoch_total_seconds" in last_step_logs
+        id = wandb.get_id()
+    with mock_wandb() as wandb:
+        wandb.set_id(id)
+        # the first job was killed before wandb uploaded its last step
+        wandb.set_last_received_step(last_step - 1)
+        main(config_segment_two_path)
+        recovered_logs = wandb.get_logs()[last_step]
+    assert recovered_logs["epoch"] == last_step_logs["epoch"]
+    assert "epoch_total_seconds" in recovered_logs
 
 
 @pytest.mark.slow
