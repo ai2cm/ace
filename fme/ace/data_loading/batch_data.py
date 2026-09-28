@@ -875,6 +875,7 @@ class BatchData:
 
     def select_sample_slice(self: SelfType, sample_slice: slice) -> SelfType:
         """Select a contiguous range of samples from the batch."""
+        self._raise_if_step_diagnostics("select_sample_slice")
         return self.__class__(
             {k: v[sample_slice] for k, v in self.data.items()},
             time=self.time[sample_slice],
