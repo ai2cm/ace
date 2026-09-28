@@ -17,7 +17,33 @@ docstrings of `generate_paper_configs.py` / `submit_paper_jobs.py`, then check
 the status section below against `argo list`, `beaker`, and the GCS paths
 (weka is not mounted on the submitting machine).
 
-## Status (2026-09-27)
+## Status (2026-09-28)
+
+- **2026-09-28, the nc-swin-v2.1 blowup diagnostics are all in, and the
+  cause is residual prediction on the Swin backbone as such**, not the v2.1
+  variant, its size, or numerics. All four ran to completion (exit 0) in
+  `ai2/ace`, 12 epochs with inline inference every other epoch, on the
+  c96 A1 cell:
+
+  | Diag | Arch | Change from the failing cell | Inline inference |
+  |---|---|---|---|
+  | H1 `01M32F8MDVHEADV71Z5NKZWZRS` | nc-swin-v2.1 | `residual_prediction: false` | finite at every epoch, 0.79 → 0.10 by epoch 10, `best_inference_ckpt.tar` written |
+  | H2 `01M32F96KV49FX1Y2GZPF96770` | nc-swin-v2.1 | `compile: false`, `float32_matmul_precision: highest` | NaN at every epoch, `best_inference_error` stayed `inf` |
+  | H4 `01M37QGNSBX6DQX3YDA8WY7TPR` | nc-swin-v2 (embed 256, depth mult 4) | `residual_prediction: true` | NaN at epochs 6, 8 and 10 while validation loss fell 0.15 → 0.11 |
+  | H3 `01M37QH0RHAE9DWJWC2V02J5E2` | nc-swin-v2.1 | three-year daily rollout from H2's `best_ckpt.tar`, every step written | ran; step dump in its result dataset, not yet analysed |
+
+  H4 is the decisive one: the larger nc-swin-v2, which is fine full-field
+  on every cell, shows the same signature (healthy one-step validation,
+  NaN multi-year rollout) as soon as residual prediction is on. H1 and H4
+  also each skipped one or two non-finite training losses with residual
+  prediction off, so `max_consecutive_non_finite_losses: 5` is doing real
+  work for Swin regardless of the stepping convention. Consequence: Swin
+  stays full-field (the `nc-swin-v2` base always was; `nc-swin-v2.1` via
+  `ARCH_STEP_CONFIG_OVERRIDES`), and the architecture comparison now
+  carries a residual-versus-full-field term, since `nc-sfno` steps
+  residuals. Not chasing a residual Swin further; the cheap de-confounding
+  run, if wanted, is one full-field `nc-sfno` cell (the v1 SFNO base was
+  full-field and trained fine), not another Swin variant.
 
 - **2026-09-27, the paper kinds are now a stage of the job watcher**
   (`watch_fm_jobs.py`, stage `paper`): every per-run kind on every
@@ -419,6 +445,11 @@ Everything the paper kinds need is on weka and every kind has run on every
 - Generator/submitter renamed from `*_som_*` to `*_paper_*`, config prefix
   `ace-paper-`, wandb group `ace2-fm-paper-2026-06-26`, before any job was
   submitted. `run-ace-som-two-stage.sh` keeps its name (SOM-specific).
+- Swin cells step full-field, SFNO cells step residuals (2026-09-28): the
+  H1/H2/H4 diagnostics (status above) show residual prediction breaks the
+  multi-year rollout of both Swin sizes while leaving one-step validation
+  healthy, and numerics are not the cause. Accepted as a known confound of
+  the architecture comparison rather than fixed on the Swin side.
 - Job volume is the main risk: `--kind` is required; everything is ≈ 4300
   jobs now, ≈ 6300 with D3 (see "How to run"). Sibling submitters now skip
   already-submitted jobs via the Beaker listing (`drop_jobs_in_beaker`);
