@@ -1709,7 +1709,6 @@ class TestSelectSampleSlice:
         )
 
 
-
 @pytest.mark.parallel
 class TestGather:
     def test_gathers_data_tensors(self):
