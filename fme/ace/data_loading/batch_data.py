@@ -1136,10 +1136,13 @@ class GatheredBatchData:
 
     Holds the concatenated data from all ranks and a
     ``GatheredStepperState`` that preserves each rank's random state.
-    Exposes only ``to_xarray_dataset`` — the single ability needed by
-    the write path.  The read path (``BatchData.from_xarray_dataset``)
+    The primary interface is ``to_xarray_dataset`` — the ability needed
+    by the write path.  The read path (``BatchData.from_xarray_dataset``)
     scatters the per-rank state internally and always returns a plain
     ``BatchData``.
+
+    Read-only properties expose the gathered fields for inspection
+    (e.g. in tests); the type is not intended for mutation.
     """
 
     def __init__(
@@ -1162,6 +1165,30 @@ class GatheredBatchData:
         self._n_ensemble = n_ensemble
         self._stepper_state = stepper_state
         self._data_mask = data_mask
+
+    @property
+    def data(self) -> TensorDict:
+        return self._data
+
+    @property
+    def time(self) -> xr.DataArray:
+        return self._time
+
+    @property
+    def horizontal_dims(self) -> list[str]:
+        return self._horizontal_dims
+
+    @property
+    def labels(self) -> BatchLabels | None:
+        return self._labels
+
+    @property
+    def stepper_state(self) -> GatheredStepperState | None:
+        return self._stepper_state
+
+    @property
+    def data_mask(self) -> TensorMapping | None:
+        return self._data_mask
 
     @property
     def _dims(self) -> list[str]:
