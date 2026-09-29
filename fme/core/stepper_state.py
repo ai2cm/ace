@@ -209,6 +209,11 @@ class GatheredStepperState:
         )
 
     @property
+    def corrector_state(self) -> CorrectorState | None:
+        """The concatenated corrector state (all ranks along sample dim)."""
+        return self._corrector_state
+
+    @property
     def n_ranks(self) -> int:
         if self._per_rank_random_states is not None:
             return len(self._per_rank_random_states)
