@@ -24,7 +24,9 @@ class MergedXarrayDataset(DatasetABC):
         names: The requested names. Names in ``derived.DERIVED_INPUTS`` are
             computed on each sample from the stored inputs, which the datasets
             must provide (``get_per_dataset_names`` requests them); the
-            inputs not in ``names`` are then dropped. If no derived name is
+            inputs not in ``names`` are then dropped. The names in
+            ``derived.DERIVED_MASK_SOURCE`` are also NaN where their mask is 0
+            (``derived.get_masks`` on the datasets' masks). If no derived name is
             requested, samples are returned unchanged.
     """
 
@@ -38,6 +40,13 @@ class MergedXarrayDataset(DatasetABC):
             _, self._derived = derived.expand_names(names)
         self._keep = frozenset(names or ())
         self._timestep = self.datasets[0].properties.timestep if self._derived else None
+        self._masks: dict[str, torch.Tensor] = {}
+        if self._derived:
+            stored_masks: dict[str, torch.Tensor] = {}
+            for dataset in self.datasets:
+                for key, mask in dataset.properties.spatial_mask_provider.masks.items():
+                    stored_masks.setdefault(key, mask)
+            self._masks = derived.get_masks(stored_masks, self._derived)
 
         combined_names = [
             item for dataset in self.datasets for item in dataset[0][0].keys()
@@ -84,7 +93,9 @@ class MergedXarrayDataset(DatasetABC):
             raise ValueError(
                 "All datasets in a merged dataset must have the same epoch."
             )
-        tensors = derived.apply(tensors, self._derived, self._timestep, self._keep)
+        tensors = derived.apply(
+            tensors, self._derived, self._timestep, self._keep, self._masks
+        )
         return tensors, time, labels, epochs[0], missing
 
     def get_sample_by_time_slice(self, time_slice: slice) -> DatasetItem:
@@ -97,7 +108,9 @@ class MergedXarrayDataset(DatasetABC):
             tensors.update(ds_tensors)
             if ds_missing is not None:
                 missing = (missing or frozenset()).union(ds_missing)
-        tensors = derived.apply(tensors, self._derived, self._timestep, self._keep)
+        tensors = derived.apply(
+            tensors, self._derived, self._timestep, self._keep, self._masks
+        )
         return tensors, time, labels, epoch, missing
 
     @property
@@ -137,6 +150,7 @@ class MergedXarrayDataset(DatasetABC):
         if data_properties is None:
             raise ValueError("No dataset available to determine properties")
         derived.add_metadata(data_properties, self._derived)
+        derived.add_masks(data_properties, self._derived)
         return data_properties
 
     def enable_shared_memory(self):
@@ -453,6 +467,7 @@ def get_merged_datasets(
     merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets, names=names)
     _, derived_names = derived.expand_names(names)
     derived.add_metadata(merged_properties, derived_names)
+    derived.add_masks(merged_properties, derived_names)
     return merged_datasets, merged_properties
 
 

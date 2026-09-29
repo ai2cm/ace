@@ -46,11 +46,19 @@ N_TIME, N_LAT, N_LON = 12, 4, 8
 DERIVED = ["frozen_mass", "calving_residue", "frozen_mass_energy_budget_residual"]
 _OCEAN = torch.ones(N_LAT, N_LON, dtype=torch.bool)
 _OCEAN[0, 0] = False  # the all-land cell, NaN in every ocean field
+# mask_sea_ice_fraction: 0 on land and on one ocean cell with mask_2d == 1
+_ICE = _OCEAN.clone()
+_ICE[1, 2] = False
+_ICE_MASKED = ["frozen_mass", "frozen_mass_energy_budget_residual"]
 
 
-def _write_stores(tmp_path) -> tuple[MergeNoConcatDatasetConfig, xr.Dataset]:
+def _write_stores(
+    tmp_path, ice_mask: bool = True
+) -> tuple[MergeNoConcatDatasetConfig, xr.Dataset]:
     """An atmosphere store (C) and an ocean store (O) on a 5-daily axis; ocean
-    fields are NaN on the one all-land cell. Returns the config and the joint data.
+    fields are NaN on the one all-land cell. O holds ``mask_2d`` (``_OCEAN``)
+    and, if ``ice_mask``, ``mask_sea_ice_fraction`` (``_ICE``). Returns the
+    config and the joint data.
     """
     rng = np.random.default_rng(0)
     time = xr.date_range(
@@ -90,18 +98,23 @@ def _write_stores(tmp_path) -> tuple[MergeNoConcatDatasetConfig, xr.Dataset]:
         "hfrunoffds": field(5.0, nan_land=True),
         "hfds_total_area": field(100.0, -50.0, nan_land=True),
     }
+    masks = {"mask_2d": xr.DataArray(_OCEAN.numpy().astype(np.float32), dims=dims[1:])}
+    if ice_mask:
+        masks["mask_sea_ice_fraction"] = xr.DataArray(
+            _ICE.numpy().astype(np.float32), dims=dims[1:]
+        )
     c_dir, o_dir = tmp_path / "c", tmp_path / "o"
     c_dir.mkdir()
     o_dir.mkdir()
     xr.Dataset({**atmos, **static}, coords=coords).to_netcdf(c_dir / "data.nc")
-    xr.Dataset({**ocean, **static}, coords=coords).to_netcdf(o_dir / "data.nc")
+    xr.Dataset({**ocean, **static, **masks}, coords=coords).to_netcdf(o_dir / "data.nc")
     config = MergeNoConcatDatasetConfig(
         merge=[
             XarrayDataConfig(data_path=str(c_dir)),
             XarrayDataConfig(data_path=str(o_dir)),
         ]
     )
-    joint = xr.Dataset({**atmos, **ocean, **static}, coords=coords)
+    joint = xr.Dataset({**atmos, **ocean, **static, **masks}, coords=coords)
     return config, joint
 
 
@@ -127,7 +140,11 @@ def _expected(joint: xr.Dataset, start: int, n: int) -> dict[str, torch.Tensor]:
             window, dt
         ),
     }
-    return {k: torch.where(land, float("nan"), v) for k, v in expected.items()}
+    out = {k: torch.where(land, float("nan"), v) for k, v in expected.items()}
+    if "mask_sea_ice_fraction" in joint:
+        for k in _ICE_MASKED:
+            out[k] = torch.where(~_ICE, float("nan"), out[k])
+    return out
 
 
 def _build(config, names, n_timesteps=4):
@@ -159,8 +176,8 @@ def test_derived_names_match_recomputation(tmp_path):
         for name in DERIVED:
             torch.testing.assert_close(tensors[name], expected[name], equal_nan=True)
         residual = tensors["frozen_mass_energy_budget_residual"]
-        assert (residual[0, _OCEAN] == 0).all()
-        assert (residual[1:, _OCEAN] != 0).any()
+        assert (residual[0, _ICE] == 0).all()
+        assert (residual[1:, _ICE] != 0).any()
     for name in DERIVED:
         assert properties.variable_metadata[name] == derived.DERIVED_METADATA[name]
         assert (
@@ -176,8 +193,47 @@ def test_derived_names_nan_where_stored_inputs_nan(tmp_path):
     dataset, _ = _build(config, DERIVED)
     tensors, *_ = dataset[1]
     for name in DERIVED:
-        assert torch.isnan(tensors[name][:, ~_OCEAN]).all(), name
-        assert torch.isfinite(tensors[name][:, _OCEAN]).all(), name
+        valid = _ICE if name in _ICE_MASKED else _OCEAN
+        assert torch.isnan(tensors[name][:, ~valid]).all(), name
+        assert torch.isfinite(tensors[name][:, valid]).all(), name
+
+
+def test_masked_names_carry_sea_ice_fraction_mask(tmp_path):
+    """07: frozen_mass and the residual get mask_<name> == mask_sea_ice_fraction
+    in the merged properties, and are NaN at every time where it is 0; values
+    where it is 1 are those without the mask (03a-c01)."""
+    config, joint = _write_stores(tmp_path)
+    dataset, properties = _build(config, ["sst", *DERIVED])
+    ice = torch.as_tensor(joint["mask_sea_ice_fraction"].values)
+    mask_2d = torch.as_tensor(joint["mask_2d"].values)
+    for props in (properties, dataset.properties):
+        provider = props.spatial_mask_provider
+        for name in _ICE_MASKED:
+            assert f"mask_{name}" in provider.masks
+            torch.testing.assert_close(provider.get_mask_tensor_for(name), ice)
+        torch.testing.assert_close(
+            provider.get_mask_tensor_for("calving_residue"), mask_2d
+        )
+        assert "mask_calving_residue" not in provider.masks
+    tensors, *_ = dataset[2]
+    reference = _expected(joint.drop_vars("mask_sea_ice_fraction"), start=2, n=4)
+    for name in _ICE_MASKED:
+        assert torch.isnan(tensors[name][:, ice == 0]).all(), name
+        torch.testing.assert_close(
+            tensors[name][:, ice == 1], reference[name][:, ice == 1]
+        )
+    torch.testing.assert_close(
+        tensors["calving_residue"], reference["calving_residue"], equal_nan=True
+    )
+
+
+def test_absent_sea_ice_fraction_mask_raises(tmp_path):
+    config, _ = _write_stores(tmp_path, ice_mask=False)
+    for name in _ICE_MASKED:
+        with pytest.raises(ValueError, match="mask_sea_ice_fraction"):
+            _build(config, [name])
+    dataset, properties = _build(config, ["calving_residue"])
+    assert set(properties.spatial_mask_provider.masks) == {"mask_2d"}
 
 
 @pytest.mark.parametrize(
@@ -225,7 +281,13 @@ def test_derived_names_by_time_slice(tmp_path):
     expected = _expected(joint, start=5, n=6)
     for name in DERIVED:
         torch.testing.assert_close(tensors[name], expected[name], equal_nan=True)
-    assert (tensors["frozen_mass_energy_budget_residual"][0, _OCEAN] == 0).all()
+    assert (tensors["frozen_mass_energy_budget_residual"][0, _ICE] == 0).all()
+    provider = dataset.properties.spatial_mask_provider
+    for name in _ICE_MASKED:
+        torch.testing.assert_close(
+            provider.get_mask_tensor_for(name),
+            torch.as_tensor(joint["mask_sea_ice_fraction"].values),
+        )
 
 
 def test_unrequested_inputs_are_dropped(tmp_path):
@@ -246,6 +308,11 @@ def test_no_derived_names_unchanged(tmp_path):
     )
     for name in DERIVED:
         assert name not in properties.variable_metadata
+    for props in (properties, dataset.properties):
+        assert set(props.spatial_mask_provider.masks) == {
+            "mask_2d",
+            "mask_sea_ice_fraction",
+        }
 
 
 def test_missing_input_raises():

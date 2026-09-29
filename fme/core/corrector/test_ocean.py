@@ -6,9 +6,14 @@ import torch
 
 from fme import get_device
 from fme.core.constants import LATENT_HEAT_OF_FREEZING
-from fme.core.coordinates import DepthCoordinate
+from fme.core.coordinates import (
+    DepthCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.corrector.ocean import (
     FrozenMassBudgetConfig,
+    FrozenMassBudgetCorrection,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
@@ -16,10 +21,11 @@ from fme.core.corrector.ocean import (
     _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.dataset import derived
+from fme.core.dataset_info import DatasetInfo
 from fme.core.frozen_mass_budget import frozen_mass_flux_sum
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
-from fme.core.spatial_mask_provider import SpatialMaskProvider
+from fme.core.spatial_mask_provider import NullSpatialMaskProvider, SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
 DEVICE = get_device()
@@ -1100,3 +1106,180 @@ def test_frozen_mass_budget_correction_ignores_gen_on_land():
         m_c[:, ~land], gen_data["frozen_mass"][:, ~land], rtol=1e-10, atol=1e-8
     )
     torch.testing.assert_close(m_c[:, land], noisy["frozen_mass"][:, land])
+
+
+def _fm_mask() -> torch.Tensor:
+    """``mask_frozen_mass`` for ``_fm_case``: 0 on the all-land cell and on
+    ice-covered ocean cells Z, 1 elsewhere."""
+    mask = torch.ones(_FM_SHAPE[1:], dtype=torch.float32)
+    mask[3, 0] = 0.0
+    mask[0, 2] = 0.0
+    mask[2, 1] = 0.0
+    mask[4, 0] = 0.0
+    return mask
+
+
+def _fm_masked_corrector(mask, floor_mass_per_fraction: float = 905.0 * 1.0e-10):
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig(
+            floor_mass_per_fraction=floor_mass_per_fraction
+        ),
+    )
+    return config._build(
+        LatLonOperations(_FM_AREA),
+        None,
+        datetime.timedelta(seconds=_FM_DT),
+        lat_1d=_FM_LAT,
+        frozen_mass_mask=mask,
+    )
+
+
+@pytest.mark.parametrize(
+    "factors", [[[1.3, 1.1], [1.05, 2.0]], [[0.6, 0.9], [0.2, 0.99]]]
+)
+def test_frozen_mass_budget_correction_mask_budget_on_s(factors):
+    """09: the hemisphere budget closes over S = wet & mask == 1, and
+    frozen_mass passes through on Z = wet & mask == 0."""
+    input_data, gen_data, forcing_data, m_diag, _ = _fm_case(factors)
+    mask = _fm_mask()
+    s = (forcing_data["sea_surface_fraction"] > 0) & (mask == 1)
+    z = (forcing_data["sea_surface_fraction"] > 0) & (mask == 0)
+    assert (gen_data["frozen_mass"][z] > 0).all()
+    m_c = _fm_masked_corrector(mask)(
+        input_data, gen_data, forcing_data, None
+    ).corrected["frozen_mass"]
+    for h in _FM_HEMISPHERES:
+        torch.testing.assert_close(
+            _fm_sum(m_c * s, h),
+            _fm_sum(m_diag * s, h).clamp(min=0),
+            rtol=1e-10,
+            atol=1e-6,
+        )
+    assert (m_c[s] >= 0).all()
+    assert torch.equal(m_c[z], gen_data["frozen_mass"][z])
+
+
+def test_frozen_mass_budget_correction_mask_ignores_z():
+    """09: values on Z of every field the corrector reads do not change m_c on
+    S; m_c on Z is the (changed) gen frozen_mass."""
+    input_data, gen_data, forcing_data, _, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
+    mask = _fm_mask()
+    corrector = _fm_masked_corrector(mask)
+    s = (forcing_data["sea_surface_fraction"] > 0) & (mask == 1)
+    z = (forcing_data["sea_surface_fraction"] > 0) & (mask == 0)
+    m_c = corrector(input_data, gen_data, forcing_data, None).corrected["frozen_mass"]
+    g = torch.Generator().manual_seed(3)
+
+    def perturb(data):
+        out = {}
+        for k, v in data.items():
+            v = v.clone()
+            v[z] = 100.0 * torch.randn(v[z].shape, generator=g, dtype=v.dtype)
+            out[k] = v
+        return out
+
+    noisy_gen = perturb(gen_data)
+    noisy_input = perturb(input_data)
+    m_c_noisy = corrector(noisy_input, noisy_gen, forcing_data, None).corrected[
+        "frozen_mass"
+    ]
+    torch.testing.assert_close(m_c_noisy[s], m_c[s], rtol=1e-12, atol=1e-9)
+    assert torch.equal(m_c_noisy[z], noisy_gen["frozen_mass"][z])
+
+
+def _fm_dataset_info(spatial_mask_provider):
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=_FM_LAT, lon=torch.tensor([0.0, 90.0, 180.0, 270.0])
+        ),
+        vertical_coordinate=NullVerticalCoordinate(),
+        spatial_mask_provider=spatial_mask_provider,
+        timestep=datetime.timedelta(seconds=_FM_DT),
+    )
+
+
+def _fm_get_corrector_result(dataset_info, mask):
+    """``m_c`` from ``_get_corrector(dataset_info)`` and from ``_build`` with
+    ``frozen_mass_mask=mask`` on the same grid."""
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig()
+    )
+    input_data, gen_data, forcing_data, _, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
+    got = config._get_corrector(dataset_info)(
+        input_data, gen_data, forcing_data, None
+    ).corrected["frozen_mass"]
+    expected = config._build(
+        dataset_info.gridded_operations,
+        None,
+        datetime.timedelta(seconds=_FM_DT),
+        lat_1d=_FM_LAT,
+        frozen_mass_mask=mask,
+    )(input_data, gen_data, forcing_data, None).corrected["frozen_mass"]
+    return got, expected
+
+
+@pytest.mark.parametrize("mask_name", ["mask_frozen_mass", "mask_2d"])
+def test_frozen_mass_budget_correction_get_corrector_uses_mask(mask_name):
+    """09: _get_corrector passes the provider's frozen_mass mask (or its
+    mask_2d fallback) to the corrector."""
+    mask = _fm_mask()
+    dataset_info = _fm_dataset_info(SpatialMaskProvider({mask_name: mask}))
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig()
+    )
+    (correction,) = config._get_corrector(dataset_info)._corrections
+    assert isinstance(correction, FrozenMassBudgetCorrection)
+    assert correction.mask is not None
+    torch.testing.assert_close(correction.mask.cpu(), mask)
+    got, expected = _fm_get_corrector_result(dataset_info, mask)
+    torch.testing.assert_close(got, expected, rtol=0, atol=0)
+    unmasked = _fm_get_corrector_result(dataset_info, None)[1]
+    assert not torch.equal(got, unmasked)
+
+
+@pytest.mark.parametrize(
+    "spatial_mask_provider",
+    [
+        None,
+        NullSpatialMaskProvider,
+        SpatialMaskProvider({"mask_sst": _fm_mask()}),
+    ],
+    ids=["missing", "null", "no_frozen_mass_mask"],
+)
+def test_frozen_mass_budget_correction_get_corrector_no_mask(spatial_mask_provider):
+    """09: with no frozen_mass mask the corrector sums over wet, as before."""
+    dataset_info = _fm_dataset_info(spatial_mask_provider)
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig()
+    )
+    (correction,) = config._get_corrector(dataset_info)._corrections
+    assert isinstance(correction, FrozenMassBudgetCorrection)
+    assert correction.mask is None
+    got, expected = _fm_get_corrector_result(dataset_info, None)
+    torch.testing.assert_close(got, expected, rtol=0, atol=0)
+
+
+def test_frozen_mass_budget_correction_get_corrector_uses_frozen_mass_name():
+    """09-c01: _get_corrector looks the mask up by
+    FrozenMassBudgetConfig.frozen_mass_name, not the literal "frozen_mass"."""
+    mask = _fm_mask()
+    dataset_info = _fm_dataset_info(SpatialMaskProvider({"mask_ice_mass": mask}))
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig(
+            frozen_mass_name="ice_mass"
+        )
+    )
+    (correction,) = config._get_corrector(dataset_info)._corrections
+    assert isinstance(correction, FrozenMassBudgetCorrection)
+    assert correction.mask is not None
+    torch.testing.assert_close(correction.mask.cpu(), mask)
+
+    def rename(data):
+        return {("ice_mass" if k == "frozen_mass" else k): v for k, v in data.items()}
+
+    input_data, gen_data, forcing_data, _, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
+    got = config._get_corrector(dataset_info)(
+        rename(input_data), rename(gen_data), forcing_data, None
+    ).corrected["ice_mass"]
+    expected = _fm_get_corrector_result(dataset_info, mask)[1]
+    torch.testing.assert_close(got, expected, rtol=0, atol=0)

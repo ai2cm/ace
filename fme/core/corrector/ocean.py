@@ -13,7 +13,7 @@ from fme.core.corrector.registry import (
 )
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.frozen_mass_budget import (
     correct_hfds,
     frozen_mass_flux_sum,
@@ -294,12 +294,17 @@ class FrozenMassBudgetCorrection:
     """Correction that sets each hemisphere's frozen mass to the budget
     integrated from the input with the predicted residual; see
     ``FrozenMassBudgetConfig``.
+
+    The sums run over ``sea_surface_fraction > 0 & mask == 1`` when ``mask``
+    (the dataset's ``frozen_mass`` mask) is given, else over
+    ``sea_surface_fraction > 0``; elsewhere ``frozen_mass`` passes through.
     """
 
     config: FrozenMassBudgetConfig
     area_weighted_sum: AreaWeightedMean
     hemispheres: tuple[torch.Tensor, torch.Tensor]
     timestep_seconds: float
+    mask: torch.Tensor | None = None
 
     def __call__(
         self,
@@ -327,20 +332,24 @@ class FrozenMassBudgetCorrection:
         ssf = torch.nan_to_num(OceanData(forcing_data).sea_surface_fraction).to(
             torch.float64
         )
-        # The budget is over the ocean (sea_surface_fraction > 0). Land holds
-        # NaN in the stored fields and network output in gen (output masking
-        # runs after the corrector); neither enters the hemisphere sums.
-        wet = ssf > 0
+        # The budget is over the ocean (sea_surface_fraction > 0) where the
+        # frozen_mass mask is 1. Outside it the stored fields hold NaN and gen
+        # holds network output (output masking runs after the corrector);
+        # neither enters the hemisphere sums.
+        region = ssf > 0
+        if self.mask is not None:
+            mask = self.mask.to(device=ssf.device, dtype=torch.float64)
+            region = region & (mask == 1)
 
-        def on_wet(x: torch.Tensor) -> torch.Tensor:
+        def on_region(x: torch.Tensor) -> torch.Tensor:
             x = torch.nan_to_num(x.to(torch.float64))
-            return torch.where(wet, x, torch.zeros_like(x))
+            return torch.where(region, x, torch.zeros_like(x))
 
-        m_hat = on_wet(m_gen)
-        m0 = on_wet(input_data[c.frozen_mass_name])
-        r_hat = on_wet(gen_data[c.residual_name])
-        f = ssf * on_wet(gen_data[c.sea_ice_fraction_name])
-        flux_sum = on_wet(
+        m_hat = on_region(m_gen)
+        m0 = on_region(input_data[c.frozen_mass_name])
+        r_hat = on_region(gen_data[c.residual_name])
+        f = ssf * on_region(gen_data[c.sea_ice_fraction_name])
+        flux_sum = on_region(
             frozen_mass_flux_sum(
                 forcing_data,
                 gen_data["hfds_total_area"],
@@ -354,13 +363,13 @@ class FrozenMassBudgetCorrection:
         available = torch.relu(m_hat - c.floor_mass_per_fraction * f)
         remainder = m_hat - available
         dm = torch.zeros_like(m_hat)
-        for mask in self.hemispheres:
-            if mask.shape[-2] != m_hat.shape[-2]:
+        for hemisphere in self.hemispheres:
+            if hemisphere.shape[-2] != m_hat.shape[-2]:
                 raise ValueError(
-                    f"Hemisphere mask has {mask.shape[-2]} latitudes, data has "
+                    f"Hemisphere mask has {hemisphere.shape[-2]} latitudes, data has "
                     f"{m_hat.shape[-2]}; spatial parallelism is not supported"
                 )
-            h = mask.to(m_hat.device)
+            h = hemisphere.to(m_hat.device)
 
             def hemisphere_sum(x: torch.Tensor, h: torch.Tensor = h) -> torch.Tensor:
                 return self.area_weighted_sum(x * h, keepdim=True)
@@ -369,7 +378,7 @@ class FrozenMassBudgetCorrection:
             dm = dm + h * _floor_increment(
                 deficit, f, available, remainder, hemisphere_sum
             )
-        m_c = torch.where(wet, torch.relu(m_hat + dm).to(out_dtype), m_gen)
+        m_c = torch.where(region, torch.relu(m_hat + dm).to(out_dtype), m_gen)
         return {c.frozen_mass_name: m_c}, corrector_state
 
 
@@ -488,11 +497,22 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             if self.frozen_mass_budget_correction is not None
             else None
         )
+        frozen_mass_mask = None
+        if self.frozen_mass_budget_correction is not None:
+            try:
+                frozen_mass_mask = (
+                    dataset_info.spatial_mask_provider.get_mask_tensor_for(
+                        self.frozen_mass_budget_correction.frozen_mass_name
+                    )
+                )
+            except MissingDatasetInfo:
+                frozen_mass_mask = None
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
             lat_1d=lat_1d,
+            frozen_mass_mask=frozen_mass_mask,
         )
 
     def _build(
@@ -501,6 +521,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
         lat_1d: torch.Tensor | None = None,
+        frozen_mass_mask: torch.Tensor | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -538,6 +559,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     gridded_operations.area_weighted_sum,
                     _hemisphere_masks(lat_1d),
                     timestep_seconds,
+                    mask=frozen_mass_mask,
                 )
             )
         if self.ocean_heat_content_correction is not None:

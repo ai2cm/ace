@@ -4,11 +4,13 @@ A requested derived name is swapped for its stored inputs when the names are
 split among the merged stores (``expand_names``), and computed on each merged
 sample window (``apply``). Inputs that were not requested are then dropped.
 The budget terms come from ``fme.core.frozen_mass_budget``, which the ocean
-corrector also uses.
+corrector also uses. The names in ``DERIVED_MASK_SOURCE`` get a
+``mask_<name>`` in the merged properties (``add_masks``) and are NaN where it
+is 0.
 """
 
 import datetime
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 import torch
 
@@ -19,7 +21,8 @@ from fme.core.frozen_mass_budget import (
     frozen_mass,
     target_frozen_mass_energy_budget_residual,
 )
-from fme.core.typing_ import TensorDict
+from fme.core.spatial_mask_provider import SpatialMaskProvider
+from fme.core.typing_ import TensorDict, TensorMapping
 
 _FROZEN_MASS_INPUTS = ["simass", "sisnmass", "sea_surface_fraction"]
 _CALVING_RESIDUE_INPUTS = ["hflso", "evs", "prsn"]
@@ -63,6 +66,14 @@ _NAN_INPUTS: dict[str, list[str]] = {
     + ["hfrunoffds", "hfds_total_area", "sst"],
 }
 
+# Each derived name here takes ``mask_<name>`` equal to the stored mask named,
+# as ``sea_ice_fraction`` is masked by ``mask_sea_ice_fraction``; a store's
+# own ``mask_<name>`` takes precedence.
+DERIVED_MASK_SOURCE: dict[str, str] = {
+    "frozen_mass": "mask_sea_ice_fraction",
+    "frozen_mass_energy_budget_residual": "mask_sea_ice_fraction",
+}
+
 DERIVED_METADATA: dict[str, VariableMetadata] = {
     "frozen_mass": VariableMetadata(
         units="kg/m**2", long_name="sea ice plus snow mass per total cell area"
@@ -95,10 +106,12 @@ def apply(
     derived: Collection[str],
     timestep: datetime.timedelta | None,
     keep: Collection[str],
+    masks: TensorMapping | None = None,
 ) -> TensorDict:
     """Add the ``derived`` names to one sample window (time on dim 0) and
     return only the names in ``keep``. Each derived name is NaN where its
-    stored ocean inputs are NaN at the same time (land).
+    stored ocean inputs are NaN at the same time (land), and at every time
+    where its ``mask_<name>`` in ``masks`` (from ``get_masks``) is 0.
     """
     if len(derived) == 0:
         return tensors
@@ -129,6 +142,11 @@ def apply(
         )
     for name in derived:
         out[name] = _nan_where_inputs_nan(out[name], tensors, _NAN_INPUTS[name])
+        mask = (masks or {}).get(f"mask_{name}")
+        if mask is not None:
+            out[name] = torch.where(
+                mask == 0, torch.full_like(out[name], float("nan")), out[name]
+            )
     return {k: v for k, v in out.items() if k in keep}
 
 
@@ -145,3 +163,41 @@ def add_metadata(properties: DatasetProperties, derived: Collection[str]) -> Non
     """Add the ``VariableMetadata`` of the ``derived`` names in place."""
     for name in derived:
         properties.variable_metadata[name] = DERIVED_METADATA[name]
+
+
+def get_masks(
+    masks: Mapping[str, torch.Tensor], derived: Collection[str]
+) -> dict[str, torch.Tensor]:
+    """Return ``mask_<name>`` for each ``derived`` name in
+    ``DERIVED_MASK_SOURCE``: the stored ``mask_<name>`` if ``masks`` holds it,
+    else the stored mask it names.
+
+    Raises:
+        ValueError: if neither is in ``masks``.
+    """
+    out: dict[str, torch.Tensor] = {}
+    for name in derived:
+        if name not in DERIVED_MASK_SOURCE:
+            continue
+        key, source = f"mask_{name}", DERIVED_MASK_SOURCE[name]
+        if key in masks:
+            out[key] = masks[key]
+        elif source in masks:
+            out[key] = masks[source]
+        else:
+            raise ValueError(
+                f"Derived variable {name} is masked like {source}, which "
+                f"none of the merged datasets provide (masks: {sorted(masks)})."
+            )
+    return out
+
+
+def add_masks(properties: DatasetProperties, derived: Collection[str]) -> None:
+    """Replace ``properties.spatial_mask_provider`` with one that also holds
+    the ``get_masks`` masks of the ``derived`` names. The provider is replaced,
+    not updated, as it may be shared with a merged sub-dataset.
+    """
+    masks = properties.spatial_mask_provider.masks
+    new = {k: v for k, v in get_masks(masks, derived).items() if k not in masks}
+    if new:
+        properties.spatial_mask_provider = SpatialMaskProvider({**masks, **new})
