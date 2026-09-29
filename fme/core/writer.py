@@ -12,6 +12,7 @@ from fme.core.dataset.utils import zarrs_codec_pipeline
 from fme.core.distributed import Distributed
 
 logger = logging.getLogger(__name__)
+ZARRS_WRITE_THREADS = 8
 DATETIME_ENCODING_UNITS = "microseconds since 1970-01-01"
 TIMEDELTA_ENCODING_UNITS = "microseconds"
 TIMEDELTA_ENCODING_DTYPE = "timedelta64[us]"
@@ -67,7 +68,7 @@ def _insert_into_zarr(
     insert_slices: Mapping[int, slice],
     overwrite_check: bool = True,
 ):
-    with zarrs_codec_pipeline():
+    with zarrs_codec_pipeline(max_workers=ZARRS_WRITE_THREADS):
         root = zarr.open_group(path, mode="r+")
         for var_name, var_data in data.items():
             n_dims = len(var_data.shape)
@@ -88,7 +89,7 @@ def _read_from_zarr(
     names: Sequence[str],
     insert_slices: Mapping[int, slice],
 ) -> dict[str, np.ndarray]:
-    with zarrs_codec_pipeline():
+    with zarrs_codec_pipeline(max_workers=ZARRS_WRITE_THREADS):
         root = zarr.open_group(path, mode="r")
         data = {}
         for var_name in names:

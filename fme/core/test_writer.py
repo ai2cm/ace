@@ -11,6 +11,7 @@ import zarr
 from zarrs import ZarrsCodecPipeline
 
 from fme.core.writer import (
+    ZARRS_WRITE_THREADS,
     ZarrWriter,
     _initialize_zarr,
     _insert_into_zarr,
@@ -350,6 +351,28 @@ def test_ZarrWriter_uses_zarrs_pipeline_for_local_store(tmp_path):
     assert zarrs_write.called
     assert zarrs_read.called
     np.testing.assert_array_equal(read["var"], data)
+
+
+def test_ZarrWriter_caps_zarrs_threads(tmp_path):
+    """A pool of one thread per logical CPU burns several times the CPU of a small
+    pool for the same wall time, so the writer builds its arrays with a capped pool."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    max_workers_at_write = []
+
+    def record_and_write(*args, **kwargs):
+        max_workers_at_write.append(zarr.config.get("threading.max_workers"))
+        return ZarrsCodecPipeline.write(*args, **kwargs)
+
+    with patch.object(
+        ZarrsCodecPipeline, "write", autospec=True, side_effect=record_and_write
+    ):
+        writer.record_batch(
+            data={"var": np.random.rand(2, NLAT, NLON).astype("f4")},
+            position_slices={"time": slice(0, 2)},
+        )
+    assert max_workers_at_write == [ZARRS_WRITE_THREADS]
+    assert zarr.config.get("threading.max_workers") is None
 
 
 def test_ZarrWriter_read_batch_before_initialization_errors(tmp_path):
