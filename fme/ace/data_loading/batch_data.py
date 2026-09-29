@@ -19,7 +19,7 @@ from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
-from fme.core.stepper_state import StepperState
+from fme.core.stepper_state import GatheredStepperState, StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
@@ -247,7 +247,7 @@ class BatchData:
     epoch: int | None = None
     n_ensemble: int = 1
     data_mask: TensorMapping | None = None
-    stepper_state: StepperState | None = None
+    stepper_state: StepperState | GatheredStepperState | None = None
     step_diagnostics: StepDiagnostics | None = None
 
     @classmethod
@@ -430,7 +430,7 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
-        stepper_state: StepperState | None = None,
+        stepper_state: StepperState | GatheredStepperState | None = None,
         step_diagnostics: StepDiagnostics | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
@@ -468,7 +468,7 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
-        stepper_state: StepperState | None = None,
+        stepper_state: StepperState | GatheredStepperState | None = None,
         step_diagnostics: StepDiagnostics | None = None,
     ) -> "BatchData":
         """
@@ -696,7 +696,12 @@ class BatchData:
                     ds[name]
                 )
 
-        stepper_state = StepperState.from_state_dict(state_dict) if state_dict else None
+        if not state_dict:
+            stepper_state: StepperState | GatheredStepperState | None = None
+        elif "random_state.n_ranks" in state_dict:
+            stepper_state = GatheredStepperState.from_state_dict(state_dict)
+        else:
+            stepper_state = StepperState.from_state_dict(state_dict)
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:
             names = [str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values]
@@ -885,6 +890,45 @@ class BatchData:
             )
         )
 
+    def scatter_stepper_state(
+        self: SelfType, dist: Distributed | None = None
+    ) -> SelfType:
+        """Replace a ``GatheredStepperState`` with this rank's ``StepperState``.
+
+        Extracts the rank's per-rank random state and keeps the corrector
+        state unchanged (it is per-sample and will be sliced later by
+        ``select_sample_slice``).  Must be called before
+        ``select_sample_slice`` when the batch was loaded from a multi-GPU
+        restart file.  A no-op when the stepper state is already a plain
+        ``StepperState`` or ``None``.
+        """
+        if not isinstance(self.stepper_state, GatheredStepperState):
+            return self
+        if dist is None:
+            dist = Distributed.get_instance()
+
+        if self.stepper_state.per_rank_random_states is not None:
+            random_state = self.stepper_state.per_rank_random_states[
+                dist.data_parallel_rank
+            ]
+        else:
+            random_state = None
+
+        stepper = StepperState(
+            corrector_state=self.stepper_state.corrector_state,
+            random_state=random_state,
+        )
+        return self.__class__(
+            data=self.data,
+            time=self.time,
+            horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
+            labels=self.labels,
+            n_ensemble=self.n_ensemble,
+            data_mask=self.data_mask,
+            stepper_state=stepper,
+        )
+
     def select_sample_slice(self: SelfType, sample_slice: slice) -> SelfType:
         """Select a contiguous range of samples from the batch."""
         self._raise_if_step_diagnostics("select_sample_slice")
@@ -984,9 +1028,19 @@ class BatchData:
                 )
             else:
                 gathered_corrector = first_corrector
-            gathered_stepper_state = StepperState(
-                corrector_state=gathered_corrector,
-                random_state=first_state.random_state,
+
+            if first_state.random_state is not None:
+                per_rank_random_states = [
+                    p["stepper_state"].random_state for p in gathered_parts
+                ]
+            else:
+                per_rank_random_states = None
+
+            gathered_stepper_state: GatheredStepperState | None = (
+                GatheredStepperState(
+                    corrector_state=gathered_corrector,
+                    per_rank_random_states=per_rank_random_states,
+                )
             )
         else:
             gathered_stepper_state = None
