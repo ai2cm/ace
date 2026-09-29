@@ -12,6 +12,7 @@ import numpy.typing as npt
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
     BatchData,
+    GatheredBatchData,
     PairedData,
     PrognosticState,
 )
@@ -373,7 +374,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
 
 
 def _write(
-    data: BatchData,
+    data: BatchData | GatheredBatchData,
     path: str,
     filename: str,
     variable_metadata: Mapping[str, VariableMetadata],
