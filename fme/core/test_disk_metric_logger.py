@@ -152,6 +152,18 @@ def test_restore_without_previous_file_warns(log_dir, caplog):
     assert "no disk metrics are restored" in caplog.text
 
 
+def test_restore_after_metrics_file_is_deleted_warns(log_dir, caplog):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"loss": 0.0}, step=0)
+    offset = logger.offset
+    os.remove(os.path.join(log_dir, METRICS_FILENAME))
+    with caplog.at_level(logging.WARNING):
+        assert not logger.restore(offset)
+        assert not logger.restore_through_step(0)
+    logger.close()
+    assert "no disk metrics are restored" in caplog.text
+
+
 def test_restore_from_shorter_file_warns_and_keeps_it_aside(log_dir, caplog):
     offsets = _log_steps(log_dir, range(2))
 

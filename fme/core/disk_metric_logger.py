@@ -71,11 +71,10 @@ class DiskMetricLogger:
             metrics file to restore, or if it is shorter than ``offset`` (e.g.
             ``metrics_log_dir`` changed since the checkpoint was saved).
         """
-        source_path = self._path if self._offset > 0 else self._previous_path
+        source_path = self._restore_source_path()
         if source_path is None:
             logging.warning(
-                "No metrics file from a previous job in %s, so no disk metrics "
-                "are restored",
+                "No metrics file to restore in %s, so no disk metrics are " "restored",
                 self.directory,
             )
             return False
@@ -117,7 +116,7 @@ class DiskMetricLogger:
         The metrics are cut before the first line with a step after
         ``last_step``. See ``restore`` for the rest.
         """
-        source_path = self._path if self._offset > 0 else self._previous_path
+        source_path = self._restore_source_path()
         if source_path is None:
             return self.restore(0)
         offset = 0
@@ -130,6 +129,16 @@ class DiskMetricLogger:
                     break
                 offset += len(line)
         return self.restore(offset)
+
+    def _restore_source_path(self) -> str | None:
+        """The metrics file to restore: this logger's own if it has logged
+        anything, otherwise the one a previous job left. None if that file
+        does not exist.
+        """
+        source_path = self._path if self._offset > 0 else self._previous_path
+        if source_path is None or not os.path.exists(source_path):
+            return None
+        return source_path
 
     def close(self):
         if self._file is not None:
