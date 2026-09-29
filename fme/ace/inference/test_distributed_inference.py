@@ -16,26 +16,22 @@ import pathlib
 import subprocess
 import sys
 
-import cftime
 import numpy as np
 import pytest
 import torch
 import xarray as xr
 import yaml
 
+from fme.ace.data_loading.inference import InferenceInitialConditionIndices
+from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     run_evaluator_from_config,
 )
-from fme.ace.data_loading.inference import (
-    ForcingDataLoaderConfig,
-    InferenceInitialConditionIndices,
-)
-from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.inference import main as inference_main
 from fme.ace.inference.test_evaluator import save_plus_one_stepper
 from fme.ace.inference.test_inference import save_stepper
 from fme.ace.testing import DimSize, DimSizes, FV3GFSData
-from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 
@@ -100,8 +96,6 @@ def _make_standalone_inference_inputs(
     and prognostic variables (the IC file), with an ocean config so the stepper
     has a surface_temperature_name.
     """
-    from fme.core.ocean import OceanConfig
-
     in_names = ["prog", "sst", "forcing_var", "DSWRFtoa"]
     out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
     forcing_names = ["forcing_var", "DSWRFtoa", "sst", "ocean_fraction"]
@@ -176,7 +170,9 @@ def _run_torchrun(config_yaml: str, module: str, extra_args: list[str] | None = 
 def test_distributed_evaluator(tmp_path: pathlib.Path):
     """Evaluator under 2 GPU ranks matches a serial in-process reference."""
     n_forward_steps = 2
-    stepper_path, data = _make_evaluator_test_data(tmp_path, n_forward_steps=n_forward_steps)
+    stepper_path, data = _make_evaluator_test_data(
+        tmp_path, n_forward_steps=n_forward_steps
+    )
 
     # Build config with 2 ICs and all writers disabled.
     loader_config = dataclasses.replace(
@@ -192,7 +188,9 @@ def test_distributed_evaluator(tmp_path: pathlib.Path):
         experiment_dir=serial_dir,
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
-        logging=LoggingConfig(log_to_screen=False, log_to_file=False, log_to_wandb=False),
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=False
+        ),
         loader=loader_config,
         forward_steps_in_memory=1,
         data_writer=_no_writers_config(),
@@ -212,15 +210,15 @@ def test_distributed_evaluator(tmp_path: pathlib.Path):
 
     _run_torchrun(config_yaml, "fme.ace.evaluator")
 
-    # Compare reduced diagnostics.
+    # Compare diagnostics produced by the default aggregator.
     for name in ("time_mean", "reduced", "zonal_mean"):
         serial_nc = os.path.join(serial_dir, f"{name}_diagnostics.nc")
         dist_nc = os.path.join(dist_dir, f"{name}_diagnostics.nc")
-        if os.path.exists(serial_nc):
-            serial_ds = xr.open_dataset(serial_nc)
-            assert os.path.exists(dist_nc), f"Missing {dist_nc}"
-            dist_ds = xr.open_dataset(dist_nc)
-            xr.testing.assert_allclose(serial_ds, dist_ds)
+        if not os.path.exists(serial_nc):
+            assert not os.path.exists(dist_nc), f"Extra {dist_nc}"
+            continue
+        assert os.path.exists(dist_nc), f"Missing {dist_nc}"
+        xr.testing.assert_allclose(xr.open_dataset(serial_nc), xr.open_dataset(dist_nc))
 
     # Compare restart.nc.
     serial_restart = xr.open_dataset(os.path.join(serial_dir, "restart.nc"))
@@ -240,7 +238,11 @@ def test_distributed_standalone_inference(tmp_path: pathlib.Path):
         "experiment_dir": str(tmp_path / "serial"),
         "n_forward_steps": n_forward_steps,
         "checkpoint_path": str(stepper_path),
-        "logging": {"log_to_screen": False, "log_to_file": False, "log_to_wandb": False},
+        "logging": {
+            "log_to_screen": False,
+            "log_to_file": False,
+            "log_to_wandb": False,
+        },
         "initial_condition": {"path": str(ic_path)},
         "forcing_loader": {"dataset": {"data_path": str(data.data_path)}},
         "forward_steps_in_memory": 1,
@@ -253,12 +255,10 @@ def test_distributed_standalone_inference(tmp_path: pathlib.Path):
         yaml.dump(config_dict, f)
 
     with mock_wandb(), torch.no_grad():
-        from fme.ace.inference.inference import main as inference_main
-
         inference_main(serial_yaml)
 
     # Distributed run.
-    serial_dir = config_dict["experiment_dir"]
+    serial_dir = str(config_dict["experiment_dir"])
     dist_dir = str(tmp_path / "distributed")
     config_dict["experiment_dir"] = dist_dir
     dist_yaml = str(tmp_path / "dist_config.yaml")

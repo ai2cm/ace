@@ -23,6 +23,7 @@ from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -379,6 +380,13 @@ def run_inference_from_config(config: InferenceConfig):
     )
     stepper = config.load_stepper()
     stepper.set_eval()
+    dist = Distributed.get_instance()
+    config.data_writer.ocean.raise_if_unsupported_under_multi_gpu(
+        dist.total_data_parallel_ranks
+    )
+    config.data_writer.atmosphere.raise_if_unsupported_under_multi_gpu(
+        dist.total_data_parallel_ranks
+    )
     logging.info("Initializing forcing data loader")
     data = get_forcing_data(
         config=config.forcing_loader,
