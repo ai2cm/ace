@@ -12,4 +12,4 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # Hardware as lt0lt_a2s (../coupled_tail_lt0): 8xH100 jupiter, high, 3 retries,
 # min_runtime 8h, shared_mem blank so node_caps.txt derives 1494GiB,
 # MALLOC_ARENA_MAX=4.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-mae2ftn_a2s-fto|o2a0rs0|ace-samudra-cm4|j1eeib1r|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h|MALLOC_ARENA_MAX=4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-mae2ftn_a2s-fto|o2a0rs0|ace-samudra-cm4|j1eeib1r|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter|8||3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h|MALLOC_ARENA_MAX=4
