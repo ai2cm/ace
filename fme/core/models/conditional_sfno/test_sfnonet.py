@@ -754,3 +754,51 @@ def test_clip_latent_global_means_envelope_synchronized_across_ranks():
     # different envelopes and this reduction would change the values.
     torch.testing.assert_close(dist.reduce_min(model._gm_min.clone()), model._gm_min)
     torch.testing.assert_close(dist.reduce_max(model._gm_max.clone()), model._gm_max)
+
+
+def _grads_after_backward(checkpointing: int):
+    """Gradient of every parameter after one backward at a checkpointing level."""
+    img_shape = (9, 18)
+    n_samples, n_channels = 2, 2
+    device = get_device()
+    torch.manual_seed(0)
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        checkpointing=checkpointing,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=n_channels,
+        out_chans=n_channels,
+    ).to(device)
+    context = Context(
+        embedding_scalar=torch.zeros(n_samples, 0, device=device),
+        labels=torch.zeros(n_samples, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    torch.manual_seed(1234)
+    x = torch.randn(n_samples, n_channels, *img_shape, device=device)
+    model(x, context).square().mean().backward()
+    return {
+        name: param.grad.clone() if param.grad is not None else None
+        for name, param in model.named_parameters()
+    }
+
+
+@pytest.mark.parametrize("checkpointing", [1, 2, 3])
+def test_checkpointing_gradients_match_uncheckpointed(checkpointing):
+    """Checkpointing recomputes activations, so it must not change gradients.
+
+    A dropped gradient fails here too: the reentrant checkpoint variant leaves
+    the encoder's parameters at grad=None, which no longer matches the
+    uncheckpointed reference.
+    """
+    reference = _grads_after_backward(0)
+    actual = _grads_after_backward(checkpointing)
+    assert set(actual) == set(reference)
+    for name, grad in reference.items():
+        torch.testing.assert_close(actual[name], grad, msg=f"gradient for {name}")

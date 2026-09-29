@@ -1,3 +1,4 @@
+import dacite
 import pytest
 import torch
 
@@ -635,6 +636,31 @@ def test_step_loss_forwards_data_mask():
     # var_0: MSE=1.0 (4 samples). var_1: MSE=4.0 but all masked out → no contribution.
     # Without the mask the total would be mean(1.0, 4.0) = 2.5.
     torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
+
+
+def test_step_loss_config_l1_is_reachable_from_config():
+    out_names = ["var_0"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    gridded_operations: GriddedOperations = LatLonOperations(torch.ones(1, 1))
+    config = dacite.from_dict(
+        data_class=StepLossConfig,
+        data={"type": "L1"},
+        config=dacite.Config(strict=True),
+    )
+    step_loss = config.build(
+        gridded_operations,
+        out_names=out_names,
+        channel_dim=-3,
+        normalizer=normalizer,
+    )
+    x_mapping = {"var_0": torch.full((4, 5, 5), 2.0).to(get_device())}
+    y_mapping = {"var_0": torch.zeros(4, 5, 5).to(get_device())}
+    result = step_loss(x_mapping, y_mapping, step=0)
+    # mean absolute error is 2.0, where MSE would give 4.0
+    torch.testing.assert_close(result.total(), torch.tensor(2.0, device=get_device()))
 
 
 def test_weighted_mapping_loss_with_ensemble_and_data_mask():

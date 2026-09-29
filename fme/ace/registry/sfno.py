@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
@@ -40,6 +41,10 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     spectral_layers: int = 1
     checkpointing: int = 0
     data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,
@@ -89,6 +94,10 @@ class SFNO_V0_1_0(ModuleConfig):
     spectral_layers: int = 1
     checkpointing: int = 0
     data_grid: Literal["legendre-gauss", "equiangular", "healpix"] = "legendre-gauss"
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,

@@ -938,7 +938,7 @@ class StepLossConfig:
             weights to apply to their normalized losses
     """
 
-    type: Literal["LpLoss", "MSE", "AreaWeightedMSE", "EnsembleLoss"] = "MSE"
+    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "EnsembleLoss"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Literal["LpLoss"] | None = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
