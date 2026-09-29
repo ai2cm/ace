@@ -1,3 +1,5 @@
+import datetime
+
 import numpy as np
 import pytest
 import torch
@@ -42,6 +44,8 @@ OCEAN = [
 STATIC = ["land_fraction", "sea_surface_fraction"]
 N_TIME, N_LAT, N_LON = 12, 4, 8
 DERIVED = ["frozen_mass", "calving_residue", "frozen_mass_energy_budget_residual"]
+_OCEAN = torch.ones(N_LAT, N_LON, dtype=torch.bool)
+_OCEAN[0, 0] = False  # the all-land cell, NaN in every ocean field
 
 
 def _write_stores(tmp_path) -> tuple[MergeNoConcatDatasetConfig, xr.Dataset]:
@@ -111,7 +115,8 @@ def _expected(joint: xr.Dataset, start: int, n: int) -> dict[str, torch.Tensor]:
         for name in ATMOS + OCEAN + STATIC
     }
     dt = 5 * 86400.0
-    return {
+    land = torch.isnan(window["sst"])
+    expected = {
         "frozen_mass": frozen_mass(
             window["simass"], window["sisnmass"], window["sea_surface_fraction"]
         ),
@@ -122,6 +127,7 @@ def _expected(joint: xr.Dataset, start: int, n: int) -> dict[str, torch.Tensor]:
             window, dt
         ),
     }
+    return {k: torch.where(land, float("nan"), v) for k, v in expected.items()}
 
 
 def _build(config, names, n_timesteps=4):
@@ -151,16 +157,53 @@ def test_derived_names_match_recomputation(tmp_path):
         assert set(tensors) == set(requested)
         expected = _expected(joint, start=idx, n=4)
         for name in DERIVED:
-            torch.testing.assert_close(tensors[name], expected[name])
-            assert torch.isfinite(tensors[name]).all()
-        assert (tensors["frozen_mass_energy_budget_residual"][0] == 0).all()
-        assert (tensors["frozen_mass_energy_budget_residual"][1:] != 0).any()
+            torch.testing.assert_close(tensors[name], expected[name], equal_nan=True)
+        residual = tensors["frozen_mass_energy_budget_residual"]
+        assert (residual[0, _OCEAN] == 0).all()
+        assert (residual[1:, _OCEAN] != 0).any()
     for name in DERIVED:
         assert properties.variable_metadata[name] == derived.DERIVED_METADATA[name]
         assert (
             dataset.properties.variable_metadata[name]
             == (derived.DERIVED_METADATA[name])
         )
+
+
+def test_derived_names_nan_where_stored_inputs_nan(tmp_path):
+    """03a-c01: the loss masks where the target is NaN, so a derived target is
+    NaN on land like the stored ocean fields it is built from."""
+    config, _ = _write_stores(tmp_path)
+    dataset, _ = _build(config, DERIVED)
+    tensors, *_ = dataset[1]
+    for name in DERIVED:
+        assert torch.isnan(tensors[name][:, ~_OCEAN]).all(), name
+        assert torch.isfinite(tensors[name][:, _OCEAN]).all(), name
+
+
+@pytest.mark.parametrize(
+    "name, nan_input",
+    [
+        ("frozen_mass", "sisnmass"),
+        ("calving_residue", "prsn"),
+        ("frozen_mass_energy_budget_residual", "hfds_total_area"),
+        ("frozen_mass_energy_budget_residual", "simass"),
+    ],
+)
+def test_apply_nan_follows_each_input(name, nan_input):
+    """A NaN in one stored input at one time and cell makes the derived name
+    NaN there only; ``ocean_sea_ice_fraction``, NaN on ice-free ocean in the
+    stores, does not."""
+    names = derived.DERIVED_INPUTS[name]
+    tensors = {n: torch.rand(3, 2, 2, dtype=torch.float64) + 0.5 for n in names}
+    tensors["sst"] = tensors.get("sst", torch.zeros(3, 2, 2)) + 270.0
+    tensors["sea_surface_fraction"] = torch.ones(3, 2, 2, dtype=torch.float64)
+    if "ocean_sea_ice_fraction" in tensors:
+        tensors["ocean_sea_ice_fraction"][:, 1, 1] = float("nan")
+    tensors[nan_input][2, 0, 1] = float("nan")
+    out = derived.apply(tensors, [name], datetime.timedelta(days=5), {name})[name]
+    expected_nan = torch.zeros(3, 2, 2, dtype=torch.bool)
+    expected_nan[2, 0, 1] = True
+    assert torch.equal(torch.isnan(out), expected_nan)
 
 
 def test_derived_names_by_time_slice(tmp_path):
@@ -181,8 +224,8 @@ def test_derived_names_by_time_slice(tmp_path):
     assert set(tensors) == set(requested)
     expected = _expected(joint, start=5, n=6)
     for name in DERIVED:
-        torch.testing.assert_close(tensors[name], expected[name])
-    assert (tensors["frozen_mass_energy_budget_residual"][0] == 0).all()
+        torch.testing.assert_close(tensors[name], expected[name], equal_nan=True)
+    assert (tensors["frozen_mass_energy_budget_residual"][0, _OCEAN] == 0).all()
 
 
 def test_unrequested_inputs_are_dropped(tmp_path):

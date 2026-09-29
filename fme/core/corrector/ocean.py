@@ -322,19 +322,32 @@ class FrozenMassBudgetCorrection:
             raise ValueError(
                 f"Frozen mass budget correction needs {missing} in the generated data"
             )
-        m_hat = gen_data[c.frozen_mass_name]
-        out_dtype = m_hat.dtype
-        m_hat = m_hat.to(torch.float64)
-        m0 = input_data[c.frozen_mass_name].to(torch.float64)
-        r_hat = gen_data[c.residual_name].to(torch.float64)
-        ssf = torch.nan_to_num(OceanData(forcing_data).sea_surface_fraction)
-        f = ssf.to(torch.float64) * gen_data[c.sea_ice_fraction_name].to(torch.float64)
-        flux_sum = frozen_mass_flux_sum(
-            forcing_data,
-            gen_data["hfds_total_area"],
-            gen_data["hfrunoffds"],
-            gen_data["calving_residue"],
-        ).to(torch.float64)
+        m_gen = gen_data[c.frozen_mass_name]
+        out_dtype = m_gen.dtype
+        ssf = torch.nan_to_num(OceanData(forcing_data).sea_surface_fraction).to(
+            torch.float64
+        )
+        # The budget is over the ocean (sea_surface_fraction > 0). Land holds
+        # NaN in the stored fields and network output in gen (output masking
+        # runs after the corrector); neither enters the hemisphere sums.
+        wet = ssf > 0
+
+        def on_wet(x: torch.Tensor) -> torch.Tensor:
+            x = torch.nan_to_num(x.to(torch.float64))
+            return torch.where(wet, x, torch.zeros_like(x))
+
+        m_hat = on_wet(m_gen)
+        m0 = on_wet(input_data[c.frozen_mass_name])
+        r_hat = on_wet(gen_data[c.residual_name])
+        f = ssf * on_wet(gen_data[c.sea_ice_fraction_name])
+        flux_sum = on_wet(
+            frozen_mass_flux_sum(
+                forcing_data,
+                gen_data["hfds_total_area"],
+                gen_data["hfrunoffds"],
+                gen_data["calving_residue"],
+            )
+        )
         m_diag = m0 + self.timestep_seconds / LATENT_HEAT_OF_FREEZING * (
             flux_sum - r_hat
         )
@@ -356,7 +369,7 @@ class FrozenMassBudgetCorrection:
             dm = dm + h * _floor_increment(
                 deficit, f, available, remainder, hemisphere_sum
             )
-        m_c = torch.relu(m_hat + dm).to(out_dtype)
+        m_c = torch.where(wet, torch.relu(m_hat + dm).to(out_dtype), m_gen)
         return {c.frozen_mass_name: m_c}, corrector_state
 
 

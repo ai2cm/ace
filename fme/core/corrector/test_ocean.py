@@ -15,12 +15,8 @@ from fme.core.corrector.ocean import (
     SurfaceEnergyFluxCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
 )
-from fme.core.frozen_mass_budget import (
-    calving_residue,
-    frozen_mass,
-    frozen_mass_flux_sum,
-    target_frozen_mass_energy_budget_residual,
-)
+from fme.core.dataset import derived
+from fme.core.frozen_mass_budget import frozen_mass_flux_sum
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -811,7 +807,7 @@ def _fm_case(factors: list[list[float]], seed: int = 0):
     sif = r()
     sif[:, 0, 0] = 0.0  # ice-free cells
     sif[:, 4, 3] = 0.0
-    m_hat = r(1000.0) * (sif > 0)
+    m_hat = r(1000.0) * (sif > 0) * (ssf > 0)  # 0 on the all-land cell
     m_hat[:, 3, 2] = 0.0
     forcing_data = {
         "sea_surface_fraction": ssf,
@@ -962,10 +958,36 @@ def test_frozen_mass_budget_correction_missing_flux_raises():
         _fm_corrector()(input_data, gen_data, forcing_data, None)
 
 
-def test_frozen_mass_budget_correction_target_identity():
-    """16-c03: the loader residual of a target step, fed as r_hat with the
-    target frozen mass, returns the target frozen mass; the surface energy
-    flux correction runs first, as in the train config."""
+_FM_OCEAN_STORE = [
+    "ocean_sea_ice_fraction",
+    "sst",
+    "simass",
+    "sisnmass",
+    "hflso",
+    "evs",
+    "prsn",
+    "hfrunoffds",
+    "hfds_total_area",
+]
+_FM_GEN_NAMES = [
+    "frozen_mass",
+    "frozen_mass_energy_budget_residual",
+    "calving_residue",
+    "hfrunoffds",
+    "hfds_total_area",
+    "ocean_sea_ice_fraction",
+    "sst",
+]
+
+
+def _fm_target_step(nan_on_land: bool):
+    """A target step ``0 -> 1`` of a window whose derived names come from the
+    loader (``derived.apply``), with the full corrector of the train config
+    (``prescribed``, ``runoff_and_calving``, floor). Cell ``[3, 0]`` is all
+    land; with ``nan_on_land`` the ocean-store fields are NaN there, as in the
+    stores. Returns input, gen and forcing data, the corrector and the
+    all-land mask.
+    """
     g = torch.Generator().manual_seed(1)
     n_time, shape = 2, _FM_SHAPE[1:]
 
@@ -977,6 +999,7 @@ def test_frozen_mass_budget_correction_target_identity():
     land = torch.zeros(shape, dtype=torch.float64)
     land[1, 1] = 0.7
     land[3, 0] = 1.0
+    all_land = land == 1.0
     land_t = land.expand(n_time, *shape).clone()
     window = {
         "land_fraction": land_t,
@@ -995,33 +1018,27 @@ def test_frozen_mass_budget_correction_target_identity():
             for k, v in _make_atmos_forcing_data((n_time, *shape), "cpu").items()
         },
     }
-    residual = target_frozen_mass_energy_budget_residual(window, _FM_DT)
-    m = frozen_mass(
-        window["simass"], window["sisnmass"], window["sea_surface_fraction"]
-    )
-    cr = calving_residue(window["hflso"], window["evs"], window["prsn"])
-    derived = {
-        "frozen_mass": m,
-        "calving_residue": cr,
-        "frozen_mass_energy_budget_residual": residual,
-    }
-    data = {**window, **derived}
-    gen_names = [
+    if nan_on_land:
+        for name in _FM_OCEAN_STORE:
+            window[name][:, all_land] = float("nan")
+    derived_names = [
         "frozen_mass",
-        "frozen_mass_energy_budget_residual",
         "calving_residue",
-        "hfrunoffds",
-        "hfds_total_area",
-        "ocean_sea_ice_fraction",
-        "sst",
+        "frozen_mass_energy_budget_residual",
     ]
+    data = derived.apply(
+        window,
+        derived_names,
+        datetime.timedelta(seconds=_FM_DT),
+        keep=set(window) | set(derived_names),
+    )
     forcing_names = [
         "land_fraction",
         "sea_surface_fraction",
         *_make_atmos_forcing_data((1,), "cpu"),
     ]
     input_data = {k: v[0:1] for k, v in data.items()}
-    gen_data = {k: data[k][1:2] for k in gen_names}
+    gen_data = {k: data[k][1:2] for k in _FM_GEN_NAMES}
     forcing_data = {k: data[k][1:2] for k in forcing_names}
     config = OceanCorrectorConfig(
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
@@ -1035,8 +1052,51 @@ def test_frozen_mass_budget_correction_target_identity():
         datetime.timedelta(seconds=_FM_DT),
         lat_1d=_FM_LAT,
     )
+    return input_data, gen_data, forcing_data, corrector, all_land
+
+
+def test_frozen_mass_budget_correction_target_identity():
+    """16-c03: the loader residual of a target step, fed as r_hat with the
+    target frozen mass, returns the target frozen mass; the surface energy
+    flux correction runs first, as in the train config."""
+    input_data, gen_data, forcing_data, corrector, _ = _fm_target_step(False)
     result = corrector(input_data, gen_data, forcing_data, None)
     assert set(result.modified_names) == {"hfds_total_area", "frozen_mass"}
     torch.testing.assert_close(
         result.corrected["frozen_mass"], gen_data["frozen_mass"], rtol=1e-10, atol=1e-8
     )
+
+
+@pytest.mark.parametrize("input_on_land", ["nan", "zero"])
+def test_frozen_mass_budget_correction_target_identity_nan_on_land(input_on_land):
+    """03a-c01: the 16-c03 identity holds on ocean cells when the target is
+    NaN on land, with the input NaN there (no input masking) or 0 (the
+    train config's ``input_masking``); land passes through."""
+    input_data, gen_data, forcing_data, corrector, land = _fm_target_step(True)
+    assert torch.isnan(gen_data["frozen_mass"][:, land]).all()
+    if input_on_land == "zero":
+        input_data = {k: torch.nan_to_num(v) for k, v in input_data.items()}
+    m_c = corrector(input_data, gen_data, forcing_data, None).corrected["frozen_mass"]
+    torch.testing.assert_close(
+        m_c[:, ~land], gen_data["frozen_mass"][:, ~land], rtol=1e-10, atol=1e-8
+    )
+    assert torch.isnan(m_c[:, land]).all()
+
+
+def test_frozen_mass_budget_correction_ignores_gen_on_land():
+    """03a-c01: output masking runs after the corrector, so the gen values on
+    land are network output; they do not change the ocean cells, and land
+    passes through."""
+    input_data, gen_data, forcing_data, corrector, land = _fm_target_step(True)
+    input_data = {k: torch.nan_to_num(v) for k, v in input_data.items()}
+    g = torch.Generator().manual_seed(2)
+    noisy = {}
+    for k, v in gen_data.items():
+        v = v.clone()
+        v[:, land] = 100.0 * torch.randn(v[:, land].shape, generator=g, dtype=v.dtype)
+        noisy[k] = v
+    m_c = corrector(input_data, noisy, forcing_data, None).corrected["frozen_mass"]
+    torch.testing.assert_close(
+        m_c[:, ~land], gen_data["frozen_mass"][:, ~land], rtol=1e-10, atol=1e-8
+    )
+    torch.testing.assert_close(m_c[:, land], noisy["frozen_mass"][:, land])
