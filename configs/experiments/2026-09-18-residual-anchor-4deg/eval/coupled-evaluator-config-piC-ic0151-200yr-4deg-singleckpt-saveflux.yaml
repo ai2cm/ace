@@ -1,0 +1,59 @@
+# Same 200-yr piControl coupled rollout as coupled-evaluator-config-piC-ic0151-200yr-4deg-singleckpt.yaml, but the
+# atmosphere writer saves the ten fields the ocean takes as forcing, block-averaged over the 20 atmosphere steps of
+# each 5-day ocean step (ACE's own 5-day-mean fluxes, as the coupled stepper hands them to the ocean). Used to force
+# ocean-only rollouts with ACE's fluxes instead of CM4's (the from-scratch prescribed-forcing question, 2026-09-29).
+experiment_dir: /results
+n_coupled_steps: 14598
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - sst
+  atmosphere:
+    save_prediction_files: true
+    save_monthly_files: false
+    names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+    - total_frozen_precipitation_rate
+    time_coarsen:
+      coarsen_factor: 20
+      method: block_mean
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
+        engine: zarr
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
