@@ -10,6 +10,7 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig, _write
 from fme.ace.inference.data_writer.raw import RawDataWriter
 from fme.ace.inference.data_writer.step_diagnostics import StepDiagnosticsWriter
@@ -17,9 +18,6 @@ from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.step.step_diagnostics import StepDiagnostics
-
-from fme.ace.inference.data_writer.file_writer import FileWriterConfig
-
 
 _WRITER_ENABLING_FIELDS = {
     "save_prediction_files",
