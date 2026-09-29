@@ -20,6 +20,10 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.random_state import RandomState
 
 
+class UngatheredStateDictError(Exception):
+    """The state dict does not contain gathered per-rank random state."""
+
+
 @dataclasses.dataclass
 class StepperState:
     """Per-sample state carried by the Stepper across predict calls.
@@ -157,7 +161,6 @@ class StepperState:
         return keys
 
 
-@dataclasses.dataclass
 class GatheredStepperState:
     """Stepper state after a data-parallel gather.
 
@@ -165,33 +168,62 @@ class GatheredStepperState:
     dimension (the same layout as a serial run), while each rank's
     random state is preserved separately so it can be scattered back
     on restart.
-
-    Parameters:
-        corrector_state: Concatenated per-sample corrector state, or
-            ``None`` when no corrector state was present on any rank.
-        per_rank_random_states: One ``RandomState`` per data-parallel
-            rank, or ``None`` when no rank carried a random state.
     """
 
-    corrector_state: CorrectorState | None = None
-    per_rank_random_states: list[RandomState] | None = None
+    def __init__(
+        self,
+        corrector_state: CorrectorState | None = None,
+        per_rank_random_states: list[RandomState] | None = None,
+    ):
+        self._corrector_state = corrector_state
+        self._per_rank_random_states = per_rank_random_states
+
+    @classmethod
+    def from_per_rank_states(cls, states: list[StepperState]) -> GatheredStepperState:
+        """Build from the per-rank ``StepperState`` objects collected by
+        a data-parallel gather."""
+        first = states[0]
+        if (
+            first.corrector_state is not None
+            and first.corrector_state.global_dry_air_mass is not None
+        ):
+            corrector: CorrectorState | None = CorrectorState(
+                global_dry_air_mass=torch.cat(
+                    [s.corrector_state.global_dry_air_mass for s in states],  # type: ignore[union-attr]
+                    dim=0,
+                )
+            )
+        else:
+            corrector = first.corrector_state
+
+        if first.random_state is not None:
+            per_rank: list[RandomState] | None = [
+                s.random_state for s in states  # type: ignore[misc]
+            ]
+        else:
+            per_rank = None
+
+        return cls(
+            corrector_state=corrector,
+            per_rank_random_states=per_rank,
+        )
 
     @property
     def n_ranks(self) -> int:
-        if self.per_rank_random_states is not None:
-            return len(self.per_rank_random_states)
+        if self._per_rank_random_states is not None:
+            return len(self._per_rank_random_states)
         return 1
 
     def to_cpu(self) -> GatheredStepperState:
         return GatheredStepperState(
             corrector_state=(
                 None
-                if self.corrector_state is None
-                else self.corrector_state.to_cpu()
+                if self._corrector_state is None
+                else self._corrector_state.to_cpu()
             ),
             per_rank_random_states=(
-                [rs.to_cpu() for rs in self.per_rank_random_states]
-                if self.per_rank_random_states is not None
+                [rs.to_cpu() for rs in self._per_rank_random_states]
+                if self._per_rank_random_states is not None
                 else None
             ),
         )
@@ -208,25 +240,42 @@ class GatheredStepperState:
             n_ranks: Total number of data-parallel ranks (needed to
                 compute the corrector slice).
         """
-        if self.corrector_state is not None:
-            sample_size = self.corrector_state.sample_dim_size()
+        if self._corrector_state is not None:
+            sample_size = self._corrector_state.sample_dim_size()
             if sample_size is not None:
                 shard = sample_size // n_ranks
-                corrector = self.corrector_state.select_sample_slice(
+                corrector = self._corrector_state.select_sample_slice(
                     slice(rank * shard, (rank + 1) * shard)
                 )
             else:
-                corrector = self.corrector_state
+                corrector = self._corrector_state
         else:
             corrector = None
 
-        if self.per_rank_random_states is not None:
-            random_state = self.per_rank_random_states[rank]
+        if self._per_rank_random_states is not None:
+            random_state = self._per_rank_random_states[rank]
         else:
             random_state = None
 
         return StepperState(
             corrector_state=corrector,
+            random_state=random_state,
+        )
+
+    def scatter_random_state(self, rank: int) -> StepperState:
+        """Return a ``StepperState`` with this rank's random state.
+
+        The corrector state is returned in full (unsliced); the caller
+        is responsible for slicing it to the rank's shard if needed
+        (typically via ``select_sample_slice`` on the enclosing
+        ``BatchData``).
+        """
+        if self._per_rank_random_states is not None:
+            random_state = self._per_rank_random_states[rank]
+        else:
+            random_state = None
+        return StepperState(
+            corrector_state=self._corrector_state,
             random_state=random_state,
         )
 
@@ -239,16 +288,16 @@ class GatheredStepperState:
         ``n_ranks`` marker so the reader knows how many to expect.
         """
         result: dict[str, torch.Tensor] = {}
-        if self.corrector_state is not None:
+        if self._corrector_state is not None:
             result["corrector_state.present"] = torch.tensor(True)
-            for key, value in self.corrector_state.to_state_dict().items():
+            for key, value in self._corrector_state.to_state_dict().items():
                 result[f"corrector_state.{key}"] = value
-        if self.per_rank_random_states is not None:
+        if self._per_rank_random_states is not None:
             result["random_state.present"] = torch.tensor(True)
             result["random_state.n_ranks"] = torch.tensor(
-                len(self.per_rank_random_states)
+                len(self._per_rank_random_states)
             )
-            for i, rs in enumerate(self.per_rank_random_states):
+            for i, rs in enumerate(self._per_rank_random_states):
                 for key, value in rs.to_state_dict().items():
                     result[f"random_state.rank_{i}.{key}"] = value
         return result
@@ -257,10 +306,10 @@ class GatheredStepperState:
     def from_state_dict(cls, state: dict[str, torch.Tensor]) -> GatheredStepperState:
         """Rebuild from ``to_state_dict``.
 
-        Also accepts a legacy ``StepperState`` state dict (single
-        ``random_state.generator_state`` without ``n_ranks``): the
-        single generator is stored as a 1-rank list so the scatter
-        path still works.
+        Raises:
+            UngatheredStateDictError: If the state dict does not contain
+                the ``random_state.n_ranks`` marker, indicating it is a
+                plain ``StepperState`` dict rather than a gathered one.
         """
         corrector_state: CorrectorState | None = None
         per_rank_random_states: list[RandomState] | None = None
@@ -271,20 +320,18 @@ class GatheredStepperState:
             )
 
         if "random_state.present" in state:
-            if "random_state.n_ranks" in state:
-                n_ranks = int(state["random_state.n_ranks"].item())
-                per_rank_random_states = []
-                for i in range(n_ranks):
-                    rank_state = _sub_state_dict(state, f"random_state.rank_{i}")
-                    per_rank_random_states.append(
-                        RandomState.from_state_dict(rank_state)
-                    )
-            else:
-                # Legacy single-generator format.
-                rs = RandomState.from_state_dict(
-                    _sub_state_dict(state, "random_state")
+            if "random_state.n_ranks" not in state:
+                raise UngatheredStateDictError(
+                    "State dict has random_state but no n_ranks marker; "
+                    "this is a plain StepperState dict, not a gathered one."
                 )
-                per_rank_random_states = [rs]
+            n_ranks = int(state["random_state.n_ranks"].item())
+            per_rank_random_states = []
+            for i in range(n_ranks):
+                rank_state = _sub_state_dict(state, f"random_state.rank_{i}")
+                per_rank_random_states.append(
+                    RandomState.from_state_dict(rank_state)
+                )
 
         return cls(
             corrector_state=corrector_state,

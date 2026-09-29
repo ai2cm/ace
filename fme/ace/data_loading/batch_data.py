@@ -12,14 +12,17 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.ace.requirements import InitialConditionRequirements
-from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
-from fme.core.stepper_state import GatheredStepperState, StepperState
+from fme.core.stepper_state import (
+    GatheredStepperState,
+    StepperState,
+    UngatheredStateDictError,
+)
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
@@ -699,21 +702,16 @@ class BatchData:
         stepper_state: StepperState | None
         if not state_dict:
             stepper_state = None
-        elif "random_state.n_ranks" in state_dict:
-            gathered = GatheredStepperState.from_state_dict(state_dict)
-            dist = Distributed.get_instance()
-            if gathered.per_rank_random_states is not None:
-                random_state = gathered.per_rank_random_states[
-                    dist.data_parallel_rank
-                ]
-            else:
-                random_state = None
-            stepper_state = StepperState(
-                corrector_state=gathered.corrector_state,
-                random_state=random_state,
-            )
         else:
-            stepper_state = StepperState.from_state_dict(state_dict)
+            try:
+                gathered = GatheredStepperState.from_state_dict(state_dict)
+            except UngatheredStateDictError:
+                stepper_state = StepperState.from_state_dict(state_dict)
+            else:
+                dist = Distributed.get_instance()
+                stepper_state = gathered.scatter_random_state(
+                    dist.data_parallel_rank
+                )
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:
             names = [str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values]
@@ -984,36 +982,10 @@ class BatchData:
         else:
             gathered_labels = None
 
-        first_state = gathered_parts[0]["stepper_state"]
-        if first_state is not None:
-            first_corrector = first_state.corrector_state
-            if (
-                first_corrector is not None
-                and first_corrector.global_dry_air_mass is not None
-            ):
-                gathered_corrector = CorrectorState(
-                    global_dry_air_mass=torch.cat(
-                        [
-                            p["stepper_state"].corrector_state.global_dry_air_mass
-                            for p in gathered_parts
-                        ],
-                        dim=0,
-                    )
-                )
-            else:
-                gathered_corrector = first_corrector
-
-            if first_state.random_state is not None:
-                per_rank_random_states = [
-                    p["stepper_state"].random_state for p in gathered_parts
-                ]
-            else:
-                per_rank_random_states = None
-
+        if gathered_parts[0]["stepper_state"] is not None:
             gathered_stepper_state: GatheredStepperState | None = (
-                GatheredStepperState(
-                    corrector_state=gathered_corrector,
-                    per_rank_random_states=per_rank_random_states,
+                GatheredStepperState.from_per_rank_states(
+                    [p["stepper_state"] for p in gathered_parts]
                 )
             )
         else:
@@ -1159,7 +1131,6 @@ class BatchData:
         return self
 
 
-@dataclasses.dataclass
 class GatheredBatchData:
     """BatchData after a data-parallel gather, used only for writing restarts.
 
@@ -1171,27 +1142,39 @@ class GatheredBatchData:
     ``BatchData``.
     """
 
-    data: TensorDict
-    time: xr.DataArray
-    horizontal_dims: list[str]
-    epoch: int | None = None
-    labels: BatchLabels | None = None
-    n_ensemble: int = 1
-    data_mask: TensorMapping | None = None
-    stepper_state: GatheredStepperState | None = None
+    def __init__(
+        self,
+        *,
+        data: TensorDict,
+        time: xr.DataArray,
+        horizontal_dims: list[str],
+        epoch: int | None = None,
+        labels: BatchLabels | None = None,
+        n_ensemble: int = 1,
+        stepper_state: GatheredStepperState | None = None,
+        data_mask: TensorMapping | None = None,
+    ):
+        self._data = data
+        self._time = time
+        self._horizontal_dims = horizontal_dims
+        self._epoch = epoch
+        self._labels = labels
+        self._n_ensemble = n_ensemble
+        self._stepper_state = stepper_state
+        self._data_mask = data_mask
 
     @property
-    def dims(self) -> list[str]:
-        return [_SAMPLE_DIM, _TIME_DIM] + self.horizontal_dims
+    def _dims(self) -> list[str]:
+        return [_SAMPLE_DIM, _TIME_DIM] + self._horizontal_dims
 
     def to_xarray_dataset(self) -> xr.Dataset:
         """Serialize to xarray, using the same layout as ``BatchData``."""
         data_arrays: dict[str, xr.DataArray] = {}
-        for name, tensor in self.data.items():
+        for name, tensor in self._data.items():
             data_arrays[name] = xr.DataArray(
-                tensor.detach().cpu().numpy(), dims=self.dims
+                tensor.detach().cpu().numpy(), dims=self._dims
             )
-        data_arrays[_TIME_DIM] = self.time
+        data_arrays[_TIME_DIM] = self._time
 
         extra_arrays, attrs = self._encode_reserved_state()
         data_arrays.update(extra_arrays)
@@ -1207,9 +1190,9 @@ class GatheredBatchData:
         data_arrays: dict[str, xr.DataArray] = {}
         attrs: dict[str, Any] = {}
 
-        if self.stepper_state is not None:
-            state_dict = self.stepper_state.to_cpu().to_state_dict()
-            per_sample_keys = self.stepper_state.per_sample_state_keys()
+        if self._stepper_state is not None:
+            state_dict = self._stepper_state.to_cpu().to_state_dict()
+            per_sample_keys = self._stepper_state.per_sample_state_keys()
             for key, tensor in state_dict.items():
                 var_name = f"{_STEPPER_PREFIX}{key}"
                 array = tensor.detach().cpu().numpy()
@@ -1220,15 +1203,15 @@ class GatheredBatchData:
                     ),
                 )
 
-        if self.labels is not None:
+        if self._labels is not None:
             data_arrays[_LABELS_VALUES_VAR] = xr.DataArray(
-                self.labels.tensor.detach().cpu().numpy(),
+                self._labels.tensor.detach().cpu().numpy(),
                 dims=[_SAMPLE_DIM, _LABEL_INDEX_DIM],
-                coords={_LABEL_INDEX_DIM: list(self.labels.names)},
+                coords={_LABEL_INDEX_DIM: list(self._labels.names)},
             )
 
-        if self.data_mask is not None:
-            for name, mask in self.data_mask.items():
+        if self._data_mask is not None:
+            for name, mask in self._data_mask.items():
                 data_arrays[f"{_DATA_MASK_PREFIX}{name}"] = xr.DataArray(
                     mask.detach().cpu().numpy(), dims=[_SAMPLE_DIM]
                 )
