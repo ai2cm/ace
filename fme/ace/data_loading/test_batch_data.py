@@ -1796,6 +1796,8 @@ class TestSelectSampleSlice:
 class TestDataParallelGather:
     def setup_method(self):
         dist = Distributed.get_instance()
+        if dist.total_data_parallel_ranks == 1:
+            pytest.skip("needs multiple data-parallel ranks")
         if dist.has_spatial_parallelism:
             pytest.skip("gather uses the global communicator, not spatial")
 
@@ -1812,10 +1814,10 @@ class TestDataParallelGather:
         result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
-            assert result.data["x"].shape[0] == dist.world_size
+            assert result._data["x"].shape[0] == dist.world_size
             for r in range(dist.world_size):
                 torch.testing.assert_close(
-                    result.data["x"][r], torch.full((1, 2, 3), float(r))
+                    result._data["x"][r], torch.full((1, 2, 3), float(r))
                 )
         else:
             assert result is None
@@ -1833,7 +1835,7 @@ class TestDataParallelGather:
         result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
-            assert result.time.sizes["sample"] == dist.world_size
+            assert result._time.sizes["sample"] == dist.world_size
 
     def test_gathers_labels(self):
         dist = Distributed.get_instance()
@@ -1849,8 +1851,8 @@ class TestDataParallelGather:
         result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
-            assert result.labels is not None
-            assert result.labels.tensor.shape[0] == dist.world_size
+            assert result._labels is not None
+            assert result._labels.tensor.shape[0] == dist.world_size
 
     def test_gathers_stepper_state(self):
         dist = Distributed.get_instance()
@@ -1870,9 +1872,9 @@ class TestDataParallelGather:
         result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
-            assert result.stepper_state is not None
-            assert result.stepper_state.corrector_state is not None
-            mass = result.stepper_state.corrector_state.global_dry_air_mass
+            assert result._stepper_state is not None
+            assert result._stepper_state._corrector_state is not None
+            mass = result._stepper_state._corrector_state.global_dry_air_mass
             assert mass is not None
             assert mass.shape[0] == dist.world_size
 
@@ -1888,9 +1890,9 @@ class TestDataParallelGather:
         result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
-            assert result.labels is None
-            assert result.stepper_state is None
-            assert result.data_mask is None
+            assert result._labels is None
+            assert result._stepper_state is None
+            assert result._data_mask is None
 
     def test_result_is_on_cpu(self):
         dist = Distributed.get_instance()
@@ -1905,7 +1907,7 @@ class TestDataParallelGather:
         result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
-            for tensor in result.data.values():
+            for tensor in result._data.values():
                 assert tensor.device == torch.device("cpu")
 
 
