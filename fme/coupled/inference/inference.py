@@ -23,7 +23,6 @@ from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -227,13 +226,6 @@ class InferenceConfig:
         self,
         data: InferenceGriddedData,
     ) -> CoupledPairedDataWriter:
-        dist = Distributed.get_instance()
-        self.data_writer.ocean.raise_if_unsupported_under_multi_gpu(
-            dist.total_data_parallel_ranks
-        )
-        self.data_writer.atmosphere.raise_if_unsupported_under_multi_gpu(
-            dist.total_data_parallel_ranks
-        )
         if self.data_writer.ocean.time_coarsen is not None:
             try:
                 self.data_writer.ocean.time_coarsen.validate(

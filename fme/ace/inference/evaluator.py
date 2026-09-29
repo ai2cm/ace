@@ -346,10 +346,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         # Validate divisibility (raises ValueError if not divisible).
         local_ic_range(n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks)
 
-        config.data_writer.raise_if_unsupported_under_multi_gpu(
-            dist.total_data_parallel_ranks
-        )
-
         stepper_config = config.load_stepper_config()
         logging.info("Initializing data loader")
         window_requirements = stepper_config.get_evaluation_window_data_requirements(

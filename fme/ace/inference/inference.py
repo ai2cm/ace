@@ -376,10 +376,6 @@ def run_inference_from_config(config: InferenceConfig):
         # Validate divisibility (raises ValueError if not divisible).
         local_ic_range(n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks)
 
-        config.data_writer.raise_if_unsupported_under_multi_gpu(
-            dist.total_data_parallel_ranks
-        )
-
         logging.info("Initializing forcing data loader")
         data = get_forcing_data(
             config=config.forcing_loader,
