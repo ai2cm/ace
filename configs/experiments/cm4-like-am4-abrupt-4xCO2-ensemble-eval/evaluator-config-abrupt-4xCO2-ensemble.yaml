@@ -17,9 +17,9 @@ loader:
       - data_path: /climate-default
         file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
         engine: zarr
-    overwrite:
-      constant:
-        global_mean_co2: 1137.048
+        overwrite:
+          constant:
+            carbon_dioxide: 1137.048
   num_data_workers: 4
   start_indices:
     times:
