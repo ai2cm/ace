@@ -1,8 +1,13 @@
+import pytest
 import torch
 
 from fme.core.corrector.state import CorrectorState
 from fme.core.random_state import RandomState
-from fme.core.stepper_state import GatheredStepperState, StepperState
+from fme.core.stepper_state import (
+    GatheredStepperState,
+    StepperState,
+    UngatheredStateDictError,
+)
 
 
 def _make_random_state(seed: int) -> RandomState:
@@ -44,10 +49,42 @@ class TestGatheredStepperState:
         assert gathered.get_for_rank(0, n_ranks=2).random_state is rs0
         assert gathered.get_for_rank(1, n_ranks=2).random_state is rs1
 
+    def test_scatter_random_state_keeps_full_corrector(self):
+        corrector = CorrectorState(
+            global_dry_air_mass=torch.arange(4).reshape(4, 1, 1).float()
+        )
+        rs0 = _make_random_state(10)
+        rs1 = _make_random_state(20)
+        gathered = GatheredStepperState(
+            corrector_state=corrector,
+            per_rank_random_states=[rs0, rs1],
+        )
+        result = gathered.scatter_random_state(rank=0)
+        assert result.corrector_state is corrector
+        assert result.random_state is rs0
+
+        result1 = gathered.scatter_random_state(rank=1)
+        assert result1.corrector_state is corrector
+        assert result1.random_state is rs1
+
+    def test_from_per_rank_states(self):
+        s0 = _make_stepper_state(n_samples=2, seed=10)
+        s1 = _make_stepper_state(n_samples=2, seed=20)
+        gathered = GatheredStepperState.from_per_rank_states([s0, s1])
+        assert gathered.n_ranks == 2
+        result0 = gathered.get_for_rank(0, n_ranks=2)
+        result1 = gathered.get_for_rank(1, n_ranks=2)
+        assert result0.random_state is s0.random_state
+        assert result1.random_state is s1.random_state
+        assert result0.corrector_state is not None
+        torch.testing.assert_close(
+            result0.corrector_state.global_dry_air_mass,
+            s0.corrector_state.global_dry_air_mass,
+        )
+
     def test_round_trip_state_dict(self):
         rs0 = _make_random_state(10)
         rs1 = _make_random_state(20)
-        # Advance rs0 so the two states differ.
         torch.randn(5, generator=rs0.generator)
 
         gathered = GatheredStepperState(
@@ -61,30 +98,21 @@ class TestGatheredStepperState:
         restored = GatheredStepperState.from_state_dict(state_dict)
 
         assert restored.n_ranks == 2
-        assert restored.corrector_state is not None
-        torch.testing.assert_close(
-            restored.corrector_state.global_dry_air_mass,
-            gathered.corrector_state.global_dry_air_mass,
-        )
         for i in range(2):
-            assert restored.per_rank_random_states is not None
-            original_state = gathered.per_rank_random_states[i].generator.get_state()
-            restored_state = restored.per_rank_random_states[i].generator.get_state()
-            assert torch.equal(original_state, restored_state)
+            original = gathered.get_for_rank(i, n_ranks=2)
+            restored_rank = restored.get_for_rank(i, n_ranks=2)
+            assert original.random_state is not None
+            assert restored_rank.random_state is not None
+            assert torch.equal(
+                original.random_state.generator.get_state(),
+                restored_rank.random_state.generator.get_state(),
+            )
 
-    def test_from_state_dict_legacy_single_generator(self):
-        """A StepperState state dict (single generator) round-trips through
-        GatheredStepperState as a 1-rank list."""
+    def test_from_state_dict_raises_on_ungathered(self):
         stepper = _make_stepper_state(n_samples=2, seed=42)
         state_dict = stepper.to_state_dict()
-
-        gathered = GatheredStepperState.from_state_dict(state_dict)
-        assert gathered.n_ranks == 1
-        assert gathered.per_rank_random_states is not None
-
-        original_gen_state = stepper.random_state.generator.get_state()
-        restored_gen_state = gathered.per_rank_random_states[0].generator.get_state()
-        assert torch.equal(original_gen_state, restored_gen_state)
+        with pytest.raises(UngatheredStateDictError):
+            GatheredStepperState.from_state_dict(state_dict)
 
     def test_n_ranks_marker_in_state_dict(self):
         gathered = GatheredStepperState(
@@ -108,5 +136,6 @@ class TestGatheredStepperState:
             per_rank_random_states=[_make_random_state(0)],
         )
         cpu_gathered = gathered.to_cpu()
-        assert cpu_gathered.corrector_state is not None
-        assert cpu_gathered.corrector_state.global_dry_air_mass.device.type == "cpu"
+        result = cpu_gathered.get_for_rank(0, n_ranks=1)
+        assert result.corrector_state is not None
+        assert result.corrector_state.global_dry_air_mass.device.type == "cpu"
