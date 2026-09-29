@@ -97,7 +97,7 @@ class DataWriterConfig:
             or bool(self.files)
         )
 
-    def raise_if_unsupported_under_multi_gpu(self, n_ranks: int) -> None:
+    def _raise_if_unsupported_under_multi_gpu(self, n_ranks: int) -> None:
         """Raise if per-timestep writers are enabled under multi-GPU."""
         if n_ranks > 1 and self.has_subwriters_enabled:
             raise ValueError(
@@ -133,7 +133,7 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
         dist = Distributed.get_instance()
-        self.raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
+        self._raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
         writers: list[PairedSubwriter] = []
         if self.save_prediction_files:
             raw_writer: PairedSubwriter = PairedRawDataWriter(
@@ -227,7 +227,7 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
         dist = Distributed.get_instance()
-        self.raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
+        self._raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
         writers: list[Subwriter] = []
         # TODO: handle writing HEALPix data
         # https://github.com/ai2cm/full-model/issues/1089
