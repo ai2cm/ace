@@ -30,8 +30,8 @@ SOFTWARE.
 import contextlib
 import dataclasses
 import logging
-from collections.abc import Iterable, Iterator
-from typing import Protocol
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any, Protocol
 
 import torch
 from torch import nn
@@ -285,6 +285,48 @@ class EMATracker:
         else:
             logging.warning("EMA params not found in state and will not be restored.")
         return ema
+
+
+def load_ema_params_if_available(
+    checkpoint: Mapping[str, Any], model: HasNamedParameters
+) -> bool:
+    """Overwrite a model's parameters with the EMA weights in a training checkpoint.
+
+    Only checkpoints saved with their optimization state (e.g. ``ckpt.tar``)
+    contain EMA weights. Other checkpoints (e.g. ``best_ckpt.tar``,
+    ``ema_ckpt_XXXX.tar``) store no EMA weights, but may already hold EMA
+    weights as their stepper weights if they were saved with EMA applied.
+
+    Parameters the EMA does not track (e.g. frozen parameters) keep their
+    current values.
+
+    Args:
+        checkpoint: A checkpoint as saved by the ``Trainer``.
+        model: The model built from the checkpoint's stepper state.
+
+    Returns:
+        Whether EMA weights were found and copied into the model.
+    """
+    ema_state = checkpoint.get("ema", {})
+    if "ema_params" not in ema_state:
+        logging.info(
+            "Checkpoint does not contain EMA weights, using the stepper weights."
+        )
+        return False
+    parameters = dict(model.named_parameters())
+    ema_params = ema_state["ema_params"]
+    with torch.no_grad():
+        for name, ema_name in ema_state["module_name_to_ema_name"].items():
+            if name not in parameters:
+                raise ValueError(
+                    f"EMA-tracked parameter {name} is not a parameter of the model."
+                )
+            parameters[name].copy_(ema_params[ema_name])
+    logging.info(
+        "Using EMA weights from checkpoint "
+        f"(num_updates={int(ema_state['num_updates'])})."
+    )
+    return True
 
 
 def _load_finetune_ema_state(ema: EMATracker, checkpoint_path: str):
