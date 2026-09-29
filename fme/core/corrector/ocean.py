@@ -7,6 +7,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    EARTH_RADIUS,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
@@ -18,17 +19,23 @@ from fme.core.corrector.registry import (
 )
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
+
+_SPHERE_AREA_M2 = 4 * torch.pi * EARTH_RADIUS**2
 
 
 class AreaWeightedMean(Protocol):
     def __call__(
         self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
     ) -> torch.Tensor: ...
+
+
+AreaWeightedSum = AreaWeightedMean  # same call signature
 
 
 @dataclasses.dataclass
@@ -109,6 +116,43 @@ class OceanHeatContentBudgetConfig:
 
     method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
+
+
+@dataclasses.dataclass
+class OceanSaltContentBudgetConfig:
+    """Configuration for ocean salt content budget correction.
+
+    Global ocean salt content has no surface flux source: precipitation,
+    evaporation and runoff move water, not salt. The only exchange is with the
+    sea-ice reservoir, whose volume the model predicts, so the expected change
+    is computed from the model's own outputs. The ice term is the change in
+    total sea ice volume, so the slope does not depend on the grid. Cells
+    outside the dataset's mask for ``sea_ice_volume`` (if any) are left out of
+    the ice term: the stepper's output masking discards the prediction there
+    after every step, so it is never part of the evolving state.
+
+    Parameters:
+        method: Method to use for salt budget correction. The available option
+            is "scaled_salinity", which enforces the budget by scaling the
+            predicted salinity by a vertically and horizontally uniform
+            correction factor.
+        ice_volume_salt_slope_psu: Empirical slope of the change in total
+            column salt content (psu m^3) against the change in total sea ice
+            volume (m^3), in psu. Calibrate against the target data; set to 0
+            to hold salt content fixed.
+        constant_unaccounted_salting: Area-weighted global mean rate of column
+            salt content change, in psu m / s, added at every step. This can be
+            useful for correcting a residual in the salt budget of target data.
+        use_float64: Compute the global sums, expected change and correction
+            ratio in float64 instead of the data's dtype. The expected change is
+            only a couple of float32 epsilons of the salt content, so in float32
+            it is applied with a ~25-30% error per step.
+    """
+
+    method: Literal["scaled_salinity"]
+    ice_volume_salt_slope_psu: float = 0.0
+    constant_unaccounted_salting: float = 0.0
+    use_float64: bool = False
 
 
 @dataclasses.dataclass
@@ -241,6 +285,51 @@ class OceanHeatContentCorrection:
         return corrected, corrector_state
 
 
+@dataclasses.dataclass
+class OceanSaltContentCorrection:
+    """Correction that conserves ocean salt content."""
+
+    area_weighted_sum: AreaWeightedSum
+    vertical_coordinate: HasOceanDepthIntegral | None
+    timestep_seconds: float
+    method: Literal["scaled_salinity"]
+    ice_volume_salt_slope_psu: float
+    unaccounted_salting: float
+    sea_ice_volume_valid: torch.Tensor | None
+    use_float64: bool
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the salinity at every depth level).
+        """
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "Ocean salt content correction is turned on, but no vertical "
+                "coordinate is available."
+            )
+        corrected = _force_conserve_ocean_salt_content(
+            input_data,
+            gen_data,
+            self.area_weighted_sum,
+            self.vertical_coordinate,
+            self.timestep_seconds,
+            self.method,
+            self.ice_volume_salt_slope_psu,
+            self.unaccounted_salting,
+            self.sea_ice_volume_valid,
+            self.use_float64,
+        )
+        return corrected, corrector_state
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -256,6 +345,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             flux correction to the generated hfds.
         ocean_heat_content_correction: Optional configuration for an ocean heat
             content correction.
+        ocean_salt_content_correction: Optional configuration for an ocean salt
+            content correction.
         keep_gradient_through_clamps: If True, apply the corrector's hard clamps
             (the ``force_positive_names`` clamp and the
             ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
@@ -268,6 +359,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
 
     @classmethod
@@ -298,10 +390,21 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
+        sea_ice_volume_mask = None
+        if self.ocean_salt_content_correction is not None:
+            try:
+                sea_ice_volume_mask = (
+                    dataset_info.spatial_mask_provider.get_mask_tensor_for(
+                        "sea_ice_volume"
+                    )
+                )
+            except MissingDatasetInfo:
+                pass
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
+            sea_ice_volume_mask=sea_ice_volume_mask,
         )
 
     def _build(
@@ -309,6 +412,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
+        sea_ice_volume_mask: torch.Tensor | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -339,6 +443,27 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                )
+            )
+        if self.ocean_salt_content_correction is not None:
+            salt_config = self.ocean_salt_content_correction
+            if sea_ice_volume_mask is None:
+                sea_ice_volume_valid = None
+            else:
+                # rounded as the stepper's output masking does, so the two agree
+                sea_ice_volume_valid = (
+                    torch.round(sea_ice_volume_mask.to(get_device())) != 0
+                )
+            corrections.append(
+                OceanSaltContentCorrection(
+                    gridded_operations.area_weighted_sum,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    salt_config.method,
+                    salt_config.ice_volume_salt_slope_psu,
+                    salt_config.constant_unaccounted_salting,
+                    sea_ice_volume_valid,
+                    salt_config.use_float64,
                 )
             )
         return OceanCorrector(corrections)
@@ -490,4 +615,77 @@ def _force_conserve_ocean_heat_content(
         out["sst"] = (  # assuming sst in Kelvin
             gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
         ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    return out
+
+
+def _force_conserve_ocean_salt_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    area_weighted_sum: AreaWeightedSum,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    method: Literal["scaled_salinity"] = "scaled_salinity",
+    ice_volume_salt_slope_psu: float = 0.0,
+    unaccounted_salting: float = 0.0,
+    sea_ice_volume_valid: torch.Tensor | None = None,
+    use_float64: bool = False,
+) -> TensorDict:
+    if method != "scaled_salinity":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean salt content conservation"
+        )
+    input = OceanData(input_data, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
+    dtype = torch.float64 if use_float64 else gen.data["so_0"].dtype
+
+    def global_total(data: torch.Tensor) -> torch.Tensor:
+        # area weights are cell areas as a fraction of the sphere, so scaling
+        # the weighted sum by 4 pi R^2 gives the total over the ocean
+        weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
+        return weighted_sum * _SPHERE_AREA_M2
+
+    def global_salt_content(data: OceanData) -> torch.Tensor:
+        column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
+        return global_total(column)  # psu m^3
+
+    global_gen_salt_content = global_salt_content(gen)
+    global_input_salt_content = global_salt_content(input)
+    ocean_area = global_total(torch.ones_like(gen.data["so_0"], dtype=dtype))  # m^2
+    expected_change = unaccounted_salting * timestep_seconds * ocean_area
+    if ice_volume_salt_slope_psu != 0.0:
+        try:
+            gen_ice_volume = gen.sea_ice_volume.to(dtype)
+            input_ice_volume = input.sea_ice_volume.to(dtype)
+        except KeyError as err:
+            raise ValueError(
+                "sea_ice_volume is required to force ocean salt content "
+                "conservation with a nonzero ice_volume_salt_slope_psu; set it to "
+                "0 to hold salt content fixed."
+            ) from err
+        ice_volume_change = gen_ice_volume - input_ice_volume
+        if sea_ice_volume_valid is not None:
+            ice_volume_change = torch.where(
+                sea_ice_volume_valid,
+                ice_volume_change,
+                torch.zeros_like(ice_volume_change),
+            )
+        # sea_ice_volume is per cell (m^3), so its total is a plain sum. Under
+        # spatial parallelism this sum would need a spatial_reduce_sum across
+        # ranks, and sea_ice_volume_valid would need slicing to the local chunk.
+        total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
+        expected_change = (
+            expected_change + ice_volume_salt_slope_psu * total_ice_volume_change
+        )
+    salt_content_correction_ratio = (
+        global_input_salt_content + expected_change
+    ) / global_gen_salt_content
+    # apply same salinity correction to all vertical layers
+    out: TensorDict = {}
+    n_levels = gen.sea_water_salinity.shape[-1]
+    for k in range(n_levels):
+        name = f"so_{k}"
+        salinity = gen.data[name]
+        out[name] = (salinity.to(dtype) * salt_content_correction_ratio).to(
+            salinity.dtype
+        )
     return out
