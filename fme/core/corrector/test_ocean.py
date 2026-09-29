@@ -656,10 +656,13 @@ def test_ocean_salt_content_correction():
 
 
 def test_ocean_salt_content_correction_ignores_ice_outside_mask():
-    # The step input is filled with 0 outside the sea_ice_volume mask but the
-    # prediction is not, so predicted ice there must not count as an ice change.
+    # The stepper's output masking leaves sea_ice_volume NaN outside its mask
+    # (or input masking fills it), but the prediction there is unconstrained, so
+    # neither must count as an ice change.
     torch.manual_seed(0)
     ocean_mask, ice_mask = _salt_ocean_and_ice_masks()
+    # a fractional mask value, which the output masking rounds to outside
+    ice_mask[1, 0] = 0.4
     config = OceanCorrectorConfig(
         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
             method="scaled_salinity", ice_volume_salt_slope_psu=40.0
@@ -668,20 +671,21 @@ def test_ocean_salt_content_correction_ignores_ice_outside_mask():
     corrector = config.get_corrector(
         _salt_dataset_info(ocean_mask, (10.0, 20.0), ice_mask)
     )
-    ice_mask = ice_mask.to(DEVICE)
+    valid = torch.round(ice_mask.to(DEVICE)) != 0
     input_data = {
         "so_0": 34.0 + torch.rand(ocean_mask.shape, device=DEVICE),
         "so_1": 34.0 + torch.rand(ocean_mask.shape, device=DEVICE),
-        "sea_ice_volume": torch.rand(ocean_mask.shape, device=DEVICE) * 1e10 * ice_mask,
+        "sea_ice_volume": (torch.rand(ocean_mask.shape, device=DEVICE) * 1e10).where(
+            valid, float("nan")
+        ),
     }
-    gen_ice = torch.rand(ocean_mask.shape, device=DEVICE) * 1e10 * ice_mask
+    gen_ice = torch.rand(ocean_mask.shape, device=DEVICE) * 1e10 * valid
 
     def corrected_so_0(sea_ice_volume):
         gen_data = dict(input_data, sea_ice_volume=sea_ice_volume)
         return corrector(input_data, gen_data, {}, None).corrected["so_0"]
 
-    outside_mask_ice = torch.rand(ocean_mask.shape, device=DEVICE) * 1e12
-    outside_mask_ice = outside_mask_ice * (1 - ice_mask)
+    outside_mask_ice = torch.rand(ocean_mask.shape, device=DEVICE) * 1e12 * ~valid
     torch.testing.assert_close(
         corrected_so_0(gen_ice + outside_mask_ice), corrected_so_0(gen_ice)
     )

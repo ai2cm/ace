@@ -125,7 +125,9 @@ class OceanSaltContentBudgetConfig:
     This constrains the salinity budget through the exchange with the sea-ice
     reservoir, whose volume the model predicts. This represents the expected
     change purely from the model's own outputs. We fit the change to the total
-    sea ice volume, so the slope does not depend on the grid.
+    sea ice volume, so the slope does not depend on the grid. Assumes a global
+    lat-lon grid: absolute totals are formed as the area-weighted sum times
+    4 pi R**2, which requires area weights normalized over the whole sphere.
 
     Parameters:
         method: Method to use for salt budget correction. The available option
@@ -143,13 +145,14 @@ class OceanSaltContentBudgetConfig:
         use_float64: Compute the global sums, expected change and correction
             ratio in float64 instead of the data's dtype. The expected change is
             only a couple of float32 epsilons of the salt content, so in float32
-            it is applied with a ~25-30% error per step.
+            it is applied with a ~25-30% error per step. Defaults to True for
+            that reason.
     """
 
     method: Literal["scaled_salinity"]
     ice_volume_salt_slope_psu: float = 0.0
     constant_unaccounted_salting: float = 0.0
-    use_float64: bool = False
+    use_float64: bool = True
 
 
 @dataclasses.dataclass
