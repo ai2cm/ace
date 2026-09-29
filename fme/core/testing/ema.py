@@ -4,7 +4,7 @@ from typing import Any, Protocol
 import torch
 from torch import nn
 
-from fme.core.ema import EMATracker
+from fme.core.ema import EMA_CHECKPOINT_KEY, EMATracker
 
 
 class ScaledIdentity(nn.Module):
@@ -52,7 +52,9 @@ def save_checkpoint_with_ema(
     with ema.applied_params(modules):
         ema_weights = _named_parameters(modules)
     stepper_weights = _named_parameters(modules)
-    torch.save({"stepper": stepper.get_state(), "ema": ema.get_state()}, path)
+    torch.save(
+        {"stepper": stepper.get_state(), EMA_CHECKPOINT_KEY: ema.get_state()}, path
+    )
     return stepper_weights, ema_weights
 
 
