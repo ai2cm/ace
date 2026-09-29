@@ -1636,3 +1636,74 @@ def test_paired_data_new_on_cpu_accepts_step_diagnostics():
         step_diagnostics=diagnostics,
     )
     assert paired.step_diagnostics is diagnostics
+
+
+class TestSelectSampleSlice:
+    def test_basic_slicing(self):
+        batch = _batch_for_serialization(
+            "corrector", with_labels=True, with_data_mask=False, n_samples=4
+        )
+        sliced = batch.select_sample_slice(slice(1, 3))
+        assert sliced.data["prog"].shape[0] == 2
+        torch.testing.assert_close(sliced.data["prog"], batch.data["prog"][1:3])
+        assert sliced.time.sizes["sample"] == 2
+
+    def test_preserves_labels(self):
+        batch = _batch_for_serialization(
+            "none", with_labels=True, with_data_mask=False, n_samples=4
+        )
+        sliced = batch.select_sample_slice(slice(0, 2))
+        assert batch.labels is not None
+        assert sliced.labels is not None
+        assert sliced.labels.tensor.shape[0] == 2
+        torch.testing.assert_close(sliced.labels.tensor, batch.labels.tensor[:2])
+
+    def test_none_labels_stays_none(self):
+        batch = _batch_for_serialization(
+            "none", with_labels=False, with_data_mask=False, n_samples=4
+        )
+        sliced = batch.select_sample_slice(slice(0, 2))
+        assert sliced.labels is None
+
+    def test_preserves_stepper_state(self):
+        batch = _batch_for_serialization(
+            "corrector", with_labels=False, with_data_mask=False, n_samples=4
+        )
+        sliced = batch.select_sample_slice(slice(2, 4))
+        assert batch.stepper_state is not None
+        assert batch.stepper_state.corrector_state is not None
+        assert batch.stepper_state.corrector_state.global_dry_air_mass is not None
+        assert sliced.stepper_state is not None
+        assert sliced.stepper_state.corrector_state is not None
+        torch.testing.assert_close(
+            sliced.stepper_state.corrector_state.global_dry_air_mass,
+            batch.stepper_state.corrector_state.global_dry_air_mass[2:4],
+        )
+
+    def test_preserves_data_mask(self):
+        batch = _batch_for_serialization(
+            "none", with_labels=False, with_data_mask=True, n_samples=2
+        )
+        sliced = batch.select_sample_slice(slice(0, 1))
+        assert sliced.data_mask is not None
+        assert sliced.data_mask["prog"].shape[0] == 1
+
+    def test_preserves_horizontal_dims_and_epoch(self):
+        batch = _batch_for_serialization(
+            "none", with_labels=False, with_data_mask=False, n_samples=4
+        )
+        sliced = batch.select_sample_slice(slice(0, 1))
+        assert sliced.horizontal_dims == batch.horizontal_dims
+        assert sliced.epoch == batch.epoch
+
+    def test_covers_all_fields(self):
+        """Fail if a new field is added to BatchData but not handled by
+        select_sample_slice."""
+        actual_fields = {f.name for f in dataclasses.fields(BatchData)}
+        covered = _METADATA_FIELDS | _NON_METADATA_FIELDS
+        unknown = actual_fields - covered
+        assert not unknown, (
+            f"BatchData has new fields {unknown} not covered by "
+            f"TestSelectSampleSlice. Update select_sample_slice and add a "
+            f"test for each new field."
+        )
