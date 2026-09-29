@@ -1,7 +1,8 @@
 #!/bin/bash
 # Usage: bash run.sh <cluster> [<cluster> ...]   e.g. bash run.sh ai2/phobos ai2/jupiter
-# Raw write throughput to the weka mount and to the node's local disk, one job per
-# cluster, no GPU, no W&B. Results are in the job log.
+# Raw write throughput to the weka mount and to the node's local disk, then one
+# benchmark window of zarr shards with the default and zarrs codec pipelines with
+# CPU accounting. One job per cluster, no GPU, no W&B. Results are in the job log.
 
 set -e
 
@@ -30,7 +31,8 @@ run_cluster() {
         -- bash -c "
             python3 $SCRIPT_PATH/write_test.py $WEKA_ROOT --label weka &&
             python3 $SCRIPT_PATH/write_test.py $WEKA_ROOT --label weka-fsync --fsync --streams 1 4 &&
-            python3 $SCRIPT_PATH/write_test.py /tmp/weka-raw-write-test --label local --gb-per-config 3
+            python3 $SCRIPT_PATH/write_test.py /tmp/weka-raw-write-test --label local --gb-per-config 3 &&
+            python3 $SCRIPT_PATH/zarr_write_cpu_test.py $WEKA_ROOT /tmp/weka-raw-write-test
         "
 }
 
