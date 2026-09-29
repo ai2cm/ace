@@ -393,5 +393,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
             )
             merged_xarray_datasets.append(current_dataset)
             config_counter += 1
-        merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)
+        merged_datasets = MergedXarrayDataset(
+            datasets=merged_xarray_datasets, names=requirements.names
+        )
         return merged_datasets
