@@ -3,7 +3,7 @@ import pytest
 import torch
 from torch import nn
 
-from fme.core.weight_ops import CopyWeightsConfig, overwrite_weights
+from fme.core.weight_ops import CopyWeightsConfig, overwrite_weights, prefix_submodule
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -160,3 +160,72 @@ def test_apply_copy_weights_config(
                     param.detach().cpu().numpy(),
                     original_dest_model_state[name].detach().cpu().numpy(),
                 )
+
+
+def test_prefix_submodule_inserts_after_the_wrapper_prefix():
+    """The leading "module." names the DDP/DummyWrapper layer, not a submodule.
+
+    Prefixing in front of it would produce "conditional_model.module.…" and
+    match nothing, so the new name goes inside it.
+    """
+    renamed = prefix_submodule(
+        {"module.layers.0.weight": torch.zeros(1)}, "conditional_model"
+    )
+    assert list(renamed) == ["module.conditional_model.layers.0.weight"]
+
+
+def test_prefix_submodule_without_wrapper_prefix():
+    renamed = prefix_submodule({"layers.0.weight": torch.zeros(1)}, "wrapped")
+    assert list(renamed) == ["wrapped.layers.0.weight"]
+
+
+def test_prefix_submodule_accepts_a_dotted_submodule_name():
+    """A submodule more than one level down is named by its dotted path."""
+    renamed = prefix_submodule(
+        {
+            "module.layers.0.weight": torch.zeros(1),
+            "layers.0.bias": torch.zeros(1),
+        },
+        "outer.inner",
+    )
+    assert set(renamed) == {
+        "module.outer.inner.layers.0.weight",
+        "outer.inner.layers.0.bias",
+    }
+
+
+def test_missing_parameters_message_lists_every_candidate_submodule():
+    """Two submodules can satisfy the subset test, so neither is presented as
+    the answer."""
+
+    class Inner(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(2, 2)
+
+    class TwoWayWrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.first = Inner()
+            self.second = Inner()
+
+    with pytest.raises(ValueError, match="'first' or 'second'"):
+        overwrite_weights(Inner().state_dict(), TwoWayWrapper())
+
+
+def test_overwrite_weights_error_names_the_submodule_that_would_fix_it():
+    class Inner(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(2, 2)
+
+    class Wrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conditional_model = Inner()
+
+    from_state = Inner().state_dict()
+    with pytest.raises(ValueError, match="weights_submodule"):
+        overwrite_weights(from_state, Wrapper())
+    with pytest.raises(ValueError, match="conditional_model"):
+        overwrite_weights(from_state, Wrapper())
