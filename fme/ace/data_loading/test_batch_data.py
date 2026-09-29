@@ -1809,6 +1809,22 @@ class TestDataParallelGather:
             assert result.stepper_state is None
             assert result.data_mask is None
 
+    def test_result_is_on_cpu(self):
+        dist = Distributed.get_instance()
+        rank = dist.rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.full((1, 1, 2, 3), float(rank))},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1 + rank)]]),
+                dims=["sample", "time"],
+            ),
+        )
+        result = local.data_parallel_gather(dist)
+        if dist.is_root():
+            assert result is not None
+            for tensor in result.data.values():
+                assert tensor.device == torch.device("cpu")
+
 
 def test_data_parallel_gather_covers_all_fields():
     """Fail if a new field is added to BatchData but not handled by

@@ -227,6 +227,13 @@ class InferenceConfig:
         self,
         data: InferenceGriddedData,
     ) -> CoupledPairedDataWriter:
+        dist = Distributed.get_instance()
+        self.data_writer.ocean.raise_if_unsupported_under_multi_gpu(
+            dist.total_data_parallel_ranks
+        )
+        self.data_writer.atmosphere.raise_if_unsupported_under_multi_gpu(
+            dist.total_data_parallel_ranks
+        )
         if self.data_writer.ocean.time_coarsen is not None:
             try:
                 self.data_writer.ocean.time_coarsen.validate(
@@ -380,13 +387,6 @@ def run_inference_from_config(config: InferenceConfig):
     )
     stepper = config.load_stepper()
     stepper.set_eval()
-    dist = Distributed.get_instance()
-    config.data_writer.ocean.raise_if_unsupported_under_multi_gpu(
-        dist.total_data_parallel_ranks
-    )
-    config.data_writer.atmosphere.raise_if_unsupported_under_multi_gpu(
-        dist.total_data_parallel_ranks
-    )
     logging.info("Initializing forcing data loader")
     data = get_forcing_data(
         config=config.forcing_loader,
