@@ -920,8 +920,10 @@ class BatchData:
 
         device = get_device()
         gathered_data: dict[str, torch.Tensor] = {}
-        for name, tensor in self.data.items():
-            rank_tensors = dist.gather(tensor.to(device).contiguous())
+        # Sort keys so every rank calls dist.gather in the same order;
+        # dict iteration order can differ across processes.
+        for name in sorted(self.data):
+            rank_tensors = dist.gather(self.data[name].to(device).contiguous())
             if dist.is_root():
                 if rank_tensors is None:
                     raise RuntimeError("dist.gather returned None on root")
