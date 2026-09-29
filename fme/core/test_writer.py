@@ -337,7 +337,11 @@ def _spy_on(method):
 
 def test_ZarrWriter_uses_zarrs_pipeline_for_local_store(tmp_path):
     """The writer's I/O must go through zarrs, not silently fall back to zarr's
-    default pipeline. Strict mode makes zarrs raise instead of falling back."""
+    default pipeline. The spies prove zarr built the zarrs pipeline at all: for a
+    store zarrs does not support, zarr substitutes its default pipeline without a
+    warning, even in strict mode. Strict mode covers the other fallback, where the
+    zarrs pipeline hands unsupported metadata or dtypes to its own Python
+    implementation instead of raising."""
     path = os.path.join(tmp_path, "test.zarr")
     writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
     data = np.random.rand(2, NLAT, NLON).astype("f4")
