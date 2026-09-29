@@ -10,6 +10,8 @@ The Stepper does not inspect the contents of sub-states; they are opaque
 payloads owned by their respective components.
 """
 
+from __future__ import annotations
+
 import dataclasses
 
 import torch
@@ -155,10 +157,169 @@ class StepperState:
         return keys
 
 
+@dataclasses.dataclass
+class GatheredStepperState:
+    """Stepper state after a data-parallel gather.
+
+    The corrector state is concatenated across ranks along the sample
+    dimension (the same layout as a serial run), while each rank's
+    random state is preserved separately so it can be scattered back
+    on restart.
+
+    Parameters:
+        corrector_state: Concatenated per-sample corrector state, or
+            ``None`` when no corrector state was present on any rank.
+        per_rank_random_states: One ``RandomState`` per data-parallel
+            rank, or ``None`` when no rank carried a random state.
+    """
+
+    corrector_state: CorrectorState | None = None
+    per_rank_random_states: list[RandomState] | None = None
+
+    @property
+    def random_state(self) -> RandomState | None:
+        """The root rank's random state, for compatibility checks."""
+        if self.per_rank_random_states is not None:
+            return self.per_rank_random_states[0]
+        return None
+
+    @property
+    def n_ranks(self) -> int:
+        if self.per_rank_random_states is not None:
+            return len(self.per_rank_random_states)
+        return 1
+
+    def to_cpu(self) -> GatheredStepperState:
+        return GatheredStepperState(
+            corrector_state=(
+                None
+                if self.corrector_state is None
+                else self.corrector_state.to_cpu()
+            ),
+            per_rank_random_states=(
+                [rs.to_cpu() for rs in self.per_rank_random_states]
+                if self.per_rank_random_states is not None
+                else None
+            ),
+        )
+
+    def sample_dim_size(self) -> int | None:
+        if self.corrector_state is not None:
+            return self.corrector_state.sample_dim_size()
+        return None
+
+    def get_for_rank(self, rank: int, n_ranks: int) -> StepperState:
+        """Extract the ``StepperState`` for a single data-parallel rank.
+
+        The corrector state is sliced to the rank's contiguous sample
+        shard, and the rank's own random state is selected from the
+        per-rank list.
+
+        Args:
+            rank: Data-parallel rank index.
+            n_ranks: Total number of data-parallel ranks (needed to
+                compute the corrector slice).
+        """
+        if self.corrector_state is not None:
+            sample_size = self.corrector_state.sample_dim_size()
+            if sample_size is not None:
+                shard = sample_size // n_ranks
+                corrector = self.corrector_state.select_sample_slice(
+                    slice(rank * shard, (rank + 1) * shard)
+                )
+            else:
+                corrector = self.corrector_state
+        else:
+            corrector = None
+
+        if self.per_rank_random_states is not None:
+            random_state = self.per_rank_random_states[rank]
+        else:
+            random_state = None
+
+        return StepperState(
+            corrector_state=corrector,
+            random_state=random_state,
+        )
+
+    def to_state_dict(self) -> dict[str, torch.Tensor]:
+        """Serialize for a restart file.
+
+        The corrector state uses the same ``corrector_state.`` namespace
+        as ``StepperState``. Per-rank random states are stored under
+        ``random_state.rank_<n>.generator_state``, with an
+        ``n_ranks`` marker so the reader knows how many to expect.
+        """
+        result: dict[str, torch.Tensor] = {}
+        if self.corrector_state is not None:
+            result["corrector_state.present"] = torch.tensor(True)
+            for key, value in self.corrector_state.to_state_dict().items():
+                result[f"corrector_state.{key}"] = value
+        if self.per_rank_random_states is not None:
+            result["random_state.present"] = torch.tensor(True)
+            result["random_state.n_ranks"] = torch.tensor(
+                len(self.per_rank_random_states)
+            )
+            for i, rs in enumerate(self.per_rank_random_states):
+                for key, value in rs.to_state_dict().items():
+                    result[f"random_state.rank_{i}.{key}"] = value
+        return result
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> GatheredStepperState:
+        """Rebuild from ``to_state_dict``.
+
+        Also accepts a legacy ``StepperState`` state dict (single
+        ``random_state.generator_state`` without ``n_ranks``): the
+        single generator is stored as a 1-rank list so the scatter
+        path still works.
+        """
+        corrector_state: CorrectorState | None = None
+        per_rank_random_states: list[RandomState] | None = None
+
+        if "corrector_state.present" in state:
+            corrector_state = CorrectorState.from_state_dict(
+                _sub_state_dict(state, "corrector_state")
+            )
+
+        if "random_state.present" in state:
+            if "random_state.n_ranks" in state:
+                n_ranks = int(state["random_state.n_ranks"].item())
+                per_rank_random_states = []
+                for i in range(n_ranks):
+                    rank_state = _sub_state_dict(state, f"random_state.rank_{i}")
+                    per_rank_random_states.append(
+                        RandomState.from_state_dict(rank_state)
+                    )
+            else:
+                # Legacy single-generator format.
+                rs = RandomState.from_state_dict(
+                    _sub_state_dict(state, "random_state")
+                )
+                per_rank_random_states = [rs]
+
+        return cls(
+            corrector_state=corrector_state,
+            per_rank_random_states=per_rank_random_states,
+        )
+
+    @staticmethod
+    def per_sample_state_keys() -> set[str]:
+        """Keys whose tensors carry a leading per-sample dimension.
+
+        Per-rank random states have no per-sample dimension (they are
+        per-rank, not per-sample), so only corrector keys appear here.
+        """
+        return {
+            f"corrector_state.{key}"
+            for key in CorrectorState.per_sample_state_keys()
+        }
+
+
 def _sub_state_dict(
     state: dict[str, torch.Tensor], name: str
 ) -> dict[str, torch.Tensor]:
-    """Extract a sub-state's fields from a namespaced ``StepperState`` state dict,
+    """Extract a sub-state's fields from a namespaced state dict,
     stripping the ``<name>.`` prefix and dropping the ``<name>.present`` marker.
     """
     prefix = f"{name}."
