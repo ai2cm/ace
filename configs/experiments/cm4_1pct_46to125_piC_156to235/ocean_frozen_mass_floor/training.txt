@@ -1,0 +1,8 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+# ocean_frozen_mass_floor: ocean_wide with frozen_mass for sea_ice_volume, the
+# floor corrector, runoff_and_calving, and the ocean_wide_ohc_clip_cde1
+# overrides folded into train-config.yaml (scaled_temperature OHC, max_grad_norm
+# 1.0, corrector_disabled_epochs 1)
+
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|train|urgent|jupiter|4|500GiB|3|ai2/ace|seed=0|8h
