@@ -16,6 +16,11 @@ salinity in *any* calendar month, so a cell is masked if it is ever fresh.
     python make_plume_mask.py gs://bucket/plume-mask.zarr \
         --start_year 2011 --end_year 2020 --threshold 20.0
 
+The fine-tune chain runs GLORYS12 then GLO12 on one mask, and the products'
+river inputs differ: GLO12 holds the Ob and Yenisei gulfs near 0 psu where
+GLORYS12 has ~19. ``--product glo12 --union <GLORYS12 mask>`` masks a cell
+that is fresh in either product.
+
 Reads surface salinity only (one level, one day per month), so the cost is
 roughly 35 MB per sampled month rather than the 1.8 GB a full 3-D field costs.
 """
@@ -48,9 +53,11 @@ def sample_times(start_year: int, end_year: int, day: int) -> pd.DatetimeIndex:
     )
 
 
-def surface_salinity(times: pd.DatetimeIndex, output_grid: str, weights_path):
+def surface_salinity(
+    times: pd.DatetimeIndex, output_grid: str, weights_path, product: str
+):
     """Regridded surface salinity for each sampled time, as (time, lat, lon)."""
-    ocean = gp.open_cmems(gp.URL_OCEAN).rename({"latitude": "lat", "longitude": "lon"})
+    ocean = gp.open_ocean(["so"], times, product)
     surface = float(ocean[gp.VDIM].max())  # elevation is negative, deepest first
     src = gp._make_source_grid(ocean["lat"].values, ocean["lon"].values)
     frames = []
@@ -111,6 +118,13 @@ def main():
         help="mask cells whose lowest climatological monthly-mean surface "
         "salinity falls below this (psu)",
     )
+    p.add_argument("--product", default="glorys12", choices=gp.PRODUCTS)
+    p.add_argument(
+        "--union",
+        default=None,
+        help="an existing plume mask store; the output masks a cell masked "
+        "there or here",
+    )
     p.add_argument("--output_grid", default=gp.DEFAULT_OUTPUT_GRID)
     p.add_argument("--regrid_weights", default=None)
     args = p.parse_args()
@@ -119,8 +133,29 @@ def main():
     logging.info(
         "sampling %d months, %d-%d", len(times), args.start_year, args.end_year
     )
-    salinity = surface_salinity(times, args.output_grid, args.regrid_weights)
+    salinity = surface_salinity(
+        times, args.output_grid, args.regrid_weights, args.product
+    )
     out = plume_mask(salinity, args.threshold)
+    out["plume_mask"].attrs["sources"] = (
+        f"{args.product} {args.start_year}-{args.end_year}"
+    )
+    if args.union:
+        prior = xr.open_zarr(gp._make_zarr_store(args.union))
+        if not np.allclose(prior["lat"].values, out["lat"].values):
+            raise ValueError(f"{args.union} is not on the output grid")
+        prior_mask = prior["plume_mask"].load().values
+        added = int(((out["plume_mask"].values == 0) & (prior_mask > 0)).sum())
+        logging.info("%d cells masked here and not in %s", added, args.union)
+        attrs = dict(out["plume_mask"].attrs)
+        before = prior["plume_mask"].attrs.get("sources", args.union)
+        attrs["sources"] = f"{before}; {attrs['sources']}"
+        out["plume_mask"] = (out["plume_mask"] * (prior_mask > 0)).astype(np.float32)
+        out["plume_mask"].attrs = attrs
+        out["monthly_min_so_0"] = np.fmin(
+            out["monthly_min_so_0"], prior["monthly_min_so_0"].load()
+        ).astype(np.float32)
+        out["monthly_min_so_0"].attrs = prior["monthly_min_so_0"].attrs
     ocean = np.isfinite(out["monthly_min_so_0"].values)
     masked = int(((out["plume_mask"].values == 0) & ocean).sum())
     finite = int(ocean.sum())

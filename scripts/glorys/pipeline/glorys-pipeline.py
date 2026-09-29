@@ -149,8 +149,11 @@ URL_UFS_MASK = (
 # is simply absent from the model, so these cells are unpredictable by
 # construction rather than by lack of capacity. They also carry outsized
 # leverage on normalization. Built by make_plume_mask.py; see its docstring.
+# Cells fresh in GLORYS12 (2011-2020) or GLO12 (2023-2025), so both products
+# share one mask.
 URL_PLUME_MASK = (
-    "gs://vcm-ml-intermediate/2026-09-17-GLORYS-trial-run/plume-mask-5psu.zarr"
+    "gs://vcm-ml-intermediate/2026-09-17-GLORYS-trial-run/"
+    "plume-mask-5psu-glorys12-glo12.zarr"
 )
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
@@ -637,6 +640,39 @@ def _product_mask(url: str, reference: xr.DataArray) -> xr.DataArray:
     return m.assign_coords(lat=reference["lat"], lon=reference["lon"])
 
 
+def _coverage_masks(
+    references: Sequence[xr.Dataset],
+    weights: np.ndarray,
+    output_grid: str,
+    source_grid: xr.Dataset,
+    weights_path: str | None,
+) -> list[np.ndarray]:
+    """Per-level output cells where every 3-D field of every reference state
+    has data.
+
+    The bathymetry mask is the temperature/salinity mask. Velocities are NaN at
+    some coastal and bottom cells it calls ocean, and the vertical remap leaves
+    a few layers empty where the mask says wet, so a mask built from bathymetry
+    alone lets NaN through inside the ocean. These cells are the product's
+    land, which is fixed in time, so one state per product finds all of them.
+    Processed exactly as ``process_ocean_3d`` does.
+    """
+    cover: list[np.ndarray] | None = None
+    for reference in references:
+        for name in VARS_3D:
+            da = reference[name].isel(time=0, drop=True).load()
+            ds = _regrid_dataset(
+                remap_vertical(da, weights, name),
+                output_grid,
+                source_grid,
+                weights_path,
+            )
+            finite = [np.isfinite(ds[f"{name}_{k}"].values) for k in range(N_LEVELS)]
+            cover = finite if cover is None else [c & f for c, f in zip(cover, finite)]
+    assert cover is not None
+    return cover
+
+
 def build_invariants(
     output_grid: str,
     weights: np.ndarray,
@@ -644,6 +680,7 @@ def build_invariants(
     intersect_ufs_mask: bool = True,
     plume_mask_url: str | None = None,
     product_mask_url: str | None = None,
+    coverage_references: Sequence[xr.Dataset] = (),
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """Build the time-invariant output fields from the static datasets.
 
@@ -653,6 +690,9 @@ def build_invariants(
     matching the UFS convention. ``sea_surface_fraction`` is the
     conservatively regridded surface mask; F90 rows south of 80S get zero
     overlap and come out as land.
+
+    ``coverage_references``, one state of the 3-D fields per product, further
+    removes the cells where any of them has no data (see ``_coverage_masks``).
     """
     bathy = open_cmems(URL_BATHY).rename({"latitude": "lat", "longitude": "lon"})
     mask3 = bathy["mask"].load().astype(np.float32)  # (elevation, lat, lon)
@@ -682,6 +722,11 @@ def build_invariants(
             skipna=True,
             na_thres=1.0,
         )
+    cover = None
+    if coverage_references:
+        cover = _coverage_masks(
+            coverage_references, weights, output_grid, src, weights_path
+        )
     inv = {}
     sea_fraction = frac["mask_2d"].fillna(0.0).clip(0, 1).astype(np.float32)
     if ufs is not None:
@@ -691,6 +736,9 @@ def build_invariants(
     if prod is not None:
         keep = prod["mask_2d"].fillna(0.0) > 0
         sea_fraction = sea_fraction.where(keep, 0.0).astype(np.float32)
+    if cover is not None:
+        # keeps mask_2d equal to mask_0
+        sea_fraction = sea_fraction.where(cover[0], 0.0).astype(np.float32)
     for k in range(N_LEVELS):
         m = (frac[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
         if ufs is not None:
@@ -700,6 +748,8 @@ def build_invariants(
         if prod is not None:
             keep = (prod[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
             m = (m * keep).astype(np.float32)
+        if cover is not None:
+            m = m.where(cover[k], 0.0).astype(np.float32)
         m.attrs = {
             "long_name": f"ocean mask level-{k}",
             "units": "0 if land, 1 if ocean",
@@ -857,9 +907,9 @@ def process_forcing(
     labelled with the output time whose window it closes."""
     logging.info("forcing key=%s", key)
     chunk = chunk.load()
-    assert (
-        chunk.sizes["time"] == steps
-    ), f"partial forcing window at {key}: {chunk.sizes['time']}"
+    assert chunk.sizes["time"] == steps, (
+        f"partial forcing window at {key}: {chunk.sizes['time']}"
+    )
     k = key.offsets["time"] // steps
     ds = chunk.mean("time", keep_attrs=True)
     ds = ds.assign_coords(lat=target_lat, lon=target_lon)
@@ -1036,6 +1086,15 @@ def main():
     assert np.all(covered <= e3t + 1e-6) and np.allclose(
         np.delete(covered, deepest), np.delete(e3t, deepest)
     ), "GLORYS cells must nest inside the target column (except the deepest)"
+    ds_3d = open_ocean(VARS_3D, out_times, args.product)
+    # The geometry is GLORYS12's whatever the product, so GLORYS12's coverage
+    # always applies (from a fixed day: its land does not change); another
+    # product adds its own, keeping its ocean inside GLORYS12's.
+    coverage_references = [
+        open_ocean(VARS_3D, pd.DatetimeIndex([TIME_ORIGIN]), "glorys12")
+    ]
+    if args.product != "glorys12":
+        coverage_references.append(ds_3d.isel(time=[0]))
     invariant_ds, source_grid = build_invariants(
         args.output_grid,
         weights,
@@ -1043,15 +1102,15 @@ def main():
         intersect_ufs_mask=not args.no_ufs_mask_intersection,
         product_mask_url=URL_BATHY_GLO12 if args.product == "glo12" else None,
         plume_mask_url=args.plume_mask or None,
+        coverage_references=coverage_references,
     )
 
-    ds_3d = open_ocean(VARS_3D, out_times, args.product)
     ds_2d = open_ocean(VARS_2D, out_times, args.product)
     ds_forcing = open_forcing(forcing_times)
     n_missing = len(forcing_times) - ds_forcing.sizes["time"]
-    assert (
-        n_missing == 0
-    ), f"ERA5 store lacks {n_missing} forcing steps; shorten end_date"
+    assert n_missing == 0, (
+        f"ERA5 store lacks {n_missing} forcing steps; shorten end_date"
+    )
 
     template = make_template(
         out_times, invariant_ds, _output_attrs(ds_3d, ds_2d, ds_forcing)
