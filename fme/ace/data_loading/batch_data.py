@@ -247,7 +247,7 @@ class BatchData:
     epoch: int | None = None
     n_ensemble: int = 1
     data_mask: TensorMapping | None = None
-    stepper_state: StepperState | GatheredStepperState | None = None
+    stepper_state: StepperState | None = None
     step_diagnostics: StepDiagnostics | None = None
 
     @classmethod
@@ -430,7 +430,7 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
-        stepper_state: StepperState | GatheredStepperState | None = None,
+        stepper_state: StepperState | None = None,
         step_diagnostics: StepDiagnostics | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
@@ -468,7 +468,7 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
-        stepper_state: StepperState | GatheredStepperState | None = None,
+        stepper_state: StepperState | None = None,
         step_diagnostics: StepDiagnostics | None = None,
     ) -> "BatchData":
         """
@@ -696,10 +696,22 @@ class BatchData:
                     ds[name]
                 )
 
+        stepper_state: StepperState | None
         if not state_dict:
-            stepper_state: StepperState | GatheredStepperState | None = None
+            stepper_state = None
         elif "random_state.n_ranks" in state_dict:
-            stepper_state = GatheredStepperState.from_state_dict(state_dict)
+            gathered = GatheredStepperState.from_state_dict(state_dict)
+            dist = Distributed.get_instance()
+            if gathered.per_rank_random_states is not None:
+                random_state = gathered.per_rank_random_states[
+                    dist.data_parallel_rank
+                ]
+            else:
+                random_state = None
+            stepper_state = StepperState(
+                corrector_state=gathered.corrector_state,
+                random_state=random_state,
+            )
         else:
             stepper_state = StepperState.from_state_dict(state_dict)
         labels: BatchLabels | None = None
@@ -890,45 +902,6 @@ class BatchData:
             )
         )
 
-    def scatter_stepper_state(
-        self: SelfType, dist: Distributed | None = None
-    ) -> SelfType:
-        """Replace a ``GatheredStepperState`` with this rank's ``StepperState``.
-
-        Extracts the rank's per-rank random state and keeps the corrector
-        state unchanged (it is per-sample and will be sliced later by
-        ``select_sample_slice``).  Must be called before
-        ``select_sample_slice`` when the batch was loaded from a multi-GPU
-        restart file.  A no-op when the stepper state is already a plain
-        ``StepperState`` or ``None``.
-        """
-        if not isinstance(self.stepper_state, GatheredStepperState):
-            return self
-        if dist is None:
-            dist = Distributed.get_instance()
-
-        if self.stepper_state.per_rank_random_states is not None:
-            random_state = self.stepper_state.per_rank_random_states[
-                dist.data_parallel_rank
-            ]
-        else:
-            random_state = None
-
-        stepper = StepperState(
-            corrector_state=self.stepper_state.corrector_state,
-            random_state=random_state,
-        )
-        return self.__class__(
-            data=self.data,
-            time=self.time,
-            horizontal_dims=self.horizontal_dims,
-            epoch=self.epoch,
-            labels=self.labels,
-            n_ensemble=self.n_ensemble,
-            data_mask=self.data_mask,
-            stepper_state=stepper,
-        )
-
     def select_sample_slice(self: SelfType, sample_slice: slice) -> SelfType:
         """Select a contiguous range of samples from the batch."""
         self._raise_if_step_diagnostics("select_sample_slice")
@@ -957,11 +930,12 @@ class BatchData:
 
     def data_parallel_gather(
         self, dist: Distributed | None = None
-    ) -> "BatchData | None":
+    ) -> "GatheredBatchData | BatchData | None":
         """Gather data-parallel shards to root along the sample dimension.
 
-        Returns a CPU BatchData on root, ``None`` on other ranks.
-        When there is only one data-parallel rank, returns ``self`` unchanged.
+        Returns a CPU ``GatheredBatchData`` on root (preserving per-rank
+        random states), ``None`` on other ranks.  When there is only one
+        data-parallel rank, returns ``self`` unchanged.
         """
         self._raise_if_step_diagnostics("data_parallel_gather")
         if dist is None:
@@ -1054,7 +1028,7 @@ class BatchData:
         else:
             gathered_mask = None
 
-        return BatchData(
+        return GatheredBatchData(
             data=gathered_data,
             time=gathered_time,
             horizontal_dims=self.horizontal_dims,
@@ -1183,6 +1157,85 @@ class BatchData:
         if self.step_diagnostics is not None:
             self.step_diagnostics.pin_memory()
         return self
+
+
+@dataclasses.dataclass
+class GatheredBatchData:
+    """BatchData after a data-parallel gather, used only for writing restarts.
+
+    Holds the concatenated data from all ranks and a
+    ``GatheredStepperState`` that preserves each rank's random state.
+    Exposes only ``to_xarray_dataset`` — the single ability needed by
+    the write path.  The read path (``BatchData.from_xarray_dataset``)
+    scatters the per-rank state internally and always returns a plain
+    ``BatchData``.
+    """
+
+    data: TensorDict
+    time: xr.DataArray
+    horizontal_dims: list[str]
+    epoch: int | None = None
+    labels: BatchLabels | None = None
+    n_ensemble: int = 1
+    data_mask: TensorMapping | None = None
+    stepper_state: GatheredStepperState | None = None
+
+    @property
+    def dims(self) -> list[str]:
+        return [_SAMPLE_DIM, _TIME_DIM] + self.horizontal_dims
+
+    def to_xarray_dataset(self) -> xr.Dataset:
+        """Serialize to xarray, using the same layout as ``BatchData``."""
+        data_arrays: dict[str, xr.DataArray] = {}
+        for name, tensor in self.data.items():
+            data_arrays[name] = xr.DataArray(
+                tensor.detach().cpu().numpy(), dims=self.dims
+            )
+        data_arrays[_TIME_DIM] = self.time
+
+        extra_arrays, attrs = self._encode_reserved_state()
+        data_arrays.update(extra_arrays)
+        ds = xr.Dataset(data_arrays)
+        ds.attrs.update(attrs)
+        if ds.sizes[_TIME_DIM] == 1:
+            ds = ds.squeeze(_TIME_DIM).reset_coords(_TIME_DIM)
+        return ds
+
+    def _encode_reserved_state(
+        self,
+    ) -> tuple[dict[str, xr.DataArray], dict[str, Any]]:
+        data_arrays: dict[str, xr.DataArray] = {}
+        attrs: dict[str, Any] = {}
+
+        if self.stepper_state is not None:
+            state_dict = self.stepper_state.to_cpu().to_state_dict()
+            per_sample_keys = self.stepper_state.per_sample_state_keys()
+            for key, tensor in state_dict.items():
+                var_name = f"{_STEPPER_PREFIX}{key}"
+                array = tensor.detach().cpu().numpy()
+                data_arrays[var_name] = xr.DataArray(
+                    array,
+                    dims=_reserved_var_dims(
+                        var_name, array.ndim, per_sample=key in per_sample_keys
+                    ),
+                )
+
+        if self.labels is not None:
+            data_arrays[_LABELS_VALUES_VAR] = xr.DataArray(
+                self.labels.tensor.detach().cpu().numpy(),
+                dims=[_SAMPLE_DIM, _LABEL_INDEX_DIM],
+                coords={_LABEL_INDEX_DIM: list(self.labels.names)},
+            )
+
+        if self.data_mask is not None:
+            for name, mask in self.data_mask.items():
+                data_arrays[f"{_DATA_MASK_PREFIX}{name}"] = xr.DataArray(
+                    mask.detach().cpu().numpy(), dims=[_SAMPLE_DIM]
+                )
+
+        if data_arrays:
+            attrs[_SCHEMA_ATTR] = _SCHEMA_VERSION
+        return data_arrays, attrs
 
 
 @dataclasses.dataclass

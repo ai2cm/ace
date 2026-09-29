@@ -177,13 +177,6 @@ class GatheredStepperState:
     per_rank_random_states: list[RandomState] | None = None
 
     @property
-    def random_state(self) -> RandomState | None:
-        """The root rank's random state, for compatibility checks."""
-        if self.per_rank_random_states is not None:
-            return self.per_rank_random_states[0]
-        return None
-
-    @property
     def n_ranks(self) -> int:
         if self.per_rank_random_states is not None:
             return len(self.per_rank_random_states)
@@ -202,11 +195,6 @@ class GatheredStepperState:
                 else None
             ),
         )
-
-    def sample_dim_size(self) -> int | None:
-        if self.corrector_state is not None:
-            return self.corrector_state.sample_dim_size()
-        return None
 
     def get_for_rank(self, rank: int, n_ranks: int) -> StepperState:
         """Extract the ``StepperState`` for a single data-parallel rank.

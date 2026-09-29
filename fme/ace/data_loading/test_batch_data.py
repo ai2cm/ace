@@ -435,84 +435,20 @@ def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
     assert torch.equal(states[1], reference_r1)
 
 
-def test_scatter_stepper_state_extracts_per_rank():
-    """scatter_stepper_state replaces a GatheredStepperState with the
-    rank's own StepperState."""
-    from unittest.mock import PropertyMock
-
-    from fme.core.stepper_state import GatheredStepperState
-
-    rs0 = RandomState.from_seed(10)
-    rs1 = RandomState.from_seed(20)
-    gathered = GatheredStepperState(
-        corrector_state=CorrectorState(
-            global_dry_air_mass=torch.arange(4).reshape(4, 1, 1).float()
-        ),
-        per_rank_random_states=[rs0, rs1],
-    )
-    batch = get_batch_data(
-        names=["foo"], n_samples=4, n_times=1, horizontal_dims=["lat", "lon"]
-    )
-    batch = BatchData(
-        data=batch.data,
-        time=batch.time,
-        horizontal_dims=batch.horizontal_dims,
-        stepper_state=gathered,
-    )
-
-    dist = Distributed.get_instance()
-    dist_type = type(dist)
-
-    # Simulate rank 1 of 2.
-    original_rank = dist_type.data_parallel_rank
-    original_total = dist_type.total_data_parallel_ranks
-    try:
-        dist_type.data_parallel_rank = property(lambda self: 1)
-        dist_type.total_data_parallel_ranks = property(lambda self: 2)
-
-        scattered = batch.scatter_stepper_state(dist)
-        assert isinstance(scattered.stepper_state, StepperState)
-        assert scattered.stepper_state.random_state is rs1
-        # Corrector stays full (4 samples); select_sample_slice slices later.
-        assert scattered.stepper_state.corrector_state is not None
-        expected_mass = torch.arange(4).reshape(4, 1, 1).float()
-        torch.testing.assert_close(
-            scattered.stepper_state.corrector_state.global_dry_air_mass,
-            expected_mass,
-        )
-    finally:
-        dist_type.data_parallel_rank = original_rank
-        dist_type.total_data_parallel_ranks = original_total
-
-
-def test_scatter_stepper_state_noop_for_plain_stepper():
-    """scatter_stepper_state is a no-op when the stepper_state is already
-    a StepperState."""
-    batch = get_batch_data(
-        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
-    )
-    stepper = StepperState(random_state=RandomState.from_seed(42))
-    batch = BatchData(
-        data=batch.data,
-        time=batch.time,
-        horizontal_dims=batch.horizontal_dims,
-        stepper_state=stepper,
-    )
-    result = batch.scatter_stepper_state()
-    assert result is batch
-
-
-def test_gathered_stepper_state_xarray_round_trip():
-    """A BatchData with a GatheredStepperState round-trips through
-    to_xarray_dataset / from_xarray_dataset."""
+def test_gathered_batch_data_xarray_round_trip_scatters_on_read():
+    """GatheredBatchData.to_xarray_dataset → BatchData.from_xarray_dataset
+    scatters the per-rank random state internally, returning a plain
+    BatchData with this rank's (rank 0 in tests) StepperState."""
+    from fme.ace.data_loading.batch_data import GatheredBatchData
     from fme.core.stepper_state import GatheredStepperState
 
     rs0 = RandomState.from_seed(10)
     rs1 = RandomState.from_seed(20)
     # Advance rs0 so the two differ.
     torch.randn(5, generator=rs0.generator)
+    rs0_state = rs0.generator.get_state().clone()
 
-    gathered = GatheredStepperState(
+    gathered_stepper = GatheredStepperState(
         corrector_state=CorrectorState(
             global_dry_air_mass=torch.tensor([[[1.0]], [[2.0]]])
         ),
@@ -521,23 +457,29 @@ def test_gathered_stepper_state_xarray_round_trip():
     batch = get_batch_data(
         names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
     )
-    batch = BatchData(
+    gathered = GatheredBatchData(
         data=batch.data,
         time=batch.time,
         horizontal_dims=batch.horizontal_dims,
-        stepper_state=gathered,
+        stepper_state=gathered_stepper,
     )
 
-    ds = batch.to_xarray_dataset()
+    ds = gathered.to_xarray_dataset()
     restored = BatchData.from_xarray_dataset(ds)
 
-    assert isinstance(restored.stepper_state, GatheredStepperState)
-    assert restored.stepper_state.n_ranks == 2
-    for i in range(2):
-        assert restored.stepper_state.per_rank_random_states is not None
-        original = gathered.per_rank_random_states[i].generator.get_state()
-        restored_gen = restored.stepper_state.per_rank_random_states[i].generator.get_state()
-        assert torch.equal(original, restored_gen)
+    # from_xarray_dataset scatters internally — result is a plain StepperState.
+    assert isinstance(restored.stepper_state, StepperState)
+    # In tests, data_parallel_rank is 0, so we get rs0's generator state.
+    assert restored.stepper_state.random_state is not None
+    assert torch.equal(
+        restored.stepper_state.random_state.generator.get_state(), rs0_state
+    )
+    # Corrector is preserved in full (all samples).
+    assert restored.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        restored.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[1.0]], [[2.0]]]),
+    )
 
 
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])

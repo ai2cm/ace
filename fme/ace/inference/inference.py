@@ -398,7 +398,6 @@ def run_inference_from_config(config: InferenceConfig):
         # Must happen before the ensemble broadcast.
         if dist.total_data_parallel_ranks > 1:
             ic_batch = data.initial_condition.as_batch_data()
-            ic_batch = ic_batch.scatter_stepper_state(dist)
             start, end = local_ic_range(
                 n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
             )
