@@ -270,9 +270,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
 
-    # keep_gradient_through_clamps only changes how gradient flows through the
-    # clamps, not whether they are applied, so it is not a correction that
-    # disable_corrections can switch off (it is also a no-op under no_grad).
+    # keep_gradient_through_clamps changes gradients, not whether clamps apply
     NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = (
         CorrectorConfigABC.NON_CORRECTION_OPTIONS | {"keep_gradient_through_clamps"}
     )

@@ -28,10 +28,7 @@ class CorrectorConfigABC(abc.ABC):
 
     corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
 
-    # Options that are not corrections: they schedule the corrector or shape how
-    # a correction is applied, rather than being a correction that can be
-    # switched off. ``disable_corrections`` rejects these names, since resetting
-    # them to their default disables no correction. Subclasses extend the set.
+    # Options disable_corrections rejects: resetting them disables no correction.
     NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = frozenset(
         {"corrector_disabled_epochs"}
     )
@@ -77,25 +74,11 @@ class CorrectorConfigABC(abc.ABC):
         )
 
     def disable_corrections(self, names: Sequence[str]) -> None:
-        """Switch the named corrections off in place, for inference-time ablation.
-
-        A correction is disabled by resetting its option to that field's
-        declared default, which is the "not applied" value for every option on
-        every corrector config (``None`` for an optional sub-config, ``False``
-        for a flag, empty for a name list). Using the default rather than a
-        per-option rule keeps this uniform across corrector types.
-
-        Only the corrections themselves can be disabled; the options in
-        ``NON_CORRECTION_OPTIONS`` schedule the corrector or shape how a
-        correction is applied rather than being corrections, so naming one is an
-        error -- resetting it to its default would disable no correction.
+        """Switch the named corrections off by resetting them to their defaults.
 
         Raises:
-            ValueError: if a name is not an option on this corrector config, if
-                it has no default (so no disabled state), or if it is already
-                disabled. An unknown or already-off name would make the
-                ablation silently reproduce the un-ablated run, so it fails
-                loudly instead.
+            ValueError: if a name is not a correction or is already off, since
+                either would make an ablation silently reproduce the baseline.
         """
         fields = {field.name: field for field in dataclasses.fields(self)}
         non_corrections = type(self).NON_CORRECTION_OPTIONS
@@ -107,15 +90,10 @@ class CorrectorConfigABC(abc.ABC):
                     f"{type(self).__name__}, whose corrections are {options}"
                 )
             field = fields[name]
-            if field.default is not dataclasses.MISSING:
-                disabled = field.default
-            elif field.default_factory is not dataclasses.MISSING:
+            if field.default_factory is not dataclasses.MISSING:
                 disabled = field.default_factory()
             else:
-                raise ValueError(
-                    f"cannot disable {name!r}: it has no default, so it has no "
-                    "disabled state"
-                )
+                disabled = field.default
             if getattr(self, name) == disabled:
                 raise ValueError(
                     f"cannot disable {name!r}: it is already disabled "

@@ -44,18 +44,14 @@ from fme.coupled.stepper import (
 def _validate_coupled_component_override(
     override: StepperOverrideConfig | None,
 ) -> None:
-    """Restrict coupled inference overrides to the name-preserving ones.
+    """Restrict coupled inference overrides to those that preserve names.
 
     ``CoupledStepperConfig`` caches cross-component forcing-name sets and
     validates component compatibility at construction. An ``ocean``,
     ``multi_call`` or ``derived_forcings`` override applied afterward would leave
     those caches stale, so reject them rather than silently use stale values.
-
-    ``prescribed_prognostic_names`` is recomputed on demand, and
-    ``disable_corrections`` only switches corrections off inside a component's
-    corrector -- it changes no variable names at all (not ``in_names``,
-    ``out_names`` or ``next_step_input_names``), so neither leaves a stale
-    cache.
+    ``prescribed_prognostic_names`` is recomputed on demand and
+    ``disable_corrections`` changes no names.
     """
     if override is None:
         return

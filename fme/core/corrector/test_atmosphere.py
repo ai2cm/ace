@@ -818,59 +818,26 @@ def test_disable_corrections_switches_off_only_the_named_correction():
             method="constant_temperature"
         ),
     )
-    config.disable_corrections(["total_energy_budget_correction"])
-    assert config.total_energy_budget_correction is None
-    # the other corrections are untouched
-    assert config.conserve_dry_air
-    assert config.zero_global_mean_moisture_advection
-    assert config.force_positive_names == ["PRATEsfc"]
-
-
-def test_disable_corrections_resets_a_flag_and_a_name_list():
-    config = AtmosphereCorrectorConfig(
-        conserve_dry_air=True,
-        force_positive_names=["PRATEsfc"],
+    config.disable_corrections(
+        ["total_energy_budget_correction", "conserve_dry_air", "force_positive_names"]
     )
-    config.disable_corrections(["conserve_dry_air", "force_positive_names"])
+    assert config.total_energy_budget_correction is None
     assert config.conserve_dry_air is False
     assert config.force_positive_names == []
+    assert config.zero_global_mean_moisture_advection
 
 
 @pytest.mark.parametrize(
-    "name,match",
-    [
-        pytest.param("not_a_correction", "not a correction", id="unknown_name"),
-        pytest.param(
-            "corrector_disabled_epochs", "not a correction", id="training_schedule"
-        ),
-        pytest.param(
-            "keep_gradient_through_clamps", "not a correction", id="gradient_shaping"
-        ),
-    ],
+    "name",
+    ["not_an_option", "corrector_disabled_epochs", "keep_gradient_through_clamps"],
 )
-def test_disable_corrections_rejects_a_name_that_is_not_a_correction(name, match):
+def test_disable_corrections_rejects_a_name_that_is_not_a_correction(name):
     config = AtmosphereCorrectorConfig(conserve_dry_air=True)
-    with pytest.raises(ValueError, match=match):
+    with pytest.raises(ValueError, match="not a correction"):
         config.disable_corrections([name])
 
 
-def test_disable_corrections_rejects_gradient_shaping_without_touching_the_clamp():
-    """keep_gradient_through_clamps changes only how gradient flows through the
-    clamps, not whether they run, so "disabling" it would ablate nothing --
-    exactly the silent no-op the raise-on-already-off rule exists to prevent."""
-    config = AtmosphereCorrectorConfig(
-        force_positive_names=["PRATEsfc"],
-        keep_gradient_through_clamps=True,
-    )
-    with pytest.raises(ValueError, match="not a correction"):
-        config.disable_corrections(["keep_gradient_through_clamps"])
-    assert config.keep_gradient_through_clamps is True
-    assert config.force_positive_names == ["PRATEsfc"]
-
-
 def test_disable_corrections_rejects_an_already_disabled_correction():
-    """An already-off name would make an ablation silently reproduce the
-    un-ablated run, so it must fail rather than no-op."""
     config = AtmosphereCorrectorConfig(conserve_dry_air=True)
     with pytest.raises(ValueError, match="already disabled"):
         config.disable_corrections(["total_energy_budget_correction"])

@@ -755,12 +755,6 @@ class StepperConfig:
         return self.step.get_prescribed_prognostic_names()
 
     def disable_corrections(self, names: Sequence[str]) -> None:
-        """Disable the named corrections of this stepper's step, in place.
-
-        Used for inference / evaluation ablations: the corrector options are
-        serialized in the trained checkpoint, so switching one off is only
-        possible after loading.
-        """
         self.step.disable_corrections(names)
 
     def replace_multi_call(
@@ -1037,11 +1031,6 @@ class Stepper:
     def disable_corrections(self, names: Sequence[str]) -> None:
         """
         Disable the named corrections of the step's corrector.
-
-        The corrector is built when the step is built, so the step is rebuilt
-        from the mutated config and the trained state reloaded into it. Only
-        meant to be used at inference time: a disabled conservation correction
-        makes the model's budgets open.
 
         Args:
             names: The corrector option names to switch off.
@@ -1937,11 +1926,7 @@ class StepperOverrideConfig:
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
         disable_corrections: Names of corrector options to switch off, e.g.
-            ``[total_energy_budget_correction]``. Corrector options are
-            serialized into the checkpoint, so this is the only way to ablate a
-            correction at inference time. A name that is not an option of the
-            checkpoint's corrector, or that is already off, is an error rather
-            than a silent no-op.
+            ``[total_energy_budget_correction]``.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"

@@ -397,9 +397,6 @@ def test_apply_coupled_overrides_rejects_non_prescribed_override(override):
 
 
 def test_apply_coupled_overrides_accepts_disable_corrections():
-    """disable_corrections changes no variable names, so unlike ocean /
-    multi_call / derived_forcings it cannot leave a stale forcing-name cache and
-    is allowed in coupled inference."""
     config = get_stepper_config(
         ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
         ocean_out_names=["sst"],

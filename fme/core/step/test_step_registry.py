@@ -261,6 +261,9 @@ class DeprecatingMockStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        raise NotImplementedError("DeprecatingMockStepConfig has no corrector")
+
     @property
     def allow_missing_variables(self) -> bool:
         return False

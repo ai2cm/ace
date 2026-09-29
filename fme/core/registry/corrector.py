@@ -56,13 +56,7 @@ class CorrectorSelector(CorrectorConfigABC):
         return dict(state)
 
     def disable_corrections(self, names: Sequence[str]) -> None:
-        """Disable the named corrections on the wrapped corrector config.
-
-        The selector's own fields are ``type``/``config``, not corrections, so
-        the names are resolved against the wrapped config. ``config`` is then
-        rewritten from the mutated instance, since it -- not the instance -- is
-        what gets serialized.
-        """
+        # config, not the instance, is what gets serialized
         self._corrector_config_instance.disable_corrections(names)
         self.config = dataclasses.asdict(self._corrector_config_instance)
 

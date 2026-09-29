@@ -130,13 +130,7 @@ class StepConfigABC(abc.ABC):
 
     @abc.abstractmethod
     def disable_corrections(self, names: Sequence[str]) -> None:
-        """Disable the named corrections on this step's corrector, in place.
-
-        Used for inference-time ablation of a trained checkpoint, whose corrector
-        options are otherwise fixed at training time. A step type with no
-        corrector must raise, so that naming a correction fails loudly rather
-        than silently leaving the corrections on.
-        """
+        """Disable the named corrections on this step's corrector, in place."""
 
     @property
     @abc.abstractmethod
