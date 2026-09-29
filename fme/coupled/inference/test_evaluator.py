@@ -45,7 +45,11 @@ from fme.coupled.inference.evaluator import (
     load_stepper_config,
     main,
 )
-from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
+from fme.coupled.stepper import (
+    CoupledStepper,
+    CoupledStepperConfig,
+    load_coupled_stepper,
+)
 from fme.coupled.test_stepper import (
     AddOneWithNoise,
     CoupledDatasetInfoBuilder,
@@ -785,3 +789,14 @@ def test_inference_evaluator_config_load_stepper_uses_ema_weights(
         config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
 
     check(config.load_stepper(), expect_ema)
+
+
+def test_load_coupled_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Coupled warm starts (CoupledParameterInitConfig) load weights through
+    load_coupled_stepper, and must keep getting the stepper weights of a
+    checkpoint that has EMA weights.
+    """
+    checkpoint_path, check = save_coupled_stepper_with_ema(tmp_path, standalone=False)
+    assert isinstance(checkpoint_path, str)
+
+    check(load_coupled_stepper(checkpoint_path), False)
