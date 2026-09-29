@@ -313,6 +313,12 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         self.dataset_metadata = dataset_metadata
 
     def write(self, data: PrognosticState, filename: str):
+        """Eagerly write data to a single netCDF file.
+
+        Args:
+            data: the data to be written.
+            filename: the filename to use for the netCDF file.
+        """
         _gather_and_write(
             batch=data.as_batch_data(),
             path=self.path,
@@ -410,19 +416,19 @@ def _gather_and_write(
     dataset_metadata: DatasetMetadata,
     dist: Distributed | None = None,
 ) -> None:
-    """Gather per-rank BatchData shards to root and write once.
+    """Gather data-parallel BatchData shards to root and write once.
 
-    Each rank holds a contiguous block of samples.  The gather concatenates
-    them along the sample dimension in rank order so the written file has the
-    same layout as a serial run.  Non-root ranks skip the write.  A barrier
-    at the end ensures all ranks see the file before continuing (required for
-    segmented inference, where the next segment reads the restart).  At
-    ``world_size == 1`` the gather is a no-op.
+    Each data-parallel rank holds a contiguous block of samples.  The gather
+    concatenates them along the sample dimension in rank order so the written
+    file has the same layout as a serial run.  Non-root ranks skip the write.
+    A barrier at the end ensures all ranks see the file before continuing
+    (required for segmented inference, where the next segment reads the
+    restart).  With a single data-parallel rank the gather is a no-op.
     """
     if dist is None:
         dist = Distributed.get_instance()
 
-    gathered_batch = batch.gather(dist)
+    gathered_batch = batch.data_parallel_gather(dist)
 
     try:
         if dist.is_root():
@@ -518,6 +524,12 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             self._step_diagnostics_writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
+        """Eagerly write data to a single netCDF file.
+
+        Args:
+            data: the data to be written.
+            filename: the filename to use for the netCDF file.
+        """
         _gather_and_write(
             batch=data.as_batch_data(),
             path=self.path,

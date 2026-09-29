@@ -900,15 +900,23 @@ class BatchData:
             ),
         )
 
-    def gather(self, dist: Distributed | None = None) -> "BatchData | None":
-        """Gather per-rank shards to root along the sample dimension.
+    def data_parallel_gather(
+        self, dist: Distributed | None = None
+    ) -> "BatchData | None":
+        """Gather data-parallel shards to root along the sample dimension.
 
         Returns a CPU BatchData on root, ``None`` on other ranks.
+        When there is only one data-parallel rank, returns ``self`` unchanged.
         """
-        self._raise_if_step_diagnostics("gather")
+        self._raise_if_step_diagnostics("data_parallel_gather")
         if dist is None:
             dist = Distributed.get_instance()
-        dist.require_no_spatial_parallelism("BatchData.gather")
+        if dist.total_data_parallel_ranks == 1:
+            return self
+        if dist.has_spatial_parallelism:
+            raise NotImplementedError(
+                "BatchData.data_parallel_gather with spatial parallelism"
+            )
 
         device = get_device()
         gathered_data: dict[str, torch.Tensor] = {}
