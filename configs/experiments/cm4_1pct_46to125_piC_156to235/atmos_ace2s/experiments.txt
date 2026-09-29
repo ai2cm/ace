@@ -41,19 +41,10 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-newinf|01M2TYT9RQP29J1GFTW63C80
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-newinf|01M3A4DX2TDEJYTA5YPF4TWA44|training|best_inference_ckpt|normal|--min-runtime 8h
 
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GBW24Y8SMBWRB39JJFPVGT|run_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|run_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GBW24Y8SMBWRB39JJFPVGT|run_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|run_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GBW24Y8SMBWRB39JJFPVGT|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M1CV3XCNJQ225GT89ES8SM18|run_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M1CV3XCNJQ225GT89ES8SM18|run_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M1CV3XCNJQ225GT89ES8SM18|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
-
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GBW24Y8SMBWRB39JJFPVGT|skip_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M1CV3XCNJQ225GT89ES8SM18|skip_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|skip_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
