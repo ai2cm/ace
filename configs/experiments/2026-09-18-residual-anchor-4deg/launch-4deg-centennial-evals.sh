@@ -24,7 +24,7 @@ for A in $ARMS; do
   for S in $SCENARIOS; do
     total=$((total+1))
     case "$S" in
-      piC)  CFG=evaluator-config-piC-ic0151-200yr-4deg.yaml;  TAG=piC-ic0151-200yr ;;
+      piC)  CFG=${CFG_PIC:-evaluator-config-piC-ic0151-200yr-4deg.yaml};  TAG=${TAG_PIC:-piC-ic0151-200yr} ;;
       1pct) CFG=evaluator-config-1pct-ic0001-130yr-4deg.yaml; TAG=1pct-ic0001-130yr ;;
       *) echo "unknown scenario $S"; exit 1 ;;
     esac
@@ -40,6 +40,7 @@ for A in $ARMS; do
       --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-anchor-4deg-centennial \
       --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
       --dataset "${CKPT_DS}:${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}:/ckpt.tar" \
+      ${EXTRA_DATASET:+--dataset "$EXTRA_DATASET"} \
       --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
       --allow-dirty --system-python --install "pip install --no-deps ." \
       -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/eval/${CFG}" 2>&1)
