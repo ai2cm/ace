@@ -1711,6 +1711,11 @@ class TestSelectSampleSlice:
 
 @pytest.mark.parallel
 class TestGather:
+    def setup_method(self):
+        dist = Distributed.get_instance()
+        if dist.has_spatial_parallelism:
+            pytest.skip("gather uses the global communicator, not spatial")
+
     def test_gathers_data_tensors(self):
         dist = Distributed.get_instance()
         rank = dist.rank
