@@ -552,11 +552,14 @@ def _salt_dataset_info(
     masks = {"mask_0": ocean_mask, "mask_1": ocean_mask, "mask_2d": ocean_mask}
     if sea_ice_volume_mask is not None:
         masks["mask_sea_ice_volume"] = sea_ice_volume_mask
-    idepth = torch.tensor([0.0, layer_thickness[0], sum(layer_thickness)])
+    # on the device, as the dataset properties are in a real run
+    idepth = torch.tensor(
+        [0.0, layer_thickness[0], sum(layer_thickness)], device=DEVICE
+    )
     return DatasetInfo(
         horizontal_coordinates=_salt_coordinates(nlat, nlon),
         vertical_coordinate=DepthCoordinate(
-            idepth, torch.stack([ocean_mask, ocean_mask], dim=-1)
+            idepth, torch.stack([ocean_mask, ocean_mask], dim=-1).to(DEVICE)
         ),
         spatial_mask_provider=SpatialMaskProvider(masks),
         timestep=datetime.timedelta(seconds=5 * 24 * 3600),
@@ -714,7 +717,8 @@ def test_ocean_salt_content_correction_counts_all_ice_without_mask(
     dataset_info = DatasetInfo(
         horizontal_coordinates=_salt_coordinates(nlat, nlon),
         vertical_coordinate=DepthCoordinate(
-            torch.tensor([0.0, 10.0, 30.0]), torch.ones(nlat, nlon, 2)
+            torch.tensor([0.0, 10.0, 30.0], device=DEVICE),
+            torch.ones(nlat, nlon, 2, device=DEVICE),
         ),
         spatial_mask_provider=spatial_mask_provider,
         timestep=datetime.timedelta(seconds=5 * 24 * 3600),
