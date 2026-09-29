@@ -8,11 +8,21 @@ import argparse
 import os
 import shutil
 import time
+from typing import Any
 
 import numpy as np
 import zarr
 
 N_VARS, N_IC, N_TIMES, N_LAT, N_LON = 53, 2, 50, 180, 360
+ZARRS: dict[str, Any] = {"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"}
+PIPELINE_CONFIGS: dict[str, dict[str, Any]] = {
+    "default": {},
+    "zarrs": ZARRS,
+    "zarrs-threads8": {**ZARRS, "threading.max_workers": 8},
+    "zarrs-threads16": {**ZARRS, "threading.max_workers": 16},
+    "zarrs-chunks8": {**ZARRS, "codec_pipeline.chunk_concurrent_maximum": 8},
+    "zarrs-chunks16": {**ZARRS, "codec_pipeline.chunk_concurrent_maximum": 16},
+}
 
 
 def _cpu_quota() -> str:
@@ -21,6 +31,24 @@ def _cpu_quota() -> str:
             with open(path) as f:
                 return f"{path}={f.read().strip()}"
     return "no cgroup cpu limit file found"
+
+
+def _cpu_model() -> str:
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return "unknown"
+
+
+def _load_average() -> str:
+    try:
+        return " ".join(f"{x:.1f}" for x in os.getloadavg())
+    except OSError:
+        return "unknown"
 
 
 def _affinity_count() -> int | None:
@@ -38,7 +66,9 @@ def _synthetic_window(seed: int = 0) -> dict[str, np.ndarray]:
     return {f"v{i}": (base * (1 + 0.01 * i)).astype("f4") for i in range(N_VARS)}
 
 
-def _write_window(root: str, label: str, config: dict, data: dict[str, np.ndarray]):
+def _write_window(
+    root: str, label: str, config: dict[str, Any], data: dict[str, np.ndarray]
+):
     path = os.path.join(root, f"{label}.zarr")
     shutil.rmtree(path, ignore_errors=True)
     with zarr.config.set(config):
@@ -69,19 +99,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="+", help="Directories to write into.")
     parser.add_argument("--repeats", type=int, default=2)
+    parser.add_argument(
+        "--pipelines",
+        nargs="+",
+        default=list(PIPELINE_CONFIGS),
+        choices=PIPELINE_CONFIGS,
+    )
     args = parser.parse_args()
     print(
         f"cpu_count={os.cpu_count()} affinity={_affinity_count()} "
         f"quota={_cpu_quota()} zarr={zarr.__version__}"
     )
+    print(f"cpu_model={_cpu_model()!r} loadavg_1_5_15={_load_average()}")
     data = _synthetic_window()
     for root in args.roots:
         os.makedirs(root, exist_ok=True)
         for _ in range(args.repeats):
-            _write_window(root, "default", {}, data)
-            _write_window(
-                root, "zarrs", {"codec_pipeline.path": "zarrs.ZarrsCodecPipeline"}, data
-            )
+            for label in args.pipelines:
+                _write_window(root, label, PIPELINE_CONFIGS[label], data)
+    print(f"loadavg_1_5_15_at_end={_load_average()}")
 
 
 if __name__ == "__main__":
