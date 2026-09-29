@@ -122,14 +122,10 @@ class OceanHeatContentBudgetConfig:
 class OceanSaltContentBudgetConfig:
     """Configuration for ocean salt content budget correction.
 
-    Global ocean salt content has no surface flux source: precipitation,
-    evaporation and runoff move water, not salt. The only exchange is with the
-    sea-ice reservoir, whose volume the model predicts, so the expected change
-    is computed from the model's own outputs. The ice term is the change in
-    total sea ice volume, so the slope does not depend on the grid. Cells
-    outside the dataset's mask for ``sea_ice_volume`` (if any) are left out of
-    the ice term: the stepper's output masking discards the prediction there
-    after every step, so it is never part of the evolving state.
+    This constrains the salinity budget through the exchange with the sea-ice
+    reservoir, whose volume the model predicts. This represents the expected
+    change purely from the model's own outputs. We fit the change to the total
+    sea ice volume, so the slope does not depend on the grid.
 
     Parameters:
         method: Method to use for salt budget correction. The available option
@@ -137,12 +133,13 @@ class OceanSaltContentBudgetConfig:
             predicted salinity by a vertically and horizontally uniform
             correction factor.
         ice_volume_salt_slope_psu: Empirical slope of the change in total
-            column salt content (psu m^3) against the change in total sea ice
-            volume (m^3), in psu. Calibrate against the target data; set to 0
+            column salt content (psu m**3) against the change in total sea ice
+            volume (m**3), in psu. Calibrate against the target data; set to 0
             to hold salt content fixed.
         constant_unaccounted_salting: Area-weighted global mean rate of column
             salt content change, in psu m / s, added at every step. This can be
             useful for correcting a residual in the salt budget of target data.
+            In current data, this may be below precision.
         use_float64: Compute the global sums, expected change and correction
             ratio in float64 instead of the data's dtype. The expected change is
             only a couple of float32 epsilons of the salt content, so in float32
@@ -640,17 +637,17 @@ def _force_conserve_ocean_salt_content(
 
     def global_total(data: torch.Tensor) -> torch.Tensor:
         # area weights are cell areas as a fraction of the sphere, so scaling
-        # the weighted sum by 4 pi R^2 gives the total over the ocean
+        # the weighted sum by 4 pi R**2 gives the total over the ocean
         weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
         return weighted_sum * _SPHERE_AREA_M2
 
     def global_salt_content(data: OceanData) -> torch.Tensor:
         column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
-        return global_total(column)  # psu m^3
+        return global_total(column)  # psu m**3
 
     global_gen_salt_content = global_salt_content(gen)
     global_input_salt_content = global_salt_content(input)
-    ocean_area = global_total(torch.ones_like(gen.data["so_0"], dtype=dtype))  # m^2
+    ocean_area = global_total(torch.ones_like(gen.data["so_0"], dtype=dtype))  # m**2
     expected_change = unaccounted_salting * timestep_seconds * ocean_area
     if ice_volume_salt_slope_psu != 0.0:
         try:
@@ -669,7 +666,7 @@ def _force_conserve_ocean_salt_content(
                 ice_volume_change,
                 torch.zeros_like(ice_volume_change),
             )
-        # sea_ice_volume is per cell (m^3), so its total is a plain sum. Under
+        # sea_ice_volume is per cell (m**3), so its total is a plain sum. Under
         # spatial parallelism this sum would need a spatial_reduce_sum across
         # ranks, and sea_ice_volume_valid would need slicing to the local chunk.
         total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)

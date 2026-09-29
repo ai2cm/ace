@@ -564,7 +564,8 @@ def _salt_dataset_info(
 
 
 def _ocean_cell_area_m2(ocean_mask: torch.Tensor) -> torch.Tensor:
-    """float64 cell areas from the same weights the corrector uses, 0 over land."""
+    """float64 cell areas from the same weights the corrector uses, with 0
+    over land."""
     area_weights = _salt_coordinates(*ocean_mask.shape).area_weights
     cell_area = area_weights.to(DEVICE, torch.float64) * 4 * torch.pi * EARTH_RADIUS**2
     return cell_area * (ocean_mask.to(DEVICE) > 0)
@@ -575,7 +576,7 @@ def _total_salt_content(
     ocean_cell_area: torch.Tensor,
     layer_thickness: tuple[float, float],
 ) -> torch.Tensor:
-    """float64 reference total salt content in psu m^3 over ocean cells."""
+    """float64 reference total salt content in psu m**3 over ocean cells."""
     column = (
         data["so_0"].double() * layer_thickness[0]
         + data["so_1"].double() * layer_thickness[1]
