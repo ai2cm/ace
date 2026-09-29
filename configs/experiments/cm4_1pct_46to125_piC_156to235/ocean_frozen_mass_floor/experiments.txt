@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3P96T8P7FSRZFF5G1BAZH90|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|training|best_inference_ckpt|normal|--min-runtime 8h
