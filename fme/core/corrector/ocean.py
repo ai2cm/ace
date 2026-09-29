@@ -1,16 +1,11 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
 
-from fme.core.atmosphere_data import AtmosphereData
-from fme.core.constants import (
-    FREEZING_TEMPERATURE_KELVIN,
-    LATENT_HEAT_OF_VAPORIZATION,
-    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
-)
+from fme.core.constants import FREEZING_TEMPERATURE_KELVIN, LATENT_HEAT_OF_FREEZING
 from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
@@ -19,6 +14,11 @@ from fme.core.corrector.registry import (
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo
+from fme.core.frozen_mass_budget import (
+    correct_hfds,
+    frozen_mass_flux_sum,
+    ocean_net_surface_energy_flux,
+)
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
@@ -133,10 +133,55 @@ class SurfaceEnergyFluxCorrectionConfig:
 
     Parameters:
         method: Method to use for the correction.
+        runoff_and_calving: If True, net_flux gains ``+ hfrunoffds -
+            calving_residue`` (both per ocean area, read from the generated
+            data) before any ``* sea_surface_fraction``. Default False leaves
+            existing configs and checkpoints unchanged.
 
     """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    runoff_and_calving: bool = False
+
+
+@dataclasses.dataclass
+class FrozenMassBudgetConfig:
+    """Configuration for the frozen-mass (sea ice + snow) budget correction,
+    the ``floor_r`` form of the toy frozen-mass corrector.
+
+    Per sample and hemisphere h (``lat >= 0``, ``lat < 0``), with
+    ``<x>_h = sum(x * area * 1_h)`` and every field per total cell area::
+
+        S      = frozen_mass_flux_sum(forcing, hfds_total_area, hfrunoffds,
+                                      calving_residue)
+        m_diag = m0 + (dt / L_f) (S - r_hat)
+        D      = <m_diag - m_hat>_h
+        f      = sea_surface_fraction * sea_ice_fraction
+        a      = relu(m_hat - c f),  s = m_hat - a
+        dm     = D f / <f>_h                        D >= 0
+               = D a / <a>_h                        -<a>_h <= D < 0
+               = -a + (D + <a>_h) s / <s>_h         D < -<a>_h
+        m_c    = relu(m_hat + dm)
+
+    Each ratio is 0 where its denominator is 0. ``m0`` is the input
+    ``frozen_mass``; ``m_hat``, ``r_hat``, ``hfds_total_area``, ``hfrunoffds``,
+    ``calving_residue`` and the sea ice fraction are generated; the
+    atmosphere fluxes and ``sea_surface_fraction`` are forcing. Only
+    ``frozen_mass`` is modified.
+
+    Parameters:
+        frozen_mass_name: Name of the frozen mass [kg m-2 per total area].
+        residual_name: Name of the predicted budget residual [W m-2].
+        sea_ice_fraction_name: Name of the sea ice fraction as a proportion of
+            the sea surface.
+        floor_mass_per_fraction: ``c`` [kg m-2], the mass per unit ice
+            fraction kept from melting: SIS2 RHO_ICE * hLim(1).
+    """
+
+    frozen_mass_name: str = "frozen_mass"
+    residual_name: str = "frozen_mass_energy_budget_residual"
+    sea_ice_fraction_name: str = "ocean_sea_ice_fraction"
+    floor_mass_per_fraction: float = 905.0 * 1.0e-10
 
 
 @dataclasses.dataclass
@@ -178,6 +223,7 @@ class SurfaceEnergyFluxCorrection:
     """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    runoff_and_calving: bool = False
 
     def __call__(
         self,
@@ -196,8 +242,122 @@ class SurfaceEnergyFluxCorrection:
             gen_data,
             forcing_data,
             method=self.method,
+            runoff_and_calving=self.runoff_and_calving,
         )
         return corrected, corrector_state
+
+
+def _hemisphere_masks(lat_1d: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(lat >= 0, lat < 0)`` as float64 ``(nlat, 1)`` masks that partition
+    the grid.
+    """
+    lat = lat_1d.detach().to("cpu", torch.float64).reshape(-1, 1)
+    return (lat >= 0).to(torch.float64), (lat < 0).to(torch.float64)
+
+
+def _safe_share(
+    field: torch.Tensor, total: torch.Tensor, amount: torch.Tensor
+) -> torch.Tensor:
+    """``amount * field / total``, 0 where ``total <= 0``; the denominator is
+    replaced by 1 there so backward stays finite.
+    """
+    positive = total > 0
+    safe_total = torch.where(positive, total, torch.ones_like(total))
+    return torch.where(positive, amount * field / safe_total, torch.zeros_like(field))
+
+
+def _floor_increment(
+    deficit: torch.Tensor,
+    ice_fraction: torch.Tensor,
+    available: torch.Tensor,
+    remainder: torch.Tensor,
+    hemisphere_sum: Callable[[torch.Tensor], torch.Tensor],
+) -> torch.Tensor:
+    """The ``floor`` increment ``dm`` for one hemisphere, given its total
+    ``D = deficit`` (shape ``(..., 1, 1)``).
+    """
+    total_available = hemisphere_sum(available)
+    grow = _safe_share(ice_fraction, hemisphere_sum(ice_fraction), deficit)
+    melt = _safe_share(available, total_available, deficit)
+    melt_all = -available + _safe_share(
+        remainder, hemisphere_sum(remainder), deficit + total_available
+    )
+    return torch.where(
+        deficit >= 0,
+        grow,
+        torch.where(deficit >= -total_available, melt, melt_all),
+    )
+
+
+@dataclasses.dataclass
+class FrozenMassBudgetCorrection:
+    """Correction that sets each hemisphere's frozen mass to the budget
+    integrated from the input with the predicted residual; see
+    ``FrozenMassBudgetConfig``.
+    """
+
+    config: FrozenMassBudgetConfig
+    area_weighted_sum: AreaWeightedMean
+    hemispheres: tuple[torch.Tensor, torch.Tensor]
+    timestep_seconds: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only ``frozen_mass``.
+        """
+        c = self.config
+        missing = [
+            name
+            for name in ("hfds_total_area", "hfrunoffds", "calving_residue")
+            if name not in gen_data
+        ]
+        if missing:
+            raise ValueError(
+                f"Frozen mass budget correction needs {missing} in the generated data"
+            )
+        m_hat = gen_data[c.frozen_mass_name]
+        out_dtype = m_hat.dtype
+        m_hat = m_hat.to(torch.float64)
+        m0 = input_data[c.frozen_mass_name].to(torch.float64)
+        r_hat = gen_data[c.residual_name].to(torch.float64)
+        ssf = torch.nan_to_num(OceanData(forcing_data).sea_surface_fraction)
+        f = ssf.to(torch.float64) * gen_data[c.sea_ice_fraction_name].to(torch.float64)
+        flux_sum = frozen_mass_flux_sum(
+            forcing_data,
+            gen_data["hfds_total_area"],
+            gen_data["hfrunoffds"],
+            gen_data["calving_residue"],
+        ).to(torch.float64)
+        m_diag = m0 + self.timestep_seconds / LATENT_HEAT_OF_FREEZING * (
+            flux_sum - r_hat
+        )
+        available = torch.relu(m_hat - c.floor_mass_per_fraction * f)
+        remainder = m_hat - available
+        dm = torch.zeros_like(m_hat)
+        for mask in self.hemispheres:
+            if mask.shape[-2] != m_hat.shape[-2]:
+                raise ValueError(
+                    f"Hemisphere mask has {mask.shape[-2]} latitudes, data has "
+                    f"{m_hat.shape[-2]}; spatial parallelism is not supported"
+                )
+            h = mask.to(m_hat.device)
+
+            def hemisphere_sum(x: torch.Tensor, h: torch.Tensor = h) -> torch.Tensor:
+                return self.area_weighted_sum(x * h, keepdim=True)
+
+            deficit = hemisphere_sum(m_diag - m_hat)
+            dm = dm + h * _floor_increment(
+                deficit, f, available, remainder, hemisphere_sum
+            )
+        m_c = torch.relu(m_hat + dm).to(out_dtype)
+        return {c.frozen_mass_name: m_c}, corrector_state
 
 
 @dataclasses.dataclass
@@ -256,6 +416,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             flux correction to the generated hfds.
         ocean_heat_content_correction: Optional configuration for an ocean heat
             content correction.
+        frozen_mass_budget_correction: Optional configuration for the
+            frozen-mass budget (``floor``) correction. Needs latitudes, so it
+            is not available on HEALPix grids.
         keep_gradient_through_clamps: If True, apply the corrector's hard clamps
             (the ``force_positive_names`` clamp and the
             ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
@@ -268,6 +431,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    frozen_mass_budget_correction: FrozenMassBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
 
     @classmethod
@@ -306,10 +470,16 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
+        lat_1d = (
+            dataset_info.lat_1d
+            if self.frozen_mass_budget_correction is not None
+            else None
+        )
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
+            lat_1d=lat_1d,
         )
 
     def _build(
@@ -317,6 +487,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
+        lat_1d: torch.Tensor | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -337,7 +508,24 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             )
         if self.surface_energy_flux_correction is not None:
             corrections.append(
-                SurfaceEnergyFluxCorrection(self.surface_energy_flux_correction.method)
+                SurfaceEnergyFluxCorrection(
+                    self.surface_energy_flux_correction.method,
+                    self.surface_energy_flux_correction.runoff_and_calving,
+                )
+            )
+        if self.frozen_mass_budget_correction is not None:
+            if lat_1d is None:
+                raise ValueError(
+                    "frozen_mass_budget_correction needs latitudes (lat_1d), "
+                    "which this grid does not provide"
+                )
+            corrections.append(
+                FrozenMassBudgetCorrection(
+                    self.frozen_mass_budget_correction,
+                    gridded_operations.area_weighted_sum,
+                    _hemisphere_masks(lat_1d),
+                    timestep_seconds,
+                )
             )
         if self.ocean_heat_content_correction is not None:
             corrections.append(
@@ -356,30 +544,7 @@ class OceanCorrector(CorrectionSequence):
     pass
 
 
-def _compute_ocean_net_surface_energy_flux(
-    forcing_data: TensorMapping,
-    sst: torch.Tensor,
-) -> torch.Tensor:
-    """Compute the net surface energy flux into the ocean from atmospheric
-    forcing variables and the sea surface temperature.
-
-    This extends the atmosphere net surface energy flux with SST-dependent
-    heat transport by precipitation and evaporation.
-    """
-    atmos = AtmosphereData(forcing_data)
-    base_flux = (
-        atmos.net_surface_energy_flux
-    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
-    mass_heat_flux = (
-        SPECIFIC_HEAT_OF_SEA_WATER_CM4
-        * (
-            atmos.precipitation_rate
-            + atmos.frozen_precipitation_rate
-            - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
-        )  # missing: + river runoff + calving
-        * (sst - FREEZING_TEMPERATURE_KELVIN)
-    )
-    return base_flux + mass_heat_flux
+_compute_ocean_net_surface_energy_flux = ocean_net_surface_energy_flux
 
 
 def _correct_hfds(
@@ -387,11 +552,16 @@ def _correct_hfds(
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"],
+    runoff_and_calving: bool = False,
 ) -> TensorDict:
     """Apply surface energy flux correction to the generated hfds.
 
+    If ``runoff_and_calving``, net_flux gains ``+ hfrunoffds - calving_residue``
+    from ``gen_data`` (per ocean area) before any ``* sea_surface_fraction``.
+
     The ocean_fraction naturally zeroes the correction on land and reduces
-    it under sea ice.
+    it under sea ice. The arithmetic is ``fme.core.frozen_mass_budget.correct_hfds``,
+    shared with the data loader's ``frozen_mass_energy_budget_residual``.
 
     Methods:
         residual_prediction: gen_hfds + ocean_fraction * net_flux
@@ -400,28 +570,37 @@ def _correct_hfds(
     """
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
-    ocean_fraction = input.ocean_fraction
     net_flux = _compute_ocean_net_surface_energy_flux(
         forcing_data, input.sea_surface_temperature
     )
-    out: TensorDict = {}
     if "hfds" in gen_data:
         hfds_name = "hfds"
+        sea_surface_fraction = None
     else:
         hfds_name = "hfds_total_area"
-        net_flux = net_flux * forcing.sea_surface_fraction
-    gen_hfds = gen_data[hfds_name]
-    if method == "residual_prediction":
-        out[hfds_name] = net_flux * ocean_fraction + gen_hfds
-    elif method == "prescribed":
-        out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
-    elif method == "prescribed_open_ocean":
-        out[hfds_name] = torch.where(ocean_fraction == 1, net_flux, gen_hfds)
-    else:
-        raise NotImplementedError(
-            f"Method {method!r} not implemented for surface energy flux correction"
+        sea_surface_fraction = forcing.sea_surface_fraction
+    hfrunoffds: torch.Tensor | None = None
+    calving_residue: torch.Tensor | None = None
+    if runoff_and_calving:
+        missing = [n for n in ("hfrunoffds", "calving_residue") if n not in gen_data]
+        if missing:
+            raise ValueError(
+                f"runoff_and_calving is set, but {missing} are not in the "
+                "generated data"
+            )
+        hfrunoffds = gen_data["hfrunoffds"]
+        calving_residue = gen_data["calving_residue"]
+    return {
+        hfds_name: correct_hfds(
+            net_flux,
+            gen_data[hfds_name],
+            input.ocean_fraction,
+            method,
+            sea_surface_fraction=sea_surface_fraction,
+            hfrunoffds=hfrunoffds,
+            calving_residue=calving_residue,
         )
-    return out
+    }
 
 
 def _force_conserve_ocean_heat_content(

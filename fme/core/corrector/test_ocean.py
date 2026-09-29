@@ -5,13 +5,21 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.constants import LATENT_HEAT_OF_FREEZING
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
+    FrozenMassBudgetConfig,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
+)
+from fme.core.frozen_mass_budget import (
+    calving_residue,
+    frozen_mass,
+    frozen_mass_flux_sum,
+    target_frozen_mass_energy_budget_residual,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
@@ -541,6 +549,7 @@ def test_ocean_corrector_config_fields_are_known():
         "sea_ice_fraction_correction",
         "surface_energy_flux_correction",
         "ocean_heat_content_correction",
+        "frozen_mass_budget_correction",
         "keep_gradient_through_clamps",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
@@ -685,3 +694,349 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
     # above is not vacuous
     for name in folded:
         assert not torch.allclose(folded[name][0], folded[name][1])
+
+
+def _runoff_calving_case(hfds_name: str):
+    """Open ocean everywhere (no land, no ice) except one land row."""
+    torch.manual_seed(0)
+    sst = torch.full(IMG_SHAPE, 290.0, device=DEVICE)
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+    gen_data = {
+        "sst": sst,
+        hfds_name: torch.randn(IMG_SHAPE, device=DEVICE),
+        "sea_ice_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+        "hfrunoffds": torch.rand(IMG_SHAPE, device=DEVICE) * 5.0,
+        "calving_residue": torch.randn(IMG_SHAPE, device=DEVICE),
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        "sea_surface_fraction": 1 - land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+    return input_data, gen_data, forcing_data
+
+
+def _surface_flux_corrector(runoff_and_calving: bool | None):
+    kwargs = (
+        {} if runoff_and_calving is None else {"runoff_and_calving": runoff_and_calving}
+    )
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed", **kwargs
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    return config._build(ops, None, datetime.timedelta(seconds=3600))
+
+
+@pytest.mark.parametrize("hfds_name", ["hfds", "hfds_total_area"])
+def test_surface_energy_flux_correction_runoff_and_calving(hfds_name):
+    input_data, gen_data, forcing_data = _runoff_calving_case(hfds_name)
+    ssf = forcing_data["sea_surface_fraction"]
+    net_flux = _compute_ocean_net_surface_energy_flux(input_data, gen_data["sst"])
+    extra = gen_data["hfrunoffds"] - gen_data["calving_residue"]
+
+    on = _surface_flux_corrector(True)(input_data, gen_data, forcing_data, None)
+    off = _surface_flux_corrector(False)(input_data, gen_data, forcing_data, None)
+    default = _surface_flux_corrector(None)(input_data, gen_data, forcing_data, None)
+
+    open_ocean = slice(0, -1)
+    if hfds_name == "hfds_total_area":
+        expected_on = ssf * (net_flux + extra)
+        expected_off = ssf * net_flux
+    else:
+        expected_on = net_flux + extra
+        expected_off = net_flux
+    torch.testing.assert_close(
+        on.corrected[hfds_name][open_ocean], expected_on[open_ocean]
+    )
+    torch.testing.assert_close(
+        off.corrected[hfds_name][open_ocean], expected_off[open_ocean]
+    )
+    # on land (ocean_fraction 0) the generated value passes through
+    torch.testing.assert_close(on.corrected[hfds_name][-1], gen_data[hfds_name][-1])
+    # default off: identical to the flag unset
+    torch.testing.assert_close(default.corrected[hfds_name], off.corrected[hfds_name])
+    assert set(on.modified_names) == {hfds_name}
+
+
+@pytest.mark.parametrize("missing", ["hfrunoffds", "calving_residue"])
+def test_surface_energy_flux_correction_runoff_and_calving_missing_raises(missing):
+    input_data, gen_data, forcing_data = _runoff_calving_case("hfds_total_area")
+    del gen_data[missing]
+    with pytest.raises(ValueError, match=missing):
+        _surface_flux_corrector(True)(input_data, gen_data, forcing_data, None)
+    # the flag off does not need them
+    _surface_flux_corrector(False)(input_data, gen_data, forcing_data, None)
+
+
+_FM_LAT = torch.tensor([-60.0, -20.0, 0.0, 30.0, 70.0])
+_FM_SHAPE = (2, 5, 4)  # (sample, lat, lon)
+_FM_DT = 5 * 86400.0
+_FM_AREA = torch.tensor([0.5, 1.0, 1.2, 1.0, 0.4]).unsqueeze(-1).expand(5, 4)
+_FM_HEMISPHERES = (_FM_LAT >= 0, _FM_LAT < 0)
+
+
+def _fm_corrector(floor_mass_per_fraction: float = 905.0 * 1.0e-10):
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig(
+            floor_mass_per_fraction=floor_mass_per_fraction
+        ),
+    )
+    ops = LatLonOperations(_FM_AREA)
+    return config._build(ops, None, datetime.timedelta(seconds=_FM_DT), lat_1d=_FM_LAT)
+
+
+def _fm_sum(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+    """Per-sample hemisphere total, shape (sample, 1, 1), float64."""
+    w = (_FM_AREA * h.unsqueeze(-1)).to(torch.float64)
+    return (x.to(torch.float64) * w).sum(dim=(-2, -1), keepdim=True)
+
+
+def _fm_case(factors: list[list[float]], seed: int = 0):
+    """Random step whose r_hat puts m_diag = factor_h(sample) * m_hat.
+
+    ``factors[sample][i]`` for hemisphere i of ``_FM_HEMISPHERES``.
+    """
+    g = torch.Generator().manual_seed(seed)
+
+    def r(scale=1.0, offset=0.0):
+        return offset + scale * torch.rand(_FM_SHAPE, generator=g, dtype=torch.float64)
+
+    ssf = torch.ones(_FM_SHAPE, dtype=torch.float64)
+    ssf[:, 1, 1] = 0.3
+    ssf[:, 3, 0] = 0.0
+    sif = r()
+    sif[:, 0, 0] = 0.0  # ice-free cells
+    sif[:, 4, 3] = 0.0
+    m_hat = r(1000.0) * (sif > 0)
+    m_hat[:, 3, 2] = 0.0
+    forcing_data = {
+        "sea_surface_fraction": ssf,
+        **{
+            k: v.to(torch.float64).expand(_FM_SHAPE)
+            for k, v in _make_atmos_forcing_data(_FM_SHAPE[1:], "cpu").items()
+        },
+    }
+    gen_data = {
+        "frozen_mass": m_hat,
+        "ocean_sea_ice_fraction": sif,
+        "hfds_total_area": r(100.0, -50.0),
+        "hfrunoffds": r(5.0),
+        "calving_residue": r(20.0, -10.0),
+    }
+    input_data = {"frozen_mass": r(1000.0)}
+    factor = torch.zeros(_FM_SHAPE, dtype=torch.float64)
+    for sample, row in enumerate(factors):
+        for h, fac in zip(_FM_HEMISPHERES, row):
+            factor[sample, h] = fac
+    m_diag = factor * m_hat
+    flux_sum = frozen_mass_flux_sum(
+        forcing_data,
+        gen_data["hfds_total_area"],
+        gen_data["hfrunoffds"],
+        gen_data["calving_residue"],
+    )
+    gen_data["frozen_mass_energy_budget_residual"] = (
+        flux_sum
+        - LATENT_HEAT_OF_FREEZING * (m_diag - input_data["frozen_mass"]) / _FM_DT
+    )
+    return input_data, gen_data, forcing_data, m_diag, ssf * sif
+
+
+def _assert_hemisphere_budget(m_c, m_diag):
+    for h in _FM_HEMISPHERES:
+        torch.testing.assert_close(
+            _fm_sum(m_c, h), _fm_sum(m_diag, h).clamp(min=0), rtol=1e-10, atol=1e-6
+        )
+    assert (m_c >= 0).all()
+
+
+def test_frozen_mass_budget_correction_grow():
+    # sample 0 grows in both hemispheres, sample 1 grows by other factors
+    input_data, gen_data, forcing_data, m_diag, f = _fm_case([[1.3, 1.1], [1.05, 2.0]])
+    result = _fm_corrector()(input_data, gen_data, forcing_data, None)
+    m_c = result.corrected["frozen_mass"]
+    assert set(result.modified_names) == {"frozen_mass"}
+    _assert_hemisphere_budget(m_c, m_diag)
+    m_hat = gen_data["frozen_mass"]
+    for h in _FM_HEMISPHERES:
+        deficit = _fm_sum(m_diag - m_hat, h)
+        expected = m_hat + deficit * f / _fm_sum(f, h)
+        torch.testing.assert_close(m_c[..., h, :], expected[..., h, :])
+
+
+def test_frozen_mass_budget_correction_melt():
+    input_data, gen_data, forcing_data, m_diag, _ = _fm_case([[0.6, 0.9], [0.2, 0.99]])
+    m_c = _fm_corrector()(input_data, gen_data, forcing_data, None).corrected[
+        "frozen_mass"
+    ]
+    _assert_hemisphere_budget(m_c, m_diag)
+    m_hat = gen_data["frozen_mass"]
+    # c f is negligible: the melt branch is a uniform scaling per hemisphere
+    for h in _FM_HEMISPHERES:
+        ratio = _fm_sum(m_diag, h) / _fm_sum(m_hat, h)
+        torch.testing.assert_close(
+            m_c[..., h, :], (m_hat * ratio)[..., h, :], rtol=1e-6, atol=1e-6
+        )
+
+
+def test_frozen_mass_budget_correction_melt_past_floor():
+    # a large floor so the remainder branch keeps a visible s = min(m_hat, c f)
+    c = 300.0
+    input_data, gen_data, forcing_data, m_diag, f = _fm_case([[0.1, 0.05], [-0.5, 0.2]])
+    m_hat = gen_data["frozen_mass"]
+    available = torch.relu(m_hat - c * f)
+    remainder = m_hat - available
+    for h in _FM_HEMISPHERES:  # the case is in the remainder branch
+        assert (_fm_sum(m_diag - m_hat, h) < -_fm_sum(available, h)).all()
+    m_c = _fm_corrector(c)(input_data, gen_data, forcing_data, None).corrected[
+        "frozen_mass"
+    ]
+    _assert_hemisphere_budget(m_c, m_diag)
+    for h in _FM_HEMISPHERES:
+        scale = (_fm_sum(m_diag, h) / _fm_sum(remainder, h)).clamp(min=0)
+        torch.testing.assert_close(
+            m_c[..., h, :], (remainder * scale)[..., h, :], rtol=1e-8, atol=1e-8
+        )
+    # sample 1, northern hemisphere: <m_diag> < 0, all mass removed
+    assert (m_c[1, _FM_HEMISPHERES[0]] == 0).all()
+
+
+@pytest.mark.parametrize("factor_sign", [1.0, -1.0])
+def test_frozen_mass_budget_correction_ice_free_hemisphere(factor_sign):
+    input_data, gen_data, forcing_data, _, _ = _fm_case([[1.2, 1.0], [0.8, 1.0]])
+    south = _FM_HEMISPHERES[1]
+    gen_data["frozen_mass"][:, south] = 0.0
+    gen_data["ocean_sea_ice_fraction"][:, south] = 0.0
+    # a nonzero budget deficit of either sign in the ice-free hemisphere
+    gen_data["frozen_mass_energy_budget_residual"][:, south] -= factor_sign * 50.0
+    m_hat = gen_data["frozen_mass"].clone().requires_grad_(True)
+    r_hat = gen_data["frozen_mass_energy_budget_residual"].clone().requires_grad_(True)
+    sif = gen_data["ocean_sea_ice_fraction"].clone().requires_grad_(True)
+    gen_data.update(
+        frozen_mass=m_hat,
+        frozen_mass_energy_budget_residual=r_hat,
+        ocean_sea_ice_fraction=sif,
+    )
+    m_c = _fm_corrector()(input_data, gen_data, forcing_data, None).corrected[
+        "frozen_mass"
+    ]
+    assert (m_c[:, south] == 0).all()
+    assert torch.isfinite(m_c).all()
+    m_c.sum().backward()
+    for x in (m_hat, r_hat, sif):
+        assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def test_frozen_mass_budget_correction_float32_gradients_finite():
+    input_data, gen_data, forcing_data, _, _ = _fm_case([[0.7, 1.4], [1.1, 0.5]])
+    gen32 = {k: v.to(torch.float32).requires_grad_(True) for k, v in gen_data.items()}
+    m_c = _fm_corrector()(
+        {k: v.float() for k, v in input_data.items()},
+        gen32,
+        {k: v.float() for k, v in forcing_data.items()},
+        None,
+    ).corrected["frozen_mass"]
+    assert m_c.dtype == torch.float32
+    m_c.pow(2).sum().backward()
+    for name, x in gen32.items():
+        assert x.grad is not None and torch.isfinite(x.grad).all(), name
+
+
+def test_frozen_mass_budget_correction_needs_lat():
+    config = OceanCorrectorConfig(
+        frozen_mass_budget_correction=FrozenMassBudgetConfig()
+    )
+    ops = LatLonOperations(_FM_AREA)
+    with pytest.raises(ValueError, match="lat_1d"):
+        config._build(ops, None, datetime.timedelta(seconds=_FM_DT))
+
+
+def test_frozen_mass_budget_correction_missing_flux_raises():
+    input_data, gen_data, forcing_data, _, _ = _fm_case([[1.0, 1.0], [1.0, 1.0]])
+    del gen_data["calving_residue"]
+    with pytest.raises(ValueError, match="calving_residue"):
+        _fm_corrector()(input_data, gen_data, forcing_data, None)
+
+
+def test_frozen_mass_budget_correction_target_identity():
+    """16-c03: the loader residual of a target step, fed as r_hat with the
+    target frozen mass, returns the target frozen mass; the surface energy
+    flux correction runs first, as in the train config."""
+    g = torch.Generator().manual_seed(1)
+    n_time, shape = 2, _FM_SHAPE[1:]
+
+    def r(scale=1.0, offset=0.0):
+        return offset + scale * torch.rand(
+            n_time, *shape, generator=g, dtype=torch.float64
+        )
+
+    land = torch.zeros(shape, dtype=torch.float64)
+    land[1, 1] = 0.7
+    land[3, 0] = 1.0
+    land_t = land.expand(n_time, *shape).clone()
+    window = {
+        "land_fraction": land_t,
+        "sea_surface_fraction": 1 - land_t,
+        "ocean_sea_ice_fraction": r() * (r() > 0.3),
+        "sst": r(10.0, 270.0),
+        "simass": r(900.0),
+        "sisnmass": r(300.0),
+        "hflso": r(20.0, -10.0),
+        "evs": r(1e-5),
+        "prsn": r(1e-5),
+        "hfrunoffds": r(5.0),
+        "hfds_total_area": r(100.0, -50.0),
+        **{
+            k: v.to(torch.float64) * r(0.5, 0.75)
+            for k, v in _make_atmos_forcing_data((n_time, *shape), "cpu").items()
+        },
+    }
+    residual = target_frozen_mass_energy_budget_residual(window, _FM_DT)
+    m = frozen_mass(
+        window["simass"], window["sisnmass"], window["sea_surface_fraction"]
+    )
+    cr = calving_residue(window["hflso"], window["evs"], window["prsn"])
+    derived = {
+        "frozen_mass": m,
+        "calving_residue": cr,
+        "frozen_mass_energy_budget_residual": residual,
+    }
+    data = {**window, **derived}
+    gen_names = [
+        "frozen_mass",
+        "frozen_mass_energy_budget_residual",
+        "calving_residue",
+        "hfrunoffds",
+        "hfds_total_area",
+        "ocean_sea_ice_fraction",
+        "sst",
+    ]
+    forcing_names = [
+        "land_fraction",
+        "sea_surface_fraction",
+        *_make_atmos_forcing_data((1,), "cpu"),
+    ]
+    input_data = {k: v[0:1] for k, v in data.items()}
+    gen_data = {k: data[k][1:2] for k in gen_names}
+    forcing_data = {k: data[k][1:2] for k in forcing_names}
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed", runoff_and_calving=True
+        ),
+        frozen_mass_budget_correction=FrozenMassBudgetConfig(),
+    )
+    corrector = config._build(
+        LatLonOperations(_FM_AREA),
+        None,
+        datetime.timedelta(seconds=_FM_DT),
+        lat_1d=_FM_LAT,
+    )
+    result = corrector(input_data, gen_data, forcing_data, None)
+    assert set(result.modified_names) == {"hfds_total_area", "frozen_mass"}
+    torch.testing.assert_close(
+        result.corrected["frozen_mass"], gen_data["frozen_mass"], rtol=1e-10, atol=1e-8
+    )
