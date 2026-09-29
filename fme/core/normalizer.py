@@ -32,6 +32,11 @@ class NormalizationConfig:
         fill_nans_on_denormalize: Whether to fill NaNs during denormalization. If
             true, on denormalization NaNs in the normalized input become global means in
             the denormalized output.
+        extra_means: Means for names absent from the global_means_path file.
+            A name present in the file keeps the file's value. Merged into
+            ``means`` by ``load``, so the values are stored in checkpoints.
+        extra_stds: Stds for names absent from the global_stds_path file,
+            with the same keys as ``extra_means``.
     """
 
     global_means_path: str | pathlib.Path | None = None
@@ -40,8 +45,15 @@ class NormalizationConfig:
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
+    extra_means: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    extra_stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
+        if set(self.extra_means) != set(self.extra_stds):
+            raise ValueError(
+                "extra_means and extra_stds must have the same keys, got "
+                f"{sorted(self.extra_means)} and {sorted(self.extra_stds)}."
+            )
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
@@ -57,6 +69,12 @@ class NormalizationConfig:
                 "or explicit means and stds."
             )
 
+    def _means_defaults(self) -> dict[str, float]:
+        return {**_DEFAULT_MEANS, **self.extra_means}
+
+    def _stds_defaults(self) -> dict[str, float]:
+        return {**_DEFAULT_STDS, **self.extra_stds}
+
     def load(self):
         """
         Load the normalization configuration from the netCDF files.
@@ -69,12 +87,12 @@ class NormalizationConfig:
             means = load_dict_from_netcdf(
                 self.global_means_path,
                 names=None,
-                defaults={"x": 0.0, "y": 0.0, "z": 0.0},
+                defaults=self._means_defaults(),
             )
             stds = load_dict_from_netcdf(
                 self.global_stds_path,
                 names=None,
-                defaults={"x": 1.0, "y": 1.0, "z": 1.0},
+                defaults=self._stds_defaults(),
             )
             self.means = means
             self.stds = stds
@@ -90,12 +108,16 @@ class NormalizationConfig:
                 global_means_path=self.global_means_path,
                 global_stds_path=self.global_stds_path,
                 names=names,
+                means_defaults=self._means_defaults(),
+                stds_defaults=self._stds_defaults(),
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
             )
         else:
-            means = {k: torch.tensor(self.means[k]) for k in names}
-            stds = {k: torch.tensor(self.stds[k]) for k in names}
+            all_means = {**self.extra_means, **self.means}
+            all_stds = {**self.extra_stds, **self.stds}
+            means = {k: torch.tensor(all_means[k]) for k in names}
+            stds = {k: torch.tensor(all_stds[k]) for k in names}
             return StandardNormalizer(
                 means=means,
                 stds=stds,
@@ -242,16 +264,31 @@ def _denormalize(
     return denormalized
 
 
+_DEFAULT_MEANS: dict[str, float] = {"x": 0.0, "y": 0.0, "z": 0.0}
+_DEFAULT_STDS: dict[str, float] = {"x": 1.0, "y": 1.0, "z": 1.0}
+
+
 def get_normalizer(
-    global_means_path, global_stds_path, names: list[str], **normalizer_kwargs
+    global_means_path,
+    global_stds_path,
+    names: list[str],
+    means_defaults: Mapping[str, float] | None = None,
+    stds_defaults: Mapping[str, float] | None = None,
+    **normalizer_kwargs,
 ) -> StandardNormalizer:
-    means = load_dict_from_netcdf(
-        global_means_path, names, defaults={"x": 0.0, "y": 0.0, "z": 0.0}
-    )
+    """
+    Build a normalizer from netCDF files of scalar means and stds.
+
+    ``means_defaults`` and ``stds_defaults`` fill names absent from the
+    files; they default to the x/y/z coordinate defaults.
+    """
+    if means_defaults is None:
+        means_defaults = _DEFAULT_MEANS
+    if stds_defaults is None:
+        stds_defaults = _DEFAULT_STDS
+    means = load_dict_from_netcdf(global_means_path, names, defaults=means_defaults)
     means = {k: torch.as_tensor(v, dtype=torch.float) for k, v in means.items()}
-    stds = load_dict_from_netcdf(
-        global_stds_path, names, defaults={"x": 1.0, "y": 1.0, "z": 1.0}
-    )
+    stds = load_dict_from_netcdf(global_stds_path, names, defaults=stds_defaults)
     stds = {k: torch.as_tensor(v, dtype=torch.float) for k, v in stds.items()}
     return StandardNormalizer(means=means, stds=stds, **normalizer_kwargs)
 

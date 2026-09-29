@@ -397,3 +397,97 @@ def test_can_create_config_without_files():
         global_means_path="/not/a/real/path",
         global_stds_path="/not/a/real/path",
     )
+
+
+def _write_stats_files(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    mean_ds = get_scalar_dataset(["a", "b"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a", "b"], fill_value=2.0)
+    mean_ds.to_netcdf(tmp_path / "mean.nc")
+    std_ds.to_netcdf(tmp_path / "std.nc")
+    return tmp_path / "mean.nc", tmp_path / "std.nc"
+
+
+def test_extra_stats_fill_missing_names_and_do_not_override_file():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        means_path, stds_path = _write_stats_files(pathlib.Path(tmp_dir))
+        config = NormalizationConfig(
+            global_means_path=means_path,
+            global_stds_path=stds_path,
+            extra_means={"a": -5.0, "extra": 3.0},
+            extra_stds={"a": -6.0, "extra": 4.0},
+        )
+        built = config.build(["a", "b", "extra"])
+        config.load()
+    loaded = config.build(["a", "b", "extra"])
+    for normalizer in (built, loaded):
+        assert normalizer.means["a"] == 1.0
+        assert normalizer.stds["a"] == 2.0
+        assert normalizer.means["b"] == 1.0
+        assert normalizer.stds["b"] == 2.0
+        assert normalizer.means["extra"] == 3.0
+        assert normalizer.stds["extra"] == 4.0
+    assert config.means["extra"] == 3.0
+    assert config.stds["extra"] == 4.0
+
+
+def test_extra_stats_checkpoint_round_trip():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        means_path, stds_path = _write_stats_files(pathlib.Path(tmp_dir))
+        config = NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(
+                global_means_path=means_path,
+                global_stds_path=stds_path,
+                extra_means={"extra": 3.0},
+                extra_stds={"extra": 4.0},
+            )
+        )
+        config.load()
+    # files are gone; the stored config must be self-contained
+    round_tripped = dacite.from_dict(
+        NetworkAndLossNormalizationConfig,
+        data=dataclasses.asdict(config),
+        config=dacite.Config(strict=True),
+    )
+    assert round_tripped == config
+    assert round_tripped.network.global_means_path is None
+    normalizer = round_tripped.get_network_normalizer(["a", "extra"])
+    assert normalizer.means["a"] == 1.0
+    assert normalizer.stds["a"] == 2.0
+    assert normalizer.means["extra"] == 3.0
+    assert normalizer.stds["extra"] == 4.0
+    state_round_tripped = StandardNormalizer.from_state(normalizer.get_state())
+    assert state_round_tripped.means["extra"] == 3.0
+    assert state_round_tripped.stds["extra"] == 4.0
+
+
+def test_config_without_extra_fields_still_loads():
+    data = {"means": {"a": 1.0}, "stds": {"a": 2.0}}
+    config = dacite.from_dict(
+        NormalizationConfig, data=data, config=dacite.Config(strict=True)
+    )
+    assert config.extra_means == {}
+    assert config.extra_stds == {}
+
+
+def test_extra_stats_explicit_means_take_priority():
+    config = NormalizationConfig(
+        means={"a": 1.0},
+        stds={"a": 2.0},
+        extra_means={"a": -1.0, "extra": 3.0},
+        extra_stds={"a": -1.0, "extra": 4.0},
+    )
+    normalizer = config.build(["a", "extra"])
+    assert normalizer.means["a"] == 1.0
+    assert normalizer.stds["a"] == 2.0
+    assert normalizer.means["extra"] == 3.0
+    assert normalizer.stds["extra"] == 4.0
+
+
+def test_extra_stats_keys_must_match():
+    with pytest.raises(ValueError, match="same keys"):
+        NormalizationConfig(
+            means={"a": 1.0},
+            stds={"a": 2.0},
+            extra_means={"extra": 3.0},
+            extra_stds={},
+        )
