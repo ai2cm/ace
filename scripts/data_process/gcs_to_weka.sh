@@ -36,6 +36,7 @@ if (( $# % 2 != 0 )); then
     exit 1
 fi
 
+TOTAL_PAIRS=$(($# / 2))
 COPY_CMD=""
 N_PAIRS=0
 while [[ $# -gt 0 ]]; do
@@ -53,14 +54,18 @@ while [[ $# -gt 0 ]]; do
     GS_PATH="${GS_PATH%/}"
     WEKA_PATH="${WEKA_PATH%/}"
 
-    if [[ -z "$FIRST_GS_PATH" ]]; then
+    if (( N_PAIRS == 0 )); then
         FIRST_GS_PATH="$GS_PATH"
         FIRST_WEKA_PATH="$WEKA_PATH"
     fi
 
-    COPY_CMD+="${COPY_CMD:+ && }mkdir -p $WEKA_PATH && gsutil -m -o Credentials:gs_service_key_file=/tmp/google_application_credentials.json rsync -r $GS_PATH $WEKA_PATH"
     N_PAIRS=$((N_PAIRS + 1))
+
+    # Log a marker before each pair so a failed job shows where it stopped
+    COPY_CMD+="${COPY_CMD:+ && }echo '[$N_PAIRS/$TOTAL_PAIRS] $GS_PATH -> $WEKA_PATH'"
+    COPY_CMD+=" && mkdir -p $WEKA_PATH && gsutil -m -o Credentials:gs_service_key_file=/tmp/google_application_credentials.json rsync -r $GS_PATH $WEKA_PATH"
 done
+COPY_CMD+=" && echo 'Done: copied $N_PAIRS/$TOTAL_PAIRS pairs'"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
