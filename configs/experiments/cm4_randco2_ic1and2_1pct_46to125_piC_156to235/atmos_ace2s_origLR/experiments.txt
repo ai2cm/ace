@@ -17,16 +17,23 @@ cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M31ZPF
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M31ZPF9JHAGXQVNFSTCEFXP8|skip_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M31ZPF9JHAGXQVNFSTCEFXP8|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M31ZPF9JHAGXQVNFSTCEFXP8|skip_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs1|01M31ZPZY41PHY92VPR7WPZD0N|skip_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs1|01M31ZPZY41PHY92VPR7WPZD0N|skip_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs1|01M31ZPZY41PHY92VPR7WPZD0N|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs1|01M31ZPZY41PHY92VPR7WPZD0N|skip_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M31ZQKDWHJBJVS7E7Y61CXQ7|skip_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M31ZQKDWHJBJVS7E7Y61CXQ7|skip_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M31ZQKDWHJBJVS7E7Y61CXQ7|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M31ZQKDWHJBJVS7E7Y61CXQ7|skip_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M31ZPF9JHAGXQVNFSTCEFXP8|run_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs1|01M31ZPZY41PHY92VPR7WPZD0N|run_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M31ZQKDWHJBJVS7E7Y61CXQ7|run_abrupt-4xCO2-ensemble3|best_inference_ckpt|high|--min-runtime 2h
