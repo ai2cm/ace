@@ -1,0 +1,8 @@
+cftime
+dask
+fsspec
+gcsfs
+netCDF4
+scipy
+xarray
+zarr
