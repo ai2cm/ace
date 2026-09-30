@@ -1,0 +1,180 @@
+# Global video PMD (Brownian-bridge + per-channel noise) WITH subset training AT
+# THE MAXIMUM RATE (prob 1.0 -- every batch trains on a random subset of interior
+# frames, never the full grid) AND the marginal-consistency loss at weight 10.
+# Extends the subset-rate sweep (0.25 -> 0.5 -> 1.0) and the L_marg sweep
+# (0 -> 1 -> 10) to their combined extreme: maximum variable-query diversity
+# paired with the strongest cross-query consistency penalty.
+# 4x B200 DDP.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20   # bound the 50-step generation pass during validation
+max_test_batches: 50  # test eval runs every 10 epochs; 50 batches = stable metrics
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-1degree-24to3-bb-pcn-subset100-cons10-v1
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 8  # global across ranks
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 8
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 8
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  # Endpoint-aware time-correlated noise (process-matched diffusion).
+  temporal_noise_correlation: brownian_bridge
+  # Subset training at the maximum rate: every batch trains on a random subset
+  # of interior frames (endpoints always kept) -- there is no full-grid batch.
+  # Maximizes variable-query diversity at the cost of the full-set task never
+  # being trained on directly (that cost is what this run measures, paired
+  # with cons10's stronger L_marg to see if it compensates).
+  subset_augmentation_prob: 1.0
+  subset_min_interior: 1
+  # Marginal-consistency loss on: each step also runs a second pass on a strict
+  # subset of the interior frames (sharing the first pass's noise on shared
+  # frames) and penalizes cross-query disagreement (video PMD L_marg).
+  marginal_consistency_weight: 10.0
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  # Per-channel noise matched to each channel's measured residual std
+  # (toy/compute_residual_std.py over the TRAIN split): u10=0.354, v10=0.487,
+  # PRMSL=0.200, PRATEsfc=0.782 (log1p space). p_mean=ln(resid_std) centers the
+  # training noise at the residual scale; sigma_data fixes EDM preconditioning;
+  # sigma_max ~= 160 x resid_std (EDM ratio). p_std narrowed 1.8 -> 1.2.
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+  normalization:  # train-only, global domain
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
