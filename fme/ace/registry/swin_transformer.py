@@ -54,6 +54,11 @@ class SwinTransformerBuilder(ModuleConfig):
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        skip_projection: Project the concatenated skip back to ``embed_dim``
+            before the decoder stage so it runs at ``embed_dim`` rather than
+            ``2 * embed_dim`` channels. Cuts roughly a quarter of the FLOPs.
+            Requires ``use_skip``; default False keeps existing checkpoints
+            loadable.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         embed_dim_scalar: Scalar conditioning dimension. AdaLN conditioning on
             a scalar embedding requires a wrapper that populates
@@ -72,6 +77,7 @@ class SwinTransformerBuilder(ModuleConfig):
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
+    skip_projection: bool = False
     mlp_layer: str = "mlp"
     embed_dim_scalar: int = 0
     cpb_hidden_dim: int = 64
@@ -85,6 +91,8 @@ class SwinTransformerBuilder(ModuleConfig):
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
             self.padding_conf = TensorPaddingConfig(**self.padding_conf)
+        if self.skip_projection and not self.use_skip:
+            raise ValueError("skip_projection=True requires use_skip=True")
 
     def build(
         self,
@@ -131,6 +139,7 @@ class SwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            skip_projection=self.skip_projection,
         )
         return _ContextWrappedModule(net)
 
@@ -153,6 +162,11 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
+        skip_projection: Project the concatenated skip back to ``embed_dim``
+            before the decoder stage so it runs at ``embed_dim`` rather than
+            ``2 * embed_dim`` channels. Cuts roughly a quarter of the FLOPs.
+            Requires ``use_skip``; default False keeps existing checkpoints
+            loadable.
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         noise_embed_dim: Dimension of the Gaussian noise field injected through
             each block's ``ConditionalLayerNorm``.
@@ -173,6 +187,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
+    skip_projection: bool = False
     mlp_layer: str = "mlp"
     noise_embed_dim: int = 256
     label_embed_dim: int = 0
@@ -187,6 +202,8 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
             self.padding_conf = TensorPaddingConfig(**self.padding_conf)
+        if self.skip_projection and not self.use_skip:
+            raise ValueError("skip_projection=True requires use_skip=True")
 
     def build(
         self,
@@ -236,6 +253,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            skip_projection=self.skip_projection,
         )
         return NoiseConditionedModel(
             net,
