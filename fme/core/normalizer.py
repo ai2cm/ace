@@ -525,16 +525,17 @@ class GroupedNormalizer:
                 f"Labels {sorted(unknown)} are not assigned to any normalization "
                 f"group. Known labels: {sorted(self._label_to_group)}."
             )
-        # labels @ membership counts each sample's labels per group.
+        # labels @ membership counts each sample's labels per group. Done in
+        # float: CUDA has no integer matmul, and labels may be integer-typed.
         membership = torch.zeros(
             (len(labels.names), len(self._group_names)),
-            dtype=labels.tensor.dtype,
+            dtype=torch.float32,
             device=labels.tensor.device,
         )
         for i, label in enumerate(labels.names):
             group = self._label_to_group[label]
             membership[i, self._group_names.index(group)] = 1.0
-        counts = labels.tensor @ membership
+        counts = labels.tensor.to(torch.float32) @ membership
         n_groups_per_sample = (counts > 0).sum(dim=1)
         if not bool((n_groups_per_sample == 1).all()):
             bad = torch.nonzero(n_groups_per_sample != 1).flatten().tolist()
