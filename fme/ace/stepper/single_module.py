@@ -28,6 +28,7 @@ from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSche
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.loss_config import CorrectorLossConfig
+from fme.core.corrector.registry import CorrectorConfigABC
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -742,6 +743,14 @@ class StepperConfig:
     def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
 
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        self.step.replace_corrector(corrector)
+
+    def get_corrector(self) -> AtmosphereCorrectorConfig | CorrectorSelector:
+        return self.step.get_corrector()
+
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint).
 
@@ -1002,6 +1011,28 @@ class Stepper:
             ocean: The new ocean model configuration or None.
         """
         self._config.replace_ocean(ocean)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        """
+        Replace the corrector with a new one. Note this is only meant to be
+        used at inference time.
+
+        The new corrector must not carry checkpointed state (e.g. it must have
+        ``corrector_disabled_epochs=0``), since the step state being reloaded
+        was saved with the previous corrector. Correctors without state ignore
+        any previous corrector state.
+
+        Args:
+            corrector: The new corrector configuration.
+        """
+        self._config.replace_corrector(corrector)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
         )
@@ -1908,12 +1939,37 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        corrector: Corrector configuration to override that used in producing a
+            serialized stepper. This replaces the serialized corrector entirely
+            rather than merging with it, so it must include every correction to
+            apply. The correction only uses variables the stepper already
+            requires; it cannot request new ones. ``corrector_disabled_epochs``
+            must be 0, as it only affects training.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    corrector: Literal["keep"] | AtmosphereCorrectorConfig | CorrectorSelector = "keep"
+
+    def __post_init__(self):
+        if self.corrector == "keep":
+            return
+        if isinstance(self.corrector, CorrectorSelector):
+            # the selector's own corrector_disabled_epochs must be 0, so check
+            # the wrapped config it builds
+            corrector_config: CorrectorConfigABC = CorrectorSelector.registry.get(
+                self.corrector.type, self.corrector.config
+            )
+        else:
+            corrector_config = self.corrector
+        if corrector_config.corrector_disabled_epochs != 0:
+            raise ValueError(
+                "StepperOverrideConfig.corrector must have "
+                "corrector_disabled_epochs=0, got "
+                f"{corrector_config.corrector_disabled_epochs}."
+            )
 
 
 def load_stepper_config(
@@ -2006,6 +2062,9 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        _log_corrector_override(stepper._config.get_corrector(), override_config)
+        stepper.replace_corrector(override_config.corrector)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2045,3 +2104,18 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        _log_corrector_override(stepper_config.get_corrector(), override_config)
+        stepper_config.replace_corrector(override_config.corrector)
+
+
+def _log_corrector_override(
+    previous: AtmosphereCorrectorConfig | CorrectorSelector,
+    override_config: StepperOverrideConfig,
+) -> None:
+    logging.info(
+        "Overriding training corrector configuration %s with a new corrector "
+        "configuration %s.",
+        previous,
+        override_config.corrector,
+    )
