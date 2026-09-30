@@ -118,9 +118,24 @@ randco2_dataflow_%:
 # its own subdirectory of the dated parent prefix in $(RANDCO2_CONFIG).
 randco2_dataflow_all: $(addprefix randco2_dataflow_,$(RANDCO2_MEMBERS))
 
+# The 4-degree twin of the stores above: the same targets re-run against
+# the F22.5 config, with its own smoke-test scratch root so the 1- and
+# 4-degree smoke stores never share a path.
+RANDCO2_4DEG_CONFIG = configs/cm4-like-am4-randco2-sea-surface-4deg.yaml
+RANDCO2_4DEG_SMOKE_OUTPUT_ROOT ?= $(RANDCO2_SMOKE_OUTPUT_ROOT)-4deg
+RANDCO2_4DEG = RANDCO2_CONFIG=$(RANDCO2_4DEG_CONFIG) \
+	RANDCO2_SMOKE_OUTPUT_ROOT=$(RANDCO2_4DEG_SMOKE_OUTPUT_ROOT)
+
+randco2_4deg_smoke_tests:
+	$(MAKE) randco2_smoke_tests $(RANDCO2_4DEG)
+
+randco2_4deg_dataflow_all:
+	$(MAKE) randco2_dataflow_all $(RANDCO2_4DEG)
+
 # The per-member targets are deliberately absent: make skips implicit-rule
 # search for a phony target, which would leave the pattern rules above with
 # nothing to match.
 .PHONY: randco2_smoke_test randco2_smoke_test_repeat_fails \
 	randco2_smoke_test_shard_boundary randco2_check_wetmask_equivalence \
-	randco2_smoke_tests randco2_dataflow randco2_dataflow_all
+	randco2_smoke_tests randco2_dataflow randco2_dataflow_all \
+	randco2_4deg_smoke_tests randco2_4deg_dataflow_all

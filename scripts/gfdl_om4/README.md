@@ -366,6 +366,11 @@ python -m pipeline.randco2.run \
    and review the job's Dataflow console page for stage-level errors before
    consuming the output.
 
+The 4° stores (`configs/cm4-like-am4-randco2-sea-surface-4deg.yaml`, target
+grid `F22.5`) run through the same targets with that config:
+`make randco2_4deg_smoke_tests` and `make randco2_4deg_dataflow_all`, or any
+single-member target with `RANDCO2_CONFIG` set to it.
+
 `make randco2_dataflow*` checks that `$(IMAGE_NAME)` exists in Artifact
 Registry (`make check_dataflow_image`), then invokes `run-dataflow.sh
 randco2` (shared core above).
