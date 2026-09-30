@@ -38,8 +38,6 @@ import tempfile
 from typing import List, Optional
 
 import dacite
-import dask
-import distributed
 import fsspec
 import xarray as xr
 import yaml
@@ -212,6 +210,10 @@ def compute_store_stats(store: str, pair: DatasetPair) -> dict:
     """Open one zarr store, slice it with the pair's time bounds, and return its
     centering / full-field / residual stats plus the timestep count used as the
     pooling weight."""
+    # Imported here, not at module level, so the Config can be loaded (e.g. by
+    # scripts/data_process/test_config.py) without dask installed.
+    import dask
+
     with dask.config.set({"array.chunk-size": "128MiB"}):
         ds = xr.open_zarr(store, chunks={"time": "auto"})
 
@@ -346,7 +348,10 @@ def compute(config_yaml: str, output_directory: str):
         os.makedirs(output_directory, exist_ok=True)
 
     # Start a dask distributed client so the per-store reads/reductions run across
-    # many workers, mirroring get_stats.py.
+    # many workers, mirroring get_stats.py. Imported here for the same reason as
+    # dask in compute_store_stats.
+    import distributed
+
     client = distributed.Client(n_workers=16)
     logging.info(f"Started dask distributed client: {client}")
 
