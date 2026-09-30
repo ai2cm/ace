@@ -36,3 +36,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs1|01M3MTPQV4Y2ZX
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs2|01M3MTQ0WPEQ1C5PRBHADTJ0EE|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs1|01M3TA4P68966FJ6ED14H7GSRZ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs2|01M3TA518712Y2RR1AJV7CX0QK|training|best_inference_ckpt|normal|--min-runtime 8h
