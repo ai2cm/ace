@@ -4,13 +4,12 @@ import logging
 from collections.abc import Callable, Collection, Mapping
 from typing import Any, Literal
 
-import fsspec
 import numpy as np
 import torch
 import torch.linalg
 import torch.nn.functional as F
-import xarray as xr
 
+from fme.core.cloud import open_dataset_via_inter_filesystem_copy
 from fme.core.device import get_device
 from fme.core.ensemble import (
     get_crps,
@@ -814,8 +813,9 @@ def load_variogram_scaling(
     Returns:
         A tensor of shape ``(len(offsets), len(names))`` in physical units.
     """
-    with fsspec.open(path, "rb") as f:
-        ds = xr.load_dataset(f)
+    # via a local copy: h5netcdf on an fsspec file object can fail reading
+    # dimension scales when netCDF4 and h5py bundle different HDF5 builds
+    ds = open_dataset_via_inter_filesystem_copy(path)
     missing = [name for name in names if name not in ds.data_vars]
     if missing:
         raise ValueError(
