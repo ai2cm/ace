@@ -1,0 +1,154 @@
+experiment_dir: gs://vcm-ml-intermediate/2026-09-29-ace2s-snow-scenario-rollouts/cm4-masked-naive-1pctco2
+n_forward_steps: 51050
+forward_steps_in_memory: 50
+# Four stochastic realizations of the one full-length trajectory: the noise is
+# drawn per sample, so the members sample the model's internal variability at
+# identical valid times with no loss of run length.
+n_ensemble_per_ic: 4
+seed: 0
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0001-01-02T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-land-snow-masked.zarr
+      engine: zarr
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: daily_fields
+    names:
+    - USWRFsfc
+    - DSWRFsfc
+    - DLWRFsfc
+    - ULWRFsfc
+    - SHTFLsfc
+    - LHTFLsfc
+    - total_frozen_precipitation_rate
+    - PRATEsfc
+    - TMP2m
+    - surface_temperature
+    - surface_snow_amount_masked
+    - surface_snow_area_fraction_masked
+    # -56 rather than the holdout's -40: the snow mask reaches -54.3 and
+    # midwinter Patagonia carries more snow than the Andes box.
+    lat_extent: [-56, 90]
+    # false: the daily targets are a straight slice of the GCS daily store and
+    # sidecar, so writing them would double the heaviest writer for no new
+    # information. The 50-day target means below are kept, being negligible.
+    save_reference: false
+    format:
+      name: zarr
+  # Global 50-day means for the forced-response traces; the target copy is
+  # written too, since every headline diagnostic is an emulator-target
+  # difference.
+  - label: means_50d
+    names:
+    - TMP2m
+    - surface_temperature
+    - PRESsfc
+    - PRMSL
+    - h500
+    - TMP850
+    - PRATEsfc
+    - total_frozen_precipitation_rate
+    - DSWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - ULWRFsfc
+    - SHTFLsfc
+    - LHTFLsfc
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+    # ULWRFtoa/USWRFtoa and the top model layers bound the missing direct-CO2
+    # pathway: the emulator's OLR should run high vs the target by roughly the
+    # direct forcing, and the target's stratospheric cooling should be absent.
+    - ULWRFtoa
+    - USWRFtoa
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_7
+    - surface_snow_amount_masked
+    - surface_snow_area_fraction_masked
+    save_reference: true
+    time_coarsen:
+      coarsen_factor: 50
+    format:
+      name: zarr
+aggregator:
+  anomaly_memory:
+  # Disabled on the ramp: the climatology is a constant plus annual
+  # harmonics fit over the whole record with no trend term, so anomalies
+  # over 140 warming years retain the trend and every lag correlation is
+  # biased high. Ramp memory is done offline, windowed and detrended, on
+  # the daily_fields output.
+    enabled: false
+    variables:
+    - USWRFsfc
+    - TMP2m
+    - surface_temperature
+    - surface_snow_amount_masked
+    - surface_snow_area_fraction_masked
+    lags: [0, 1, 3, 7, 14, 30]
+    report_lags: [7, 14]
+    map_lags: [7]
+    months_northern: [11, 12, 1, 2, 3, 4, 5]
+    months_southern: [5, 6, 7, 8, 9, 10, 11]
+    regions: &snow_regions
+    - name: Siberia
+      lat: [50, 68]
+      lon: [60, 140]
+    - name: Canada
+      lat: [50, 65]
+      lon: [250, 285]
+    - name: N_Europe
+      lat: [55, 68]
+      lon: [5, 40]
+    - name: Tibet
+      lat: [30, 38]
+      lon: [80, 100]
+    - name: Great_Plains
+      lat: [32, 49]
+      lon: [255, 265]
+    - name: Rockies
+      lat: [38, 45]
+      lon: [249, 256]
+    - name: Andes
+      lat: [-35, -15]
+      lon: [287, 293]
+    - name: Patagonia
+      lat: [-55, -40]
+      lon: [285, 295]
+    - name: north_of_40S
+      lat: [-40, 90]
+      lon: [0, 360]
+  snow_season:
+    enabled: true
+    variable: surface_snow_amount_masked
+    regions: *snow_regions
+  # Trend maps on both scenarios: the piControl trend is the null distribution
+  # the 1pctCO2 trend is read against.
+  trend:
+    enabled: true
+    variables:
+    - TMP2m
+    - surface_temperature
+    - USWRFsfc
+    - ULWRFtoa
+    - PRATEsfc
+    - surface_snow_amount_masked
+    - surface_snow_area_fraction_masked
