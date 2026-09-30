@@ -40,7 +40,7 @@ and the stats script.
 
 | file | role |
 |---|---|
-| `masked_snow.py` | parent definitions, mask loading, the shared transform |
+| `masked_snow.py` | parent definitions (`era5`, `cm4`, `cm4-1pctco2`), mask loading, the shared transform |
 | `build_masked_snow_channels.py` | writes `store-out/<parent>-land-snow-masked.zarr` (4 variables, parent time coordinate, chunk 1 / shard 360) |
 | `fit_masked_snow_stats.py` | copies the parent's stats files and adds `_masked` entries (mean, std, one-day residual std over valid cells) and valid-domain time-mean maps |
 | `run_data_pipeline.sh` | both stores, both stats, GCS uploads, Beaker stats datasets |
@@ -53,6 +53,7 @@ and the stats script.
 |---|---|---|
 | ERA5 | `gs://vcm-ml-intermediate/2026-08-07-era5-1deg-8layer-daily-1940-2025/2026-08-07-era5-1deg-8layer-daily-1940-2025-land-snow-masked.zarr` | `2026-08-07-era5-1deg-8layer-daily-1940-2025-land-snow-masked-stats-1990-2019` |
 | CM4 | `gs://vcm-ml-intermediate/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr` | `2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked-stats` |
+| CM4 1pctCO2 | `gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-land-snow-masked.zarr` | none; evaluation only, so `fit_masked_snow_stats.py` is not run for this parent |
 
 The earlier stores (`...-snow-masked.zarr`, per-cell-area ERA5, percent CM4 cover) and their
 stats datasets stay in place so the 2026-08-12 and 2026-09-17 masked-naive checkpoints remain

@@ -98,6 +98,25 @@ PARENTS = {
         stats_stop=None,
         stats_pair_stride_days=8,
     ),
+    "cm4-1pctco2": Parent(
+        name="2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily",
+        directory=(
+            "gs://vcm-ml-intermediate/"
+            "2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily"
+        ),
+        # Evaluation only: the scenario rollouts normalize from the checkpoint, so
+        # no stats are fit for this parent and this URL is never read.
+        stats_url=(
+            "gs://vcm-ml-intermediate/"
+            "2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-stats/"
+            "combined"
+        ),
+        cover_scale=100.0,
+        divide_by_land_fraction=False,
+        stats_start=None,
+        stats_stop=None,
+        stats_pair_stride_days=8,
+    ),
 }
 
 
