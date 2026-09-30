@@ -1,13 +1,23 @@
+import pathlib
+from typing import Literal
+
 import pytest
 import torch
 
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.testing.regression import validate_tensor_dict
 
 from .swin_layers import ColumnMixer, WindowAttention2D
 from .swin_transformer import SwinTransformerNet
 
 _EMBED_DIM_NOISE = 8
+_CLN_CONTEXT_CONFIG = ContextConfig(
+    embed_dim_scalar=0,
+    embed_dim_labels=0,
+    embed_dim_noise=_EMBED_DIM_NOISE,
+    embed_dim_pos=0,
+)
 
 
 def _build_net(
@@ -15,50 +25,45 @@ def _build_net(
     out_chans: int,
     img_shape: tuple[int, int],
     context_config: ContextConfig | None = None,
+    conditioning: Literal["adaln", "cln"] = "adaln",
     use_skip: bool = True,
-) -> SwinTransformerNet:
-    return SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        use_skip=use_skip,
-        context_config=context_config,
-    )
-
-
-def _build_cln_net(
-    in_chans: int,
-    out_chans: int,
-    img_shape: tuple[int, int],
-    use_skip: bool = True,
+    embed_dim: int = 32,
+    num_heads: tuple[int, ...] = (2, 4, 4, 2),
+    window_size: tuple[int, int] = (4, 4),
+    mlp_layer: str = "mlp",
+    lat_coords: torch.Tensor | None = None,
     padding_conf: dict | None = None,
 ) -> SwinTransformerNet:
-    context_config = ContextConfig(
-        embed_dim_scalar=0,
-        embed_dim_labels=0,
-        embed_dim_noise=_EMBED_DIM_NOISE,
-        embed_dim_pos=0,
-    )
+    """A small Swin U-Net for tests. ``conditioning="cln"`` without an explicit
+    ``context_config`` builds the noise-conditioned variant with
+    ``_EMBED_DIM_NOISE`` noise channels."""
+    if conditioning == "cln" and context_config is None:
+        context_config = _CLN_CONTEXT_CONFIG
     return SwinTransformerNet(
         in_chans=in_chans,
         out_chans=out_chans,
         img_shape=img_shape,
-        embed_dim=32,
+        embed_dim=embed_dim,
         depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
+        num_heads=num_heads,
+        window_size=window_size,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
-        conditioning="cln",
+        conditioning=conditioning,
+        mlp_layer=mlp_layer,
+        lat_coords=lat_coords,
         padding_conf=padding_conf,
+    )
+
+
+def _cln_context(n: int, img_shape: tuple[int, int]) -> Context:
+    return Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=get_device()),
     )
 
 
@@ -153,14 +158,9 @@ def test_cln_forward_backward():
     img_shape = (16, 32)
     n = 2
     device = get_device()
-    net = _build_cln_net(in_chans, out_chans, img_shape).to(device)
+    net = _build_net(in_chans, out_chans, img_shape, conditioning="cln").to(device)
     x = torch.randn(n, in_chans, *img_shape, device=device)
-    context = Context(
-        embedding_scalar=None,
-        embedding_pos=None,
-        labels=None,
-        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
-    )
+    context = _cln_context(n, img_shape)
     out = net(x, context)
     assert out.shape == (n, out_chans, *img_shape)
     out.sum().backward()
@@ -174,14 +174,9 @@ def test_cln_padded_shape():
     img_shape = (9, 18)  # not divisible by window_size * 2
     n = 2
     device = get_device()
-    net = _build_cln_net(in_chans, out_chans, img_shape).to(device)
+    net = _build_net(in_chans, out_chans, img_shape, conditioning="cln").to(device)
     x = torch.randn(n, in_chans, *img_shape, device=device)
-    context = Context(
-        embedding_scalar=None,
-        embedding_pos=None,
-        labels=None,
-        noise=torch.randn(n, _EMBED_DIM_NOISE, *img_shape, device=device),
-    )
+    context = _cln_context(n, img_shape)
     out = net(x, context)
     assert out.shape == (n, out_chans, *img_shape)
 
@@ -197,7 +192,7 @@ def test_cln_noise_divergence():
     img_shape = (16, 32)
     n = 2
     device = get_device()
-    net = _build_cln_net(in_chans, out_chans, img_shape).to(device)
+    net = _build_net(in_chans, out_chans, img_shape, conditioning="cln").to(device)
     net.train()
     optimizer = torch.optim.SGD(net.parameters(), lr=1.0)
 
@@ -255,18 +250,9 @@ def test_cpb_lat_coords_changes_output():
     lat_high = torch.full((img_shape[0],), 60.0, device=device)
     net_low = _build_net(in_chans, out_chans, img_shape).to(device)
     net_low_state = net_low.state_dict()
-    net_high = SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_high,
-    ).to(device)
+    net_high = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_high).to(
+        device
+    )
     net_high.load_state_dict(net_low_state)
     # Push cpb_mlp off zero so lat_mean actually changes the bias.
     optimizer = torch.optim.SGD(net_low.parameters(), lr=1.0)
@@ -276,18 +262,9 @@ def test_cpb_lat_coords_changes_output():
     optimizer.step()
     # Give net_high the same updated weights.
     net_high.load_state_dict(net_low.state_dict())
-    net_low_lat = SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_low,
-    ).to(device)
+    net_low_lat = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_low).to(
+        device
+    )
     net_low_lat.load_state_dict(net_low.state_dict())
     with torch.no_grad():
         out_low = net_low_lat(x)
@@ -302,18 +279,7 @@ def test_cpb_backward_with_lat_coords():
     n = 2
     device = get_device()
     lat_coords = torch.linspace(-90.0, 90.0, img_shape[0], device=device)
-    net = SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_coords,
-    ).to(device)
+    net = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_coords).to(device)
     x = torch.randn(n, in_chans, *img_shape, device=device)
     net(x).sum().backward()
     for name, param in net.named_parameters():
@@ -378,17 +344,7 @@ def test_earth_padding_forward():
         "pad_lat": [2, 1],
         "pad_lon": [2, 2],
     }
-    net = SwinTransformerNet(
-        3,
-        3,
-        img_shape,
-        embed_dim=32,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        padding_conf=padding_conf,
-    ).to(get_device())
+    net = _build_net(3, 3, img_shape, padding_conf=padding_conf).to(get_device())
     x = torch.randn(2, 3, *img_shape, device=get_device())
     assert net(x).shape == (2, 3, *img_shape)
 
@@ -406,18 +362,7 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
         "pad_lon": [0, 0],
     }
 
-    net = SwinTransformerNet(
-        3,
-        3,
-        img_shape,
-        embed_dim=32,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_coords,
-        padding_conf=padding_conf,
-    )
+    net = _build_net(3, 3, img_shape, lat_coords=lat_coords, padding_conf=padding_conf)
 
     expected_pieces = []
     if pad_lat[0] > 0:
@@ -440,7 +385,9 @@ def test_earth_padding_cln_forward():
         "pad_lat": [2, 1],
         "pad_lon": [2, 2],
     }
-    net = _build_cln_net(3, 3, img_shape, padding_conf=padding_conf).to(get_device())
+    net = _build_net(3, 3, img_shape, conditioning="cln", padding_conf=padding_conf).to(
+        get_device()
+    )
     noise = torch.randn(2, _EMBED_DIM_NOISE, *img_shape, device=get_device())
     ctx = Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=noise)
     assert net(torch.randn(2, 3, *img_shape, device=get_device()), ctx).shape == (
@@ -448,3 +395,80 @@ def test_earth_padding_cln_forward():
         3,
         *img_shape,
     )
+
+
+_REGRESSION_DIR = pathlib.Path(__file__).parent / "testdata"
+_REGRESSION_PADDING_CONF = {
+    "activate": True,
+    "mode": "earth",
+    "pad_lat": [2, 1],
+    "pad_lon": [3, 3],
+}
+
+
+def _build_regression_net(
+    conditioning: Literal["adaln", "cln"], context_config: ContextConfig | None
+) -> SwinTransformerNet:
+    """A tiny net with earth padding on an odd grid so both padding stages are
+    exercised; built under a fixed seed so its initial weights are
+    reproducible."""
+    torch.manual_seed(0)
+    net = _build_net(
+        4,
+        2,
+        (9, 18),
+        context_config=context_config,
+        conditioning=conditioning,
+        embed_dim=16,
+        num_heads=(2, 2, 2, 2),
+        mlp_layer="swiglu",
+        lat_coords=torch.linspace(-80.0, 80.0, 9),
+        padding_conf=_REGRESSION_PADDING_CONF,
+    )
+    return net.eval()
+
+
+def test_regression_adaln():
+    """The AdaLN forward pass matches a stored reference output.
+
+    Locks the numerics of the encoder/decoder/level wiring on CPU in float32 so
+    refactors of that wiring can be checked to be bit-for-bit unchanged.
+    """
+    n, embed_dim_scalar, embed_dim_labels = 2, 8, 4
+    net = _build_regression_net(
+        "adaln",
+        ContextConfig(
+            embed_dim_scalar=embed_dim_scalar,
+            embed_dim_labels=embed_dim_labels,
+            embed_dim_noise=0,
+            embed_dim_pos=0,
+        ),
+    )
+    torch.manual_seed(0)
+    x = torch.randn(n, 4, 9, 18)
+    context = Context(
+        embedding_scalar=torch.randn(n, embed_dim_scalar),
+        embedding_pos=None,
+        labels=torch.randn(n, embed_dim_labels),
+        noise=None,
+    )
+    with torch.no_grad():
+        out = net(x, context)
+    validate_tensor_dict({"output": out}, _REGRESSION_DIR / "swin_regression_adaln.pt")
+
+
+def test_regression_cln():
+    """The CLN (noise-conditioned) forward pass matches a stored reference."""
+    n = 2
+    net = _build_regression_net("cln", None)
+    torch.manual_seed(0)
+    x = torch.randn(n, 4, 9, 18)
+    context = Context(
+        embedding_scalar=None,
+        embedding_pos=None,
+        labels=None,
+        noise=torch.randn(n, _EMBED_DIM_NOISE, 9, 18),
+    )
+    with torch.no_grad():
+        out = net(x, context)
+    validate_tensor_dict({"output": out}, _REGRESSION_DIR / "swin_regression_cln.pt")
