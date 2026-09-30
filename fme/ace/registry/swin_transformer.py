@@ -55,6 +55,12 @@ class SwinTransformerBuilder(ModuleConfig):
             padded pixel grid divided by ``patch_size``, and ``window_size``
             counts tokens, not pixels. Default ``[1, 1]`` is one token per
             pixel and reproduces the previous network exactly.
+        num_levels: Number of U-Net downsampling levels above the bottleneck.
+            Each level beyond the first inserts a dim-preserving encoder and
+            decoder stage, so the bottleneck runs on a ``2**num_levels`` times
+            coarser token grid at unchanged per-stage cost. Default 1 builds no
+            extra levels and reproduces the previous network exactly. See
+            ``SwinTransformerNet`` for the intended 1-degree recipe.
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
@@ -79,6 +85,7 @@ class SwinTransformerBuilder(ModuleConfig):
     num_heads: list[int] = dataclasses.field(default_factory=lambda: [3, 6, 6, 3])
     window_size: list[int] = dataclasses.field(default_factory=lambda: [4, 8])
     patch_size: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    num_levels: int = 1
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
@@ -102,6 +109,8 @@ class SwinTransformerBuilder(ModuleConfig):
             raise ValueError(f"patch_size must have length 2, got {self.patch_size}")
         if any(p < 1 for p in self.patch_size):
             raise ValueError(f"patch_size entries must be >= 1, got {self.patch_size}")
+        if self.num_levels < 1:
+            raise ValueError(f"num_levels must be >= 1, got {self.num_levels}")
 
     def build(
         self,
@@ -141,6 +150,7 @@ class SwinTransformerBuilder(ModuleConfig):
             num_heads=tuple(self.num_heads),
             window_size=(self.window_size[0], self.window_size[1]),
             patch_size=(self.patch_size[0], self.patch_size[1]),
+            num_levels=self.num_levels,
             mlp_ratio=self.mlp_ratio,
             drop_path_rate=self.drop_path_rate,
             use_skip=self.use_skip,
@@ -173,6 +183,12 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             padded pixel grid divided by ``patch_size``, and ``window_size``
             counts tokens, not pixels. Default ``[1, 1]`` is one token per
             pixel and reproduces the previous network exactly.
+        num_levels: Number of U-Net downsampling levels above the bottleneck.
+            Each level beyond the first inserts a dim-preserving encoder and
+            decoder stage, so the bottleneck runs on a ``2**num_levels`` times
+            coarser token grid at unchanged per-stage cost. Default 1 builds no
+            extra levels and reproduces the previous network exactly. See
+            ``SwinTransformerNet`` for the intended 1-degree recipe.
         mlp_ratio: Hidden-dim multiplier for block MLPs.
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate the layer-1 skip into the decoder.
@@ -199,6 +215,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     num_heads: list[int] = dataclasses.field(default_factory=lambda: [3, 6, 6, 3])
     window_size: list[int] = dataclasses.field(default_factory=lambda: [4, 8])
     patch_size: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    num_levels: int = 1
     mlp_ratio: float = 4.0
     drop_path_rate: float = 0.2
     use_skip: bool = True
@@ -223,6 +240,8 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             raise ValueError(f"patch_size must have length 2, got {self.patch_size}")
         if any(p < 1 for p in self.patch_size):
             raise ValueError(f"patch_size entries must be >= 1, got {self.patch_size}")
+        if self.num_levels < 1:
+            raise ValueError(f"num_levels must be >= 1, got {self.num_levels}")
 
     def build(
         self,
@@ -264,6 +283,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             num_heads=tuple(self.num_heads),
             window_size=(self.window_size[0], self.window_size[1]),
             patch_size=(self.patch_size[0], self.patch_size[1]),
+            num_levels=self.num_levels,
             mlp_ratio=self.mlp_ratio,
             drop_path_rate=self.drop_path_rate,
             use_skip=self.use_skip,

@@ -306,7 +306,8 @@ def test_nc_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
 
 @pytest.mark.parametrize("builder", [_builder, _nc_builder])
 @pytest.mark.parametrize(
-    "options", [dict(skip_projection=True), dict(patch_size=[2, 2])]
+    "options",
+    [dict(skip_projection=True), dict(patch_size=[2, 2]), dict(num_levels=2)],
 )
 def test_swin_transformer_options_build_and_run(builder, options: dict[str, Any]):
     module = builder(**options).build(5, 3, _get_dataset_info()).to(fme.get_device())
@@ -321,6 +322,7 @@ def test_swin_transformer_options_build_and_run(builder, options: dict[str, Any]
         (dict(use_skip=False, skip_projection=True), "requires use_skip"),
         (dict(patch_size=[0, 2]), "patch_size"),
         (dict(patch_size=[2]), "patch_size"),
+        (dict(num_levels=0), "num_levels"),
     ],
 )
 def test_swin_transformer_option_validation(builder, options: dict[str, Any], match):
