@@ -1,20 +1,25 @@
 import pytest
 import torch
 
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import CorrectorLoss, StepLossConfig, StepOutputLoss
 from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
+from fme.core.ocean_data import OceanData
 from fme.core.ocean_eos import G_EARTH, RHO_0, wright97_anomaly
 from fme.core.optimized_derived import (
+    LAYER_OHC_DEFAULT_BANDS,
+    LAYER_OHC_DEFAULT_STDS,
     PBO_WRIGHT97_STD,
     SO_CLAMP_RANGE,
     STERIC_HEIGHT_WRIGHT97_STD,
     THETAO_CLAMP_RANGE,
     OptimizedDerivedVariableConfig,
     build_optimized_derived_variables,
+    layer_ohc_name,
 )
 
 N_LAT, N_LON, N_LEVELS = 4, 6, 2
@@ -552,3 +557,366 @@ def test_steric_height_does_not_need_zos():
 def test_column_config_rejects_levels(name):
     with pytest.raises(ValueError, match="levels"):
         OptimizedDerivedVariableConfig(name=name, levels=[0])
+
+
+# ---------------------------------------------------------------- layer_ohc
+# layer_ohc_b = RHO_0 c_p sum_k thetao_k h_b,k,
+# h_b,k = clamp(idepth[k] + dz_k, a, b) - clamp(idepth[k], a, b)
+
+RHO_CP = DENSITY_OF_SEA_WATER_CM4 * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+
+
+def _build_ohc(
+    bands=None,
+    vertical_coordinate=None,
+    loss_names=NAMES,
+    ops="default",
+    normalizer=None,
+    **config_kwargs,
+):
+    return build_optimized_derived_variables(
+        [
+            OptimizedDerivedVariableConfig(
+                name="layer_ohc", bands=bands, **config_kwargs
+            )
+        ],
+        vertical_coordinate=vertical_coordinate
+        if vertical_coordinate is not None
+        else DepthCoordinate(IDEPTH, _mask(), DEPTHO),
+        network_normalizer=_normalizer(),
+        loss_normalizer=normalizer if normalizer is not None else _normalizer(),
+        loss_names=list(loss_names),
+        gridded_operations=_ops() if ops == "default" else ops,
+    )
+
+
+def test_layer_ohc_hand_computed():
+    """Columns (idepth 0, 100, 300; theta 10, 4 degC) with a partial bottom cell,
+    band edges inside layers 0 and 1, a land cell and a dry level 1."""
+    idepth = torch.tensor([0.0, 100.0, 300.0])
+    mask = torch.ones(2, 3, 2)
+    mask[0, 0] = 0.0  # land
+    mask[1, 0, 1] = 0.0  # level 1 dry
+    deptho = torch.tensor([[0.0, 300.0, 250.0], [100.0, 300.0, 180.0]])
+    derived = build_optimized_derived_variables(
+        [
+            OptimizedDerivedVariableConfig(
+                name="layer_ohc", bands=[[0, 50], [50, 200], [200, None]]
+            )
+        ],
+        vertical_coordinate=DepthCoordinate(idepth, mask, deptho),
+        network_normalizer=_normalizer(),
+        loss_normalizer=_normalizer(),
+        loss_names=NAMES,
+        gridded_operations=LatLonOperations(torch.ones(2, 3)),
+    )
+    assert derived.names == [
+        "layer_ohc_0_50",
+        "layer_ohc_50_200",
+        "layer_ohc_200_bottom",
+    ]
+    data = {
+        "thetao_0": torch.full((1, 2, 3), 10.0),
+        "thetao_1": torch.full((1, 2, 3), 4.0),
+    }
+    data["thetao_1"][0, 1, 0] = torch.nan  # below the sea floor
+    out = {k: v.cpu() for k, v in derived(data).items()}
+    nan = float("nan")
+    expected = {
+        "layer_ohc_0_50": [[nan, 500.0, 500.0], [500.0, 500.0, 500.0]],
+        "layer_ohc_50_200": [[nan, 900.0, 900.0], [500.0, 900.0, 820.0]],
+        "layer_ohc_200_bottom": [[nan, 400.0, 200.0], [nan, 400.0, nan]],
+    }
+    for name, values in expected.items():
+        torch.testing.assert_close(
+            out[name], RHO_CP * torch.tensor([values]), equal_nan=True
+        )
+
+
+_DEEP_IDEPTH = torch.tensor([0.0, 50.0, 200.0, 1000.0, 3000.0, 5000.0])
+
+
+def _deep_coordinate(with_deptho: bool) -> DepthCoordinate:
+    nz = len(_DEEP_IDEPTH) - 1
+    mask = torch.ones(N_LAT, N_LON, nz)
+    mask[0] = 0.0  # land
+    mask[1, :, 3:] = 0.0
+    mask[2, :3, 4:] = 0.0
+    deptho = torch.full((N_LAT, N_LON), 4600.0)
+    deptho[1] = 700.0
+    deptho[2, :3] = 2400.0
+    return DepthCoordinate(_DEEP_IDEPTH, mask, deptho if with_deptho else None)
+
+
+@pytest.mark.parametrize("with_deptho", [True, False])
+@pytest.mark.parametrize("bands", ["default", "random"])
+def test_layer_ohc_sum_is_ocean_heat_content(with_deptho, bands):
+    if bands == "default":
+        band_list = None
+    else:
+        g = torch.Generator().manual_seed(1)
+        cuts = sorted((5000.0 * torch.rand(4, generator=g)).tolist())
+        edges = [0.0, *cuts]
+        band_list = [[a, b] for a, b in zip(edges[:-1], edges[1:])]
+        band_list.append([edges[-1], None])
+    nz = len(_DEEP_IDEPTH) - 1
+    names = [f"thetao_{k}" for k in range(nz)]
+    normalizer = StandardNormalizer(
+        means={n: torch.tensor(0.0) for n in names},
+        stds={n: torch.tensor(1.0) for n in names},
+    )
+    vc = _deep_coordinate(with_deptho)
+    derived = build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig(name="layer_ohc", bands=band_list)],
+        vertical_coordinate=vc,
+        network_normalizer=normalizer,
+        loss_normalizer=normalizer,
+        loss_names=names,
+        gridded_operations=_ops(),
+    )
+    g = torch.Generator().manual_seed(0)
+    data = {
+        n: (-2.0 + 30.0 * torch.rand((2, N_LAT, N_LON), generator=g)).to(get_device())
+        for n in names
+    }
+    for k in range(nz):  # NaN below the sea floor, as in the data
+        data[f"thetao_{k}"] = torch.where(
+            vc.mask[..., k].to(get_device()) > 0, data[f"thetao_{k}"], torch.nan
+        )
+    out = derived(data)
+    total = sum(v.nan_to_num() for v in out.values())
+    reference = OceanData(data, vc.to(get_device())).ocean_heat_content
+    wet = vc.mask[..., 0].to(get_device()) > 0
+    torch.testing.assert_close(total[:, wet], reference[:, wet], rtol=1e-5, atol=0.0)
+    for v in out.values():
+        assert v[:, ~wet].isnan().all()
+
+
+def test_layer_ohc_masking_and_gradient():
+    """Only layer_ohc carries loss weight: NaN off mask_0 and where a band is
+    absent, finite loss and gradients with NaN below the bottom, gradient on
+    thetao_k exactly for the levels a band overlaps, none on so_k."""
+    # [0, 5] overlaps level 0 only; [20, bottom] level 1 only, absent in row 1
+    cases: list[tuple[list[list[float | None]], set[int]]] = [
+        ([[0.0, 5.0]], {0}),
+        ([[20.0, None]], {1}),
+        ([[0.0, 5.0], [20.0, None]], {0, 1}),
+    ]
+    for bands, levels in cases:
+        derived = _build_ohc(bands=bands)
+        step_loss = StepLossConfig(type="MSE", weights={n: 0.0 for n in NAMES}).build(
+            gridded_ops=None,
+            out_names=NAMES,
+            normalizer=_normalizer(),
+            channel_dim=-3,
+            derived=derived,
+        )
+        mask = _mask().to(get_device()) > 0
+        target = _data(seed=0)
+        for k in range(N_LEVELS):
+            for v in ("so", "thetao"):
+                target[f"{v}_{k}"] = torch.where(
+                    mask[..., k], target[f"{v}_{k}"], torch.nan
+                )
+        predict = {k: v.clone().requires_grad_() for k, v in _data(seed=1).items()}
+        with torch.no_grad():  # NaN predictions off the mask
+            predict["thetao_1"][0, 0, 1, 2] = torch.nan
+            predict["thetao_0"][0, 0, 0, 0] = torch.nan
+        out = derived(predict)
+        for name, ohc in out.items():
+            assert ohc[:, :, 0].isnan().all(), name  # land row
+            if name.endswith("_bottom"):
+                assert ohc[:, :, 1].isnan().all()  # level 1 dry: band absent
+                assert ohc[:, :, 2:].isfinite().all()
+            else:
+                assert ohc[:, :, 1:].isfinite().all()
+        total = step_loss(predict, target, step=0).total()
+        assert total.isfinite() and total > 0
+        total.backward()
+        for k in range(N_LEVELS):
+            grad = predict[f"thetao_{k}"].grad
+            assert grad is not None and grad.isfinite().all()
+            if k in levels:
+                valid = mask[..., k].expand_as(grad)
+                assert (grad[valid] != 0).any()
+                assert (grad[~valid] == 0).all()
+            else:
+                assert (grad == 0).all()
+            so_grad = predict[f"so_{k}"].grad
+            assert so_grad is None or (so_grad == 0).all()
+
+
+def test_layer_ohc_default_stds_and_override():
+    """s_b = RHO_0 c_p sum_k hbar_b,k sigma_k, hbar over cells where b exists."""
+    stds = {"so_0": 0.5, "so_1": 0.5, "thetao_0": 2.0, "thetao_1": 5.0}
+    normalizer = StandardNormalizer(
+        means={n: torch.tensor(0.0) for n in stds},
+        stds={n: torch.tensor(v) for n, v in stds.items()},
+    )
+    bands: list[list[float | None]] = [[0.0, 5.0], [5.0, 100.0], [100.0, None]]
+    derived = _build_ohc(bands=bands, normalizer=normalizer)
+    area = _ops()._cpu_area
+    mask = _mask()
+    dz = DepthCoordinate(IDEPTH, mask, DEPTHO).dz
+    for (a, b), name in zip(bands, derived.names):
+        assert a is not None
+        hi = float("inf") if b is None else b
+        z_top = IDEPTH[:-1]
+        h = (z_top + dz).clamp(a, hi) - z_top.expand_as(dz).clamp(a, hi)
+        exists = (mask[..., 0] > 0) & (h.sum(-1) > 0)
+        w = area * exists
+        hbar = (h * w[..., None]).sum((0, 1)) / w.sum()
+        expected = RHO_CP * float(hbar[0] * 2.0 + hbar[1] * 5.0)
+        assert derived.stds[name] == pytest.approx(expected, rel=1e-6)
+        assert derived.weights[name] == 1.0 and derived.means[name] == 0.0
+    # band [0, 5] in a 10 m top layer: hbar_0 = 5 m
+    assert derived.stds["layer_ohc_0_5"] == pytest.approx(RHO_CP * 5.0 * 2.0)
+    override = _build_ohc(
+        bands=bands, normalizer=normalizer, stds={"layer_ohc_5_100": 7.0}, weight=0.5
+    )
+    assert override.stds["layer_ohc_5_100"] == 7.0
+    assert override.stds["layer_ohc_0_5"] == derived.stds["layer_ohc_0_5"]
+    assert set(override.weights.values()) == {0.5}
+
+
+def test_layer_ohc_linearized_std_hand_computed():
+    """Grid of test_layer_ohc_hand_computed, unit area, sigma = (2, 5):
+    hbar_b = (50, 0), (50, 76), (0, 250/3) m over the cells where b exists."""
+    idepth = torch.tensor([0.0, 100.0, 300.0])
+    mask = torch.ones(2, 3, 2)
+    mask[0, 0] = 0.0
+    mask[1, 0, 1] = 0.0
+    deptho = torch.tensor([[0.0, 300.0, 250.0], [100.0, 300.0, 180.0]])
+    stds = {"so_0": 0.5, "so_1": 0.5, "thetao_0": 2.0, "thetao_1": 5.0}
+    normalizer = StandardNormalizer(
+        means={n: torch.tensor(0.0) for n in stds},
+        stds={n: torch.tensor(v) for n, v in stds.items()},
+    )
+    derived = build_optimized_derived_variables(
+        [
+            OptimizedDerivedVariableConfig(
+                name="layer_ohc", bands=[[0, 50], [50, 200], [200, None]]
+            )
+        ],
+        vertical_coordinate=DepthCoordinate(idepth, mask, deptho),
+        network_normalizer=normalizer,
+        loss_normalizer=normalizer,
+        loss_names=NAMES,
+        gridded_operations=LatLonOperations(torch.ones(2, 3)),
+    )
+    expected = {
+        "layer_ohc_0_50": 50.0 * 2.0,
+        "layer_ohc_50_200": 50.0 * 2.0 + 76.0 * 5.0,
+        "layer_ohc_200_bottom": 250.0 / 3.0 * 5.0,
+    }
+    for name, value in expected.items():
+        assert derived.stds[name] == pytest.approx(RHO_CP * value, rel=1e-6)
+
+
+def test_layer_ohc_default_bands_use_data_stds():
+    """Default band names take LAYER_OHC_DEFAULT_STDS; another band keeps the
+    linearized bound."""
+    vc = _deep_coordinate(with_deptho=True)
+    nz = len(_DEEP_IDEPTH) - 1
+    names = [f"thetao_{k}" for k in range(nz)]
+    normalizer = StandardNormalizer(
+        means={n: torch.tensor(0.0) for n in names},
+        stds={n: torch.tensor(1.0) for n in names},
+    )
+    bands: list[list[float | None]] = [
+        *LAYER_OHC_DEFAULT_BANDS[:-1],
+        [2700.0, 4000.0],
+    ]
+    derived = build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig(name="layer_ohc", bands=bands)],
+        vertical_coordinate=vc,
+        network_normalizer=normalizer,
+        loss_normalizer=normalizer,
+        loss_names=names,
+        gridded_operations=_ops(),
+    )
+    for name in derived.names[:-1]:
+        assert derived.stds[name] == LAYER_OHC_DEFAULT_STDS[name]
+    assert derived.names[-1] == "layer_ohc_2700_4000"
+    default = build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig(name="layer_ohc")],
+        vertical_coordinate=vc,
+        network_normalizer=normalizer,
+        loss_normalizer=normalizer,
+        loss_names=names,
+        gridded_operations=_ops(),
+    )
+    assert default.names == list(LAYER_OHC_DEFAULT_STDS)
+    for name in default.names:
+        assert default.stds[name] == LAYER_OHC_DEFAULT_STDS[name]
+    # sigma = 1: RHO_0 c_p hbar summed over levels = RHO_0 c_p mean thickness
+    assert 0 < derived.stds["layer_ohc_2700_4000"] <= RHO_CP * 1300.0
+
+
+def test_layer_ohc_names_and_defaults():
+    config = OptimizedDerivedVariableConfig(name="layer_ohc")
+    assert config.bands == LAYER_OHC_DEFAULT_BANDS
+    assert config.bands is not LAYER_OHC_DEFAULT_BANDS
+    assert [layer_ohc_name(b) for b in LAYER_OHC_DEFAULT_BANDS] == [
+        "layer_ohc_0_130",
+        "layer_ohc_130_450",
+        "layer_ohc_450_1200",
+        "layer_ohc_1200_2700",
+        "layer_ohc_2700_bottom",
+    ]
+    derived = _build_ohc(bands=[[0, 12.5], [12.5, None]])
+    assert derived.names == ["layer_ohc_0_12p5", "layer_ohc_12p5_bottom"]
+    assert set(derived(_data())) == set(derived.names)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"name": "layer_ohc", "bands": []},
+        {"name": "layer_ohc", "bands": [[0.0]]},
+        {"name": "layer_ohc", "bands": [[-1.0, 10.0]]},
+        {"name": "layer_ohc", "bands": [[10.0, 5.0]]},
+        {"name": "layer_ohc", "bands": [[10.0, 10.0]]},
+        {"name": "layer_ohc", "bands": [[None, 10.0]]},
+        {"name": "layer_ohc", "bands": [[0.0, None], [100.0, 200.0]]},
+        {"name": "layer_ohc", "bands": [[0.0, 10.0], [0.0, 10.0]]},
+        {"name": "layer_ohc", "bands": [["0", 10.0]]},
+        {"name": "layer_ohc", "bands": [[0.0, "10"]]},
+        {"name": "layer_ohc", "levels": [0]},
+        {"name": "layer_ohc", "thetao_clamp": [-2.0, 40.0]},
+        {"name": "layer_ohc", "so_clamp": [0.0, 50.0]},
+        {"name": "rho_wright97", "bands": [[0.0, 10.0]]},
+        {"name": "pbo_wright97", "bands": [[0.0, 10.0]]},
+    ],
+)
+def test_layer_ohc_config_validation(kwargs):
+    with pytest.raises(ValueError):
+        OptimizedDerivedVariableConfig(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"loss_names": ["so_0", "so_1", "thetao_0"]}, "thetao_1"),
+        ({"loss_names": ["thetao_0", "thetao_1"]}, None),  # so_k not needed
+        ({"ops": None}, "gridded"),
+        ({"bands": [[5000.0, None]]}, "no wet layer"),
+        ({"stds": {"layer_ohc_0_1": 1.0}}, "layer_ohc_0_1"),
+        ({"loss_names": NAMES + ["layer_ohc_0_130"]}, "not unique"),
+        (
+            {
+                "vertical_coordinate": HybridSigmaPressureCoordinate(
+                    ak=torch.tensor([0.0, 1.0]), bk=torch.tensor([0.0, 1.0])
+                )
+            },
+            "DepthCoordinate",
+        ),
+    ],
+)
+def test_layer_ohc_build_validation(kwargs, match):
+    kwargs = {"bands": [[0, 130], [130, None]], **kwargs}
+    if match is None:
+        _build_ohc(**kwargs)
+        return
+    with pytest.raises(ValueError, match=match):
+        _build_ohc(**kwargs)

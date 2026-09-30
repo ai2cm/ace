@@ -469,3 +469,38 @@ def test_train_on_batch_with_pbo():
     for data in (stepped.gen_data, stepped.target_data):
         pbo = data["pbo_wright97"]
         assert pbo[..., ~wet].isnan().all() and pbo[..., wet].isfinite().all()
+
+
+def test_train_on_batch_with_layer_ohc():
+    """layer_ohc alone carries loss weight: its gradient moves the thetao
+    channels and not so, and TrainOutput's derived gen and target data carry
+    every band."""
+    torch.manual_seed(0)
+    bands: list[list[float | None]] = [[0.0, 100.0], [100.0, None]]
+    ohc_names = ["layer_ohc_0_100", "layer_ohc_100_bottom"]
+    stepper = _train_stepper(
+        _AddBias(len(NAMES)),
+        loss=StepLossConfig(type="MSE", weights={n: 0.0 for n in NAMES}),
+        optimized_derived_variables=[
+            OptimizedDerivedVariableConfig(name="layer_ohc", bands=bands)
+        ],
+    )
+    optimization = OptimizationConfig(lr=1e-2).build(
+        modules=stepper.modules, max_epochs=1
+    )
+    stepped = stepper.train_on_batch(
+        _data(), optimization=optimization, compute_derived_variables=True
+    )
+    assert stepped.per_channel_losses is not None
+    assert set(stepped.per_channel_losses) == set(NAMES + ohc_names)
+    for name in ohc_names:
+        assert stepped.per_channel_losses[name].loss > 0.0
+    (bias,) = [p for p in stepper.modules.parameters()]
+    moved = dict(zip(NAMES, bias.detach().flatten() != 0))
+    assert all(moved[f"thetao_{k}"] for k in range(N_LEVELS))
+    assert not any(moved[f"so_{k}"] for k in range(N_LEVELS))
+    wet = _dataset_info().vertical_coordinate.mask[..., 0] > 0  # type: ignore
+    for data in (stepped.gen_data, stepped.target_data):
+        for name in ohc_names:
+            ohc = data[name]
+            assert ohc[..., ~wet].isnan().all() and ohc[..., wet].isfinite().all()
