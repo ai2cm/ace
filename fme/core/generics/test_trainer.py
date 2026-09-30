@@ -734,6 +734,64 @@ def test_resume_after_interrupted_training_during_epoch(
     )
 
 
+def test_resume_at_epoch_boundary_does_not_re_enter_the_trained_epoch(
+    tmp_path: str,
+):
+    """A checkpoint written at an epoch boundary must skip straight to validation.
+
+    The restart checkpoint is saved before ``_epochs_trained`` is incremented,
+    so that a resume re-runs the validation and inference the interrupted job
+    never got to. That leaves ``current_epoch_num_batches_seen`` at a full
+    epoch, and re-entering the epoch yields an empty batch subset.
+    """
+    n_train_batches = 10
+    stepper_state = {"foo": "bar"}
+    config, trainer = get_trainer(
+        tmp_path,
+        stepper_state=stepper_state,
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=2,
+        n_train_batches=n_train_batches,
+    )
+    # Interrupt during the first epoch's validation: by then the boundary
+    # checkpoint is on disk, written before the epoch counter moved.
+    with unittest.mock.patch.object(
+        trainer, "_log_first_batch_metrics", return_value=None
+    ):
+        with fail_after_calls_patch(trainer, "_validation_callback", 1):
+            trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    checkpoint = torch.load(
+        paths.latest_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    assert checkpoint["epoch"] == 0
+    assert checkpoint["current_epoch_num_batches_seen"] == n_train_batches
+
+    _, resumed = get_trainer(
+        tmp_path,
+        stepper_state=stepper_state,
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+    )
+    with unittest.mock.patch.object(
+        resumed,
+        "_validation_callback",
+        return_value=({"val/mean/loss": 0.0}, 0.0),
+    ) as validation_callback:
+        resumed.train()
+
+    stepper = cast(TrainStepper, resumed.stepper)
+    assert stepper.train_batches_seen == []  # the epoch was not re-trained
+    # the post-epoch train-evaluation pass is the only thing that would step
+    # under NullOptimization here (_validation_callback is mocked out), so an
+    # empty list is what says the epoch was not re-entered at all
+    assert stepper.validation_batches_seen == []
+    validation_callback.assert_called_once_with(1)
+    assert resumed._epochs_trained == 1
+
+
 @pytest.mark.parametrize("ema_decay", [0.05, 0.99])
 @pytest.mark.parametrize("validate_using_ema", [True, False])
 def test_saves_correct_ema_checkpoints(
