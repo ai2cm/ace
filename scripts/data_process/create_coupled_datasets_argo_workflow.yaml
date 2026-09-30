@@ -11,20 +11,12 @@ spec:
         secretName: gcp-key
   arguments:
     parameters:
-    # one parameter per module in the transitive sibling-import closures of
-    # create_coupled_datasets.py and upload_coupled_stats.py; each is written
-    # to <module>.py in the container
-    - name: create_coupled_datasets_script
-    - name: coupled_dataset_utils_script
-    - name: create_window_avg_dataset_script
-    - name: time_utils_script
-    - name: get_stats_script
-    - name: merge_stats_script
-    - name: combine_stats_script
-    - name: writer_utils_script
-    - name: fs_utils_script
-    - name: upload_coupled_stats_script
-    - name: upload_stats_script
+    # tar | gzip | base64 of every module in the transitive sibling-import
+    # closures of create_coupled_datasets.py and upload_coupled_stats.py,
+    # unpacked into each container; compressed because argo passes each
+    # resolved template to argoexec as one env string, capped by the kernel
+    # at MAX_ARG_STRLEN
+    - name: code_bundle
     - name: config
     # a config that reads the config's outputs (e.g. the 1pctCO2 coupled
     # config's precomputed_sea_ice_mask names the piControl coupled ocean
@@ -100,41 +92,7 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << 'EOF' > create_coupled_datasets.py
-            {{workflow.parameters.create_coupled_datasets_script}}
-            EOF
-
-            cat << 'EOF' > coupled_dataset_utils.py
-            {{workflow.parameters.coupled_dataset_utils_script}}
-            EOF
-
-            cat << 'EOF' > create_window_avg_dataset.py
-            {{workflow.parameters.create_window_avg_dataset_script}}
-            EOF
-
-            cat << 'EOF' > time_utils.py
-            {{workflow.parameters.time_utils_script}}
-            EOF
-
-            cat << 'EOF' > get_stats.py
-            {{workflow.parameters.get_stats_script}}
-            EOF
-
-            cat << 'EOF' > merge_stats.py
-            {{workflow.parameters.merge_stats_script}}
-            EOF
-
-            cat << 'EOF' > combine_stats.py
-            {{workflow.parameters.combine_stats_script}}
-            EOF
-
-            cat << 'EOF' > writer_utils.py
-            {{workflow.parameters.writer_utils_script}}
-            EOF
-
-            cat << 'EOF' > fs_utils.py
-            {{workflow.parameters.fs_utils_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
             cat << 'EOF' > config.yaml
             {{inputs.parameters.config}}
@@ -177,49 +135,7 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << 'EOF' > upload_coupled_stats.py
-            {{workflow.parameters.upload_coupled_stats_script}}
-            EOF
-
-            cat << 'EOF' > upload_stats.py
-            {{workflow.parameters.upload_stats_script}}
-            EOF
-
-            cat << 'EOF' > create_coupled_datasets.py
-            {{workflow.parameters.create_coupled_datasets_script}}
-            EOF
-
-            cat << 'EOF' > coupled_dataset_utils.py
-            {{workflow.parameters.coupled_dataset_utils_script}}
-            EOF
-
-            cat << 'EOF' > create_window_avg_dataset.py
-            {{workflow.parameters.create_window_avg_dataset_script}}
-            EOF
-
-            cat << 'EOF' > time_utils.py
-            {{workflow.parameters.time_utils_script}}
-            EOF
-
-            cat << 'EOF' > get_stats.py
-            {{workflow.parameters.get_stats_script}}
-            EOF
-
-            cat << 'EOF' > merge_stats.py
-            {{workflow.parameters.merge_stats_script}}
-            EOF
-
-            cat << 'EOF' > combine_stats.py
-            {{workflow.parameters.combine_stats_script}}
-            EOF
-
-            cat << 'EOF' > writer_utils.py
-            {{workflow.parameters.writer_utils_script}}
-            EOF
-
-            cat << 'EOF' > fs_utils.py
-            {{workflow.parameters.fs_utils_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
             cat << 'EOF' > config.yaml
             {{inputs.parameters.config}}
