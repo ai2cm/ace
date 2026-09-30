@@ -1,0 +1,7 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+# w = weight of each layer_ohc_{a}_{b} channel
+
+# ocean_layer_ohc
+
+cm4_1pct_46to125_piC_156to235-ocean_layer_ohc_w1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1|30m
