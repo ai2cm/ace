@@ -28,7 +28,7 @@ inference:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-07-22-om4-1pctco2-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-sea_ice.zarr
             engine: zarr
           - data_path: /climate-default
             file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr.zarr
@@ -55,7 +55,7 @@ inference:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-07-22-om4-picontrol-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-sea_ice.zarr
             engine: zarr
           - data_path: /climate-default
             file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
@@ -82,7 +82,7 @@ train_loader:
       - concat:
           - &1pctCO2_coupled_training_data
             data_path: /climate-default
-            file_pattern: 2026-07-22-om4-1pctco2-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-sea_ice.zarr
             engine: zarr
             subset:
               start_time: '0046-01-01T06:00:00'
@@ -96,7 +96,7 @@ train_loader:
               start_time: '0116-01-01T06:00:00'
               stop_time: '0125-01-01T00:00:00'
           - data_path: /climate-default
-            file_pattern: 2026-07-22-om4-picontrol-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-sea_ice.zarr
             engine: zarr
             subset:
               start_time: '0156-01-01T06:00:00'
@@ -167,7 +167,7 @@ validation:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-07-22-om4-1pctco2-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-sea_ice.zarr
             engine: zarr
             subset:
               start_time: '0041-01-01T06:00:00'
@@ -189,7 +189,7 @@ validation:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-07-22-om4-1pctco2-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-sea_ice.zarr
             engine: zarr
             subset:
               start_time: '0126-01-01T06:00:00'
@@ -211,7 +211,7 @@ validation:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-07-22-om4-picontrol-4deg-coupled-sea_ice.zarr
+            file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-sea_ice.zarr
             engine: zarr
             subset:
               start_time: '0236-01-01T06:00:00'
