@@ -10,8 +10,10 @@ import torch
 from torch import nn
 
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -135,6 +137,14 @@ class MockStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        raise NotImplementedError()
+
+    def get_corrector(self) -> AtmosphereCorrectorConfig | CorrectorSelector:
+        raise NotImplementedError()
+
     @property
     def allow_missing_variables(self) -> bool:
         return False
@@ -257,6 +267,14 @@ class DeprecatingMockStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
+
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        raise NotImplementedError()
+
+    def get_corrector(self) -> AtmosphereCorrectorConfig | CorrectorSelector:
+        raise NotImplementedError()
 
     @property
     def allow_missing_variables(self) -> bool:

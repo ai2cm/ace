@@ -11,6 +11,7 @@ from typing import Literal
 from unittest.mock import patch
 
 import cftime
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -40,6 +41,8 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    apply_stepper_override,
+    apply_stepper_override_to_stepper_config,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -2634,6 +2637,106 @@ def test_scheduled_corrector_disabled_state_restored_on_resume():
     resumed.load_state(state)
     output, raw_prediction = _step_negative_input(resumed)
     torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_corrector_override_replaces_corrector():
+    stepper = _get_stepper(["a"], ["a"])
+    stepper.set_eval()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, raw_prediction)
+
+    corrector = AtmosphereCorrectorConfig(force_positive_names=["a"])
+    apply_stepper_override(stepper, StepperOverrideConfig(corrector=corrector))
+    assert stepper._config.get_corrector() == corrector
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+    # the override is serialized with the stepper
+    reloaded = Stepper.from_state(stepper.get_state())
+    reloaded.set_eval()
+    assert reloaded._config.get_corrector() == corrector
+    output, raw_prediction = _step_negative_input(reloaded)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_corrector_override_discards_scheduled_corrector_state():
+    # the trained corrector's state (the disabled flag) does not belong to the
+    # override corrector, which has none
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    assert "corrector" in stepper.get_state()["step"]
+    apply_stepper_override(
+        stepper, StepperOverrideConfig(corrector=AtmosphereCorrectorConfig())
+    )
+    stepper.set_eval()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, raw_prediction)
+
+
+def test_corrector_override_to_stepper_config():
+    config = _get_stepper_config(["a"], ["a"])
+    corrector = CorrectorSelector("ocean_corrector", {"force_positive_names": ["a"]})
+    apply_stepper_override_to_stepper_config(
+        config, StepperOverrideConfig(corrector=corrector)
+    )
+    assert config.get_corrector() == corrector
+    # the selector's serialized config is kept in sync with the override
+    reloaded = StepperConfig.from_state(dataclasses.asdict(config))
+    assert reloaded.get_corrector() == corrector
+
+
+def test_load_stepper_with_corrector_override(tmp_path: pathlib.Path):
+    """The override reaches the corrector of a multi-call-wrapped checkpoint."""
+    stepper_path = tmp_path / "stepper"
+    save_plus_one_stepper(
+        stepper_path,
+        in_names=["a"],
+        out_names=["a"],
+        mean=0.0,
+        std=1.0,
+        data_shape=[1, 1, 4, 8],
+    )
+    corrector = AtmosphereCorrectorConfig(force_positive_names=["a"])
+    stepper = load_stepper(stepper_path, StepperOverrideConfig(corrector=corrector))
+    assert stepper._config.get_corrector() == corrector
+
+
+@pytest.mark.parametrize(
+    "corrector",
+    [
+        pytest.param(
+            AtmosphereCorrectorConfig(corrector_disabled_epochs=1), id="atmosphere"
+        ),
+        pytest.param(
+            CorrectorSelector("ocean_corrector", {"corrector_disabled_epochs": 1}),
+            id="selector",
+        ),
+    ],
+)
+def test_corrector_override_rejects_disabled_epochs(corrector):
+    with pytest.raises(ValueError, match="corrector_disabled_epochs"):
+        StepperOverrideConfig(corrector=corrector)
+
+
+@pytest.mark.parametrize(
+    "corrector, expected_type",
+    [
+        pytest.param(
+            {"force_positive_names": ["a"]}, AtmosphereCorrectorConfig, id="atmosphere"
+        ),
+        pytest.param(
+            {"type": "ocean_corrector", "config": {"force_positive_names": ["a"]}},
+            CorrectorSelector,
+            id="selector",
+        ),
+    ],
+)
+def test_corrector_override_from_dict(corrector, expected_type):
+    override = dacite.from_dict(
+        StepperOverrideConfig,
+        {"corrector": corrector},
+        config=dacite.Config(strict=True),
+    )
+    assert type(override.corrector) is expected_type
 
 
 def _get_stepper_with_input_masking(

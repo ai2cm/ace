@@ -6,9 +6,11 @@ from typing import Any, TypeVar
 import torch
 from torch import nn
 
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
@@ -200,6 +202,14 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.wrapped_step.get_ocean()
+
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        self.wrapped_step.replace_corrector(corrector)
+
+    def get_corrector(self) -> AtmosphereCorrectorConfig | CorrectorSelector:
+        return self.wrapped_step.get_corrector()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self.wrapped_step.replace_prescribed_prognostic_names(names)

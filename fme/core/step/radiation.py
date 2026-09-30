@@ -239,6 +239,20 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
+    def replace_corrector(
+        self, corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    ) -> None:
+        """
+        Replace the corrector configuration with a new one.
+
+        Args:
+            corrector: The new corrector configuration.
+        """
+        self.corrector = corrector
+
+    def get_corrector(self) -> AtmosphereCorrectorConfig | CorrectorSelector:
+        return self.corrector
+
     def load(self):
         self.normalization.load()
 
