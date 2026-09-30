@@ -5,5 +5,11 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 # overrides folded into train-config.yaml (scaled_temperature OHC, max_grad_norm
 # 1.0, corrector_disabled_epochs 1)
 
+# ocean_frozen_mass_floor
+
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|training|urgent|jupiter|4|500GiB|3|ai2/ace|seed=0|8h
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1|8h
+
+# ocean_frozen_mass_r_diag_floor
+
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_r_diag_floor|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.frozen_mass_budget_correction.form=r_diag_floor|8h
