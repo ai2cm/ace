@@ -161,4 +161,24 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-dt0_a2s-fto|o0a0rs0|ace-samudra-cm
 # NOT a one-variable fork of James's owc_a2s: it also changes the masking scope
 # and carries precorrector_optimization. It is the best-standalone-ocean arm,
 # read as a screen, not as an attribution.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|ace-samudra-cm4|lhq97gpm|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-pcfe0_a2s-fto|o0a0rs0|ace-samudra-cm4|lhq97gpm|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|training|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
+
+# --- mean-fill complete-mask (mfcm0), a ONE-VARIABLE fork of pcfe0 ---
+# Added 2026-09-29. Ocean init is ocean_precorr_clip_fillmean_maskall rs0
+# (1rw0cfkn). Its wandb config differs from pcfe0's init (lhq97gpm) ONLY in
+# stepper.input_masking.fill_value_overrides: lhq97gpm zero-fills so_/uo_/vo_/
+# deptho/hfgeou, 1rw0cfkn mean-fills everything. Same substrate, seed, masking
+# scope (exclude [land_fraction, sea_surface_fraction]), epochs and loss. Every
+# coupled knob is pcfe0's (4 coupled steps, 8 epochs, lr 7e-5, n_ensemble 2,
+# EnsembleLoss, frozen ACE2S j0ng1tw3), so this row reads directly against
+# pcfe0_a2s (b39u5wry).
+#
+# Why: ai2cm/reports#130 finds this recipe has the lowest out-of-sample SST
+# and sea-ice error of 49 recent 1deg standalone conditions (below the CO2
+# range 0.37x / 0.27x production; piC holdout SST 0.60x), where Arm E's zero-
+# filled deep channels give most of that back (0.82x / 1.12x; 0.94x). The
+# question is whether that out-of-sample surface advantage survives coupling.
+#
+# Branch exp/coupled-meanfill-maskall = exp/coupled-armE + ace#1510's
+# trainer.py (epoch-boundary resume fix, crash-only, no numerics change).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mfcm0_a2s-fto|o0a0rs0|ace-samudra-cm4|1rw0cfkn|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|500GiB|3|ai2/ace|seed=0|8h
