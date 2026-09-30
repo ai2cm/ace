@@ -1,0 +1,138 @@
+# Produces the daily 1deg CM4-1pctCO2 atmosphere+land dataset by time-coarsening
+# the existing 6-hourly zarr store by a factor of 4, for the scenario rollouts of
+# the fine-tuned snow checkpoints.
+#
+# Run with (never pass --dataset, which would rewrite the 6-hourly source):
+#   ./compute_dataset.sh --time-coarsen --config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml
+#
+# --stats is not passed either: these rollouts are evaluation only and the
+# evaluator normalizes from the checkpoint, so no daily stats are needed. The
+# stats block below is required by the config schema and is otherwise unused.
+#
+# The 6-hourly source store is written by
+# CM4-1pctCO2-atmosphere-1deg-8layer-140yr.yaml. Unlike the piControl store it
+# carries no static soil masks, so the 12 mask_ fields are appended afterwards
+# with CM4-1pctCO2-land-mask-append.yaml; without them the evaluator's
+# SpatialMaskProvider compatibility check rejects the store.
+#
+# Variables in none of the three lists below are dropped by the coarsening.
+runs:
+  2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr: ""  # no real data source, config only for time coarsening
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  # Unused: --stats is not passed for this config. Kept because the schema
+  # requires it, and pointed at the existing 6-hourly stats so that passing
+  # --stats by accident recomputes nothing.
+  output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats
+  start_date: "0001-01-01T06:00:00"
+  end_date: "0141-01-01T00:00:00"
+  data_type: CM4
+  beaker_dataset: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr
+time_coarsen:
+  factor: 4
+  data_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily
+  stats_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-stats
+  output_names:
+    # Without this the coarsened store would take the source store's name, and
+    # the downstream configs expect the -daily suffix.
+    2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily
+  n_split: 140 # 140 years * 365 days/yr / 360 steps per shard ~= 142 shards, so about one shard per partition
+  snapshot_names:
+    # variables whose cell_methods in the 6-hourly store is "time: point"
+    - PRESsfc
+    - PRMSL
+    - Q2m
+    - TMP2m
+    - TMP850
+    - UGRD10m
+    - VGRD10m
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - column_soil_moisture
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_2
+    - eastward_wind_3
+    - eastward_wind_4
+    - eastward_wind_5
+    - eastward_wind_6
+    - eastward_wind_7
+    - h500
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_2
+    - northward_wind_3
+    - northward_wind_4
+    - northward_wind_5
+    - northward_wind_6
+    - northward_wind_7
+    - ocean_fraction
+    - sea_ice_fraction
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - surface_snow_amount
+    - surface_snow_area_fraction
+    - surface_temperature
+    - temperature_of_soil_layer_0
+    - temperature_of_soil_layer_1
+    - temperature_of_soil_layer_2
+    - temperature_of_soil_layer_3
+    - total_land_column_energy_without_rivers
+    - total_moisture_content_of_soil_layer_0
+    - total_moisture_content_of_soil_layer_1
+    - total_moisture_content_of_soil_layer_2
+    - total_moisture_content_of_soil_layer_3
+    - total_water_path
+    - total_energy
+  window_names:
+    # variables whose cell_methods in the 6-hourly store is "time: mean", plus
+    # the two derived tendencies. The tendencies are backward differences over
+    # one 6-hourly step, so averaging four of them telescopes to exactly the
+    # daily rate (TWP[T] - TWP[T-24h]) / 24h.
+    - DLWRFsfc
+    - DSWRFsfc
+    - DSWRFtoa
+    - GHTFLsfc
+    - LHTFLsfc
+    - PRATEsfc
+    - SHTFLsfc
+    - ULWRFsfc
+    - ULWRFtoa
+    - USWRFsfc
+    - USWRFtoa
+    - carbon_dioxide  # cell_methods is "time: mean" here, a snapshot in piControl
+    - downward_longwave_radiative_flux
+    - eastward_surface_wind_stress
+    - net_surface_longwave_radiative_flux
+    - northward_surface_wind_stress
+    - tendency_of_total_water_path
+    - tendency_of_total_water_path_due_to_advection
+    - total_frozen_precipitation_rate
+    - total_precipitation_heat_flux
+    - total_vapor_sensible_heat_flux
+  constant_prefixes:
+    # copied through unmodified; all are static in the 6-hourly store. mask_
+    # matches nothing here, since this store's soil masks are appended to the
+    # daily store afterwards, but is kept so the list matches the piControl one.
+    - HGTsfc
+    - ak_
+    - bk_
+    - glac_fraction
+    - lake_fraction
+    - land_fraction
+    - lat
+    - lon
+    - mask_
+    - soil_fraction

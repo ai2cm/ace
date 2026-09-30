@@ -1,0 +1,28 @@
+# Appends the 12 static soil masks to the daily 1pctCO2 store. The 6-hourly
+# 1pctCO2 store was written without them, but the evaluator's
+# SpatialMaskProvider requires every mask the checkpoint was trained with, with
+# identical values, so they are copied from the piControl lsm-masks store (the
+# masks are static and the two runs share a grid):
+#
+#   python append_dataset.py \
+#     --dataset-config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml \
+#     --append-config configs/CM4-1pctCO2-land-mask-append.yaml \
+#     --run-directory gs://vcm-ml-intermediate/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-lsm-masks \
+#     --append-store gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily.zarr
+#
+# The key below is joined onto --run-directory, so it names the store relative
+# to that directory. Run with --debug first to confirm the join resolves.
+variable_sources:
+  lsm_masks.zarr:
+    - mask_column_soil_moisture
+    - mask_downward_longwave_radiative_flux
+    - mask_net_surface_longwave_radiative_flux
+    - mask_total_land_column_energy_without_rivers
+    - mask_temperature_of_soil_layer_0
+    - mask_temperature_of_soil_layer_1
+    - mask_temperature_of_soil_layer_2
+    - mask_temperature_of_soil_layer_3
+    - mask_total_moisture_content_of_soil_layer_0
+    - mask_total_moisture_content_of_soil_layer_1
+    - mask_total_moisture_content_of_soil_layer_2
+    - mask_total_moisture_content_of_soil_layer_3

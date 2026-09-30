@@ -278,6 +278,13 @@ cm4_picontrol_atmosphere_8layer_200yr:
 cm4_1pctCO2_atmosphere_8layer_140yr:
 	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)-8layer-140yr.yaml
 
+# Time-coarsens the existing 2026-06-19 1deg 6-hourly store to daily. Does not
+# pass --dataset, so the 6-hourly source is never rewritten, nor --stats, since
+# the scenario rollouts normalize from the checkpoint.
+.PHONY: cm4_1pctCO2_atmosphere_1deg_8layer_140yr_daily
+cm4_1pctCO2_atmosphere_1deg_8layer_140yr_daily:
+	./compute_dataset.sh --time-coarsen --config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml
+
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	./convert_to_monthly_netcdf_fv3gfs.sh \
