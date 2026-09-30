@@ -9,6 +9,7 @@ lives with each training experiment and just names the checkpoint.
 | config | status tag | for checkpoints trained on |
 | --- | --- | --- |
 | `evaluator-config-1pct_yearly_4deg.yaml` | `run_1pct_yearly_4deg` | 4deg zarrs (`2026-07-22-cm4-*-4deg-coupled-ocean`, `2026-07-15-om4-*-4deg-ocean-5daily`) |
+| `evaluator-config-1pct_yearly_4deg_totalsalt64.yaml` | `run_1pct_yearly_4deg_totalsalt64` | the 4deg no-salt-corrector runs (`2026-09-28-test-no-sal-correct`, `2026-09-29-test-resid-no-sal-correct`); same as above plus a `stepper_override` that adds the float64 total salt content correction |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
 (`2026-07-15-om4-1pctco2-1deg-coupled-ocean`,
@@ -54,6 +55,7 @@ id in column 9 instead:
 ```
 
 Column 8 (`override_args`) takes `--override` dotlist entries applied on top
-of the config, e.g. to evaluate a checkpoint with a different corrector once
-`stepper_override.corrector` exists (see the design notes on
-`StepperOverrideConfig` in `fme/ace/stepper/single_module.py`).
+of the config. To evaluate a checkpoint with a different corrector, use a
+config with a `stepper_override.corrector` block instead (as in
+`evaluator-config-1pct_yearly_4deg_totalsalt64.yaml`): it replaces the trained
+corrector entirely, so it has to repeat every correction to keep.
