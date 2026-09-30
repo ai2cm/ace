@@ -1799,6 +1799,8 @@ class TrainStepper(
         )
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()
+        for term, value in step_loss.get_term_losses().items():
+            metrics[f"loss_term/{term}_step_{step}"] = value
         if optimize:
             per_ch = step_loss.get_channel_losses()
             for k, v in per_ch.items():

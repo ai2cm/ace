@@ -31,6 +31,8 @@ every 10 epochs (`ema_checkpoint_save_epochs`).
 | `ace2s-finetune-no-bottleneck.yaml` | the no-bottleneck arm's fine-tune: paper detached recipe on the unbottlenecked checkpoint (config otherwise identical to the seed-0 recipe) |
 | `ace2s-finetune-6hourly.yaml` | the 6-hourly arm's fine-tune: paper detached recipe at 3 steps (18 h, not 3 days) on the 6-hourly store and stats, 81-year rollout without zonal-mean images (as the pretrain's resume) |
 | `ace2s-finetune-deterministic.yaml` | the deterministic arm's fine-tune: paper detached recipe with the arm's MSE loss (ACE2 weight table, single member) and 1-member inline inference |
+| `ace2s-finetune-vs-w{3,5}-{measured,0p1,0p5}.yaml` | variogram-score arms: paper detached recipe on the paper model's seed-0 pretrain (`01M21CHK3XT6M4VSV1GE7W1G27`) with the energy score replaced by the fair 2-member variogram score (p = 0.5) over the edges of a 3x3 or 5x5 window; CRPS / VS weights 0.9 / `<VS_WEIGHT_MEASURED>` (placeholder, fails validation until filled), 0.9 / 0.1 and 0.5 / 0.5; the other window's VS logged at weight 0; needs the variogram scaling dataset (`variogram-scaling.nc` from `scripts/data_process/get_variogram_scaling.py`) at `/variogram-stats` (placeholder `<VARIOGRAM_STATS_DATASET>` in the `# arg:` header) |
+| `ace2s-finetune-vs-measure.yaml` | variogram-score measurement: the paper fine-tune (0.9 CRPS / 0.1 energy score) with both VS windows logged at weight 0 and `evaluate_before_training: true`, inline inference removed; stop it once the epoch-0 `val/mean/loss_term/*` logs land |
 
 Launch with `./run-train.sh [<filter> ...]` from this directory: workspace
 `ai2/ace`, beaker priority `normal`, no `CM_PRIORITY` label, 8 GPUs on

@@ -1,9 +1,12 @@
 import dacite
+import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.ensemble import get_variogram_edge_offsets, get_variogram_score
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
@@ -25,8 +28,10 @@ from fme.core.loss import (
     StepLossConfig,
     StepOutputLoss,
     VariableWeightingLoss,
+    VariogramScoreLoss,
     WeightedMappingLoss,
     _construct_weight_tensor,
+    load_variogram_scaling,
 )
 from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
@@ -1402,4 +1407,254 @@ def test_regularizer_channels_come_from_the_deltas():
     assert regularizer.names == ["b_0"]
     torch.testing.assert_close(
         regularizer(deltas).total(), _expected_penalty(deltas, ["b_0"])
+    )
+
+
+def _write_variogram_scaling(
+    path, scales: dict[str, list[float]], window_size: int = 5
+) -> None:
+    """Write a variogram scaling file with per-variable, per-edge values ordered
+    as get_variogram_edge_offsets(window_size)."""
+    offsets = get_variogram_edge_offsets(window_size)
+    ds = xr.Dataset(
+        {name: ("edge", np.asarray(values)) for name, values in scales.items()},
+        coords={
+            "di": ("edge", np.array([di for di, _ in offsets])),
+            "dj": ("edge", np.array([dj for _, dj in offsets])),
+        },
+    )
+    ds.to_netcdf(path)
+
+
+def _vs_setup(tmp_path):
+    out_names = ["a", "b"]
+    normalizer = StandardNormalizer(
+        means={"a": torch.as_tensor(1.0), "b": torch.as_tensor(-2.0)},
+        stds={"a": torch.as_tensor(2.0), "b": torch.as_tensor(3.0)},
+    )
+    rng = np.random.default_rng(0)
+    phys = {name: list(rng.uniform(0.5, 2.0, size=12)) for name in out_names}
+    path = str(tmp_path / "variogram-scaling.nc")
+    _write_variogram_scaling(path, phys)
+    gridded_ops = LatLonOperations(torch.ones(6, 8))
+    return out_names, normalizer, phys, path, gridded_ops
+
+
+@pytest.mark.parametrize("window_size", [3, 5])
+def test_variogram_score_loss_from_file_converts_to_normalized_units(
+    tmp_path, window_size: int
+):
+    out_names, normalizer, phys, path, _ = _vs_setup(tmp_path)
+    loss = VariogramScoreLoss.from_file(
+        path, out_names, normalizer, window_size=window_size
+    )
+    offsets = get_variogram_edge_offsets(window_size)
+    file_offsets = get_variogram_edge_offsets(5)
+    scale_phys = torch.tensor(
+        [[phys[name][file_offsets.index(o)] for name in out_names] for o in offsets],
+        dtype=torch.float32,
+    )
+    torch.testing.assert_close(
+        loss.scale.cpu(), scale_phys / torch.tensor([[2.0, 3.0]])
+    )
+    # applied to normalized inputs, the score equals the score of the
+    # physical fields with the physical scales (centering cancels)
+    mapping_loss = WeightedMappingLoss(
+        loss, weights={}, out_names=out_names, normalizer=normalizer
+    )
+    torch.manual_seed(0)
+    x = torch.randn(3, 2, 2, 6, 8, device=get_device()) * 4.0 + 1.0
+    y = torch.randn(3, 1, 2, 6, 8, device=get_device()) * 4.0 + 1.0
+    result = mapping_loss(
+        {name: x[:, :, i] for i, name in enumerate(out_names)},
+        {name: y[:, :, i] for i, name in enumerate(out_names)},
+    )
+    expected = get_variogram_score(x, y, scale_phys.to(get_device()), offsets)
+    torch.testing.assert_close(result.total(), expected.mean())
+
+
+def test_load_variogram_scaling_missing_channel_raises(tmp_path):
+    path = str(tmp_path / "variogram-scaling.nc")
+    _write_variogram_scaling(path, {"a": [1.0] * 12})
+    with pytest.raises(ValueError, match="missing variables \\['b'\\]"):
+        load_variogram_scaling(path, ["a", "b"], get_variogram_edge_offsets(3))
+
+
+def test_load_variogram_scaling_missing_offset_raises(tmp_path):
+    path = str(tmp_path / "variogram-scaling.nc")
+    _write_variogram_scaling(path, {"a": [1.0] * 4}, window_size=3)
+    with pytest.raises(ValueError, match="edge offset"):
+        load_variogram_scaling(path, ["a"], get_variogram_edge_offsets(5))
+
+
+def test_load_variogram_scaling_non_positive_raises(tmp_path):
+    path = str(tmp_path / "variogram-scaling.nc")
+    _write_variogram_scaling(path, {"a": [1.0, 1.0, 1.0, 0.0]}, window_size=3)
+    with pytest.raises(ValueError, match="non-positive"):
+        load_variogram_scaling(path, ["a"], get_variogram_edge_offsets(3))
+
+
+def _build_vs_step_loss(tmp_path, sqrt_loss_step_decay_constant=0.0, **kwargs):
+    """Build an EnsembleLoss StepLoss; a kwarg value "PATH" is replaced by the
+    path of a scaling file for variables a and b."""
+    out_names, normalizer, _, path, gridded_ops = _vs_setup(tmp_path)
+    kwargs = {k: (path if v == "PATH" else v) for k, v in kwargs.items()}
+    config = StepLossConfig(
+        type="EnsembleLoss",
+        kwargs=kwargs,
+        sqrt_loss_step_decay_constant=sqrt_loss_step_decay_constant,
+    )
+    step_loss = config.build(gridded_ops, out_names=out_names, normalizer=normalizer)
+    return step_loss, out_names, normalizer, path
+
+
+def _ensemble_inputs(out_names):
+    torch.manual_seed(0)
+    x = {n: torch.randn(3, 2, 6, 8, device=get_device()) for n in out_names}
+    y = {n: torch.randn(3, 1, 6, 8, device=get_device()) for n in out_names}
+    return x, y
+
+
+def test_variogram_score_config_wiring(tmp_path):
+    step_loss, out_names, normalizer, path = _build_vs_step_loss(
+        tmp_path,
+        crps_weight=0.5,
+        energy_score_weight=0.0,
+        variogram_score_weight=0.5,
+        variogram_score_window_size=5,
+        variogram_score_scaling_path="PATH",
+    )
+    x, y = _ensemble_inputs(out_names)
+    result = step_loss(x, y, step=0)
+    terms = result.get_term_losses()
+    assert set(terms) == {"crps", "variogram_score_w5"}
+    vs = VariogramScoreLoss.from_file(path, out_names, normalizer, window_size=5)
+    vs_only = WeightedMappingLoss(
+        vs, weights={}, out_names=out_names, normalizer=normalizer
+    )(x, y)
+    crps_only = WeightedMappingLoss(
+        CRPSLoss(alpha=1.0), weights={}, out_names=out_names, normalizer=normalizer
+    )(x, y)
+    torch.testing.assert_close(terms["variogram_score_w5"], vs_only.total())
+    torch.testing.assert_close(terms["crps"], crps_only.total())
+    torch.testing.assert_close(
+        result.total(), 0.5 * crps_only.total() + 0.5 * vs_only.total()
+    )
+
+
+def test_variogram_score_weight_zero_leaves_loss_unchanged(tmp_path):
+    base, out_names, _, _ = _build_vs_step_loss(
+        tmp_path, crps_weight=0.9, energy_score_weight=0.1
+    )
+    with_report, _, _, _ = _build_vs_step_loss(
+        tmp_path,
+        crps_weight=0.9,
+        energy_score_weight=0.1,
+        variogram_score_weight=0.0,
+        variogram_score_window_size=3,
+        variogram_score_report_window_sizes=[5],
+        variogram_score_scaling_path="PATH",
+    )
+    x, y = _ensemble_inputs(out_names)
+    x = {k: v.requires_grad_(True) for k, v in x.items()}
+    base_result = base(x, y, step=0)
+    report_result = with_report(x, y, step=0)
+    torch.testing.assert_close(report_result.total(), base_result.total())
+    base_terms = base_result.get_term_losses()
+    report_terms = report_result.get_term_losses()
+    assert set(base_terms) == {"crps", "energy_score"}
+    assert set(report_terms) == {
+        "crps",
+        "energy_score",
+        "variogram_score_w3",
+        "variogram_score_w5",
+    }
+    for term in base_terms:
+        torch.testing.assert_close(report_terms[term], base_terms[term])
+    assert report_terms["variogram_score_w3"] > 0
+    assert report_terms["variogram_score_w5"] > 0
+    # the report terms add no gradient
+    (g_base,) = torch.autograd.grad(base_result.total(), x["a"])
+    (g_report,) = torch.autograd.grad(report_result.total(), x["a"])
+    torch.testing.assert_close(g_report, g_base)
+
+
+def test_get_term_losses_are_unweighted_under_step_decay(tmp_path):
+    step_loss, out_names, _, _ = _build_vs_step_loss(
+        tmp_path,
+        sqrt_loss_step_decay_constant=1.0,
+        crps_weight=0.9,
+        energy_score_weight=0.1,
+        variogram_score_weight=0.3,
+        variogram_score_scaling_path="PATH",
+    )
+    x, y = _ensemble_inputs(out_names)
+    step_0 = step_loss(x, y, step=0)
+    step_3 = step_loss(x, y, step=3)
+    torch.testing.assert_close(step_3.total(), step_0.total() * 0.5)
+    terms_0 = step_0.get_term_losses()
+    terms_3 = step_3.get_term_losses()
+    assert set(terms_0) == {"crps", "energy_score", "variogram_score_w3"}
+    for term in terms_0:
+        torch.testing.assert_close(terms_3[term], terms_0[term])
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"variogram_score_weight": 0.5}, "scaling_path is required"),
+        ({"variogram_score_report_window_sizes": [5]}, "scaling_path is required"),
+        (
+            {
+                "variogram_score_weight": 0.5,
+                "variogram_score_window_size": 4,
+                "variogram_score_scaling_path": "x.nc",
+            },
+            "window sizes must be one of",
+        ),
+        (
+            {"variogram_score_weight": -1.0, "variogram_score_scaling_path": "x.nc"},
+            "non-negative",
+        ),
+        (
+            {"variogram_score_p": 0.0, "variogram_score_scaling_path": "x.nc"},
+            "must be positive",
+        ),
+        (
+            {
+                "variogram_score_weight": 0.5,
+                "variogram_score_window_size": 3,
+                "variogram_score_report_window_sizes": [3],
+                "variogram_score_scaling_path": "x.nc",
+            },
+            "both the weighted",
+        ),
+    ],
+)
+def test_variogram_score_config_validation(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        StepLossConfig(type="EnsembleLoss", kwargs=kwargs)
+
+
+def test_variogram_score_config_rejects_placeholder_weight():
+    with pytest.raises(TypeError, match="must be a number"):
+        StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={
+                "variogram_score_weight": "<VS_WEIGHT_MEASURED>",
+                "variogram_score_scaling_path": "x.nc",
+            },
+        )
+
+
+def test_ensemble_loss_weights_must_sum_positive(tmp_path):
+    with pytest.raises(ValueError, match="sum to a positive value"):
+        _build_vs_step_loss(tmp_path, crps_weight=0.0, energy_score_weight=0.0)
+    # the variogram score alone is a valid loss
+    _build_vs_step_loss(
+        tmp_path,
+        crps_weight=0.0,
+        energy_score_weight=0.0,
+        variogram_score_weight=1.0,
+        variogram_score_scaling_path="PATH",
     )

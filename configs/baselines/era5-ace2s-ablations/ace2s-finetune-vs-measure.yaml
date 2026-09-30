@@ -1,0 +1,119 @@
+# arg: --dataset 01M21CHK3XT6M4VSV1GE7W1G27:/weights
+# arg: --dataset <VARIOGRAM_STATS_DATASET>:/variogram-stats
+#
+# Variogram-score measurement run: the paper model's 3-step detached fine-tune
+# recipe on its seed-0 pretrain (as ace2s-finetune-vs-w*.yaml) with the paper
+# loss (0.9 CRPS / 0.1 energy score) and the variogram score of windows 3 and 5
+# logged at weight 0, validating before training (evaluate_before_training).
+# Its val/mean/loss_term/{crps,energy_score,variogram_score_w3,
+# variogram_score_w5}_step_<k> logs at epoch 0 give the unweighted term
+# magnitudes that set the <VS_WEIGHT_MEASURED> weight of the *-measured arms.
+# Meant to be stopped once those logs land, so inline inference is removed
+# (pre-training validation logs are only written after the pre-training inline
+# inference, which would include the 81-year rollout). Otherwise identical
+# to the paper fine-tune recipe.
+seed: 0
+evaluate_before_training: true
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_save_epochs:
+  step: 5
+ema_checkpoint_save_epochs:
+  step: 5
+validate_using_ema: true
+max_epochs: 10
+ema:
+  decay: 0.999
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    merge:
+    - concat:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          stop_time: '1995-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2011-01-01'
+          stop_time: '2019-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2021-01-01'
+    - concat:
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          stop_time: '1995-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2011-01-01'
+          stop_time: '2019-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2021-01-01'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 4
+    prefetch_factor: 2
+    dataset:
+      merge:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1996-01-01'
+          stop_time: '1997-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1996-01-01'
+          stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 3
+  optimize_last_step_only: false
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  loss:
+    type: EnsembleLoss
+    weights:
+      h500: 5.0
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+      variogram_score_weight: 0.0
+      variogram_score_window_size: 3
+      variogram_score_p: 0.5
+      variogram_score_report_window_sizes: [5]
+      variogram_score_scaling_path: /variogram-stats/variogram-scaling.nc
+stepper:
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

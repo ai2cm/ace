@@ -4,12 +4,20 @@ import logging
 from collections.abc import Callable, Collection, Mapping
 from typing import Any, Literal
 
+import fsspec
+import numpy as np
 import torch
 import torch.linalg
 import torch.nn.functional as F
+import xarray as xr
 
 from fme.core.device import get_device
-from fme.core.ensemble import get_crps, get_energy_score
+from fme.core.ensemble import (
+    get_crps,
+    get_energy_score,
+    get_variogram_edge_offsets,
+    get_variogram_score,
+)
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
@@ -34,18 +42,64 @@ class LossComponent(abc.ABC):
     channel dimension lives) and implement :meth:`reduce_to_channel`.
     """
 
-    def __init__(self, loss: torch.Tensor):
+    def __init__(
+        self,
+        loss: torch.Tensor,
+        term: str | None = None,
+        weight: float = 1.0,
+        report_only: bool = False,
+    ):
         """
         Args:
             loss: The loss tensor. Can be a scalar (``ndim == 0``),
                 a partially-reduced tensor like ``(B, C)``, or a
                 full element-wise tensor like ``(B, C, lat, lon)``.
+            term: Optional name of the loss term this component belongs to
+                (e.g. ``"crps"``), used to report per-term values.
+            weight: The product of the scalar weights already applied to
+                ``loss`` (term weight, step weight, ...), so that
+                ``loss / weight`` is the term's unweighted value.
+            report_only: If True, ``loss`` is an unweighted value that is
+                reported under ``term`` but not added to the loss total.
         """
         self.loss = loss
+        self.term = term
+        self.weight = weight
+        self.report_only = report_only
 
     @abc.abstractmethod
     def reduce_to_channel(self) -> torch.Tensor:
         """Reduce to ``(B, C)`` by meaning over non-batch, non-channel dims."""
+
+    def replace_loss(self, loss: torch.Tensor) -> "LossComponent":
+        """A copy with the same metadata holding a different loss tensor."""
+        return type(self)(
+            loss, term=self.term, weight=self.weight, report_only=self.report_only
+        )
+
+    def scaled(self, factor: float) -> "LossComponent":
+        """A copy with ``loss`` multiplied by ``factor``, and ``weight``
+        tracking it. Report-only components are returned unchanged, since
+        they carry an unweighted value.
+        """
+        if self.report_only:
+            return self
+        return type(self)(
+            self.loss * factor, term=self.term, weight=self.weight * factor
+        )
+
+    def unweighted_channel_loss(self) -> torch.Tensor | None:
+        """The detached ``(B, C)`` unweighted value of this component, or None
+        if it is untagged or its weight is zero (the value is unrecoverable).
+        """
+        if self.term is None:
+            return None
+        bc = self.reduce_to_channel().detach()
+        if self.report_only:
+            return bc
+        if self.weight == 0:
+            return None
+        return bc / self.weight
 
 
 class StandardLoss(LossComponent):
@@ -95,20 +149,29 @@ class LossOutput:
         present, so masked-out variables never dilute the result.
         """
         if self._per_channel is None:
-            bc = sum(c.reduce_to_channel() for c in self._losses)
+            bc = sum(c.reduce_to_channel() for c in self._losses if not c.report_only)
             assert isinstance(bc, torch.Tensor)
-            if bc.ndim == 0:
-                self._per_channel = bc.expand(len(self._channel_names))
-                self._counts = [1] * len(self._channel_names)
-            elif self._mask is not None:
-                masked_sum = (bc * self._mask).sum(dim=0)
-                self._per_channel = masked_sum / self._mask.sum(dim=0).clamp(min=1)
-                self._counts = [int(c.item()) for c in self._mask.sum(dim=0)]
-            else:
-                self._per_channel = bc.mean(dim=0)
-                self._counts = [bc.shape[0]] * len(self._channel_names)
+            self._per_channel, self._counts = self._reduce_batch(bc)
         assert self._per_channel is not None and self._counts is not None
         return self._per_channel, self._counts
+
+    def _reduce_batch(self, bc: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
+        """Reduce a ``(B, C)`` (or scalar) tensor to per-channel values."""
+        if bc.ndim == 0:
+            return bc.expand(len(self._channel_names)), [1] * len(self._channel_names)
+        elif self._mask is not None:
+            masked_sum = (bc * self._mask).sum(dim=0)
+            per_channel = masked_sum / self._mask.sum(dim=0).clamp(min=1)
+            return per_channel, [int(c.item()) for c in self._mask.sum(dim=0)]
+        else:
+            return bc.mean(dim=0), [bc.shape[0]] * len(self._channel_names)
+
+    def _mean_over_channels(self, pc: torch.Tensor) -> torch.Tensor:
+        if self._mask is not None:
+            active = self._mask.sum(dim=0) > 0
+            if active.any():
+                return pc[active].mean()
+        return pc.mean()
 
     def total(self) -> torch.Tensor:
         """Scalar loss used as the optimization target.
@@ -119,11 +182,31 @@ class LossOutput:
         returned value.
         """
         pc, _ = self._reduce()
-        if self._mask is not None:
-            active = self._mask.sum(dim=0) > 0
-            if active.any():
-                return pc[active].mean()
-        return pc.mean()
+        return self._mean_over_channels(pc)
+
+    def get_term_losses(self) -> dict[str, torch.Tensor]:
+        """Detached scalar unweighted value of each named loss term.
+
+        Each term is reduced like :meth:`total` (mean over active samples per
+        channel, then over active channels), after dividing out the scalar
+        weights applied to it (term and step weights; per-variable weights,
+        which scale the loss inputs, are kept). Report-only terms, which do
+        not enter :meth:`total`, are included.
+        """
+        by_term: dict[str, torch.Tensor] = {}
+        for c in self._losses:
+            bc = c.unweighted_channel_loss()
+            if bc is None:
+                continue
+            assert c.term is not None
+            if c.term in by_term:
+                by_term[c.term] = by_term[c.term] + bc
+            else:
+                by_term[c.term] = bc
+        return {
+            term: self._mean_over_channels(self._reduce_batch(bc)[0])
+            for term, bc in by_term.items()
+        }
 
     def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
         """Per-channel mean losses with active-sample counts.
@@ -149,7 +232,7 @@ class LossOutput:
     def scale(self, weight: float) -> "LossOutput":
         """Return a new ``LossOutput`` with every component scaled."""
         return LossOutput(
-            [type(c)(c.loss * weight) for c in self._losses],
+            [c.scaled(weight) for c in self._losses],
             self._channel_names,
             mask=self._mask,
         )
@@ -260,27 +343,27 @@ class WeightedMappingLoss:
             input_ndim + self.channel_dim if self.channel_dim < 0 else self.channel_dim
         )
 
-        def _wrap_elementwise(t: torch.Tensor) -> StandardLoss:
+        def _reduce_elementwise(t: torch.Tensor) -> torch.Tensor:
             # Element-wise loss tensors have the same shape as the input;
             # the channel position depends on the data layout (ensemble,
             # tile, etc.). Reduce non-(batch, channel) dims here so the
             # downstream component carries a canonical ``(B, C)`` tensor.
             dims = tuple(i for i in range(t.ndim) if i not in (0, cdim))
-            reduced = t.mean(dim=dims) if dims else t
-            return StandardLoss(reduced)
+            return t.mean(dim=dims) if dims else t
 
+        losses: list[LossComponent]
         if isinstance(result, list):
             # Inner losses that return raw element-wise tensors (e.g. MSE,
             # L1) wrap themselves in StandardLoss but don't know the input
             # channel layout, so reduce around the actual channel dim here.
             losses = [
-                _wrap_elementwise(c.loss)
+                c.replace_loss(_reduce_elementwise(c.loss))
                 if c.loss.ndim == input_ndim and type(c) is StandardLoss
                 else c
                 for c in result
             ]
         else:
-            losses = [_wrap_elementwise(result)]
+            losses = [StandardLoss(_reduce_elementwise(result))]
 
         mask = None
         if data_mask is not None:
@@ -387,7 +470,7 @@ class WeightedSum(torch.nn.Module):
         components: list[LossComponent] = []
         for w, module in zip(self._weights, self._wrapped):
             for c in module(x, y):
-                components.append(type(c)(c.loss * w))
+                components.append(c.scaled(w))
         return components
 
 
@@ -710,6 +793,160 @@ def _get_finite_difference_crps_loss(
     return level_crps
 
 
+def load_variogram_scaling(
+    path: str,
+    names: list[str],
+    offsets: list[tuple[int, int]],
+) -> torch.Tensor:
+    """Load per-variable, per-edge-kind increment scales from a netCDF file.
+
+    The file (written by ``scripts/data_process/get_stats.py``) holds one
+    variable per data variable with an edge dimension carrying integer
+    coordinates ``di`` (latitude index step) and ``dj`` (longitude index
+    step); each value is the RMS of the increment for that offset, in the
+    variable's physical units.
+
+    Args:
+        path: Path to the netCDF file.
+        names: The variable names, in channel order.
+        offsets: The ``(di, dj)`` edge kinds to select, in order.
+
+    Returns:
+        A tensor of shape ``(len(offsets), len(names))`` in physical units.
+    """
+    with fsspec.open(path, "rb") as f:
+        ds = xr.load_dataset(f)
+    missing = [name for name in names if name not in ds.data_vars]
+    if missing:
+        raise ValueError(
+            f"Variogram scaling file {path} is missing variables {missing}; "
+            "it must contain every variable the loss is computed on."
+        )
+    di = ds["di"].values
+    dj = ds["dj"].values
+    indices = []
+    for offset in offsets:
+        match = np.nonzero((di == offset[0]) & (dj == offset[1]))[0]
+        if len(match) != 1:
+            raise ValueError(
+                f"Variogram scaling file {path} has {len(match)} entries for "
+                f"edge offset (di, dj) = {offset}, expected exactly 1."
+            )
+        indices.append(int(match[0]))
+    values = np.stack(
+        [ds[name].values[indices].astype(np.float64) for name in names], axis=-1
+    )
+    if not np.all(np.isfinite(values)) or np.any(values <= 0):
+        bad = sorted(
+            {
+                names[j]
+                for j in range(len(names))
+                if not np.all(np.isfinite(values[:, j])) or np.any(values[:, j] <= 0)
+            }
+        )
+        raise ValueError(
+            f"Variogram scaling file {path} has non-positive or non-finite "
+            f"scales for {bad}."
+        )
+    return torch.tensor(values, dtype=torch.float32)
+
+
+class VariogramScoreLoss(torch.nn.Module):
+    """
+    Per-channel, grid-local variogram score of order ``p`` (Scheuerer and
+    Hamill 2015) with the fair two-member estimator; see
+    :func:`fme.core.ensemble.get_variogram_score` for its definition, pole
+    and longitude handling, and reduction.
+
+    Increments are divided by a per-channel, per-edge-kind scale before the
+    power. The scales are given in physical units and converted to the
+    normalized units the loss is computed in: normalized data is
+    ``(x - mean_c) / std_c``, so a normalized increment is the physical one
+    divided by ``std_c`` (centering cancels), and the scale in normalized
+    units is ``scale_phys / std_c``.
+
+    Per-variable loss weights multiply the loss inputs, so they scale the
+    score by ``weight ** (2 * p)`` (linearly, like CRPS, for ``p = 0.5``).
+
+    Assumes a ``[..., n_lat, n_lon]`` layout with periodic longitude (a
+    lat-lon grid).
+
+    Returns a ``(B, C)`` tensor.
+    """
+
+    def __init__(
+        self,
+        scale: torch.Tensor,
+        window_size: int,
+        p: float = 0.5,
+    ):
+        """
+        Args:
+            scale: The increment scales in normalized units, of shape
+                ``(n_edges, n_channels)`` with edge kinds ordered as
+                :func:`get_variogram_edge_offsets` returns them for
+                ``window_size``.
+            window_size: Odd width of the window of edges in grid points.
+            p: Order of the variogram score.
+        """
+        super().__init__()
+        self.offsets = get_variogram_edge_offsets(window_size)
+        if scale.ndim != 2 or scale.shape[0] != len(self.offsets):
+            raise ValueError(
+                f"scale must have shape ({len(self.offsets)}, n_channels) for "
+                f"window_size {window_size}, got {tuple(scale.shape)}"
+            )
+        if p <= 0:
+            raise ValueError(f"p must be positive, got {p}")
+        self.window_size = window_size
+        self.p = p
+        self.scale = scale.to(get_device())
+
+    @property
+    def term_name(self) -> str:
+        return f"variogram_score_w{self.window_size}"
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str,
+        names: list[str],
+        normalizer: StandardNormalizer,
+        window_size: int,
+        p: float = 0.5,
+    ) -> "VariogramScoreLoss":
+        """Build from a physical-units scaling file, converting the scales to
+        the normalized units of ``normalizer``.
+
+        Args:
+            path: Path to the variogram scaling netCDF file.
+            names: The variable names, in the channel order of the loss
+                inputs.
+            normalizer: The normalizer that produced the loss inputs.
+            window_size: Odd width of the window of edges in grid points.
+            p: Order of the variogram score.
+        """
+        offsets = get_variogram_edge_offsets(window_size)
+        scale_phys = load_variogram_scaling(path, names, offsets)
+        stds = torch.stack(
+            [normalizer.stds[name].detach().float().cpu().reshape(()) for name in names]
+        )
+        return cls(scale_phys / stds[None, :], window_size=window_size, p=p)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        return [
+            StandardLoss(
+                get_variogram_score(
+                    x,
+                    y,
+                    self.scale.to(device=x.device, dtype=x.dtype),
+                    self.offsets,
+                    p=self.p,
+                )
+            )
+        ]
+
+
 class EnsembleLoss(torch.nn.Module):
     def __init__(
         self,
@@ -720,7 +957,30 @@ class EnsembleLoss(torch.nn.Module):
         finite_difference_crps_levels: int = 1,
         almost_fair_crps_alpha: float = 1.0,
         energy_score_whitening: SpectralWhitening | None = None,
+        variogram_score_weight: float = 0.0,
+        variogram_score_loss: VariogramScoreLoss | None = None,
+        variogram_score_report_losses: list[VariogramScoreLoss] | None = None,
     ):
+        """
+        Args:
+            crps_weight: Weight of the CRPS term.
+            energy_score_weight: Weight of the spectral energy score term.
+            sht: The real spherical harmonic transform for the energy score.
+            finite_difference_crps_weight: Weight of the finite-difference
+                CRPS term.
+            finite_difference_crps_levels: Number of coarsening levels of the
+                finite-difference CRPS.
+            almost_fair_crps_alpha: The almost-fair CRPS alpha.
+            energy_score_whitening: Optional spectral whitening of the energy
+                score.
+            variogram_score_weight: Weight of the variogram score term.
+            variogram_score_loss: The variogram score term. Required when
+                variogram_score_weight is positive; with a zero weight it is
+                computed and reported but not added to the loss.
+            variogram_score_report_losses: Further variogram score terms that
+                are computed and reported but not added to the loss (e.g. other
+                window sizes).
+        """
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
             raise ValueError(
@@ -732,11 +992,46 @@ class EnsembleLoss(torch.nn.Module):
                 "finite_difference_crps_weight must be non-negative, "
                 f"got {finite_difference_crps_weight}"
             )
-        if crps_weight + energy_score_weight == 0:
+        if variogram_score_weight < 0:
             raise ValueError(
-                "crps_weight and energy_score_weight must sum to a positive value, "
-                f"got {crps_weight} and {energy_score_weight}"
+                "variogram_score_weight must be non-negative, "
+                f"got {variogram_score_weight}"
             )
+        if variogram_score_weight > 0 and variogram_score_loss is None:
+            raise ValueError(
+                "variogram_score_loss is required when variogram_score_weight "
+                "is positive"
+            )
+        total_weight = (
+            crps_weight
+            + energy_score_weight
+            + finite_difference_crps_weight
+            + variogram_score_weight
+        )
+        if total_weight == 0:
+            raise ValueError(
+                "crps_weight, energy_score_weight, finite_difference_crps_weight "
+                "and variogram_score_weight must sum to a positive value, "
+                f"got {crps_weight}, {energy_score_weight}, "
+                f"{finite_difference_crps_weight} and {variogram_score_weight}"
+            )
+        report_losses = list(variogram_score_report_losses or [])
+        if variogram_score_loss is not None and variogram_score_weight == 0:
+            report_losses.insert(0, variogram_score_loss)
+            variogram_score_loss = None
+        self.variogram_score_weight = variogram_score_weight
+        self.variogram_score_loss = variogram_score_loss
+        term_names = [loss.term_name for loss in report_losses]
+        if variogram_score_loss is not None:
+            term_names.append(variogram_score_loss.term_name)
+        if len(set(term_names)) != len(term_names):
+            raise ValueError(
+                f"variogram score terms must have distinct window sizes, got "
+                f"{term_names}"
+            )
+        # A plain list, not a ModuleList: these terms hold no parameters and
+        # keep their scales on the device themselves.
+        self.variogram_score_report_losses = report_losses
         self.crps_loss = CRPSLoss(alpha=almost_fair_crps_alpha)
         if finite_difference_crps_weight > 0:
             self.diff_crps_loss: FiniteDifferenceCRPSLoss | None = (
@@ -761,17 +1056,162 @@ class EnsembleLoss(torch.nn.Module):
         gen_norm: torch.Tensor,
         target_norm: torch.Tensor,
     ) -> list[LossComponent]:
+        """Weighted components of the active terms, each tagged with its term
+        name, plus unweighted report-only components for zero-weight
+        variogram score terms.
+        """
         components: list[LossComponent] = []
+
+        def _add(
+            term: str, weight: float, term_components: list[LossComponent]
+        ) -> None:
+            for c in term_components:
+                components.append(
+                    type(c)(c.loss * weight, term=term, weight=c.weight * weight)
+                )
+
         if self.crps_weight > 0:
-            for c in self.crps_loss(gen_norm, target_norm):
-                components.append(type(c)(c.loss * self.crps_weight))
+            _add("crps", self.crps_weight, self.crps_loss(gen_norm, target_norm))
         if self.energy_score_weight > 0:
-            for c in self.energy_score_loss(gen_norm, target_norm):
-                components.append(type(c)(c.loss * self.energy_score_weight))
+            _add(
+                "energy_score",
+                self.energy_score_weight,
+                self.energy_score_loss(gen_norm, target_norm),
+            )
         if self.diff_crps_loss is not None:
-            for c in self.diff_crps_loss(gen_norm, target_norm):
-                components.append(type(c)(c.loss * self.diff_crps_weight))
+            _add(
+                "finite_difference_crps",
+                self.diff_crps_weight,
+                self.diff_crps_loss(gen_norm, target_norm),
+            )
+        if self.variogram_score_loss is not None:
+            _add(
+                self.variogram_score_loss.term_name,
+                self.variogram_score_weight,
+                self.variogram_score_loss(gen_norm, target_norm),
+            )
+        for report_loss in self.variogram_score_report_losses:
+            with torch.no_grad():
+                report_components = report_loss(gen_norm, target_norm)
+            for c in report_components:
+                components.append(
+                    type(c)(
+                        c.loss.detach(),
+                        term=report_loss.term_name,
+                        report_only=True,
+                    )
+                )
         return components
+
+
+@dataclasses.dataclass
+class _VariogramScoreKwargs:
+    """The variogram score settings among the (flat) EnsembleLoss kwargs.
+
+    Parameters:
+        weight: ``variogram_score_weight``, the weight of the variogram score
+            term. With a zero weight and a scaling path, the term is still
+            computed and reported (unweighted), but not added to the loss.
+        window_size: ``variogram_score_window_size``, the odd window width
+            (3 or 5) of the weighted term.
+        p: ``variogram_score_p``, the order of the variogram score.
+        scaling_path: ``variogram_score_scaling_path``, the netCDF file of
+            per-variable, per-edge-kind increment scales in physical units
+            (``variogram-scaling.nc`` from ``scripts/data_process/get_stats.py``).
+        report_window_sizes: ``variogram_score_report_window_sizes``, further
+            window sizes whose variogram score is computed and reported but not
+            added to the loss.
+    """
+
+    weight: float = 0.0
+    window_size: int = 3
+    p: float = 0.5
+    scaling_path: str | None = None
+    report_window_sizes: list[int] = dataclasses.field(default_factory=list)
+
+    SUPPORTED_WINDOW_SIZES = (3, 5)
+
+    def __post_init__(self):
+        # kwargs are untyped, so an unfilled config placeholder arrives here
+        if not isinstance(self.weight, int | float) or isinstance(self.weight, bool):
+            raise TypeError(
+                f"variogram_score_weight must be a number, got {self.weight!r}"
+            )
+        if self.weight < 0:
+            raise ValueError(
+                f"variogram_score_weight must be non-negative, got {self.weight}"
+            )
+        for size in [self.window_size, *self.report_window_sizes]:
+            if size not in self.SUPPORTED_WINDOW_SIZES:
+                raise ValueError(
+                    f"variogram score window sizes must be one of "
+                    f"{self.SUPPORTED_WINDOW_SIZES}, got {size}"
+                )
+        if len(set(self.report_window_sizes)) != len(self.report_window_sizes):
+            raise ValueError(
+                "variogram_score_report_window_sizes must be distinct, got "
+                f"{self.report_window_sizes}"
+            )
+        if self.p <= 0:
+            raise ValueError(f"variogram_score_p must be positive, got {self.p}")
+        if self.scaling_path is None and (
+            self.weight > 0 or len(self.report_window_sizes) > 0
+        ):
+            raise ValueError(
+                "variogram_score_scaling_path is required when "
+                "variogram_score_weight is positive or "
+                "variogram_score_report_window_sizes is given"
+            )
+        if self.weight > 0 and self.window_size in self.report_window_sizes:
+            raise ValueError(
+                f"window size {self.window_size} is both the weighted variogram "
+                "score and a report-only one"
+            )
+
+    @classmethod
+    def pop_from(cls, kwargs: dict[str, Any]) -> "_VariogramScoreKwargs":
+        """Pop the ``variogram_score_*`` entries from ``kwargs``."""
+        return cls(
+            weight=kwargs.pop("variogram_score_weight", 0.0),
+            window_size=kwargs.pop("variogram_score_window_size", 3),
+            p=kwargs.pop("variogram_score_p", 0.5),
+            scaling_path=kwargs.pop("variogram_score_scaling_path", None),
+            report_window_sizes=list(
+                kwargs.pop("variogram_score_report_window_sizes", [])
+            ),
+        )
+
+    def build(
+        self,
+        out_names: list[str] | None,
+        normalizer: StandardNormalizer | None,
+    ) -> tuple["VariogramScoreLoss | None", list["VariogramScoreLoss"]]:
+        """Build the weighted (or, at zero weight, reported) term and the
+        report-only terms. Nothing is built without a scaling path.
+        """
+        if self.scaling_path is None:
+            return None, []
+        if out_names is None or normalizer is None:
+            raise ValueError(
+                "out_names and normalizer are required to build the variogram score"
+            )
+        path = self.scaling_path
+
+        def _build(window_size: int) -> VariogramScoreLoss:
+            return VariogramScoreLoss.from_file(
+                path,
+                names=out_names,
+                normalizer=normalizer,
+                window_size=window_size,
+                p=self.p,
+            )
+
+        report = [
+            _build(size)
+            for size in self.report_window_sizes
+            if size != self.window_size
+        ]
+        return _build(self.window_size), report
 
 
 @dataclasses.dataclass
@@ -813,15 +1253,24 @@ class LossConfig:
             raise NotImplementedError(self.type)
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
+        if self.type == "EnsembleLoss":
+            # validate the variogram score kwargs without reading the file
+            _VariogramScoreKwargs.pop_from(dict(self.kwargs))
 
     def build(
         self,
         gridded_operations: GriddedOperations | None,
+        out_names: list[str] | None = None,
+        normalizer: StandardNormalizer | None = None,
     ) -> Any:
         """
         Args:
             gridded_operations: The gridded operations to use in the case that
                 the loss function requires use of the horizontal dimensions.
+            out_names: The names of the loss channels, in channel order.
+                Required by the EnsembleLoss variogram score.
+            normalizer: The normalizer applied to the loss inputs. Required by
+                the EnsembleLoss variogram score.
         """
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
@@ -850,11 +1299,16 @@ class LossConfig:
             whitening = (
                 whitening_config.build() if whitening_config is not None else None
             )
+            variogram = _VariogramScoreKwargs.pop_from(kwargs)
+            vs_loss, vs_report_losses = variogram.build(out_names, normalizer)
             main_loss = EnsembleLoss(
                 sht=gridded_operations.get_real_sht(),
                 crps_weight=crps_weight,
                 energy_score_weight=energy_score_weight,
                 energy_score_whitening=whitening,
+                variogram_score_weight=variogram.weight,
+                variogram_score_loss=vs_loss,
+                variogram_score_report_losses=vs_report_losses,
                 **kwargs,
             )
 
@@ -966,6 +1420,8 @@ class StepLossConfig:
     ) -> StepLoss:
         loss = self.loss_config.build(
             gridded_operations=gridded_ops,
+            out_names=out_names,
+            normalizer=normalizer,
         )
         return StepLoss(
             WeightedMappingLoss(
@@ -1239,6 +1695,10 @@ class StepOutputLossOutput:
     def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
         """Per-channel main-loss values; the penalty is in ``total()`` only."""
         return self.main.get_channel_losses()
+
+    def get_term_losses(self) -> dict[str, torch.Tensor]:
+        """Unweighted values of the main loss's named terms."""
+        return self.main.get_term_losses()
 
 
 class StepOutputLoss(torch.nn.Module):

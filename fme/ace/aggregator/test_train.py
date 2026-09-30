@@ -133,6 +133,46 @@ def test_aggregator_logs_per_channel_loss():
     assert logs["train/mean/loss/a"] == 0.75
 
 
+def test_aggregator_logs_loss_terms():
+    """Per-term unweighted losses (loss_term/<term>_step_<k>) are averaged
+    over batches and logged under <label>/mean/."""
+    batch_size, n_time, nx, ny = 2, 2, 2, 2
+    device = get_device()
+    agg = TrainAggregator(
+        config=TrainAggregatorConfig(
+            spherical_power_spectrum=False, weighted_rmse=False
+        ),
+        operations=LatLonOperations(area_weights=torch.ones(nx, ny, device=device)),
+    )
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 2, n_time, nx, ny, device=device)},
+    )
+    for value in [1.0, 3.0]:
+        agg.record_batch(
+            batch=TrainOutput(
+                metrics={
+                    "loss": torch.tensor(value, device=device),
+                    "loss_term/variogram_score_w3_step_0": torch.tensor(
+                        value, device=device
+                    ),
+                    "unrelated_metric": torch.tensor(value, device=device),
+                },
+                target_data=target_data,
+                gen_data=gen_data,
+                time=xr.DataArray(
+                    np.zeros((batch_size, n_time)), dims=["sample", "time"]
+                ),
+                normalize=lambda x: x,
+            ),
+        )
+    logs = agg.get_logs(label="train")
+    assert logs["train/mean/loss_term/variogram_score_w3_step_0"] == 2.0
+    assert "train/mean/unrelated_metric" not in logs
+
+
 def test_aggregator_per_channel_loss_weighted_by_count():
     """When batches have different counts, the mean is weighted correctly."""
     batch_size = 4

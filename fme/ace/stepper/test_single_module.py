@@ -77,6 +77,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
+from fme.core.ensemble import get_variogram_edge_offsets
 from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
@@ -550,6 +551,71 @@ def test_train_on_batch_crps_loss():
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
+
+
+@pytest.mark.parametrize("with_variogram_score", [False, True])
+def test_train_on_batch_reports_loss_terms(tmp_path, with_variogram_score: bool):
+    torch.manual_seed(0)
+
+    class AddNoise(torch.nn.Module):
+        def forward(self, x):
+            return x + torch.randn_like(x)
+
+    n_steps = 2
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=3, n_time=n_steps + 1).data
+    kwargs: dict = {"crps_weight": 0.9, "energy_score_weight": 0.1}
+    expected_terms = {"crps", "energy_score"}
+    if with_variogram_score:
+        offsets = get_variogram_edge_offsets(5)
+        path = str(tmp_path / "variogram-scaling.nc")
+        xr.Dataset(
+            {name: ("edge", np.ones(len(offsets))) for name in ["a", "b"]},
+            coords={
+                "di": ("edge", np.array([di for di, _ in offsets])),
+                "dj": ("edge", np.array([dj for _, dj in offsets])),
+            },
+        ).to_netcdf(path)
+        kwargs.update(
+            variogram_score_weight=0.0,
+            variogram_score_window_size=3,
+            variogram_score_report_window_sizes=[5],
+            variogram_score_scaling_path=path,
+        )
+        expected_terms |= {"variogram_score_w3", "variogram_score_w5"}
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddNoise()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_ensemble=2,
+        loss=StepLossConfig(type="EnsembleLoss", kwargs=kwargs),
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    for step in range(n_steps):
+        terms = {
+            key[len("loss_term/") : -len(f"_step_{step}")]
+            for key in stepped.metrics
+            if key.startswith("loss_term/") and key.endswith(f"_step_{step}")
+        }
+        assert terms == expected_terms
+        crps = stepped.metrics[f"loss_term/crps_step_{step}"]
+        energy_score = stepped.metrics[f"loss_term/energy_score_step_{step}"]
+        # with no step decay, the step loss is the weighted sum of the terms
+        torch.testing.assert_close(
+            stepped.metrics[f"loss_step_{step}"], 0.9 * crps + 0.1 * energy_score
+        )
 
 
 @pytest.mark.parametrize("optimize_last_step_only", [True, False])
@@ -2535,6 +2601,9 @@ def flatten_dict(
 def _get_train_output_tensor_dict(data: TrainOutput) -> dict[str, torch.Tensor]:
     return_dict = {}
     for k, v in data.metrics.items():
+        if k.startswith("loss_term/"):
+            # per-term diagnostics, tested in test_train_on_batch_reports_loss_terms
+            continue
         return_dict[f"metrics.{k}"] = v
     for k, v in data.gen_data.items():
         return_dict[f"gen_data.{k}"] = v

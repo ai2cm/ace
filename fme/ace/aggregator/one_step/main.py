@@ -76,7 +76,9 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         step_metrics = {
             k: v
             for k, v in batch.metrics.items()
-            if k.startswith("loss_step_") or k.startswith("loss/")
+            if k.startswith("loss_step_")
+            or k.startswith("loss/")
+            or k.startswith("loss_term/")
         }
         self._per_step_losses.record(step_metrics)
         if (

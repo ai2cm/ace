@@ -128,6 +128,36 @@ def test_aggregator_logs_per_channel_loss():
     assert logs["val/mean/loss/a"] == 0.75
 
 
+def test_aggregator_logs_loss_terms():
+    """Per-term unweighted losses are reported during validation under the
+    same keys as in training."""
+    batch_size, n_time, nx, ny = 2, 2, 2, 2
+    device = get_device()
+    agg = OneStepAggregatorConfig().build(get_ds_info(nx, ny), save_diagnostics=False)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 2, n_time, nx, ny, device=device)},
+    )
+    time = xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"])
+    for value in [1.0, 3.0]:
+        agg.record_batch(
+            batch=TrainOutput(
+                metrics={
+                    "loss": torch.tensor(value, device=device),
+                    "loss_term/crps_step_1": torch.tensor(value, device=device),
+                },
+                target_data=target_data,
+                gen_data=gen_data,
+                time=time,
+                normalize=lambda x: x,
+            ),
+        )
+    logs = agg.get_logs(label="val")
+    assert logs["val/mean/loss_term/crps_step_1"] == 2.0
+
+
 def test_aggregator_omits_per_channel_loss_when_disabled():
     nx, ny = 2, 2
     device = get_device()
