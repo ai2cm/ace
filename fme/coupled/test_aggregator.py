@@ -7,6 +7,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.aggregator.inference.step_diagnostics import StepDiagnosticsMetricConfig
 from fme.ace.aggregator.inference.test_evaluator import get_zero_time
 from fme.ace.aggregator.one_step.main import (
     OneStepAggregatorConfig,
@@ -18,8 +19,10 @@ from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.step.step_diagnostics import StepDiagnostics
 from fme.core.typing_ import EnsembleTensorDict
 from fme.coupled.aggregator import (
+    InferenceAggregatorConfig,
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,
     _combine_logs,
@@ -389,3 +392,198 @@ def test_one_step_aggregator_config_reaches_both_sub_aggregators():
     # sanity check: the disabled keys are exactly the ones present by default
     default_logs = _one_step_summary_logs(config=None)
     assert any(key.startswith("val/snapshot/") for key in default_logs)
+
+
+def _make_correction_paired_data(
+    nx: int,
+    ny: int,
+    n_time: int,
+    ocean_delta: float | None,
+    atmosphere_delta: float | None,
+    n_sample: int = 2,
+) -> CoupledPairedData:
+    time = xr.DataArray(
+        [
+            [
+                (cftime.DatetimeProlepticGregorian(2000, 1, 1) + i * TIMESTEP)
+                for i in range(n_time)
+            ]
+            for _ in range(n_sample)
+        ],
+        dims=["sample", "time"],
+    )
+
+    def _realm(name: str, delta: float | None) -> PairedData:
+        return PairedData.new_on_device(
+            prediction={
+                name: torch.randn(n_sample, n_time, ny, nx, device=get_device())
+            },
+            reference={
+                name: torch.randn(n_sample, n_time, ny, nx, device=get_device())
+            },
+            time=time,
+            step_diagnostics=(
+                StepDiagnostics(
+                    delta={
+                        name: torch.full(
+                            (n_sample, n_time, ny, nx),
+                            delta,
+                            device=get_device(),
+                        )
+                    }
+                )
+                if delta is not None
+                else None
+            ),
+        )
+
+    return CoupledPairedData(
+        ocean_data=_realm("ocean_var", ocean_delta),
+        atmosphere_data=_realm("atmos_var", atmosphere_delta),
+    )
+
+
+def _divide_by(std: float):
+    def normalize(tensors, apply_mean: bool = True):
+        return {k: v / std for k, v in tensors.items()}
+
+    return normalize
+
+
+def _build_evaluator_aggregator_for_correction(
+    ocean_std: float, atmosphere_std: float, n_time: int
+):
+    return InferenceEvaluatorAggregatorConfig().build(
+        dataset_info=_coupled_ds_info(2, 2),
+        n_timesteps_ocean=n_time,
+        n_timesteps_atmosphere=n_time,
+        initial_time=get_zero_time(shape=[2, 0], dims=["sample", "time"]),
+        ocean_normalize=_divide_by(ocean_std),
+        atmosphere_normalize=_divide_by(atmosphere_std),
+        save_diagnostics=False,
+    )
+
+
+def test_inference_evaluator_aggregator_logs_correction_metrics_per_realm():
+    n_time = 3
+    agg = _build_evaluator_aggregator_for_correction(
+        ocean_std=4.0, atmosphere_std=2.0, n_time=n_time
+    )
+    agg.record_batch(
+        _make_correction_paired_data(
+            2, 2, n_time, ocean_delta=2.0, atmosphere_delta=3.0
+        )
+    )
+    summary = agg.get_summary_logs()
+    # each realm's delta is normalized with that realm's std
+    assert summary["time_mean_norm/correction_magnitude/ocean_var"] == pytest.approx(
+        2.0 / 4.0
+    )
+    assert summary["time_mean_norm/correction_magnitude/atmos_var"] == pytest.approx(
+        3.0 / 2.0
+    )
+
+
+def test_inference_evaluator_aggregator_silent_without_step_diagnostics():
+    n_time = 3
+    agg = _build_evaluator_aggregator_for_correction(
+        ocean_std=4.0, atmosphere_std=2.0, n_time=n_time
+    )
+    agg.record_batch(
+        _make_correction_paired_data(
+            2, 2, n_time, ocean_delta=2.0, atmosphere_delta=None
+        )
+    )
+    summary = agg.get_summary_logs()
+    assert "time_mean_norm/correction_magnitude/ocean_var" in summary
+    assert not any("correction" in key and "atmos_var" in key for key in summary)
+
+
+@pytest.mark.parametrize(
+    "ocean_normalize, atmosphere_normalize",
+    [
+        (None, None),
+        (_divide_by(1.0), None),
+        (None, _divide_by(1.0)),
+    ],
+    ids=["neither", "ocean_only", "atmosphere_only"],
+)
+def test_inference_aggregator_correction_metrics_require_normalizer(
+    tmp_path, ocean_normalize, atmosphere_normalize
+):
+    # default configuration with missing normalizers builds silently
+    InferenceAggregatorConfig().build(
+        dataset_info=_coupled_ds_info(2, 2),
+        n_timesteps_ocean=3,
+        n_timesteps_atmosphere=3,
+        output_dir=str(tmp_path),
+        ocean_normalize=ocean_normalize,
+        atmosphere_normalize=atmosphere_normalize,
+    )
+    # an explicit non-default opt-in with a missing normalizer raises
+    config = InferenceAggregatorConfig(
+        step_diagnostics=StepDiagnosticsMetricConfig(correction_maps=True)
+    )
+    with pytest.raises(ValueError, match="normalizer"):
+        config.build(
+            dataset_info=_coupled_ds_info(2, 2),
+            n_timesteps_ocean=3,
+            n_timesteps_atmosphere=3,
+            output_dir=str(tmp_path),
+            ocean_normalize=ocean_normalize,
+            atmosphere_normalize=atmosphere_normalize,
+        )
+
+
+def test_inference_aggregator_builds_correction_metrics_with_normalizers(tmp_path):
+    n_time = 3
+    agg = InferenceAggregatorConfig().build(
+        dataset_info=_coupled_ds_info(2, 2),
+        n_timesteps_ocean=n_time,
+        n_timesteps_atmosphere=n_time,
+        output_dir=str(tmp_path),
+        ocean_normalize=_divide_by(4.0),
+        atmosphere_normalize=_divide_by(2.0),
+    )
+    agg.record_batch(
+        _make_correction_paired_data(
+            2, 2, n_time, ocean_delta=2.0, atmosphere_delta=3.0
+        )
+    )
+    summary = agg.get_summary_logs()
+    assert summary["time_mean_norm/correction_magnitude/ocean_var"] == pytest.approx(
+        2.0 / 4.0
+    )
+    assert summary["time_mean_norm/correction_magnitude/atmos_var"] == pytest.approx(
+        3.0 / 2.0
+    )
+    agg.flush_diagnostics()
+    # each realm's correction diagnostics land in that realm's subdirectory
+    assert (tmp_path / "ocean" / "mean_norm_correction_diagnostics.nc").exists()
+    assert (tmp_path / "atmosphere" / "mean_norm_correction_diagnostics.nc").exists()
+
+
+def test_inference_evaluator_aggregator_inline_validation_drops_correction_series():
+    # inline validation (fme/coupled/train/train_config.py) builds with
+    # enable_time_series=False: correction scalars stay, per-step series drop
+    n_time = 3
+    agg = InferenceEvaluatorAggregatorConfig().build(
+        dataset_info=_coupled_ds_info(2, 2),
+        n_timesteps_ocean=n_time,
+        n_timesteps_atmosphere=n_time,
+        initial_time=get_zero_time(shape=[2, 0], dims=["sample", "time"]),
+        ocean_normalize=_divide_by(4.0),
+        atmosphere_normalize=_divide_by(2.0),
+        save_diagnostics=False,
+        enable_time_series=False,
+    )
+    inference_logs = agg.record_batch(
+        _make_correction_paired_data(
+            2, 2, n_time, ocean_delta=2.0, atmosphere_delta=3.0
+        )
+    )
+    summary = agg.get_summary_logs()
+    assert "time_mean_norm/correction_magnitude/ocean_var" in summary
+    assert "time_mean_norm/correction_magnitude/atmos_var" in summary
+    series_keys = {key for log in inference_logs for key in log}
+    assert not any("correction" in key for key in series_keys)
