@@ -402,10 +402,7 @@ class FCN3Step(StepABC):
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
-        # The compiled module is held as a second reference to the same
-        # wrapped module rather than replacing self.module: state dict keys,
-        # device handling and train/eval toggling all continue to go through
-        # self.module, so checkpoints are identical to an uncompiled run.
+        # not a replacement: state dict, device, train/eval still go via self.module
         self._forward_module = (
             compile_torch_module(self.module) if config.compile else self.module
         )
