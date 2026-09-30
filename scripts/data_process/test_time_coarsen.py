@@ -57,7 +57,7 @@ def write_v3_with_chunks(ds: xr.Dataset, path: str) -> None:
         )
         encoding[name] = {"chunks": chunks, "compressor": compressor, "shards": shards}
 
-    ds.to_zarr(path, mode="w", zarr_version=3, encoding=encoding)
+    ds.to_zarr(path, mode="w", zarr_format=3, encoding=encoding)
 
 
 def test_process_path_pair() -> None:
