@@ -1,0 +1,151 @@
+# Example B — transfer learning (frozen C96-SHiELD donor, ERA5↔SHiELD
+# translators). Translators operate directly on real fields (no latent
+# domain), wrapped around a fully-frozen SHiELD+ donor stepper loaded from
+# checkpoint. Cycle consistency in both directions. Both datasets at 4°, so
+# the translators are same-grid (a resolution-changing registry entry drops
+# in if the ERA5 side were 1°).
+# Intended config surface for the fme/translate PR series; only the
+# component_pool: block is implemented in PR 1. See README.md in this
+# directory for which PR lands each block. Not runnable.
+experiment_dir: train_output
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 20
+logging: {log_to_screen: true, log_to_wandb: true, log_to_file: true, project: ace}
+
+# stream `name` defaults to `domain` (omitted here). No objective consumes
+# both streams in one term, so they are sampled independently — pairing is
+# derived from objective co-occurrence, not configured.
+train_data:
+  batch_size: 16
+  num_data_workers: 4
+  streams:
+    - {domain: era5,       dataset: {data_path: gs://.../era5-4deg-daily/train}}
+    - {domain: shield_c96, dataset: {data_path: gs://.../shield-c96-4deg-daily/train}}
+
+validation_data:
+  batch_size: 16
+  streams:
+    - {domain: era5,       dataset: {data_path: gs://.../era5-4deg-daily/valid}}
+    - {domain: shield_c96, dataset: {data_path: gs://.../shield-c96-4deg-daily/valid}}
+
+component_pool:
+  domains:
+    # channel lists live on the transforms below; each domain's load list is
+    # derived from the channels the transforms reference in it. Grids come
+    # from the bound datasets (both 4°).
+    era5: {}
+    shield_c96: {}
+
+  transforms:
+    to_shield:
+      in_domain: era5
+      in_channels: &era5_channels  # full list elided; the two variable sets
+        - air_temperature_0        # differ, and the translators map between
+        - specific_total_water_0   # them — they need not match
+        - eastward_wind_0          # ...
+        - northward_wind_0         # ...
+        - PRESsfc
+        - surface_temperature
+        - DSWRFtoa
+        - ocean_fraction
+        - land_fraction
+        - sea_ice_fraction
+        - global_mean_co2
+      out_domain: shield_c96
+      out_channels: &shield_channels  # the donor's full in/out union, incl.
+        - air_temperature_0           # channels ERA5 lacks
+        - specific_total_water_0      # ...
+        - eastward_wind_0             # ...
+        - northward_wind_0            # ...
+        - PRESsfc
+        - surface_temperature
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - DSWRFtoa
+        - ocean_fraction
+        - land_fraction
+        - sea_ice_fraction
+        - global_mean_co2
+      module:
+        type: same_grid      # both domains on the same 4° grid
+        config:
+          module:
+            type: SphericalFourierNeuralOperatorNet
+            config: {embed_dim: 256, num_layers: 4, scale_factor: 1}
+    to_era5:
+      in_domain: shield_c96
+      in_channels: *shield_channels
+      out_domain: era5
+      out_channels: *era5_channels
+      module:
+        type: same_grid
+        config:
+          module:
+            type: SphericalFourierNeuralOperatorNet
+            config: {embed_dim: 256, num_layers: 4, scale_factor: 1}
+
+  backbones:
+    donor:
+      domain: shield_c96
+      checkpoint:
+        checkpoint_path: gs://.../t1-modern-pretrain/best_inference_ckpt.tar
+      init_from_checkpoint: true   # weights sourced from the checkpoint...
+      parameter_init:
+        parameters:
+          - frozen: {exclude: []}  # ...and every parameter frozen (empty
+                                   # exclude list = freeze all), applied
+                                   # before DDP wrapping
+
+objectives:
+  # end-to-end rollout scored on ERA5: a component chain with exactly one
+  # backbone — to_shield encodes once, the frozen donor rolls out, to_era5
+  # decodes every output step. Forcings (incl. SST for the donor's ocean
+  # config, CO2) are translated per step through to_shield so they arrive
+  # in-donor-domain — the same path the +4K / future-scenario perturbation
+  # harnesses exercise.
+  - name: forward_era5
+    type: forward_prediction
+    config:
+      components: [to_shield, donor, to_era5]
+      input_stream: era5
+      target_stream: era5
+      forcing_stream: era5
+      n_forward_steps:
+        start_value: 1
+        milestones:
+          - epoch: 4
+            value: {outcomes: [{steps: 1, probability: 0.5}, {steps: 4, probability: 0.5}]}
+      n_ensemble: 2   # donor is the v2 noise-conditioned SFNO
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 1.0
+
+  # cycle consistency: translating to the other domain and back is identity
+  - name: cycle_era5
+    type: translation
+    config:
+      components: [to_shield, to_era5]
+      input_stream: era5
+      target_stream: era5
+      loss: {type: MSE}
+      weight: 0.2
+  - name: cycle_shield
+    type: translation
+    config:
+      components: [to_era5, to_shield]
+      input_stream: shield_c96
+      target_stream: shield_c96
+      loss: {type: MSE}
+      weight: 0.2
+
+optimization:
+  optimizer_type: AdamW
+  lr: 1.0e-4
+  enable_automatic_mixed_precision: false
+
+inference:
+  - composite: [to_shield, donor, to_era5]
+    n_forward_steps: 1460
+    forward_steps_in_memory: 50
+    loader: {dataset: {data_path: gs://.../era5-4deg-daily/valid}, start_indices: {first: 0, n_initial_conditions: 4, interval: 365}}
