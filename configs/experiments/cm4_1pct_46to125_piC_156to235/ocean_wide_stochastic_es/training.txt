@@ -43,6 +43,24 @@
 
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+
+# rs0/rs1 above LAUNCHED 2026-09-21 (silm932h, 7wx3n420); flipped to training
+# 2026-09-30 so the runner does not relaunch them.
+
+# --- mean-fill complete-mask input treatment (fmma), added 2026-09-30 ---
+# ONE-VARIABLE fork of the rs0 row above on stepper.input_masking: fill_value
+# 0.0 -> mean, and exclude_names_and_prefixes [land_fraction,
+# sea_surface_fraction, + the ten atmosphere forcings] -> [land_fraction,
+# sea_surface_fraction], so the forcings are masked too. That is the input
+# treatment of ocean_precorr_clip_fillmean_maskall (1rw0cfkn), which
+# ai2cm/reports#130 found has the lowest out-of-sample SST and sea-ice error
+# of 49 1deg standalone conditions (below the CO2 range 0.37x / 0.27x
+# production) -- where this stochastic lineage is 2.86x / 0.79x after its
+# long-tail finetune. sea_surface_fraction stays UNMASKED, as it must: every
+# mean-fill arm that mean-filled it collapsed in surface salinity.
+# Question: does the input treatment carry the out-of-sample surface result
+# over to the stochastic model? One seed (rs0, paired with silm932h).
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'|3h
