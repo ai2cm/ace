@@ -42,6 +42,9 @@ class MockStep(StepABC):
     def normalizer(self):
         raise NotImplementedError()
 
+    def network_normalizer(self, labels):
+        raise NotImplementedError()
+
     @property
     def surface_temperature_name(self):
         return None
@@ -160,6 +163,9 @@ class DeprecatingMockStep(StepABC):
 
     @property
     def normalizer(self):
+        raise NotImplementedError()
+
+    def network_normalizer(self, labels):
         raise NotImplementedError()
 
     @property
