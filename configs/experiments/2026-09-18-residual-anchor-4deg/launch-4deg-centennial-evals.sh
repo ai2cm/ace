@@ -4,6 +4,10 @@
 # from 0151-01-06 and 130-yr 1pctCO2 from 0001-01-06, from each arm's
 # best_inference_ckpt. Ocean-only, atmosphere prescribed; 1 GPU per job.
 #   ARMS="ff-ohc resid-ohc" SCENARIOS="piC 1pct" ./launch-4deg-centennial-evals.sh
+# Corrector-off centennial with step diagnostics (splits drift into network heating vs corrector deposition):
+#   ARMS=ff-ohc-precorr SCENARIOS=piC CFG_PIC=evaluator-config-piC-ic0151-200yr-4deg-corrdiag.yaml \
+#     TAG_PIC=piC-ic0151-200yr-corrdiag-noohc \
+#     EXTRA_OVERRIDE="stepper_override.disable_corrections=[ocean_heat_content_correction]" ./launch-4deg-centennial-evals.sh
 set -euo pipefail
 ARMS="${ARMS:-ff-ohc resid-ohc resid-noohc resid-uniformohc resid-uniform-shapeslow resid-uniform-shapefast resid-anomohc split-noohc split-ohc}"
 SCENARIOS="${SCENARIOS:-piC 1pct}"
@@ -43,7 +47,7 @@ for A in $ARMS; do
       ${EXTRA_DATASET:+--dataset "$EXTRA_DATASET"} \
       --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
       --allow-dirty --system-python --install "pip install --no-deps ." \
-      -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/eval/${CFG}" 2>&1)
+      -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/eval/${CFG}" ${EXTRA_OVERRIDE:+--override "$EXTRA_OVERRIDE"} 2>&1)
     echo "$out" | grep -qm1 "beaker.org/ex/" && ok=$((ok+1)) || echo "FAILED $JOB: $(echo "$out" | tail -2)"
   done
 done
