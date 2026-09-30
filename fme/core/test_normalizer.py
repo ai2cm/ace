@@ -1,10 +1,13 @@
 import dataclasses
 import pathlib
+import sys
 import tempfile
 
 import dacite
+import fsspec
 import pytest
 import torch
+import xarray as xr
 
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.device import move_tensordict_to_device
@@ -14,6 +17,7 @@ from fme.core.normalizer import (
     NormalizeFn,
     StandardNormalizer,
     _combine_normalizers,
+    load_dict_from_netcdf,
 )
 
 
@@ -397,3 +401,25 @@ def test_can_create_config_without_files():
         global_means_path="/not/a/real/path",
         global_stds_path="/not/a/real/path",
     )
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_load_dict_from_netcdf_without_h5netcdf(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, remote: bool
+):
+    monkeypatch.setitem(sys.modules, "h5netcdf", None)  # simulate not installed
+    ds = xr.Dataset({"a": ((), 1.5), "b": ((), 2.5)})
+    local_path = tmp_path / "stats.nc"
+    ds.to_netcdf(local_path)
+    if remote:
+        path = "memory://load-dict-test/stats.nc"
+        fs, _ = fsspec.url_to_fs(path)
+        fs.put(str(local_path), path)
+    else:
+        path = str(local_path)
+    try:
+        result = load_dict_from_netcdf(path, names=["a", "c"], defaults={"c": 3.0})
+    finally:
+        if remote:
+            fs.rm(path)
+    assert result == {"a": 1.5, "c": 3.0}
