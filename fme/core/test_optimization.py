@@ -878,3 +878,26 @@ def test_optimization_config_passes_max_grad_norm():
         nn.ModuleList([model]), max_epochs=1
     )
     assert opt._max_grad_norm == 1.5
+
+
+def test_last_grad_norm_is_exposed_and_none_without_clipping():
+    """The pre-clip norm clip_grad_norm_ already returns is readable as a metric.
+
+    It is logged as `grad_norm`, which is the only view onto how often
+    max_grad_norm binds; without clipping configured there is no norm to report.
+    """
+    module = torch.nn.Linear(3, 3)
+    with_clip = OptimizationConfig(lr=1e-3, max_grad_norm=1.0).build(
+        modules=torch.nn.ModuleList([module]), max_epochs=1
+    )
+    without_clip = OptimizationConfig(lr=1e-3).build(
+        modules=torch.nn.ModuleList([module]), max_epochs=1
+    )
+    for optimization, expect_norm in ((with_clip, True), (without_clip, False)):
+        optimization.accumulate_loss(module(torch.ones(2, 3)).sum())
+        optimization.step_weights()
+        if expect_norm:
+            assert optimization.last_grad_norm is not None
+            assert optimization.last_grad_norm > 0.0
+        else:
+            assert optimization.last_grad_norm is None
