@@ -39,6 +39,7 @@ def _build_net(
     mlp_layer: str = "mlp",
     lat_coords: torch.Tensor | None = None,
     padding_conf: dict | None = None,
+    patch_size: tuple[int, int] = (1, 1),
 ) -> SwinTransformerNet:
     """A small Swin U-Net for tests. ``conditioning="cln"`` without an explicit
     ``context_config`` builds the noise-conditioned variant with
@@ -62,6 +63,7 @@ def _build_net(
         mlp_layer=mlp_layer,
         lat_coords=lat_coords,
         padding_conf=padding_conf,
+        patch_size=patch_size,
     )
 
 
@@ -170,6 +172,70 @@ def test_skip_projection_absent_by_default_and_without_skip(
     assert net.skip_proj is None
     assert not any("skip_proj" in k for k in net.state_dict())
     assert net.layer4.blocks[0].dim == decoder_dim
+
+
+_EARTH_PADDING_CONF = {
+    "activate": True,
+    "mode": "earth",
+    "pad_lat": [2, 1],
+    "pad_lon": [2, 2],
+}
+
+
+@pytest.mark.parametrize(
+    "conditioning, img_shape, options",
+    [
+        ("adaln", (16, 32), dict(patch_size=(2, 2))),
+        ("adaln", (16, 32), dict(patch_size=(2, 4))),
+        ("adaln", (9, 18), dict(patch_size=(2, 2), padding_conf=_EARTH_PADDING_CONF)),
+        ("cln", (9, 18), dict(patch_size=(2, 2), padding_conf=_EARTH_PADDING_CONF)),
+    ],
+)
+def test_token_grid_options_forward_backward(
+    conditioning: Literal["adaln", "cln"], img_shape: tuple[int, int], options: dict
+):
+    """A coarser token grid, with or without padding up to the token/window
+    multiple, still returns the original pixel resolution, and every
+    parameter receives a gradient."""
+    n, in_chans, out_chans = 2, 4, 2
+    device = get_device()
+    net = _build_net(
+        in_chans, out_chans, img_shape, conditioning=conditioning, **options
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = _cln_context(n, img_shape) if conditioning == "cln" else None
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_patch_size_sets_token_grid():
+    """The U-Net stages run on the padded pixel grid divided by patch_size."""
+    net = _build_net(4, 2, (16, 32), patch_size=(2, 2))
+    assert net.padded_shape == (16, 32)
+    assert net.token_shape == (8, 16)
+    assert net.layer1.blocks[0].input_resolution == (8, 16)
+    assert net.layer2.blocks[0].input_resolution == (4, 8)
+
+
+def test_default_options_keep_parameter_shapes():
+    """The defaults reproduce the previous network's parameter names and
+    shapes, so existing checkpoints keep loading."""
+    state = _build_net(5, 3, (16, 32)).state_dict()
+    assert state["encoder.weight"].shape == (32, 5, 3, 3)
+    assert state["final_linear.weight"].shape == (32, 64)
+    assert not any("skip_proj" in k for k in state)
+
+
+@pytest.mark.parametrize(
+    "options, match",
+    [(dict(patch_size=(0, 2)), "patch_size")],
+)
+def test_option_validation(options: dict, match: str):
+    with pytest.raises(ValueError, match=match):
+        _build_net(4, 2, (16, 32), **options)
 
 
 def test_column_mixer():
