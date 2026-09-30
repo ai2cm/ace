@@ -71,6 +71,15 @@ class StepConfigABC(abc.ABC):
         return frozenset(set(self.input_names).intersection(self.output_names))
 
     @property
+    def residual_names(self) -> frozenset[str]:
+        """
+        Names whose loss errors are scored in residual (tendency) units when a
+        residual loss normalization is configured. Every prognostic, unless a
+        step type narrows the set.
+        """
+        return self.prognostic_names
+
+    @property
     @abc.abstractmethod
     def loss_names(self) -> list[str]:
         """
@@ -132,9 +141,20 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
-    @abc.abstractmethod
+    @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
-        pass
+        state = cls.remove_deprecated_keys(state)
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
+    @classmethod
+    @abc.abstractmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove or transform deprecated keys from a serialized config.
+
+        Called by ``from_state`` before the dict is loaded via dacite.
+        Implementations must return a new dict and never mutate the input.
+        When there is nothing to remove, implement as ``return dict(state)``.
+        """
 
 
 @dataclasses.dataclass
@@ -184,6 +204,10 @@ class StepSelector(StepConfigABC):
     @property
     def input_names(self) -> frozenset[str]:
         return self._step_config_instance.input_names
+
+    @property
+    def residual_names(self) -> frozenset[str]:
+        return self._step_config_instance.residual_names
 
     @property
     def output_names(self) -> frozenset[str]:
@@ -239,8 +263,8 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
     @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 class StepABC(abc.ABC):

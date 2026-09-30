@@ -7,10 +7,16 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.data import InferenceBatchData
+from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.distributed import Distributed, distributed
 from fme.core.gridded_ops import LatLonOperations
 
-from .enso_coefficient import OVERLAP_THRESHOLD, EnsoCoefficientEvaluatorAggregator
+from .enso_coefficient import (
+    OVERLAP_THRESHOLD,
+    EnsoCoefficientEvaluatorAggregator,
+    reduce_sample_coefficients,
+)
 
 
 @contextmanager
@@ -236,3 +242,143 @@ def test_enso_agg_calendar(calendar):
     enso_agg.record_batch(batch)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
     assert (target_coefficients is not None) and (gen_coefficients is not None)
+
+
+@contextmanager
+def _mock_distributed_singleton(backend):
+    """Install a fake backend as the distributed singleton."""
+    original_singleton = distributed.singleton
+    original_entered = Distributed._entered
+    distributed.singleton = backend
+    Distributed._entered = True  # the fake stands in for an entered context
+    try:
+        yield backend
+    finally:
+        distributed.singleton = original_singleton
+        Distributed._entered = original_entered
+
+
+class _FakeDistributed:
+    """Stands in for the distributed singleton of a two-process job.
+
+    Records the collectives this process takes part in, and optionally adds a
+    second process's contribution to each of them, supplied in call order.
+    """
+
+    world_size = 2
+
+    def __init__(self, contributions: list[torch.Tensor] | None = None):
+        self.calls: list[tuple[str, tuple[int, ...]]] = []
+        self._contributions = None if contributions is None else list(contributions)
+
+    def is_distributed(self) -> bool:
+        return True
+
+    def is_root(self) -> bool:
+        return True
+
+    def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        self.calls.append(("reduce_sum", tuple(tensor.shape)))
+        if self._contributions is None:
+            return tensor
+        return tensor + self._contributions.pop(0)
+
+    def weighted_mean(self, data, weights, dim, keepdim=False) -> torch.Tensor:
+        # not a collective; used by the area-weighted RMSE in get_logs
+        return metrics.weighted_mean(data, weights, dim=dim, keepdim=keepdim)
+
+
+def _record_collectives(shift: float) -> tuple[list[tuple[str, tuple[int, ...]]], dict]:
+    """Run an aggregator whose samples are shifted by `shift` index durations,
+    and report the collectives it took part in along with its logs.
+    """
+    n_samples, n_times, n_lat, n_lon = 2, 28, 3, 3
+    data_scale = 3
+    area_weights = torch.ones([n_lat, n_lon], device=get_device())
+    enso_index, sample_time, target_data, gen_data = _get_data(
+        data_scale, n_samples, n_times, n_lat, n_lon
+    )
+    index_duration = enso_index.time[-1].item() - enso_index.time[0].item()
+    sample_time = sample_time + datetime.timedelta(
+        seconds=shift * index_duration.total_seconds()
+    )
+    with change_aggregator_enso_index(EnsoCoefficientEvaluatorAggregator, enso_index):
+        enso_agg = EnsoCoefficientEvaluatorAggregator(
+            initial_time=sample_time.isel(time=0),
+            n_forward_timesteps=(n_times - 1),
+            timestep=datetime.timedelta(hours=6),
+            gridded_operations=LatLonOperations(area_weights),
+        )
+    enso_agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm={},
+            target=target_data,
+            target_norm=None,
+            time=sample_time,
+            i_time_start=0,
+        )
+    )
+    with _mock_distributed_singleton(_FakeDistributed()) as recorder:
+        logs = enso_agg.get_logs("enso_coefficients")
+    return recorder.calls, logs
+
+
+def test_collectives_do_not_depend_on_index_overlap():
+    """A process whose samples do not overlap the reference index must still
+    take part in the same collectives, in the same order, as one whose samples
+    do. Otherwise the processes with data block in the reduction waiting for
+    processes that never enter it, and the job dies at the collective timeout.
+    """
+    overlapping_calls, overlapping_logs = _record_collectives(shift=0.0)
+    # shifted a full index duration and a half past the reference index
+    inert_calls, inert_logs = _record_collectives(shift=1.5)
+    assert len(overlapping_calls) > 0
+    assert inert_calls == overlapping_calls
+    assert len(overlapping_logs) > 0
+    assert inert_logs == {}
+
+
+def test_reduce_sample_coefficients_weights_by_sample_count():
+    """Coefficients are averaged over contributing samples across all
+    processes, so that a process with more of them carries more weight and
+    samples without index overlap do not dilute the mean toward zero.
+    """
+    spatial_shapes = {"a": torch.Size([2, 2]), "b": torch.Size([2, 2])}
+    ones = torch.ones([2, 2], device=get_device())
+    # this process: two samples overlapping the index, and one that does not
+    sample_coefficients = [
+        {"a": ones, "b": -ones},
+        {"a": 3.0 * ones, "b": -3.0 * ones},
+        {},
+    ]
+    # the other process: a single overlapping sample, coefficients 8.0 and -8.0
+    contributions = [
+        torch.stack([8.0 * ones, -8.0 * ones], dim=0),
+        torch.tensor([1.0, 1.0], device=get_device()),
+    ]
+    with _mock_distributed_singleton(_FakeDistributed(contributions)):
+        reduced = reduce_sample_coefficients(
+            Distributed.get_instance(), sample_coefficients, spatial_shapes
+        )
+    assert reduced is not None
+    # (1.0 + 3.0 + 8.0) / 3 samples, not the (2.0 + 8.0) / 2 process-mean
+    assert torch.allclose(reduced["a"], torch.full([2, 2], 4.0, device=get_device()))
+    # each variable is averaged independently, not pooled with the others
+    assert torch.allclose(reduced["b"], torch.full([2, 2], -4.0, device=get_device()))
+
+
+def test_reduce_sample_coefficients_none_when_no_process_has_samples():
+    """When no sample on any process overlaps the reference index, every
+    process reports no coefficients rather than a mean of zeros.
+    """
+    spatial_shapes = {"a": torch.Size([2, 2]), "b": torch.Size([2, 2])}
+    contributions = [
+        torch.zeros([2, 2, 2], device=get_device()),
+        torch.tensor([0.0, 0.0], device=get_device()),
+    ]
+    with _mock_distributed_singleton(_FakeDistributed(contributions)):
+        reduced = reduce_sample_coefficients(
+            Distributed.get_instance(), [{}, {}], spatial_shapes
+        )
+    assert reduced is None

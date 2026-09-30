@@ -53,12 +53,8 @@ class Samudra(torch.nn.Module):
         is supported so far; scalar, label, and positional embeddings are not.
     conditioned_blocks : {"bottleneck", "all_blocks"}, optional
         Which ConvNeXt blocks are conditioned. ``"bottleneck"`` conditions only
-        the block at the coarsest resolution, DLESyM-Ocean's choice; note that
-        after the encoder's AvgPools that grid is 1/16 of the input, so on a
-        45x90 domain it is 2x5 cells and can only perturb the largest scales.
-        ``"all_blocks"`` conditions every block, the pattern the ACE SFNO uses,
-        which also reaches the finest scales. Required when ``context_config``
-        is given.
+        the block at the coarsest resolution. ``"all_blocks"`` conditions every block.
+        Required when ``context_config`` is given.
 
     Example:
     --------
@@ -136,10 +132,8 @@ class Samudra(torch.nn.Module):
             raise ValueError("conditioned_blocks requires context_config to be set")
         self.conditioned_blocks = conditioned_blocks
 
-        # Blocks are built in this order: the num_steps encoder blocks, the
-        # bottleneck block, then the num_steps decoder blocks. `block_context`
-        # is called once per block, in that order, and hands back the context
-        # for the blocks this injection variant conditions.
+        # Called once per block in construction order: num_steps encoder
+        # blocks, the bottleneck, then num_steps decoder blocks.
         num_steps = len(self.ch_width)
         n_built = 0
 
@@ -224,8 +218,6 @@ class Samudra(torch.nn.Module):
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
 
         if n_built != 2 * num_steps + 1:
-            # a bare assert would vanish under `python -O`, and miscounting
-            # silently moves which block "bottleneck" conditions
             raise AssertionError(
                 f"built {n_built} ConvNeXt blocks, expected {2 * num_steps + 1}"
             )

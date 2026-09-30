@@ -29,9 +29,8 @@ inference:
         - data_path: /climate-default
           file_pattern: 2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3/data.zarr
           engine: zarr
-      num_data_workers: 8
-    aggregator:
-      log_histograms: false
+      num_data_workers: 4
+    aggregator: {}
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -40,7 +39,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 8
+  num_data_workers: 4
   dataset:
     merge:
     - data_path: /climate-default
@@ -61,7 +60,7 @@ train_loader:
 validation:
   loader:
     batch_size: 16
-    num_data_workers: 8
+    num_data_workers: 4
     dataset:
       merge:
       - data_path: /climate-default

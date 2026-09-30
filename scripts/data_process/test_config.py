@@ -13,39 +13,53 @@ from upload_stats import Config as UploadStatsConfig
 from upload_stats import _upload_specs
 
 DIRNAME = os.path.abspath(os.path.dirname(__file__))
-# list files in DIRNAME/config
-APPEND_CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith(".yaml") and "append" in f
-]
-COUPLED_CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith("-coupled.yaml")
-]
-IGNORE_CONFIGS_WITH_SUFFIX = [
-    "-append.yaml",
-    "-coupled.yaml",
-    "-vertical-coarsen.yaml",
-    "-coupled-ic.yaml",
-]
-COUPLED_IC_CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith("-coupled-ic.yaml")
-]
+CONFIGS_DIR = os.path.join(DIRNAME, "configs")
+
+# Configs whose schema has no test here; any other unclassified config fails
+# test_every_config_is_classified.
+UNTESTED_CONFIG_SUFFIXES = ("-vertical-coarsen.yaml",)
 
 
-def _ignore_config(fname: str) -> bool:
-    return any([fname.endswith(suffix) for suffix in IGNORE_CONFIGS_WITH_SUFFIX])
+def _config_kind(path: str) -> str:
+    """Classify a config by its top-level keys, not its filename."""
+    with open(path) as f:
+        keys = set(yaml.load(f, Loader=yaml.CLoader))
+    if "coupled_datasets" in keys:
+        return "coupled"
+    if "coupled_config_path" in keys:
+        return "coupled-ic"
+    if "variable_sources" in keys:
+        return "append"
+    if "runs" in keys:
+        return "stats"
+    return "other"
 
 
-CONFIG_YAMLS = [
-    os.path.join(DIRNAME + "/configs", f)
-    for f in os.listdir(DIRNAME + "/configs")
-    if f.endswith(".yaml") and not _ignore_config(f)
+ALL_CONFIG_YAMLS = [
+    os.path.join(CONFIGS_DIR, f)
+    for f in sorted(os.listdir(CONFIGS_DIR))
+    if f.endswith(".yaml")
 ]
+CONFIG_KINDS = {path: _config_kind(path) for path in ALL_CONFIG_YAMLS}
+
+
+def _configs_of_kind(kind: str) -> list[str]:
+    return [path for path, k in CONFIG_KINDS.items() if k == kind]
+
+
+CONFIG_YAMLS = _configs_of_kind("stats")
+APPEND_CONFIG_YAMLS = _configs_of_kind("append")
+COUPLED_CONFIG_YAMLS = _configs_of_kind("coupled")
+COUPLED_IC_CONFIG_YAMLS = _configs_of_kind("coupled-ic")
+
+
+def test_every_config_is_classified():
+    unclassified = [
+        os.path.basename(path)
+        for path in _configs_of_kind("other")
+        if not path.endswith(UNTESTED_CONFIG_SUFFIXES)
+    ]
+    assert unclassified == []
 
 
 @pytest.mark.parametrize(

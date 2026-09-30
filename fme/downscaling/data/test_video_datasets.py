@@ -1,6 +1,8 @@
+import dataclasses
 import datetime
 
 import cftime
+import numpy as np
 import pytest
 import torch
 import xarray as xr
@@ -133,6 +135,17 @@ def test_build_video_shapes_and_time_features(tmp_path):
     assert torch.equal(batch.fine.day_of_year, batch.coarse.day_of_year)
     # daily timesteps in the fixture -> every frame at midnight UTC
     assert torch.all(batch.fine.second_of_day == 0)
+    assert data.timestep == datetime.timedelta(days=1)
+
+    # fine_extent_latlon_coords is the post-crop domain actually fed to the
+    # model, narrower than fine_coords (the pre-crop full domain).
+    assert len(data.fine_extent_latlon_coords.lat) < len(data.fine_coords.lat)
+    torch.testing.assert_close(
+        data.fine_extent_latlon_coords.lat, batch.fine.latlon_coordinates.lat[0].cpu()
+    )
+    torch.testing.assert_close(
+        data.fine_extent_latlon_coords.lon, batch.fine.latlon_coordinates.lon[0].cpu()
+    )
 
 
 def test_build_video_default_is_per_day_non_overlapping(tmp_path):
@@ -151,3 +164,41 @@ def test_build_video_default_is_per_day_non_overlapping(tmp_path):
         train=False, requirements=requirements
     )
     assert len(sliding_data.loader) == 10
+
+
+def test_build_video_frame_times_and_clip_start_indices(tmp_path):
+    paths = data_paths_helper(tmp_path, num_timesteps=18)
+    requirements = _requirements()
+
+    # Tumbling (default stride 8): clips start at 0, 8, sharing their
+    # boundary frame -> frame_times covers indices 0..16 (17 distinct
+    # frames); the 18th raw timestep is never a clip frame, so it's excluded.
+    tumbling = _video_config(paths).build_video(train=False, requirements=requirements)
+    assert len(tumbling.frame_times) == 17
+    np.testing.assert_array_equal(tumbling.clip_start_indices, [0, 8])
+    expected = [tumbling.clip_start_times[0] + i * tumbling.timestep for i in range(17)]
+    assert list(tumbling.frame_times) == expected
+
+    # Full sliding window (stride 1): 10 overlapping clips starting 0..9,
+    # together covering every one of the 18 raw timesteps.
+    sliding = _video_config(paths, time_stride=1).build_video(
+        train=False, requirements=requirements
+    )
+    assert len(sliding.frame_times) == 18
+    np.testing.assert_array_equal(sliding.clip_start_indices, list(range(10)))
+
+
+def test_build_video_drop_last_override(tmp_path):
+    # 27 timesteps, clip length 9, default stride 8 -> 3 clip starts (0, 8, 16).
+    # batch_size 2 -> one full batch + one trailing partial batch of size 1.
+    paths = data_paths_helper(tmp_path, num_timesteps=27)
+    requirements = _requirements()
+    config = dataclasses.replace(_video_config(paths), batch_size=2)
+
+    default_data = config.build_video(train=False, requirements=requirements)
+    assert sum(len(b) for b in default_data.loader) == 2  # trailing batch dropped
+
+    kept_data = config.build_video(
+        train=False, requirements=requirements, drop_last=False
+    )
+    assert sum(len(b) for b in kept_data.loader) == 3  # nothing dropped
