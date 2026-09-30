@@ -189,7 +189,7 @@ stepper_training:
   # a first guess, sweep it via override_args.
   optimized_derived_variables:
     - name: layer_ohc
-      weight: 1.0
+      weight: 0.1
       bands: [[0, 130], [130, 450], [450, 1200], [1200, 2700], [2700, null]]
 stepper:
   input_masking:
