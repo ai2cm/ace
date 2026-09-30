@@ -18,8 +18,6 @@ class CappedGELU(torch.nn.Module):
 
     def forward(self, inputs: torch.Tensor):
         x = self.gelu(inputs)
-        # Clamp against the 0-d buffer directly; calling .item() here would
-        # force a graph break under torch.compile. torch.clamp casts the
-        # tensor bound to the input dtype, so this is numerically identical.
+        # clamp against the 0-d buffer directly; .item() would graph-break torch.compile
         x = torch.clamp(x, max=self.cap)
         return x

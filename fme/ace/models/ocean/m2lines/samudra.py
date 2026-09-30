@@ -252,16 +252,11 @@ class Samudra(torch.nn.Module):
                     temp.append(fts)
                     count += 1
             elif count >= self.num_steps:
-                # a tuple rather than ``A | B``: dynamo cannot evaluate a
-                # class union inside isinstance and skips the whole frame
+                # tuple rather than ``A | B``: dynamo cannot trace a class union here
                 if isinstance(  # noqa: UP038
                     layer, (BilinearUpsample, ZonallyPeriodicBilinearUpsample)
                 ):
-                    # plain int arithmetic rather than numpy: dynamo traces
-                    # a numpy array of the shape as a tensor, and reading the
-                    # pad widths back out of it is a data-dependent value,
-                    # which breaks the graph. Python's // is floor division,
-                    # as numpy's is, so the padding is unchanged.
+                    # int arithmetic rather than numpy so dynamo does not graph-break
                     skip = temp[int(2 * self.num_steps - count - 1)]
                     pad_h = skip.shape[2] - fts.shape[2]
                     pad_w = skip.shape[3] - fts.shape[3]
