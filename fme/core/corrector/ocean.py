@@ -131,6 +131,17 @@ class OceanHeatContentBudgetConfig:
             permitted in a single step by "anomaly_scaled_temperature". Bounds
             the correction when the column anomaly is near zero, which would
             otherwise make the solved factor blow up.
+        max_scaled_contraction: Only for "scaled_temperature". If set, the
+            global ratio is clamped to ``1 +/- max_scaled_contraction`` and the
+            heat the clamp leaves unclosed is added as a uniform temperature
+            increment (deposited in proportion to ``dz_k``), so the budget still
+            closes exactly. This separates the two jobs the unclamped ratio does
+            at once: the multiplicative contraction that anchors a
+            residual-prediction stepper, whose strength becomes this chosen
+            constant rather than whatever bias the network learns, and the
+            placement of the budget residual, which moves from the warm upper
+            ocean (``T_k * dz_k``) to the whole column (``dz_k``). Default None
+            keeps the unclamped ratio.
         shape_restoring_rate: Fraction of the global-mean vertical *shape*
             anomaly removed per step, restoring toward
             ``reference_temperature``. Composes with any method and defaults to
@@ -166,8 +177,20 @@ class OceanHeatContentBudgetConfig:
     reference_temperature: list[float] | None = None
     max_anomaly_contraction: float = 0.1
     shape_restoring_rate: float = 0.0
+    max_scaled_contraction: float | None = None
 
     def __post_init__(self):
+        if self.max_scaled_contraction is not None:
+            if self.method != "scaled_temperature":
+                raise ValueError(
+                    "max_scaled_contraction is only meaningful for method "
+                    f"'scaled_temperature', not {self.method!r}."
+                )
+            if not 0.0 < self.max_scaled_contraction <= 1.0:
+                raise ValueError(
+                    "max_scaled_contraction must be in (0, 1], got "
+                    f"{self.max_scaled_contraction}."
+                )
         if self.shape_restoring_rate < 0.0 or self.shape_restoring_rate > 1.0:
             raise ValueError(
                 "shape_restoring_rate must be in [0, 1], got "
@@ -331,6 +354,7 @@ class OceanHeatContentCorrection:
     reference_temperature: list[float] | None = None
     max_anomaly_contraction: float = 0.1
     shape_restoring_rate: float = 0.0
+    max_scaled_contraction: float | None = None
 
     def __call__(
         self,
@@ -362,6 +386,7 @@ class OceanHeatContentCorrection:
             self.reference_temperature,
             self.max_anomaly_contraction,
             self.shape_restoring_rate,
+            self.max_scaled_contraction,
         )
         return corrected, corrector_state
 
@@ -488,6 +513,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.reference_temperature,
                     self.ocean_heat_content_correction.max_anomaly_contraction,
                     self.ocean_heat_content_correction.shape_restoring_rate,
+                    self.ocean_heat_content_correction.max_scaled_contraction,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -628,6 +654,7 @@ def _force_conserve_ocean_heat_content(
     reference_temperature: list[float] | None = None,
     max_anomaly_contraction: float = 0.1,
     shape_restoring_rate: float = 0.0,
+    max_scaled_contraction: float | None = None,
 ) -> TensorDict:
     if method not in (
         "scaled_temperature",
@@ -764,6 +791,7 @@ def _force_conserve_ocean_heat_content(
         )
         out.update(restored)
 
+    contracted_ocean_heat_content: torch.Tensor | None = None
     if method == "scaled_temperature":
         # Multiplying about 0 degrees Celsius contracts every vertical mode,
         # which is what anchors a residual stepper, at the cost of depositing
@@ -771,6 +799,15 @@ def _force_conserve_ocean_heat_content(
         heat_content_correction_ratio = (
             target_ocean_heat_content / global_gen_ocean_heat_content
         )
+        if max_scaled_contraction is not None:
+            # Capped: the contraction is a chosen constant at most, and the
+            # heat it leaves unclosed is placed by the uniform increment below.
+            heat_content_correction_ratio = heat_content_correction_ratio.clamp(
+                1.0 - max_scaled_contraction, 1.0 + max_scaled_contraction
+            )
+            contracted_ocean_heat_content = (
+                heat_content_correction_ratio * global_gen_ocean_heat_content
+            )
         for k in range(n_levels):
             name = f"thetao_{k}"
             out[name] = gen.data[name] * heat_content_correction_ratio
@@ -778,7 +815,8 @@ def _force_conserve_ocean_heat_content(
             out["sst"] = (  # assuming sst in Kelvin
                 gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
             ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
-        return out
+        if max_scaled_contraction is None:
+            return out
 
     # Both remaining methods need the column heat capacity, which must be a
     # depth_integral over the same columns as the heat content itself or the
@@ -807,6 +845,11 @@ def _force_conserve_ocean_heat_content(
     if method == "uniform_temperature":
         temperature_increment = (
             target_ocean_heat_content - global_gen_ocean_heat_content
+        ) / heat_capacity_per_area
+    elif method == "scaled_temperature":  # capped: close what the clamp left
+        assert contracted_ocean_heat_content is not None
+        temperature_increment = (
+            target_ocean_heat_content - contracted_ocean_heat_content
         ) / heat_capacity_per_area
     else:  # anomaly_scaled_temperature
         if reference_temperature is None:
@@ -875,8 +918,9 @@ def _force_conserve_ocean_heat_content(
         ) / heat_capacity_per_area
 
     # "uniform_temperature" leaves ``out`` empty above and applies the whole
-    # correction here; "anomaly_scaled_temperature" has already written the
-    # contracted field and this adds the increment on top of it.
+    # correction here; "anomaly_scaled_temperature" and the capped
+    # "scaled_temperature" have already written the contracted field and this
+    # adds the increment on top of it.
     contracted: TensorDict = dict(out) if out else dict(gen.data)
     for k in range(n_levels):
         name = f"thetao_{k}"

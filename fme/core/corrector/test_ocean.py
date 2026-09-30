@@ -725,6 +725,55 @@ def test_ocean_heat_content_methods_all_conserve(method, kwargs):
     torch.testing.assert_close(out_ohc, input_ohc, rtol=1e-5, atol=0.0)
 
 
+def test_capped_scaled_conserves_and_clamps_the_ratio():
+    """With max_scaled_contraction the multiplicative part is at most the cap
+    and the uniform remainder closes the budget exactly."""
+    gen = [
+        16.0,
+        10.0,
+        2.0,
+        0.5,
+    ]  # holds excess heat: the exact ratio is well below 1 - cap
+    cap = 0.002
+    corrected, input_ohc, out_ohc = _run_method(
+        "scaled_temperature", gen, max_scaled_contraction=cap
+    )
+    torch.testing.assert_close(out_ohc, input_ohc, rtol=1e-5, atol=0.0)
+    # corrected_k = r * gen_k + dT with one r and one dT: recover r from two levels
+    c0 = corrected["thetao_0"][0, 1, 1].item()
+    c1 = corrected["thetao_1"][0, 1, 1].item()
+    r = (c0 - c1) / (gen[0] - gen[1])
+    assert abs(r - (1.0 - cap)) < 1e-5, r
+    d_t = c0 - r * gen[0]
+    assert d_t < 0.0  # the excess the clamp could not remove is taken out uniformly
+    # sst follows the same ratio and increment
+    sst_c = corrected["sst"][0, 1, 1].item() - 273.15
+    assert abs(sst_c - (r * gen[0] + d_t)) < 1e-4
+
+
+def test_capped_scaled_is_inert_when_the_exact_ratio_is_within_the_cap():
+    gen = [14.001, 8.0, 3.0, 1.0]  # tiny excess: exact ratio inside 1 +/- cap
+    plain, _, _ = _run_method("scaled_temperature", gen)
+    capped, _, out_ohc = _run_method(
+        "scaled_temperature", gen, max_scaled_contraction=0.1
+    )
+    for k in range(4):
+        torch.testing.assert_close(
+            capped[f"thetao_{k}"], plain[f"thetao_{k}"], rtol=1e-6, atol=1e-6
+        )
+
+
+def test_max_scaled_contraction_config_validation():
+    with pytest.raises(ValueError, match="only meaningful"):
+        OceanHeatContentBudgetConfig(
+            method="uniform_temperature", max_scaled_contraction=0.01
+        )
+    with pytest.raises(ValueError, match="must be in"):
+        OceanHeatContentBudgetConfig(
+            method="scaled_temperature", max_scaled_contraction=0.0
+        )
+
+
 def test_uniform_leaves_vertical_dipole_free_and_anomaly_scaled_damps_it():
     """The mechanism behind the residual-stepper failure.
 
