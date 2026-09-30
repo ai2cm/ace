@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any, ClassVar, Self, TypeVar, final
 
 import dacite
@@ -10,6 +10,7 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
@@ -129,8 +130,8 @@ class StepConfigABC(abc.ABC):
         """
 
     @abc.abstractmethod
-    def disable_corrections(self, names: Sequence[str]) -> None:
-        """Disable the named corrections on this step's corrector, in place."""
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """Replace this step's corrector configuration wholesale, in place."""
 
     @property
     @abc.abstractmethod
@@ -258,8 +259,8 @@ class StepSelector(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._step_config_instance.get_prescribed_prognostic_names()
 
-    def disable_corrections(self, names: Sequence[str]) -> None:
-        self._step_config_instance.disable_corrections(names)
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self._step_config_instance.replace_corrector(corrector)
         self.config = dataclasses.asdict(self._step_config_instance)
 
     @property

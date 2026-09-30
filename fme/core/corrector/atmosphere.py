@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Callable, Mapping
-from typing import Any, ClassVar, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import torch
 
@@ -339,11 +339,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
     clip_frozen_precipitation: bool = False
-
-    # keep_gradient_through_clamps changes gradients, not whether clamps apply
-    NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = (
-        CorrectorConfigABC.NON_CORRECTION_OPTIONS | {"keep_gradient_through_clamps"}
-    )
 
     def _get_corrector(
         self,

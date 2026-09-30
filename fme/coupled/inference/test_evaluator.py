@@ -17,6 +17,7 @@ from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -396,7 +397,7 @@ def test_apply_coupled_overrides_rejects_non_prescribed_override(override):
         )
 
 
-def test_apply_coupled_overrides_accepts_disable_corrections():
+def test_apply_coupled_overrides_accepts_corrector():
     config = get_stepper_config(
         ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
         ocean_out_names=["sst"],
@@ -417,11 +418,15 @@ def test_apply_coupled_overrides_accepts_disable_corrections():
         config,
         ocean_override=None,
         atmosphere_override=StepperOverrideConfig(
-            disable_corrections=["force_positive_names"]
+            corrector=CorrectorSelector(type="atmosphere_corrector", config={})
         ),
     )
     atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
-    assert atmosphere_corrector["force_positive_names"] == []
+    assert atmosphere_corrector == {
+        "type": "atmosphere_corrector",
+        "config": {},
+        "corrector_disabled_epochs": 0,
+    }
     assert set(config.ocean_forcing_window_names) == ocean_forcing_names_before
 
 

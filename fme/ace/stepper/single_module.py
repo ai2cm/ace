@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
 import dacite
@@ -754,8 +754,8 @@ class StepperConfig:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.step.get_prescribed_prognostic_names()
 
-    def disable_corrections(self, names: Sequence[str]) -> None:
-        self.step.disable_corrections(names)
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.step.replace_corrector(corrector)
 
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
@@ -1028,14 +1028,14 @@ class Stepper:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._config.get_prescribed_prognostic_names()
 
-    def disable_corrections(self, names: Sequence[str]) -> None:
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
         """
-        Disable the named corrections of the step's corrector.
+        Replace the step's corrector configuration with a new one.
 
         Args:
-            names: The corrector option names to switch off.
+            corrector: The new corrector configuration.
         """
-        self._config.disable_corrections(names)
+        self._config.replace_corrector(corrector)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
         )
@@ -1925,15 +1925,41 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
-        disable_corrections: Names of corrector options to switch off, e.g.
-            ``[total_energy_budget_correction]``.
+        corrector: Corrector configuration to replace that used in producing a
+            serialized stepper. The whole corrector is replaced: options not
+            restated here fall back to their defaults rather than to the
+            checkpoint's values. For example::
+
+                corrector:
+                  type: atmosphere_corrector
+                  config:
+                    conserve_dry_air: true
+                    total_energy_budget_correction:
+                      method: constant_temperature
+
+            ``corrector_disabled_epochs`` must be 0 (the default): it only
+            schedules the corrector during training.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
-    disable_corrections: Literal["keep"] | list[str] = "keep"
+    corrector: Literal["keep"] | CorrectorSelector = "keep"
+
+    def __post_init__(self):
+        # Eval mode always applies the corrector, so a nonzero value is inert
+        # at inference, and the EpochScheduledCorrector it builds cannot load
+        # checkpoint state saved without a schedule.
+        if (
+            self.corrector != "keep"
+            and self.corrector.config.get("corrector_disabled_epochs", 0) != 0
+        ):
+            raise ValueError(
+                "StepperOverrideConfig.corrector must not set "
+                "corrector_disabled_epochs, which only applies during training, "
+                f"but got {self.corrector.config['corrector_disabled_epochs']}."
+            )
 
 
 def load_stepper_config(
@@ -2026,9 +2052,12 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
-    if override_config.disable_corrections != "keep":
-        logging.info("Disabling corrections %s.", override_config.disable_corrections)
-        stepper.disable_corrections(override_config.disable_corrections)
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with a new "
+            "corrector configuration."
+        )
+        stepper.replace_corrector(override_config.corrector)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2068,6 +2097,9 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
-    if override_config.disable_corrections != "keep":
-        logging.info("Disabling corrections %s.", override_config.disable_corrections)
-        stepper_config.disable_corrections(override_config.disable_corrections)
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with a new "
+            "corrector configuration."
+        )
+        stepper_config.replace_corrector(override_config.corrector)

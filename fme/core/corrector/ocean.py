@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Mapping
-from typing import Any, ClassVar, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import torch
 
@@ -269,11 +269,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
-
-    # keep_gradient_through_clamps changes gradients, not whether clamps apply
-    NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = (
-        CorrectorConfigABC.NON_CORRECTION_OPTIONS | {"keep_gradient_through_clamps"}
-    )
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:

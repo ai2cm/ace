@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, ClassVar  # noqa: UP035
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
@@ -54,11 +54,6 @@ class CorrectorSelector(CorrectorConfigABC):
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         return dict(state)
-
-    def disable_corrections(self, names: Sequence[str]) -> None:
-        # config, not the instance, is what gets serialized
-        self._corrector_config_instance.disable_corrections(names)
-        self.config = dataclasses.asdict(self._corrector_config_instance)
 
     def _get_corrector(
         self,

@@ -50,8 +50,9 @@ def _validate_coupled_component_override(
     validates component compatibility at construction. An ``ocean``,
     ``multi_call`` or ``derived_forcings`` override applied afterward would leave
     those caches stale, so reject them rather than silently use stale values.
-    ``prescribed_prognostic_names`` is recomputed on demand and
-    ``disable_corrections`` changes no names.
+    ``prescribed_prognostic_names`` is recomputed on demand, and a
+    ``corrector`` config feeds no input, output or forcing names, so neither
+    invalidates the caches.
     """
     if override is None:
         return
@@ -67,7 +68,7 @@ def _validate_coupled_component_override(
     if unsupported:
         raise ValueError(
             "Coupled inference overrides only support "
-            "prescribed_prognostic_names and disable_corrections, "
+            "prescribed_prognostic_names and corrector, "
             f"but got unsupported override(s): {sorted(unsupported)}."
         )
 

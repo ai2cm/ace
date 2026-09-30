@@ -15,7 +15,6 @@ from fme.core.corrector.ocean import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
-from fme.core.registry import CorrectorSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
@@ -686,29 +685,3 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
     # above is not vacuous
     for name in folded:
         assert not torch.allclose(folded[name][0], folded[name][1])
-
-
-def test_disable_corrections_through_a_corrector_selector():
-    """Disabling reaches the wrapped config and survives serialization."""
-    selector = CorrectorSelector(
-        type="ocean_corrector",
-        config=dataclasses.asdict(
-            OceanCorrectorConfig(
-                force_positive_names=["so_0"],
-                surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
-                    method="prescribed"
-                ),
-                ocean_heat_content_correction=OceanHeatContentBudgetConfig(
-                    method="scaled_temperature"
-                ),
-            )
-        ),
-    )
-    selector.disable_corrections(["ocean_heat_content_correction"])
-
-    reloaded = CorrectorSelector.from_state(dataclasses.asdict(selector))
-    wrapped = reloaded._corrector_config_instance
-    assert isinstance(wrapped, OceanCorrectorConfig)
-    assert wrapped.ocean_heat_content_correction is None
-    assert wrapped.surface_energy_flux_correction is not None
-    assert wrapped.force_positive_names == ["so_0"]

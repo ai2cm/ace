@@ -11,6 +11,7 @@ from typing import Literal
 from unittest.mock import patch
 
 import cftime
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -2298,15 +2299,33 @@ def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
 
 
 @pytest.mark.medium_duration
-def test_load_stepper_with_disable_corrections_override(tmp_path: pathlib.Path):
+@pytest.mark.parametrize(
+    "checkpoint_force_positive, override_force_positive",
+    [
+        pytest.param(False, True, id="turn_on"),
+        pytest.param(True, False, id="turn_off"),
+    ],
+)
+def test_load_stepper_with_corrector_override(
+    tmp_path: pathlib.Path,
+    checkpoint_force_positive: bool,
+    override_force_positive: bool,
+):
     """The stepper adds one, so an input of -3 predicts -2, which the
-    force-positive clamp turns into 0 unless it is disabled."""
+    force-positive clamp turns into 0 when the active corrector enables it."""
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
         n_time=9,
         horizontal=[DimSize("grid_yt", 4), DimSize("grid_xt", 8)],
         nz_interface=4,
     )
+
+    def force_positive_names(enabled: bool) -> list[str]:
+        return ["var"] if enabled else []
+
+    def expected(enabled: bool) -> float:
+        return 0.0 if enabled else -2.0
+
     save_plus_one_stepper(
         stepper_path,
         in_names=["var"],
@@ -2315,21 +2334,47 @@ def test_load_stepper_with_disable_corrections_override(tmp_path: pathlib.Path):
         mean=0.0,
         std=1.0,
         data_shape=dim_sizes.shape_nd,
-        corrector=AtmosphereCorrectorConfig(force_positive_names=["var"]),
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=force_positive_names(checkpoint_force_positive)
+        ),
     )
 
     stepper = load_stepper(stepper_path)
-    clamped = _predict_one_step(stepper, -3.0)
-    torch.testing.assert_close(clamped, torch.zeros_like(clamped))
-
-    stepper = load_stepper(
-        stepper_path,
-        StepperOverrideConfig(disable_corrections=["force_positive_names"]),
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(checkpoint_force_positive))
     )
-    unclamped = _predict_one_step(stepper, -3.0)
-    torch.testing.assert_close(unclamped, torch.full_like(unclamped, -2.0))
-    config = _get_inner_single_module_config(stepper)
-    assert config.corrector.force_positive_names == []
+
+    override = CorrectorSelector(
+        type="atmosphere_corrector",
+        config={"force_positive_names": force_positive_names(override_force_positive)},
+    )
+    stepper = load_stepper(stepper_path, StepperOverrideConfig(corrector=override))
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+    assert _get_inner_single_module_config(stepper).corrector == override
+    # the replacement survives serialization
+    reloaded = Stepper.from_state(stepper.get_state())
+    output = _predict_one_step(reloaded, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+
+
+def test_stepper_override_rejects_corrector_disabled_epochs():
+    with pytest.raises(ValueError, match="corrector_disabled_epochs"):
+        dacite.from_dict(
+            StepperOverrideConfig,
+            {
+                "corrector": {
+                    "type": "atmosphere_corrector",
+                    "config": {"corrector_disabled_epochs": 1},
+                }
+            },
+            config=dacite.Config(strict=True),
+        )
 
 
 class _LargeLinear(torch.nn.Module):

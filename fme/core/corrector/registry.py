@@ -1,7 +1,7 @@
 import abc
 import dataclasses
-from collections.abc import Mapping, Sequence
-from typing import Any, ClassVar, Protocol, Self, final
+from collections.abc import Mapping
+from typing import Any, Protocol, Self, final
 
 import dacite
 
@@ -27,11 +27,6 @@ class CorrectorConfigABC(abc.ABC):
     """
 
     corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
-
-    # Options disable_corrections rejects: resetting them disables no correction.
-    NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = frozenset(
-        {"corrector_disabled_epochs"}
-    )
 
     def __post_init__(self):
         if self.corrector_disabled_epochs < 0:
@@ -72,34 +67,6 @@ class CorrectorConfigABC(abc.ABC):
             wrapped=corrector,
             disabled_epochs=self.corrector_disabled_epochs,
         )
-
-    def disable_corrections(self, names: Sequence[str]) -> None:
-        """Switch the named corrections off by resetting them to their defaults.
-
-        Raises:
-            ValueError: if a name is not a correction or is already off, since
-                either would make an ablation silently reproduce the baseline.
-        """
-        fields = {field.name: field for field in dataclasses.fields(self)}
-        non_corrections = type(self).NON_CORRECTION_OPTIONS
-        for name in names:
-            if name in non_corrections or name not in fields:
-                options = sorted(set(fields) - non_corrections)
-                raise ValueError(
-                    f"cannot disable {name!r}: not a correction of "
-                    f"{type(self).__name__}, whose corrections are {options}"
-                )
-            field = fields[name]
-            if field.default_factory is not dataclasses.MISSING:
-                disabled = field.default_factory()
-            else:
-                disabled = field.default
-            if getattr(self, name) == disabled:
-                raise ValueError(
-                    f"cannot disable {name!r}: it is already disabled "
-                    f"({disabled!r}) on this {type(self).__name__}"
-                )
-            setattr(self, name, disabled)
 
     @abc.abstractmethod
     def _get_corrector(

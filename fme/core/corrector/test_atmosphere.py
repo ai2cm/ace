@@ -807,37 +807,3 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
     assert set(result.modified_names) == set()
     for name in gen_data:
         torch.testing.assert_close(result.corrected[name], gen_data[name])
-
-
-def test_disable_corrections_switches_off_only_the_named_correction():
-    config = AtmosphereCorrectorConfig(
-        conserve_dry_air=True,
-        zero_global_mean_moisture_advection=True,
-        force_positive_names=["PRATEsfc"],
-        total_energy_budget_correction=EnergyBudgetConfig(
-            method="constant_temperature"
-        ),
-    )
-    config.disable_corrections(
-        ["total_energy_budget_correction", "conserve_dry_air", "force_positive_names"]
-    )
-    assert config.total_energy_budget_correction is None
-    assert config.conserve_dry_air is False
-    assert config.force_positive_names == []
-    assert config.zero_global_mean_moisture_advection
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["not_an_option", "corrector_disabled_epochs", "keep_gradient_through_clamps"],
-)
-def test_disable_corrections_rejects_a_name_that_is_not_a_correction(name):
-    config = AtmosphereCorrectorConfig(conserve_dry_air=True)
-    with pytest.raises(ValueError, match="not a correction"):
-        config.disable_corrections([name])
-
-
-def test_disable_corrections_rejects_an_already_disabled_correction():
-    config = AtmosphereCorrectorConfig(conserve_dry_air=True)
-    with pytest.raises(ValueError, match="already disabled"):
-        config.disable_corrections(["total_energy_budget_correction"])

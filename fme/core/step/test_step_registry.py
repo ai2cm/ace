@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -12,6 +12,7 @@ from torch import nn
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -135,7 +136,7 @@ class MockStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
-    def disable_corrections(self, names: Sequence[str]) -> None:
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
         raise NotImplementedError("MockStepConfig has no corrector")
 
     @property
@@ -261,7 +262,7 @@ class DeprecatingMockStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
-    def disable_corrections(self, names: Sequence[str]) -> None:
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
         raise NotImplementedError("DeprecatingMockStepConfig has no corrector")
 
     @property
