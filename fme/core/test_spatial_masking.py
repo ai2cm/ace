@@ -1,5 +1,6 @@
 import re
 
+import dacite
 import pytest
 import torch
 
@@ -225,14 +226,20 @@ def test_masking_with_per_sample_means():
     torch.testing.assert_close(output["PRESsfc"][:, 0, 0], data["PRESsfc"][:, 0, 0])
 
 
-def test_masking_with_float_fill_ignores_means():
-    config = StaticSpatialMaskingConfig(mask_value=0, fill_value=0.0)
+@pytest.mark.parametrize("fill_value", [2.0, 2], ids=["float", "int"])
+def test_masking_with_numeric_fill_ignores_means(fill_value: float):
+    """A numeric fill is used as-is, including an int as YAML loads ``2``."""
+    config = dacite.from_dict(
+        StaticSpatialMaskingConfig,
+        {"mask_value": 0, "fill_value": fill_value},
+        config=dacite.Config(strict=True),
+    )
     mask = config.build(mask=_Mask(_MASK_2D))
     output = mask(
         {"PRESsfc": torch.ones(_SIZE, device=DEVICE)},
         means={"PRESsfc": torch.tensor(5.0, device=DEVICE)},
     )
-    assert output["PRESsfc"][1, 1] == 0.0
+    assert output["PRESsfc"][1, 1] == 2.0
 
 
 def test_static_masking_error_on_missing_mean():

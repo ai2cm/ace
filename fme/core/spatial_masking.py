@@ -66,6 +66,10 @@ class StaticSpatialMaskingConfig:
             raise ValueError(
                 f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
+        if isinstance(self.fill_value, int):
+            # YAML loads e.g. ``fill_value: 0`` as an int, which would otherwise
+            # be mistaken for a fill value mapping.
+            self.fill_value = float(self.fill_value)
 
     def build(self, mask: HasGetSpatialMask) -> "StaticSpatialMasking":
         """
