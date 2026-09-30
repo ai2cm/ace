@@ -1,1 +1,2 @@
-group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_1pct_46to125_piC_156to235-4deg-ocean_resid_no_sal_correct|rs0|01M3Q08106C6JGVX2AQ6CBHM5E|training|best_inference_ckpt|normal|--min-runtime 8h
