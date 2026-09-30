@@ -55,7 +55,11 @@ def write_v3_with_chunks(ds: xr.Dataset, path: str) -> None:
             4 if dim == "time" else 2 if dim == "lat" else 4 if dim == "lon" else 1
             for dim in da.dims
         )
-        encoding[name] = {"chunks": chunks, "compressor": compressor, "shards": shards}
+        encoding[name] = {
+            "chunks": chunks,
+            "compressors": (compressor,),
+            "shards": shards,
+        }
 
     ds.to_zarr(path, mode="w", zarr_format=3, encoding=encoding)
 
