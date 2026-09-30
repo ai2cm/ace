@@ -152,6 +152,39 @@ def test_swin_transformer_unconditional_builds_no_label_weights():
     assert net.embed_dim_labels == 0
 
 
+def test_unconditional_swin_transformer_loads_state_with_unused_label_weights():
+    """A state saved with label weights by an older unconditional build loads.
+
+    Before unconditional modules were built without labels, an unconditional
+    SwinTransformer on a labeled dataset (e.g. as a secondary decoder, which is
+    never given labels) allocated label weights it never used. Such a state
+    must still load, and give the same outputs, now that the weights are gone.
+    """
+    n_in, n_out = 5, 3
+    dataset_info = _get_dataset_info(all_labels={"label_a", "label_b"})
+    # Build the way an unconditional selector did before labels were hidden.
+    old_net = (
+        _builder()
+        .build(n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info)
+        .to(fme.get_device())
+    )
+    old_state = {**old_net.state_dict(), "label_encoding": None}
+    assert any("_labels." in k for k in old_state)
+    selector = ModuleSelector(
+        type="SwinTransformer",
+        config=dataclasses.asdict(_builder()),
+    )
+    module = selector.build(
+        n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info
+    ).to(fme.get_device())
+    module.load_state(old_state)
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    old_net.eval()
+    module.torch_module.eval()
+    with torch.no_grad():
+        torch.testing.assert_close(module(x), old_net(x))
+
+
 def test_nc_swin_transformer_is_registered():
     assert "NoiseConditionedSwinTransformer" in ModuleSelector.get_available_types()
 

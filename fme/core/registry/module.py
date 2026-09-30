@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+import logging
 from collections.abc import Callable, Mapping
 
 # we use Type to distinguish from type attr of ModuleSelector
@@ -130,6 +131,8 @@ class Module:
             else:
                 self._label_encoding.conform_to_state(state.pop("label_encoding"))
         state.pop("label_encoding", None)
+        if self._label_encoding is None:
+            state = _drop_unused_label_weights(state, self._module.state_dict())
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
@@ -137,6 +140,25 @@ class Module:
 
     def to(self, device: torch.device) -> "Module":
         return Module(self._module.to(device), self._label_encoding)
+
+
+def _drop_unused_label_weights(
+    state: dict[str, Any], expected: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Drop label weights an unconditional module no longer allocates.
+
+    Before unconditional modules were built without labels, some builders
+    (e.g. SwinTransformer used as a secondary decoder, which is never given
+    labels) allocated label weights from the dataset's labels. Those weights
+    never affected outputs, so dropping them keeps such checkpoints loadable.
+    """
+    unused = {k for k in state if k not in expected and "_labels." in k}
+    if unused:
+        logging.info(
+            f"Dropping {len(unused)} unused label weights from the state of an "
+            "unconditional module."
+        )
+    return {k: v for k, v in state.items() if k not in unused}
 
 
 @dataclasses.dataclass
