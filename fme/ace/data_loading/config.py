@@ -40,6 +40,12 @@ class DataLoaderConfig:
             Each pool slot holds one window of
             ``batch_size * (time_buffer + n_timesteps)`` tensors in memory.
             Requires ``time_buffer > 0``.
+        label_dropout_rate: Probability, in [0, 1], that each training sample has
+            its source label withheld (replaced by the empty/all-zeros label). This
+            is cBottle-style label dropout: it forces the model to learn a genuine
+            unconditional mode alongside the per-source conditional ones. Applied
+            per-sample on the training path only (never validation or inference),
+            and a no-op when the dataset has no labels (``available_labels is None``).
 
     Note:
         Setting `time_buffer` to a value greater than 0 results in pre-loading
@@ -66,6 +72,7 @@ class DataLoaderConfig:
     sample_with_replacement: int | None = None
     time_buffer: int = 0
     time_buffer_pool_size: int = 1
+    label_dropout_rate: float = 0.0
 
     @property
     def using_labels(self) -> bool:
@@ -112,6 +119,11 @@ class DataLoaderConfig:
                 "time_buffer_pool_size > 1 requires time_buffer > 0. "
                 f"Got time_buffer={self.time_buffer}, "
                 f"time_buffer_pool_size={self.time_buffer_pool_size}"
+            )
+        if not 0.0 <= self.label_dropout_rate <= 1.0:
+            raise ValueError(
+                "label_dropout_rate must be in [0, 1]. "
+                f"Got {self.label_dropout_rate}"
             )
 
     @property
