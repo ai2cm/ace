@@ -209,7 +209,6 @@ class WindowAttention2D(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.softmax = nn.Softmax(dim=-1)
 
     def _position_bias(self) -> torch.Tensor:
         """Continuous position bias.
@@ -238,6 +237,16 @@ class WindowAttention2D(nn.Module):
     ) -> torch.Tensor:
         """Apply windowed attention.
 
+        Cosine attention (Swin V2): queries and keys are L2-normalized and the
+        logits divided by the learned per-head temperature ``tau``, then the
+        position bias and optional shift mask are added before the softmax.
+        The softmax and value aggregation run through
+        ``F.scaled_dot_product_attention`` with the bias passed as an additive
+        float mask, which is the same function as materializing the logits
+        explicitly. Tensors are kept 4D, ``(B * nW, num_heads, N, head_dim)``,
+        because torch only dispatches to its fused attention kernels for 4D
+        inputs; a per-window bias is tiled over the batch to match.
+
         Args:
             x: Tokens of shape ``(num_windows * B, N, C)`` where
                 ``N = ws_h * ws_w`` and windows are in window-partition order.
@@ -250,26 +259,35 @@ class WindowAttention2D(nn.Module):
             .reshape(B_, N, 3, self.num_heads, C // self.num_heads)
             .permute(2, 0, 3, 1, 4)
         )
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        norm_q = torch.norm(q, dim=-1, keepdim=True)
-        norm_k = torch.norm(k, dim=-1, keepdim=True).transpose(-2, -1)
-        attn = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
-        attn = attn / self.tau.clamp(min=0.01)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each (B_, num_heads, N, head_dim)
+        # Normalizing q and k separately matches dividing q.k by the product
+        # of their norms except when that product is below the 1e-6 clamp,
+        # which does not occur for trained weights.
+        q = F.normalize(q, dim=-1, eps=1e-6) / self.tau.clamp(min=0.01)
+        k = F.normalize(k, dim=-1, eps=1e-6)
 
         # (num_heads, N, N) shared by every window, or (nW, num_heads, N, N).
         bias = self._position_bias()
         if mask is not None:
             bias = bias + mask[:, None]  # (nW, num_heads, N, N)
         if bias.dim() == 3:
-            attn = attn + bias.unsqueeze(0)
+            attn_bias = bias.unsqueeze(0)  # broadcast over B_
         else:
             nW = bias.shape[0]
-            attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + bias.unsqueeze(0)
-            attn = attn.view(B_, self.num_heads, N, N)
-        attn = self.softmax(attn)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
+            attn_bias = (
+                bias.unsqueeze(0)
+                .expand(B_ // nW, -1, -1, -1, -1)
+                .reshape(B_, self.num_heads, N, N)
+            )
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=attn_bias,
+            dropout_p=self.attn_drop.p if self.training else 0.0,
+            scale=1.0,
+        )
+        x = x.transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
