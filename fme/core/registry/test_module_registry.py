@@ -163,6 +163,7 @@ def test_build_conditional():
         assert isinstance(module, Module)
         assert isinstance(module.torch_module, MockModule)
         assert isinstance(module._label_encoding, LabelEncoding)
+        assert module.is_conditional
     finally:
         CONDITIONAL_BUILDERS.remove("mock")
 
