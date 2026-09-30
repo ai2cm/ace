@@ -37,7 +37,7 @@ Artifacts are published alongside the regridding weights and treated as
 immutable; generation is self-verifying (see generate_face_masks) and
 refuses to clobber. Example invocation (see also the Makefile):
 
-    python -m pipeline.face_masks \\
+    python -m pipeline.om4.face_masks \\
         --config configs/om4-picontrol-1deg-5daily.yaml \\
         --stream snapshot_ocean \\
         --output-url $FACE_MASKS_URL_ROOT/om4-picontrol-2026-06-19 \\
@@ -213,8 +213,9 @@ def generate_face_masks(
     belongs under a new version prefix.
     """
     # Imported here: run.py imports this module for the artifact loader.
+    from ..zarr_io import TIME_DIM
     from .config import load_config
-    from .run import LEVEL_DIM, TIME_DIM, load_wetmask, open_stream
+    from .run import LEVEL_DIM, load_wetmask, open_stream
 
     fs, _ = fsspec.url_to_fs(output_url)
     url = f"{output_url.rstrip('/')}/{FACE_MASKS_FILENAME}"
@@ -322,7 +323,7 @@ def generate_face_masks(
             "history": (
                 "Structurally-zero coastal staggered face masks and the "
                 "resulting tracer-center velocity footprint, computed by "
-                "scripts/gfdl_om4/pipeline/face_masks.py from "
+                "scripts/gfdl_om4/pipeline/om4/face_masks.py from "
                 f"{u_name}/{v_name} of {stream.store} over "
                 f"{ds.sizes[TIME_DIM]} timesteps "
                 f"({ds[TIME_DIM].values[0]} .. {ds[TIME_DIM].values[-1]}), "
