@@ -1,6 +1,11 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    GroupedNormalizationConfig,
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+    NormalizationGroupConfig,
+)
 
 
 def trivial_normalization(
@@ -24,4 +29,34 @@ def trivial_network_and_loss_normalization(
     """
     return NetworkAndLossNormalizationConfig(
         network=trivial_normalization(names, mean=mean, std=std),
+    )
+
+
+def uniform_grouped_normalization(
+    names: Iterable[str],
+    groups: Mapping[str, tuple[Sequence[str], float, float]],
+    default_group: str,
+    pinned_variables: Sequence[str] = (),
+) -> GroupedNormalizationConfig:
+    """
+    Create a GroupedNormalizationConfig in which each group uses the same mean
+    and std for all names.
+
+    Args:
+        names: Names each group provides constants for.
+        groups: Mapping from group name to ``(labels, mean, std)``.
+        default_group: Group used for unlabeled batches.
+        pinned_variables: Names which always use the pooled constants.
+    """
+    names = list(names)
+    return GroupedNormalizationConfig(
+        groups={
+            group: NormalizationGroupConfig(
+                labels=list(labels),
+                normalization=trivial_normalization(names, mean=mean, std=std),
+            )
+            for group, (labels, mean, std) in groups.items()
+        },
+        default_group=default_group,
+        pinned_variables=list(pinned_variables),
     )
