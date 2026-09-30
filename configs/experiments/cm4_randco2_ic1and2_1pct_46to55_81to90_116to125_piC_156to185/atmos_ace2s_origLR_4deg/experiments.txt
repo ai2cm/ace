@@ -1,2 +1,4 @@
 
 
+
+cm4_randco2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origLR_4deg|rs0|01M3SBQJKDVXK2YAJTSHZ8DK78|training|best_inference_ckpt|normal|--min-runtime 8h
