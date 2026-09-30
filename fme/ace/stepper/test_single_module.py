@@ -2281,7 +2281,9 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
 
 
 def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
-    """Run one step from a constant input and return the predicted "var"."""
+    """Run one eval-mode step from a constant input and return the predicted
+    "var"."""
+    stepper.set_eval()
     index = xr.date_range("2000", freq="6h", periods=2, use_cftime=True)
     time = xr.DataArray(np.stack([index]), dims=["sample", "time"])
     input_data = BatchData.new_on_device(
@@ -2300,16 +2302,20 @@ def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
 
 @pytest.mark.medium_duration
 @pytest.mark.parametrize(
-    "checkpoint_force_positive, override_force_positive",
+    "checkpoint_force_positive, override_force_positive, checkpoint_disabled_epochs",
     [
-        pytest.param(False, True, id="turn_on"),
-        pytest.param(True, False, id="turn_off"),
+        pytest.param(False, True, 0, id="turn_on"),
+        pytest.param(True, False, 0, id="turn_off"),
+        # the checkpoint's corrector state (from its EpochScheduledCorrector)
+        # must load into the unscheduled replacement
+        pytest.param(True, False, 1, id="turn_off_scheduled_checkpoint"),
     ],
 )
 def test_load_stepper_with_corrector_override(
     tmp_path: pathlib.Path,
     checkpoint_force_positive: bool,
     override_force_positive: bool,
+    checkpoint_disabled_epochs: int,
 ):
     """The stepper adds one, so an input of -3 predicts -2, which the
     force-positive clamp turns into 0 when the active corrector enables it."""
@@ -2335,7 +2341,8 @@ def test_load_stepper_with_corrector_override(
         std=1.0,
         data_shape=dim_sizes.shape_nd,
         corrector=AtmosphereCorrectorConfig(
-            force_positive_names=force_positive_names(checkpoint_force_positive)
+            force_positive_names=force_positive_names(checkpoint_force_positive),
+            corrector_disabled_epochs=checkpoint_disabled_epochs,
         ),
     )
 

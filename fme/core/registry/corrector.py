@@ -42,6 +42,11 @@ class CorrectorSelector(CorrectorConfigABC):
             )
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
+    @property
+    def wrapped_corrector_disabled_epochs(self) -> int:
+        """The ``corrector_disabled_epochs`` of the wrapped corrector config."""
+        return self._corrector_config_instance.corrector_disabled_epochs
+
     @classmethod
     def register(cls, type_name):
         return cls.registry.register(type_name)

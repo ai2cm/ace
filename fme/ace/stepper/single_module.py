@@ -1953,12 +1953,12 @@ class StepperOverrideConfig:
         # checkpoint state saved without a schedule.
         if (
             self.corrector != "keep"
-            and self.corrector.config.get("corrector_disabled_epochs", 0) != 0
+            and self.corrector.wrapped_corrector_disabled_epochs != 0
         ):
             raise ValueError(
                 "StepperOverrideConfig.corrector must not set "
                 "corrector_disabled_epochs, which only applies during training, "
-                f"but got {self.corrector.config['corrector_disabled_epochs']}."
+                f"but got {self.corrector.wrapped_corrector_disabled_epochs}."
             )
 
 
