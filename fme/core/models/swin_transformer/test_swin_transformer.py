@@ -8,7 +8,12 @@ from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.testing.regression import validate_tensor_dict
 
-from .swin_layers import ColumnMixer, WindowAttention2D
+from .swin_layers import (
+    ColumnMixer,
+    WindowAttention2D,
+    _cos_lat_scaled_coords_log,
+    window_lat_mean,
+)
 from .swin_transformer import SwinTransformerNet
 
 _EMBED_DIM_NOISE = 8
@@ -286,14 +291,18 @@ def test_cpb_lat_coords_changes_output():
     assert not torch.allclose(out_low, out_high), "lat_coords should change output"
 
 
-def test_cpb_backward_with_lat_coords():
-    """Gradients reach cpb_mlp when lat_coords is provided."""
+@pytest.mark.parametrize("window_size", [(4, 4), (4, 8)])
+def test_cpb_backward_with_lat_coords(window_size: tuple[int, int]):
+    """Gradients reach cpb_mlp when lat_coords is provided, including with a
+    non-square window whose window-row ordering the band index must match."""
     in_chans, out_chans = 4, 2
     img_shape = (16, 32)
     n = 2
     device = get_device()
     lat_coords = torch.linspace(-90.0, 90.0, img_shape[0], device=device)
-    net = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_coords).to(device)
+    net = _build_net(
+        in_chans, out_chans, img_shape, window_size=window_size, lat_coords=lat_coords
+    ).to(device)
     x = torch.randn(n, in_chans, *img_shape, device=device)
     net(x).sum().backward()
     for name, param in net.named_parameters():
@@ -388,7 +397,14 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
     pad_h = net.padded_shape[0] - expected.shape[0]
     if pad_h > 0:
         expected = torch.cat([expected, expected[-1:].expand(pad_h)])
-    torch.testing.assert_close(net.layer1.blocks[0].lat_coords, expected)
+    # The block precomputes its CPB coordinates from the padded lat rows.
+    attn = net.layer1.blocks[0].attn
+    expected_lat_mean = window_lat_mean(expected, net.padded_shape, (4, 4), shift=0)
+    assert expected_lat_mean is not None
+    torch.testing.assert_close(
+        attn.coords_log,
+        _cos_lat_scaled_coords_log(attn.relative_coords_base, expected_lat_mean),
+    )
 
 
 def test_earth_padding_cln_forward():
@@ -409,6 +425,115 @@ def test_earth_padding_cln_forward():
         3,
         *img_shape,
     )
+
+
+def _per_window_position_bias(
+    attn: WindowAttention2D,
+    lat_mean_per_window: torch.Tensor,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Position bias with the CPB MLP evaluated separately for every window,
+    as implemented before the per-latitude-band deduplication. The module
+    precomputes its coordinates in float32 at construction; ``dtype`` is the
+    dtype they are cast to before the MLP."""
+    N = attn.window_size[0] * attn.window_size[1]
+    nW = lat_mean_per_window.shape[0]
+    base = attn.relative_coords_base.float()
+    lat_rad = lat_mean_per_window.float() * (torch.pi / 180.0)
+    h_coords = base[:, 0]
+    w_coords = base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(1)
+    coords = torch.stack([h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1)
+    coords_log = (torch.sign(coords) * torch.log(1.0 + coords.abs())).to(dtype)
+    bias = 16.0 * torch.sigmoid(attn.cpb_mlp(coords_log))
+    return bias.permute(0, 2, 1).reshape(nW, attn.num_heads, N, N)
+
+
+def test_window_lat_mean_matches_rolled_window_means():
+    """Precomputed per-window-row latitudes equal the mean of the (shifted)
+    latitude rows in each window row, top to bottom."""
+    H, W = 8, 16
+    ws = (4, 4)
+    lat = torch.linspace(-70.0, 70.0, H)
+    for shift in (0, 2):
+        lat_mean = window_lat_mean(lat, (H, W), ws, shift)
+        assert lat_mean is not None
+        assert lat_mean.shape == (H // ws[0],)
+        rolled = torch.roll(lat, -shift)
+        expected = rolled.reshape(H // ws[0], ws[0]).mean(1)
+        torch.testing.assert_close(lat_mean, expected)
+    assert window_lat_mean(None, (H, W), ws, 0) is None
+
+
+def test_window_attention_requires_num_windows_w_with_lat_mean():
+    """Omitting the windows-per-row count is a construction-time error, not a
+    forward-time shape mismatch."""
+    with pytest.raises(ValueError, match="num_windows_w"):
+        WindowAttention2D(16, (4, 4), 4, lat_mean=torch.zeros(3))
+    # Without latitude scaling the count is not needed.
+    WindowAttention2D(16, (4, 4), 4)
+
+
+@pytest.mark.parametrize("use_lat", [False, True])
+def test_position_bias_matches_per_window_evaluation(use_lat: bool):
+    """Evaluating the CPB MLP once per latitude band and gathering to windows
+    gives the same bias as evaluating it for every window, and windows in the
+    same window-row share identical bias rows. Without latitude scaling the
+    bias has no window dimension at all."""
+    device = get_device()
+    torch.manual_seed(0)
+    dim, num_heads, window_size = 16, 4, (4, 4)
+    N = window_size[0] * window_size[1]
+    nH_win, nW_win = 3, 5
+    lat_mean = torch.linspace(-75.0, 75.0, nH_win, device=device) if use_lat else None
+    attn = WindowAttention2D(
+        dim, window_size, num_heads, lat_mean=lat_mean, num_windows_w=nW_win
+    ).to(device)
+    with torch.no_grad():
+        for param in attn.cpb_mlp.parameters():
+            param.normal_()
+    bias = attn._position_bias()
+    if not use_lat:
+        assert attn.coords_log is None
+        assert attn.band_index is None
+        assert bias.shape == (num_heads, N, N)
+        expected = 16.0 * torch.sigmoid(attn.cpb_mlp(attn.relative_coords_log))
+        expected = expected.permute(1, 0).reshape(num_heads, N, N)
+        torch.testing.assert_close(bias, expected)
+        return
+    assert lat_mean is not None
+    assert attn.coords_log.shape == (nH_win, N * N, 2)
+    assert attn.band_index.shape == (nH_win * nW_win,)
+    assert bias.shape == (nH_win * nW_win, num_heads, N, N)
+    expected = _per_window_position_bias(attn, lat_mean.repeat_interleave(nW_win))
+    torch.testing.assert_close(bias, expected)
+    bias_by_row = bias.view(nH_win, nW_win, num_heads, N, N)
+    assert torch.equal(bias_by_row, bias_by_row[:, :1].expand_as(bias_by_row))
+    # Distinct latitude bands do give distinct biases.
+    assert not torch.equal(bias_by_row[0, 0], bias_by_row[1, 0])
+
+
+def test_blocks_precompute_cpb_coords_per_shift():
+    """Regular and shifted blocks hold distinct precomputed coordinate buffers
+    that follow the module across devices and are absent without lat_coords."""
+    img_shape = (16, 32)
+    lat = torch.linspace(-80.0, 80.0, img_shape[0])
+    net = _build_net(4, 2, img_shape, lat_coords=lat).to(get_device())
+    regular, shifted = net.layer1.blocks[0].attn, net.layer1.blocks[1].attn
+    n_bands = img_shape[0] // 4
+    n_windows = n_bands * (img_shape[1] // 4)
+    for attn in (regular, shifted):
+        assert attn.coords_log is not None
+        assert attn.coords_log.shape == (n_bands, 16 * 16, 2)
+        assert attn.coords_log.device.type == get_device().type
+        assert attn.band_index.shape == (n_windows,)
+        assert attn.band_index.device.type == get_device().type
+    assert not torch.equal(regular.coords_log, shifted.coords_log)
+    state_keys = {k.split(".")[-1] for k in net.state_dict()}
+    assert "coords_log" not in state_keys
+    assert "band_index" not in state_keys
+    net_no_lat = _build_net(4, 2, img_shape)
+    assert net_no_lat.layer1.blocks[0].attn.coords_log is None
+    assert net_no_lat.layer1.blocks[0].attn.band_index is None
 
 
 _REGRESSION_DIR = pathlib.Path(__file__).parent / "testdata"

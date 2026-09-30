@@ -74,13 +74,60 @@ def window_reverse_2d(
     return x
 
 
+def _cos_lat_scaled_coords_log(
+    relative_coords_base: torch.Tensor, lat_mean: torch.Tensor
+) -> torch.Tensor:
+    """Log-spaced relative coordinates with longitude offsets scaled by
+    ``cos(lat)`` per latitude band: ``(n_bands, N*N, 2)``.
+    """
+    n_bands = lat_mean.shape[0]
+    # lat_mean may live on the accelerator while the base coordinates are
+    # built on CPU; compute on CPU and let the module's .to() move the buffer.
+    lat_rad = lat_mean.to(
+        device=relative_coords_base.device, dtype=relative_coords_base.dtype
+    ) * (math.pi / 180.0)
+    h_coords = relative_coords_base[:, 0]  # (N*N,)
+    w_coords = relative_coords_base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(
+        1
+    )  # (n_bands, N*N)
+    coords = torch.stack(
+        [h_coords.unsqueeze(0).expand(n_bands, -1), w_coords], dim=-1
+    )  # (n_bands, N*N, 2)
+    return torch.sign(coords) * torch.log(1.0 + coords.abs())
+
+
+def window_lat_mean(
+    lat_coords: torch.Tensor | None,
+    input_resolution: tuple[int, int],
+    window_size: tuple[int, int],
+    shift: int,
+) -> torch.Tensor | None:
+    """Mean latitude (degrees) of each row of attention windows, for a feature
+    map whose rows are cyclically shifted by ``shift``.
+
+    All windows in a window-row share a mean latitude, so only one value per
+    row is returned: ``(nH_win,)``, or None when ``lat_coords`` is None.
+    """
+    if lat_coords is None:
+        return None
+    H, _ = input_resolution
+    ws_h, _ = window_size
+    lat_shifted = torch.roll(lat_coords, -shift) if shift != 0 else lat_coords
+    nH_win = H // ws_h
+    return lat_shifted[:H].reshape(nH_win, ws_h).mean(1)
+
+
 class WindowAttention2D(nn.Module):
     """Multi-head self-attention within 2D windows with continuous position bias.
 
     Uses a 2-layer MLP (CPB, Swin V2-style) over log-spaced coordinate offsets
-    instead of a lookup-table RPB. When ``lat_mean`` is supplied at forward
-    time, the longitude offsets are scaled by ``cos(lat)`` so that the bias
-    reflects physical arc-length rather than pixel-index distance.
+    instead of a lookup-table RPB. When ``lat_mean`` is supplied, the
+    longitude offsets are scaled by ``cos(lat)`` per spatial window so that
+    the bias reflects physical arc-length rather than pixel-index distance.
+    The (constant) log-spaced coordinates are precomputed once at
+    construction; only the CPB MLP runs at forward time. Because the scaling
+    depends only on latitude, the MLP is evaluated once per window-row
+    (latitude band) and its output gathered out to every window in that row.
 
     Args:
         dim: Number of input channels.
@@ -90,6 +137,14 @@ class WindowAttention2D(nn.Module):
         qkv_bias: Whether to add a learnable bias to query/key/value.
         attn_drop: Dropout rate on the attention matrix.
         proj_drop: Dropout rate on the output projection.
+        lat_mean: Optional ``(nH_win,)`` tensor of mean latitude in degrees
+            for each row of spatial windows of the feature map this module
+            attends over, top to bottom. When None, plain Swin V2 offsets are
+            used.
+        num_windows_w: Number of windows per window-row, ``nW_win``. Together
+            with ``lat_mean`` this fixes the window count
+            ``nW = nH_win * nW_win`` that the position bias is gathered to.
+            Required when ``lat_mean`` is given, ignored otherwise.
     """
 
     def __init__(
@@ -101,6 +156,8 @@ class WindowAttention2D(nn.Module):
         qkv_bias: bool = True,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
+        lat_mean: torch.Tensor | None = None,
+        num_windows_w: int | None = None,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -134,6 +191,19 @@ class WindowAttention2D(nn.Module):
             1.0 + relative_coords_base.abs()
         )
         self.register_buffer("relative_coords_log", relative_coords_log)
+        # Per-band cos(lat)-scaled offsets, (n_bands, N*N, 2), and the band of
+        # each window in window-partition order, (nW,); both None without lat.
+        if lat_mean is None:
+            coords_log = band_index = None
+        else:
+            if num_windows_w is None:
+                raise ValueError("num_windows_w is required when lat_mean is given")
+            coords_log = _cos_lat_scaled_coords_log(relative_coords_base, lat_mean)
+            band_index = torch.arange(lat_mean.shape[0]).repeat_interleave(
+                num_windows_w
+            )
+        self.register_buffer("coords_log", coords_log, persistent=False)
+        self.register_buffer("band_index", band_index, persistent=False)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -141,22 +211,38 @@ class WindowAttention2D(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         self.softmax = nn.Softmax(dim=-1)
 
+    def _position_bias(self) -> torch.Tensor:
+        """Continuous position bias.
+
+        Returns ``(num_heads, N, N)`` without latitude scaling, otherwise
+        ``(nW, num_heads, N, N)`` with longitude offsets scaled by ``cos(lat)``
+        per spatial window.
+        """
+        N = self.window_size[0] * self.window_size[1]
+        if self.coords_log is None:
+            bias = 16.0 * torch.sigmoid(
+                self.cpb_mlp(self.relative_coords_log)
+            )  # (N*N, num_heads)
+            return bias.permute(1, 0).reshape(self.num_heads, N, N)
+        n_bands = self.coords_log.shape[0]
+        bias = 16.0 * torch.sigmoid(
+            self.cpb_mlp(self.coords_log)
+        )  # (n_bands, N*N, num_heads)
+        bias = bias.permute(0, 2, 1).reshape(n_bands, self.num_heads, N, N)
+        return bias.index_select(0, self.band_index)  # (nW, num_heads, N, N)
+
     def forward(
         self,
         x: torch.Tensor,
         mask: torch.Tensor | None = None,
-        lat_mean: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Apply windowed attention.
 
         Args:
             x: Tokens of shape ``(num_windows * B, N, C)`` where
-                ``N = ws_h * ws_w``.
+                ``N = ws_h * ws_w`` and windows are in window-partition order.
             mask: Optional attention mask of shape ``(nW, N, N)`` for the
                 shifted-window case.
-            lat_mean: Optional ``(nW,)`` tensor of mean latitude in degrees
-                for each spatial window. When provided, longitude offsets are
-                scaled by ``cos(lat)`` to reflect physical arc-length.
         """
         B_, N, C = x.shape
         qkv = (
@@ -170,36 +256,16 @@ class WindowAttention2D(nn.Module):
         attn = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
         attn = attn / self.tau.clamp(min=0.01)
 
-        if lat_mean is None:
-            bias = 16.0 * torch.sigmoid(
-                self.cpb_mlp(self.relative_coords_log)
-            )  # (N*N, num_heads)
-            bias = bias.permute(1, 0).reshape(self.num_heads, N, N)
+        # (num_heads, N, N) shared by every window, or (nW, num_heads, N, N).
+        bias = self._position_bias()
+        if mask is not None:
+            bias = bias + mask[:, None]  # (nW, num_heads, N, N)
+        if bias.dim() == 3:
             attn = attn + bias.unsqueeze(0)
         else:
-            nW = lat_mean.shape[0]
-            lat_rad = lat_mean * (math.pi / 180.0)  # (nW,)
-            h_coords = self.relative_coords_base[:, 0]  # (N*N,)
-            w_coords = self.relative_coords_base[:, 1].unsqueeze(0) * torch.cos(
-                lat_rad
-            ).unsqueeze(1)  # (nW, N*N)
-            coords = torch.stack(
-                [h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1
-            )  # (nW, N*N, 2)
-            coords_log = torch.sign(coords) * torch.log(1.0 + coords.abs())
-            bias = 16.0 * torch.sigmoid(
-                self.cpb_mlp(coords_log)
-            )  # (nW, N*N, num_heads)
-            bias = bias.permute(0, 2, 1).reshape(nW, self.num_heads, N, N)
+            nW = bias.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + bias.unsqueeze(0)
             attn = attn.view(B_, self.num_heads, N, N)
-
-        if mask is not None:
-            nW = mask.shape[0]
-            attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(
-                1
-            ).unsqueeze(0)
-            attn = attn.view(-1, self.num_heads, N, N)
         attn = self.softmax(attn)
         attn = self.attn_drop(attn)
 
@@ -381,13 +447,16 @@ class SwinTransformerBlock(nn.Module):
             num_heads,
             cpb_hidden_dim=cpb_hidden_dim,
             qkv_bias=qkv_bias,
+            lat_mean=window_lat_mean(
+                lat_coords, input_resolution, window_size, shift_size[0]
+            ),
+            num_windows_w=input_resolution[1] // window_size[1],
         )
         self.column_mixer = ColumnMixer(dim)
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.mlp = _build_mlp(mlp_layer, dim, int(dim * mlp_ratio))
 
         self.register_buffer("attn_mask", self._build_mask(), persistent=False)
-        self.register_buffer("lat_coords", lat_coords, persistent=False)
 
     def _build_mask(self) -> torch.Tensor | None:
         sh, sw = self.shift_size
@@ -410,42 +479,31 @@ class SwinTransformerBlock(nn.Module):
         )
         return attn_mask
 
+    def _window_attention(self, x: torch.Tensor) -> torch.Tensor:
+        """(Shifted-)window attention on a ``(B, H, W, C)`` feature map."""
+        H, W = self.input_resolution
+        ws_h, ws_w = self.window_size
+        sh, sw = self.shift_size
+        C = x.shape[-1]
+        if sh > 0 or sw > 0:
+            x = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
+        x_windows = window_partition_2d(x, ws_h, ws_w).view(-1, ws_h * ws_w, C)
+        attn_windows = self.attn(x_windows, mask=self.attn_mask)
+        attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
+        x = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
+        if sh > 0 or sw > 0:
+            x = torch.roll(x, shifts=(sh, sw), dims=(1, 2))
+        return x
+
     def forward(
         self,
         x: torch.Tensor,
         cond_params: CondParams | None = None,
         context: Context | None = None,
     ) -> torch.Tensor:
-        H, W = self.input_resolution
-        ws_h, ws_w = self.window_size
-        sh, sw = self.shift_size
-        _, _, _, C = x.shape
-
-        if self.lat_coords is not None:
-            lat_shifted = (
-                torch.roll(self.lat_coords, -sh) if sh != 0 else self.lat_coords
-            )
-            nH_win = H // ws_h
-            nW_win = W // ws_w
-            lat_mean_h = lat_shifted[:H].reshape(nH_win, ws_h).mean(1)  # (nH_win,)
-            lat_mean: torch.Tensor | None = (
-                lat_mean_h.unsqueeze(1).expand(-1, nW_win).reshape(-1)
-            )
-        else:
-            lat_mean = None
-
         if self.conditioning == "cln":
             shortcut = x
-            if sh > 0 or sw > 0:
-                h = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
-            else:
-                h = x
-            h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
-            attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
-            attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
-            h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
-            if sh > 0 or sw > 0:
-                h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
+            h = self._window_attention(x)
             # ColumnMixer folded in (no own residual).
             h = h + self.column_mixer(h)
             # Swin activations are channels-last; use the CLN path that
@@ -463,16 +521,7 @@ class SwinTransformerBlock(nn.Module):
                     cond_params
                 )
 
-            if sh > 0 or sw > 0:
-                h = torch.roll(x, shifts=(-sh, -sw), dims=(1, 2))
-            else:
-                h = x
-            h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
-            attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
-            attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
-            h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
-            if sh > 0 or sw > 0:
-                h = torch.roll(h, shifts=(sh, sw), dims=(1, 2))
+            h = self._window_attention(x)
 
             # ColumnMixer folded into the window-attention output (no own residual).
             h = h + self.column_mixer(h)
