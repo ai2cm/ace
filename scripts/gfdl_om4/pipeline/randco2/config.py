@@ -14,12 +14,24 @@ simulation or a new output store is a config change, not a code change.
 import dataclasses
 
 import dacite
-import yaml
 
+from ..config_io import MEMBER_PLACEHOLDER, OutputConfig, WetmaskConfig, load_yaml
+from ..postprocess import (
+    Postprocess,
+    PostprocessConfig,
+    assert_postprocess_inputs,
+    resolve_postprocess,
+)
 from .postprocess import POSTPROCESS
 
-# Token replaced by the ensemble-member name throughout a config's text.
-MEMBER_PLACEHOLDER = "{member}"
+__all__ = [
+    "MEMBER_PLACEHOLDER",
+    "OutputConfig",
+    "PipelineConfig",
+    "StreamConfig",
+    "WetmaskConfig",
+    "load_config",
+]
 
 
 @dataclasses.dataclass
@@ -39,8 +51,11 @@ class StreamConfig:
             normalization — written under their source name, with NaN over
             land applied after. Each must also have a ``renaming`` entry so
             its wetmask-normalized twin doesn't collide.
-        postprocess: named post-regrid transforms to apply per chunk, in
-            order (see pipeline/postprocess.py).
+        postprocess: post-regrid transforms to apply per chunk, in order
+            (see pipeline/randco2/postprocess.py): a registry name, or a
+            :class:`~pipeline.postprocess.PostprocessConfig` naming the
+            variables the transform reads (``kelvin_sst`` needs
+            ``sources: {celsius_sst: <name>}``).
     """
 
     name: str
@@ -49,7 +64,7 @@ class StreamConfig:
     renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
-    postprocess: list[str] = dataclasses.field(default_factory=list)
+    postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         for name in self.full_cell_variables:
@@ -65,55 +80,20 @@ class StreamConfig:
                     "source name, so the wetmask-normalized output must be "
                     "renamed to avoid a collision"
                 )
-        for name in self.postprocess:
-            if name not in POSTPROCESS:
-                raise ValueError(
-                    f"unknown postprocess {name!r} in stream {self.name!r}; "
-                    f"available: {sorted(POSTPROCESS)}"
-                )
+        context = f"stream {self.name!r}"
+        output_names = {self.renaming.get(name, name) for name in self.variables}
+        output_names.update(self.full_cell_variables)
+        assert_postprocess_inputs(
+            self.postprocess_specs(),
+            output_names,
+            context,
+        )
 
-
-@dataclasses.dataclass
-class WetmaskConfig:
-    """Where the 2D ocean wetmask comes from.
-
-    The wetmask is the NaN pattern of the reference variable's first
-    timestep. Every processed variable's valid-data footprint is asserted to
-    equal it (see run._assert_footprint), so the output NaN pattern is the
-    same at every timestep and a source whose footprint disagrees fails
-    loudly instead of being silently zero-filled by the normalized regrid.
-
-    Attributes:
-        store: URL of the zarr store holding the reference variable.
-        variable: name of a 2D (y, x) variable whose NaN pattern defines the
-            wetmask.
-    """
-
-    store: str
-    variable: str
-
-
-@dataclasses.dataclass
-class OutputConfig:
-    """Output store layout.
-
-    Attributes:
-        path: URL of the output zarr store.
-        time_chunk_size: zarr chunk size along time.
-        time_shard_size: zarr shard size along time; must be a multiple of
-            ``time_chunk_size``.
-    """
-
-    path: str
-    time_chunk_size: int = 1
-    time_shard_size: int = 365
-
-    def __post_init__(self):
-        if self.time_shard_size % self.time_chunk_size != 0:
-            raise ValueError(
-                "time_shard_size must be a multiple of time_chunk_size; got "
-                f"{self.time_shard_size} and {self.time_chunk_size}"
-            )
+    def postprocess_specs(self) -> list[Postprocess]:
+        """The configured transforms, with their source names bound."""
+        return resolve_postprocess(
+            POSTPROCESS, self.postprocess, f"stream {self.name!r}"
+        )
 
 
 @dataclasses.dataclass
@@ -141,31 +121,10 @@ class PipelineConfig:
 
 
 def load_config(path: str, member: str | None = None) -> PipelineConfig:
-    """Load a config, substituting ``member`` for MEMBER_PLACEHOLDER.
-
-    Substitution happens on the raw text before parsing, so a placeholder may
-    appear anywhere in a URL. A config carrying the placeholder requires a
-    member; one without it rejects a member, since the name would then have
-    no effect on the output store.
-    """
-    with open(path) as f:
-        text = f.read()
-    has_placeholder = MEMBER_PLACEHOLDER in text
-    if has_placeholder and member is None:
-        raise ValueError(
-            f"{path} contains {MEMBER_PLACEHOLDER}; an ensemble-member name "
-            "is required to resolve it"
-        )
-    if member is not None:
-        if not has_placeholder:
-            raise ValueError(
-                f"member {member!r} was given but {path} contains no "
-                f"{MEMBER_PLACEHOLDER} for it to fill, so it would not "
-                "change the output store"
-            )
-        text = text.replace(MEMBER_PLACEHOLDER, member)
+    """Load a config, substituting ``member`` for MEMBER_PLACEHOLDER (see
+    pipeline.config_io.load_yaml for the substitution rules)."""
     return dacite.from_dict(
         data_class=PipelineConfig,
-        data=yaml.safe_load(text),
+        data=load_yaml(path, member),
         config=dacite.Config(strict=True),
     )

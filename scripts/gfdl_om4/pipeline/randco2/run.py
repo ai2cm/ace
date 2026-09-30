@@ -3,11 +3,12 @@
 Reads a native-grid 0.25 degree tripolar ice-model snapshot store, applies
 wetmask-normalized conservative regridding to a Gaussian grid per chunk, and
 writes one templated, sharded zarr v3 store per invocation, driven by a YAML
-config and an ensemble-member name (see pipeline/config.py and configs/).
+config and an ensemble-member name (see pipeline/randco2/config.py and
+configs/).
 
-Run locally on a subset with the DirectRunner (see the Makefile smoke_test
-target), or on Google Cloud Dataflow by passing the corresponding beam
-pipeline options after the script's own arguments.
+Run locally on a subset with the DirectRunner (see the randco2.mk
+randco2_smoke_test target), or on Google Cloud Dataflow by passing the
+corresponding beam pipeline options after the script's own arguments.
 
 The source fields are two-dimensional surface quantities on the tracer grid,
 so nothing here splits vertical levels, interpolates from staggered points,
@@ -20,7 +21,7 @@ Masking conventions of the output store:
   wetmask-normalized regrid: target cells with ocean fraction <=
   OCEAN_FRACTION_THRESHOLD are NaN. The NaN pattern is the same at every
   timestep because each chunk's valid-data footprint is asserted to equal
-  the reference-time wetmask before regridding (see _assert_footprint).
+  the reference-time wetmask before regridding (see pipeline.zarr_io.assert_footprint).
 - ``sea_surface_fraction`` is the regridded ocean fraction (0 over land, not
   NaN), usable to weight coastal cells, and is exempt from land-NaN by
   explicit list (see land_nan_exempt_names).
@@ -36,23 +37,31 @@ import logging
 import math
 
 import apache_beam as beam
-import fsspec
-import numpy as np
 import xarray as xr
 import xarray_beam as xbeam
 from apache_beam.options.pipeline_options import PipelineOptions
-from obstore.store import from_url
-from zarr.storage import ObjectStore
 
+from ..ocean_emulators_port import OCEAN_FRACTION_THRESHOLD, regrid_normalized
+from ..postprocess import (
+    DERIVATION_ATTR,
+    ChunkContext,
+    assert_postprocess_inputs,
+    provenance_attrs,
+)
+from ..weights import get_regridder
+from ..zarr_io import (
+    OUTPUT_DTYPE,
+    TIME_DIM,
+    WriteShardedZarr,
+    assert_footprint,
+    assert_output_store_absent,
+    make_zarr_store,
+    shard_aligned_chunk_size,
+    source_time_chunk_size,
+)
 from .config import PipelineConfig, StreamConfig, load_config
-from .ocean_emulators_port import OCEAN_FRACTION_THRESHOLD, regrid_normalized
-from .postprocess import DERIVATION_ATTR, POSTPROCESS, ChunkContext, provenance_attrs
-from .weights import get_regridder
 
 logger = logging.getLogger(__name__)
-
-TIME_DIM = "time"
-OUTPUT_DTYPE = np.float32
 
 
 def land_nan_exempt_names() -> list[str]:
@@ -64,29 +73,6 @@ def land_nan_exempt_names() -> list[str]:
     return ["sea_surface_fraction"]
 
 
-def _make_zarr_store(url: str, read_only: bool = True):
-    """Create a zarr store from a URL using obstore. If local, return the path."""
-    if url.startswith("gs://"):
-        return ObjectStore(from_url(url), read_only=read_only)
-    else:
-        return url
-
-
-def _assert_output_store_absent(path: str) -> None:
-    """Refuse to initialize into a pre-existing output store.
-
-    Output stores are written once and treated as immutable; initializing
-    the template into an existing store would corrupt or silently overwrite
-    it. Delete the store explicitly or pick a new output path.
-    """
-    fs, root = fsspec.url_to_fs(path)
-    if fs.exists(root):
-        raise FileExistsError(
-            f"output store already exists at {path}; refusing to initialize "
-            "into it. Delete it explicitly or choose a new output path."
-        )
-
-
 # ---------------------------------------------------------------------------
 # Source opening and load-bearing assertions
 # ---------------------------------------------------------------------------
@@ -95,7 +81,7 @@ def _assert_output_store_absent(path: str) -> None:
 def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
     """Open the stream's variables lazily, time-subset, with fail-fast checks."""
     ds = xr.open_zarr(
-        _make_zarr_store(stream.store), chunks=None, decode_timedelta=False
+        make_zarr_store(stream.store), chunks=None, decode_timedelta=False
     )
     missing = set(stream.variables) - set(ds.data_vars)
     if missing:
@@ -123,50 +109,11 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
     return ds
 
 
-def source_time_chunk_size(ds: xr.Dataset) -> int:
-    """The stream's own time chunk width, used as the beam read width.
-
-    Reading a narrower slice than the source is chunked re-fetches and
-    re-decompresses the whole chunk once per slice, so a one-timestep read
-    against a ten-timestep chunk costs ten times the bytes it uses. Matching
-    the source width makes every chunk pay for itself once. Widening beyond
-    it would buy nothing and cost worker memory.
-    """
-    widths = {
-        int(da.encoding["preferred_chunks"][TIME_DIM])
-        for da in ds.data_vars.values()
-        if TIME_DIM in da.encoding.get("preferred_chunks", {})
-    }
-    if len(widths) != 1:
-        raise AssertionError(
-            f"expected one source time chunk width across the stream's "
-            f"variables; found {sorted(widths)}"
-        )
-    return widths.pop()
-
-
-def shard_aligned_chunk_size(read_chunk_size: int, shard_size: int) -> int:
-    """The width to split read chunks to before consolidating into shards.
-
-    ``ConsolidateChunks`` groups a chunk by ``shard_size * (offset //
-    shard_size)`` and asserts the group's first offset is the group key, so
-    every chunk boundary must fall on a shard boundary. A read chunk wider
-    than that alignment straddles one: a 10-timestep read against a
-    365-timestep shard puts a chunk at offset 360 in the group for offset 0
-    and the next, at 370, in a group keyed 365.
-
-    The greatest common divisor is the widest split that lands every boundary
-    on both a read and a shard boundary, and is the read width itself when the
-    read width already divides the shard, leaving the split a no-op.
-    """
-    return math.gcd(read_chunk_size, shard_size)
-
-
 def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     """The 2D ocean wetmask: the NaN pattern of the reference variable's
     first timestep (True over ocean)."""
     ds = xr.open_zarr(
-        _make_zarr_store(config.wetmask.store), chunks=None, decode_timedelta=False
+        make_zarr_store(config.wetmask.store), chunks=None, decode_timedelta=False
     )
     if config.wetmask.variable not in ds.data_vars:
         raise AssertionError(
@@ -187,24 +134,6 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     return wetmask
 
 
-def _assert_footprint(da: xr.DataArray, wetmask: xr.DataArray, context: str) -> None:
-    """Assert a variable's valid-data footprint exactly equals the wetmask.
-
-    Guards against a source variable whose land pattern disagrees with the
-    wetmask's, which the normalized regrid would otherwise silently average
-    as zeros — and guarantees the output NaN pattern is the same at every
-    timestep, which training assumes (a finite target at a masked cell NaNs
-    the loss; a NaN target at an unmasked cell NaNs metrics).
-    """
-    valid, expected = xr.broadcast(da.notnull(), wetmask)
-    mismatches = int((valid != expected).sum())
-    if mismatches:
-        raise AssertionError(
-            f"{context}: valid-data footprint of {da.name!r} differs from the "
-            f"wetmask at {mismatches} cells"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Per-chunk processing
 # ---------------------------------------------------------------------------
@@ -221,7 +150,7 @@ def _process_chunk(
     apply the configured postprocess transforms."""
     context = f"stream {stream.name!r}"
     for name in ds.data_vars:
-        _assert_footprint(ds[name], wetmask, context)
+        assert_footprint(ds[name], wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
     regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
@@ -249,8 +178,7 @@ def _process_chunk(
 
     if stream.postprocess:
         chunk_context = ChunkContext(ocean_fraction=ocean_fraction, store=stream.store)
-        for postprocess_name in stream.postprocess:
-            spec = POSTPROCESS[postprocess_name]
+        for spec in stream.postprocess_specs():
             if all(v in output.data_vars for v in spec.requires):
                 output = spec.fn(output, chunk_context)
 
@@ -340,7 +268,7 @@ def build_template(
     # driver when it sets up the store.
     template.update(statics.drop_encoding())
     template.attrs["history"] = (
-        "Dataset computed by ace/scripts/gfdl_cm4_like_am4_randco2/pipeline, "
+        "Dataset computed by ace/scripts/gfdl_om4/pipeline/randco2, "
         f"using the following input sources: {input_urls}."
     )
     return template
@@ -352,8 +280,10 @@ def _expected_output_names(
     stream = config.stream
     names = {stream.renaming.get(name, name) for name in stream_dataset.data_vars}
     names.update(stream.full_cell_variables)
-    for postprocess_name in stream.postprocess:
-        names.update(POSTPROCESS[postprocess_name].adds)
+    specs = stream.postprocess_specs()
+    assert_postprocess_inputs(specs, names, f"stream {stream.name!r}")
+    for spec in specs:
+        names.update(spec.adds)
     return names
 
 
@@ -405,7 +335,7 @@ def main():
     if args.time_shard_size is not None:
         config.output.time_shard_size = args.time_shard_size
         config.output.__post_init__()
-    _assert_output_store_absent(config.output.path)
+    assert_output_store_absent(config.output.path)
 
     logger.info(
         "[config] stream=%s target_grid=%s output=%s time_chunk=%d time_shard=%d",
@@ -461,9 +391,7 @@ def main():
         )
     logger.info("[template] %d output variables", len(template.data_vars))
 
-    output_chunks = {TIME_DIM: config.output.time_chunk_size}
-    output_shards = {TIME_DIM: config.output.time_shard_size}
-    output_store = _make_zarr_store(config.output.path, read_only=False)
+    output_store = make_zarr_store(config.output.path, read_only=False)
 
     chunks = {TIME_DIM: source_time_chunk_size(stream_dataset)}
     logger.info(
@@ -501,15 +429,13 @@ def main():
                 weights_url=config.weights_url,
                 target_grid_name=config.target_grid,
             )
-            | "split" >> xbeam.SplitChunks(split_chunks)
-            | "consolidate" >> xbeam.ConsolidateChunks(output_shards)
-            | "to_zarr"
-            >> xbeam.ChunksToZarr(
+            | "write"
+            >> WriteShardedZarr(
                 output_store,
                 template,
-                zarr_chunks=output_chunks,
-                zarr_shards=output_shards,
-                zarr_format=3,
+                time_chunk_size=config.output.time_chunk_size,
+                time_shard_size=config.output.time_shard_size,
+                split_chunks=split_chunks,
             )
         )
     logger.info("[write] pipeline complete: %s", config.output.path)

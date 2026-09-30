@@ -1,6 +1,6 @@
 # 6-hourly 1-degree sea-surface store for one member of the CM4-like-AM4
 # random-CO2 ensemble. `{member}` is filled from --member (see
-# pipeline/config.py); the nine members are listed in the Makefile.
+# pipeline/config_io.py); the nine members are listed in randco2.mk.
 target_grid: F90
 weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F90
 output:
@@ -33,5 +33,7 @@ stream:
   full_cell_variables:
     - sea_ice_fraction
   postprocess:
-    - kelvin_sst
+    - name: kelvin_sst
+      sources:
+        celsius_sst: SST
     - sea_ice_fraction_consistency
