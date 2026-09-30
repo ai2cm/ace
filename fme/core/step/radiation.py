@@ -71,6 +71,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
+        self.normalization.raise_if_grouped("SeparateRadiationStepConfig")
         seen_names: dict[str, str] = {}
         for name_list, label in (
             (self.main_prognostic_names, "main_prognostic_names"),
