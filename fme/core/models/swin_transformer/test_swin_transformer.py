@@ -168,6 +168,20 @@ def test_cln_forward_backward():
         assert param.grad is not None, f"No gradient for {name}"
 
 
+def test_cln_state_dict_keeps_conv_weight_shapes():
+    """The channels-last CLN path reuses the 1x1 conv parameters, so the state
+    dict (and therefore checkpoint compatibility) is unchanged."""
+    net = _build_net(4, 2, (16, 32), conditioning="cln")
+    state = net.state_dict()
+    scale_keys = [k for k in state if k.endswith("norm1.W_scale_2d.weight")]
+    n_blocks = sum(
+        len(layer.blocks) for layer in (net.layer1, net.layer2, net.layer3, net.layer4)
+    )
+    assert len(scale_keys) == n_blocks
+    for key in scale_keys:
+        assert state[key].shape[2:] == (1, 1), key
+
+
 def test_cln_padded_shape():
     """CLN mode with an img_shape that requires padding exercises pad + subsample."""
     in_chans, out_chans = 4, 2
