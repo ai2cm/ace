@@ -5401,5 +5401,9 @@
   "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-1000yr-sstslab-inference-3xCO2": "01M3KXWP4RBNM3K2S0B0GKJ1DD",
   "ace2-fm-nc-swin-v2-c96-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M3JF663P57CH8SPXJ1YV64BM",
   "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-2xCO2": "01M3M9D38AZ5KW91Z26N589A62",
-  "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-3xCO2": "01M3M9D3BKRC09G8T6QTTK0V30"
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-3xCO2": "01M3M9D3BKRC09G8T6QTTK0V30",
+  "ace2-fm-nc-swin-v2-c96-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-2xCO2": "01M3N9CK99HST0ZF6CXMJ1G1JP",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-cond-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M3MX5232SQBAWT910P4M9FPR",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-finetune": "01M3MX4MZNBSJ7NQ1XNFWHQFJ1",
+  "ace2-fm-nc-swin-v2-fm-a1-mask10-som-eq-dataCO2-1000yr-sstslab-inference-1xCO2": "01M3MX5G33JTEYPHC9EZDE6ETP"
 }
