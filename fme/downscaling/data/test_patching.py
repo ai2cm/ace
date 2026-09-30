@@ -137,17 +137,17 @@ def test_paired_patches_with_random_offset_consistent(overlap):
         # that corresponds to the first patch coordinate in order to
         # determine the offset applied
         coarse_y_offset = torch.where(
-            full_coarse_coords.lat[0] == coarse_patch_coords.lat[0, 0]
+            full_coarse_coords.lat == coarse_patch_coords.lat[0]
         )[0].item()
         coarse_x_offset = torch.where(
-            full_coarse_coords.lon[0] == coarse_patch_coords.lon[0, 0]
+            full_coarse_coords.lon == coarse_patch_coords.lon[0]
         )[0].item()
-        fine_y_offset = torch.where(
-            full_fine_coords.lat[0] == fine_patch_coords.lat[0, 0]
-        )[0].item()
-        fine_x_offset = torch.where(
-            full_fine_coords.lon[0] == fine_patch_coords.lon[0, 0]
-        )[0].item()
+        fine_y_offset = torch.where(full_fine_coords.lat == fine_patch_coords.lat[0])[
+            0
+        ].item()
+        fine_x_offset = torch.where(full_fine_coords.lon == fine_patch_coords.lon[0])[
+            0
+        ].item()
 
         assert fine_y_offset == coarse_y_offset * downscale_factor
         assert fine_x_offset == coarse_x_offset * downscale_factor
