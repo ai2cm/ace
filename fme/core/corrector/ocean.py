@@ -147,7 +147,7 @@ class SurfaceEnergyFluxCorrectionConfig:
 @dataclasses.dataclass
 class FrozenMassBudgetConfig:
     """Configuration for the frozen-mass (sea ice + snow) budget correction,
-    the ``floor_r`` form of the toy frozen-mass corrector.
+    the ``floor_r`` or ``r_diag_floor`` form of the toy frozen-mass corrector.
 
     Per sample and hemisphere h (``lat >= 0``, ``lat < 0``), with
     ``<x>_h = sum(x * area * 1_h)`` and every field per total cell area::
@@ -155,19 +155,22 @@ class FrozenMassBudgetConfig:
         S      = frozen_mass_flux_sum(forcing, hfds_total_area, hfrunoffds,
                                       calving_residue)
         m_diag = m0 + (dt / L_f) (S - r_hat)
-        D      = <m_diag - m_hat>_h
+        m_pre  = m_hat                              floor_r
+               = relu(m_diag)                       r_diag_floor
+        D      = <m_diag - m_pre>_h                 (r_diag_floor: D <= 0)
         f      = sea_surface_fraction * sea_ice_fraction
-        a      = relu(m_hat - c f),  s = m_hat - a
+        a      = relu(m_pre - c f),  s = m_pre - a
         dm     = D f / <f>_h                        D >= 0
                = D a / <a>_h                        -<a>_h <= D < 0
                = -a + (D + <a>_h) s / <s>_h         D < -<a>_h
-        m_c    = relu(m_hat + dm)
+        m_c    = relu(m_pre + dm)
 
-    Each ratio is 0 where its denominator is 0. ``m0`` is the input
-    ``frozen_mass``; ``m_hat``, ``r_hat``, ``hfds_total_area``, ``hfrunoffds``,
-    ``calving_residue`` and the sea ice fraction are generated; the
-    atmosphere fluxes and ``sea_surface_fraction`` are forcing. Only
-    ``frozen_mass`` is modified.
+    Each ratio is 0 where its denominator is 0. ``r_diag_floor`` discards
+    ``m_hat`` and gives ``<m_c>_h = max(0, <m_diag>_h)`` in every hemisphere.
+    ``m0`` is the input ``frozen_mass``; ``m_hat``, ``r_hat``,
+    ``hfds_total_area``, ``hfrunoffds``, ``calving_residue`` and the sea ice
+    fraction are generated; the atmosphere fluxes and
+    ``sea_surface_fraction`` are forcing. Only ``frozen_mass`` is modified.
 
     Parameters:
         frozen_mass_name: Name of the frozen mass [kg m-2 per total area].
@@ -176,12 +179,15 @@ class FrozenMassBudgetConfig:
             the sea surface.
         floor_mass_per_fraction: ``c`` [kg m-2], the mass per unit ice
             fraction kept from melting: SIS2 RHO_ICE * hLim(1).
+        form: ``m_pre``, the field the increment is applied to: ``floor_r``
+            (``m_hat``, the default) or ``r_diag_floor`` (``relu(m_diag)``).
     """
 
     frozen_mass_name: str = "frozen_mass"
     residual_name: str = "frozen_mass_energy_budget_residual"
     sea_ice_fraction_name: str = "ocean_sea_ice_fraction"
     floor_mass_per_fraction: float = 905.0 * 1.0e-10
+    form: Literal["floor_r", "r_diag_floor"] = "floor_r"
 
 
 @dataclasses.dataclass
@@ -360,9 +366,10 @@ class FrozenMassBudgetCorrection:
         m_diag = m0 + self.timestep_seconds / LATENT_HEAT_OF_FREEZING * (
             flux_sum - r_hat
         )
-        available = torch.relu(m_hat - c.floor_mass_per_fraction * f)
-        remainder = m_hat - available
-        dm = torch.zeros_like(m_hat)
+        m_pre = torch.relu(m_diag) if c.form == "r_diag_floor" else m_hat
+        available = torch.relu(m_pre - c.floor_mass_per_fraction * f)
+        remainder = m_pre - available
+        dm = torch.zeros_like(m_pre)
         for hemisphere in self.hemispheres:
             if hemisphere.shape[-2] != m_hat.shape[-2]:
                 raise ValueError(
@@ -374,11 +381,11 @@ class FrozenMassBudgetCorrection:
             def hemisphere_sum(x: torch.Tensor, h: torch.Tensor = h) -> torch.Tensor:
                 return self.area_weighted_sum(x * h, keepdim=True)
 
-            deficit = hemisphere_sum(m_diag - m_hat)
+            deficit = hemisphere_sum(m_diag - m_pre)
             dm = dm + h * _floor_increment(
                 deficit, f, available, remainder, hemisphere_sum
             )
-        m_c = torch.where(region, torch.relu(m_hat + dm).to(out_dtype), m_gen)
+        m_c = torch.where(region, torch.relu(m_pre + dm).to(out_dtype), m_gen)
         return {c.frozen_mass_name: m_c}, corrector_state
 
 
@@ -439,8 +446,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         ocean_heat_content_correction: Optional configuration for an ocean heat
             content correction.
         frozen_mass_budget_correction: Optional configuration for the
-            frozen-mass budget (``floor``) correction. Needs latitudes, so it
-            is not available on HEALPix grids.
+            frozen-mass budget (``floor``) correction, in the ``floor_r``
+            (default) or ``r_diag_floor`` form (``FrozenMassBudgetConfig.form``).
+            Needs latitudes, so it is not available on HEALPix grids.
         keep_gradient_through_clamps: If True, apply the corrector's hard clamps
             (the ``force_positive_names`` clamp and the
             ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through

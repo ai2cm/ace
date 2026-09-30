@@ -781,10 +781,21 @@ _FM_AREA = torch.tensor([0.5, 1.0, 1.2, 1.0, 0.4]).unsqueeze(-1).expand(5, 4)
 _FM_HEMISPHERES = (_FM_LAT >= 0, _FM_LAT < 0)
 
 
-def _fm_corrector(floor_mass_per_fraction: float = 905.0 * 1.0e-10):
+_FM_FORMS = [None, "r_diag_floor"]  # None: FrozenMassBudgetConfig.form unset
+
+
+def _fm_config(form: str | None = None, **kwargs) -> FrozenMassBudgetConfig:
+    if form is not None:
+        kwargs["form"] = form
+    return FrozenMassBudgetConfig(**kwargs)
+
+
+def _fm_corrector(
+    floor_mass_per_fraction: float = 905.0 * 1.0e-10, form: str | None = None
+):
     config = OceanCorrectorConfig(
-        frozen_mass_budget_correction=FrozenMassBudgetConfig(
-            floor_mass_per_fraction=floor_mass_per_fraction
+        frozen_mass_budget_correction=_fm_config(
+            form, floor_mass_per_fraction=floor_mass_per_fraction
         ),
     )
     ops = LatLonOperations(_FM_AREA)
@@ -933,10 +944,11 @@ def test_frozen_mass_budget_correction_ice_free_hemisphere(factor_sign):
         assert x.grad is not None and torch.isfinite(x.grad).all()
 
 
-def test_frozen_mass_budget_correction_float32_gradients_finite():
+@pytest.mark.parametrize("form", _FM_FORMS)
+def test_frozen_mass_budget_correction_float32_gradients_finite(form):
     input_data, gen_data, forcing_data, _, _ = _fm_case([[0.7, 1.4], [1.1, 0.5]])
     gen32 = {k: v.to(torch.float32).requires_grad_(True) for k, v in gen_data.items()}
-    m_c = _fm_corrector()(
+    m_c = _fm_corrector(form=form)(
         {k: v.float() for k, v in input_data.items()},
         gen32,
         {k: v.float() for k, v in forcing_data.items()},
@@ -946,6 +958,9 @@ def test_frozen_mass_budget_correction_float32_gradients_finite():
     m_c.pow(2).sum().backward()
     for name, x in gen32.items():
         assert x.grad is not None and torch.isfinite(x.grad).all(), name
+    if form == "r_diag_floor":  # m_hat discarded on the region
+        region = forcing_data["sea_surface_fraction"] > 0
+        assert (gen32["frozen_mass"].grad[region] == 0).all()
 
 
 def test_frozen_mass_budget_correction_needs_lat():
@@ -986,7 +1001,7 @@ _FM_GEN_NAMES = [
 ]
 
 
-def _fm_target_step(nan_on_land: bool):
+def _fm_target_step(nan_on_land: bool, form: str | None = None):
     """A target step ``0 -> 1`` of a window whose derived names come from the
     loader (``derived.apply``), with the full corrector of the train config
     (``prescribed``, ``runoff_and_calving``, floor). Cell ``[3, 0]`` is all
@@ -1050,7 +1065,7 @@ def _fm_target_step(nan_on_land: bool):
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
             method="prescribed", runoff_and_calving=True
         ),
-        frozen_mass_budget_correction=FrozenMassBudgetConfig(),
+        frozen_mass_budget_correction=_fm_config(form),
     )
     corrector = config._build(
         LatLonOperations(_FM_AREA),
@@ -1073,27 +1088,42 @@ def test_frozen_mass_budget_correction_target_identity():
     )
 
 
+def _fm_noise_frozen_mass(gen_data, where: torch.Tensor, seed: int):
+    """``gen_data`` with ``frozen_mass`` replaced by noise on ``where``."""
+    g = torch.Generator().manual_seed(seed)
+    v = gen_data["frozen_mass"].clone()
+    v[:, where] = 100.0 * torch.randn(v[:, where].shape, generator=g, dtype=v.dtype)
+    return {**gen_data, "frozen_mass": v}
+
+
+@pytest.mark.parametrize("form", _FM_FORMS)
 @pytest.mark.parametrize("input_on_land", ["nan", "zero"])
-def test_frozen_mass_budget_correction_target_identity_nan_on_land(input_on_land):
+def test_frozen_mass_budget_correction_target_identity_nan_on_land(input_on_land, form):
     """03a-c01: the 16-c03 identity holds on ocean cells when the target is
     NaN on land, with the input NaN there (no input masking) or 0 (the
-    train config's ``input_masking``); land passes through."""
-    input_data, gen_data, forcing_data, corrector, land = _fm_target_step(True)
+    train config's ``input_masking``); land passes through. Under
+    ``r_diag_floor`` it holds with any gen frozen_mass on the ocean."""
+    input_data, gen_data, forcing_data, corrector, land = _fm_target_step(True, form)
     assert torch.isnan(gen_data["frozen_mass"][:, land]).all()
     if input_on_land == "zero":
         input_data = {k: torch.nan_to_num(v) for k, v in input_data.items()}
-    m_c = corrector(input_data, gen_data, forcing_data, None).corrected["frozen_mass"]
+    gen_in = gen_data
+    if form == "r_diag_floor":
+        gen_in = _fm_noise_frozen_mass(gen_data, ~land, seed=4)
+    m_c = corrector(input_data, gen_in, forcing_data, None).corrected["frozen_mass"]
     torch.testing.assert_close(
         m_c[:, ~land], gen_data["frozen_mass"][:, ~land], rtol=1e-10, atol=1e-8
     )
     assert torch.isnan(m_c[:, land]).all()
 
 
-def test_frozen_mass_budget_correction_ignores_gen_on_land():
+@pytest.mark.parametrize("form", _FM_FORMS)
+def test_frozen_mass_budget_correction_ignores_gen_on_land(form):
     """03a-c01: output masking runs after the corrector, so the gen values on
     land are network output; they do not change the ocean cells, and land
-    passes through."""
-    input_data, gen_data, forcing_data, corrector, land = _fm_target_step(True)
+    passes through. Under ``r_diag_floor`` gen frozen_mass on the ocean is
+    noise too."""
+    input_data, gen_data, forcing_data, corrector, land = _fm_target_step(True, form)
     input_data = {k: torch.nan_to_num(v) for k, v in input_data.items()}
     g = torch.Generator().manual_seed(2)
     noisy = {}
@@ -1101,6 +1131,8 @@ def test_frozen_mass_budget_correction_ignores_gen_on_land():
         v = v.clone()
         v[:, land] = 100.0 * torch.randn(v[:, land].shape, generator=g, dtype=v.dtype)
         noisy[k] = v
+    if form == "r_diag_floor":
+        noisy = _fm_noise_frozen_mass(noisy, ~land, seed=5)
     m_c = corrector(input_data, noisy, forcing_data, None).corrected["frozen_mass"]
     torch.testing.assert_close(
         m_c[:, ~land], gen_data["frozen_mass"][:, ~land], rtol=1e-10, atol=1e-8
@@ -1119,10 +1151,12 @@ def _fm_mask() -> torch.Tensor:
     return mask
 
 
-def _fm_masked_corrector(mask, floor_mass_per_fraction: float = 905.0 * 1.0e-10):
+def _fm_masked_corrector(
+    mask, floor_mass_per_fraction: float = 905.0 * 1.0e-10, form: str | None = None
+):
     config = OceanCorrectorConfig(
-        frozen_mass_budget_correction=FrozenMassBudgetConfig(
-            floor_mass_per_fraction=floor_mass_per_fraction
+        frozen_mass_budget_correction=_fm_config(
+            form, floor_mass_per_fraction=floor_mass_per_fraction
         ),
     )
     return config._build(
@@ -1134,20 +1168,24 @@ def _fm_masked_corrector(mask, floor_mass_per_fraction: float = 905.0 * 1.0e-10)
     )
 
 
+@pytest.mark.parametrize("form", _FM_FORMS)
 @pytest.mark.parametrize(
     "factors", [[[1.3, 1.1], [1.05, 2.0]], [[0.6, 0.9], [0.2, 0.99]]]
 )
-def test_frozen_mass_budget_correction_mask_budget_on_s(factors):
+def test_frozen_mass_budget_correction_mask_budget_on_s(factors, form):
     """09: the hemisphere budget closes over S = wet & mask == 1, and
-    frozen_mass passes through on Z = wet & mask == 0."""
+    frozen_mass passes through on Z = wet & mask == 0. Under
+    ``r_diag_floor``, m_diag >= 0 gives m_c = m_diag on S."""
     input_data, gen_data, forcing_data, m_diag, _ = _fm_case(factors)
     mask = _fm_mask()
     s = (forcing_data["sea_surface_fraction"] > 0) & (mask == 1)
     z = (forcing_data["sea_surface_fraction"] > 0) & (mask == 0)
     assert (gen_data["frozen_mass"][z] > 0).all()
-    m_c = _fm_masked_corrector(mask)(
+    m_c = _fm_masked_corrector(mask, form=form)(
         input_data, gen_data, forcing_data, None
     ).corrected["frozen_mass"]
+    if form == "r_diag_floor":
+        torch.testing.assert_close(m_c[s], m_diag[s], rtol=1e-10, atol=1e-8)
     for h in _FM_HEMISPHERES:
         torch.testing.assert_close(
             _fm_sum(m_c * s, h),
@@ -1159,15 +1197,19 @@ def test_frozen_mass_budget_correction_mask_budget_on_s(factors):
     assert torch.equal(m_c[z], gen_data["frozen_mass"][z])
 
 
-def test_frozen_mass_budget_correction_mask_ignores_z():
+@pytest.mark.parametrize("form", _FM_FORMS)
+def test_frozen_mass_budget_correction_mask_ignores_z(form):
     """09: values on Z of every field the corrector reads do not change m_c on
-    S; m_c on Z is the (changed) gen frozen_mass."""
-    input_data, gen_data, forcing_data, _, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
+    S; m_c on Z is the (changed) gen frozen_mass. Under ``r_diag_floor``,
+    m_diag >= 0 gives m_c = m_diag on S."""
+    input_data, gen_data, forcing_data, m_diag, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
     mask = _fm_mask()
-    corrector = _fm_masked_corrector(mask)
+    corrector = _fm_masked_corrector(mask, form=form)
     s = (forcing_data["sea_surface_fraction"] > 0) & (mask == 1)
     z = (forcing_data["sea_surface_fraction"] > 0) & (mask == 0)
     m_c = corrector(input_data, gen_data, forcing_data, None).corrected["frozen_mass"]
+    if form == "r_diag_floor":
+        torch.testing.assert_close(m_c[s], m_diag[s], rtol=1e-10, atol=1e-8)
     g = torch.Generator().manual_seed(3)
 
     def perturb(data):
@@ -1198,12 +1240,10 @@ def _fm_dataset_info(spatial_mask_provider):
     )
 
 
-def _fm_get_corrector_result(dataset_info, mask):
+def _fm_get_corrector_result(dataset_info, mask, form: str | None = None):
     """``m_c`` from ``_get_corrector(dataset_info)`` and from ``_build`` with
     ``frozen_mass_mask=mask`` on the same grid."""
-    config = OceanCorrectorConfig(
-        frozen_mass_budget_correction=FrozenMassBudgetConfig()
-    )
+    config = OceanCorrectorConfig(frozen_mass_budget_correction=_fm_config(form))
     input_data, gen_data, forcing_data, _, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
     got = config._get_corrector(dataset_info)(
         input_data, gen_data, forcing_data, None
@@ -1246,17 +1286,23 @@ def test_frozen_mass_budget_correction_get_corrector_uses_mask(mask_name):
     ],
     ids=["missing", "null", "no_frozen_mass_mask"],
 )
-def test_frozen_mass_budget_correction_get_corrector_no_mask(spatial_mask_provider):
-    """09: with no frozen_mass mask the corrector sums over wet, as before."""
+@pytest.mark.parametrize("form", _FM_FORMS)
+def test_frozen_mass_budget_correction_get_corrector_no_mask(
+    spatial_mask_provider, form
+):
+    """09: with no frozen_mass mask the corrector sums over wet, as before.
+    Under ``r_diag_floor``, m_diag >= 0 gives m_c = m_diag on wet."""
     dataset_info = _fm_dataset_info(spatial_mask_provider)
-    config = OceanCorrectorConfig(
-        frozen_mass_budget_correction=FrozenMassBudgetConfig()
-    )
+    config = OceanCorrectorConfig(frozen_mass_budget_correction=_fm_config(form))
     (correction,) = config._get_corrector(dataset_info)._corrections
     assert isinstance(correction, FrozenMassBudgetCorrection)
     assert correction.mask is None
-    got, expected = _fm_get_corrector_result(dataset_info, None)
+    got, expected = _fm_get_corrector_result(dataset_info, None, form)
     torch.testing.assert_close(got, expected, rtol=0, atol=0)
+    if form == "r_diag_floor":
+        _, _, forcing_data, m_diag, _ = _fm_case([[1.3, 0.7], [0.4, 1.6]])
+        wet = forcing_data["sea_surface_fraction"] > 0
+        torch.testing.assert_close(got[wet], m_diag[wet], rtol=1e-10, atol=1e-8)
 
 
 def test_frozen_mass_budget_correction_get_corrector_uses_frozen_mass_name():
@@ -1283,3 +1329,185 @@ def test_frozen_mass_budget_correction_get_corrector_uses_frozen_mass_name():
     ).corrected["ice_mass"]
     expected = _fm_get_corrector_result(dataset_info, mask)[1]
     torch.testing.assert_close(got, expected, rtol=0, atol=0)
+
+
+def test_frozen_mass_budget_correction_form_default_is_floor_r():
+    """11: ``form`` unset and ``form="floor_r"`` give identical m_c."""
+    assert FrozenMassBudgetConfig().form == "floor_r"
+    for factors in ([[1.3, 1.1], [1.05, 2.0]], [[0.6, 0.9], [0.2, 0.99]]):
+        input_data, gen_data, forcing_data, _, _ = _fm_case(factors)
+        unset, explicit = (
+            _fm_corrector(form=form)(
+                input_data, gen_data, forcing_data, None
+            ).corrected["frozen_mass"]
+            for form in (None, "floor_r")
+        )
+        assert torch.equal(unset, explicit)
+
+
+def test_frozen_mass_budget_correction_from_state_without_form():
+    """11: a saved FrozenMassBudgetConfig state without ``form`` loads as
+    ``floor_r``."""
+    fm_state = dataclasses.asdict(FrozenMassBudgetConfig())
+    del fm_state["form"]
+    config = OceanCorrectorConfig.from_state(
+        {"frozen_mass_budget_correction": fm_state}
+    )
+    assert config.frozen_mass_budget_correction == FrozenMassBudgetConfig()
+    assert config.frozen_mass_budget_correction.form == "floor_r"
+
+
+def _fm_set_diag(input_data, gen_data, forcing_data, m_diag):
+    """Set gen r_hat so the corrector's m_diag is ``m_diag`` (in place)."""
+    flux_sum = frozen_mass_flux_sum(
+        forcing_data,
+        gen_data["hfds_total_area"],
+        gen_data["hfrunoffds"],
+        gen_data["calving_residue"],
+    )
+    gen_data["frozen_mass_energy_budget_residual"] = (
+        flux_sum
+        - LATENT_HEAT_OF_FREEZING * (m_diag - input_data["frozen_mass"]) / _FM_DT
+    )
+
+
+def _fm_r_diag_floor_expected(m_diag, f, c, region):
+    """``r_diag_floor`` m_c on ``region``, per branch in closed form:
+    p = relu(m_diag), a = relu(p - c f), s = p - a, D = <m_diag - p>_h;
+    p + D a / <a>_h if D >= -<a>_h, else s relu(<m_diag>_h) / <s>_h."""
+    zero = torch.zeros_like(m_diag)
+    m_diag = torch.where(region, m_diag, zero)
+    p = m_diag.clamp(min=0)
+    a = (p - c * f).clamp(min=0)
+    s = p - a
+    out = torch.zeros_like(m_diag)
+    for h in _FM_HEMISPHERES:
+        deficit = _fm_sum(m_diag - p, h)
+        total_a, total_s = _fm_sum(a, h), _fm_sum(s, h)
+        melt = p + deficit * a / torch.where(total_a > 0, total_a, 1.0)
+        past = torch.where(
+            total_s > 0,
+            s * _fm_sum(m_diag, h).clamp(min=0) / torch.where(total_s > 0, total_s, 1),
+            zero,
+        )
+        out[..., h, :] = torch.where(deficit >= -total_a, melt, past)[..., h, :]
+    return out
+
+
+def _fm_r_diag_case(name: str):
+    """A step for ``r_diag_floor`` whose m_diag has the sign pattern ``name``.
+
+    Returns input, gen and forcing data, m_diag, f and the floor ``c``.
+    """
+    c = 905.0 * 1.0e-10
+    ice_free_south = name.startswith("ice_free")
+    factors = {
+        "no_negative": [[1.3, 0.7], [0.4, 1.6]],
+        "melt": [[1.0, 0.9], [1.2, 0.8]],
+        "melt_past_floor": [[0.1, 0.05], [0.5, 0.2]],
+        "negative_sum": [[0.5, 0.5], [0.5, 0.5]],
+        "ice_free_positive": [[1.2, 1.0], [0.8, 1.0]],
+        "ice_free_negative": [[1.2, 1.0], [0.8, 1.0]],
+    }[name]
+    input_data, gen_data, forcing_data, m_diag, f = _fm_case(factors)
+    wet = forcing_data["sea_surface_fraction"] > 0
+    south = _FM_HEMISPHERES[1]
+    m_diag = m_diag.clone()
+    if name == "no_negative":
+        m_diag[:, 0, 0] += 50.0  # m_diag > 0 where f = 0
+    elif name == "melt":
+        m_diag[:, 2, 3] = -30.0  # north
+        m_diag[:, 0, 1] = -20.0  # south
+    elif name == "melt_past_floor":
+        c = 300.0
+        m_diag[:, 2, 3] = -100.0
+        m_diag[:, 0, 1] = -200.0
+        m_diag[1, 4, :] = -2000.0  # sample 1, north: <m_diag> < 0
+    elif name == "negative_sum":
+        m_diag[:, 2, 3] = -30.0
+        m_diag[0, 1, :] = -2000.0  # sample 0, south: <m_diag> < 0
+    elif ice_free_south:
+        gen_data["frozen_mass"][:, south] = 0.0
+        gen_data["ocean_sea_ice_fraction"][:, south] = 0.0
+        f = forcing_data["sea_surface_fraction"] * gen_data["ocean_sea_ice_fraction"]
+        g = torch.Generator().manual_seed(6)
+        shift = 50.0 if name == "ice_free_positive" else 150.0
+        noise = 200.0 * torch.rand(m_diag[:, south].shape, generator=g) - shift
+        m_diag[:, south] = noise.to(m_diag.dtype)
+        m_diag[:, 2, 3] = -30.0  # north melts
+    m_diag = torch.where(wet, m_diag, torch.zeros_like(m_diag))
+    _fm_set_diag(input_data, gen_data, forcing_data, m_diag)
+    return input_data, gen_data, forcing_data, m_diag, f, c
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "no_negative",
+        "melt",
+        "melt_past_floor",
+        "negative_sum",
+        "ice_free_positive",
+        "ice_free_negative",
+    ],
+)
+def test_frozen_mass_budget_correction_r_diag_floor_identity(name):
+    """11 (16-c05): under r_diag_floor, per sample and hemisphere,
+    <m_c>_h = max(0, <m_diag>_h) and m_c >= 0; per cell, m_c is the closed
+    form of each branch."""
+    input_data, gen_data, forcing_data, m_diag, f, c = _fm_r_diag_case(name)
+    region = forcing_data["sea_surface_fraction"] > 0
+    p = m_diag.clamp(min=0)
+    a = (p - c * f).clamp(min=0)
+    deficits = torch.stack([_fm_sum(m_diag - p, h) for h in _FM_HEMISPHERES])
+    totals_a = torch.stack([_fm_sum(a, h) for h in _FM_HEMISPHERES])
+    sums = torch.stack([_fm_sum(m_diag, h) for h in _FM_HEMISPHERES])
+    # the case is in the branch its name claims
+    if name == "no_negative":
+        assert (m_diag >= 0).all() and (m_diag[:, 0, 0] > 0).all()
+        assert (deficits == 0).all()
+    elif name == "melt":
+        assert ((deficits < 0) & (deficits >= -totals_a)).all()
+    elif name == "melt_past_floor":
+        assert (deficits < -totals_a).all()
+        assert (sums[0, 1] < 0).all() and (sums[:, 0] > 0).all()
+    elif name == "negative_sum":
+        assert (sums[1, 0] < 0).all() and (sums[0] > 0).all()
+    else:
+        south = _FM_HEMISPHERES[1]
+        assert (_fm_sum(f, south) == 0).all()
+        assert (m_diag[:, south] < 0).any() and (m_diag[:, south] > 0).any()
+        sign = 1 if name == "ice_free_positive" else -1
+        assert (sign * sums[1] > 0).all()
+    m_c = _fm_corrector(c, form="r_diag_floor")(
+        input_data, gen_data, forcing_data, None
+    ).corrected["frozen_mass"]
+    _assert_hemisphere_budget(m_c, m_diag)
+    expected = _fm_r_diag_floor_expected(m_diag, f, c, region)
+    torch.testing.assert_close(m_c[region], expected[region], rtol=1e-8, atol=1e-8)
+    assert torch.equal(m_c[~region], gen_data["frozen_mass"][~region])
+    if name == "no_negative":
+        torch.testing.assert_close(m_c, m_diag, rtol=1e-10, atol=1e-8)
+    if name == "melt_past_floor":
+        assert (m_c[1, _FM_HEMISPHERES[0]] == 0).all()
+    if name == "negative_sum":
+        assert (m_c[0, _FM_HEMISPHERES[1]] == 0).all()
+
+
+def test_frozen_mass_budget_correction_r_diag_floor_discards_m_hat():
+    """11: under r_diag_floor, gen frozen_mass on the region does not change
+    m_c there."""
+    input_data, gen_data, forcing_data, _, _, c = _fm_r_diag_case("melt")
+    region = forcing_data["sea_surface_fraction"] > 0
+    corrector = _fm_corrector(c, form="r_diag_floor")
+    m_c = corrector(input_data, gen_data, forcing_data, None).corrected["frozen_mass"]
+    g = torch.Generator().manual_seed(7)
+    m_hat = gen_data["frozen_mass"].clone()
+    m_hat[region] = 1000.0 * torch.rand(
+        m_hat[region].shape, generator=g, dtype=m_hat.dtype
+    )
+    m_c_new = corrector(
+        input_data, {**gen_data, "frozen_mass": m_hat}, forcing_data, None
+    ).corrected["frozen_mass"]
+    assert not torch.equal(m_hat[region], gen_data["frozen_mass"][region])
+    assert torch.equal(m_c_new[region], m_c[region])
