@@ -38,4 +38,18 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw90
 # min_runtime 8h: the pretraining ran with 3h and lost a 12-hour job to
 # preemption.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|yva51vwg|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M1PV0PX1Q85J1TMMBDG023J5|8h
+#
+# rs0 finished 10 epochs 2026-09-08 and is disarmed to "trained". rs1/rs2 added
+# 2026-09-30, fine-tuning the seeds launched 2026-09-28 so the arm has three
+# seeds at matched 8-step unroll. Identical to rs0 in every override token but
+# `seed`.
+#
+# Every seed's pretraining was preempted several times, so each experiment
+# carries 4-5 result datasets; results_dataset is pinned to the LAST job's for
+# each, which is the one holding the finished checkpoints.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs0|ace-samudra-cm4|yva51vwg|best_ckpt|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M1PV0PX1Q85J1TMMBDG023J5|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs1|ace-samudra-cm4|e2g2rnub|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M3SCT647C60FMDCR6C6T03Q3|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs2|ace-samudra-cm4|p9hay7uf|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='uniform_temperature' optimization.max_grad_norm=1.0|01M3SYFYNP0AP1R93RF0FBDEAF|8h
