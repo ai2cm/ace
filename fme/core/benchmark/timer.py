@@ -55,11 +55,7 @@ class Timer(Protocol):
 
 
 class NullTimer:
-    # child is a generator-based context manager because torch.compile's dynamo
-    # tracer graph-breaks on arbitrary objects used as context managers, but can
-    # trace through @contextlib.contextmanager generators. Do not replace this
-    # with contextlib.nullcontext(self): dynamo 2.7.1 traces that as yielding
-    # None, which silently breaks nested `with timer.child(...) as t` usage.
+    # generator-based so dynamo can trace it; nullcontext(self) yields None under dynamo
     @contextlib.contextmanager
     def child(self, name: str) -> Iterator["NullTimer"]:
         yield self
