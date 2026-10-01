@@ -385,7 +385,7 @@ def run_inference_from_config(config: InferenceConfig):
         n_ic = initial_condition.as_batch_data().time.sizes["sample"]
         ic_already_sharded = (
             dist.total_data_parallel_ranks > 1
-            and BatchData.dataset_has_embedded_state(ic_ds)
+            and BatchData.dataset_has_gathered_state(ic_ds)
         )
         if not ic_already_sharded:
             # Validate divisibility (raises ValueError if not divisible).

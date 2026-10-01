@@ -509,6 +509,18 @@ class BatchData:
         """
         return _SCHEMA_ATTR in ds.attrs
 
+    @staticmethod
+    def dataset_has_gathered_state(ds: xr.Dataset) -> bool:
+        """Whether ``ds`` carries gathered (multi-rank) stepper state.
+
+        True iff the embedded stepper state includes the ``n_ranks`` marker
+        written by ``GatheredStepperState.to_state_dict``, indicating the
+        restart was produced by a multi-GPU data-parallel run.  A single-rank
+        restart has embedded state (``dataset_has_embedded_state`` is True)
+        but is NOT gathered.
+        """
+        return f"{_STEPPER_PREFIX}n_ranks" in ds.data_vars
+
     def validate_initial_condition(
         self, requirements: InitialConditionRequirements
     ) -> None:
@@ -606,15 +618,21 @@ class BatchData:
         reader in ``get_initial_condition``). ``horizontal_dims`` is recovered
         from the prognostic variables' dims.
 
-        Under multi-GPU data parallelism the restart file holds gathered
-        state (written by ``GatheredBatchData``). Only root reads the
-        file; the data is reconstructed as a ``GatheredBatchData`` and
-        scattered to every rank via ``data_parallel_scatter``, so each
-        rank receives its own shard as a plain ``BatchData``.
+        Under multi-GPU data parallelism the restart file may hold gathered
+        state (written by ``GatheredBatchData``).  When a gathered restart is
+        detected (``dataset_has_gathered_state``), only root reads the file;
+        the data is reconstructed as a ``GatheredBatchData`` and scattered to
+        every rank via ``data_parallel_scatter``, so each rank receives its
+        own shard as a plain ``BatchData``.
+
+        A single-rank restart (embedded state but no ``n_ranks`` marker) is
+        read independently by every rank and returned as-is; the caller
+        (e.g. ``inference.py``) is responsible for sharding via
+        ``select_sample_slice``.
         """
         dist = Distributed.get_instance()
-        if dist.total_data_parallel_ranks > 1:
-            if dist.is_root():
+        if dist.total_data_parallel_ranks > 1 and cls.dataset_has_gathered_state(ds):
+            if dist.is_data_parallel_root():
                 gathered = GatheredBatchData.from_xarray_dataset(ds)
             else:
                 gathered = None
