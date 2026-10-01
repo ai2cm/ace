@@ -928,35 +928,18 @@ class BatchData:
 
     def data_parallel_gather(
         self, dist: Distributed | None = None
-    ) -> "GatheredBatchData | None":
+    ) -> "GatheredBatchData | BatchData | None":
         """Gather data-parallel shards to root along the sample dimension.
 
         Returns a CPU ``GatheredBatchData`` on root (preserving per-rank
-        random states), ``None`` on other ranks.
+        random states), ``None`` on other ranks.  When there is only one
+        data-parallel rank, returns ``self`` unchanged.
         """
         self._raise_if_step_diagnostics("data_parallel_gather")
         if dist is None:
             dist = Distributed.get_instance()
         if dist.total_data_parallel_ranks == 1:
-            stepper_state = (
-                GatheredStepperState.from_per_rank_states([self.stepper_state])
-                if self.stepper_state is not None
-                else None
-            )
-            return GatheredBatchData(
-                data=dict(self.data),
-                time=self.time,
-                horizontal_dims=self.horizontal_dims,
-                epoch=self.epoch,
-                labels=self.labels,
-                n_ensemble=self.n_ensemble,
-                stepper_state=stepper_state,
-                data_mask=(
-                    dict(self.data_mask)
-                    if self.data_mask is not None
-                    else None
-                ),
-            )
+            return self
         if dist.has_spatial_parallelism:
             raise NotImplementedError(
                 "BatchData.data_parallel_gather with spatial parallelism"
@@ -1001,8 +984,8 @@ class BatchData:
 
         if gathered_parts[0]["stepper_state"] is not None:
             gathered_stepper_state: GatheredStepperState | None = (
-                GatheredStepperState.from_per_rank_states(
-                    [p["stepper_state"] for p in gathered_parts]
+                GatheredStepperState(
+                    states=[p["stepper_state"] for p in gathered_parts]
                 )
             )
         else:
