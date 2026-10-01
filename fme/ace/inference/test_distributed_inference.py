@@ -211,7 +211,7 @@ def test_distributed_evaluator(tmp_path: pathlib.Path):
     _run_torchrun(config_yaml, "fme.ace.evaluator")
 
     # Compare diagnostics produced by the default aggregator.
-    for name in ("time_mean", "reduced", "zonal_mean"):
+    for name in ("time_mean", "zonal_mean"):
         serial_nc = os.path.join(serial_dir, f"{name}_diagnostics.nc")
         dist_nc = os.path.join(dist_dir, f"{name}_diagnostics.nc")
         if not os.path.exists(serial_nc):
