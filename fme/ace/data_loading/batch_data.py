@@ -252,6 +252,9 @@ class BatchData:
     data_mask: TensorMapping | None = None
     stepper_state: StepperState | None = None
     step_diagnostics: StepDiagnostics | None = None
+    _gathered_stepper_state: GatheredStepperState | None = dataclasses.field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @classmethod
     def new_for_testing(
@@ -627,8 +630,13 @@ class BatchData:
                     str(d) for d in da.dims if d not in (_SAMPLE_DIM, _TIME_DIM)
                 ]
 
-        stepper_state, labels, data_mask = cls._decode_reserved_state(ds)
-        return cls.new_on_cpu(
+        stepper_state, gathered, labels, data_mask = cls._decode_reserved_state(ds)
+        if gathered is not None:
+            dist = Distributed.get_instance()
+            if dist.total_data_parallel_ranks == 1:
+                stepper_state = gathered.get_for_rank(0)
+                gathered = None
+        batch = cls.new_on_cpu(
             data=data,
             time=time,
             labels=labels,
@@ -636,6 +644,9 @@ class BatchData:
             stepper_state=stepper_state,
             horizontal_dims=horizontal_dims,
         )
+        if gathered is not None:
+            batch._gathered_stepper_state = gathered
+        return batch
 
     def _encode_reserved_state(
         self,
@@ -687,7 +698,12 @@ class BatchData:
     @classmethod
     def _decode_reserved_state(
         cls, ds: xr.Dataset
-    ) -> tuple[StepperState | None, BatchLabels | None, dict[str, torch.Tensor] | None]:
+    ) -> tuple[
+        StepperState | None,
+        GatheredStepperState | None,
+        BatchLabels | None,
+        dict[str, torch.Tensor] | None,
+    ]:
         state_dict: dict[str, torch.Tensor] = {}
         data_mask: dict[str, torch.Tensor] = {}
         for name in ds.data_vars:
@@ -699,24 +715,19 @@ class BatchData:
                     ds[name]
                 )
 
-        stepper_state: StepperState | None
-        if not state_dict:
-            stepper_state = None
-        else:
+        stepper_state: StepperState | None = None
+        gathered_stepper: GatheredStepperState | None = None
+        if state_dict:
             try:
-                gathered = GatheredStepperState.from_state_dict(state_dict)
+                gathered_stepper = GatheredStepperState.from_state_dict(state_dict)
             except UngatheredStateDictError:
                 stepper_state = StepperState.from_state_dict(state_dict)
-            else:
-                dist = Distributed.get_instance()
-                stepper_state = gathered.scatter_random_state(
-                    dist.data_parallel_rank
-                )
+
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:
             names = [str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values]
             labels = BatchLabels(_restore_tensor(ds[_LABELS_VALUES_VAR]), names=names)
-        return stepper_state, labels, (data_mask or None)
+        return stepper_state, gathered_stepper, labels, (data_mask or None)
 
     def __post_init__(self):
         if len(self.time.shape) != 2:

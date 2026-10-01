@@ -22,23 +22,6 @@ def _make_stepper_state(n_samples: int, seed: int | None = None) -> StepperState
     return StepperState(corrector_state=corrector, random_state=random_state)
 
 
-class TestCorrectorStateConcat:
-    def test_concat(self):
-        c0 = CorrectorState(global_dry_air_mass=torch.tensor([[[1.0]]]))
-        c1 = CorrectorState(global_dry_air_mass=torch.tensor([[[2.0]]]))
-        result = CorrectorState.concat([c0, c1])
-        torch.testing.assert_close(
-            result.global_dry_air_mass,
-            torch.tensor([[[1.0]], [[2.0]]]),
-        )
-
-    def test_concat_none_field(self):
-        c0 = CorrectorState(global_dry_air_mass=None)
-        c1 = CorrectorState(global_dry_air_mass=None)
-        result = CorrectorState.concat([c0, c1])
-        assert result.global_dry_air_mass is None
-
-
 class TestGatheredStepperState:
     def test_get_for_rank(self):
         s0 = _make_stepper_state(n_samples=2, seed=10)
@@ -52,43 +35,6 @@ class TestGatheredStepperState:
         s1 = _make_stepper_state(n_samples=2, seed=20)
         gathered = GatheredStepperState(states=[s0, s1])
         assert gathered.n_ranks == 2
-
-    def test_scatter_random_state_concatenates_correctors(self):
-        s0 = StepperState(
-            corrector_state=CorrectorState(
-                global_dry_air_mass=torch.tensor([[[1.0]]])
-            ),
-            random_state=_make_random_state(10),
-        )
-        s1 = StepperState(
-            corrector_state=CorrectorState(
-                global_dry_air_mass=torch.tensor([[[2.0]]])
-            ),
-            random_state=_make_random_state(20),
-        )
-        gathered = GatheredStepperState(states=[s0, s1])
-
-        result = gathered.scatter_random_state(1)
-        assert result.random_state is s1.random_state
-        assert result.corrector_state is not None
-        torch.testing.assert_close(
-            result.corrector_state.global_dry_air_mass,
-            torch.tensor([[[1.0]], [[2.0]]]),
-        )
-
-    def test_scatter_random_state_no_corrector(self):
-        s0 = StepperState(
-            corrector_state=None,
-            random_state=_make_random_state(10),
-        )
-        s1 = StepperState(
-            corrector_state=None,
-            random_state=_make_random_state(20),
-        )
-        gathered = GatheredStepperState(states=[s0, s1])
-        result = gathered.scatter_random_state(0)
-        assert result.corrector_state is None
-        assert result.random_state is s0.random_state
 
     def test_round_trip_state_dict(self):
         rs0 = _make_random_state(10)

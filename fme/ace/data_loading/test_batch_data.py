@@ -35,7 +35,7 @@ _METADATA_FIELDS = {
     "stepper_state",
     "step_diagnostics",
 }
-_NON_METADATA_FIELDS = {"data", "time"}
+_NON_METADATA_FIELDS = {"data", "time", "_gathered_stepper_state"}
 
 
 def assert_metadata_equal(
@@ -437,13 +437,54 @@ def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
     assert torch.equal(states[1], reference_r1)
 
 
-@pytest.mark.parametrize("data_parallel_rank", [0, 1])
-def test_gathered_batch_data_xarray_round_trip_scatters_on_read(
-    data_parallel_rank: int,
-):
-    """GatheredBatchData.to_xarray_dataset → BatchData.from_xarray_dataset
-    scatters the per-rank random state internally, returning a plain
-    BatchData with the requested rank's StepperState."""
+def test_gathered_batch_data_xarray_round_trip_single_rank():
+    """In single-rank mode, from_xarray_dataset resolves the per-rank
+    stepper state directly via get_for_rank(0)."""
+    rs0 = RandomState.from_seed(10)
+    torch.randn(5, generator=rs0.generator)
+    expected_gen_state = rs0.generator.get_state().clone()
+
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]], [[2.0]]])
+                ),
+                random_state=rs0,
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    ds = gathered.to_xarray_dataset()
+    restored = BatchData.from_xarray_dataset(ds)
+
+    # Single-rank: resolved to rank 0's state directly.
+    assert isinstance(restored.stepper_state, StepperState)
+    assert restored.stepper_state.random_state is not None
+    assert torch.equal(
+        restored.stepper_state.random_state.generator.get_state(),
+        expected_gen_state,
+    )
+    assert restored.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        restored.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[1.0]], [[2.0]]]),
+    )
+    assert restored._gathered_stepper_state is None
+
+
+def test_gathered_batch_data_xarray_round_trip_multi_rank():
+    """In multi-rank mode, from_xarray_dataset stores the GatheredStepperState
+    on the BatchData for later resolution after IC sharding."""
     rs0 = RandomState.from_seed(10)
     rs1 = RandomState.from_seed(20)
     torch.randn(5, generator=rs0.generator)
@@ -481,25 +522,30 @@ def test_gathered_batch_data_xarray_round_trip_scatters_on_read(
     ds = gathered.to_xarray_dataset()
     with unittest.mock.patch.object(
         Distributed,
-        "data_parallel_rank",
-        new_callable=lambda: property(
-            lambda self: data_parallel_rank
-        ),
+        "total_data_parallel_ranks",
+        new_callable=lambda: property(lambda self: 2),
     ):
         restored = BatchData.from_xarray_dataset(ds)
 
-    assert isinstance(restored.stepper_state, StepperState)
-    assert restored.stepper_state.random_state is not None
-    assert torch.equal(
-        restored.stepper_state.random_state.generator.get_state(),
-        expected_states[data_parallel_rank],
-    )
-    # Corrector is preserved in full (all samples) regardless of rank.
-    assert restored.stepper_state.corrector_state is not None
-    torch.testing.assert_close(
-        restored.stepper_state.corrector_state.global_dry_air_mass,
-        torch.tensor([[[1.0]], [[2.0]]]),
-    )
+    # Multi-rank: stepper_state is None, gathered stored for later.
+    assert restored.stepper_state is None
+    assert restored._gathered_stepper_state is not None
+    assert restored._gathered_stepper_state.n_ranks == 2
+
+    # Resolve per-rank state (simulating post-IC-sharding attachment).
+    for rank in range(2):
+        rank_state = restored._gathered_stepper_state.get_for_rank(rank)
+        assert rank_state.random_state is not None
+        assert torch.equal(
+            rank_state.random_state.generator.get_state(),
+            expected_states[rank],
+        )
+        assert rank_state.corrector_state is not None
+        expected_corrector = torch.tensor([[[float(rank + 1)]]])
+        torch.testing.assert_close(
+            rank_state.corrector_state.global_dry_air_mass,
+            expected_corrector,
+        )
 
 
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])

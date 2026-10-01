@@ -398,12 +398,19 @@ def run_inference_from_config(config: InferenceConfig):
         # Must happen before the ensemble broadcast.
         if dist.total_data_parallel_ranks > 1:
             ic_batch = data.initial_condition.as_batch_data()
+            gathered = ic_batch._gathered_stepper_state
             start, end = local_ic_range(
                 n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
             )
-            data._initial_condition = PrognosticState(
-                ic_batch.select_sample_slice(slice(start, end))
-            )
+            sliced = ic_batch.select_sample_slice(slice(start, end))
+            if gathered is not None:
+                sliced = dataclasses.replace(
+                    sliced,
+                    stepper_state=gathered.get_for_rank(
+                        dist.data_parallel_rank
+                    ),
+                )
+            data._initial_condition = PrognosticState(sliced)
 
         # Broadcast the initial condition across ensemble members only after the
         # forcing loader is built, mirroring the evaluator path. The forcing then

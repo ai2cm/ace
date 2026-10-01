@@ -187,26 +187,6 @@ class GatheredStepperState:
         """Return the ``StepperState`` for a single data-parallel rank."""
         return self._states[rank]
 
-    def scatter_random_state(self, rank: int) -> StepperState:
-        """Return a ``StepperState`` with the corrector gathered from
-        all ranks and only the specified rank's random state.
-
-        The restart file stores data for all samples together, so the
-        corrector must match the full sample count; this method
-        concatenates the per-rank corrector shards for that purpose.
-        """
-        correctors = [s.corrector_state for s in self._states]
-        if correctors[0] is not None:
-            gathered_corrector: CorrectorState | None = CorrectorState.concat(
-                correctors  # type: ignore[arg-type]
-            )
-        else:
-            gathered_corrector = None
-        return StepperState(
-            corrector_state=gathered_corrector,
-            random_state=self._states[rank].random_state,
-        )
-
     def to_state_dict(self) -> dict[str, torch.Tensor]:
         """Serialize for a restart file.
 
