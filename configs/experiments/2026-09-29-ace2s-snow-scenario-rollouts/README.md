@@ -58,6 +58,16 @@ Sharded zarr v3: offline gcsfs reads need the suffix-range patch
 (`scripts/data_process/snow_masked_channels/masked_snow.patch_gcsfs_suffix_ranges`)
 until gcsfs is fixed.
 
+## 1pctCO2 W&B summaries
+
+The two 1pctCO2 runs completed and wrote all outputs, but crashed while building
+their end-of-run W&B summary: this branch predates the year-0001 date-axis fix
+for the ENSO/IPO index plots (#1439). Their summaries come from writer-free
+reruns (`-summary` job names and experiment dirs) with `enso_index` and
+`ipo_index` disabled; those indices are the prescribed SST read back in these
+runs (predicted Nino3.4 equals the target bitwise). The rerun trajectories are
+checked bitwise against the original runs via `restart.nc`.
+
 ## Launch
 
 The piControl jobs run at normal priority and finish inside the 8h

@@ -14,7 +14,13 @@
 #   OVERRIDE="n_forward_steps=1000 experiment_dir=gs://vcm-ml-intermediate/2026-09-29-ace2s-snow-scenario-rollouts/dry-run" \
 #     ./run-ace-evaluator.sh masked-naive-1pctco2
 # Overriding experiment_dir keeps the dry run's small zarr stores out of the
-# real output location. Job names get a -dry suffix so W&B stays tidy.
+# real output location. Job names get a -dry suffix so W&B stays tidy; set
+# JOB_SUFFIX to use a different one (an empty JOB_SUFFIX means none).
+#
+# Writer-free rerun of a run's summaries (the model trajectory is unchanged, so
+# the W&B summaries describe the saved outputs; check restart.nc bitwise):
+#   JOB_SUFFIX=-summary OVERRIDE="data_writer.files=null aggregator.enso_index.enabled=false aggregator.ipo_index.enabled=false experiment_dir=gs://vcm-ml-intermediate/2026-09-29-ace2s-snow-scenario-rollouts/cm4-control-1pctco2-summary" \
+#     ./run-ace-evaluator.sh control-1pctco2
 
 set -e
 
@@ -36,10 +42,12 @@ run_evaluator() {
     local job_name="ace2s-snowmetrics-${arm}-${scenario}-rollout"
     local config_path="${SCRIPT_PATH}${arm}-${scenario}-evaluator.yaml"
     local override_args=()
+    local suffix="${JOB_SUFFIX:-}"
     if [ -n "${OVERRIDE:-}" ]; then
-        job_name="${job_name}-dry"
+        suffix="${JOB_SUFFIX--dry}"
         override_args=(--override $OVERRIDE)
     fi
+    job_name="${job_name}${suffix}"
 
     if [ -n "$SELECT" ] && [[ "$job_name" != *"$SELECT"* ]]; then
         return 0
