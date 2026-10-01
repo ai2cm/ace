@@ -245,15 +245,13 @@ class OceanData:
         """Virtual salt flux into the ocean column in g/m2/s, per unit total
         cell area.
 
-        Positive wfo (freshwater in) dilutes salt, giving a negative salt flux.
-        The dilution uses a fixed reference salinity rather than the local
-        surface salinity: the free surface spreads the added water within a
-        step, so a fixed-depth salt content is diluted at close to the
-        area-mean salinity, and a local-salinity form drifts by the covariance
-        of surface salinity with wfo. The salt exchanged with sea ice (sfdsi)
-        is added, since melting ice is not fresh. Both fluxes are ocean-area
-        means, so they are weighted by the sea surface fraction, like
-        ``ocean_salt_content``.
+        We represent the net change in salinity through a virtual flux that 
+        accounts for the addition of freshwater and the salt directly exchanged 
+        with sea ice. The dilution uses a fixed reference salinity rather than 
+        the local surface salinity. The salt exchanged with sea ice (sfdsi)
+        is added, since melting ice is not fresh and some salt remains in newly
+        formed ice. Both fluxes are ocean-area means, so they are weighted by the
+        sea surface fraction, like ``ocean_salt_content``.
         """
         return (
             -REFERENCE_SALINITY * self.water_flux_into_sea_water
