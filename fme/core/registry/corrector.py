@@ -42,10 +42,13 @@ class CorrectorSelector(CorrectorConfigABC):
             )
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
-    @property
-    def wrapped_corrector_disabled_epochs(self) -> int:
-        """The ``corrector_disabled_epochs`` of the wrapped corrector config."""
-        return self._corrector_config_instance.corrector_disabled_epochs
+    def training_is_default(self) -> bool:
+        """Whether the wrapped config leaves its training schedule at the default.
+
+        A scheduled corrector cannot load state from a checkpoint trained
+        without a schedule, and the schedule has no effect at inference.
+        """
+        return self._corrector_config_instance.corrector_disabled_epochs == 0
 
     @classmethod
     def register(cls, type_name):

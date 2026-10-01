@@ -168,7 +168,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return []
 
     def replace_corrector(self, corrector: CorrectorSelector) -> None:
-        logging.info("Replacing corrector %s with %s.", self.corrector, corrector)
         self.corrector = corrector
 
     @property

@@ -1926,9 +1926,8 @@ class StepperOverrideConfig:
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
         corrector: Corrector configuration to replace that used in producing a
-            serialized stepper. The whole corrector is replaced: options not
-            restated here fall back to their defaults rather than to the
-            checkpoint's values. For example::
+            serialized stepper. Options not restated here fall back to their
+            defaults, not to the checkpoint's values. For example::
 
                 corrector:
                   type: atmosphere_corrector
@@ -1936,9 +1935,6 @@ class StepperOverrideConfig:
                     conserve_dry_air: true
                     total_energy_budget_correction:
                       method: constant_temperature
-
-            ``corrector_disabled_epochs`` must be 0 (the default): it only
-            schedules the corrector during training.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
@@ -1948,17 +1944,10 @@ class StepperOverrideConfig:
     corrector: Literal["keep"] | CorrectorSelector = "keep"
 
     def __post_init__(self):
-        # Eval mode always applies the corrector, so a nonzero value is inert
-        # at inference, and the EpochScheduledCorrector it builds cannot load
-        # checkpoint state saved without a schedule.
-        if (
-            self.corrector != "keep"
-            and self.corrector.wrapped_corrector_disabled_epochs != 0
-        ):
+        if self.corrector != "keep" and not self.corrector.training_is_default():
             raise ValueError(
-                "StepperOverrideConfig.corrector must not set "
-                "corrector_disabled_epochs, which only applies during training, "
-                f"but got {self.corrector.wrapped_corrector_disabled_epochs}."
+                "StepperOverrideConfig.corrector must not set training-only "
+                "options such as corrector_disabled_epochs."
             )
 
 
@@ -2054,8 +2043,8 @@ def apply_stepper_override(
         )
     if override_config.corrector != "keep":
         logging.info(
-            "Overriding training corrector configuration with a new "
-            "corrector configuration."
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
         )
         stepper.replace_corrector(override_config.corrector)
 
@@ -2099,7 +2088,7 @@ def apply_stepper_override_to_stepper_config(
         )
     if override_config.corrector != "keep":
         logging.info(
-            "Overriding training corrector configuration with a new "
-            "corrector configuration."
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
         )
         stepper_config.replace_corrector(override_config.corrector)

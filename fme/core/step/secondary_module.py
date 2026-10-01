@@ -235,7 +235,6 @@ class SecondaryModuleStepConfig(StepConfigABC):
         return list(self.prescribed_prognostic_names)
 
     def replace_corrector(self, corrector: CorrectorSelector) -> None:
-        logging.info("Replacing corrector %s with %s.", self.corrector, corrector)
         self.corrector = corrector
 
     def get_step(

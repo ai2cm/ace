@@ -137,7 +137,7 @@ class MockStepConfig(StepConfigABC):
         return []
 
     def replace_corrector(self, corrector: CorrectorSelector) -> None:
-        raise NotImplementedError("MockStepConfig has no corrector")
+        raise RuntimeError("MockStepConfig has no corrector")
 
     @property
     def allow_missing_variables(self) -> bool:
@@ -263,7 +263,7 @@ class DeprecatingMockStepConfig(StepConfigABC):
         return []
 
     def replace_corrector(self, corrector: CorrectorSelector) -> None:
-        raise NotImplementedError("DeprecatingMockStepConfig has no corrector")
+        raise RuntimeError("DeprecatingMockStepConfig has no corrector")
 
     @property
     def allow_missing_variables(self) -> bool:
