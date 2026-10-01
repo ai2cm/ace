@@ -172,6 +172,7 @@ def ocean_salt_content(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
+    """Compute the column-integrated ocean salt content."""
     return data.ocean_salt_content
 
 
@@ -182,6 +183,7 @@ def ocean_salt_content_tendency(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
+    """Compute the column-integrated ocean salt content tendency."""
     osc = data.ocean_salt_content
     osc_tendency = torch.zeros_like(osc)
     osc_tendency[:, 1:] = torch.diff(osc, n=1, dim=1) / timestep.total_seconds()

@@ -6,7 +6,7 @@ import torch
 
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
-    REFERENCE_SALINITY_PSU,
+    REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
@@ -181,7 +181,7 @@ def test_salt_budget_closes(
     initial_salinity = 35.0
     # g/m2/s per unit ocean area; sfdsi is in kg/m2/s
     sfdsi_flux = 0.0 if sfdsi is None or math.isnan(sfdsi) else sfdsi
-    salt_flux = -REFERENCE_SALINITY_PSU * wfo + 1000.0 * sfdsi_flux
+    salt_flux = -REFERENCE_SALINITY * wfo + 1000.0 * sfdsi_flux
     salinity_change = (
         salt_flux * TIMESTEP.total_seconds() / (DENSITY_OF_SEA_WATER_CM4 * dz)
     )

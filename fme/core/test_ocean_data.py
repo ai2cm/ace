@@ -53,14 +53,17 @@ def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
 
 @pytest.mark.parametrize("has_depth_coordinate", [True, False])
 def test_column_integrated_ocean_salt_content(has_depth_coordinate: bool):
-    """Test column-integrated ocean salt content."""
+    """Test column-integrated ocean salt content, which is weighted by the sea
+    surface fraction.
+    """
     n_samples, n_time_steps, nlat, nlon, nlevels = 2, 2, 2, 2, 2
     shape_2d = (n_samples, n_time_steps, nlat, nlon)
+    so_0, so_1, sea_surface_fraction = 34.0, 36.0, 0.5
 
     data = {
-        "so_0": torch.ones(n_samples, n_time_steps, nlat, nlon),
-        "so_1": torch.ones(n_samples, n_time_steps, nlat, nlon),
-        "sea_surface_fraction": torch.ones(n_samples, n_time_steps, nlat, nlon),
+        "so_0": torch.full(shape_2d, so_0),
+        "so_1": torch.full(shape_2d, so_1),
+        "sea_surface_fraction": torch.full(shape_2d, sea_surface_fraction),
     }
 
     if has_depth_coordinate:
@@ -71,25 +74,18 @@ def test_column_integrated_ocean_salt_content(has_depth_coordinate: bool):
         mask[:, :, 0, 0, 1] = 0.0
         mask[:, :, 0, 1, 1] = 0.0
 
-        expected_osc = torch.tensor(
+        # 3 of 4 columns are ocean at level 0, 2 of 4 at level 1
+        expected_osc = (
             DENSITY_OF_SEA_WATER_CM4
+            * sea_surface_fraction
             * n_samples
             * n_time_steps
-            * (
-                nlat * nlon * lev_thickness.sum()
-                - lev_thickness[0]
-                - 2 * lev_thickness[1]
-            )
+            * (3 * lev_thickness[0] * so_0 + 2 * lev_thickness[1] * so_1)
         )
         depth_coordinate = DepthCoordinate(idepth, mask)
         ocean_data = OceanData(data, depth_coordinate)
         assert ocean_data.ocean_salt_content.shape == shape_2d
-        assert torch.allclose(
-            ocean_data.ocean_salt_content.nansum(),
-            expected_osc,
-            atol=1e-10,
-            equal_nan=True,
-        )
+        torch.testing.assert_close(ocean_data.ocean_salt_content.nansum(), expected_osc)
     else:
         ocean_data = OceanData(data)
         with pytest.raises(ValueError, match="Depth coordinate must be provided"):

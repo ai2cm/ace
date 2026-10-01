@@ -6,7 +6,7 @@ import torch
 
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
-    REFERENCE_SALINITY_PSU,
+    REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.stacker import Stacker
@@ -226,8 +226,12 @@ class OceanData:
         """Returns the salt flux from sea ice into the ocean in kg/m2/s,
         or zeros if not available.
 
-        NaN is treated as zero: some stores leave sfdsi NaN in ocean cells
-        that never carry sea ice, where there is no basal salt flux.
+        Falling back to zeros is acceptable for the global salt budget: on
+        OM4 data the sfdsi term is about a tenth of the wfo term and adding it
+        does not measurably change the global closure.
+
+        NaN is treated as zero everywhere: some stores leave sfdsi NaN in
+        ocean cells that never carry sea ice, where there is no basal salt flux.
         """
         try:
             return torch.nan_to_num(
@@ -238,15 +242,22 @@ class OceanData:
 
     @property
     def net_virtual_salt_flux_into_ocean(self) -> torch.Tensor:
-        """Virtual salt flux into the ocean column (g/m2/s).
+        """Virtual salt flux into the ocean column in g/m2/s, per unit total
+        cell area.
 
         Positive wfo (freshwater in) dilutes salt, giving a negative salt flux.
-        Uses a fixed reference salinity for diagnostic purposes. The salt
-        exchanged with sea ice (sfdsi) is added, since melting ice is not fresh.
+        The dilution uses a fixed reference salinity rather than the local
+        surface salinity: the free surface spreads the added water within a
+        step, so a fixed-depth salt content is diluted at close to the
+        area-mean salinity, and a local-salinity form drifts by the covariance
+        of surface salinity with wfo. The salt exchanged with sea ice (sfdsi)
+        is added, since melting ice is not fresh. Both fluxes are ocean-area
+        means, so they are weighted by the sea surface fraction, like
+        ``ocean_salt_content``.
         """
         return (
-            -REFERENCE_SALINITY_PSU * self.water_flux_into_sea_water
-            + 1000 * self.downward_sea_ice_basal_salt_flux
+            -REFERENCE_SALINITY * self.water_flux_into_sea_water
+            + 1000 * self.downward_sea_ice_basal_salt_flux  # kg -> g
         ) * self.sea_surface_fraction
 
     @property
