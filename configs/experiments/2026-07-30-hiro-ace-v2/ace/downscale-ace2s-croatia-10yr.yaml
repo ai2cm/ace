@@ -1,7 +1,7 @@
 experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-10-01-downscale-bora-region
 patch:
   divide_generation: false
-  composite_prediction: true
+  composite_prediction: false
   coarse_horizontal_overlap: 1
 model:
   #mixture_of_experts_path: /ckpt.tar
