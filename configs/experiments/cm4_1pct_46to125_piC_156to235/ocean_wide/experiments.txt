@@ -86,8 +86,8 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs2|01M3TA3X0BSN66ZK0
 # rs0's two rows above finished 2026-09-08 but were left armed at `run_`; they
 # are disarmed to `ran_` here so this launch does not resubmit them.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs1|01M3TA3JE6HA7GZSJFNDJGDCF2|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3V9RXAA4RKW9PB3JDQABVRP|ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs1|01M3TA3JE6HA7GZSJFNDJGDCF2|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3V9RXAA4RKW9PB3JDQABVRP|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs1|01M3TA3JE6HA7GZSJFNDJGDCF2|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3V9RXAA4RKW9PB3JDQABVRP|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs1|01M3TA3JE6HA7GZSJFNDJGDCF2|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3V9RXAA4RKW9PB3JDQABVRP|ai2/ace|jupiter|||30GiB
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs2|01M3TA3X0BSN66ZK07KWSYSCCE|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3VHQ2Q1HJN972YFP16EMS21|ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs2|01M3TA3X0BSN66ZK07KWSYSCCE|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3VHQ2Q1HJN972YFP16EMS21|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs2|01M3TA3X0BSN66ZK07KWSYSCCE|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3VHQ2Q1HJN972YFP16EMS21|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_uniformdt_clip-ft|rs2|01M3TA3X0BSN66ZK07KWSYSCCE|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3VHQ2Q1HJN972YFP16EMS21|ai2/ace|jupiter|||30GiB
