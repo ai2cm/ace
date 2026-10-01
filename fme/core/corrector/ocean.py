@@ -140,6 +140,22 @@ class SurfaceEnergyFluxCorrectionConfig:
 
 
 @dataclasses.dataclass
+class ZosGlobalMeanCorrectionConfig:
+    """Configuration for setting the global mean of generated sea surface
+    height (``zos``) to a reference value each step.
+
+    The global mean is weighted by cell area times ``sea_surface_fraction``
+    (taken from forcing data) over the ``zos`` mask, so fractional coastal
+    cells count by their ocean fraction.
+
+    Parameters:
+        reference_global_mean: Target global mean of ``zos`` in m.
+    """
+
+    reference_global_mean: float = 0.0
+
+
+@dataclasses.dataclass
 class SeaIceFractionCorrection:
     """Correction that enforces sea-ice-fraction constraints.
 
@@ -241,6 +257,39 @@ class OceanHeatContentCorrection:
         return corrected, corrector_state
 
 
+@dataclasses.dataclass
+class ZosGlobalMeanCorrection:
+    """Correction that shifts ``zos`` uniformly so its
+    sea-surface-fraction-weighted global mean equals ``reference_global_mean``.
+
+    A no-op when ``zos`` is not in ``gen_data``.
+    """
+
+    area_weighted_mean: AreaWeightedMean
+    reference_global_mean: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only ``zos``, or is empty when
+            ``zos`` is absent from ``gen_data``.
+        """
+        if "zos" not in gen_data:
+            return {}, corrector_state
+        zos = gen_data["zos"]
+        s = OceanData(forcing_data).sea_surface_fraction
+        global_mean = self.area_weighted_mean(
+            s * zos, keepdim=True, name="zos"
+        ) / self.area_weighted_mean(s, keepdim=True, name="zos")
+        return {"zos": zos - global_mean + self.reference_global_mean}, corrector_state
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -262,6 +311,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             estimator: the forward value is still clamped, but gradient flows as if
             the clamp had not happened, so out-of-range cells still get a learning
             signal.
+        zos_global_mean_correction: Optional configuration for setting the
+            sea-surface-fraction-weighted global mean of the generated ``zos``
+            to a reference value.
     """
 
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
@@ -269,6 +321,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
+    zos_global_mean_correction: ZosGlobalMeanCorrectionConfig | None = None
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -347,6 +400,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                )
+            )
+        if self.zos_global_mean_correction is not None:
+            corrections.append(
+                ZosGlobalMeanCorrection(
+                    area_weighted_mean,
+                    self.zos_global_mean_correction.reference_global_mean,
                 )
             )
         return OceanCorrector(corrections)
