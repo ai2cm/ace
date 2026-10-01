@@ -252,9 +252,6 @@ class BatchData:
     data_mask: TensorMapping | None = None
     stepper_state: StepperState | None = None
     step_diagnostics: StepDiagnostics | None = None
-    _gathered_stepper_state: GatheredStepperState | None = dataclasses.field(
-        default=None, init=False, repr=False, compare=False
-    )
 
     @classmethod
     def new_for_testing(
@@ -608,7 +605,21 @@ class BatchData:
         IC datasets or legacy plain restart files (those go through the lenient
         reader in ``get_initial_condition``). ``horizontal_dims`` is recovered
         from the prognostic variables' dims.
+
+        Under multi-GPU data parallelism the restart file holds gathered
+        state (written by ``GatheredBatchData``). Only root reads the
+        file; the data is reconstructed as a ``GatheredBatchData`` and
+        scattered to every rank via ``data_parallel_scatter``, so each
+        rank receives its own shard as a plain ``BatchData``.
         """
+        dist = Distributed.get_instance()
+        if dist.total_data_parallel_ranks > 1:
+            if dist.is_root():
+                gathered = GatheredBatchData.from_xarray_dataset(ds)
+            else:
+                gathered = None
+            return data_parallel_scatter(gathered, dist)
+
         time = ds[_TIME_DIM]
         squeezed = list(time.dims) == [_SAMPLE_DIM]
         if squeezed:
@@ -630,13 +641,8 @@ class BatchData:
                     str(d) for d in da.dims if d not in (_SAMPLE_DIM, _TIME_DIM)
                 ]
 
-        stepper_state, gathered, labels, data_mask = cls._decode_reserved_state(ds)
-        if gathered is not None:
-            dist = Distributed.get_instance()
-            if dist.total_data_parallel_ranks == 1:
-                stepper_state = gathered.get_for_rank(0)
-                gathered = None
-        batch = cls.new_on_cpu(
+        stepper_state, labels, data_mask = cls._decode_reserved_state(ds)
+        return cls.new_on_cpu(
             data=data,
             time=time,
             labels=labels,
@@ -644,9 +650,6 @@ class BatchData:
             stepper_state=stepper_state,
             horizontal_dims=horizontal_dims,
         )
-        if gathered is not None:
-            batch._gathered_stepper_state = gathered
-        return batch
 
     def _encode_reserved_state(
         self,
@@ -698,12 +701,15 @@ class BatchData:
     @classmethod
     def _decode_reserved_state(
         cls, ds: xr.Dataset
-    ) -> tuple[
-        StepperState | None,
-        GatheredStepperState | None,
-        BatchLabels | None,
-        dict[str, torch.Tensor] | None,
-    ]:
+    ) -> tuple[StepperState | None, BatchLabels | None, dict[str, torch.Tensor] | None]:
+        """Decode stepper state, labels, and data mask from reserved variables.
+
+        Used only on the single-rank path. When a gathered state dict
+        (``n_ranks`` marker) is encountered in single-rank mode it is
+        resolved to rank 0 via ``GatheredStepperState``; the multi-rank
+        path goes through ``GatheredBatchData.from_xarray_dataset``
+        instead.
+        """
         state_dict: dict[str, torch.Tensor] = {}
         data_mask: dict[str, torch.Tensor] = {}
         for name in ds.data_vars:
@@ -716,18 +722,19 @@ class BatchData:
                 )
 
         stepper_state: StepperState | None = None
-        gathered_stepper: GatheredStepperState | None = None
         if state_dict:
             try:
-                gathered_stepper = GatheredStepperState.from_state_dict(state_dict)
+                gathered = GatheredStepperState.from_state_dict(state_dict)
             except UngatheredStateDictError:
                 stepper_state = StepperState.from_state_dict(state_dict)
+            else:
+                stepper_state = gathered.get_for_rank(0)
 
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:
             names = [str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values]
             labels = BatchLabels(_restore_tensor(ds[_LABELS_VALUES_VAR]), names=names)
-        return stepper_state, gathered_stepper, labels, (data_mask or None)
+        return stepper_state, labels, (data_mask or None)
 
     def __post_init__(self):
         if len(self.time.shape) != 2:
@@ -1143,14 +1150,18 @@ class BatchData:
 
 
 class GatheredBatchData:
-    """BatchData after a data-parallel gather, used only for writing restarts.
+    """BatchData after a data-parallel gather.
 
     Holds the concatenated data from all ranks and a
     ``GatheredStepperState`` that preserves each rank's random state.
-    Exposes only ``to_xarray_dataset`` — the single ability needed by
-    the write path.  The read path (``BatchData.from_xarray_dataset``)
-    scatters the per-rank state internally and always returns a plain
-    ``BatchData``.
+
+    Used in both directions of the restart cycle:
+
+    - **Write**: ``BatchData.data_parallel_gather`` → ``GatheredBatchData``
+      → ``to_xarray_dataset`` writes the restart file.
+    - **Read**: ``from_xarray_dataset`` reconstructs from a restart file
+      → ``data_parallel_scatter`` distributes per-rank ``BatchData``
+      to every rank (inverse of the gather).
     """
 
     def __init__(
@@ -1230,6 +1241,129 @@ class GatheredBatchData:
         if data_arrays:
             attrs[_SCHEMA_ATTR] = _SCHEMA_VERSION
         return data_arrays, attrs
+
+    def get_for_rank(self, rank: int, n_ranks: int) -> BatchData:
+        """Extract a single rank's ``BatchData`` from gathered state.
+
+        The data, time, labels, and mask are sliced to the rank's
+        contiguous sample shard; the stepper state is selected via
+        ``GatheredStepperState.get_for_rank``.
+        """
+        n_samples = next(iter(self._data.values())).shape[0]
+        shard = n_samples // n_ranks
+        sample_slice = slice(rank * shard, (rank + 1) * shard)
+        data = {k: v[sample_slice] for k, v in self._data.items()}
+        time = self._time[sample_slice]
+        labels = (
+            self._labels.select_sample_slice(sample_slice)
+            if self._labels is not None
+            else None
+        )
+        data_mask = (
+            {k: v[sample_slice] for k, v in self._data_mask.items()}
+            if self._data_mask is not None
+            else None
+        )
+        stepper_state = (
+            self._stepper_state.get_for_rank(rank)
+            if self._stepper_state is not None
+            else None
+        )
+        return BatchData.new_on_cpu(
+            data=data,
+            time=time,
+            labels=labels,
+            data_mask=data_mask,
+            stepper_state=stepper_state,
+            horizontal_dims=self._horizontal_dims,
+        )
+
+    @classmethod
+    def from_xarray_dataset(cls, ds: xr.Dataset) -> "GatheredBatchData":
+        """Reconstruct a ``GatheredBatchData`` from a gathered restart file.
+
+        Raises ``UngatheredStateDictError`` if the embedded stepper state
+        is not in gathered format (no ``n_ranks`` marker), since a
+        multi-rank restart must have been written by a multi-rank run.
+        """
+        time = ds[_TIME_DIM]
+        squeezed = list(time.dims) == [_SAMPLE_DIM]
+        if squeezed:
+            time = time.expand_dims(dim=_TIME_DIM, axis=1)
+
+        data: dict[str, torch.Tensor] = {}
+        horizontal_dims: list[str] | None = None
+        state_dict: dict[str, torch.Tensor] = {}
+        data_mask_dict: dict[str, torch.Tensor] = {}
+        for name in ds.data_vars:
+            name_str = str(name)
+            if name_str == _TIME_DIM:
+                continue
+            if name_str.startswith(_STEPPER_PREFIX):
+                state_dict[name_str[len(_STEPPER_PREFIX) :]] = _restore_tensor(
+                    ds[name]
+                )
+            elif name_str.startswith(_DATA_MASK_PREFIX):
+                data_mask_dict[name_str[len(_DATA_MASK_PREFIX) :]] = (
+                    _restore_tensor(ds[name])
+                )
+            elif not name_str.startswith(_RESERVED_PREFIX):
+                da = ds[name]
+                tensor = torch.as_tensor(np.asarray(da.values))
+                if squeezed:
+                    tensor = tensor.unsqueeze(1)
+                data[name_str] = tensor
+                if horizontal_dims is None:
+                    horizontal_dims = [
+                        str(d)
+                        for d in da.dims
+                        if d not in (_SAMPLE_DIM, _TIME_DIM)
+                    ]
+
+        gathered_stepper: GatheredStepperState | None = None
+        if state_dict:
+            gathered_stepper = GatheredStepperState.from_state_dict(state_dict)
+
+        labels: BatchLabels | None = None
+        if _LABELS_VALUES_VAR in ds:
+            names = [
+                str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values
+            ]
+            labels = BatchLabels(
+                _restore_tensor(ds[_LABELS_VALUES_VAR]), names=names
+            )
+
+        return cls(
+            data=data,
+            time=time,
+            horizontal_dims=horizontal_dims or ["lat", "lon"],
+            labels=labels,
+            stepper_state=gathered_stepper,
+            data_mask=data_mask_dict or None,
+        )
+
+
+def data_parallel_scatter(
+    gathered: GatheredBatchData | None, dist: Distributed | None = None
+) -> BatchData:
+    """Scatter gathered data from root to all data-parallel ranks.
+
+    Inverse of ``BatchData.data_parallel_gather``. Must be called on
+    all ranks; ``gathered`` is populated only on root (``None``
+    elsewhere).
+    """
+    if dist is None:
+        dist = Distributed.get_instance()
+    if dist.is_root():
+        if gathered is None:
+            raise RuntimeError("gathered must be provided on root")
+        per_rank = [
+            gathered.get_for_rank(r, dist.total_data_parallel_ranks)
+            for r in range(dist.total_data_parallel_ranks)
+        ]
+    else:
+        per_rank = None
+    return dist.scatter_object(per_rank)
 
 
 @dataclasses.dataclass
