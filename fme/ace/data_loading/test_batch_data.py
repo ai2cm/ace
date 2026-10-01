@@ -1,4 +1,5 @@
 import dataclasses
+import unittest.mock
 
 import cftime
 import numpy as np
@@ -10,6 +11,7 @@ from xarray.coding.times import CFDatetimeCoder
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
     BatchData,
+    GatheredBatchData,
     PairedData,
     PrognosticState,
     _collate_with_masking,
@@ -21,7 +23,7 @@ from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
-from fme.core.stepper_state import StepperState
+from fme.core.stepper_state import GatheredStepperState, StepperState
 from fme.core.typing_ import TensorDict
 
 _METADATA_FIELDS = {
@@ -435,18 +437,20 @@ def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
     assert torch.equal(states[1], reference_r1)
 
 
-def test_gathered_batch_data_xarray_round_trip_scatters_on_read():
+@pytest.mark.parametrize("data_parallel_rank", [0, 1])
+def test_gathered_batch_data_xarray_round_trip_scatters_on_read(
+    data_parallel_rank: int,
+):
     """GatheredBatchData.to_xarray_dataset → BatchData.from_xarray_dataset
     scatters the per-rank random state internally, returning a plain
-    BatchData with this rank's (rank 0 in tests) StepperState."""
-    from fme.ace.data_loading.batch_data import GatheredBatchData
-    from fme.core.stepper_state import GatheredStepperState
-
+    BatchData with the requested rank's StepperState."""
     rs0 = RandomState.from_seed(10)
     rs1 = RandomState.from_seed(20)
-    # Advance rs0 so the two differ.
     torch.randn(5, generator=rs0.generator)
-    rs0_state = rs0.generator.get_state().clone()
+    expected_states = [
+        rs0.generator.get_state().clone(),
+        rs1.generator.get_state().clone(),
+    ]
 
     gathered_stepper = GatheredStepperState(
         corrector_state=CorrectorState(
@@ -465,16 +469,22 @@ def test_gathered_batch_data_xarray_round_trip_scatters_on_read():
     )
 
     ds = gathered.to_xarray_dataset()
-    restored = BatchData.from_xarray_dataset(ds)
+    with unittest.mock.patch.object(
+        Distributed,
+        "data_parallel_rank",
+        new_callable=lambda: property(
+            lambda self: data_parallel_rank
+        ),
+    ):
+        restored = BatchData.from_xarray_dataset(ds)
 
-    # from_xarray_dataset scatters internally — result is a plain StepperState.
     assert isinstance(restored.stepper_state, StepperState)
-    # In tests, data_parallel_rank is 0, so we get rs0's generator state.
     assert restored.stepper_state.random_state is not None
     assert torch.equal(
-        restored.stepper_state.random_state.generator.get_state(), rs0_state
+        restored.stepper_state.random_state.generator.get_state(),
+        expected_states[data_parallel_rank],
     )
-    # Corrector is preserved in full (all samples).
+    # Corrector is preserved in full (all samples) regardless of rank.
     assert restored.stepper_state.corrector_state is not None
     torch.testing.assert_close(
         restored.stepper_state.corrector_state.global_dry_air_mass,
