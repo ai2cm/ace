@@ -1,4 +1,5 @@
 import datetime
+import math
 
 import pytest
 import torch
@@ -164,6 +165,7 @@ def test_metadata_registry():
         pytest.param(1e-5, None, 0.5, id="wfo-sfdsi-missing-partial-ocean"),
         pytest.param(0.0, 2e-7, 0.5, id="sfdsi-partial-ocean"),
         pytest.param(1e-5, 2e-7, 0.5, id="wfo-and-sfdsi-partial-ocean"),
+        pytest.param(1e-5, float("nan"), 0.5, id="wfo-sfdsi-nan-ice-free"),
     ],
 )
 def test_salt_budget_closes(
@@ -172,12 +174,14 @@ def test_salt_budget_closes(
     """A salinity change set by the surface salt fluxes leaves no implied
     advection, also in a cell that is partly land. Salinity, wfo and sfdsi are
     ocean-area means, so the salt content and the fluxes must all be weighted by
-    the sea surface fraction. A missing sfdsi contributes no flux.
+    the sea surface fraction. A missing sfdsi, or a NaN sfdsi where there is no
+    sea ice, contributes no flux.
     """
     dz = 10.0
     initial_salinity = 35.0
     # g/m2/s per unit ocean area; sfdsi is in kg/m2/s
-    salt_flux = -REFERENCE_SALINITY_PSU * wfo + 1000.0 * (sfdsi or 0.0)
+    sfdsi_flux = 0.0 if sfdsi is None or math.isnan(sfdsi) else sfdsi
+    salt_flux = -REFERENCE_SALINITY_PSU * wfo + 1000.0 * sfdsi_flux
     salinity_change = (
         salt_flux * TIMESTEP.total_seconds() / (DENSITY_OF_SEA_WATER_CM4 * dz)
     )
