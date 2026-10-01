@@ -1,5 +1,5 @@
 # arg: --dataset 01M21CHK3XT6M4VSV1GE7W1G27:/weights
-# arg: --dataset <VARIOGRAM_STATS_DATASET>:/variogram-stats
+# arg: --dataset 01M3W1QZHDEJYH8HA1P5EMQBAB:/variogram-stats
 #
 # Variogram-score arm, window 5, 0p1 weight.
 # The paper model's 3-step DETACHED fine-tune recipe
