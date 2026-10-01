@@ -1,5 +1,4 @@
 import dataclasses
-import unittest.mock
 
 import cftime
 import numpy as np
@@ -35,7 +34,7 @@ _METADATA_FIELDS = {
     "stepper_state",
     "step_diagnostics",
 }
-_NON_METADATA_FIELDS = {"data", "time", "_gathered_stepper_state"}
+_NON_METADATA_FIELDS = {"data", "time"}
 
 
 def assert_metadata_equal(
@@ -467,7 +466,6 @@ def test_gathered_batch_data_xarray_round_trip_single_rank():
     ds = gathered.to_xarray_dataset()
     restored = BatchData.from_xarray_dataset(ds)
 
-    # Single-rank: resolved to rank 0's state directly.
     assert isinstance(restored.stepper_state, StepperState)
     assert restored.stepper_state.random_state is not None
     assert torch.equal(
@@ -479,12 +477,12 @@ def test_gathered_batch_data_xarray_round_trip_single_rank():
         restored.stepper_state.corrector_state.global_dry_air_mass,
         torch.tensor([[[1.0]], [[2.0]]]),
     )
-    assert restored._gathered_stepper_state is None
 
 
-def test_gathered_batch_data_xarray_round_trip_multi_rank():
-    """In multi-rank mode, from_xarray_dataset stores the GatheredStepperState
-    on the BatchData for later resolution after IC sharding."""
+@pytest.mark.parametrize("rank", [0, 1])
+def test_gathered_batch_data_get_for_rank(rank: int):
+    """GatheredBatchData.get_for_rank slices data and picks per-rank
+    stepper state."""
     rs0 = RandomState.from_seed(10)
     rs1 = RandomState.from_seed(20)
     torch.randn(5, generator=rs0.generator)
@@ -519,33 +517,25 @@ def test_gathered_batch_data_xarray_round_trip_multi_rank():
         stepper_state=gathered_stepper,
     )
 
+    # Round-trip through xarray to exercise the serialization format.
     ds = gathered.to_xarray_dataset()
-    with unittest.mock.patch.object(
-        Distributed,
-        "total_data_parallel_ranks",
-        new_callable=lambda: property(lambda self: 2),
-    ):
-        restored = BatchData.from_xarray_dataset(ds)
+    restored_gathered = GatheredBatchData.from_xarray_dataset(ds)
 
-    # Multi-rank: stepper_state is None, gathered stored for later.
-    assert restored.stepper_state is None
-    assert restored._gathered_stepper_state is not None
-    assert restored._gathered_stepper_state.n_ranks == 2
-
-    # Resolve per-rank state (simulating post-IC-sharding attachment).
-    for rank in range(2):
-        rank_state = restored._gathered_stepper_state.get_for_rank(rank)
-        assert rank_state.random_state is not None
-        assert torch.equal(
-            rank_state.random_state.generator.get_state(),
-            expected_states[rank],
-        )
-        assert rank_state.corrector_state is not None
-        expected_corrector = torch.tensor([[[float(rank + 1)]]])
-        torch.testing.assert_close(
-            rank_state.corrector_state.global_dry_air_mass,
-            expected_corrector,
-        )
+    rank_batch = restored_gathered.get_for_rank(rank, n_ranks=2)
+    assert isinstance(rank_batch, BatchData)
+    assert rank_batch.stepper_state is not None
+    assert rank_batch.stepper_state.random_state is not None
+    assert torch.equal(
+        rank_batch.stepper_state.random_state.generator.get_state(),
+        expected_states[rank],
+    )
+    assert rank_batch.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        rank_batch.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[float(rank + 1)]]]),
+    )
+    # Data is sliced to 1 sample per rank (2 total, 2 ranks).
+    assert next(iter(rank_batch.data.values())).shape[0] == 1
 
 
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
