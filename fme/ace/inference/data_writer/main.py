@@ -374,7 +374,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
 
 
 def _write(
-    data: BatchData | GatheredBatchData,
+    data: GatheredBatchData,
     path: str,
     filename: str,
     variable_metadata: Mapping[str, VariableMetadata],
