@@ -1,0 +1,81 @@
+# Smoke config for the endpoint-conditioned video-PMD trainer: capped
+# epochs/batches and a small model, so it runs in seconds against local
+# synthetic data. See test_video_train.py::test_video_train_xshield_smoke_config_runs.
+experiment_dir: /will/be/overwritten
+max_epochs: 1
+max_train_batches: 3
+max_val_batches: 2
+validate_using_ema: true
+validate_interval: 1
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: false
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.99
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /will/be/overwritten
+  coarse:
+    - data_path: /will/be/overwritten
+  batch_size: 2
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 8
+  lon_extent:
+    start: 0
+    stop: 8
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /will/be/overwritten
+  coarse:
+    - data_path: /will/be/overwritten
+  batch_size: 2
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 8
+  lon_extent:
+    start: 0
+    stop: 8
+model:
+  n_timesteps: 9
+  model_channels: 16
+  n_heads: 2
+  num_freqs: 3
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 4
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.2
+      p_std: 1.8
+    northward_wind_at_ten_meters:
+      p_mean: -1.2
+      p_std: 1.8
+    PRMSL:
+      p_mean: -1.2
+      p_std: 1.8
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+  normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.206107
+      northward_wind_at_ten_meters: 0.133348
+      PRMSL: 1009.104862
+    stds:
+      eastward_wind_at_ten_meters: 2.845158
+      northward_wind_at_ten_meters: 3.598240
+      PRMSL: 5.558873

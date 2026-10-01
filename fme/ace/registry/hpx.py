@@ -1,6 +1,6 @@
 import dataclasses
-from collections.abc import Sequence
-from typing import Literal
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
 import torch.nn as nn
 
@@ -35,6 +35,10 @@ class HEALPixUNetBuilder(ModuleConfig):
     decoder: UNetDecoderConfig
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
     nside: Sequence[int] | None = None
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,

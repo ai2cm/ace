@@ -369,6 +369,61 @@ def test_surface_energy_flux_correction_prescribed():
 
 
 @pytest.mark.parametrize(
+    "hfds_name",
+    [
+        pytest.param("hfds", id="hfds_in_gen"),
+        pytest.param("hfds_total_area", id="hfds_total_area_in_gen"),
+    ],
+)
+def test_surface_energy_flux_correction_prescribed_open_ocean(hfds_name):
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = config._build(ops, None, timestep)
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+
+    gen_data = {
+        "sst": sst,
+        hfds_name: gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    ocean_fraction = 1 - land_fraction - sea_ice_fraction
+    net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    if hfds_name == "hfds_total_area":
+        net_flux = net_flux * (1 - land_fraction)
+    expected_hfds = torch.where(ocean_fraction == 1, net_flux, gen_hfds)
+
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    torch.testing.assert_close(corrected[hfds_name], expected_hfds)
+    # open ocean (ocean_fraction exactly 1): hfds is the prescribed net flux
+    open_ocean_row = 1
+    torch.testing.assert_close(
+        corrected[hfds_name][open_ocean_row, :], net_flux[open_ocean_row, :]
+    )
+    # partial ocean under sea ice: gen_hfds passes through unweighted, unlike
+    # the "prescribed" method which would blend it with the net flux
+    torch.testing.assert_close(corrected[hfds_name][0, :], gen_hfds[0, :])
+    # land: gen_hfds passes through
+    torch.testing.assert_close(corrected[hfds_name][-1, :], gen_hfds[-1, :])
+
+
+@pytest.mark.parametrize(
     "hfds_type",
     [
         pytest.param("input", id="hfds_in_input"),
@@ -539,3 +594,94 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     assert dict(result.diagnostics.delta) == {}
     assert set(result.modified_names) == set()
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_ocean_corrector_is_per_member_under_ensemble_folding():
+    """Ensemble training folds the ensemble members into the batch dimension, so
+    the corrector sees several members at once. Every correction must act
+    per-member: one that coupled across the batch dim (e.g. a global mean taken
+    over samples too) would tie the members together and silently collapse the
+    ensemble spread the proper scoring rule is meant to reward.
+    """
+    torch.manual_seed(0)
+    n_members, nlat, nlon, nlevels = 2, 3, 3, 2
+    config = OceanCorrectorConfig(
+        force_positive_names=["so_0", "so_1"],
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["sea_ice_thickness"],
+        ),
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.1,
+        ),
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, :] = 0.0
+    masks = {
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
+    }
+    # non-uniform in latitude only, as the area weights require
+    area = torch.tensor([0.5, 1.0, 1.5]).unsqueeze(-1).expand(nlat, nlon)
+    ops = LatLonOperations(area, SpatialMaskProvider(masks))
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10.0, 20.0]), mask)
+    corrector = config._build(ops, depth_coordinate, timestep)
+
+    def randoms(shape):
+        return torch.randn(shape)
+
+    input_data = {
+        "thetao_0": randoms((n_members, nlat, nlon)) + 2.0,
+        "thetao_1": randoms((n_members, nlat, nlon)) + 2.0,
+        "sst": randoms((n_members, nlat, nlon)) + 275.0,
+        "land_fraction": torch.zeros(n_members, nlat, nlon),
+    }
+    # members differ in every generated field, as they would under different
+    # noise draws
+    gen_data = {
+        "thetao_0": randoms((n_members, nlat, nlon)) + 2.0,
+        "thetao_1": randoms((n_members, nlat, nlon)) + 2.0,
+        "sst": randoms((n_members, nlat, nlon)) + 275.0,
+        "so_0": randoms((n_members, nlat, nlon)),
+        "so_1": randoms((n_members, nlat, nlon)),
+        # spans the clamp range at both ends so the sea-ice rebalance engages
+        "sea_ice_fraction": randoms((n_members, nlat, nlon)) * 0.8 + 0.5,
+        "sea_ice_thickness": randoms((n_members, nlat, nlon)),
+        "hfds": randoms((n_members, nlat, nlon)),
+    }
+    forcing_data = {
+        "hfgeou": randoms((n_members, nlat, nlon)),
+        "sea_surface_fraction": mask[:, :, 0].expand(n_members, nlat, nlon),
+    }
+
+    folded = corrector(input_data, gen_data, forcing_data, None).corrected
+    assert set(folded) >= {"so_0", "sea_ice_fraction", "thetao_0", "sst"}
+
+    for member in range(n_members):
+
+        def slice_member(data, member=member):
+            return {name: value[member : member + 1] for name, value in data.items()}
+
+        alone = corrector(
+            slice_member(input_data),
+            slice_member(gen_data),
+            slice_member(forcing_data),
+            None,
+        ).corrected
+        for name, value in alone.items():
+            torch.testing.assert_close(
+                folded[name][member : member + 1],
+                value,
+                msg=lambda m, name=name, member=member: (
+                    f"{name} for member {member} depends on the other members: {m}"
+                ),
+            )
+
+    # and the members really are distinct after correction, so the comparison
+    # above is not vacuous
+    for name in folded:
+        assert not torch.allclose(folded[name][0], folded[name][1])

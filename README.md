@@ -19,6 +19,8 @@ pip install fme
 
 See complete documentation [here](https://ai2-climate-emulator.readthedocs.io/en/latest/) and a quickstart guide [here](https://ai2-climate-emulator.readthedocs.io/en/latest/quickstart.html).
 
+New to ACE? See our previous [workshop notebooks](https://ai2cm.github.io/ace/) giving a step-by-step walkthrough of running ACE, SamudrACE, and HiRO-ACE on free Colab GPUs.
+
 ## Model checkpoints
 
 Pretrained model checkpoints are available in the [ACE Hugging Face](https://huggingface.co/collections/allenai/ace-67327d822f0f0d8e0e5e6ca4) collection.
@@ -34,7 +36,10 @@ The following papers described models trained using code in this repository.
 - "Applying the ACE2 Emulator to SST Green's Functions for the E3SMv3 Global Atmosphere Model" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2025JH000774))
 - "SamudrACE: Fast and Accurate Coupled Climate Modeling with 3D Ocean and Atmosphere Emulators" ([link](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2025GL119340))
 - "HiRO-ACE: Fast and skillful AI emulation and downscaling trained on a 3 km global storm-resolving model" ([link](https://arxiv.org/abs/2512.18224))
-- "FloeNet: A mass-conserving global sea ice emulator that generalizes across climates" ([link](https://arxiv.org/abs/2603.12449))
+- "FloeNet: A mass-conserving global sea ice emulator that generalizes across climates" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2026GL122981))
+- "AIMIP Phase 1: systematic evaluations of AI weather and climate models" ([link](https://arxiv.org/abs/2605.06944))
+- "Disentangling the effects of sea surface temperature and CO<sub>2</sub> in global machine learned weather-climate emulators" ([link](https://arxiv.org/abs/2606.07928))
+- "Stochastic Emulation of a Fully Coupled Preindustrial E3SMv3 Simulation" ([link](https://arxiv.org/abs/2608.10277))
 
 ## ⚠️ Important migration notice
 

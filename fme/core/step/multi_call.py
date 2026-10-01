@@ -1,9 +1,8 @@
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import copy
 from typing import Any, TypeVar
 
-import dacite
 import torch
 from torch import nn
 
@@ -155,7 +154,11 @@ class MultiCallStepConfig(StepConfigABC):
             for output_name in self.config.output_names:
                 for name in self.config.get_multi_called_names(output_name):
                     extra_names.append(name)
-                    if output_name in self.wrapped_step.input_names:
+                    # A variant is scored in the same units as its base
+                    # variable, which follows the wrapped step's residual
+                    # convention (not mere prognostic-ness: a hybrid step
+                    # predicts some prognostics full-field).
+                    if output_name in self.wrapped_step.residual_names:
                         extra_residual_scaled_names.append(name)
         return self.wrapped_step.get_loss_normalizer(
             extra_names=extra_names,
@@ -169,24 +172,26 @@ class MultiCallStepConfig(StepConfigABC):
         return self.config.names
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self.wrapped_step.input_names
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self.wrapped_step.get_next_step_forcing_names()
 
     @property
-    def output_names(self) -> list[str]:
-        return self.wrapped_step.output_names + self._multi_call_outputs
+    def output_names(self) -> frozenset[str]:
+        return frozenset(
+            set(self.wrapped_step.output_names).union(self._multi_call_outputs)
+        )
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         return self.wrapped_step.next_step_input_names
 
     @property
     def loss_names(self) -> list[str]:
         if self.include_multi_call_in_loss:
-            return self.wrapped_step.loss_names + self._multi_call_outputs
+            return sorted(self.output_names)
         else:
             return self.wrapped_step.loss_names
 
@@ -217,8 +222,8 @@ class MultiCallStepConfig(StepConfigABC):
         return self.wrapped_step.allow_missing_variables
 
     @classmethod
-    def from_state(cls, state) -> "MultiCallStepConfig":
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 def _extend_normalizer_with_multi_call_outputs(

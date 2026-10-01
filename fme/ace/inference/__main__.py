@@ -12,9 +12,7 @@ if __name__ == "__main__":
         help=(
             "If provided, number of times to repeat the inference in time, "
             "saving each segment in a separate folder labeled by the start "
-            "time of its first (or only) ensemble member. "
-            "WARNING: this feature is experimental and its API is subject "
-            "to change."
+            "time of its first (or only) ensemble member."
         ),
     )
     args = parser.parse_args()

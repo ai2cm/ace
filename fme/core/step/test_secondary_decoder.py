@@ -21,6 +21,33 @@ class TestSecondaryDecoderConfig:
         )
         assert config.network.type == "SphericalFourierNeuralOperatorNet"
 
+    def test_include_input_step_defaults_false(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="MLP", config={}),
+        )
+        assert config.include_input_step is False
+
+    def test_include_input_step_true(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="MLP", config={}),
+            include_input_step=True,
+        )
+        assert config.include_input_step is True
+
+    def test_build_with_include_input_step(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="MLP", config={"hidden_dim": 16, "depth": 2}),
+            include_input_step=True,
+        )
+        decoder = config.build(n_in_channels=7, dataset_info=DatasetInfo())
+        x = torch.randn(2, 7, 8, 8)
+        output = decoder(x)
+        assert set(output.keys()) == {"diag1"}
+        assert output["diag1"].shape == (2, 8, 8)
+
 
 class TestSecondaryDecoder:
     def test_forward_and_unpack_integration(self):

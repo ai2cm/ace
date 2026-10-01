@@ -52,14 +52,16 @@ not validate cross-backend correctness.
 
 When committing changes, do not include Co-Authored-By: Claude in the commit message. This is because Claude bears no accountability or responsibility for the changes, the user is the sole author accountable.
 
-When committing to a branch that has an open PR, check whether the PR description needs to be updated to reflect the changes.
-When amending a PR description, make sure it still reflects the change _from main_, not the change from a previous, ephemeral state of the PR.
+When committing to a branch that has an open PR, check whether the PR description needs to be updated to reflect the changes; update it via the `write-pr-prose` skill (see "PR description template").
+When amending a PR description, make sure it still reflects the change _from the PR's base branch_ (main, unless the PR is stacked on another branch), not the change from a previous, ephemeral state of the PR.
 
 ### PR description template
 
 When making PRs, use the template that exists in the repo under .github/pull_request_template.md, if one exists.
 
 The PR description becomes the squash-and-merge commit message, so keep it self-contained and describe the final state of the change from main. PR-process information belongs in PR comments, not the description.
+
+In Claude Code sessions, write or amend PR titles and descriptions only via the `write-pr-prose` skill (`.claude/skills/write-pr-prose/`), never inline: its frontmatter pins PR-prose authoring to the required model.
 
 ### Commit/PR process
 

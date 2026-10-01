@@ -1,13 +1,25 @@
+import dataclasses
+import datetime
 import logging
-from collections.abc import Callable, Iterator
+import os
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Generic, Protocol, TypeVar
 
+import cftime
+
+from fme.core.cloud import exists
 from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
 from fme.core.generics.data import InferenceDataABC
 from fme.core.generics.writer import NullDataWriter, WriterABC
+from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 from fme.core.wandb import WandB
+
+# Truncated to hour precision: segment start times in existing runs have always
+# been at least 6h apart, so finer precision would just add visual noise. We can
+# reconsider if this changes.
+SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
 
 PS = TypeVar("PS")  # prognostic state
 FD = TypeVar("FD", contravariant=True)  # forcing data
@@ -167,3 +179,115 @@ def run_inference(
     with timer.context("data_writer"):
         prognostic_state = looper.get_prognostic_state()
         writer.write(prognostic_state, "restart.nc")
+
+
+def get_segment_label(
+    initialization_time: cftime.datetime,
+    timestep: datetime.timedelta,
+    segment: int,
+    n_steps: int,
+) -> str:
+    """Label a segment by the start time of its first (or only) ensemble member."""
+    segment_length = n_steps * timestep
+    current_start_time = initialization_time + segment * segment_length
+    current_label = current_start_time.strftime(SEGMENT_LABEL_FORMAT)
+
+    if segment > 0:
+        previous_start_time = initialization_time + (segment - 1) * segment_length
+        previous_label = previous_start_time.strftime(SEGMENT_LABEL_FORMAT)
+        if previous_label == current_label:
+            raise ValueError(
+                f"Consecutive segments have the same label ({previous_label!r} "
+                f"and {current_label!r}), meaning the current segment would "
+                f"overwrite the previous segment. Please open an issue on "
+                f"GitHub if having greater temporal precision in segmented run "
+                f"directory labels is an important use-case for you."
+            )
+
+    return current_label
+
+
+def run_segments(
+    segments: int,
+    experiment_dir: str,
+    logging_config: LoggingConfig,
+    logging_config_dict: Mapping[str, Any],
+    n_ensemble_per_ic: int,
+    n_steps_per_segment: int,
+    get_initialization: Callable[[], tuple[cftime.datetime, datetime.timedelta]],
+    get_restart_paths: Callable[[str], Sequence[str]],
+    run_segment: Callable[[str], None],
+    set_initial_condition: Callable[[Sequence[str]], None],
+    description: str = "segmented inference",
+) -> None:
+    """Run inference as a sequence of resumable segments.
+
+    Each segment runs ``n_steps_per_segment`` steps into a subdirectory of
+    ``experiment_dir`` labeled by its start time, and gets its own wandb run
+    named ``WANDB_NAME`` with the segment label appended. A segment counts as
+    complete once its restart files exist, so re-running the same configuration
+    skips finished segments. Restart files are written before the data writer's
+    final flush, so a segment interrupted in that window counts as complete
+    despite having incomplete diagnostics.
+
+    Args:
+        segments: Total number of segments; only missing ones are run.
+        experiment_dir: Directory holding the per-segment subdirectories.
+        logging_config: Logging configuration. Applied at the top level with
+            wandb disabled, since each segment opens its own run.
+        logging_config_dict: Full run configuration, logged to wandb.
+        n_ensemble_per_ic: Ensemble size, which must be 1. A segment's restart
+            already carries the broadcast ensemble as its sample dimension, so
+            later segments cannot re-broadcast it consistently.
+        n_steps_per_segment: Steps per segment, used to compute segment labels.
+        get_initialization: Returns the run's start time and timestep. Called
+            once, since it may be expensive.
+        get_restart_paths: Maps a segment directory to the restart files that
+            segment writes on completion.
+        run_segment: Runs one segment into the given directory.
+        set_initial_condition: Points the next segment at the given restarts.
+        description: Run description for the opening log message.
+    """
+    if n_ensemble_per_ic > 1:
+        raise ValueError(
+            "Ensemble inference (n_ensemble_per_ic > 1) is not supported with "
+            "segmented inference. A segment's restart already carries the "
+            "broadcasted ensemble as its sample dimension, so later segments "
+            "cannot re-broadcast it consistently. Run with n_ensemble_per_ic=1, "
+            "or run a single non-segmented inference for ensemble runs."
+        )
+    # Top-level logging has no wandb run; each segment owns its own.
+    top_level_logging = dataclasses.replace(logging_config, log_to_wandb=False)
+    top_level_logging.configure_logging(
+        experiment_dir,
+        "inference_out.log",
+        config=logging_config_dict,
+        resumable=False,
+    )
+    logging.info(
+        f"Starting {description} with {segments} segments. "
+        f"Saving to {experiment_dir}."
+    )
+    original_wandb_name = os.environ.get("WANDB_NAME")
+    initialization_time, timestep = get_initialization()
+
+    for segment in range(segments):
+        segment_label = get_segment_label(
+            initialization_time,
+            timestep,
+            segment,
+            n_steps_per_segment,
+        )
+        segment_dir = os.path.join(experiment_dir, segment_label)
+        restart_paths = get_restart_paths(segment_dir)
+        if all(exists(path) for path in restart_paths):
+            logging.info(f"Skipping segment {segment} because it has already been run.")
+        else:
+            logging.info(f"Running segment {segment}.")
+            if original_wandb_name is not None:
+                os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
+            with GlobalTimer():
+                run_segment(segment_dir)
+            # Finish so the next segment starts a fresh wandb run.
+            WandB.get_instance().finish()
+        set_initial_condition(restart_paths)

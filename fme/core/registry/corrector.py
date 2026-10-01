@@ -51,6 +51,10 @@ class CorrectorSelector(CorrectorConfigABC):
         """This class method is used to expose all available types of Correctors."""
         return set(cls.registry._types.keys())
 
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,

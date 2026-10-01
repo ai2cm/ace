@@ -1,4 +1,6 @@
 import dataclasses
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 from torch import nn
@@ -114,6 +116,10 @@ class SwinTransformerBuilder(ModuleConfig):
     use_cpb_scaling: bool = True
     cross_level_attention: bool = False
     column_num_heads: int = 8
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -235,6 +241,10 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     cross_level_attention: bool = False
     column_num_heads: int = 8
     time_embed_dim: int = 0
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
