@@ -1339,17 +1339,76 @@ def data_parallel_scatter(
     all ranks; ``gathered`` is populated only on root (``None``
     elsewhere).
 
-    Implementation note: ``scatter_object`` broadcasts the same object
-    to every rank (it is a broadcast utility, not a true list-scatter).
-    We broadcast the ``GatheredBatchData`` and let each rank extract its
-    own shard via ``get_for_rank``.
+    Tensor data is scattered via ``data_parallel_scatter`` so each rank
+    receives only its own shard. Metadata (time, labels, stepper_state,
+    data_mask) is broadcast from the data-parallel root.
     """
     if dist is None:
         dist = Distributed.get_instance()
-    # scatter_object broadcasts gathered to all ranks.
-    gathered_all: GatheredBatchData = dist.scatter_object(gathered)
-    return gathered_all.get_for_rank(
-        dist.data_parallel_rank, dist.total_data_parallel_ranks
+
+    n_ranks = dist.total_data_parallel_ranks
+    my_rank = dist.data_parallel_rank
+
+    # Root prepares per-rank metadata and scatter lists.
+    if dist.is_data_parallel_root():
+        if gathered is None:
+            raise ValueError(
+                "data-parallel root must provide gathered data"
+            )
+        rank_batches = [gathered.get_for_rank(r, n_ranks) for r in range(n_ranks)]
+        manifest: dict | None = {
+            "var_info": [
+                (name, list(t.shape), str(t.dtype))
+                for name, t in rank_batches[0].data.items()
+            ],
+            "per_rank": [
+                {
+                    "time": b.time,
+                    "labels": b.labels,
+                    "stepper_state": b.stepper_state,
+                    "data_mask": (
+                        {k: v for k, v in b.data_mask.items()}
+                        if b.data_mask
+                        else None
+                    ),
+                    "horizontal_dims": b.horizontal_dims,
+                }
+                for b in rank_batches
+            ],
+        }
+    else:
+        rank_batches = None
+        manifest = None
+
+    # Broadcast manifest (small metadata) to all data-parallel ranks.
+    manifest = dist.data_parallel_broadcast_object(manifest)
+    my_meta = manifest["per_rank"][my_rank]
+
+    # Scatter tensor data.  Allocate on-device because NCCL requires CUDA
+    # tensors; move results to CPU afterwards for BatchData.new_on_cpu.
+    device = get_device()
+    data: dict[str, torch.Tensor] = {}
+    for name, shape, dtype_str in manifest["var_info"]:
+        dtype = _STR_TO_DTYPE[dtype_str]
+        recv_buf = torch.empty(shape, dtype=dtype, device=device)
+        if dist.is_data_parallel_root():
+            assert rank_batches is not None
+            scatter_list = [
+                rank_batches[r].data[name].to(device).contiguous()
+                for r in range(n_ranks)
+            ]
+        else:
+            scatter_list = None
+        dist.data_parallel_scatter(recv_buf, scatter_list)
+        data[name] = recv_buf.cpu()
+
+    return BatchData.new_on_cpu(
+        data=data,
+        time=my_meta["time"],
+        labels=my_meta["labels"],
+        data_mask=my_meta["data_mask"],
+        stepper_state=my_meta["stepper_state"],
+        horizontal_dims=my_meta["horizontal_dims"],
     )
 
 
