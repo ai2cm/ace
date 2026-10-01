@@ -1247,6 +1247,11 @@ class GatheredBatchData:
         contiguous sample shard; the stepper state is selected via
         ``GatheredStepperState.get_for_rank``.
         """
+        if self._stepper_state is not None and n_ranks != self._stepper_state.n_ranks:
+            raise ValueError(
+                f"n_ranks={n_ranks} does not match the gathered stepper state "
+                f"n_ranks={self._stepper_state.n_ranks}"
+            )
         n_samples = next(iter(self._data.values())).shape[0]
         shard = n_samples // n_ranks
         sample_slice = slice(rank * shard, (rank + 1) * shard)
