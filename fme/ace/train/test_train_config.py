@@ -1,9 +1,12 @@
 import dataclasses
-from typing import Any
+import datetime
+import math
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import dacite
 import pytest
+import torch
 
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
@@ -17,19 +20,33 @@ from fme.ace.stepper.single_module import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
     StepperConfig,
+    TrainStepper,
     TrainStepperConfig,
 )
+from fme.ace.stepper.test_optimized_derived_stepper import (
+    NAMES,
+    _AddBias,
+    _data,
+    _stepper_config,
+)
 from fme.ace.train.train_config import (
+    AggregatorBuilder,
     InlineInferenceConfig,
     InlineValidationConfig,
     TrainConfig,
     _get_inference_callback,
     _get_validation_callback,
 )
+from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
+from fme.core.device import get_device
 from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import OptimizationConfig
+from fme.core.loss import StepLossConfig
+from fme.core.optimization import NullOptimization, OptimizationConfig
+from fme.core.optimized_derived import OptimizedDerivedVariableConfig
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.typing_ import Slice
@@ -621,3 +638,132 @@ class TestGetInferenceCallback:
                 entries,
                 [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
             )
+
+
+def _layer_ohc_dataset_info():
+    """Ocean grid with a land row and a shelf row (wet only above 10 m), so
+    no stored mask equals the band masks of [0, 100] or [100, bottom]."""
+    device = get_device()
+    img_shape, n_levels = (4, 6), 2
+    mask = torch.ones(*img_shape, n_levels, device=device)
+    mask[0] = 0.0  # land
+    mask[1, :, 1:] = 0.0  # shelf: wet 0-10 m only
+    masks = {f"mask_{k}": mask[..., k] for k in range(n_levels)}
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.linspace(-60.0, 60.0, img_shape[0], device=device),
+            lon=torch.linspace(0.0, 300.0, img_shape[1], device=device),
+        ),
+        vertical_coordinate=DepthCoordinate(
+            idepth=torch.tensor([0.0, 10.0, 500.0], device=device), mask=mask
+        ),
+        spatial_mask_provider=SpatialMaskProvider(
+            masks={**masks, "mask_2d": masks["mask_0"]}
+        ),
+        timestep=datetime.timedelta(days=5),
+    )
+
+
+def test_layer_ohc_aggregator_means_finite(tmp_path):
+    """Issue 15: train, validation, and inline-inference aggregators built
+    through TrainConfig.build_trainer log finite layer_ohc_* metrics."""
+    torch.manual_seed(0)
+    bands: list[list[float | None]] = [[0.0, 100.0], [100.0, None]]
+    ohc_names = ["layer_ohc_0_100", "layer_ohc_100_bottom"]
+    dataset_info = _layer_ohc_dataset_info()
+    data = _data(n_timesteps=2)
+    inference = _make_inference_config(name="inference")
+    inference.n_forward_steps = 1
+    config = dataclasses.replace(
+        _make_train_config(tmp_path, inference=inference, max_epochs=1),
+        stepper=_stepper_config(_AddBias(len(NAMES))),
+        stepper_training=TrainStepperConfig(
+            n_forward_steps=1,
+            loss=StepLossConfig(type="MSE"),
+            optimized_derived_variables=[
+                OptimizedDerivedVariableConfig(name="layer_ohc", bands=bands)
+            ],
+        ),
+    )
+    train_data = MagicMock(dataset_info=dataset_info, variable_metadata={})
+    inference_data = MagicMock(initial_time=data.time.isel(time=0))
+    with (
+        patch.object(TrainConfig, "_get_train_data", return_value=train_data),
+        patch.object(
+            TrainConfig,
+            "_get_validation_data",
+            return_value=[(_make_validation_config(), MagicMock(), "val")],
+        ),
+        patch.object(
+            TrainConfig,
+            "_get_inference_data",
+            return_value=[(inference, inference_data, dataset_info, "inference")],
+        ),
+    ):
+        trainer = config.build_trainer()
+    stepper = cast(TrainStepper, trainer.stepper)
+    builder = cast(AggregatorBuilder, trainer._aggregator_builder)
+
+    captured = {}
+
+    def capture(**kwargs):
+        captured[kwargs["label"]] = kwargs["aggregator"]
+        return AggregatorSummary(logs={}, loss=0.0)
+
+    def capture_inference(**kwargs):
+        captured[kwargs["label"]] = kwargs["aggregator"]
+        return InferenceSummary(logs={}, loss=0.0)
+
+    with (
+        patch("fme.core.generics.trainer.run_validation", side_effect=capture),
+        patch(
+            "fme.core.generics.trainer.inference_one_epoch",
+            side_effect=capture_inference,
+        ),
+    ):
+        trainer._validation_callback(1)
+        trainer._inference_callback(1)
+
+    stepped = stepper.train_on_batch(
+        data, optimization=NullOptimization(), compute_derived_variables=True
+    )
+    ic = data.get_start(stepper._stepper.prognostic_names, stepper.n_ic_timesteps)
+    paired, _ = stepper.predict_paired(ic, data, compute_derived_variables=True)
+
+    train_agg = builder.get_train_aggregator()
+    train_agg.record_batch(stepped)
+    captured["val"].record_batch(stepped)
+    captured["inference"].record_initial_condition(ic)
+    captured["inference"].record_batch(paired)
+    logs = {
+        "train": train_agg.get_logs("train"),
+        "val": captured["val"].get_logs("val"),
+        "inference": captured["inference"].get_summary().logs,
+    }
+    bad = {}
+    for label, label_logs in logs.items():
+        for name in ohc_names:
+            keys = [
+                k
+                for k, v in label_logs.items()
+                if k.endswith(f"/{name}") and isinstance(v, float | torch.Tensor)
+            ]
+            assert keys, f"{label}: no metric for {name}"
+            bad.update(
+                {
+                    k: label_logs[k]
+                    for k in keys
+                    if not math.isfinite(float(label_logs[k]))
+                }
+            )
+    assert not bad, f"non-finite: {sorted(bad)}"
+    provider = builder.dataset_info.spatial_mask_provider
+    for name in ohc_names:
+        mask = provider.get_mask_tensor_for(name)
+        assert mask is not None
+        for field in (stepped.gen_data[name], stepped.target_data[name]):
+            torch.testing.assert_close(
+                mask.bool().expand(field.shape), field.isfinite()
+            )
+    stepper_masks = stepper.get_state()["dataset_info"]["mask_provider"]["masks"]
+    assert set(stepper_masks) == set(dataset_info.spatial_mask_provider.masks)

@@ -32,6 +32,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -982,6 +983,19 @@ class Stepper:
     @property
     def config(self) -> StepperConfig:
         return self._config
+
+    @property
+    def spatial_masks(self) -> dict[str, torch.Tensor]:
+        """Spatial masks of the optimized derived variables, keyed
+        ``mask_<name>``, for the aggregators' spatial mask provider; empty
+        before ``build_loss`` or without derived variables.
+        """
+        if self._optimized_derived is None:
+            return {}
+        device = get_device()
+        return {
+            k: v.to(device) for k, v in self._optimized_derived.spatial_masks.items()
+        }
 
     @property
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
@@ -1954,6 +1968,10 @@ class TrainStepper(
     @property
     def loss_names(self) -> list[str]:
         return self._stepper.loss_names
+
+    @property
+    def spatial_masks(self) -> dict[str, torch.Tensor]:
+        return self._stepper.spatial_masks
 
     def predict_paired(
         self,

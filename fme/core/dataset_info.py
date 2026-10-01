@@ -23,6 +23,7 @@ from fme.core.spatial_mask_provider import (
     SpatialMaskProvider,
     SpatialMaskProviderABC,
 )
+from fme.core.typing_ import TensorMapping
 
 __all__ = ["DatasetInfo", "IncompatibleDatasetInfo", "MissingDatasetInfo"]
 
@@ -247,6 +248,34 @@ class DatasetInfo:
             timestep=self._timestep,
             variable_metadata=new_metadata,
             gridded_operations=self._gridded_operations,
+            img_shape=self._img_shape,
+            all_labels=self._all_labels,
+        )
+
+    def update_spatial_masks(self, masks: TensorMapping) -> "DatasetInfo":
+        """
+        Return a new DatasetInfo whose spatial mask provider also holds
+        ``masks`` (keys ``mask_<name>``); existing masks win on a name clash.
+        """
+        if not masks:
+            return self
+        if self._gridded_operations is not None:
+            raise ValueError(
+                "Cannot add spatial masks to a DatasetInfo built from serialized "
+                "gridded_operations; its operations hold their own mask provider."
+            )
+        provider = SpatialMaskProvider(
+            {}
+            if self._spatial_mask_provider is None
+            else self._spatial_mask_provider.masks
+        )
+        provider.update(SpatialMaskProvider(masks))
+        return DatasetInfo(
+            horizontal_coordinates=self._horizontal_coordinates,
+            vertical_coordinate=self._vertical_coordinate,
+            spatial_mask_provider=provider,
+            timestep=self._timestep,
+            variable_metadata=self._variable_metadata,
             img_shape=self._img_shape,
             all_labels=self._all_labels,
         )

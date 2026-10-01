@@ -271,6 +271,18 @@ class OptimizedDerivedVariables:
         self.means = means
         self.stds = stds
 
+    @property
+    def spatial_masks(self) -> dict[str, torch.Tensor]:
+        """``mask_<name>`` for each derived field whose NaN pattern no data
+        mask matches (``layer_ohc_*``: the cells where the band exists), for
+        the aggregators' spatial mask provider. Not part of the loss or the
+        stepper checkpoint.
+        """
+        masks: dict[str, torch.Tensor] = {}
+        for derivation in self._derivations:
+            masks.update(getattr(derivation, "spatial_masks", {}))
+        return masks
+
     def __call__(self, data: TensorMapping) -> TensorDict:
         """The derived fields only, computed from ``data``."""
         out: TensorDict = {}
@@ -459,6 +471,15 @@ class _LayerOhcDerivation:
         self._statics_by_device: dict[
             torch.device, tuple[torch.Tensor, torch.Tensor]
         ] = {}
+
+    @property
+    def spatial_masks(self) -> dict[str, torch.Tensor]:
+        """``mask_layer_ohc_{a}_{b}``: 1 where the band exists, the band's
+        non-NaN cells.
+        """
+        return {
+            f"mask_{name}": self._exists[b].float() for b, name in enumerate(self.names)
+        }
 
     def _statics(self, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
         if device not in self._statics_by_device:

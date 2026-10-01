@@ -309,7 +309,9 @@ def _get_inference_callback(
                 data=data,
                 aggregator_factory=entry_config.build_aggregator_factory(
                     data=data,
-                    entry_dataset_info=entry_dataset_info,
+                    entry_dataset_info=entry_dataset_info.update_spatial_masks(
+                        stepper.spatial_masks
+                    ),
                     name=name,
                     stepper=stepper,
                     output_dir=output_dir,
@@ -739,7 +741,11 @@ class TrainConfig:
         )
 
         loss_names = stepper.loss_names
-        updated_dataset_info = dataset_info.update_variable_metadata(variable_metadata)
+        # Aggregator-only masks for derived fields (layer_ohc_*); the stepper's
+        # own dataset_info and checkpoint stay unchanged.
+        updated_dataset_info = dataset_info.update_variable_metadata(
+            variable_metadata
+        ).update_spatial_masks(stepper.spatial_masks)
         aggregator_builder = AggregatorBuilder(
             train_config=self.train_aggregator,
             dataset_info=updated_dataset_info,
