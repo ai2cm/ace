@@ -1893,10 +1893,15 @@ class TestDataParallelGather:
         if dist.is_root():
             assert result is not None
             assert result._stepper_state is not None
-            assert result._stepper_state._corrector_state is not None
-            mass = result._stepper_state._corrector_state.global_dry_air_mass
-            assert mass is not None
-            assert mass.shape[0] == dist.world_size
+            assert result._stepper_state.n_ranks == dist.world_size
+            for r in range(dist.world_size):
+                rank_state = result._stepper_state.get_for_rank(r)
+                assert rank_state.corrector_state is not None
+                mass = rank_state.corrector_state.global_dry_air_mass
+                assert mass is not None
+                torch.testing.assert_close(
+                    mass, torch.full((1, 1, 1), float(r))
+                )
 
     def test_none_extras_stay_none(self):
         dist = Distributed.get_instance()
