@@ -1,0 +1,42 @@
+# Per-step output around the sea-ice drop seen in the 139-year evaluations of
+# ../2026-09-25-1pct-yearly-eval: every 4deg run holds 3.4-4.3e12 m^3 more sea
+# ice than the target through years 2-40 and sheds it around years 38-42, with
+# a step in the deep salinity bias at the same time.
+#
+# 15 years, 0034-01-01..0049-01-01, initialized from the target at 0034 and
+# writing every 5-day step (1095 steps), so the order of events (ice,
+# salinity, temperature, the forcing in the target file) can be read directly.
+# Differences from evaluator-config-1pct_yearly_4deg.yaml: the initial
+# condition, n_forward_steps, per-step prediction files, and per-step corrector
+# deltas (no time_coarsen). Starting from the target, the run begins without
+# the long rollouts' ice excess: a drop at ~0041 here points to the inputs, no
+# drop points to the state the long rollouts reached.
+# Output: ~3.6 GB per-step predictions + target, ~0.8 GB corrector deltas,
+# ~0.3 GB monthly.
+experiment_dir: /results
+n_forward_steps: 1095
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0034-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: true
+  save_step_diagnostics: true

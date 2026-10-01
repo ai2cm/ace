@@ -1,0 +1,7 @@
+
+cm4_1pct_46to125_piC_156to235-4deg-ocean_no_sal_correct|rs0|01M3M32Q30ZKAN66PA2F58QMRJ|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-4deg-ocean_no_sal_correct|rs0|01M3M32Q30ZKAN66PA2F58QMRJ|1pct_yearly_4deg|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-4deg-ocean_no_sal_correct|rs0_totalsalt|01M3M32Q30ZKAN66PA2F58QMRJ|1pct_yearly_4deg|best_inference_ckpt|normal|--min-runtime 8h||01M3PMWES5CJ6YZNA9FBA1ZPHH
+cm4_1pct_46to125_piC_156to235-4deg-ocean_no_sal_correct|rs0_totalsalt_f32|01M3M32Q30ZKAN66PA2F58QMRJ|1pct_yearly_4deg|best_inference_ckpt|normal|--min-runtime 8h||01M3PQW7ZWTGYTJ11WYN4KR2SG
+cm4_1pct_46to125_piC_156to235-4deg-ocean_no_sal_correct|rs0|01M3M32Q30ZKAN66PA2F58QMRJ|1pct_jump_4deg|best_inference_ckpt|normal|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-4deg-ocean_no_sal_correct|rs0_totalsalt|01M3M32Q30ZKAN66PA2F58QMRJ|1pct_jump_4deg|best_inference_ckpt|normal|--min-runtime 2h||01M3PMWES5CJ6YZNA9FBA1ZPHH
