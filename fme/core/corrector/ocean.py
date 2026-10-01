@@ -7,6 +7,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
@@ -21,6 +22,7 @@ from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
+from fme.core.ocean_eos import interface_to_center_depth, wright97_anomaly
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -91,24 +93,63 @@ class SeaIceFractionConfig:
 
 
 @dataclasses.dataclass
+class OceanHeatContentWeightsConfig:
+    """Vertical-structure weights ``w`` for the ``weighted_temperature`` OHC
+    correction, ``thetao_k,corr = thetao_k,gen + c * w_k``.
+
+    Parameters:
+        type: ``"mld"`` gives the mixed-layer weight
+            ``w_ik = clamp((min(MLD_i, deptho_i) - z_top_k) / dz_ik, 0, 1)``
+            (dimensionless), with ``MLD_i`` [m] the density-threshold mixed
+            layer depth of the previous-step state ``(thetao_in, so_in)``,
+            using the Wright (1997) density at zero pressure. ``"theta"`` gives
+            ``w = thetao_gen`` [degC], the ``scaled_temperature`` shape.
+        delta_rho_threshold: Density increase [kg/m**3] relative to the
+            reference layer that defines the mixed layer base (``"mld"`` only).
+        mld_ref_layer: Index of the reference layer for the density threshold
+            (``"mld"`` only), dimensionless.
+    """
+
+    type: Literal["mld", "theta"] = "mld"
+    delta_rho_threshold: float = 0.03
+    mld_ref_layer: int = 1
+
+    def __post_init__(self):
+        if self.mld_ref_layer < 0:
+            raise ValueError(
+                f"mld_ref_layer must be non-negative, got {self.mld_ref_layer}"
+            )
+
+
+@dataclasses.dataclass
 class OceanHeatContentBudgetConfig:
     """Configuration for ocean heat content budget correction.
 
     Parameters:
-        method: Method to use for OHC budget correction. The available option is
-            "scaled_temperature", which enforces conservation of heat content
-            by scaling the predicted potential temperature by a vertically and
-            horizontally uniform correction factor.
+        method: Method to use for OHC budget correction.
+            "scaled_temperature" enforces conservation of heat content by
+            scaling the predicted potential temperature by a vertically and
+            horizontally uniform correction factor (dimensionless).
+            "weighted_temperature" adds ``c * w`` to the predicted potential
+            temperature, with ``w`` set by ``weights`` and the scalar ``c``
+            [K per unit of ``w``] chosen so the global mean heat content
+            closes the budget.
         constant_unaccounted_heating: Area-weighted global mean
             column-integrated heating in W/m**2 to be added to the energy flux
             into the ocean when conserving the heat content. This can be useful
             for correcting errors in heat budget in target data. The same
             additional heating is imposed at all time steps and grid cells.
-
+        weights: Weights for "weighted_temperature"; unused otherwise.
+        detach_weights: If True, ``w`` carries no gradient in
+            "weighted_temperature"; ``c`` keeps its gradient.
     """
 
-    method: Literal["scaled_temperature"]
+    method: Literal["scaled_temperature", "weighted_temperature"]
     constant_unaccounted_heating: float = 0.0
+    weights: OceanHeatContentWeightsConfig = dataclasses.field(
+        default_factory=OceanHeatContentWeightsConfig
+    )
+    detach_weights: bool = True
 
 
 @dataclasses.dataclass
@@ -223,8 +264,12 @@ class OceanHeatContentCorrection:
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
-    method: Literal["scaled_temperature"]
+    method: Literal["scaled_temperature", "weighted_temperature"]
     unaccounted_heating: float
+    weights: OceanHeatContentWeightsConfig = dataclasses.field(
+        default_factory=OceanHeatContentWeightsConfig
+    )
+    detach_weights: bool = True
 
     def __call__(
         self,
@@ -253,6 +298,8 @@ class OceanHeatContentCorrection:
             self.timestep_seconds,
             self.method,
             self.unaccounted_heating,
+            weights=self.weights,
+            detach_weights=self.detach_weights,
         )
         return corrected, corrector_state
 
@@ -400,6 +447,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                    weights=self.ocean_heat_content_correction.weights,
+                    detach_weights=self.ocean_heat_content_correction.detach_weights,
                 )
             )
         if self.zos_global_mean_correction is not None:
@@ -484,6 +533,256 @@ def _correct_hfds(
     return out
 
 
+class _HasDepthGeometry(Protocol):
+    idepth: torch.Tensor
+    mask: torch.Tensor
+    deptho: torch.Tensor | None
+
+    @property
+    def dz(self) -> torch.Tensor: ...
+
+    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor: ...
+
+
+@dataclasses.dataclass
+class OceanHeatContentCorrectionDiagnostics:
+    """Per-step diagnostics of the ``weighted_temperature`` OHC correction,
+    detached, each of shape ``(n_samples, 1, 1)`` (global means keep dims).
+
+    Parameters:
+        raw_adv: ``-dE / dt`` [W/m**2], the heat-content tendency the
+            prediction misses relative to the budget.
+        c: Correction amplitude [K per unit of ``w``].
+        denominator: ``< depth_integral(RHO_0 c_p w) >`` [J/m**2 per K].
+        closure_residual: ``<OHC_corr> - <OHC_in> - (<F> + unaccounted) dt``
+            [J/m**2].
+        max_abs_dT: ``max abs(c w)`` over the grid [K].
+        mean_mld: Area-weighted mean mixed layer depth [m]; None for
+            ``theta`` weights.
+    """
+
+    raw_adv: torch.Tensor
+    c: torch.Tensor
+    denominator: torch.Tensor
+    closure_residual: torch.Tensor
+    max_abs_dT: torch.Tensor
+    mean_mld: torch.Tensor | None
+
+
+def _check_depth_geometry(vertical_coordinate: HasOceanDepthIntegral) -> None:
+    if not all(
+        hasattr(vertical_coordinate, a) for a in ("idepth", "mask", "dz", "deptho")
+    ):
+        raise ValueError(
+            "weighted_temperature OHC correction requires a depth coordinate "
+            "with idepth, mask, dz and deptho, got "
+            f"{type(vertical_coordinate).__name__}."
+        )
+
+
+def _mixed_layer_depth(
+    thetao: torch.Tensor,
+    so: torch.Tensor,
+    idepth: torch.Tensor,
+    mask: torch.Tensor,
+    deptho: torch.Tensor,
+    delta_rho_threshold: float,
+    ref_layer: int,
+) -> torch.Tensor:
+    """Density-threshold mixed layer depth [m], positive down.
+
+    ``rho = wright97_anomaly(so, thetao, p=0)``; the MLD is where
+    ``rho_k - rho_ref`` first exceeds ``delta_rho_threshold`` below
+    ``ref_layer``, linearly interpolated between level centres, and
+    ``deptho`` where it never does. Port of
+    ``analysis/2026-09-30-1508-ohc-corrector-vertical-structure/05a_corrector.py::mld_hard``
+    in the ai2cm workspace.
+
+    Args:
+        thetao: Potential temperature [degC], ``(..., nz)``.
+        so: Practical salinity [PSU], ``(..., nz)``.
+        idepth: Interface depths [m], ``(nz + 1,)``.
+        mask: Ocean mask, broadcastable to ``thetao``.
+        deptho: Sea floor depth [m], broadcastable to ``thetao.shape[:-1]``.
+        delta_rho_threshold: Density threshold [kg/m**3].
+        ref_layer: Reference layer index.
+    """
+    n_levels = thetao.shape[-1]
+    if not 0 <= ref_layer < n_levels - 1:
+        raise ValueError(
+            f"mld_ref_layer must be in [0, {n_levels - 2}], got {ref_layer}"
+        )
+    # NaN inputs (land, below the bottom) are replaced by finite values before
+    # the EOS and the interpolation so that the zero gradient torch.where passes
+    # to unselected entries is never multiplied by NaN; d keeps its NaN there so
+    # the forward selection is unchanged.
+    finite = torch.isfinite(thetao) & torch.isfinite(so)
+    rho = wright97_anomaly(
+        torch.where(finite, so, torch.zeros_like(so)),
+        torch.where(finite, thetao, torch.zeros_like(thetao)),
+        torch.zeros_like(thetao),
+    )
+    rho = torch.where(finite, rho, torch.full_like(rho, float("nan")))
+    zc = interface_to_center_depth(idepth)
+    d = rho - rho[..., ref_layer : ref_layer + 1]
+    d_safe = torch.where(torch.isfinite(d), d, torch.zeros_like(d))
+    mask = mask.expand(d.shape)
+    mld = torch.full_like(d[..., 0], float("nan"))
+    notset = torch.ones_like(mld, dtype=torch.bool)
+    for k in range(ref_layer + 1, n_levels):
+        lm = (d[..., k] > delta_rho_threshold) & notset & (mask[..., k] > 0)
+        if k == ref_layer + 1:
+            dprev = torch.zeros_like(d[..., k])
+            dprev_safe = dprev
+        else:
+            dprev = d[..., k - 1]
+            dprev_safe = d_safe[..., k - 1]
+        zprev = zc[ref_layer] if k == ref_layer + 1 else zc[k - 1]
+        denom = d_safe[..., k] - dprev_safe + 1e-8
+        denom = torch.where(lm, denom, torch.ones_like(denom))
+        frac = (delta_rho_threshold - dprev_safe) / denom
+        value = zprev + frac * (zc[k] - zprev)
+        value = torch.where(
+            torch.isfinite(dprev), value, torch.full_like(value, float("nan"))
+        )
+        mld = torch.where(lm, value, mld)
+        notset = notset & ~lm
+    return torch.where(torch.isnan(mld), deptho.expand(mld.shape), mld)
+
+
+def _weighted_temperature_correction(
+    input: OceanData,
+    gen: OceanData,
+    expected_change_ocean_heat_content: torch.Tensor,
+    area_weighted_mean: AreaWeightedMean,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    weights: OceanHeatContentWeightsConfig,
+    detach_weights: bool,
+) -> tuple[TensorDict, OceanHeatContentCorrectionDiagnostics]:
+    """``thetao_corr = thetao_gen + c w`` with
+    ``c = dE / < depth_integral(RHO_0 c_p w) >``,
+    ``dE = <OHC_in> + (<F> + unaccounted) dt - <OHC_gen>``.
+
+    ``w`` is zero off ``mask_k`` and where ``dz`` is NaN, the support of
+    ``DepthCoordinate.depth_integral``; ``dz`` is the coordinate's own, the
+    same one ``OceanData.ocean_heat_content`` uses.
+    """
+    _check_depth_geometry(vertical_coordinate)
+    coord: _HasDepthGeometry = vertical_coordinate  # type: ignore[assignment]
+    thetao_gen = gen.sea_water_potential_temperature
+    dz = coord.dz.to(thetao_gen.dtype)
+    mask = coord.mask
+    support = (mask > 0) & torch.isfinite(dz)
+    mld: torch.Tensor | None = None
+    if weights.type == "mld":
+        idepth = coord.idepth.to(thetao_gen.dtype)
+        if coord.deptho is not None:
+            deptho = coord.deptho.to(thetao_gen.dtype)
+        else:
+            deptho = (mask * idepth[1:]).max(dim=-1).values
+        mld = _mixed_layer_depth(
+            input.sea_water_potential_temperature,
+            input.sea_water_salinity,
+            idepth,
+            mask,
+            deptho,
+            weights.delta_rho_threshold,
+            weights.mld_ref_layer,
+        )
+        support = support & (dz > 0)
+        dz_safe = torch.where(support, dz, torch.ones_like(dz))
+        m = torch.minimum(mld, deptho.expand(mld.shape)).unsqueeze(-1)
+        w = torch.clamp((m - idepth[:-1]) / dz_safe, 0.0, 1.0)
+        w = torch.where(support, w, torch.zeros_like(w))
+        w_sst = w[..., 0]
+    elif weights.type == "theta":
+        support = support.expand(thetao_gen.shape)
+        w = torch.where(support, thetao_gen, torch.zeros_like(thetao_gen))
+        if "sst" in gen.data:
+            w_sst = torch.where(
+                support[..., 0],
+                gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN,
+                torch.zeros_like(gen.data["sst"]),
+            )
+        else:
+            w_sst = w[..., 0]
+    else:
+        raise NotImplementedError(f"OHC correction weights {weights.type!r}")
+    if detach_weights:
+        w = w.detach()
+        w_sst = w_sst.detach()
+    rho_cp = SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
+    denominator = area_weighted_mean(
+        coord.depth_integral(rho_cp * w), keepdim=True, name="ocean_heat_content"
+    )
+    if not bool((denominator > 0).all()):
+        raise ValueError(
+            "weighted_temperature OHC correction denominator "
+            "<depth_integral(RHO_0 c_p w)> must be positive, got "
+            f"{denominator.detach().flatten().tolist()}."
+        )
+    global_input_ohc = area_weighted_mean(
+        input.ocean_heat_content, keepdim=True, name="ocean_heat_content"
+    )
+    global_gen_ohc = area_weighted_mean(
+        gen.ocean_heat_content, keepdim=True, name="ocean_heat_content"
+    )
+    dE = global_input_ohc + expected_change_ocean_heat_content - global_gen_ohc
+    c = dE / denominator
+    dT = c.unsqueeze(-1) * w
+    out: TensorDict = {}
+    for k in range(thetao_gen.shape[-1]):
+        name = f"thetao_{k}"
+        out[name] = gen.data[name] + dT[..., k]
+    if "sst" in gen.data:
+        out["sst"] = gen.data["sst"] + c * w_sst
+    with torch.no_grad():
+        corrected = OceanData(dict(out), vertical_coordinate)
+        global_corr_ohc = area_weighted_mean(
+            corrected.ocean_heat_content, keepdim=True, name="ocean_heat_content"
+        )
+        diagnostics = OceanHeatContentCorrectionDiagnostics(
+            raw_adv=(-dE / timestep_seconds).detach(),
+            c=c.detach(),
+            denominator=denominator.detach(),
+            closure_residual=(
+                global_corr_ohc - global_input_ohc - expected_change_ocean_heat_content
+            ).detach(),
+            max_abs_dT=dT.detach().abs().amax(dim=(-3, -2, -1)).reshape(c.shape),
+            mean_mld=(
+                None
+                if mld is None
+                else area_weighted_mean(
+                    mld.detach(), keepdim=True, name="ocean_heat_content"
+                )
+            ),
+        )
+    return out, diagnostics
+
+
+def _net_energy_flux_into_ocean(
+    input: OceanData, gen: OceanData, forcing: OceanData
+) -> torch.Tensor:
+    try:
+        # First priority: pre-weighted heat flux in gen_data
+        return (
+            gen.net_downward_surface_heat_flux_total_area
+            + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
+        )
+    except KeyError:
+        try:
+            # Second priority: standard heat flux in gen_data
+            return (
+                gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+            ) * forcing.sea_surface_fraction
+        except KeyError:
+            # Third priority: standard heat flux in input_data
+            return (
+                input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+            ) * forcing.sea_surface_fraction
+
+
 def _force_conserve_ocean_heat_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
@@ -491,13 +790,19 @@ def _force_conserve_ocean_heat_content(
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["scaled_temperature"] = "scaled_temperature",
+    method: Literal[
+        "scaled_temperature", "weighted_temperature"
+    ] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
+    weights: OceanHeatContentWeightsConfig | None = None,
+    detach_weights: bool = True,
 ) -> TensorDict:
-    if method != "scaled_temperature":
+    if method not in ("scaled_temperature", "weighted_temperature"):
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
         )
+    if method == "weighted_temperature":
+        _check_depth_geometry(vertical_coordinate)
     if "hfds" in gen_data and "hfds" in forcing_data:
         raise ValueError(
             "Net downward surface heat flux cannot be present in both gen_data and "
@@ -510,6 +815,27 @@ def _force_conserve_ocean_heat_content(
         )
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
+    net_energy_flux_into_ocean = _net_energy_flux_into_ocean(input, gen, forcing)
+    energy_flux_global_mean = area_weighted_mean(
+        net_energy_flux_into_ocean,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    expected_change_ocean_heat_content = (
+        energy_flux_global_mean + unaccounted_heating
+    ) * timestep_seconds
+    if method == "weighted_temperature":
+        weighted_out, _ = _weighted_temperature_correction(
+            input,
+            gen,
+            expected_change_ocean_heat_content,
+            area_weighted_mean,
+            vertical_coordinate,
+            timestep_seconds,
+            weights if weights is not None else OceanHeatContentWeightsConfig(),
+            detach_weights,
+        )
+        return weighted_out
     global_gen_ocean_heat_content = area_weighted_mean(
         gen.ocean_heat_content,
         keepdim=True,
@@ -520,31 +846,6 @@ def _force_conserve_ocean_heat_content(
         keepdim=True,
         name="ocean_heat_content",
     )
-    try:
-        # First priority: pre-weighted heat flux in gen_data
-        net_energy_flux_into_ocean = (
-            gen.net_downward_surface_heat_flux_total_area
-            + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
-        )
-    except KeyError:
-        try:
-            # Second priority: standard heat flux in gen_data
-            net_energy_flux_into_ocean = (
-                gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-            ) * forcing.sea_surface_fraction
-        except KeyError:
-            # Third priority: standard heat flux in input_data
-            net_energy_flux_into_ocean = (
-                input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-            ) * forcing.sea_surface_fraction
-    energy_flux_global_mean = area_weighted_mean(
-        net_energy_flux_into_ocean,
-        keepdim=True,
-        name="ocean_heat_content",
-    )
-    expected_change_ocean_heat_content = (
-        energy_flux_global_mean + unaccounted_heating
-    ) * timestep_seconds
     heat_content_correction_ratio = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
     ) / global_gen_ocean_heat_content

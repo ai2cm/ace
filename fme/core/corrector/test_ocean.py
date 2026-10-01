@@ -9,10 +9,13 @@ from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
+    OceanHeatContentWeightsConfig,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
     ZosGlobalMeanCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
+    _mixed_layer_depth,
+    _weighted_temperature_correction,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
@@ -778,3 +781,308 @@ def test_zos_global_mean_correction_config_round_trip():
         reference_global_mean=0.0
     )
     assert OceanCorrectorConfig.from_state({}).zos_global_mean_correction is None
+
+
+# ---------------------------------------------------------------------------
+# weighted_temperature OHC correction
+
+
+@dataclasses.dataclass
+class _DzeffDepthCoordinate(DepthCoordinate):
+    """DepthCoordinate whose ``dz`` is a substituted static (a dzeff stand-in)."""
+
+    dzeff: torch.Tensor | None = None
+
+    @property
+    def dz(self) -> torch.Tensor:
+        assert self.dzeff is not None
+        return self.dzeff
+
+
+_WT_TIMESTEP = datetime.timedelta(seconds=5 * 24 * 3600)
+
+
+def _weighted_setup(dzeff: bool = False, finite_input: bool = False):
+    """Grid with a land column, mask_k = 1 below deptho, partial bottom cells,
+    NaN below the bottom in the input state, and a network-like finite gen."""
+    dtype = torch.float64
+    torch.manual_seed(0)
+    nsamples, nlat, nlon = 2, 3, 4
+    idepth = torch.tensor([0.0, 10.0, 30.0, 60.0, 100.0], dtype=dtype, device=DEVICE)
+    nz = len(idepth) - 1
+    deptho = torch.tensor(
+        [
+            [100.0, 45.0, 20.0, 75.0],
+            [100.0, float("nan"), 60.0, 12.0],
+            [35.0, 100.0, 90.0, 100.0],
+        ],
+        dtype=dtype,
+        device=DEVICE,
+    )
+    land = torch.isnan(deptho)
+    mask = (~land).to(dtype).unsqueeze(-1).expand(nlat, nlon, nz).clone()
+    masks = {f"mask_{k}": mask[..., k] for k in range(nz)}
+    masks["mask_2d"] = mask[..., 0]
+    area = torch.linspace(0.5, 1.5, nlat, dtype=dtype, device=DEVICE)
+    ops = LatLonOperations(
+        area.unsqueeze(-1).expand(nlat, nlon), SpatialMaskProvider(masks)
+    )
+    coord = DepthCoordinate(idepth, mask, deptho)
+    if dzeff:
+        factor = 0.8 + 0.4 * torch.rand(nlat, nlon, nz, dtype=dtype, device=DEVICE)
+        dz = coord.dz * factor
+        dz = torch.where(dz > 0, dz, torch.full_like(dz, float("nan")))
+        coord = _DzeffDepthCoordinate(idepth, mask, deptho, dzeff=dz)
+    zc = 0.5 * (idepth[:-1] + idepth[1:])
+    h = 5.0 + 50.0 * torch.rand(nsamples, nlat, nlon, 1, dtype=dtype, device=DEVICE)
+    t0 = 15.0 + 5.0 * torch.rand(nsamples, nlat, nlon, 1, dtype=dtype, device=DEVICE)
+    thetao_in = t0 - 0.1 * torch.clamp(zc - h, min=0.0)
+    so_in = 35.0 + 0.001 * zc.expand_as(thetao_in)
+    thetao_gen = thetao_in + 0.3 * torch.randn_like(thetao_in) + 0.5
+    if not finite_input:
+        below = (idepth[:-1] >= torch.nan_to_num(deptho, nan=0.0).unsqueeze(-1)) | (
+            land.unsqueeze(-1)
+        )
+        thetao_in = thetao_in.masked_fill(below, float("nan"))
+        so_in = so_in.masked_fill(below, float("nan"))
+    sst_in = thetao_in[..., 0] + 273.15
+    sst_gen = thetao_gen[..., 0] + 0.2 + 273.15
+    input_data = {f"thetao_{k}": thetao_in[..., k] for k in range(nz)}
+    input_data.update({f"so_{k}": so_in[..., k] for k in range(nz)})
+    input_data["sst"] = sst_in
+    gen_data = {f"thetao_{k}": thetao_gen[..., k] for k in range(nz)}
+    gen_data["sst"] = sst_gen
+    ssf = mask[..., 0].expand(nsamples, nlat, nlon)
+    gen_data["hfds_total_area"] = 50.0 * ssf
+    forcing_data = {
+        "hfgeou": torch.full_like(ssf, 0.1),
+        "sea_surface_fraction": ssf,
+    }
+    return ops, coord, input_data, gen_data, forcing_data
+
+
+def _global_ohc(data, coord, ops):
+    return ops.area_weighted_mean(
+        OceanData(data, coord).ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+
+
+def _expected_change(ops, gen_data, forcing_data, unaccounted):
+    flux = (
+        gen_data["hfds_total_area"]
+        + forcing_data["hfgeou"] * forcing_data["sea_surface_fraction"]
+    )
+    mean = ops.area_weighted_mean(flux, keepdim=True, name="ocean_heat_content")
+    return (mean + unaccounted) * _WT_TIMESTEP.total_seconds()
+
+
+def _weighted_config(weights_type, **kwargs):
+    return OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="weighted_temperature",
+            constant_unaccounted_heating=0.1,
+            weights=OceanHeatContentWeightsConfig(type=weights_type),
+            **kwargs,
+        )
+    )
+
+
+@pytest.mark.parametrize("dzeff", [False, True], ids=["default_dz", "dzeff"])
+@pytest.mark.parametrize("weights_type", ["mld", "theta"])
+def test_weighted_temperature_closure(weights_type, dzeff):
+    ops, coord, input_data, gen_data, forcing_data = _weighted_setup(dzeff=dzeff)
+    corrector = _weighted_config(weights_type)._build(ops, coord, _WT_TIMESTEP)
+    result = corrector(input_data, gen_data, forcing_data, None)
+    assert set(result.modified_names) == {f"thetao_{k}" for k in range(4)} | {"sst"}
+    corrected = {**gen_data, **result.corrected}
+    ohc_in = _global_ohc(input_data, coord, ops)
+    r = (
+        _global_ohc(corrected, coord, ops)
+        - ohc_in
+        - _expected_change(ops, gen_data, forcing_data, 0.1)
+    )
+    assert torch.isfinite(r).all()
+    torch.testing.assert_close(
+        r, torch.zeros_like(r), atol=1e-12 * ohc_in.abs().max().item(), rtol=0
+    )
+    # the gen budget was not already closed, so the correction did something
+    dE = _expected_change(ops, gen_data, forcing_data, 0.1) + ohc_in
+    dE = dE - _global_ohc(gen_data, coord, ops)
+    assert dE.abs().min() > 1e-3 * ohc_in.abs().max()
+
+
+@pytest.mark.parametrize("dzeff", [False, True], ids=["default_dz", "dzeff"])
+def test_weighted_temperature_mld_shape(dzeff):
+    ops, coord, input_data, gen_data, forcing_data = _weighted_setup(dzeff=dzeff)
+    input = OceanData(input_data, coord)
+    gen = OceanData(gen_data, coord)
+    weights = OceanHeatContentWeightsConfig(type="mld")
+    out, diag = _weighted_temperature_correction(
+        input,
+        gen,
+        _expected_change(ops, gen_data, forcing_data, 0.1),
+        ops.area_weighted_mean,
+        coord,
+        _WT_TIMESTEP.total_seconds(),
+        weights,
+        detach_weights=True,
+    )
+    # independent w: clamp((min(MLD, deptho) - z_top) / dz, 0, 1) on the support
+    mld = _mixed_layer_depth(
+        input.sea_water_potential_temperature,
+        input.sea_water_salinity,
+        coord.idepth,
+        coord.mask,
+        coord.deptho,
+        weights.delta_rho_threshold,
+        weights.mld_ref_layer,
+    )
+    dz = coord.dz
+    support = (coord.mask > 0) & torch.isfinite(dz) & (dz > 0)
+    m = torch.minimum(mld, coord.deptho).unsqueeze(-1)
+    w = torch.where(
+        support,
+        torch.clamp((m - coord.idepth[:-1]) / torch.where(support, dz, 1.0), 0, 1),
+        0.0,
+    )
+    thetao_gen = gen.sea_water_potential_temperature
+    dT = OceanData(out, coord).sea_water_potential_temperature - thetao_gen
+    c = diag.c.unsqueeze(-1)
+    torch.testing.assert_close(dT, c * w)
+    assert (dT.abs() <= c.abs() * (1 + 1e-12)).all()
+    zero_w = w == 0
+    assert zero_w.any() and (~zero_w).any()
+    assert ((w > 0) & (w < 1)).any()
+    assert (dT[zero_w] == 0).all()
+    torch.testing.assert_close(out["sst"] - gen_data["sst"], diag.c * w[..., 0])
+    # diagnostics
+    torch.testing.assert_close(
+        diag.max_abs_dT, dT.abs().amax(dim=(-3, -2, -1)).reshape(diag.c.shape)
+    )
+    torch.testing.assert_close(
+        diag.closure_residual,
+        torch.zeros_like(diag.closure_residual),
+        atol=1e-12 * _global_ohc(input_data, coord, ops).abs().max().item(),
+        rtol=0,
+    )
+    dE = diag.c * diag.denominator
+    torch.testing.assert_close(diag.raw_adv, -dE / _WT_TIMESTEP.total_seconds())
+    assert diag.mean_mld is not None and torch.isfinite(diag.mean_mld).all()
+
+
+def test_weighted_temperature_theta_matches_scaled_temperature():
+    ops, coord, input_data, gen_data, forcing_data = _weighted_setup()
+    weighted = _weighted_config("theta")._build(ops, coord, _WT_TIMESTEP)
+    scaled = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature", constant_unaccounted_heating=0.1
+        )
+    )._build(ops, coord, _WT_TIMESTEP)
+    out_w = weighted(input_data, gen_data, forcing_data, None).corrected
+    out_s = scaled(input_data, gen_data, forcing_data, None).corrected
+    assert set(out_w) == set(out_s)
+    support = coord.mask > 0
+    for k in range(4):
+        sk = support[..., k].expand_as(out_w[f"thetao_{k}"])
+        torch.testing.assert_close(out_w[f"thetao_{k}"][sk], out_s[f"thetao_{k}"][sk])
+    s0 = support[..., 0].expand_as(out_w["sst"])
+    torch.testing.assert_close(out_w["sst"][s0], out_s["sst"][s0])
+
+
+def test_weighted_temperature_zero_weights_raise():
+    ops, coord, input_data, gen_data, forcing_data = _weighted_setup()
+    for k in range(4):
+        gen_data[f"thetao_{k}"] = torch.zeros_like(gen_data[f"thetao_{k}"])
+    corrector = _weighted_config("theta")._build(ops, coord, _WT_TIMESTEP)
+    with pytest.raises(ValueError, match="denominator"):
+        corrector(input_data, gen_data, forcing_data, None)
+
+
+def test_weighted_temperature_requires_depth_geometry():
+    ops, _, input_data, gen_data, forcing_data = _weighted_setup()
+    corrector = _weighted_config("mld")._build(ops, _MockDepth(), _WT_TIMESTEP)
+    with pytest.raises(ValueError, match="requires a depth coordinate"):
+        corrector(input_data, gen_data, forcing_data, None)
+
+
+def _gradients(weights_type, detach_weights):
+    ops, coord, input_data, gen_data, forcing_data = _weighted_setup(finite_input=True)
+    gen_data = {k: v.clone().requires_grad_() for k, v in gen_data.items()}
+    so = {
+        k: v.clone().requires_grad_()
+        for k, v in input_data.items()
+        if k.startswith("so_")
+    }
+    input_data = {**input_data, **so}
+    corrector = _weighted_config(weights_type, detach_weights=detach_weights)._build(
+        ops, coord, _WT_TIMESTEP
+    )
+    out = corrector(input_data, gen_data, forcing_data, None).corrected
+    loss = sum(
+        (v * torch.linspace(1.0, 2.0, v.shape[-1], dtype=v.dtype)).sum()
+        for k, v in out.items()
+    )
+    loss.backward()
+    return gen_data, so
+
+
+@pytest.mark.parametrize("weights_type", ["mld", "theta"])
+def test_weighted_temperature_detach_weights_gradient(weights_type):
+    gen_det, so_det = _gradients(weights_type, detach_weights=True)
+    gen_live, so_live = _gradients(weights_type, detach_weights=False)
+    for k in range(4):
+        g = gen_det[f"thetao_{k}"].grad
+        assert g is not None and torch.isfinite(g).all()
+    # loss reaches thetao_gen through c: the gradient is not that of the
+    # identity map (which would be the loss weights alone)
+    g0 = gen_det["thetao_0"].grad
+    assert not torch.allclose(
+        g0, torch.linspace(1.0, 2.0, g0.shape[-1], dtype=g0.dtype).expand_as(g0)
+    )
+    if weights_type == "mld":
+        # so_in enters only through w
+        assert all(v.grad is None for v in so_det.values())
+        assert any(v.grad is not None for v in so_live.values())
+        assert all(
+            torch.isfinite(v.grad).all() for v in so_live.values() if v.grad is not None
+        )
+    else:
+        assert not torch.allclose(gen_det["thetao_0"].grad, gen_live["thetao_0"].grad)
+
+
+def test_weighted_temperature_mld_live_weights_nan_input_gradient_finite():
+    ops, coord, input_data, gen_data, forcing_data = _weighted_setup()
+    input_data = {
+        k: v.clone().requires_grad_() if k.startswith(("thetao_", "so_")) else v
+        for k, v in input_data.items()
+    }
+    gen_data = {k: v.clone().requires_grad_() for k, v in gen_data.items()}
+    corrector = _weighted_config("mld", detach_weights=False)._build(
+        ops, coord, _WT_TIMESTEP
+    )
+    out = corrector(input_data, gen_data, forcing_data, None).corrected
+    sum(v.nansum() for v in out.values()).backward()
+    for v in gen_data.values():
+        assert v.grad is not None and torch.isfinite(v.grad).all()
+    so_grads = [input_data[f"so_{k}"].grad for k in range(4)]
+    assert any(g is not None for g in so_grads)
+    for k, v in input_data.items():
+        if k.startswith(("thetao_", "so_")) and v.grad is not None:
+            finite = torch.isfinite(v.detach())
+            assert torch.isfinite(v.grad[finite]).all(), k
+
+
+def test_weighted_temperature_config_round_trip():
+    config = _weighted_config("mld", detach_weights=False)
+    state = {k: v for k, v in dataclasses.asdict(config).items() if v is not None}
+    assert OceanCorrectorConfig.from_state(state) == config
+    legacy = OceanCorrectorConfig.from_state(
+        {"ocean_heat_content_correction": {"method": "scaled_temperature"}}
+    )
+    ohc = legacy.ocean_heat_content_correction
+    assert ohc is not None
+    assert ohc.method == "scaled_temperature"
+    assert ohc.weights == OceanHeatContentWeightsConfig()
+    assert ohc.detach_weights is True
