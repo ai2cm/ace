@@ -5,6 +5,7 @@ import torch
 import xarray as xr
 
 from fme.ace.stepper.time_fraction import compute_time_fraction
+from fme.core.device import get_device
 
 
 def _times(dates, calendar="noleap"):
@@ -18,7 +19,9 @@ def _times(dates, calendar="noleap"):
 
 def test_january_first_is_zero():
     result = compute_time_fraction(_times([(2000, 1, 1)]))
-    torch.testing.assert_close(result, torch.zeros(1), atol=1e-6, rtol=0)
+    torch.testing.assert_close(
+        result, torch.zeros(1, device=get_device()), atol=1e-6, rtol=0
+    )
 
 
 def test_fraction_is_in_unit_interval_across_the_year():
@@ -45,7 +48,9 @@ def test_same_day_in_different_years_matches():
 def test_360_day_calendar_uses_its_own_year_length():
     """Day 180 of a 360-day year is exactly halfway."""
     result = compute_time_fraction(_times([(2000, 7, 1)], calendar="360_day"))
-    torch.testing.assert_close(result, torch.tensor([0.5]), atol=1e-6, rtol=0)
+    torch.testing.assert_close(
+        result, torch.tensor([0.5], device=get_device()), atol=1e-6, rtol=0
+    )
 
 
 def test_calendars_disagree_on_the_same_date():

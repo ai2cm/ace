@@ -314,12 +314,16 @@ _COLUMN_OUT = [f"{prefix}_{level}" for prefix in ["t", "q"] for level in range(4
 
 def test_cross_level_attention_builds_a_vertical_axis():
     """The builder must actually give the net a level axis to attend over."""
-    module = _nc_builder(cross_level_attention=True).build(
-        n_in_channels=len(_COLUMN_IN),
-        n_out_channels=len(_COLUMN_OUT),
-        dataset_info=_get_dataset_info(),
-        in_names=_COLUMN_IN,
-        out_names=_COLUMN_OUT,
+    module = (
+        _nc_builder(cross_level_attention=True)
+        .build(
+            n_in_channels=len(_COLUMN_IN),
+            n_out_channels=len(_COLUMN_OUT),
+            dataset_info=_get_dataset_info(),
+            in_names=_COLUMN_IN,
+            out_names=_COLUMN_OUT,
+        )
+        .to(fme.get_device())
     )
     assert isinstance(module, NoiseConditionedModel)
     # 4 levels plus the surface token.
@@ -365,8 +369,12 @@ def test_cross_level_attention_without_levels_raises():
 def test_time_embed_dim_requires_time_fraction():
     """Calendar conditioning must be live, and must fail loudly when unfed."""
     n_in, n_out = 5, 3
-    module = _nc_builder(time_embed_dim=8).build(
-        n_in_channels=n_in, n_out_channels=n_out, dataset_info=_get_dataset_info()
+    module = (
+        _nc_builder(time_embed_dim=8)
+        .build(
+            n_in_channels=n_in, n_out_channels=n_out, dataset_info=_get_dataset_info()
+        )
+        .to(fme.get_device())
     )
     assert isinstance(module, NoiseConditionedModel)
     assert module.time_embedder is not None
