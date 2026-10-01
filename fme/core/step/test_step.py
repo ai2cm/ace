@@ -2435,9 +2435,19 @@ def test_single_module_step_config_loads_legacy_residual_prediction_bool(
 
 
 def test_residual_prediction_names_must_not_be_empty():
-    """[] would silently disable residual prediction; only None means "all"."""
+    """[] would silently disable residual prediction; only None means "all".
+
+    The from_state case also pins the error's quality: this must be validated
+    through the parent config, because dacite would mask a ValueError raised
+    inside ResidualPredictionConfig itself (a union member) behind a generic
+    UnionMatchError that names neither the field nor the problem.
+    """
     with pytest.raises(ValueError, match="must not be empty"):
         _residual_names_config(residual_prediction=ResidualPredictionConfig(names=[]))
+    state = _residual_names_config().get_state()
+    state["residual_prediction"] = {"names": []}
+    with pytest.raises(ValueError, match="must not be empty"):
+        SingleModuleStepConfig.from_state(state)
 
 
 @pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])

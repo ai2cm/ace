@@ -68,8 +68,6 @@ class ResidualPredictionConfig:
     normalized: bool = False
 
     def validate_names(self, prognostic_names: Collection[str]) -> None:
-        # Not a __post_init__: dacite masks a union member's __post_init__
-        # error as UnionMatchError, while parent-raised errors survive.
         if self.names is not None and len(self.names) == 0:
             raise ValueError(
                 "residual_prediction.names must not be empty; use names: null "
