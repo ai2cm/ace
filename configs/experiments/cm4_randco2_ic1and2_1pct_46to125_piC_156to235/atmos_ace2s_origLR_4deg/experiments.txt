@@ -4,3 +4,5 @@ cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg|rs0|01M3SD
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg|rs1|01M3SD133HM6SYZMRD1JP5ET3C|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg|rs2|01M3SD1FNM1WPPKV491VTAXXER|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft|rs0|01M3VX4QYGMHKDX4N63NHDED4X|training|best_inference_ckpt|normal|--min-runtime 8h
