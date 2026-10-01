@@ -1,0 +1,19 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# =====================================================================
+# 50-yr piControl surface energy budget (2026-10-01). Every coupled arm takes
+# up ocean heat 2-4x faster than CM4 over years 151-200; these rollouts save
+# global monthly surface flux components (atmosphere) and predicted hfds
+# (ocean) to decompose it. Three arms: crps4 (reference recipe), mae2ftn
+# (highest early uptake), lt0lt (lowest early uptake). seed: 0, as in the
+# 2026-09-17 flux wave. Same best_inference_ckpt and pinned training result
+# datasets as the 200-yr evals in coupled_stoch/ and coupled_eval_2026-09-25/.
+#
+#   job_runner/evaluate.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_eval_2026-10-01_sfcflux . \
+#     --config-dir configs/experiments/cm4_eval/coupled
+
+# --- piC-ic0151-50yr-sfcflux ---
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-50yr-sfcflux|best_inference_ckpt|high|--min-runtime 4h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_piC-ic0151-50yr-sfcflux|best_inference_ckpt|high|--min-runtime 4h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto|o0a0rs0|01M339VK884YE3B2M5YM1RQ966|run_piC-ic0151-50yr-sfcflux|best_inference_ckpt|high|--min-runtime 4h||01M3DN0NDP94TNHZ4M3VWVSAM4|ai2/ace|jupiter
