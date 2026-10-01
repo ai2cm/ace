@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="hiro-ace2s-inference-2023-WUS-ic0000"
+JOB_NAME="hiro-ace2s-inference-bora-2014-2023"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="downscale-ace2s-WUS-10yr.yaml"
+CONFIG_FILENAME="downscale-ace2s-croatia-10yr.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=8
+NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 # bundled moe- can't rename
