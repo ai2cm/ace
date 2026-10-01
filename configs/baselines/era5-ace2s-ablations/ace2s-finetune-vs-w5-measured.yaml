@@ -10,9 +10,9 @@
 # 2-member variogram score (Scheuerer-Hamill, p = 0.5, per channel, grid-local
 # edges of a 5x5 window, increments scaled by the per-edge-kind RMS
 # increment in variogram-scaling.nc, mounted at /variogram-stats).
-# Loss: 0.9 CRPS + w VS, with w (placeholder <VS_WEIGHT_MEASURED>) to be
-# set from the unweighted term magnitudes in ace2s-finetune-vs-measure.yaml's
-# pre-training validation logs. Validation fails until it is filled.
+# Loss: 0.9 CRPS + 0.32 VS. 0.32 = 0.1 x ES / VS_w5, each averaged over the 3
+# steps of ace2s-finetune-vs-measure.yaml's pre-training validation (wandb
+# 85dwmgvj: ES 0.2044, VS_w5 0.0636), so VS takes the paper loss's ES share.
 # The variogram score of the other window is logged at weight 0.
 # Per-term unweighted losses are logged as {train,val}/mean/loss_term/
 # <term>_step_<k>. Seed 0 throughout.
@@ -188,7 +188,7 @@ stepper_training:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.0
-      variogram_score_weight: '<VS_WEIGHT_MEASURED>'
+      variogram_score_weight: 0.32
       variogram_score_window_size: 5
       variogram_score_p: 0.5
       variogram_score_report_window_sizes: [3]

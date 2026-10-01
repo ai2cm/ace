@@ -176,8 +176,8 @@ run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck
 # 6-hourly arm, stage 2: 3-step (18 h) detached fine-tune, horizon decided 2026-09-28
 run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
 
-# Variogram-score fine-tunes of the paper pretrain (fill <VS_WEIGHT_MEASURED> in the
-# measured arms from the vs-measure run first)
+# Variogram-score fine-tunes of the paper pretrain; vs-measure set the
+# measured arms' weights and is stopped after pre-training validation
 run_training "ace2s-finetune-vs-measure.yaml" "1deg-daily-ace2s-vs-measure-rs0" 8
 run_training "ace2s-finetune-vs-w3-measured.yaml" "1deg-daily-ace2s-vs-w3-measured-ft3-detached-rs0" 8
 run_training "ace2s-finetune-vs-w3-0p1.yaml" "1deg-daily-ace2s-vs-w3-0p1-ft3-detached-rs0" 8

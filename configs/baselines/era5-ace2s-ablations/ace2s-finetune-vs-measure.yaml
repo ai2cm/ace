@@ -7,7 +7,7 @@
 # logged at weight 0, validating before training (evaluate_before_training).
 # Its val/mean/loss_term/{crps,energy_score,variogram_score_w3,
 # variogram_score_w5}_step_<k> logs at epoch 0 give the unweighted term
-# magnitudes that set the <VS_WEIGHT_MEASURED> weight of the *-measured arms.
+# magnitudes that set the weight of the *-measured arms (0.30 / 0.32).
 # Meant to be stopped once those logs land, so inline inference is removed
 # (pre-training validation logs are only written after the pre-training inline
 # inference, which would include the 81-year rollout). Otherwise identical
