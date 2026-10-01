@@ -38,3 +38,17 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1|rs2|01M3MTQ0WPEQ1C
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs1|01M3TA4P68966FJ6ED14H7GSRZ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs2|01M3TA518712Y2RR1AJV7CX0QK|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Centennial rollouts off the rs1/rs2 8-step finetunes' best_inference_ckpt,
+# launched 2026-10-01. Same two shared protocols as rs0, so all three seeds of
+# this arm are directly comparable, and comparable to the other uniform-increment
+# arm.
+#
+# Each finetune was preempted once and auto-resumed, so its experiment carries
+# two result datasets; results_dataset is pinned to the second for each.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs1|01M3TA4P68966FJ6ED14H7GSRZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3VHQ2TK4Z75JWMKHVCHEFP1|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs1|01M3TA4P68966FJ6ED14H7GSRZ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3VHQ2TK4Z75JWMKHVCHEFP1|ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs2|01M3TA518712Y2RR1AJV7CX0QK|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M3VZVYEFNE6Q2QC4J6E8HNYJ|ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_so_uniformdt_cde1-ft|rs2|01M3TA518712Y2RR1AJV7CX0QK|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M3VZVYEFNE6Q2QC4J6E8HNYJ|ai2/ace|jupiter|||30GiB
