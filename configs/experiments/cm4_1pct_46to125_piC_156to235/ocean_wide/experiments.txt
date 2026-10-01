@@ -66,8 +66,11 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9E
 
 # ocean_wide_ohc_clip_cde1
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
