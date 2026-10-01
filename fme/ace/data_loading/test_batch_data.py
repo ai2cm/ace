@@ -418,7 +418,9 @@ def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
         )
         ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
         seeded = ic.apply_config_seed(42)
-        gen_state = seeded.as_batch_data().stepper_state.random_state.generator.get_state()
+        gen_state = (
+            seeded.as_batch_data().stepper_state.random_state.generator.get_state()
+        )
         states.append(gen_state)
 
     # Each rank should produce a different generator state.
@@ -1868,7 +1870,7 @@ class TestDataParallelGather:
         )
         result = local.data_parallel_gather(dist)
         if dist.is_root():
-            assert result is not None
+            assert isinstance(result, GatheredBatchData)
             assert result._data["x"].shape[0] == dist.world_size
             for r in range(dist.world_size):
                 torch.testing.assert_close(
@@ -1889,7 +1891,7 @@ class TestDataParallelGather:
         )
         result = local.data_parallel_gather(dist)
         if dist.is_root():
-            assert result is not None
+            assert isinstance(result, GatheredBatchData)
             assert result._time.sizes["sample"] == dist.world_size
 
     def test_gathers_labels(self):
@@ -1905,7 +1907,7 @@ class TestDataParallelGather:
         )
         result = local.data_parallel_gather(dist)
         if dist.is_root():
-            assert result is not None
+            assert isinstance(result, GatheredBatchData)
             assert result._labels is not None
             assert result._labels.tensor.shape[0] == dist.world_size
 
@@ -1926,7 +1928,7 @@ class TestDataParallelGather:
         )
         result = local.data_parallel_gather(dist)
         if dist.is_root():
-            assert result is not None
+            assert isinstance(result, GatheredBatchData)
             assert result._stepper_state is not None
             assert result._stepper_state.n_ranks == dist.world_size
             for r in range(dist.world_size):
@@ -1934,9 +1936,7 @@ class TestDataParallelGather:
                 assert rank_state.corrector_state is not None
                 mass = rank_state.corrector_state.global_dry_air_mass
                 assert mass is not None
-                torch.testing.assert_close(
-                    mass, torch.full((1, 1, 1), float(r))
-                )
+                torch.testing.assert_close(mass, torch.full((1, 1, 1), float(r)))
 
     def test_none_extras_stay_none(self):
         dist = Distributed.get_instance()
@@ -1949,7 +1949,7 @@ class TestDataParallelGather:
         )
         result = local.data_parallel_gather(dist)
         if dist.is_root():
-            assert result is not None
+            assert isinstance(result, GatheredBatchData)
             assert result._labels is None
             assert result._stepper_state is None
             assert result._data_mask is None
@@ -1966,7 +1966,7 @@ class TestDataParallelGather:
         )
         result = local.data_parallel_gather(dist)
         if dist.is_root():
-            assert result is not None
+            assert isinstance(result, GatheredBatchData)
             for tensor in result._data.values():
                 assert tensor.device == torch.device("cpu")
 
