@@ -15,9 +15,7 @@ def _make_random_state(seed: int) -> RandomState:
 
 
 def _make_stepper_state(n_samples: int, seed: int | None = None) -> StepperState:
-    corrector = CorrectorState(
-        global_dry_air_mass=torch.randn(n_samples, 1, 1)
-    )
+    corrector = CorrectorState(global_dry_air_mass=torch.randn(n_samples, 1, 1))
     random_state = _make_random_state(seed) if seed is not None else None
     return StepperState(corrector_state=corrector, random_state=random_state)
 
@@ -42,15 +40,11 @@ class TestGatheredStepperState:
         torch.randn(5, generator=rs0.generator)
 
         s0 = StepperState(
-            corrector_state=CorrectorState(
-                global_dry_air_mass=torch.tensor([[[1.0]]])
-            ),
+            corrector_state=CorrectorState(global_dry_air_mass=torch.tensor([[[1.0]]])),
             random_state=rs0,
         )
         s1 = StepperState(
-            corrector_state=CorrectorState(
-                global_dry_air_mass=torch.tensor([[[2.0]]])
-            ),
+            corrector_state=CorrectorState(global_dry_air_mass=torch.tensor([[[2.0]]])),
             random_state=rs1,
         )
         gathered = GatheredStepperState(states=[s0, s1])
@@ -98,6 +92,7 @@ class TestGatheredStepperState:
         cpu_gathered = gathered.to_cpu()
         result = cpu_gathered.get_for_rank(0)
         assert result.corrector_state is not None
+        assert result.corrector_state.global_dry_air_mass is not None
         assert result.corrector_state.global_dry_air_mass.device.type == "cpu"
 
     def test_no_random_state(self):

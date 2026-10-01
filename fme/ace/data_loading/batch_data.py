@@ -1001,10 +1001,8 @@ class BatchData:
             gathered_labels = None
 
         if gathered_parts[0]["stepper_state"] is not None:
-            gathered_stepper_state: GatheredStepperState | None = (
-                GatheredStepperState(
-                    states=[p["stepper_state"] for p in gathered_parts]
-                )
+            gathered_stepper_state: GatheredStepperState | None = GatheredStepperState(
+                states=[p["stepper_state"] for p in gathered_parts]
             )
         else:
             gathered_stepper_state = None
@@ -1300,12 +1298,10 @@ class GatheredBatchData:
             if name_str == _TIME_DIM:
                 continue
             if name_str.startswith(_STEPPER_PREFIX):
-                state_dict[name_str[len(_STEPPER_PREFIX) :]] = _restore_tensor(
-                    ds[name]
-                )
+                state_dict[name_str[len(_STEPPER_PREFIX) :]] = _restore_tensor(ds[name])
             elif name_str.startswith(_DATA_MASK_PREFIX):
-                data_mask_dict[name_str[len(_DATA_MASK_PREFIX) :]] = (
-                    _restore_tensor(ds[name])
+                data_mask_dict[name_str[len(_DATA_MASK_PREFIX) :]] = _restore_tensor(
+                    ds[name]
                 )
             elif not name_str.startswith(_RESERVED_PREFIX):
                 da = ds[name]
@@ -1315,9 +1311,7 @@ class GatheredBatchData:
                 data[name_str] = tensor
                 if horizontal_dims is None:
                     horizontal_dims = [
-                        str(d)
-                        for d in da.dims
-                        if d not in (_SAMPLE_DIM, _TIME_DIM)
+                        str(d) for d in da.dims if d not in (_SAMPLE_DIM, _TIME_DIM)
                     ]
 
         gathered_stepper: GatheredStepperState | None = None
@@ -1326,12 +1320,8 @@ class GatheredBatchData:
 
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:
-            names = [
-                str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values
-            ]
-            labels = BatchLabels(
-                _restore_tensor(ds[_LABELS_VALUES_VAR]), names=names
-            )
+            names = [str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values]
+            labels = BatchLabels(_restore_tensor(ds[_LABELS_VALUES_VAR]), names=names)
 
         return cls(
             data=data,
@@ -1351,19 +1341,19 @@ def data_parallel_scatter(
     Inverse of ``BatchData.data_parallel_gather``. Must be called on
     all ranks; ``gathered`` is populated only on root (``None``
     elsewhere).
+
+    Implementation note: ``scatter_object`` broadcasts the same object
+    to every rank (it is a broadcast utility, not a true list-scatter).
+    We broadcast the ``GatheredBatchData`` and let each rank extract its
+    own shard via ``get_for_rank``.
     """
     if dist is None:
         dist = Distributed.get_instance()
-    if dist.is_root():
-        if gathered is None:
-            raise RuntimeError("gathered must be provided on root")
-        per_rank = [
-            gathered.get_for_rank(r, dist.total_data_parallel_ranks)
-            for r in range(dist.total_data_parallel_ranks)
-        ]
-    else:
-        per_rank = None
-    return dist.scatter_object(per_rank)
+    # scatter_object broadcasts gathered to all ranks.
+    gathered_all: GatheredBatchData = dist.scatter_object(gathered)
+    return gathered_all.get_for_rank(
+        dist.data_parallel_rank, dist.total_data_parallel_ranks
+    )
 
 
 @dataclasses.dataclass

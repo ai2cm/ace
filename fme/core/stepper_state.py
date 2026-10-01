@@ -39,7 +39,7 @@ class StepperState:
     corrector_state: CorrectorState | None = None
     random_state: RandomState | None = None
 
-    def to_device(self) -> "StepperState":
+    def to_device(self) -> StepperState:
         return StepperState(
             corrector_state=(
                 None
@@ -51,7 +51,7 @@ class StepperState:
             ),
         )
 
-    def to_cpu(self) -> "StepperState":
+    def to_cpu(self) -> StepperState:
         return StepperState(
             corrector_state=(
                 None if self.corrector_state is None else self.corrector_state.to_cpu()
@@ -61,14 +61,14 @@ class StepperState:
             ),
         )
 
-    def pin_memory(self) -> "StepperState":
+    def pin_memory(self) -> StepperState:
         if self.corrector_state is not None:
             self.corrector_state.pin_memory()
         if self.random_state is not None:
             self.random_state.pin_memory()
         return self
 
-    def select_sample_slice(self, sample_slice: slice) -> "StepperState":
+    def select_sample_slice(self, sample_slice: slice) -> StepperState:
         """Select a contiguous range of samples."""
         return StepperState(
             corrector_state=(
@@ -79,7 +79,7 @@ class StepperState:
             random_state=self.random_state,
         )
 
-    def broadcast_ensemble(self, n_ensemble: int) -> "StepperState":
+    def broadcast_ensemble(self, n_ensemble: int) -> StepperState:
         return StepperState(
             corrector_state=(
                 None
@@ -124,7 +124,7 @@ class StepperState:
         return result
 
     @classmethod
-    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> "StepperState":
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> StepperState:
         """Rebuild from ``to_state_dict``; a sub-state absent from the serialized
         state (no ``<name>.present`` marker) is restored as ``None``.
         """
@@ -179,9 +179,7 @@ class GatheredStepperState:
         return len(self._states)
 
     def to_cpu(self) -> GatheredStepperState:
-        return GatheredStepperState(
-            states=[s.to_cpu() for s in self._states]
-        )
+        return GatheredStepperState(states=[s.to_cpu() for s in self._states])
 
     def get_for_rank(self, rank: int) -> StepperState:
         """Return the ``StepperState`` for a single data-parallel rank."""
@@ -194,18 +192,14 @@ class GatheredStepperState:
         ``rank_<i>.`` namespace, with an ``n_ranks`` marker so the
         reader knows how many to expect.
         """
-        result: dict[str, torch.Tensor] = {
-            "n_ranks": torch.tensor(len(self._states))
-        }
+        result: dict[str, torch.Tensor] = {"n_ranks": torch.tensor(len(self._states))}
         for i, state in enumerate(self._states):
             for key, value in state.to_state_dict().items():
                 result[f"rank_{i}.{key}"] = value
         return result
 
     @classmethod
-    def from_state_dict(
-        cls, state: dict[str, torch.Tensor]
-    ) -> GatheredStepperState:
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> GatheredStepperState:
         """Rebuild from ``to_state_dict``.
 
         Raises:
