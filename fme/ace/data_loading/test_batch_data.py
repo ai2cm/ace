@@ -453,10 +453,20 @@ def test_gathered_batch_data_xarray_round_trip_scatters_on_read(
     ]
 
     gathered_stepper = GatheredStepperState(
-        corrector_state=CorrectorState(
-            global_dry_air_mass=torch.tensor([[[1.0]], [[2.0]]])
-        ),
-        per_rank_random_states=[rs0, rs1],
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]]])
+                ),
+                random_state=rs0,
+            ),
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[2.0]]])
+                ),
+                random_state=rs1,
+            ),
+        ],
     )
     batch = get_batch_data(
         names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]

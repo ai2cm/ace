@@ -6,6 +6,7 @@ window to the next.
 """
 
 import dataclasses
+from collections.abc import Sequence
 
 import torch
 
@@ -89,6 +90,18 @@ class CorrectorState:
     def from_state_dict(cls, state: dict[str, torch.Tensor]) -> "CorrectorState":
         """Rebuild from a serialized state; absent fields stay ``None``."""
         return cls(global_dry_air_mass=state.get("global_dry_air_mass"))
+
+    @classmethod
+    def concat(cls, states: Sequence["CorrectorState"]) -> "CorrectorState":
+        """Concatenate corrector states along the sample dimension."""
+        first = states[0]
+        if first.global_dry_air_mass is not None:
+            return cls(
+                global_dry_air_mass=torch.cat(
+                    [s.global_dry_air_mass for s in states], dim=0
+                )
+            )
+        return first
 
     @staticmethod
     def per_sample_state_keys() -> set[str]:
