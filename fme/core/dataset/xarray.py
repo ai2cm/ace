@@ -455,7 +455,7 @@ class XarrayDataConfig(DatasetConfigABC):
     data_path: str
     file_pattern: str = "*.nc"
     n_repeats: int = 1
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["netcdf4", "zarr"] = "netcdf4"
     spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
     subset: Slice | TimeSlice | RepeatedInterval = dataclasses.field(
         default_factory=Slice
