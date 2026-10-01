@@ -153,6 +153,42 @@ def test_metadata_registry():
     )
 
 
+def test_mld_wright97_derived_variable():
+    torch.manual_seed(0)
+    shape = (2, 3, 4, 8)
+    nz = 4
+    data = {f"thetao_{k}": 20.0 - 3.0 * k * torch.rand(*shape) for k in range(nz)}
+    data.update({f"so_{k}": 34.0 + torch.rand(*shape) for k in range(nz)})
+    mask = torch.ones(4, 8, nz)
+    mask[0, 0, :] = 0.0
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 30.0, 60.0, 100.0]), mask=mask
+    )
+    out = compute_ocean_derived_quantities(
+        dict(data), depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    assert "mld_wright97" in out
+    expected = OceanData(data, depth_coordinate).mld_wright97
+    torch.testing.assert_close(out["mld_wright97"], expected, equal_nan=True)
+    assert torch.isnan(out["mld_wright97"][..., 0, 0]).all()
+    assert torch.isfinite(out["mld_wright97"][..., 1:, :]).all()
+    metadata = get_ocean_derived_variable_metadata()["mld_wright97"]
+    assert metadata.units == "m"
+    assert metadata.long_name == ("Mixed layer depth, Wright (1997) density threshold")
+
+
+def test_mld_wright97_skipped_without_salinity():
+    data = {f"thetao_{k}": torch.rand(1, 1, 2, 2) for k in range(3)}
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 30.0, 60.0]), mask=torch.ones(2, 2, 3)
+    )
+    out = compute_ocean_derived_quantities(
+        dict(data), depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    assert "mld_wright97" not in out
+    assert "ocean_heat_content" in out
+
+
 @pytest.mark.parametrize(
     "case",
     [

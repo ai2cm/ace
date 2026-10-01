@@ -24,6 +24,11 @@ from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, GRAVITY
 RHO_0 = DENSITY_OF_SEA_WATER_CM4  # [kg m-3]
 G_EARTH = GRAVITY  # [m s-2]
 
+# Density-threshold mixed layer depth defaults, the single definition used by
+# ``OceanData.mld_wright97`` and ``OceanHeatContentWeightsConfig``.
+DELTA_RHO_THRESHOLD = 0.03  # [kg m-3]
+MLD_REF_LAYER = 1  # reference layer index, dimensionless
+
 # Reduced-range fit, -2<T<30 degC, 28<S<38 PSU, 0<p<5e7 Pa.
 _A0, _A1, _A2 = 7.057924e-4, 3.480336e-7, -1.112733e-7
 _B0, _B1, _B2, _B3, _B4, _B5 = (
@@ -71,3 +76,84 @@ def boussinesq_pressure(
 def interface_to_center_depth(idepth: torch.Tensor) -> torch.Tensor:
     """Level-centre depth ``(idepth[:-1] + idepth[1:]) / 2`` from interfaces."""
     return 0.5 * (idepth[:-1] + idepth[1:])
+
+
+def _sea_floor_depth(
+    idepth: torch.Tensor, mask: torch.Tensor, deptho: torch.Tensor | None
+) -> torch.Tensor:
+    """Sea floor depth [m]: ``deptho`` when given, else
+    ``max_k(mask_k * idepth_{k+1})``, in ``idepth``'s dtype.
+    """
+    if deptho is not None:
+        return deptho.to(idepth.dtype)
+    return (mask * idepth[1:]).max(dim=-1).values
+
+
+def _mixed_layer_depth(
+    thetao: torch.Tensor,
+    so: torch.Tensor,
+    idepth: torch.Tensor,
+    mask: torch.Tensor,
+    deptho: torch.Tensor,
+    delta_rho_threshold: float,
+    ref_layer: int,
+) -> torch.Tensor:
+    """Density-threshold mixed layer depth [m], positive down.
+
+    ``rho = wright97_anomaly(so, thetao, p=0)``; the MLD is where
+    ``rho_k - rho_ref`` first exceeds ``delta_rho_threshold`` below
+    ``ref_layer``, linearly interpolated between level centres, and
+    ``deptho`` where it never does. Port of
+    ``analysis/2026-09-30-1508-ohc-corrector-vertical-structure/05a_corrector.py::mld_hard``
+    in the ai2cm workspace.
+
+    Args:
+        thetao: Potential temperature [degC], ``(..., nz)``.
+        so: Practical salinity [PSU], ``(..., nz)``.
+        idepth: Interface depths [m], ``(nz + 1,)``.
+        mask: Ocean mask, broadcastable to ``thetao``.
+        deptho: Sea floor depth [m], broadcastable to ``thetao.shape[:-1]``.
+        delta_rho_threshold: Density threshold [kg/m**3].
+        ref_layer: Reference layer index.
+    """
+    n_levels = thetao.shape[-1]
+    if not 0 <= ref_layer < n_levels - 1:
+        raise ValueError(
+            f"mld_ref_layer must be in [0, {n_levels - 2}], got {ref_layer}"
+        )
+    # NaN inputs (land, below the bottom) are replaced by finite values before
+    # the EOS and the interpolation so that the zero gradient torch.where passes
+    # to unselected entries is never multiplied by NaN; d keeps its NaN there so
+    # the forward selection is unchanged.
+    finite = torch.isfinite(thetao) & torch.isfinite(so)
+    rho = wright97_anomaly(
+        torch.where(finite, so, torch.zeros_like(so)),
+        torch.where(finite, thetao, torch.zeros_like(thetao)),
+        torch.zeros_like(thetao),
+    )
+    rho = torch.where(finite, rho, torch.full_like(rho, float("nan")))
+    zc = interface_to_center_depth(idepth)
+    d = rho - rho[..., ref_layer : ref_layer + 1]
+    d_safe = torch.where(torch.isfinite(d), d, torch.zeros_like(d))
+    mask = mask.expand(d.shape)
+    mld = torch.full_like(d[..., 0], float("nan"))
+    notset = torch.ones_like(mld, dtype=torch.bool)
+    for k in range(ref_layer + 1, n_levels):
+        lm = (d[..., k] > delta_rho_threshold) & notset & (mask[..., k] > 0)
+        if k == ref_layer + 1:
+            dprev = torch.zeros_like(d[..., k])
+            dprev_safe = dprev
+        else:
+            dprev = d[..., k - 1]
+            dprev_safe = d_safe[..., k - 1]
+        zprev = zc[ref_layer] if k == ref_layer + 1 else zc[k - 1]
+        denom = d_safe[..., k] - dprev_safe + 1e-8
+        denom = torch.where(lm, denom, torch.ones_like(denom))
+        frac = (delta_rho_threshold - dprev_safe) / denom
+        value = zprev + frac * (zc[k] - zprev)
+        value = torch.where(
+            torch.isfinite(dprev), value, torch.full_like(value, float("nan"))
+        )
+        mld = torch.where(lm, value, mld)
+        notset = notset & ~lm
+    return torch.where(torch.isnan(mld), deptho.expand(mld.shape), mld)

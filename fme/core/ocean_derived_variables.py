@@ -180,6 +180,15 @@ def net_energy_flux_into_ocean_column(
     return data.net_energy_flux_into_ocean
 
 
+@register(VariableMetadata("m", "Mixed layer depth, Wright (1997) density threshold"))
+def mld_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Density-threshold mixed layer depth, positive down."""
+    return data.mld_wright97
+
+
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
 def sea_ice_fraction(
     data: OceanData,

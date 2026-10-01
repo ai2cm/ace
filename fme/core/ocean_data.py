@@ -6,6 +6,12 @@ from typing import Protocol, runtime_checkable
 import torch
 
 from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
+from fme.core.ocean_eos import (
+    DELTA_RHO_THRESHOLD,
+    MLD_REF_LAYER,
+    _mixed_layer_depth,
+    _sea_floor_depth,
+)
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -148,6 +154,49 @@ class OceanData:
             * SPECIFIC_HEAT_OF_SEA_WATER_CM4
             * DENSITY_OF_SEA_WATER_CM4
         )
+
+    @property
+    def mld_wright97(self) -> torch.Tensor:
+        """Density-threshold mixed layer depth [m], positive down.
+
+        ``_mixed_layer_depth`` of ``fme.core.ocean_eos`` with
+        ``DELTA_RHO_THRESHOLD`` and ``MLD_REF_LAYER``: the depth where the
+        Wright (1997) zero-pressure density first exceeds that of the reference
+        layer by the threshold, else the sea floor depth (the depth
+        coordinate's ``deptho``, or the deepest unmasked interface). NaN where
+        ``mask_0 == 0``, as ``DepthCoordinate.depth_integral``.
+
+        Raises:
+            ValueError: If no depth coordinate was provided, or it lacks
+                ``idepth`` or ``mask`` (configuration, as for
+                ``ocean_heat_content``).
+            KeyError: If potential temperature or salinity is missing from the
+                data, or it has fewer than ``MLD_REF_LAYER + 2`` levels (no
+                level below the reference layer), so
+                ``compute_ocean_derived_quantities`` skips it.
+        """
+        coord = self._depth_coordinate
+        if coord is None or not all(hasattr(coord, a) for a in ("idepth", "mask")):
+            raise ValueError(
+                "A depth coordinate with idepth and mask must be provided to "
+                f"compute mld_wright97, got {type(coord).__name__}."
+            )
+        thetao = self.sea_water_potential_temperature
+        so = self.sea_water_salinity
+        if thetao.shape[-1] < MLD_REF_LAYER + 2:
+            # a level below the reference layer is missing, as a Stacker miss
+            raise KeyError(
+                f"mld_wright97 needs at least {MLD_REF_LAYER + 2} levels, "
+                f"got {thetao.shape[-1]}."
+            )
+        idepth = coord.idepth.to(thetao.dtype)  # type: ignore[attr-defined]
+        mask = coord.mask  # type: ignore[attr-defined]
+        deptho = _sea_floor_depth(idepth, mask, getattr(coord, "deptho", None))
+        mld = _mixed_layer_depth(
+            thetao, so, idepth, mask, deptho, DELTA_RHO_THRESHOLD, MLD_REF_LAYER
+        )
+        mask_0 = mask.select(dim=-1, index=0).expand(mld.shape)
+        return mld.where(mask_0 > 0, float("nan"))
 
     @property
     def sea_surface_fraction(self) -> torch.Tensor:
