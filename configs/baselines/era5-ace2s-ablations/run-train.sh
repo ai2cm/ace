@@ -145,6 +145,9 @@ run_training "ace2s-pretrain-deterministic.yaml" "1deg-daily-ace2s-det-pretrain-
 run_training "ace2s-pretrain-crps-only.yaml" "1deg-daily-ace2s-crps-only-pretrain-rs0" 8
 run_training "ace2s-pretrain-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck-pretrain-rs0" 8
 run_training "ace2s-pretrain-6hourly.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
+
+# Shared temperature normalization arm (added 2026-10-01).
+run_training "ace2s-pretrain-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-pretrain-rs0" 8
 # Resume of the 6-hourly arm after its epoch-10 NCCL-timeout failure (same
 # wandb name so the run keeps its id; beaker suffixes the experiment name).
 run_training "ace2s-pretrain-6hourly-resume.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
