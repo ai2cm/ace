@@ -704,11 +704,8 @@ class BatchData:
     ) -> tuple[StepperState | None, BatchLabels | None, dict[str, torch.Tensor] | None]:
         """Decode stepper state, labels, and data mask from reserved variables.
 
-        Used only on the single-rank path. When a gathered state dict
-        (``n_ranks`` marker) is encountered in single-rank mode it is
-        resolved to rank 0 via ``GatheredStepperState``; the multi-rank
-        path goes through ``GatheredBatchData.from_xarray_dataset``
-        instead.
+        Used only on the single-rank path; the multi-rank path goes
+        through ``GatheredBatchData.from_xarray_dataset`` instead.
         """
         state_dict: dict[str, torch.Tensor] = {}
         data_mask: dict[str, torch.Tensor] = {}
@@ -723,12 +720,7 @@ class BatchData:
 
         stepper_state: StepperState | None = None
         if state_dict:
-            try:
-                gathered = GatheredStepperState.from_state_dict(state_dict)
-            except UngatheredStateDictError:
-                stepper_state = StepperState.from_state_dict(state_dict)
-            else:
-                stepper_state = gathered.get_for_rank(0)
+            stepper_state = StepperState.from_state_dict(state_dict)
 
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:

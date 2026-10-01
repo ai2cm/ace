@@ -436,9 +436,9 @@ def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
     assert torch.equal(states[1], reference_r1)
 
 
-def test_gathered_batch_data_xarray_round_trip_single_rank():
-    """In single-rank mode, from_xarray_dataset resolves the per-rank
-    stepper state directly via get_for_rank(0)."""
+def test_gathered_batch_data_from_xarray_round_trip():
+    """GatheredBatchData.to_xarray_dataset → GatheredBatchData.from_xarray_dataset
+    round-trips the gathered state."""
     rs0 = RandomState.from_seed(10)
     torch.randn(5, generator=rs0.generator)
     expected_gen_state = rs0.generator.get_state().clone()
@@ -464,17 +464,18 @@ def test_gathered_batch_data_xarray_round_trip_single_rank():
     )
 
     ds = gathered.to_xarray_dataset()
-    restored = BatchData.from_xarray_dataset(ds)
+    restored = GatheredBatchData.from_xarray_dataset(ds)
+    rank0 = restored.get_for_rank(0, n_ranks=1)
 
-    assert isinstance(restored.stepper_state, StepperState)
-    assert restored.stepper_state.random_state is not None
+    assert isinstance(rank0.stepper_state, StepperState)
+    assert rank0.stepper_state.random_state is not None
     assert torch.equal(
-        restored.stepper_state.random_state.generator.get_state(),
+        rank0.stepper_state.random_state.generator.get_state(),
         expected_gen_state,
     )
-    assert restored.stepper_state.corrector_state is not None
+    assert rank0.stepper_state.corrector_state is not None
     torch.testing.assert_close(
-        restored.stepper_state.corrector_state.global_dry_air_mass,
+        rank0.stepper_state.corrector_state.global_dry_air_mass,
         torch.tensor([[[1.0]], [[2.0]]]),
     )
 
