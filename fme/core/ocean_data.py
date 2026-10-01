@@ -225,9 +225,14 @@ class OceanData:
     def downward_sea_ice_basal_salt_flux(self) -> torch.Tensor:
         """Returns the salt flux from sea ice into the ocean in kg/m2/s,
         or zeros if not available.
+
+        NaN is treated as zero: some stores leave sfdsi NaN in ocean cells
+        that never carry sea ice, where there is no basal salt flux.
         """
         try:
-            return self._get("downward_sea_ice_basal_salt_flux")
+            return torch.nan_to_num(
+                self._get("downward_sea_ice_basal_salt_flux"), nan=0.0
+            )
         except KeyError:
             return torch.zeros_like(self.sea_surface_fraction)
 
