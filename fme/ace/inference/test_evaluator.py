@@ -163,7 +163,7 @@ def save_plus_one_stepper(
             timestep=timestep,
             variable_metadata=variable_metadata,
             all_labels=(
-                set(grouped_normalization.label_to_group)
+                set(grouped_normalization.groups)
                 if grouped_normalization is not None
                 else None
             ),
@@ -1413,7 +1413,7 @@ def test_evaluator_labels_select_normalization_group(
     )
     grouped = uniform_grouped_normalization(
         in_names,
-        groups={"c96": (["amip"], 0.0, 1.0), "obs": (["era5"], 0.0, 3.0)},
+        groups={"c96": (0.0, 1.0), "era5": (0.0, 3.0)},
         default_group="c96",
     )
     save_plus_one_stepper(

@@ -352,12 +352,12 @@ class GroupedNormalizer:
     Normalizer which selects normalization constants per sample, based on the
     sample's labels.
 
-    Each sample is assigned to exactly one group, determined by its labels.
-    Variables listed in ``pinned_names`` use the pooled constants regardless of
-    group; this is required for variables which are near-constant within a group
-    (whose per-group standard deviation would be ~0) and for variables whose
-    per-group normalization would place different data sources in disjoint
-    input spaces.
+    Each group is named by a dataset label, and each sample must carry exactly
+    one label, which selects its group. Variables listed in ``pinned_names``
+    use the pooled constants regardless of group; this is required for
+    variables which are near-constant within a group (whose per-group standard
+    deviation would be ~0) and for variables whose per-group normalization
+    would place different data sources in disjoint input spaces.
 
     The per-group constants are applied to the network's inputs and outputs;
     to global mean removal, which shifts each sample's fields to the
@@ -373,7 +373,6 @@ class GroupedNormalizer:
         self,
         pooled: StandardNormalizer,
         groups: Mapping[str, StandardNormalizer],
-        label_to_group: Mapping[str, str],
         default_group: str,
         n_spatial_dims: int,
         pinned_names: Iterable[str] = (),
@@ -382,11 +381,10 @@ class GroupedNormalizer:
         Args:
             pooled: Normalizer holding constants pooled over all groups. Used
                 for pinned variables.
-            groups: Mapping from group name to that group's normalizer, which
-                must hold constants for every non-pinned variable.
-            label_to_group: Mapping from dataset label to group name.
-            default_group: Group to use when a batch carries no labels, e.g.
-                during inference on an unlabeled dataset.
+            groups: Mapping from dataset label to that group's normalizer,
+                which must hold constants for every non-pinned variable.
+            default_group: Label whose group to use when a batch carries no
+                labels, e.g. during inference on an unlabeled dataset.
             n_spatial_dims: Number of trailing spatial dimensions on the
                 tensors this normalizer is applied to (2 for lat/lon, 3 for
                 HEALPix). Per-sample constants are reshaped to broadcast
@@ -396,7 +394,6 @@ class GroupedNormalizer:
         self._pooled = pooled
         self._groups = dict(groups)
         self._group_names = sorted(groups)
-        self._label_to_group = dict(label_to_group)
         self._default_group = default_group
         self._pinned_names = set(pinned_names)
         self._n_spatial_dims = n_spatial_dims
@@ -508,78 +505,36 @@ class GroupedNormalizer:
         return normalizer
 
     def _resolve_group_index(self, labels: BatchLabels) -> torch.Tensor:
-        """Map each sample's labels to exactly one group index.
+        """Map each sample's label to its group index.
 
-        Labels are multi-hot, so a sample may carry several labels; they must
-        all resolve to the same group. A sample resolving to zero or to more
-        than one group is an error rather than a silent pick, since that would
-        quietly normalize data against the wrong distribution.
+        A sample carrying zero or several labels is an error rather than a
+        silent pick, since that would quietly normalize data against the wrong
+        distribution.
 
         Called once per batch rather than once per forward step: the
-        ``(counts > 0).sum(...) == 1`` check forces a device sync, which is too
-        expensive to repeat inside a rollout. ``bind`` handles the caching.
+        ``n_labels == 1`` check forces a device sync, which is too expensive to
+        repeat inside a rollout. ``bind`` handles the caching.
         """
-        unknown = set(labels.names) - set(self._label_to_group)
+        unknown = set(labels.names) - set(self._group_names)
         if unknown:
             raise ValueError(
-                f"Labels {sorted(unknown)} are not assigned to any normalization "
-                f"group. Known labels: {sorted(self._label_to_group)}."
+                f"Labels {sorted(unknown)} have no normalization group. "
+                f"Known labels: {self._group_names}."
             )
-        # labels @ membership counts each sample's labels per group. Done in
-        # float: CUDA has no integer matmul, and labels may be integer-typed.
-        membership = torch.zeros(
-            (len(labels.names), len(self._group_names)),
-            dtype=torch.float32,
+        is_set = labels.tensor > 0
+        n_labels = is_set.sum(dim=1)
+        if not bool((n_labels == 1).all()):
+            bad = torch.nonzero(n_labels != 1).flatten().tolist()
+            raise ValueError(
+                f"Samples at batch indices {bad} carry a number of labels other "
+                "than exactly one. Each dataset must carry a single label, "
+                "which selects its normalization group."
+            )
+        column_to_group = torch.tensor(
+            [self._group_names.index(name) for name in labels.names],
             device=labels.tensor.device,
         )
-        for i, label in enumerate(labels.names):
-            group = self._label_to_group[label]
-            membership[i, self._group_names.index(group)] = 1.0
-        counts = labels.tensor.to(torch.float32) @ membership
-        n_groups_per_sample = (counts > 0).sum(dim=1)
-        if not bool((n_groups_per_sample == 1).all()):
-            bad = torch.nonzero(n_groups_per_sample != 1).flatten().tolist()
-            raise ValueError(
-                f"Samples at batch indices {bad} resolve to a number of "
-                "normalization groups other than exactly one. Each dataset must "
-                "carry labels belonging to a single group."
-            )
-        return counts.argmax(dim=1)
-
-
-@dataclasses.dataclass
-class NormalizationGroupConfig:
-    """
-    Configuration for one group's normalization constants.
-
-    Parameters:
-        labels: Dataset labels which belong to this group.
-        normalization: Normalization constants for this group. Its NaN-filling
-            options must be left unset: they are taken from the pooled
-            ``network`` config, which applies to every group.
-    """
-
-    labels: list[str]
-    normalization: NormalizationConfig
-
-    def __post_init__(self):
-        if len(self.labels) == 0:
-            raise ValueError("A normalization group must list at least one label.")
-        if self.normalization.fills_nans:
-            raise ValueError(
-                "NaN filling is not supported in a normalization group; "
-                "set it on the pooled network config instead."
-            )
-
-    def get_labels(self) -> list[str]:
-        """Dataset labels which belong to this group."""
-        return list(self.labels)
-
-    def build(self, names: list[str]) -> StandardNormalizer:
-        return self.normalization.build(names=names)
-
-    def load(self):
-        self.normalization.load()
+        return column_to_group[is_set.int().argmax(dim=1)]
 
 
 @dataclasses.dataclass
@@ -593,19 +548,23 @@ class GroupedNormalizationConfig:
     than the network's inputs and outputs and global mean removal.
 
     Parameters:
-        groups: Mapping from group name to that group's configuration.
-        default_group: Group to use for batches which carry no labels, such as
-            inference on an unlabeled dataset. Required, since an implicit
-            choice here would silently normalize against the wrong
+        groups: Mapping from dataset label to that label's normalization
+            constants. Their NaN-filling options must be left unset: they are
+            taken from the pooled ``network`` config, which applies to every
+            group.
+        default_group: Label whose group to use for batches which carry no
+            labels, such as inference on an unlabeled dataset. Required, since
+            an implicit choice here would silently normalize against the wrong
             distribution.
         pinned_variables: Variables which always use the pooled constants.
 
-    Every label the training dataset carries must belong to a group, including
-    labels used only for conditioning: a sample's group is resolved from all
-    of its labels.
+    Every label the training dataset carries must have a group, and each
+    dataset must carry exactly one label. The same labels also drive module
+    conditioning when the module is conditional, so the conditioning is
+    exactly as fine-grained as the grouping.
     """
 
-    groups: dict[str, NormalizationGroupConfig]
+    groups: dict[str, NormalizationConfig]
     default_group: str
     pinned_variables: list[str] = dataclasses.field(default_factory=list)
 
@@ -617,24 +576,14 @@ class GroupedNormalizationConfig:
                 f"default_group '{self.default_group}' is not one of the "
                 f"configured groups: {sorted(self.groups)}"
             )
-        seen: dict[str, str] = {}
-        for group_name, group in self.groups.items():
-            for label in group.get_labels():
-                if label in seen:
-                    raise ValueError(
-                        f"Label '{label}' is assigned to both group "
-                        f"'{seen[label]}' and group '{group_name}'. Each label "
-                        "must belong to exactly one group."
-                    )
-                seen[label] = group_name
-
-    @property
-    def label_to_group(self) -> dict[str, str]:
-        return {
-            label: group_name
-            for group_name, group in self.groups.items()
-            for label in group.get_labels()
-        }
+        nan_filling = sorted(
+            label for label, group in self.groups.items() if group.fills_nans
+        )
+        if nan_filling:
+            raise ValueError(
+                f"NaN filling is not supported in normalization groups "
+                f"{nan_filling}; set it on the pooled network config instead."
+            )
 
     def validate_pinned_variables(self, names: Iterable[str]) -> None:
         """Reject a pinned name which is not a variable being normalized.
@@ -666,11 +615,11 @@ class GroupedNormalizationConfig:
                 "Grouped network normalization requires a labeled dataset, but "
                 "the dataset carries no labels. Set labels on each dataset."
             )
-        unknown = sorted(dataset_labels - set(self.label_to_group))
+        unknown = sorted(dataset_labels - set(self.groups))
         if unknown:
             raise ValueError(
-                f"Dataset labels {unknown} are not assigned to any normalization "
-                f"group. Known labels: {sorted(self.label_to_group)}."
+                f"Dataset labels {unknown} have no normalization group. "
+                f"Known labels: {sorted(self.groups)}."
             )
 
     def build(
@@ -703,7 +652,6 @@ class GroupedNormalizationConfig:
         return GroupedNormalizer(
             pooled=pooled,
             groups=groups,
-            label_to_group=self.label_to_group,
             default_group=self.default_group,
             pinned_names=self.pinned_variables,
             n_spatial_dims=n_spatial_dims,

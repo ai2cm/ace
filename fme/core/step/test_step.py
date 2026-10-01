@@ -2516,7 +2516,7 @@ def _labeled_single_module_selector(
         network=trivial_normalization(names),
         grouped=uniform_grouped_normalization(
             names,
-            groups={"c96": (["amip"], 10.0, 2.0), "era5": (["era5"], -10.0, 5.0)},
+            groups={"c96": (10.0, 2.0), "era5": (-10.0, 5.0)},
             default_group="era5",
             pinned_variables=["forcing_rad"],
         )
@@ -2554,11 +2554,11 @@ def _labeled_single_module_selector(
     )
 
 
-def _amip_era5_labels() -> BatchLabels:
-    """Labels for a two-sample batch: sample 0 is amip, sample 1 is era5."""
+def _c96_era5_labels() -> BatchLabels:
+    """Labels for a two-sample batch: sample 0 is c96, sample 1 is era5."""
     return BatchLabels(
         tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]).to(fme.get_device()),
-        names=["amip", "era5"],
+        names=["c96", "era5"],
     )
 
 
@@ -2571,7 +2571,7 @@ def _step_labeled(step: StepABC) -> TensorDict:
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
-            labels=_amip_era5_labels(),
+            labels=_c96_era5_labels(),
         ),
     ).output
 
@@ -2587,7 +2587,7 @@ def test_unconditional_step_rejects_labels_without_grouped_normalization():
     step = get_step(
         _labeled_single_module_selector(grouped=False),
         DEFAULT_IMG_SHAPE,
-        all_labels={"amip", "era5"},
+        all_labels={"c96", "era5"},
     )
     with pytest.raises(TypeError, match="Labels are not allowed"):
         _step_labeled(step)
@@ -2603,7 +2603,7 @@ def test_grouped_normalization_step_runs_and_keeps_pooled_normalizer():
     step = get_step(
         _labeled_single_module_selector(),
         DEFAULT_IMG_SHAPE,
-        all_labels={"amip", "era5"},
+        all_labels={"c96", "era5"},
     )
     # The module is unconditional, so this also checks that the labels are
     # withheld from it rather than raising.
@@ -2624,10 +2624,10 @@ def test_grouped_normalization_step_denormalizes_per_group():
     step = get_step(
         _labeled_single_module_selector(),
         DEFAULT_IMG_SHAPE,
-        all_labels={"amip", "era5"},
+        all_labels={"c96", "era5"},
     )
     assert isinstance(step, SingleModuleStep)
-    labels = _amip_era5_labels()
+    labels = _c96_era5_labels()
     normalizer = step.network_normalizer(labels)
     normalized = {
         "diagnostic_main": torch.ones((2, *DEFAULT_IMG_SHAPE)).to(fme.get_device()),
@@ -2666,7 +2666,7 @@ def test_grouped_global_mean_removal_centers_each_group(global_mean_removal):
     step = get_step(
         _labeled_single_module_selector(global_mean_removal=global_mean_removal),
         DEFAULT_IMG_SHAPE,
-        all_labels={"amip", "era5"},
+        all_labels={"c96", "era5"},
     )
     assert isinstance(step, SingleModuleStep)
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2)
@@ -2683,7 +2683,7 @@ def test_grouped_global_mean_removal_centers_each_group(global_mean_removal):
         input=input_data,
         next_step_input_data={},
         network_calls=network_calls,
-        normalizer=step.network_normalizer(_amip_era5_labels()),
+        normalizer=step.network_normalizer(_c96_era5_labels()),
         corrector=None,
         ocean=None,
         global_mean_removal=step._global_mean_removal,
@@ -2718,7 +2718,7 @@ def _grouped_normalization(names: list[str]) -> NetworkAndLossNormalizationConfi
     return NetworkAndLossNormalizationConfig(
         network=trivial_normalization(names),
         grouped=uniform_grouped_normalization(
-            names, groups={"only": (["era5"], 1.0, 2.0)}, default_group="only"
+            names, groups={"era5": (1.0, 2.0)}, default_group="era5"
         ),
     )
 

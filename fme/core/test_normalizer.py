@@ -15,7 +15,6 @@ from fme.core.normalizer import (
     GroupedNormalizer,
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
-    NormalizationGroupConfig,
     NormalizeFn,
     StandardNormalizer,
     _combine_normalizers,
@@ -411,19 +410,13 @@ def _grouped_config(
     """Two groups whose constants differ, for testing per-sample selection."""
     return GroupedNormalizationConfig(
         groups={
-            "c96": NormalizationGroupConfig(
-                labels=["amip", "som"],
-                normalization=NormalizationConfig(
-                    means={"a": 10.0, "pinned": 100.0},
-                    stds={"a": 2.0, "pinned": 200.0},
-                ),
+            "c96": NormalizationConfig(
+                means={"a": 10.0, "pinned": 100.0},
+                stds={"a": 2.0, "pinned": 200.0},
             ),
-            "era5": NormalizationGroupConfig(
-                labels=["era5"],
-                normalization=NormalizationConfig(
-                    means={"a": 20.0, "pinned": 300.0},
-                    stds={"a": 4.0, "pinned": 400.0},
-                ),
+            "era5": NormalizationConfig(
+                means={"a": 20.0, "pinned": 300.0},
+                stds={"a": 4.0, "pinned": 400.0},
             ),
         },
         default_group=default_group,
@@ -446,7 +439,7 @@ def _build(
         pooled=_pooled_normalizer(),
         names=["a", "pinned"],
         n_spatial_dims=n_spatial_dims,
-        dataset_labels=config.label_to_group,
+        dataset_labels=set(config.groups),
     )
 
 
@@ -463,7 +456,7 @@ def test_grouped_normalizer_uses_per_sample_constants():
     """Samples from different groups are normalized by their own constants."""
     grouped = _build(_grouped_config())
     # Sample 0 is c96 (mean 10, std 2), sample 1 is era5 (mean 20, std 4).
-    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    labels = _labels(["c96", "era5"], [[1.0, 0.0], [0.0, 1.0]])
     normalizer = grouped.bind(labels)
     tensors = {"a": _tensor([[[12.0]], [[24.0]]])}
     normalized = normalizer.normalize(tensors)
@@ -472,7 +465,7 @@ def test_grouped_normalizer_uses_per_sample_constants():
 
 def test_grouped_normalizer_roundtrips_mixed_group_batch():
     grouped = _build(_grouped_config())
-    labels = _labels(["amip", "era5", "som"], [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    labels = _labels(["c96", "era5"], [[1, 0], [0, 1], [1, 0]])
     normalizer = grouped.bind(labels)
     tensors = {
         "a": _tensor([[[1.0, 2.0]], [[3.0, 4.0]], [[5.0, 6.0]]]),
@@ -495,9 +488,9 @@ def test_grouped_normalizer_fills_denormalized_nans_with_group_means():
         pooled=pooled,
         names=["a", "pinned"],
         n_spatial_dims=2,
-        dataset_labels=config.label_to_group,
+        dataset_labels=set(config.groups),
     )
-    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    labels = _labels(["c96", "era5"], [[1.0, 0.0], [0.0, 1.0]])
     nan = float("nan")
     denormalized = grouped.bind(labels).denormalize(
         {"a": _tensor([[[nan, 0.0]], [[nan, 0.0]]])}
@@ -529,7 +522,7 @@ def test_scalar_normalizer_serializes_to_equivalent_normalizer():
 def test_bound_grouped_normalizer_cannot_be_serialized():
     """A bound normalizer's per-sample constants are batch state, not config."""
     grouped = _build(_grouped_config())
-    normalizer = grouped.bind(_labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]]))
+    normalizer = grouped.bind(_labels(["c96", "era5"], [[1.0, 0.0], [0.0, 1.0]]))
     with pytest.raises(ValueError, match="per-sample normalization means"):
         normalizer.get_state()
     with pytest.raises(ValueError, match="per-sample normalization means"):
@@ -539,7 +532,7 @@ def test_bound_grouped_normalizer_cannot_be_serialized():
 def test_grouped_normalizer_pinned_variable_uses_pooled_constants():
     """A pinned variable is normalized identically regardless of a sample's group."""
     grouped = _build(_grouped_config(pinned_variables=["pinned"]))
-    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    labels = _labels(["c96", "era5"], [[1.0, 0.0], [0.0, 1.0]])
     normalizer = grouped.bind(labels)
     # Pooled constants for "pinned" are mean 1, std 3.
     tensors = {"pinned": _tensor([[[4.0]], [[4.0]]])}
@@ -561,13 +554,8 @@ def test_grouped_normalizer_single_group_matches_standard_normalizer():
     means, stds = {"a": 10.0, "pinned": 100.0}, {"a": 2.0, "pinned": 200.0}
     standard = NormalizationConfig(means=means, stds=stds).build(["a", "pinned"])
     grouped = GroupedNormalizationConfig(
-        groups={
-            "only": NormalizationGroupConfig(
-                labels=["era5"],
-                normalization=NormalizationConfig(means=means, stds=stds),
-            )
-        },
-        default_group="only",
+        groups={"era5": NormalizationConfig(means=means, stds=stds)},
+        default_group="era5",
     ).build(
         pooled=standard,
         names=["a", "pinned"],
@@ -626,7 +614,7 @@ def test_grouped_normalizer_warns_once_for_unlabeled_batches(
 ):
     """Unlabeled batches warn once per normalizer, not once per step."""
     grouped = _build(_grouped_config(default_group="era5"))
-    labels = _labels(["amip", "era5"], [[0.0, 1.0]]) if labeled else None
+    labels = _labels(["c96", "era5"], [[0.0, 1.0]]) if labeled else None
     with caplog.at_level(logging.WARNING):
         grouped.bind(labels)
         grouped.bind(labels)
@@ -645,7 +633,7 @@ def test_grouped_normalizer_broadcasts_against_n_spatial_dims(n_spatial_dims):
     align the sample dimension with the faces.
     """
     grouped = _build(_grouped_config(), n_spatial_dims=n_spatial_dims)
-    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    labels = _labels(["c96", "era5"], [[1.0, 0.0], [0.0, 1.0]])
     normalizer = grouped.bind(labels)
     assert normalizer.means["a"].shape == (2, *(1,) * n_spatial_dims)
     # Sample 0 is c96 (mean 10, std 2), sample 1 is era5 (mean 20, std 4).
@@ -667,11 +655,11 @@ def test_grouped_normalizer_broadcasts_against_n_spatial_dims(n_spatial_dims):
 @pytest.mark.parametrize(
     "names, rows, match",
     [
-        (["amip", "era5"], [[1.0, 1.0]], "other than exactly one"),
-        (["amip", "era5"], [[0.0, 0.0]], "other than exactly one"),
-        (["mystery"], [[1.0]], "not assigned to any normalization group"),
+        (["c96", "era5"], [[1.0, 1.0]], "other than exactly one"),
+        (["c96", "era5"], [[0.0, 0.0]], "other than exactly one"),
+        (["mystery"], [[1.0]], "have no normalization group"),
     ],
-    ids=["two_groups", "no_group", "unknown_label"],
+    ids=["two_labels", "no_label", "unknown_label"],
 )
 def test_grouped_normalizer_rejects_unresolvable_labels(
     names: list[str], rows: list[list[float]], match: str
@@ -684,16 +672,10 @@ def test_grouped_normalizer_rejects_unresolvable_labels(
 def test_grouped_normalizer_requires_every_group_to_cover_every_variable():
     config = GroupedNormalizationConfig(
         groups={
-            "c96": NormalizationGroupConfig(
-                labels=["amip"],
-                normalization=NormalizationConfig(
-                    means={"a": 1.0, "b": 1.0}, stds={"a": 1.0, "b": 1.0}
-                ),
+            "c96": NormalizationConfig(
+                means={"a": 1.0, "b": 1.0}, stds={"a": 1.0, "b": 1.0}
             ),
-            "era5": NormalizationGroupConfig(
-                labels=["era5"],
-                normalization=NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0}),
-            ),
+            "era5": NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0}),
         },
         default_group="era5",
     )
@@ -705,19 +687,14 @@ def test_grouped_normalizer_requires_every_group_to_cover_every_variable():
             pooled=pooled,
             names=["a", "b"],
             n_spatial_dims=2,
-            dataset_labels={"amip", "era5"},
+            dataset_labels={"c96", "era5"},
         )
 
 
 def test_grouped_normalizer_does_not_require_groups_to_cover_pinned_variables():
     """A pinned variable uses the pooled constants, so groups may omit it."""
     config = GroupedNormalizationConfig(
-        groups={
-            "era5": NormalizationGroupConfig(
-                labels=["era5"],
-                normalization=NormalizationConfig(means={"a": 1.0}, stds={"a": 2.0}),
-            ),
-        },
+        groups={"era5": NormalizationConfig(means={"a": 1.0}, stds={"a": 2.0})},
         default_group="era5",
         pinned_variables=["pinned"],
     )
@@ -734,7 +711,7 @@ def test_grouped_normalizer_does_not_require_groups_to_cover_pinned_variables():
 def _config_with_constant_group(pinned_variables: list[str]):
     """Groups in which "pinned" is constant within the c96 group."""
     config = _grouped_config(pinned_variables=pinned_variables)
-    config.groups["c96"].normalization = NormalizationConfig(
+    config.groups["c96"] = NormalizationConfig(
         means={"a": 10.0, "pinned": 100.0}, stds={"a": 2.0, "pinned": 0.0}
     )
     return config
@@ -753,7 +730,7 @@ def test_grouped_normalizer_rejects_variable_constant_within_a_group():
     _build(_config_with_constant_group(pinned_variables=["pinned"]))
 
 
-@pytest.mark.parametrize("group_labels", [["era5"], ["amip", "era5"]])
+@pytest.mark.parametrize("group_labels", [["era5"], ["c96", "era5"]])
 def test_grouped_normalizer_accepts_variable_constant_in_pooled_stats(group_labels):
     """A variable constant everywhere is not a grouping problem.
 
@@ -763,11 +740,7 @@ def test_grouped_normalizer_accepts_variable_constant_in_pooled_stats(group_labe
     means, stds = {"a": 10.0, "c": 5.0}, {"a": 2.0, "c": 0.0}
     config = GroupedNormalizationConfig(
         groups={
-            label: NormalizationGroupConfig(
-                labels=[label],
-                normalization=NormalizationConfig(means=means, stds=stds),
-            )
-            for label in group_labels
+            label: NormalizationConfig(means=means, stds=stds) for label in group_labels
         },
         default_group="era5",
     )
@@ -783,7 +756,7 @@ def test_grouped_normalizer_accepts_variable_constant_in_pooled_stats(group_labe
     "dataset_labels, match",
     [
         (set(), "requires a labeled dataset"),
-        ({"amip", "era5", "mystery"}, r"\['mystery'\] are not assigned"),
+        ({"c96", "era5", "mystery"}, r"\['mystery'\] have no normalization group"),
     ],
     ids=["unlabeled", "label_outside_every_group"],
 )
@@ -809,64 +782,30 @@ def test_normalization_group_rejects_nan_filling(
 ):
     """A group cannot set NaN filling, which is taken from the pooled config."""
     with pytest.raises(ValueError, match="NaN filling is not supported"):
-        NormalizationGroupConfig(
-            labels=["era5"],
-            normalization=NormalizationConfig(
-                means={"a": 0.0},
-                stds={"a": 1.0},
-                fill_nans_on_normalize=on_normalize,
-                fill_nans_on_denormalize=on_denormalize,
-            ),
+        GroupedNormalizationConfig(
+            groups={
+                "era5": NormalizationConfig(
+                    means={"a": 0.0},
+                    stds={"a": 1.0},
+                    fill_nans_on_normalize=on_normalize,
+                    fill_nans_on_denormalize=on_denormalize,
+                ),
+            },
+            default_group="era5",
         )
 
 
 def test_grouped_config_rejects_unknown_default_group():
     with pytest.raises(ValueError, match="default_group"):
         GroupedNormalizationConfig(
-            groups={
-                "c96": NormalizationGroupConfig(
-                    labels=["amip"],
-                    normalization=NormalizationConfig(
-                        means={"a": 1.0}, stds={"a": 1.0}
-                    ),
-                )
-            },
+            groups={"c96": NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0})},
             default_group="era5",
-        )
-
-
-def test_normalization_group_rejects_empty_labels():
-    with pytest.raises(ValueError, match="at least one label"):
-        NormalizationGroupConfig(
-            labels=[],
-            normalization=NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0}),
         )
 
 
 def test_grouped_config_rejects_empty_groups():
     with pytest.raises(ValueError, match="At least one normalization group"):
         GroupedNormalizationConfig(groups={}, default_group="era5")
-
-
-def test_grouped_config_rejects_label_in_two_groups():
-    with pytest.raises(ValueError, match="must belong to exactly one group"):
-        GroupedNormalizationConfig(
-            groups={
-                "c96": NormalizationGroupConfig(
-                    labels=["shared"],
-                    normalization=NormalizationConfig(
-                        means={"a": 1.0}, stds={"a": 1.0}
-                    ),
-                ),
-                "era5": NormalizationGroupConfig(
-                    labels=["shared"],
-                    normalization=NormalizationConfig(
-                        means={"a": 1.0}, stds={"a": 1.0}
-                    ),
-                ),
-            },
-            default_group="era5",
-        )
 
 
 def test_grouped_config_rejects_pinned_variable_that_is_not_normalized():
@@ -894,12 +833,9 @@ def test_grouped_normalization_loads_into_explicit_constants():
             ),
             grouped=GroupedNormalizationConfig(
                 groups={
-                    "era5": NormalizationGroupConfig(
-                        labels=["era5"],
-                        normalization=NormalizationConfig(
-                            global_means_path=tmp_path / "mean.nc",
-                            global_stds_path=tmp_path / "std.nc",
-                        ),
+                    "era5": NormalizationConfig(
+                        global_means_path=tmp_path / "mean.nc",
+                        global_stds_path=tmp_path / "std.nc",
                     )
                 },
                 default_group="era5",
@@ -907,7 +843,7 @@ def test_grouped_normalization_loads_into_explicit_constants():
         )
         config.load()
     assert config.grouped is not None
-    group = config.grouped.groups["era5"].normalization
+    group = config.grouped.groups["era5"]
     assert group.global_means_path is None
     assert group.means["a"] == 1.0
     # The config no longer depends on the netCDF files, which have been removed.

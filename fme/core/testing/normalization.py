@@ -4,7 +4,6 @@ from fme.core.normalizer import (
     GroupedNormalizationConfig,
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
-    NormalizationGroupConfig,
 )
 
 
@@ -34,7 +33,7 @@ def trivial_network_and_loss_normalization(
 
 def uniform_grouped_normalization(
     names: Iterable[str],
-    groups: Mapping[str, tuple[Sequence[str], float, float]],
+    groups: Mapping[str, tuple[float, float]],
     default_group: str,
     pinned_variables: Sequence[str] = (),
 ) -> GroupedNormalizationConfig:
@@ -44,18 +43,15 @@ def uniform_grouped_normalization(
 
     Args:
         names: Names each group provides constants for.
-        groups: Mapping from group name to ``(labels, mean, std)``.
-        default_group: Group used for unlabeled batches.
+        groups: Mapping from dataset label to ``(mean, std)``.
+        default_group: Label whose group is used for unlabeled batches.
         pinned_variables: Names which always use the pooled constants.
     """
     names = list(names)
     return GroupedNormalizationConfig(
         groups={
-            group: NormalizationGroupConfig(
-                labels=list(labels),
-                normalization=trivial_normalization(names, mean=mean, std=std),
-            )
-            for group, (labels, mean, std) in groups.items()
+            label: trivial_normalization(names, mean=mean, std=std)
+            for label, (mean, std) in groups.items()
         },
         default_group=default_group,
         pinned_variables=list(pinned_variables),

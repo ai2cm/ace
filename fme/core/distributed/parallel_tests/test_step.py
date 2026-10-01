@@ -554,7 +554,7 @@ def test_grouped_normalization_step_is_decomposition_independent():
     """Per-sample group constants broadcast against each rank's spatial chunk.
 
     The add-one network advances each sample by its own group's std (2 for
-    amip, 4 for era5) on every rank, whatever the spatial decomposition.
+    c96, 4 for era5) on every rank, whatever the spatial decomposition.
     """
     dist = Distributed.get_instance()
     img_shape = (20, 40)
@@ -570,8 +570,8 @@ def test_grouped_normalization_step_is_decomposition_independent():
                     grouped=uniform_grouped_normalization(
                         ["a"],
                         groups={
-                            "c96": (["amip"], 10.0, 2.0),
-                            "era5": (["era5"], 20.0, 4.0),
+                            "c96": (10.0, 2.0),
+                            "era5": (20.0, 4.0),
                         },
                         default_group="c96",
                     ),
@@ -579,10 +579,10 @@ def test_grouped_normalization_step_is_decomposition_independent():
             )
         ),
     )
-    step = get_step(selector, img_shape, all_labels={"amip", "era5"})
+    step = get_step(selector, img_shape, all_labels={"c96", "era5"})
     labels = BatchLabels(
         tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]], device=fme.get_device()),
-        names=["amip", "era5"],
+        names=["c96", "era5"],
     )
     input_data = dist.scatter_spatial(
         get_tensor_dict(["a"], img_shape, n_samples=2), img_shape

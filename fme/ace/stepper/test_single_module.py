@@ -88,7 +88,6 @@ from fme.core.normalizer import (
     GroupedNormalizationConfig,
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
-    NormalizationGroupConfig,
 )
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
@@ -1687,16 +1686,13 @@ def test_reloaded_grouped_stepper_keeps_per_group_constants(tmp_path: pathlib.Pa
     """
     group_stds = {"c96": 2.0, "era5": 5.0}
     groups = {}
-    for group, label in [("c96", "amip"), ("era5", "era5")]:
+    for group in ["c96", "era5"]:
         means_path = tmp_path / f"{group}_means.nc"
         stds_path = tmp_path / f"{group}_stds.nc"
         get_scalar_dataset(["a"], fill_value=0.0).to_netcdf(means_path)
         get_scalar_dataset(["a"], fill_value=group_stds[group]).to_netcdf(stds_path)
-        groups[group] = NormalizationGroupConfig(
-            labels=[label],
-            normalization=NormalizationConfig(
-                global_means_path=str(means_path), global_stds_path=str(stds_path)
-            ),
+        groups[group] = NormalizationConfig(
+            global_means_path=str(means_path), global_stds_path=str(stds_path)
         )
     config = _get_stepper_config(["a"], ["a"])
     step_config = config.step.config
@@ -1705,16 +1701,16 @@ def test_reloaded_grouped_stepper_keeps_per_group_constants(tmp_path: pathlib.Pa
     )
     stepper = dataclasses.replace(
         config, step=StepSelector(type="single_module", config=step_config)
-    ).get_stepper(get_dataset_info(all_labels={"amip", "era5"}))
+    ).get_stepper(get_dataset_info(all_labels={"c96", "era5"}))
     state = stepper.get_state()
     for path in tmp_path.glob("*.nc"):
         path.unlink()
     reloaded = Stepper.from_state(state)
 
-    # Samples 0 and 2 are amip (group c96), sample 1 is era5.
+    # Samples 0 and 2 are c96, sample 1 is era5.
     labels = BatchLabels(
         tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]]).to(DEVICE),
-        names=["amip", "era5"],
+        names=["c96", "era5"],
     )
     input_data, forcing_data = get_data_for_predict(
         n_steps=1, forcing_names=[], labels=labels
@@ -2727,7 +2723,7 @@ def _get_stepper_with_input_masking(
 
 def _get_grouped_stepper_config() -> StepperConfig:
     """Add-one stepper config for "a" under grouped normalization with groups
-    c96 (amip; mean 10, std 2) and era5 (era5; mean 20, std 4) and pooled
+    c96 (mean 10, std 2) and era5 (mean 20, std 4) and pooled
     constants (mean 0, std 1).
     """
     config = _get_stepper_config(["a"], ["a"])
@@ -2735,7 +2731,7 @@ def _get_grouped_stepper_config() -> StepperConfig:
     step_config["normalization"]["grouped"] = dataclasses.asdict(
         uniform_grouped_normalization(
             ["a"],
-            groups={"c96": (["amip"], 10.0, 2.0), "era5": (["era5"], 20.0, 4.0)},
+            groups={"c96": (10.0, 2.0), "era5": (20.0, 4.0)},
             default_group="c96",
         )
     )
@@ -2754,7 +2750,7 @@ def _get_grouped_stepper_with_mean_input_masking() -> Stepper:
     ).get_stepper(
         get_dataset_info(
             spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
-            all_labels={"amip", "era5"},
+            all_labels={"c96", "era5"},
         )
     )
 
@@ -2764,13 +2760,13 @@ def test_grouped_normalization_trains_with_ensemble_members():
 
     Training repeats each sample once per ensemble member, so each member
     must be normalized with its sample's group constants. The add-one
-    network advances each sample by its group's std: 2 for the amip sample,
+    network advances each sample by its group's std: 2 for the c96 sample,
     4 for the era5 one, in every ensemble member.
     """
     n_ensemble = 3
     stepper = _get_train_stepper(
         _get_grouped_stepper_config(),
-        dataset_info=get_dataset_info(all_labels={"amip", "era5"}),
+        dataset_info=get_dataset_info(all_labels={"c96", "era5"}),
         n_ensemble=n_ensemble,
         loss=StepLossConfig(type="MSE"),
     )
@@ -2779,7 +2775,7 @@ def test_grouped_normalization_trains_with_ensemble_members():
         data=data.data,
         time=data.time,
         labels=BatchLabels(
-            tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]), names=["amip", "era5"]
+            tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]), names=["c96", "era5"]
         ),
     )
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
@@ -2795,7 +2791,7 @@ def test_grouped_normalization_trains_with_ensemble_members():
         pytest.param(
             BatchLabels(
                 tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]).to(DEVICE),
-                names=["amip", "era5"],
+                names=["c96", "era5"],
             ),
             [10.0, 20.0],
             id="labeled",
