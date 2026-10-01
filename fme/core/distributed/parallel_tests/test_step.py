@@ -573,7 +573,7 @@ def test_grouped_normalization_step_is_decomposition_independent():
                             "c96": (10.0, 2.0),
                             "era5": (20.0, 4.0),
                         },
-                        default_group="c96",
+                        default_label="c96",
                     ),
                 ),
             )

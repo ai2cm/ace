@@ -1697,7 +1697,7 @@ def test_reloaded_grouped_stepper_keeps_per_group_constants(tmp_path: pathlib.Pa
     config = _get_stepper_config(["a"], ["a"])
     step_config = config.step.config
     step_config["normalization"]["grouped"] = dataclasses.asdict(
-        GroupedNormalizationConfig(groups=groups, default_group="c96")
+        GroupedNormalizationConfig(groups=groups, default_label="c96")
     )
     stepper = dataclasses.replace(
         config, step=StepSelector(type="single_module", config=step_config)
@@ -2732,7 +2732,7 @@ def _get_grouped_stepper_config() -> StepperConfig:
         uniform_grouped_normalization(
             ["a"],
             groups={"c96": (10.0, 2.0), "era5": (20.0, 4.0)},
-            default_group="c96",
+            default_label="c96",
         )
     )
     return dataclasses.replace(
@@ -2796,7 +2796,7 @@ def test_grouped_normalization_trains_with_ensemble_members():
             [10.0, 20.0],
             id="labeled",
         ),
-        pytest.param(None, [10.0, 10.0], id="unlabeled_uses_default_group"),
+        pytest.param(None, [10.0, 10.0], id="unlabeled_uses_default_label"),
     ],
 )
 def test_grouped_mean_input_masking_fills_with_group_means(

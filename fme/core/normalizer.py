@@ -373,7 +373,7 @@ class GroupedNormalizer:
         self,
         pooled: StandardNormalizer,
         groups: Mapping[str, StandardNormalizer],
-        default_group: str,
+        default_label: str,
         n_spatial_dims: int,
         pinned_names: Iterable[str] = (),
     ):
@@ -383,7 +383,7 @@ class GroupedNormalizer:
                 for pinned variables.
             groups: Mapping from dataset label to that group's normalizer,
                 which must hold constants for every non-pinned variable.
-            default_group: Label whose group to use when a batch carries no
+            default_label: Label whose group to use when a batch carries no
                 labels, e.g. during inference on an unlabeled dataset.
             n_spatial_dims: Number of trailing spatial dimensions on the
                 tensors this normalizer is applied to (2 for lat/lon, 3 for
@@ -394,7 +394,7 @@ class GroupedNormalizer:
         self._pooled = pooled
         self._groups = dict(groups)
         self._group_names = sorted(groups)
-        self._default_group = default_group
+        self._default_label = default_label
         self._pinned_names = set(pinned_names)
         self._n_spatial_dims = n_spatial_dims
         self._per_group_names = set(pooled.means).intersection(pooled.stds) - set(
@@ -403,11 +403,11 @@ class GroupedNormalizer:
         self._stacked_means = self._stack("means")
         self._stacked_stds = self._stack("stds")
         self._raise_on_degenerate_group_stds()
-        default_index = self._group_names.index(default_group)
+        default_index = self._group_names.index(default_label)
         self._default_normalizer = self._select(lambda t: t[default_index])
         # Caches bind() per labels object, since resolving groups forces a device sync.
         self._bind_cache: tuple[BatchLabels, StandardNormalizer] | None = None
-        self._warned_default_group = False
+        self._warned_default_label = False
 
     def _stack(self, attr: str) -> TensorDict:
         """Stack each per-group variable's constants into a [n_groups] tensor.
@@ -487,14 +487,14 @@ class GroupedNormalizer:
                 every sample uses the default group's constants.
         """
         if labels is None or len(labels.names) == 0:
-            if not self._warned_default_group:
+            if not self._warned_default_label:
                 # Warn once, not per step; fallback is expected on unlabeled data.
                 logging.warning(
                     "Batch carries no labels; normalizing every sample with "
-                    f"default_group '{self._default_group}'. Set labels on the "
+                    f"default_label '{self._default_label}'. Set labels on the "
                     "dataset or inference config to select groups per sample."
                 )
-                self._warned_default_group = True
+                self._warned_default_label = True
             return self._default_normalizer
         if self._bind_cache is not None and self._bind_cache[0] is labels:
             return self._bind_cache[1]
@@ -552,7 +552,7 @@ class GroupedNormalizationConfig:
             constants. Their NaN-filling options must be left unset: they are
             taken from the pooled ``network`` config, which applies to every
             group.
-        default_group: Label whose group to use for batches which carry no
+        default_label: Label whose group to use for batches which carry no
             labels, such as inference on an unlabeled dataset. Required, since
             an implicit choice here would silently normalize against the wrong
             distribution.
@@ -565,15 +565,15 @@ class GroupedNormalizationConfig:
     """
 
     groups: dict[str, NormalizationConfig]
-    default_group: str
+    default_label: str
     pinned_variables: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if len(self.groups) == 0:
             raise ValueError("At least one normalization group must be provided.")
-        if self.default_group not in self.groups:
+        if self.default_label not in self.groups:
             raise ValueError(
-                f"default_group '{self.default_group}' is not one of the "
+                f"default_label '{self.default_label}' is not one of the "
                 f"configured groups: {sorted(self.groups)}"
             )
         nan_filling = sorted(
@@ -606,7 +606,7 @@ class GroupedNormalizationConfig:
         """Reject training labels which cannot select a group.
 
         Without this, an unlabeled training dataset would train entirely on
-        ``default_group`` behind a single warning, and a label missing from
+        ``default_label`` behind a single warning, and a label missing from
         every group would only fail at the first batch.
         """
         dataset_labels = set(dataset_labels)
@@ -652,7 +652,7 @@ class GroupedNormalizationConfig:
         return GroupedNormalizer(
             pooled=pooled,
             groups=groups,
-            default_group=self.default_group,
+            default_label=self.default_label,
             pinned_names=self.pinned_variables,
             n_spatial_dims=n_spatial_dims,
         )

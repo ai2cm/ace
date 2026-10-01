@@ -404,7 +404,7 @@ def test_can_create_config_without_files():
 
 
 def _grouped_config(
-    default_group: str = "era5",
+    default_label: str = "era5",
     pinned_variables: list[str] | None = None,
 ) -> GroupedNormalizationConfig:
     """Two groups whose constants differ, for testing per-sample selection."""
@@ -419,7 +419,7 @@ def _grouped_config(
                 stds={"a": 4.0, "pinned": 400.0},
             ),
         },
-        default_group=default_group,
+        default_label=default_label,
         pinned_variables=pinned_variables if pinned_variables is not None else [],
     )
 
@@ -555,7 +555,7 @@ def test_grouped_normalizer_single_group_matches_standard_normalizer():
     standard = NormalizationConfig(means=means, stds=stds).build(["a", "pinned"])
     grouped = GroupedNormalizationConfig(
         groups={"era5": NormalizationConfig(means=means, stds=stds)},
-        default_group="era5",
+        default_label="era5",
     ).build(
         pooled=standard,
         names=["a", "pinned"],
@@ -574,14 +574,14 @@ def test_grouped_normalizer_single_group_matches_standard_normalizer():
 
 
 @pytest.mark.parametrize("labels", [None, "empty"])
-def test_grouped_normalizer_falls_back_to_default_group_without_labels(labels):
+def test_grouped_normalizer_falls_back_to_default_label_without_labels(labels):
     """An unlabeled batch uses the default group, not the pooled constants.
 
     A model trained on this normalizer never saw its network inputs on the
     pooled scale, so falling back to pooled would silently evaluate it against
     a distribution it was never trained on.
     """
-    grouped = _build(_grouped_config(default_group="era5", pinned_variables=["pinned"]))
+    grouped = _build(_grouped_config(default_label="era5", pinned_variables=["pinned"]))
     batch_labels = None if labels is None else _labels([], [[], []])
     normalizer = grouped.bind(batch_labels)
     # era5 group constants for "a" are mean 20, std 4; "pinned" is pinned to
@@ -598,11 +598,11 @@ def test_grouped_normalizer_falls_back_to_default_group_without_labels(labels):
         )
 
 
-def test_grouped_normalizer_default_group_choice_changes_unlabeled_constants():
+def test_grouped_normalizer_default_label_choice_changes_unlabeled_constants():
     """The default group is a real choice, not a formality."""
     tensors = {"a": _tensor([[[24.0]]])}
-    era5 = _build(_grouped_config(default_group="era5"))
-    c96 = _build(_grouped_config(default_group="c96"))
+    era5 = _build(_grouped_config(default_label="era5"))
+    c96 = _build(_grouped_config(default_label="c96"))
     assert not torch.equal(
         era5.bind(None).normalize(tensors)["a"], c96.bind(None).normalize(tensors)["a"]
     )
@@ -613,13 +613,13 @@ def test_grouped_normalizer_warns_once_for_unlabeled_batches(
     labeled: bool, n_warnings: int, caplog
 ):
     """Unlabeled batches warn once per normalizer, not once per step."""
-    grouped = _build(_grouped_config(default_group="era5"))
+    grouped = _build(_grouped_config(default_label="era5"))
     labels = _labels(["c96", "era5"], [[0.0, 1.0]]) if labeled else None
     with caplog.at_level(logging.WARNING):
         grouped.bind(labels)
         grouped.bind(labels)
     messages = [
-        r.getMessage() for r in caplog.records if "default_group" in r.getMessage()
+        r.getMessage() for r in caplog.records if "default_label" in r.getMessage()
     ]
     assert len(messages) == n_warnings
     assert all("era5" in m for m in messages)
@@ -677,7 +677,7 @@ def test_grouped_normalizer_requires_every_group_to_cover_every_variable():
             ),
             "era5": NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0}),
         },
-        default_group="era5",
+        default_label="era5",
     )
     pooled = NormalizationConfig(
         means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}
@@ -695,7 +695,7 @@ def test_grouped_normalizer_does_not_require_groups_to_cover_pinned_variables():
     """A pinned variable uses the pooled constants, so groups may omit it."""
     config = GroupedNormalizationConfig(
         groups={"era5": NormalizationConfig(means={"a": 1.0}, stds={"a": 2.0})},
-        default_group="era5",
+        default_label="era5",
         pinned_variables=["pinned"],
     )
     grouped = _build(config)
@@ -742,7 +742,7 @@ def test_grouped_normalizer_accepts_variable_constant_in_pooled_stats(group_labe
         groups={
             label: NormalizationConfig(means=means, stds=stds) for label in group_labels
         },
-        default_group="era5",
+        default_label="era5",
     )
     config.build(
         pooled=NormalizationConfig(means=means, stds=stds).build(["a", "c"]),
@@ -791,21 +791,21 @@ def test_normalization_group_rejects_nan_filling(
                     fill_nans_on_denormalize=on_denormalize,
                 ),
             },
-            default_group="era5",
+            default_label="era5",
         )
 
 
-def test_grouped_config_rejects_unknown_default_group():
-    with pytest.raises(ValueError, match="default_group"):
+def test_grouped_config_rejects_unknown_default_label():
+    with pytest.raises(ValueError, match="default_label"):
         GroupedNormalizationConfig(
             groups={"c96": NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0})},
-            default_group="era5",
+            default_label="era5",
         )
 
 
 def test_grouped_config_rejects_empty_groups():
     with pytest.raises(ValueError, match="At least one normalization group"):
-        GroupedNormalizationConfig(groups={}, default_group="era5")
+        GroupedNormalizationConfig(groups={}, default_label="era5")
 
 
 def test_grouped_config_rejects_pinned_variable_that_is_not_normalized():
@@ -838,7 +838,7 @@ def test_grouped_normalization_loads_into_explicit_constants():
                         global_stds_path=tmp_path / "std.nc",
                     )
                 },
-                default_group="era5",
+                default_label="era5",
             ),
         )
         config.load()

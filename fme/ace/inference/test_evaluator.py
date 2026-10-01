@@ -1391,7 +1391,7 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
 @pytest.mark.parametrize(
     "labels, expected_std",
     [
-        pytest.param(None, 1.0, id="unlabeled_uses_default_group"),
+        pytest.param(None, 1.0, id="unlabeled_uses_default_label"),
         pytest.param(["era5"], 3.0, id="labels_select_group"),
     ],
 )
@@ -1414,7 +1414,7 @@ def test_evaluator_labels_select_normalization_group(
     grouped = uniform_grouped_normalization(
         in_names,
         groups={"c96": (0.0, 1.0), "era5": (0.0, 3.0)},
-        default_group="c96",
+        default_label="c96",
     )
     save_plus_one_stepper(
         stepper_path,

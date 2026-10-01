@@ -2517,7 +2517,7 @@ def _labeled_single_module_selector(
         grouped=uniform_grouped_normalization(
             names,
             groups={"c96": (10.0, 2.0), "era5": (-10.0, 5.0)},
-            default_group="era5",
+            default_label="era5",
             pinned_variables=["forcing_rad"],
         )
         if grouped
@@ -2718,7 +2718,7 @@ def _grouped_normalization(names: list[str]) -> NetworkAndLossNormalizationConfi
     return NetworkAndLossNormalizationConfig(
         network=trivial_normalization(names),
         grouped=uniform_grouped_normalization(
-            names, groups={"era5": (1.0, 2.0)}, default_group="era5"
+            names, groups={"era5": (1.0, 2.0)}, default_label="era5"
         ),
     )
 

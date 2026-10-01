@@ -34,7 +34,7 @@ def trivial_network_and_loss_normalization(
 def uniform_grouped_normalization(
     names: Iterable[str],
     groups: Mapping[str, tuple[float, float]],
-    default_group: str,
+    default_label: str,
     pinned_variables: Sequence[str] = (),
 ) -> GroupedNormalizationConfig:
     """
@@ -44,7 +44,7 @@ def uniform_grouped_normalization(
     Args:
         names: Names each group provides constants for.
         groups: Mapping from dataset label to ``(mean, std)``.
-        default_group: Label whose group is used for unlabeled batches.
+        default_label: Label whose group is used for unlabeled batches.
         pinned_variables: Names which always use the pooled constants.
     """
     names = list(names)
@@ -53,6 +53,6 @@ def uniform_grouped_normalization(
             label: trivial_normalization(names, mean=mean, std=std)
             for label, (mean, std) in groups.items()
         },
-        default_group=default_group,
+        default_label=default_label,
         pinned_variables=list(pinned_variables),
     )
