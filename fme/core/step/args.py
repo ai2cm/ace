@@ -1,5 +1,7 @@
 from collections.abc import Callable
 
+import torch
+
 from fme.core.labels import BatchLabels
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorMapping
@@ -26,6 +28,10 @@ class StepArgs:
             corrector references seeded from the IC). ``None`` if no state
             has been seeded yet. The step returns an updated stepper_state
             alongside its output dict.
+        time_fraction: Position within the calendar year of the output
+            timestep, as a [n_batch] tensor in [0, 1). Used by modules which
+            condition on the time of year. ``None`` when the step is not
+            time-conditioned.
     """
 
     def __init__(
@@ -35,12 +41,14 @@ class StepArgs:
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        time_fraction: torch.Tensor | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.labels = labels
         self.data_mask = data_mask
         self.stepper_state = stepper_state
+        self.time_fraction = time_fraction
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -53,4 +61,5 @@ class StepArgs:
             labels=self.labels,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            time_fraction=self.time_fraction,
         )

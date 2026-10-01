@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from .stacker import Stacker, unstack
+from .stacker import Stacker, infer_column_layout, unstack
 
 _PREFIX_MAP = {"a": ["aa_", "ab_"], "b": ["b_", "bb_"], "c": ["ca", "cb"]}
 
@@ -128,3 +128,56 @@ def test_inferred_stacker(data_names, expected_prefix_map, expected_level_names)
             tensors = [data[name] for name in expected_levels]
             expected_stacked = torch.stack(tensors, dim=-1)
             assert torch.allclose(stacked, expected_stacked)
+
+
+def _column_names(prefixes, n_levels):
+    return [f"{prefix}{level}" for prefix in prefixes for level in range(n_levels)]
+
+
+def test_infer_column_layout_finds_grid():
+    names = (
+        ["land_fraction", "DSWRFtoa"]
+        + _column_names(["air_temperature_", "eastward_wind_"], 8)
+        + ["global_mean_co2"]
+    )
+    layout = infer_column_layout(names)
+    assert layout is not None
+    assert layout.start == 2
+    assert layout.stop == 18
+    assert layout.n_vars == 2
+    assert layout.n_levels == 8
+    assert layout.prefixes == ("air_temperature_", "eastward_wind_")
+    assert layout.surface_indices == (0, 1, 18)
+
+
+def test_infer_column_layout_without_levels_returns_none():
+    assert infer_column_layout(["land_fraction", "PRESsfc"]) is None
+
+
+def test_infer_column_layout_adapts_to_variable_count():
+    """Which variables are vertically resolved is a legitimate config choice."""
+    for n_vars in (1, 3):
+        prefixes = [f"var{i}_" for i in range(n_vars)]
+        layout = infer_column_layout(_column_names(prefixes, 4))
+        assert layout is not None
+        assert layout.n_vars == n_vars
+        assert layout.n_levels == 4
+
+
+@pytest.mark.parametrize(
+    "names, match",
+    [
+        pytest.param(["a_0", "a_1", "b_0"], "same number of", id="ragged_level_counts"),
+        pytest.param(["a_0", "a_2"], "no gaps or duplicates", id="missing_level"),
+        pytest.param(
+            ["a_0", "b_0", "a_1", "b_1"], "contiguous block", id="level_major_order"
+        ),
+        pytest.param(
+            ["a_0", "a_1", "sfc", "b_0", "b_1"], "contiguous block", id="interleaved"
+        ),
+    ],
+)
+def test_infer_column_layout_raises_on_malformed_grid(names, match):
+    """A malformed grid must fail loudly rather than silently attend over less."""
+    with pytest.raises(ValueError, match=match):
+        infer_column_layout(names)

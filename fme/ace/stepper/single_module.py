@@ -24,6 +24,7 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
+from fme.ace.stepper.time_fraction import compute_time_fraction
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
@@ -1143,6 +1144,7 @@ class Stepper:
             forcing_data.labels,
             data_mask=forcing_data.data_mask,
             stepper_state=ic_batch_data.stepper_state,
+            time=forcing_data.time,
         )
 
     @property
@@ -1158,7 +1160,18 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        time: xr.DataArray | None = None,
     ) -> Generator[StepOutput, None, None]:
+        if self._step_obj.requires_time_fraction:
+            if time is None:
+                raise ValueError(
+                    "This step conditions on the time of year, but no times "
+                    "were provided to predict_generator."
+                )
+        else:
+            # Deriving the calendar position requires real cftime data, so
+            # skip it entirely unless a module asked for it.
+            time = None
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1174,6 +1187,12 @@ class Stepper:
                 for k in self._step_obj.next_step_input_names
             }
             input_data = {**state, **input_forcing}
+            # Taken at the output timestep, consistent with next-step forcings
+            # such as insolation, so that all seasonal signals in a given
+            # forward pass describe the same interval.
+            time_fraction = (
+                None if time is None else compute_time_fraction(time[:, step + 1])
+            )
 
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
@@ -1186,6 +1205,7 @@ class Stepper:
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
+                        time_fraction=time_fraction,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1731,6 +1751,7 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
+            time=forcing_ensemble_data.time,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

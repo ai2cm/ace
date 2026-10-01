@@ -1,3 +1,4 @@
+import dataclasses
 import re
 from collections.abc import Iterable, Mapping
 
@@ -28,10 +29,115 @@ def unstack(tensor: torch.Tensor, names: list[str], dim: int = -1) -> TensorMapp
     return {name: tensor.squeeze(dim=dim) for name, tensor in zip(names, tensors)}
 
 
+LEVEL_PATTERN = re.compile(r"_(\d+)$")
+
+
+@dataclasses.dataclass(frozen=True)
+class ColumnLayout:
+    """Describes a contiguous block of channels forming a (variable, level) grid.
+
+    Channels named ``<prefix><level>`` (e.g. ``air_temperature_0``) are
+    interpreted as vertically resolved. This layout records where that block
+    sits within an ordered channel list, so a network can reshape those
+    channels into an explicit level axis and operate along it.
+
+    Attributes:
+        start: Index of the first vertically resolved channel.
+        prefixes: Level-resolved variable prefixes, in channel order.
+        n_levels: Number of levels each prefix has.
+        surface_indices: Indices of all channels outside the column block.
+    """
+
+    start: int
+    prefixes: tuple[str, ...]
+    n_levels: int
+    surface_indices: tuple[int, ...]
+
+    @property
+    def n_vars(self) -> int:
+        return len(self.prefixes)
+
+    @property
+    def n_column_channels(self) -> int:
+        return self.n_vars * self.n_levels
+
+    @property
+    def stop(self) -> int:
+        """Index one past the last vertically resolved channel."""
+        return self.start + self.n_column_channels
+
+
+def infer_column_layout(names: Iterable[str]) -> ColumnLayout | None:
+    """Infer the (variable, level) grid from an ordered list of channel names.
+
+    Names ending in ``_<int>`` are treated as levels of a shared prefix. To be
+    usable as a level axis the vertically resolved channels must form a single
+    contiguous, variable-major block in which every prefix has the same levels,
+    numbered ``0..n_levels-1`` in ascending order.
+
+    Args:
+        names: Channel names in packing order.
+
+    Returns:
+        The inferred layout, or None if no name is level-resolved.
+
+    Raises:
+        ValueError: If level-resolved names are present but do not form a
+            well-defined grid. Failing loudly here is deliberate: silently
+            attending over a subset of levels would be invisible at runtime.
+    """
+    names = list(names)
+    # Group level-resolved names by prefix, preserving first-appearance order.
+    levels_by_prefix: dict[str, list[tuple[int, int]]] = {}
+    for index, name in enumerate(names):
+        match = LEVEL_PATTERN.search(name)
+        if match is not None:
+            prefix = name[: match.start() + 1]
+            levels_by_prefix.setdefault(prefix, []).append((int(match.group(1)), index))
+    if not levels_by_prefix:
+        return None
+
+    prefixes = tuple(levels_by_prefix)
+    n_levels = len(levels_by_prefix[prefixes[0]])
+    for prefix, entries in levels_by_prefix.items():
+        if len(entries) != n_levels:
+            raise ValueError(
+                "Vertically resolved variables must all have the same number of "
+                f"levels, but {prefix!r} has {len(entries)} while "
+                f"{prefixes[0]!r} has {n_levels}."
+            )
+        found = sorted(level for level, _ in entries)
+        if found != list(range(n_levels)):
+            raise ValueError(
+                f"Levels of {prefix!r} must be numbered 0..{n_levels - 1} with no "
+                f"gaps or duplicates, got {found}."
+            )
+
+    # Require variable-major, level-ascending, contiguous ordering, since the
+    # network reshapes this block directly rather than gathering by index.
+    expected = [f"{prefix}{level}" for prefix in prefixes for level in range(n_levels)]
+    start = min(index for entries in levels_by_prefix.values() for _, index in entries)
+    stop = start + len(expected)
+    if names[start:stop] != expected:
+        raise ValueError(
+            "Vertically resolved channels must form a single contiguous block "
+            "ordered variable-major with levels ascending. Expected "
+            f"{expected} at positions {start}..{stop - 1}, got {names[start:stop]}."
+        )
+
+    surface_indices = tuple(i for i in range(len(names)) if not start <= i < stop)
+    return ColumnLayout(
+        start=start,
+        prefixes=prefixes,
+        n_levels=n_levels,
+        surface_indices=surface_indices,
+    )
+
+
 class Stacker:
     """Handles extraction and stacking of data tensors for 3D variables."""
 
-    LEVEL_PATTERN = re.compile(r"_(\d+)$")
+    LEVEL_PATTERN = LEVEL_PATTERN
 
     def __init__(
         self,
