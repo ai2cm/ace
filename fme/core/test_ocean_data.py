@@ -60,6 +60,7 @@ def test_column_integrated_ocean_salt_content(has_depth_coordinate: bool):
     data = {
         "so_0": torch.ones(n_samples, n_time_steps, nlat, nlon),
         "so_1": torch.ones(n_samples, n_time_steps, nlat, nlon),
+        "sea_surface_fraction": torch.ones(n_samples, n_time_steps, nlat, nlon),
     }
 
     if has_depth_coordinate:

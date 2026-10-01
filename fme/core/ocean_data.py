@@ -29,6 +29,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
         "water_flux_into_sea_water": ["wfo"],
+        "downward_sea_ice_basal_salt_flux": ["sfdsi"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
 )
@@ -155,14 +156,23 @@ class OceanData:
 
     @property
     def ocean_salt_content(self) -> torch.Tensor:
-        """Returns column-integrated ocean salt content in g/m2."""
+        """Returns column-integrated ocean salt content in g/m2, per unit
+        total cell area.
+
+        Salinity is an ocean-area mean, so the column integral is weighted by
+        the sea surface fraction, consistent with
+        ``net_virtual_salt_flux_into_ocean``.
+        """
         if self._depth_coordinate is None:
             raise ValueError(
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean salt content."
             )
-        return self._depth_coordinate.depth_integral(
-            self.sea_water_salinity * DENSITY_OF_SEA_WATER_CM4
+        return (
+            self._depth_coordinate.depth_integral(
+                self.sea_water_salinity * DENSITY_OF_SEA_WATER_CM4
+            )
+            * self.sea_surface_fraction
         )
 
     @property
@@ -212,17 +222,27 @@ class OceanData:
         ) * self.sea_surface_fraction
 
     @property
+    def downward_sea_ice_basal_salt_flux(self) -> torch.Tensor:
+        """Returns the salt flux from sea ice into the ocean in kg/m2/s,
+        or zeros if not available.
+        """
+        try:
+            return self._get("downward_sea_ice_basal_salt_flux")
+        except KeyError:
+            return torch.zeros_like(self.sea_surface_fraction)
+
+    @property
     def net_virtual_salt_flux_into_ocean(self) -> torch.Tensor:
         """Virtual salt flux into the ocean column (g/m2/s).
 
         Positive wfo (freshwater in) dilutes salt, giving a negative salt flux.
-        Uses a fixed reference salinity for diagnostic purposes.
+        Uses a fixed reference salinity for diagnostic purposes. The salt
+        exchanged with sea ice (sfdsi) is added, since melting ice is not fresh.
         """
         return (
-            -REFERENCE_SALINITY_PSU
-            * self.water_flux_into_sea_water
-            * self.sea_surface_fraction
-        )
+            -REFERENCE_SALINITY_PSU * self.water_flux_into_sea_water
+            + 1000 * self.downward_sea_ice_basal_salt_flux
+        ) * self.sea_surface_fraction
 
     @property
     def sea_ice_fraction(self) -> torch.Tensor:
