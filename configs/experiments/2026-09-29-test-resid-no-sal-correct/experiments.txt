@@ -1,4 +1,4 @@
 
 cm4_1pct_46to125_piC_156to235-4deg-ocean_resid_no_sal_correct|rs0|01M3Q08106C6JGVX2AQ6CBHM5E|training|best_inference_ckpt|normal|--min-runtime 8h
-cm4_1pct_46to125_piC_156to235-4deg-ocean_resid_no_sal_correct|rs0_retry|01M3Q08106C6JGVX2AQ6CBHM5E|run_1pct_yearly_4deg|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-4deg-ocean_resid_no_sal_correct|rs0_retry2|01M3Q08106C6JGVX2AQ6CBHM5E|run_1pct_yearly_4deg|best_inference_ckpt|normal|--min-runtime 8h
 cm4_1pct_46to125_piC_156to235-4deg-ocean_resid_no_sal_correct|rs0|01M3Q08106C6JGVX2AQ6CBHM5E|1pct_yearly_4deg_totalsalt64|best_inference_ckpt|normal|--min-runtime 8h
