@@ -245,9 +245,9 @@ class OceanData:
         """Virtual salt flux into the ocean column in g/m2/s, per unit total
         cell area.
 
-        We represent the net change in salinity through a virtual flux that 
-        accounts for the addition of freshwater and the salt directly exchanged 
-        with sea ice. The dilution uses a fixed reference salinity rather than 
+        We represent the net change in salinity through a virtual flux that
+        accounts for the addition of freshwater and the salt directly exchanged
+        with sea ice. The dilution uses a fixed reference salinity rather than
         the local surface salinity. The salt exchanged with sea ice (sfdsi)
         is added, since melting ice is not fresh and some salt remains in newly
         formed ice. Both fluxes are ocean-area means, so they are weighted by the
