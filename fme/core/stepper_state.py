@@ -168,10 +168,16 @@ class GatheredStepperState:
     dimension (the same layout as a serial run), while each rank's
     random state is preserved separately so it can be scattered back
     on restart.
+
+    Serialization of non-per-rank sub-states (everything except
+    ``random_state``) is delegated to ``StepperState``, so new
+    sub-states added there are automatically included without changes
+    here.
     """
 
     def __init__(
         self,
+        *,
         corrector_state: CorrectorState | None = None,
         per_rank_random_states: list[RandomState] | None = None,
     ):
@@ -181,7 +187,8 @@ class GatheredStepperState:
     @classmethod
     def from_per_rank_states(cls, states: list[StepperState]) -> GatheredStepperState:
         """Build from the per-rank ``StepperState`` objects collected by
-        a data-parallel gather."""
+        a data-parallel gather.
+        """
         first = states[0]
         if (
             first.corrector_state is not None
@@ -240,6 +247,14 @@ class GatheredStepperState:
             n_ranks: Total number of data-parallel ranks (needed to
                 compute the corrector slice).
         """
+        if self._per_rank_random_states is not None:
+            if n_ranks != len(self._per_rank_random_states):
+                raise ValueError(
+                    f"n_ranks ({n_ranks}) does not match the number of "
+                    f"per-rank random states "
+                    f"({len(self._per_rank_random_states)})"
+                )
+
         if self._corrector_state is not None:
             sample_size = self._corrector_state.sample_dim_size()
             if sample_size is not None:
@@ -282,16 +297,16 @@ class GatheredStepperState:
     def to_state_dict(self) -> dict[str, torch.Tensor]:
         """Serialize for a restart file.
 
-        The corrector state uses the same ``corrector_state.`` namespace
-        as ``StepperState``. Per-rank random states are stored under
+        Non-per-rank sub-states are serialized by delegating to
+        ``StepperState``, so new sub-states added there are
+        automatically included. Per-rank random states are stored under
         ``random_state.rank_<n>.generator_state``, with an
         ``n_ranks`` marker so the reader knows how many to expect.
         """
-        result: dict[str, torch.Tensor] = {}
-        if self._corrector_state is not None:
-            result["corrector_state.present"] = torch.tensor(True)
-            for key, value in self._corrector_state.to_state_dict().items():
-                result[f"corrector_state.{key}"] = value
+        common = StepperState(
+            corrector_state=self._corrector_state, random_state=None
+        )
+        result = common.to_state_dict()
         if self._per_rank_random_states is not None:
             result["random_state.present"] = torch.tensor(True)
             result["random_state.n_ranks"] = torch.tensor(
@@ -311,30 +326,31 @@ class GatheredStepperState:
                 the ``random_state.n_ranks`` marker, indicating it is a
                 plain ``StepperState`` dict rather than a gathered one.
         """
-        corrector_state: CorrectorState | None = None
-        per_rank_random_states: list[RandomState] | None = None
-
-        if "corrector_state.present" in state:
-            corrector_state = CorrectorState.from_state_dict(
-                _sub_state_dict(state, "corrector_state")
+        if "random_state.present" in state and "random_state.n_ranks" not in state:
+            raise UngatheredStateDictError(
+                "State dict has random_state but no n_ranks marker; "
+                "this is a plain StepperState dict, not a gathered one."
             )
 
-        if "random_state.present" in state:
-            if "random_state.n_ranks" not in state:
-                raise UngatheredStateDictError(
-                    "State dict has random_state but no n_ranks marker; "
-                    "this is a plain StepperState dict, not a gathered one."
-                )
+        per_rank_random_states: list[RandomState] | None = None
+        if "random_state.n_ranks" in state:
             n_ranks = int(state["random_state.n_ranks"].item())
-            per_rank_random_states = []
-            for i in range(n_ranks):
-                rank_state = _sub_state_dict(state, f"random_state.rank_{i}")
-                per_rank_random_states.append(
-                    RandomState.from_state_dict(rank_state)
+            per_rank_random_states = [
+                RandomState.from_state_dict(
+                    _sub_state_dict(state, f"random_state.rank_{i}")
                 )
+                for i in range(n_ranks)
+            ]
+
+        non_random = {
+            k: v
+            for k, v in state.items()
+            if not k.startswith("random_state.")
+        }
+        stepper = StepperState.from_state_dict(non_random)
 
         return cls(
-            corrector_state=corrector_state,
+            corrector_state=stepper.corrector_state,
             per_rank_random_states=per_rank_random_states,
         )
 
@@ -342,12 +358,13 @@ class GatheredStepperState:
     def per_sample_state_keys() -> set[str]:
         """Keys whose tensors carry a leading per-sample dimension.
 
-        Per-rank random states have no per-sample dimension (they are
-        per-rank, not per-sample), so only corrector keys appear here.
+        Delegates to ``StepperState`` and excludes ``random_state``
+        keys (per-rank, not per-sample).
         """
         return {
-            f"corrector_state.{key}"
-            for key in CorrectorState.per_sample_state_keys()
+            k
+            for k in StepperState.per_sample_state_keys()
+            if not k.startswith("random_state.")
         }
 
 

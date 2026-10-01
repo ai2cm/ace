@@ -128,6 +128,41 @@ class TestGatheredStepperState:
         assert all("corrector" in k for k in keys)
         assert not any("random" in k for k in keys)
 
+    def test_get_for_rank_validates_n_ranks(self):
+        gathered = GatheredStepperState(
+            corrector_state=None,
+            per_rank_random_states=[
+                _make_random_state(0),
+                _make_random_state(1),
+            ],
+        )
+        with pytest.raises(ValueError, match="does not match"):
+            gathered.get_for_rank(0, n_ranks=4)
+
+    def test_from_state_dict_corrector_only(self):
+        """A corrector-only state dict (no random state) round-trips."""
+        stepper = StepperState(
+            corrector_state=CorrectorState(
+                global_dry_air_mass=torch.tensor([[[3.0]]])
+            ),
+            random_state=None,
+        )
+        state_dict = stepper.to_state_dict()
+        gathered = GatheredStepperState.from_state_dict(state_dict)
+        assert gathered._corrector_state is not None
+        torch.testing.assert_close(
+            gathered._corrector_state.global_dry_air_mass,
+            torch.tensor([[[3.0]]]),
+        )
+        assert gathered._per_rank_random_states is None
+
+    def test_from_per_rank_states_no_random(self):
+        s0 = _make_stepper_state(n_samples=2, seed=None)
+        s1 = _make_stepper_state(n_samples=2, seed=None)
+        gathered = GatheredStepperState.from_per_rank_states([s0, s1])
+        assert gathered._corrector_state is not None
+        assert gathered._per_rank_random_states is None
+
     def test_to_cpu(self):
         gathered = GatheredStepperState(
             corrector_state=CorrectorState(
