@@ -105,6 +105,18 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  # Staged-config guard: a fine-tune whose pretrain has not finished carries the
+  # placeholder PRETRAIN_RESULT_DATASET in its "# arg:" dataset mount. Refuse to
+  # submit it (an unfiltered ./run-train.sh must not launch a doomed job).
+  local a
+  for a in "${extra_args[@]+"${extra_args[@]}"}"; do
+    if [[ "$a" == *PRETRAIN_RESULT_DATASET* ]]; then
+      echo "ERROR: $config_filename still carries the PRETRAIN_RESULT_DATASET placeholder;" >&2
+      echo "       fill in the pretrain's result dataset id (see the config header) before launching." >&2
+      exit 1
+    fi
+  done
+
   # This suite deliberately sets no CM_PRIORITY label (the reference launcher's
   # default is dropped): the jobs run at beaker priority "normal", unmanaged by
   # the priority balancer.
@@ -148,6 +160,10 @@ run_training "ace2s-pretrain-6hourly.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
 
 # Shared temperature normalization arm (added 2026-10-01).
 run_training "ace2s-pretrain-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-pretrain-rs0" 8
+
+# Shared-T-norm arm, stage 2 (staged 2026-10-01; launchable once the pretrain's
+# result dataset id replaces the placeholder in the config, see its header)
+run_training "ace2s-finetune-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-ft3-detached-rs0" 8
 # Resume of the 6-hourly arm after its epoch-10 NCCL-timeout failure (same
 # wandb name so the run keeps its id; beaker suffixes the experiment name).
 run_training "ace2s-pretrain-6hourly-resume.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
