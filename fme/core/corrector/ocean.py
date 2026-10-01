@@ -7,10 +7,10 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
-    EARTH_RADIUS,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+    SPHERE_AREA_M2,
 )
 from fme.core.corrector.registry import (
     Correction,
@@ -25,8 +25,6 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
-
-_SPHERE_AREA_M2 = 4 * torch.pi * EARTH_RADIUS**2
 
 
 class AreaWeightedMean(Protocol):
@@ -642,7 +640,7 @@ def _force_conserve_ocean_salt_content(
         # area weights are cell areas as a fraction of the sphere, so scaling
         # the weighted sum by 4 pi R**2 gives the total over the ocean
         weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
-        return weighted_sum * _SPHERE_AREA_M2
+        return weighted_sum * SPHERE_AREA_M2
 
     def global_salt_content(data: OceanData) -> torch.Tensor:
         column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
