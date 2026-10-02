@@ -27,6 +27,7 @@ from fme.ace.inference.inference import (
     get_initial_condition,
     main,
 )
+from fme.ace.inference.test_evaluator import save_stepper_with_ema
 from fme.ace.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.requirements import InitialConditionRequirements
@@ -38,6 +39,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -45,6 +47,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
+from fme.core.testing.ema import assert_parameters_equal
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -588,3 +591,33 @@ def test__subselect_initial_conditions(tmp_path, start_indices, expected_time_va
 
     np.testing.assert_array_equal(ic_data.time.values, np.array(expected_time_values))
     assert ic_data["prog"].shape == (len(expected_time_values), 16, 32)
+
+
+@pytest.mark.parametrize(
+    "use_ema_if_available, expect_ema",
+    [(None, True), (True, True), (False, False)],
+    ids=["default", "enabled", "disabled"],
+)
+def test_inference_config_load_stepper_uses_ema_weights(
+    tmp_path: pathlib.Path, use_ema_if_available: bool | None, expect_ema: bool
+):
+    checkpoint_path = tmp_path / "ckpt.tar"
+    stepper_weights, ema_weights = save_stepper_with_ema(checkpoint_path)
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=1,
+        checkpoint_path=str(checkpoint_path),
+        logging=LoggingConfig(),
+        initial_condition=InitialConditionConfig(path="unused"),
+        forcing_loader=ForcingDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path="unused")
+        ),
+    )
+    if use_ema_if_available is not None:
+        config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
+
+    stepper = config.load_stepper()
+
+    assert_parameters_equal(
+        stepper.modules, ema_weights if expect_ema else stepper_weights
+    )

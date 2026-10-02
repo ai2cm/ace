@@ -23,6 +23,7 @@ from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
     save_plus_one_stepper,
+    save_stepper_with_ema,
     validate_stepper_config,
     validate_stepper_multi_call,
     validate_stepper_ocean,
@@ -106,6 +107,7 @@ from fme.core.testing import (
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
+from fme.core.testing.ema import assert_parameters_equal
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
@@ -3957,3 +3959,15 @@ def test_normalized_residual_prediction_requires_residual_block():
             ),
             residual_prediction=ResidualPredictionConfig(normalized=True),
         )
+
+
+def test_load_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Warm starts (parameter_init) load weights through load_stepper, and
+    must keep getting the stepper weights of a checkpoint that has EMA weights.
+    """
+    path = tmp_path / "ckpt.tar"
+    stepper_weights, _ = save_stepper_with_ema(path)
+
+    stepper = load_stepper(path)
+
+    assert_parameters_equal(stepper.modules, stepper_weights)
