@@ -783,6 +783,69 @@ def test_ocean_salt_content_correction_without_sea_ice_volume(slope):
         )
 
 
+def test_ocean_salt_content_correction_weights_content_by_sea_surface_fraction():
+    # Salinity is an ocean-area mean, so with weight_by_sea_surface_fraction the
+    # content of a partly-land cell counts in proportion to its ocean part, and
+    # the constant term applies over the sea surface area rather than the whole
+    # cell area. The sea surface fraction is read from the forcing data.
+    torch.manual_seed(0)
+    ocean_mask, ice_mask = _salt_ocean_and_ice_masks()
+    nlat, nlon = ocean_mask.shape
+    layer_thickness = (10.0, 20.0)
+    dataset_info = _salt_dataset_info(ocean_mask, layer_thickness, ice_mask)
+    ocean_cell_area = _ocean_cell_area_m2(ocean_mask)
+    sea_surface_fraction = torch.rand(nlat, nlon, dtype=torch.float64) * ocean_mask
+    sea_surface_fraction[0, :] = 1.0  # some wholly-ocean cells too
+    slope, constant = 40.0, 3e-9
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            ice_volume_salt_slope_psu=slope,
+            constant_unaccounted_salting=constant,
+            weight_by_sea_surface_fraction=True,
+        )
+    )
+    corrector = config.get_corrector(dataset_info)
+
+    def salinity(value):
+        so = value + torch.rand(2, nlat, nlon, dtype=torch.float64, device=DEVICE)
+        return so.where(ocean_mask.to(DEVICE) > 0, float("nan"))
+
+    input_ice = torch.rand(nlat, nlon, dtype=torch.float64) * 1e10 * ice_mask
+    gen_ice = input_ice + torch.rand(nlat, nlon, dtype=torch.float64) * 1e9 * ice_mask
+    input_so, gen_so = salinity(34.0), salinity(35.0)
+    input_data = {
+        "so_0": input_so[0],
+        "so_1": input_so[1],
+        "sea_ice_volume": input_ice.to(DEVICE),
+    }
+    gen_data = {
+        "so_0": gen_so[0],
+        "so_1": gen_so[1],
+        "sea_ice_volume": gen_ice.to(DEVICE),
+    }
+    forcing_data = {"sea_surface_fraction": sea_surface_fraction.to(DEVICE)}
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+
+    sea_surface_area = ocean_cell_area * sea_surface_fraction.to(DEVICE)
+    expected_change = slope * float(
+        (gen_ice - input_ice).sum()
+    ) + constant * dataset_info.timestep.total_seconds() * float(sea_surface_area.sum())
+    torch.testing.assert_close(
+        _total_salt_content(corrected, sea_surface_area, layer_thickness),
+        _total_salt_content(input_data, sea_surface_area, layer_thickness)
+        + expected_change,
+        rtol=1e-12,
+        atol=0.0,
+    )
+    # which is not the budget met by the unweighted content
+    assert not torch.allclose(
+        _total_salt_content(corrected, ocean_cell_area, layer_thickness),
+        _total_salt_content(input_data, ocean_cell_area, layer_thickness)
+        + expected_change,
+    )
+
+
 def test_ocean_salt_content_correction_float64_meets_budget_for_float32_state():
     # At realistic magnitudes (column salt ~1e5 psu m, budget term ~3e-2 psu m
     # per unit area) the expected change is a couple of float32 epsilons of the

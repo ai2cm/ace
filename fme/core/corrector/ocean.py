@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
@@ -34,6 +34,31 @@ class AreaWeightedMean(Protocol):
 
 
 AreaWeightedSum = AreaWeightedMean  # same call signature
+
+GlobalTotal = Callable[[torch.Tensor], torch.Tensor]
+"""Sums a per-cell field over the ocean, in the field's units times m**2, with
+the horizontal dimensions kept (shape ``(..., 1, 1)``)."""
+
+
+class SaltBudget(Protocol):
+    """The expected change of the total ocean salt content over one step.
+
+    An implementation reads whatever fields its budget needs from the input,
+    generated and forcing data and returns the expected change in psu m**3 with
+    the horizontal dimensions kept (shape ``(..., 1, 1)``), per sample. The
+    salt content correction then rescales the generated salinity so that the
+    generated content equals the input content plus this change.
+    """
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
+    ) -> torch.Tensor: ...
 
 
 @dataclasses.dataclass
@@ -120,12 +145,20 @@ class OceanHeatContentBudgetConfig:
 class OceanSaltContentBudgetConfig:
     """Configuration for ocean salt content budget correction.
 
-    This constrains the salinity budget through the exchange with the sea-ice
-    reservoir, whose volume the model predicts. This represents the expected
-    change purely from the model's own outputs. We fit the change to the total
-    sea ice volume, so the slope does not depend on the grid. Assumes a global
-    lat-lon grid: absolute totals are formed as the area-weighted sum times
-    4 pi R**2, which requires area weights normalized over the whole sphere.
+    The correction computes the global salt content of the input and of the
+    generated state, forms a budget (the expected change over the step) and
+    rescales the generated salinity so the generated content equals the input
+    content plus the budget. The budget is the sum of a constant term and one
+    of the following, chosen by the configuration:
+
+    - the exchange with the sea-ice reservoir, whose volume the model predicts,
+      through an empirical slope fitted to the total sea ice volume so it does
+      not depend on the grid (``ice_volume_salt_slope_psu``);
+    - nothing, holding the salt content fixed (the default).
+
+    Assumes a global lat-lon grid: absolute totals are formed as the
+    area-weighted sum times 4 pi R**2, which requires area weights normalized
+    over the whole sphere.
 
     Parameters:
         method: Method to use for salt budget correction. The available option
@@ -145,12 +178,39 @@ class OceanSaltContentBudgetConfig:
             only a couple of float32 epsilons of the salt content, so in float32
             it is applied with a ~25-30% error per step. Defaults to True for
             that reason.
+        weight_by_sea_surface_fraction: Weight the column salt content (and
+            the ocean area the constant term applies over) by the sea surface
+            fraction before the global reduction. Salinity is an ocean-area
+            mean, so this is the physical content of a partly-land cell; the
+            area weights alone count such a cell as wholly ocean. Defaults to
+            False to keep the slope calibration of existing configurations;
+            a slope fitted against the unweighted content must be refit when
+            this is turned on.
     """
 
     method: Literal["scaled_salinity"]
     ice_volume_salt_slope_psu: float = 0.0
     constant_unaccounted_salting: float = 0.0
     use_float64: bool = True
+    weight_by_sea_surface_fraction: bool = False
+
+    def build_budget(
+        self, sea_ice_volume_valid: torch.Tensor | None
+    ) -> SaltBudget | None:
+        """The budget this configuration selects, or None to hold the salt
+        content fixed (up to the constant term).
+
+        Args:
+            sea_ice_volume_valid: Boolean mask of cells whose sea_ice_volume
+                prediction is kept by the stepper's output masking, or None to
+                count every cell.
+        """
+        if self.ice_volume_salt_slope_psu != 0.0:
+            return IceVolumeSaltBudget(
+                slope_psu=self.ice_volume_salt_slope_psu,
+                sea_ice_volume_valid=sea_ice_volume_valid,
+            )
+        return None
 
 
 @dataclasses.dataclass
@@ -291,9 +351,9 @@ class OceanSaltContentCorrection:
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
     method: Literal["scaled_salinity"]
-    ice_volume_salt_slope_psu: float
+    budget: SaltBudget | None
     unaccounted_salting: float
-    sea_ice_volume_valid: torch.Tensor | None
+    weight_by_sea_surface_fraction: bool
     use_float64: bool
 
     def __call__(
@@ -316,13 +376,14 @@ class OceanSaltContentCorrection:
         corrected = _force_conserve_ocean_salt_content(
             input_data,
             gen_data,
+            forcing_data,
             self.area_weighted_sum,
             self.vertical_coordinate,
             self.timestep_seconds,
             self.method,
-            self.ice_volume_salt_slope_psu,
+            self.budget,
             self.unaccounted_salting,
-            self.sea_ice_volume_valid,
+            self.weight_by_sea_surface_fraction,
             self.use_float64,
         )
         return corrected, corrector_state
@@ -458,9 +519,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     vertical_coordinate,
                     timestep_seconds,
                     salt_config.method,
-                    salt_config.ice_volume_salt_slope_psu,
+                    salt_config.build_budget(sea_ice_volume_valid),
                     salt_config.constant_unaccounted_salting,
-                    sea_ice_volume_valid,
+                    salt_config.weight_by_sea_surface_fraction,
                     salt_config.use_float64,
                 )
             )
@@ -616,41 +677,37 @@ def _force_conserve_ocean_heat_content(
     return out
 
 
-def _force_conserve_ocean_salt_content(
-    input_data: TensorMapping,
-    gen_data: TensorMapping,
-    area_weighted_sum: AreaWeightedSum,
-    vertical_coordinate: HasOceanDepthIntegral,
-    timestep_seconds: float,
-    method: Literal["scaled_salinity"] = "scaled_salinity",
-    ice_volume_salt_slope_psu: float = 0.0,
-    unaccounted_salting: float = 0.0,
-    sea_ice_volume_valid: torch.Tensor | None = None,
-    use_float64: bool = False,
-) -> TensorDict:
-    if method != "scaled_salinity":
-        raise NotImplementedError(
-            f"Method {method!r} not implemented for ocean salt content conservation"
-        )
-    input = OceanData(input_data, vertical_coordinate)
-    gen = OceanData(gen_data, vertical_coordinate)
-    dtype = torch.float64 if use_float64 else gen.data["so_0"].dtype
+@dataclasses.dataclass
+class IceVolumeSaltBudget:
+    """Expected salt content change from the change of the total sea ice
+    volume, through an empirical slope.
 
-    def global_total(data: torch.Tensor) -> torch.Tensor:
-        # area weights are cell areas as a fraction of the sphere, so scaling
-        # the weighted sum by 4 pi R**2 gives the total over the ocean
-        weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
-        return weighted_sum * SPHERE_AREA_M2
+    This is the ice-side water flux (the loss of ice mass per step) taken as
+    the whole of the water flux into the ocean. The physical slope is the salt
+    a unit of melted ice dilutes net of the salt the ice gives back,
+    (35 - S_ice) * rho_ice / rho_0 ~ 28 psu; a slope fitted to the target data
+    is larger because the open-ocean water flux correlates with the ice cycle.
 
-    def global_salt_content(data: OceanData) -> torch.Tensor:
-        column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
-        return global_total(column)  # psu m**3
+    Parameters:
+        slope_psu: Change in total salt content (psu m**3) per change in total
+            sea ice volume (m**3).
+        sea_ice_volume_valid: Boolean mask of cells whose sea_ice_volume
+            prediction the stepper keeps; the change elsewhere is ignored, as
+            the prediction there is unconstrained. None counts every cell.
+    """
 
-    global_gen_salt_content = global_salt_content(gen)
-    global_input_salt_content = global_salt_content(input)
-    ocean_area = global_total(torch.ones_like(gen.data["so_0"], dtype=dtype))  # m**2
-    expected_change = unaccounted_salting * timestep_seconds * ocean_area
-    if ice_volume_salt_slope_psu != 0.0:
+    slope_psu: float
+    sea_ice_volume_valid: torch.Tensor | None
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
         try:
             gen_ice_volume = gen.sea_ice_volume.to(dtype)
             input_ice_volume = input.sea_ice_volume.to(dtype)
@@ -661,9 +718,9 @@ def _force_conserve_ocean_salt_content(
                 "0 to hold salt content fixed."
             ) from err
         ice_volume_change = gen_ice_volume - input_ice_volume
-        if sea_ice_volume_valid is not None:
+        if self.sea_ice_volume_valid is not None:
             ice_volume_change = torch.where(
-                sea_ice_volume_valid,
+                self.sea_ice_volume_valid,
                 ice_volume_change,
                 torch.zeros_like(ice_volume_change),
             )
@@ -671,8 +728,59 @@ def _force_conserve_ocean_salt_content(
         # spatial parallelism this sum would need a spatial_reduce_sum across
         # ranks, and sea_ice_volume_valid would need slicing to the local chunk.
         total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
-        expected_change = (
-            expected_change + ice_volume_salt_slope_psu * total_ice_volume_change
+        return self.slope_psu * total_ice_volume_change
+
+
+def _force_conserve_ocean_salt_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    area_weighted_sum: AreaWeightedSum,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    method: Literal["scaled_salinity"] = "scaled_salinity",
+    budget: SaltBudget | None = None,
+    unaccounted_salting: float = 0.0,
+    weight_by_sea_surface_fraction: bool = False,
+    use_float64: bool = False,
+) -> TensorDict:
+    if method != "scaled_salinity":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean salt content conservation"
+        )
+    input = OceanData(input_data, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
+    forcing = OceanData(forcing_data)
+    dtype = torch.float64 if use_float64 else gen.data["so_0"].dtype
+
+    def global_total(data: torch.Tensor) -> torch.Tensor:
+        # area weights are cell areas as a fraction of the sphere, so scaling
+        # the weighted sum by 4 pi R**2 gives the total over the ocean
+        weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
+        return weighted_sum * SPHERE_AREA_M2
+
+    if weight_by_sea_surface_fraction:
+        # salinity is an ocean-area mean, so the content of a partly-land cell
+        # is its column content times the fraction of the cell that is ocean
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+    else:
+        sea_surface_fraction = torch.ones(
+            (), dtype=dtype, device=gen.data["so_0"].device
+        )
+
+    def global_salt_content(data: OceanData) -> torch.Tensor:
+        column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
+        return global_total(column * sea_surface_fraction)  # psu m**3
+
+    global_gen_salt_content = global_salt_content(gen)
+    global_input_salt_content = global_salt_content(input)
+    ocean_area = global_total(
+        torch.ones_like(gen.data["so_0"], dtype=dtype) * sea_surface_fraction
+    )  # m**2
+    expected_change = unaccounted_salting * timestep_seconds * ocean_area
+    if budget is not None:
+        expected_change = expected_change + budget(
+            input, gen, forcing, global_total, timestep_seconds, dtype
         )
     salt_content_correction_ratio = (
         global_input_salt_content + expected_change
