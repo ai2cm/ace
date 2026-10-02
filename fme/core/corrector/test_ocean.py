@@ -17,6 +17,8 @@ from fme.core.corrector.ocean import (
     SeaSurfaceHeightSaltBudget,
     SeaSurfaceHeightSaltBudgetConfig,
     SurfaceEnergyFluxCorrectionConfig,
+    WaterFluxCompositionConfig,
+    WaterFluxSaltBudgetConfig,
     _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.corrector.registry import CorrectorABC
@@ -1076,6 +1078,31 @@ def test_ocean_salt_content_budget_config_rejects_unweighted_sea_surface_height(
             SeaSurfaceHeightSaltBudgetConfig(reference_salinity_psu=34.0),
             id="sea_surface_height_reference_salinity",
         ),
+        pytest.param(
+            {"type": "water_flux", "water_flux_source": "predicted"},
+            WaterFluxSaltBudgetConfig(water_flux_source="predicted"),
+            id="water_flux",
+        ),
+        pytest.param(
+            {
+                "type": "water_flux",
+                "water_flux_source": "composed",
+                "brine_rejection": "none",
+                "composition": {
+                    "precipitation_minus_evaporation_weight": "open_water_fraction",
+                    "constant_runoff_sv": 1.25,
+                },
+            },
+            WaterFluxSaltBudgetConfig(
+                water_flux_source="composed",
+                brine_rejection="none",
+                composition=WaterFluxCompositionConfig(
+                    precipitation_minus_evaporation_weight="open_water_fraction",
+                    constant_runoff_sv=1.25,
+                ),
+            ),
+            id="water_flux_composed",
+        ),
     ],
 )
 def test_ocean_salt_content_budget_config_from_state(budget_config, expected):
@@ -1174,6 +1201,405 @@ def test_ocean_salt_content_correction_spatial_parallelism(slope: float, raises:
     dataset_info = _salt_dataset_info(torch.ones(4, 8), (1000.0, 3000.0))
     config = OceanCorrectorConfig(
         ocean_salt_content_correction=_ice_volume_salt_config(slope)
+    )
+    with patch.object(
+        Distributed,
+        "has_spatial_parallelism",
+        new_callable=PropertyMock,
+        return_value=True,
+    ):
+        if raises:
+            with pytest.raises(NotImplementedError, match="local spatial chunk"):
+                config.get_corrector(dataset_info)
+        else:
+            config.get_corrector(dataset_info)
+
+
+_WATER_FLUX_LAYERS = (10.0, 20.0)
+
+
+@dataclasses.dataclass
+class _WaterFluxSaltState:
+    input_data: dict[str, torch.Tensor]
+    gen_data: dict[str, torch.Tensor]
+    forcing_data: dict[str, torch.Tensor]
+    ocean_mask: torch.Tensor
+    ice_mask: torch.Tensor
+    timestep_seconds: float
+
+    @property
+    def ocean_cell_area(self) -> torch.Tensor:
+        return _ocean_cell_area_m2(self.ocean_mask)
+
+    @property
+    def sea_surface_area(self) -> torch.Tensor:
+        return self.ocean_cell_area * self.forcing_data["sea_surface_fraction"]
+
+
+def _water_flux_salt_state() -> _WaterFluxSaltState:
+    """A float64 state for the water flux budget on the grid of
+    ``_salt_ocean_and_ice_masks``: wfo (NaN over land) and sfdsi (NaN in the
+    ocean cells outside the ice mask) in both the generated and the forcing
+    data with different values, the atmosphere forcings, the land and sea ice
+    fractions, and a sea ice volume whose prediction outside the ice mask is
+    unconstrained and large."""
+    torch.manual_seed(0)
+    ocean_mask, ice_mask = _salt_ocean_and_ice_masks()
+    ocean = ocean_mask.to(DEVICE) > 0
+    ice = ice_mask.to(DEVICE) > 0
+    nan = float("nan")
+
+    def rand() -> torch.Tensor:
+        return torch.rand(ocean_mask.shape, dtype=torch.float64, device=DEVICE)
+
+    def wfo() -> torch.Tensor:
+        return (2e-5 * (rand() - 0.3)).where(ocean, nan)
+
+    def sfdsi() -> torch.Tensor:
+        return (1e-6 * (rand() - 0.5)).where(ice, nan)
+
+    sea_surface_fraction = rand() * ocean
+    sea_surface_fraction[0, :] = 1.0  # some wholly-ocean cells too
+    input_ice = (rand() * 1e10).where(ice, nan)
+    gen_ice = torch.where(ice, input_ice + rand() * 1e9, rand() * 1e12)
+    input_data = {
+        "so_0": (34.0 + rand()).where(ocean, nan),
+        "so_1": (34.0 + rand()).where(ocean, nan),
+        "sea_ice_volume": input_ice,
+        "land_fraction": 1.0 - sea_surface_fraction,
+        "ocean_sea_ice_fraction": (rand() * ice).where(ocean, nan),
+    }
+    gen_data = {
+        "so_0": (35.0 + rand()).where(ocean, nan),
+        "so_1": (35.0 + rand()).where(ocean, nan),
+        "sea_ice_volume": gen_ice,
+        "wfo": wfo(),
+        "sfdsi": sfdsi(),
+    }
+    forcing_data = {
+        "sea_surface_fraction": sea_surface_fraction,
+        "wfo": wfo(),
+        "sfdsi": sfdsi(),
+        "PRATEsfc": 3e-5 * rand(),
+        "LHTFLsfc": 100.0 * rand(),
+    }
+    timestep = _salt_dataset_info(ocean_mask, _WATER_FLUX_LAYERS).timestep
+    return _WaterFluxSaltState(
+        input_data,
+        gen_data,
+        forcing_data,
+        ocean_mask,
+        ice_mask,
+        timestep.total_seconds(),
+    )
+
+
+def _correct_with_water_flux_budget(
+    state: _WaterFluxSaltState, water_flux_budget: dict
+) -> TensorMapping:
+    config = OceanCorrectorConfig.from_state(
+        {
+            "ocean_salt_content_correction": {
+                "method": "scaled_salinity",
+                "budget_config": {"type": "water_flux", **water_flux_budget},
+            }
+        }
+    )
+    corrector = config.get_corrector(
+        _salt_dataset_info(state.ocean_mask, _WATER_FLUX_LAYERS, state.ice_mask)
+    )
+    return corrector(
+        state.input_data, state.gen_data, state.forcing_data, None
+    ).corrected
+
+
+def _global_flux(field: torch.Tensor, area: torch.Tensor) -> float:
+    """float64 reference sum of a per-cell flux times the area, NaN as zero."""
+    return float((field.nan_to_num() * area).sum())
+
+
+def _water_flux_salt_change(
+    state: _WaterFluxSaltState,
+    water_kg_per_s: float,
+    sfdsi: torch.Tensor | None,
+    reference_salinity_psu: float = 35.0,
+) -> float:
+    """float64 reference budget (DT / rho_0) * (-S_ref * W + 1000 * sum(sfdsi *
+    ssf * A)) in psu m**3."""
+    brine = 0.0 if sfdsi is None else _global_flux(sfdsi, state.sea_surface_area)
+    return (
+        state.timestep_seconds
+        / 1035.0
+        * (-reference_salinity_psu * water_kg_per_s + 1000.0 * brine)
+    )
+
+
+def _assert_water_flux_budget_met(
+    state: _WaterFluxSaltState, corrected: TensorMapping, expected_change: float
+):
+    area = state.sea_surface_area
+    torch.testing.assert_close(
+        _total_salt_content(corrected, area, _WATER_FLUX_LAYERS),
+        _total_salt_content(state.input_data, area, _WATER_FLUX_LAYERS)
+        + expected_change,
+        rtol=1e-12,
+        atol=0.0,
+    )
+    # by one ratio applied to every level
+    ratio = corrected["so_0"] / state.gen_data["so_0"]
+    torch.testing.assert_close(
+        corrected["so_1"], state.gen_data["so_1"] * ratio, equal_nan=True
+    )
+
+
+@pytest.mark.parametrize(
+    "water_flux_source, brine_rejection",
+    [
+        ("predicted", "predicted"),
+        ("predicted", "none"),
+        ("given", "given"),
+        ("given", "none"),
+        ("predicted", "given"),
+    ],
+)
+def test_water_flux_salt_budget_from_wfo(water_flux_source, brine_rejection):
+    # The budget is (DT / rho_0) * sum((-S_ref * wfo + 1000 * sfdsi) * ssf * A),
+    # with each flux from the generated data when predicted and from the
+    # forcing data when given. The two carry different values, so reading the
+    # wrong one misses the budget, and the NaNs (wfo over land, sfdsi where
+    # there is never ice) count as zero.
+    state = _water_flux_salt_state()
+    reference_salinity_psu = 34.0
+    corrected = _correct_with_water_flux_budget(
+        state,
+        {
+            "water_flux_source": water_flux_source,
+            "brine_rejection": brine_rejection,
+            "reference_salinity_psu": reference_salinity_psu,
+        },
+    )
+    source = {"predicted": state.gen_data, "given": state.forcing_data}
+    water = _global_flux(source[water_flux_source]["wfo"], state.sea_surface_area)
+    sfdsi = None if brine_rejection == "none" else source[brine_rejection]["sfdsi"]
+    _assert_water_flux_budget_met(
+        state,
+        corrected,
+        _water_flux_salt_change(state, water, sfdsi, reference_salinity_psu),
+    )
+
+
+@pytest.mark.parametrize(
+    "weight, ice_mass_term, constant_runoff_sv",
+    [
+        pytest.param("sea_surface_fraction", False, 0.0, id="p_minus_e_ssf"),
+        pytest.param("open_water_fraction", False, 0.0, id="p_minus_e_open_water"),
+        pytest.param("none", True, 0.0, id="ice_mass"),
+        pytest.param("none", False, 1.25, id="runoff"),
+        pytest.param("sea_surface_fraction", True, 1.25, id="coupled_stack"),
+    ],
+)
+def test_water_flux_salt_budget_composed(weight, ice_mass_term, constant_runoff_sv):
+    # The composed water flux is the sum of the enabled terms: the forcing
+    # P - E (PRATEsfc - LHTFLsfc / L_v) weighted by the sea surface fraction or
+    # the input's open water fraction, -rho_ice * sum(delta ice volume) / DT
+    # inside the ice mask only (the large prediction outside it would miss the
+    # budget if counted), and the runoff at 1e9 kg/s per Sv. The brine term is
+    # the predicted sfdsi.
+    state = _water_flux_salt_state()
+    corrected = _correct_with_water_flux_budget(
+        state,
+        {
+            "water_flux_source": "composed",
+            "composition": {
+                "precipitation_minus_evaporation_weight": weight,
+                "ice_mass_term": ice_mass_term,
+                "constant_runoff_sv": constant_runoff_sv,
+            },
+        },
+    )
+    forcing, input_data = state.forcing_data, state.input_data
+    p_minus_e = forcing["PRATEsfc"] - forcing["LHTFLsfc"] / 2.5e6
+    water = constant_runoff_sv * 1e9
+    if weight == "sea_surface_fraction":
+        water += _global_flux(p_minus_e, state.sea_surface_area)
+    elif weight == "open_water_fraction":
+        open_water_fraction = (1.0 - input_data["land_fraction"]) * (
+            1.0 - input_data["ocean_sea_ice_fraction"]
+        )
+        water += _global_flux(p_minus_e * open_water_fraction, state.ocean_cell_area)
+    if ice_mass_term:
+        valid = state.ice_mask.to(DEVICE) > 0
+        ice_change = state.gen_data["sea_ice_volume"] - input_data["sea_ice_volume"]
+        water -= 905.0 * float(ice_change[valid].sum()) / state.timestep_seconds
+    _assert_water_flux_budget_met(
+        state,
+        corrected,
+        _water_flux_salt_change(state, water, state.gen_data["sfdsi"]),
+    )
+
+
+def test_water_flux_salt_budget_signs():
+    # Starting from a persisted salinity, fresh water into the ocean lowers the
+    # salt content and salt from the sea ice raises it.
+    state = _water_flux_salt_state()
+    state.gen_data.update(so_0=state.input_data["so_0"], so_1=state.input_data["so_1"])
+    area = state.sea_surface_area
+    input_content = _total_salt_content(state.input_data, area, _WATER_FLUX_LAYERS)
+
+    def content_change(wfo: float, sfdsi: float) -> float:
+        state.gen_data["wfo"] = torch.full_like(state.gen_data["wfo"], wfo)
+        state.gen_data["sfdsi"] = torch.full_like(state.gen_data["sfdsi"], sfdsi)
+        corrected = _correct_with_water_flux_budget(
+            state, {"water_flux_source": "predicted"}
+        )
+        return float(
+            _total_salt_content(corrected, area, _WATER_FLUX_LAYERS) - input_content
+        )
+
+    assert content_change(wfo=1e-5, sfdsi=0.0) < 0.0
+    assert content_change(wfo=0.0, sfdsi=1e-6) > 0.0
+
+
+_COMPOSED_PRECIPITATION_ONLY = {
+    "water_flux_source": "composed",
+    "composition": {"precipitation_minus_evaporation_weight": "sea_surface_fraction"},
+}
+
+
+@pytest.mark.parametrize(
+    "water_flux_budget, data_name, missing, match",
+    [
+        (
+            {"water_flux_source": "predicted"},
+            "gen_data",
+            "wfo",
+            "needs wfo in the generated data",
+        ),
+        (
+            {"water_flux_source": "given", "brine_rejection": "none"},
+            "forcing_data",
+            "wfo",
+            "needs wfo in the forcing data",
+        ),
+        (
+            {"water_flux_source": "predicted", "brine_rejection": "predicted"},
+            "gen_data",
+            "sfdsi",
+            "needs sfdsi in the generated data",
+        ),
+        (
+            {"water_flux_source": "predicted", "brine_rejection": "given"},
+            "forcing_data",
+            "sfdsi",
+            "needs sfdsi in the forcing data",
+        ),
+        (_COMPOSED_PRECIPITATION_ONLY, "forcing_data", "PRATEsfc", "PRATEsfc"),
+        (
+            {
+                "water_flux_source": "composed",
+                "composition": {
+                    "precipitation_minus_evaporation_weight": "none",
+                    "ice_mass_term": True,
+                },
+            },
+            "gen_data",
+            "sea_ice_volume",
+            "sea_ice_volume is required",
+        ),
+    ],
+)
+def test_water_flux_salt_budget_missing_field_raises(
+    water_flux_budget, data_name, missing, match
+):
+    # A flux the configuration asks for must be present in its source, not
+    # silently read as zero or taken from the other source.
+    state = _water_flux_salt_state()
+    del getattr(state, data_name)[missing]
+    with pytest.raises(ValueError, match=match):
+        _correct_with_water_flux_budget(state, water_flux_budget)
+
+
+@pytest.mark.parametrize(
+    "salt_config, match",
+    [
+        pytest.param(
+            {"budget_config": {"type": "water_flux", "water_flux_source": "composed"}},
+            "composition must be set",
+            id="composed_without_composition",
+        ),
+        pytest.param(
+            {
+                "budget_config": dict(
+                    _COMPOSED_PRECIPITATION_ONLY,
+                    type="water_flux",
+                    water_flux_source="predicted",
+                )
+            },
+            "composition must be set",
+            id="composition_without_composed",
+        ),
+        pytest.param(
+            {
+                "budget_config": {
+                    "type": "water_flux",
+                    "water_flux_source": "composed",
+                    "composition": {"precipitation_minus_evaporation_weight": "none"},
+                }
+            },
+            "has no terms",
+            id="empty_composition",
+        ),
+        pytest.param(
+            {
+                "budget_config": {
+                    "type": "water_flux",
+                    "water_flux_source": "composed",
+                    "composition": {
+                        "precipitation_minus_evaporation_weight": "none",
+                        "ice_mass_term": True,
+                        "sea_ice_density_kg_m3": 0.0,
+                    },
+                }
+            },
+            "sea_ice_density_kg_m3 must be positive",
+            id="nonpositive_ice_density",
+        ),
+        pytest.param(
+            {
+                "budget_config": {
+                    "type": "water_flux",
+                    "water_flux_source": "predicted",
+                },
+                "weight_by_sea_surface_fraction": False,
+            },
+            "requires weight_by_sea_surface_fraction",
+            id="unweighted_content",
+        ),
+    ],
+)
+def test_water_flux_salt_budget_config_validation(salt_config, match):
+    salt_state = {"method": "scaled_salinity", **salt_config}
+    with pytest.raises(ValueError, match=match):
+        OceanCorrectorConfig.from_state({"ocean_salt_content_correction": salt_state})
+
+
+@pytest.mark.parametrize("ice_mass_term, raises", [(False, False), (True, True)])
+def test_water_flux_salt_budget_spatial_parallelism(ice_mass_term, raises):
+    # The ice mass term sums sea_ice_volume over the local grid, so it must fail
+    # at build time under spatial parallelism; the other terms reduce across
+    # ranks.
+    dataset_info = _salt_dataset_info(torch.ones(4, 8), (1000.0, 3000.0))
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=WaterFluxSaltBudgetConfig(
+                water_flux_source="composed",
+                composition=WaterFluxCompositionConfig(
+                    precipitation_minus_evaporation_weight="sea_surface_fraction",
+                    ice_mass_term=ice_mass_term,
+                ),
+            ),
+        )
     )
     with patch.object(
         Distributed,
