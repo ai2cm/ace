@@ -21,6 +21,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
@@ -33,7 +34,10 @@ class AreaWeightedMean(Protocol):
     ) -> torch.Tensor: ...
 
 
-AreaWeightedSum = AreaWeightedMean  # same call signature
+class AreaWeightedSum(Protocol):
+    def __call__(
+        self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
+    ) -> torch.Tensor: ...
 
 
 @dataclasses.dataclass
@@ -445,6 +449,12 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             )
         if self.ocean_salt_content_correction is not None:
             salt_config = self.ocean_salt_content_correction
+            if salt_config.ice_volume_salt_slope_psu != 0.0:
+                Distributed.get_instance().require_no_spatial_parallelism(
+                    "Ocean salt content correction with a nonzero "
+                    "ice_volume_salt_slope_psu sums sea_ice_volume over the "
+                    "local spatial chunk only."
+                )
             if sea_ice_volume_mask is None:
                 sea_ice_volume_valid = None
             else:
@@ -622,11 +632,11 @@ def _force_conserve_ocean_salt_content(
     area_weighted_sum: AreaWeightedSum,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
-    method: Literal["scaled_salinity"] = "scaled_salinity",
-    ice_volume_salt_slope_psu: float = 0.0,
-    unaccounted_salting: float = 0.0,
-    sea_ice_volume_valid: torch.Tensor | None = None,
-    use_float64: bool = False,
+    method: Literal["scaled_salinity"],
+    ice_volume_salt_slope_psu: float,
+    unaccounted_salting: float,
+    sea_ice_volume_valid: torch.Tensor | None,
+    use_float64: bool,
 ) -> TensorDict:
     if method != "scaled_salinity":
         raise NotImplementedError(
@@ -667,9 +677,8 @@ def _force_conserve_ocean_salt_content(
                 ice_volume_change,
                 torch.zeros_like(ice_volume_change),
             )
-        # sea_ice_volume is per cell (m**3), so its total is a plain sum. Under
-        # spatial parallelism this sum would need a spatial_reduce_sum across
-        # ranks, and sea_ice_volume_valid would need slicing to the local chunk.
+        # sea_ice_volume is per cell (m**3), so its total is a plain sum over
+        # the local grid; OceanCorrectorConfig rejects spatial parallelism here.
         total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
         expected_change = (
             expected_change + ice_volume_salt_slope_psu * total_ice_volume_change

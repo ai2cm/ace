@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from unittest.mock import PropertyMock, patch
 
 import pytest
 import torch
@@ -16,6 +17,7 @@ from fme.core.corrector.ocean import (
     _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -821,6 +823,31 @@ def test_ocean_salt_content_correction_float64_meets_budget_for_float32_state():
         + expected_change
     )
     assert abs(float(miss)) < 0.05 * expected_change
+
+
+@pytest.mark.parametrize("slope, raises", [(0.0, False), (40.0, True)])
+def test_ocean_salt_content_correction_spatial_parallelism(slope: float, raises: bool):
+    # The ice-volume total is a plain sum over the local grid, so a nonzero
+    # slope must fail at build time under spatial parallelism instead of
+    # silently using a per-rank total. Without the ice term, the area-weighted
+    # sums already reduce across ranks.
+    dataset_info = _salt_dataset_info(torch.ones(4, 8), (1000.0, 3000.0))
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity", ice_volume_salt_slope_psu=slope
+        )
+    )
+    with patch.object(
+        Distributed,
+        "has_spatial_parallelism",
+        new_callable=PropertyMock,
+        return_value=True,
+    ):
+        if raises:
+            with pytest.raises(NotImplementedError, match="local spatial chunk"):
+                config.get_corrector(dataset_info)
+        else:
+            config.get_corrector(dataset_info)
 
 
 def test_ocean_corrector_config_fields_are_known():
