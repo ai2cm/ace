@@ -326,15 +326,11 @@ class EMATracker:
                         f"EMA-tracked parameter {name} is not a parameter of the model."
                     )
                 parameters[name].copy_(ema_params[ema_name])
-        logging.info(
-            f"Copied EMA weights (num_updates={int(state['num_updates'])}) "
-            "into the model."
-        )
         return True
 
 
 def load_ema_params_if_available(
-    checkpoint: Mapping[str, Any], model: HasNamedParameters
+    checkpoint: Mapping[str, Any], model: HasNamedParameters, checkpoint_path: str
 ) -> bool:
     """Overwrite a model's parameters with the EMA weights in a training checkpoint.
 
@@ -349,13 +345,23 @@ def load_ema_params_if_available(
     Args:
         checkpoint: A checkpoint as saved by the ``Trainer``.
         model: The model built from the checkpoint's stepper state.
+        checkpoint_path: Path the checkpoint was loaded from, used in log
+            messages.
 
     Returns:
         Whether EMA weights were found and copied into the model.
     """
-    if EMATracker.copy_params_from_state(checkpoint.get(EMA_CHECKPOINT_KEY, {}), model):
+    ema_state = checkpoint.get(EMA_CHECKPOINT_KEY, {})
+    if EMATracker.copy_params_from_state(ema_state, model):
+        logging.info(
+            f"Using EMA weights from {checkpoint_path} "
+            f"(num_updates={int(ema_state['num_updates'])})."
+        )
         return True
-    logging.info("Checkpoint does not contain EMA weights, using the stepper weights.")
+    logging.info(
+        f"Checkpoint {checkpoint_path} does not contain EMA weights, "
+        "using the stepper weights."
+    )
     return False
 
 

@@ -1532,7 +1532,8 @@ def test_saved_checkpoint_ema_params_load_into_model(
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     loaded = copy.deepcopy(modules)
     loaded.load_state_dict(checkpoint["stepper"]["modules"])
-    assert load_ema_params_if_available(checkpoint, loaded) == include_optimization
+    loaded_ema = load_ema_params_if_available(checkpoint, loaded, checkpoint_path)
+    assert loaded_ema == include_optimization
     expected = ema_weight if include_optimization else stepper_weight
     torch.testing.assert_close(loaded[0].weight, expected)
 

@@ -1,3 +1,4 @@
+import logging
 import os
 
 import pytest
@@ -238,13 +239,17 @@ def _get_trained_ema_state(model: nn.Module) -> dict:
     return ema.get_state()
 
 
-def test_load_ema_params_if_available_copies_ema_weights():
+def test_load_ema_params_if_available_copies_ema_weights(
+    caplog: pytest.LogCaptureFixture,
+):
     model = ExampleModel()
     state = _get_trained_ema_state(model)
     loaded = ExampleModel()
 
-    assert load_ema_params_if_available({"ema": state}, loaded)
+    with caplog.at_level(logging.INFO):
+        assert load_ema_params_if_available({"ema": state}, loaded, "ckpt.tar")
 
+    assert "Using EMA weights from ckpt.tar" in caplog.text
     torch.testing.assert_close(loaded.weight, state["ema_params"]["weight"])
 
 
@@ -258,7 +263,7 @@ def test_load_ema_params_if_available_keeps_untracked_parameters():
     loaded = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2)).to(get_device())
     frozen_before = [p.detach().clone() for p in loaded[1].parameters()]
 
-    assert load_ema_params_if_available({"ema": state}, loaded)
+    assert load_ema_params_if_available({"ema": state}, loaded, "ckpt.tar")
 
     torch.testing.assert_close(loaded[0].weight, state["ema_params"]["0weight"])
     for before, after in zip(frozen_before, loaded[1].parameters()):
@@ -266,7 +271,9 @@ def test_load_ema_params_if_available_keeps_untracked_parameters():
 
 
 @pytest.mark.parametrize("has_ema_state", [True, False])
-def test_load_ema_params_if_available_without_ema_weights(has_ema_state: bool):
+def test_load_ema_params_if_available_without_ema_weights(
+    has_ema_state: bool, caplog: pytest.LogCaptureFixture
+):
     """Checkpoints saved without their optimization state have EMA state but
     no EMA weights; checkpoints not saved by a Trainer may have neither."""
     model = ExampleModel()
@@ -277,9 +284,11 @@ def test_load_ema_params_if_available_without_ema_weights(has_ema_state: bool):
         checkpoint["ema"] = state
     before = model.weight.detach().clone()
 
-    assert not load_ema_params_if_available(checkpoint, model)
+    with caplog.at_level(logging.INFO):
+        assert not load_ema_params_if_available(checkpoint, model, "best_ckpt.tar")
 
     torch.testing.assert_close(model.weight, before)
+    assert "best_ckpt.tar does not contain EMA weights" in caplog.text
 
 
 def test_load_ema_params_if_available_mismatched_model():
@@ -287,4 +296,4 @@ def test_load_ema_params_if_available_mismatched_model():
     other = nn.Sequential(nn.Linear(2, 2)).to(get_device())
 
     with pytest.raises(ValueError, match="not a parameter of the model"):
-        load_ema_params_if_available({"ema": state}, other)
+        load_ema_params_if_available({"ema": state}, other, "ckpt.tar")

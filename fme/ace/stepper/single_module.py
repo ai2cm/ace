@@ -1971,7 +1971,7 @@ def load_stepper(
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
     if use_ema_if_available:
-        load_ema_params_if_available(checkpoint, stepper.modules)
+        load_ema_params_if_available(checkpoint, stepper.modules, str(checkpoint_path))
     apply_stepper_override(stepper, override_config)
     return stepper
 
