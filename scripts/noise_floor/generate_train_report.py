@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import tempfile
 from typing import Callable, List, Tuple
 
 import dacite
@@ -72,7 +73,8 @@ def main(
         stds[varname] = fitted_model(window_years)
 
     wandb = WandB.get_instance()
-    wandb.configure(log_to_wandb=True)
+    # these runs are never resumed, so the on-disk metrics are not needed
+    wandb.configure(log_to_wandb=True, metrics_log_dir=tempfile.mkdtemp())
     config = {
         "window_years": window_years,
         "batches": batches,

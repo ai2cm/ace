@@ -26,15 +26,13 @@ class MockWandB:
         self._env_name_snapshot: str | None = None
         self._env_name_snapshot_taken = False
 
-    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
+    def configure(self, log_to_wandb: bool, metrics_log_dir: str):
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
         if self._disk_logger is not None:
             self._disk_logger.close()
-            self._disk_logger = None
-        if metrics_log_dir is not None and dist.is_root():
-            self._disk_logger = DiskMetricLogger(metrics_log_dir)
+        self._disk_logger = wandb.build_disk_logger(metrics_log_dir)
 
     def init(
         self,

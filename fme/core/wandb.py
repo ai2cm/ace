@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import wandb
 
+from fme.core.cloud import is_local
 from fme.core.disk_metric_logger import (
     CheckpointMark,
     DiskMetricLogger,
@@ -116,17 +117,23 @@ class WandB:
         self._enabled = False
         self._configured = False
         self._id = None
+        # None on non-root ranks and for a non-local metrics_log_dir (see
+        # build_disk_logger); the None-guards below are for those cases only
         self._disk_logger: DiskMetricLogger | None = None
 
-    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
+    def configure(self, log_to_wandb: bool, metrics_log_dir: str):
+        """
+        Args:
+            log_to_wandb: Whether to log to Weights & Biases.
+            metrics_log_dir: Directory to write scalar metrics to disk, which
+                resumable runs restore from on resume.
+        """
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
         if self._disk_logger is not None:
             self._disk_logger.close()
-            self._disk_logger = None
-        if metrics_log_dir is not None and dist.is_root():
-            self._disk_logger = DiskMetricLogger(metrics_log_dir)
+        self._disk_logger = build_disk_logger(metrics_log_dir)
 
     def init(
         self,
@@ -302,6 +309,24 @@ def scale_image(
     image_data = np.maximum(image_data, 0)
     image_data[np.isnan(image_data)] = 0
     return image_data
+
+
+def build_disk_logger(metrics_log_dir: str) -> DiskMetricLogger | None:
+    """Build the disk metric logger for this rank, or None if it has none: only
+    the root rank logs metrics to disk, and only to a local file system.
+    """
+    if not Distributed.get_instance().is_root():
+        return None
+    if not is_local(metrics_log_dir):
+        # reachable only through a non-local experiment directory, since
+        # LoggingConfig rejects a non-local metrics_log_dir itself
+        logging.warning(
+            f"Disk metric logging is only supported on a local file system. "
+            f"Got metrics_log_dir={metrics_log_dir!r}, so no metrics will be "
+            f"saved to disk and none can be recovered on resume."
+        )
+        return None
+    return DiskMetricLogger(metrics_log_dir)
 
 
 def metrics_to_relog(

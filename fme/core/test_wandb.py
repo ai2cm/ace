@@ -38,9 +38,9 @@ class TestDiskLoggingIntegration:
         assert records[0] == {"step": 0, "loss": 0.5, "lr": 1e-3}
         assert records[1] == {"step": 1, "loss": 0.3, "lr": 1e-4}
 
-    def test_no_disk_logging_when_dir_is_none(self, tmp_path):
+    def test_no_disk_logging_for_non_local_dir(self):
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True, metrics_log_dir=None)
+            wandb.configure(log_to_wandb=True, metrics_log_dir="memory://b/metrics")
             wandb.log({"loss": 0.5}, step=0)
         assert wandb._disk_logger is None
 
@@ -120,7 +120,8 @@ def _resume_wandb(
 
 
 def _close_disk_logger(wandb: WandB):
-    wandb.configure(log_to_wandb=False, metrics_log_dir=None)
+    if wandb._disk_logger is not None:
+        wandb._disk_logger.close()
 
 
 # the checkpoint mark is after the step-30 batch logs; a timings log at step
@@ -216,8 +217,8 @@ def test_mark_checkpoint_does_not_use_logging_module(tmp_path, monkeypatch):
     assert os.path.exists(os.path.join(tmp_path, "metrics", CHECKPOINT_MARK_FILENAME))
 
 
-def test_mark_checkpoint_without_disk_logging_is_a_no_op(tmp_path):
+def test_mark_checkpoint_without_disk_logging_is_a_no_op():
     wandb = WandB()
-    wandb.configure(log_to_wandb=False, metrics_log_dir=None)
+    wandb.configure(log_to_wandb=False, metrics_log_dir="memory://b/metrics")
     wandb.mark_checkpoint()
-    assert os.listdir(tmp_path) == []
+    assert wandb._disk_logger is None

@@ -41,10 +41,12 @@ class LoggingConfig:
         log_to_file: Whether to log to a file.
         log_to_wandb: Whether to log to Weights & Biases.
         metrics_log_dir: Directory to write scalar metrics to disk as JSONL,
-            so they survive the job being killed before wandb uploads them.
-            Relative paths are resolved against the experiment directory. Must
-            be on a local file system. If None, or if the experiment directory
-            is not local, disk metric logging is disabled.
+            so they survive the job being killed before wandb uploads them; a
+            resumed job restores them from there and re-logs the ones wandb
+            lost. Required, since preemption recovery depends on it. Relative
+            paths are resolved against the experiment directory. Must be on a
+            local file system; if the experiment directory is not local, disk
+            metric logging is skipped with a warning.
         log_format: Format of the log messages.
         level: Sets the logging level.
         wandb_dir_in_experiment_dir: Whether to create the wandb_dir in the
@@ -57,13 +59,13 @@ class LoggingConfig:
     log_to_screen: bool = True
     log_to_file: bool = True
     log_to_wandb: bool = True
-    metrics_log_dir: str | None = "metrics"
+    metrics_log_dir: str = "metrics"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     level: str | int = logging.INFO
     wandb_dir_in_experiment_dir: bool = False
 
     def __post_init__(self):
-        if self.metrics_log_dir is not None and not is_local(self.metrics_log_dir):
+        if not is_local(self.metrics_log_dir):
             raise ValueError(
                 "Disk metric logging is only supported on a local file system, "
                 f"got metrics_log_dir={self.metrics_log_dir!r}"
@@ -128,19 +130,6 @@ class LoggingConfig:
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
-    def _get_metrics_log_dir(self, experiment_dir: str) -> str | None:
-        if self.metrics_log_dir is None:
-            return None
-        metrics_log_dir = os.path.join(experiment_dir, self.metrics_log_dir)
-        if not is_local(metrics_log_dir):
-            logging.warning(
-                f"Disk metric logging is only supported on a local file system. "
-                f"Got metrics_log_dir={metrics_log_dir!r}, so no metrics will be "
-                f"saved to disk."
-            )
-            return None
-        return metrics_log_dir
-
     def _configure_wandb(
         self,
         experiment_dir: str,
@@ -172,7 +161,7 @@ class LoggingConfig:
         wandb = WandB.get_instance()
         wandb.configure(
             log_to_wandb=self.log_to_wandb,
-            metrics_log_dir=self._get_metrics_log_dir(experiment_dir),
+            metrics_log_dir=os.path.join(experiment_dir, self.metrics_log_dir),
         )
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(

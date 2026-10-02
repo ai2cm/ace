@@ -771,7 +771,7 @@ def test_train_and_inference(
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         inference_evaluator_main(yaml_config=inference_config)
         inference_logs = wandb.get_logs()
 
@@ -1160,7 +1160,9 @@ def test_train_and_inference_with_derived_forcings(tmp_path):
                 yaml_config=train_config,
             )
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
+            wandb.configure(
+                log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics")
+            )
             inference_evaluator_main(yaml_config=inference_config)
 
 
