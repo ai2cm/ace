@@ -11,7 +11,11 @@ from fme.core.typing_ import TensorDict
 from fme.sht_fix import InverseRealSHT, RealSHT
 
 
-def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:
+def get_block_benchmark(
+    filter_num_groups: int,
+    filter_type: str = "linear",
+    sht_grid: str = "lobatto",
+) -> type[BenchmarkABC]:
     class BlockBenchmark(BenchmarkABC):
         def __init__(
             self, block: FourierNeuralOperatorBlock, x: torch.Tensor, context: Context
@@ -77,8 +81,8 @@ def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:
                 labels=context_embedding_labels,
             )
             x = torch.randn(B, C, H, L, device=get_device())
-            forward = RealSHT(nlat=H, nlon=L)
-            inverse = InverseRealSHT(nlat=H, nlon=L)
+            forward = RealSHT(nlat=H, nlon=L, grid=sht_grid)
+            inverse = InverseRealSHT(nlat=H, nlon=L, grid=sht_grid)
             context_config = ContextConfig(
                 embed_dim_scalar=conditional_embed_dim_scalar,
                 embed_dim_noise=conditional_embed_dim_noise,
@@ -90,7 +94,7 @@ def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:
                 inverse_transform=inverse,
                 img_shape=(H, L),
                 embed_dim=C,
-                filter_type="linear",
+                filter_type=filter_type,
                 use_mlp=True,
                 context_config=context_config,
                 filter_num_groups=G,
@@ -123,3 +127,9 @@ def get_block_benchmark(filter_num_groups: int) -> type[BenchmarkABC]:
 
 register_benchmark("csfno_block")(get_block_benchmark(filter_num_groups=1))
 register_benchmark("csfno_block_8_groups")(get_block_benchmark(filter_num_groups=8))
+register_benchmark("csfno_block_disco")(
+    # legendre-gauss matches the grid of the network's internal block transforms
+    get_block_benchmark(
+        filter_num_groups=1, filter_type="local", sht_grid="legendre-gauss"
+    )
+)
