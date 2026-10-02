@@ -44,6 +44,10 @@ class TimeLengthProbabilities:
     def max_n_forward_steps(self) -> int:
         return int(max(self._n_times))
 
+    @property
+    def min_n_forward_steps(self) -> int:
+        return int(min(self._n_times))
+
     def seed_rng(self, seed: int) -> None:
         """Reset the RNG to a deterministic state with the given seed."""
         self._rng = np.random.RandomState(seed)
@@ -107,6 +111,14 @@ class TimeLengthSchedule:
 
     def get_value(self, epoch: int) -> TimeLength:
         return self._validated_milestones.get_value(epoch)
+
+    @property
+    def min_n_forward_steps(self) -> int:
+        """
+        The fewest forward steps that can be sampled at any epoch.
+        """
+        values = [self.start_value] + [m.value for m in self.milestones]
+        return min(v if isinstance(v, int) else v.min_n_forward_steps for v in values)
 
     @property
     def max_n_forward_steps(self) -> IntSchedule:
