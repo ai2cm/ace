@@ -6,10 +6,9 @@ import os
 import shutil
 from collections.abc import Sequence
 
-import fsspec
 import yaml
 
-from fme.core.cloud import makedirs
+from fme.core.cloud import makedirs, write_bytes
 from fme.core.distributed import Distributed
 from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
 
@@ -103,8 +102,10 @@ def prepare_directory(
         # either not given or ignored because we already resumed once before
         resume_results = None
     dist.barrier()
-    with fsspec.open(os.path.join(path, "config.yaml"), "w") as f:
-        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+    write_bytes(
+        os.path.join(path, "config.yaml"),
+        yaml.dump(config_data, default_flow_style=False, sort_keys=False).encode(),
+    )
     return resume_results
 
 

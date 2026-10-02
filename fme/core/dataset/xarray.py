@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import functools
-import json
 import logging
 import multiprocessing
 import os
@@ -13,12 +12,13 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
 
-import fsspec
 import numpy as np
 import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
+from zarr.storage import ObjectStore
 
+from fme.core.cloud import get_zarr_store, glob
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -232,72 +232,22 @@ def _get_protocol(path):
     return urlparse(str(path)).scheme
 
 
-def _get_fs(path):
-    protocol = _get_protocol(path)
-    if not protocol:
-        protocol = "file"
-    proto_kw = _get_fs_protocol_kwargs(path)
-    fs = fsspec.filesystem(protocol, **proto_kw)
+def get_open_target(path: str, engine: str | None) -> str | ObjectStore:
+    """Get what to pass to xr.open_dataset for a path.
 
-    return fs
-
-
-def _preserve_protocol(original_path, glob_paths):
-    protocol = _get_protocol(str(original_path))
-    if protocol:
-        glob_paths = [f"{protocol}://{path}" for path in glob_paths]
-    return glob_paths
+    Remote zarr stores are opened with obstore rather than handed to xarray as
+    URL strings.
+    """
+    if engine == "zarr" or (engine is None and path.rstrip("/").endswith(".zarr")):
+        return get_zarr_store(path)
+    return path
 
 
-def _get_fs_protocol_kwargs(path):
-    protocol = _get_protocol(path)
-    kwargs = {}
-    if protocol == "gs":
-        # https://gcsfs.readthedocs.io/en/latest/api.html#gcsfs.core.GCSFileSystem
-        key_json = os.environ.get("FSSPEC_GS_KEY_JSON", None)
-        key_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", None)
-
-        if key_json is not None:
-            token = json.loads(key_json)
-        elif key_file is not None:
-            token = key_file
-        else:
-            logger.warning(
-                "GCS currently expects user credentials authenticated using"
-                " `gcloud auth application-default login`. This is not recommended for "
-                "production use."
-            )
-            token = "google_default"
-        kwargs["token"] = token
-    elif protocol == "s3":
-        # https://s3fs.readthedocs.io/en/latest/#s3-compatible-storage
-        env_vars = [
-            "FSSPEC_S3_KEY",
-            "FSSPEC_S3_SECRET",
-            "FSSPEC_S3_ENDPOINT_URL",
-        ]
-        for v in env_vars:
-            if v not in os.environ:
-                warnings.warn(
-                    f"An S3 path was specified but environment variable {v} "
-                    "was not found. This may cause authentication issues if not "
-                    "set and no other defaults are present. See "
-                    "https://s3fs.readthedocs.io/en/latest/#s3-compatible-storage"
-                    " for details."
-                )
-
-    return kwargs
-
-
-def _open_xr_dataset(path: str, *args, **kwargs):
-    # need the path to get protocol specific arguments for the backend
-    protocol_kw = _get_fs_protocol_kwargs(path)
-    if protocol_kw:
-        kwargs.update({"storage_options": protocol_kw})
-
+def _open_xr_dataset(path: str, *args, engine: str | None = None, **kwargs):
     return xr.open_dataset(
-        path,
+        get_open_target(path, engine),
         *args,
+        engine=engine,
         decode_times=CFDatetimeCoder(use_cftime=True),
         decode_timedelta=False,
         mask_and_scale=False,
@@ -327,10 +277,7 @@ def _open_file_fh_cached(path, **kwargs):
 
 
 def get_raw_paths(path, file_pattern):
-    fs = _get_fs(path)
-    glob_paths = sorted(fs.glob(os.path.join(path, file_pattern)))
-    raw_paths = _preserve_protocol(path, glob_paths)
-    return raw_paths
+    return glob(path, file_pattern)
 
 
 def _get_spatial_mask_provider(
@@ -571,7 +518,7 @@ class XarrayDataset(DatasetABC):
             max_sample_n_times=n_timesteps.max_value,
         )
         first_dataset = xr.open_dataset(
-            self.full_paths[0],
+            get_open_target(self.full_paths[0], self.engine),
             decode_times=False,
             decode_timedelta=False,
             engine=self.engine,

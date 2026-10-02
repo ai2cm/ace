@@ -3,6 +3,7 @@ import dataclasses
 import torch
 import xarray as xr
 
+from fme.core.cloud import get_zarr_store
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.downscaling.data.utils import (
@@ -68,7 +69,7 @@ def _load_coords_from_ds(ds: xr.Dataset) -> LatLonCoordinates:
 
 def _open_ds_from_path(path: str) -> xr.Dataset:
     if path.endswith(".zarr"):
-        ds = xr.open_zarr(path, mask_and_scale=False)
+        ds = xr.open_zarr(get_zarr_store(path), mask_and_scale=False)
     else:
         ds = xr.open_dataset(path, mask_and_scale=False)
     return ds

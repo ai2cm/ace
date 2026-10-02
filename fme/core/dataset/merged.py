@@ -11,7 +11,7 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import accumulate_labels
-from fme.core.dataset.xarray import XarrayDataConfig, get_raw_paths
+from fme.core.dataset.xarray import XarrayDataConfig, get_open_target, get_raw_paths
 from fme.core.typing_ import Slice, TensorDict
 
 
@@ -441,7 +441,7 @@ def _infer_available_variables(config: XarrayDataConfig):
             f"No files found matching '{config.data_path}/{config.file_pattern}'."
         )
     dataset = xr.open_dataset(
-        raw_paths[0],
+        get_open_target(raw_paths[0], config.engine),
         decode_times=False,
         decode_timedelta=False,
         engine=config.engine,
