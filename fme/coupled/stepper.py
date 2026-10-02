@@ -38,6 +38,7 @@ from fme.ace.stepper.single_module import (
 from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
+from fme.core.ema import load_ema_params_if_available
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -391,10 +392,11 @@ class CoupledStepperConfig:
         same name in ``CoupledStepper._get_atmosphere_forcings``.
 
         Called at construction, and again after inference-time overrides
-        mutate the component step configs (the only supported coupled override
-        is ``prescribed_prognostic_names``). No ocean-side check is needed:
-        atmosphere-supplied ocean forcings are input-only names, which cannot
-        be prognostic and therefore cannot be prescribed.
+        mutate the component step configs (of the supported coupled overrides,
+        only ``prescribed_prognostic_names`` can change the result). No
+        ocean-side check is needed: atmosphere-supplied ocean forcings are
+        input-only names, which cannot be prognostic and therefore cannot be
+        prescribed.
         """
         prescribed = self.atmosphere.stepper.get_prescribed_prognostic_names()
         clobbered = sorted(set(prescribed) & self._ocean_supplied_atmosphere_names())
@@ -2278,7 +2280,12 @@ class CoupledTrainStepper(
         return stepped
 
 
-def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
+def load_coupled_stepper(
+    checkpoint_path: str | pathlib.Path, use_ema_if_available: bool = False
+) -> CoupledStepper:
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    return CoupledStepper.from_state(checkpoint["stepper"])
+    stepper = CoupledStepper.from_state(checkpoint["stepper"])
+    if use_ema_if_available:
+        load_ema_params_if_available(checkpoint, stepper.modules, str(checkpoint_path))
+    return stepper
