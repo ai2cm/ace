@@ -162,6 +162,27 @@ class TorchDistributed(DistributedBackend):
         torch.distributed.gather(tensor, gather_list)
         return gather_list
 
+    def data_parallel_gather(
+        self,
+        tensor: torch.Tensor,
+        gather_list: list[torch.Tensor] | None = None,
+    ) -> list[torch.Tensor] | None:
+        return self.gather(tensor, gather_list)
+
+    def data_parallel_scatter(
+        self,
+        tensor: torch.Tensor,
+        scatter_list: list[torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        torch.distributed.scatter(tensor, scatter_list)
+        return tensor
+
+    def data_parallel_gather_object(self, obj: T) -> list[T] | None:
+        return self.gather_object(obj)
+
+    def data_parallel_broadcast_object(self, obj: T | None) -> T:
+        return self.scatter_object(obj)
+
     def gather_object(self, obj: T) -> list[T] | None:
         """Gather a picklable object over all ranks."""
         gather_list: list[Any] | None = (
