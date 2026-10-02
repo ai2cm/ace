@@ -97,7 +97,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.multi_call import MultiCallConfig
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStep
 from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStep
 from fme.core.stepper_state import StepperState
 from fme.core.testing import (
@@ -2201,14 +2201,19 @@ def test_load_stepper_and_load_stepper_config(
     assert isinstance(stepper.forcing_deriver, ForcingDeriver)
 
 
-def _get_inner_single_module_config(stepper: Stepper):
+def _get_inner_single_module_step(stepper: Stepper) -> SingleModuleStep:
+    """Get the built SingleModuleStep from a stepper (MultiCallStep or single)."""
+    step = stepper._step_obj
+    if isinstance(step, MultiCallStep):
+        step = step._wrapped_step
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def _get_inner_single_module_config(stepper: Stepper) -> SingleModuleStepConfig:
     """Get the inner SingleModuleStep config from a stepper
     (MultiCallStep or single)."""
-    from fme.core.step.multi_call import MultiCallStep
-
-    if isinstance(stepper._step_obj, MultiCallStep):
-        return stepper._step_obj._wrapped_step.config
-    return stepper._step_obj.config
+    return _get_inner_single_module_step(stepper).config
 
 
 def validate_stepper_prescribed_prognostic_names(
@@ -2218,6 +2223,43 @@ def validate_stepper_prescribed_prognostic_names(
     prescribed_prognostic_names."""
     config = _get_inner_single_module_config(stepper)
     assert config.prescribed_prognostic_names == expected
+
+
+@pytest.mark.parametrize(
+    "saved_compile, override_compile", [(True, False), (False, True)]
+)
+def test_load_stepper_with_compile_override(
+    tmp_path: pathlib.Path, saved_compile: bool, override_compile: bool
+):
+    """StepperOverrideConfig(compile=...) overrides the compile option
+    serialized in the checkpoint, both on the built step and on the
+    config returned by load_stepper_config_with_override."""
+    in_names = ["var", "a"]
+    out_names = ["var", "a"]
+    stepper_path = tmp_path / "stepper"
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=[9, 4, 8],
+        compile=saved_compile,
+    )
+
+    stepper = load_stepper(stepper_path)
+    assert _get_inner_single_module_config(stepper).compile == saved_compile
+    assert _get_inner_single_module_step(stepper).module.is_compiled == saved_compile
+
+    stepper_override = StepperOverrideConfig(compile=override_compile)
+    stepper = load_stepper(stepper_path, stepper_override)
+    assert _get_inner_single_module_config(stepper).compile == override_compile
+    assert _get_inner_single_module_step(stepper).module.is_compiled == override_compile
+
+    stepper_config = load_stepper_config_with_override(stepper_path, stepper_override)
+    assert stepper_config.step.config["wrapped_step"]["config"]["compile"] == (
+        override_compile
+    )
 
 
 @pytest.mark.medium_duration
