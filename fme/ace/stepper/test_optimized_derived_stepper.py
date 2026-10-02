@@ -50,17 +50,21 @@ class _AddBias(torch.nn.Module):
         return x + self.bias
 
 
-def _dataset_info(with_spatial_masks: bool = False) -> DatasetInfo:
-    mask = torch.ones(*IMG_SHAPE, N_LEVELS, device=DEVICE)
+def _dataset_info(
+    with_spatial_masks: bool = False, idepth: list[float] | None = None
+) -> DatasetInfo:
+    idepth = [0.0, 10.0, 500.0] if idepth is None else idepth
+    n_levels = len(idepth) - 1
+    mask = torch.ones(*IMG_SHAPE, n_levels, device=DEVICE)
     mask[0] = 0.0  # a land row
-    masks = {f"mask_{k}": mask[..., k] for k in range(N_LEVELS)}
+    masks = {f"mask_{k}": mask[..., k] for k in range(n_levels)}
     return DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
             lat=torch.linspace(-60.0, 60.0, IMG_SHAPE[0], device=DEVICE),
             lon=torch.linspace(0.0, 300.0, IMG_SHAPE[1], device=DEVICE),
         ),
         vertical_coordinate=DepthCoordinate(
-            idepth=torch.tensor([0.0, 10.0, 500.0], device=DEVICE), mask=mask
+            idepth=torch.tensor(idepth, device=DEVICE), mask=mask
         ),
         spatial_mask_provider=SpatialMaskProvider(
             masks={**masks, "mask_2d": masks["mask_0"]}
@@ -513,3 +517,110 @@ def test_train_on_batch_with_layer_ohc():
         for name in ("layer_ohc_0_130", "layer_ohc_130_450"):
             ohc = data[name]
             assert ohc[..., ~wet].isnan().all() and ohc[..., wet].isfinite().all()
+
+
+MLD_IDEPTH = [0.0, 10.0, 50.0, 500.0]
+MLD_NAMES = [f"{v}_{k}" for v in ("so", "thetao") for k in range(len(MLD_IDEPTH) - 1)]
+MLD_OHC_NAMES = MLD_NAMES + ["hfds_total_area"]
+
+
+def _mld_train_stepper(detach_weights: bool):
+    """mld_wright97-only loss (zero weight on every output channel), and the
+    ocean_corrector's weighted_temperature heat-content correction with mld
+    weights."""
+    module = _DropForcingAddBias(len(MLD_OHC_NAMES))
+    in_names = MLD_OHC_NAMES + ["sea_surface_fraction"]
+    corrector_config = {
+        "ocean_heat_content_correction": {
+            "method": "weighted_temperature",
+            "weights": {"type": "mld"},
+            "detach_weights": detach_weights,
+        }
+    }
+    stepper_config = StepperConfig(
+        input_masking=StaticSpatialMaskingConfig(
+            mask_value=0,
+            fill_value=0.0,
+            exclude_names_and_prefixes=["sea_surface_fraction"],
+        ),
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=MLD_OHC_NAMES,
+                    normalization=trivial_network_and_loss_normalization(in_names),
+                    corrector=CorrectorSelector("ocean_corrector", corrector_config),
+                )
+            ),
+        ),
+    )
+    train_config = dacite.from_dict(
+        TrainStepperConfig,
+        {
+            "loss": {"type": "MSE", "weights": {n: 0.0 for n in MLD_OHC_NAMES}},
+            "optimized_derived_variables": [
+                {"name": "mld_wright97", "stds": {"mld_wright97": 10.0}}
+            ],
+        },
+        config=dacite.Config(strict=True),
+    )
+    return train_config.get_train_stepper(
+        stepper_config,
+        _dataset_info(with_spatial_masks=True, idepth=MLD_IDEPTH),
+    )
+
+
+def _mld_data(n_timesteps: int) -> BatchData:
+    """Stratified columns, so the density threshold is crossed between the
+    reference layer and the level below it."""
+    data = BatchData.new_for_testing(
+        names=MLD_OHC_NAMES + ["sea_surface_fraction"],
+        n_samples=2,
+        n_timesteps=n_timesteps,
+        img_shape=IMG_SHAPE,
+    )
+    g = torch.Generator().manual_seed(0)
+    shape = data.data["so_0"].shape
+    for k in range(len(MLD_IDEPTH) - 1):
+        data.data[f"so_{k}"].copy_(35.0 + 0.1 * torch.rand(shape, generator=g))
+        data.data[f"thetao_{k}"].copy_(20.0 - 6.0 * k + torch.rand(shape, generator=g))
+    data.data["hfds_total_area"].copy_(100.0 * torch.randn(shape, generator=g))
+    data.data["sea_surface_fraction"].fill_(1.0)
+    for name in MLD_OHC_NAMES:  # land row, as real data carries it
+        data.data[name][..., 0, :] = float("nan")
+    return data
+
+
+def test_mld_wright97_loss_with_detached_mld_ohc_corrector():
+    """mld_wright97 as the only loss term, with the weighted_temperature mld
+    corrector: the loss gradient reaches the thetao and so channels through
+    mld_wright97 with the corrector weights detached, and detaching them
+    changes the gradient of a two-step rollout (their path through the
+    step-1 prediction is cut)."""
+    grads = {}
+    for detach in (True, False):
+        torch.manual_seed(0)
+        stepper = _mld_train_stepper(detach)
+        (bias,) = stepper.modules.parameters()
+        captured: list[torch.Tensor] = []
+        bias.register_hook(lambda grad: captured.append(grad.detach().clone()))
+        out = stepper.train_on_batch(
+            _mld_data(n_timesteps=3),
+            optimization=OptimizationConfig(lr=0.0).build(
+                modules=stepper.modules, max_epochs=1
+            ),
+            compute_derived_variables=True,
+        )
+        assert torch.isfinite(out.metrics["loss"])
+        assert out.per_channel_losses is not None
+        assert out.per_channel_losses["mld_wright97"].loss > 0.0
+        assert "mld_wright97" in out.gen_data
+        (grad,) = captured
+        assert torch.isfinite(grad).all()
+        grads[detach] = grad.flatten()
+    moved = dict(zip(MLD_OHC_NAMES, grads[True] != 0))
+    assert any(moved[f"thetao_{k}"] for k in range(len(MLD_IDEPTH) - 1))
+    assert any(moved[f"so_{k}"] for k in range(len(MLD_IDEPTH) - 1))
+    assert not torch.allclose(grads[True], grads[False])

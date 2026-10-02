@@ -31,6 +31,10 @@ Registered variables:
                    NaN where mask_0 == 0 or sum_k h_k == 0 (band absent)
                    bands partitioning [0, inf): sum_b = OceanData.ocean_heat_content
 
+    mld_wright97:  OceanData.mld_wright97 [m]: density-threshold mixed layer
+                   depth (fme.core.ocean_eos._mixed_layer_depth, defaults)
+                   NaN where mask_0 == 0
+
 pbo_wright97 is a proxy for MOM6 ``pbo`` (bottom pressure) up to the static
 ``RHO_0 * G_EARTH * deptho`` and the global mean; zos is demeaned in the data,
 so both terms are demeaned here and a global offset of predicted zos or of C
@@ -54,6 +58,8 @@ other band the linearization
 with ``hbar_k`` the area-weighted mean of ``h_k`` over the cells where the band
 exists and stds from the loss normalizer (levels fully correlated). On the
 training data this bound is far above the data std of the default bands.
+Loss scale of mld_wright97 has no default and must be given in ``stds``
+(target-data measurement: .scratch/2026-09-24-0145-rho-eos-loss/11_mld_magnitudes.py).
 """
 
 import dataclasses
@@ -66,9 +72,10 @@ from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WA
 from fme.core.coordinates import DepthCoordinate, VerticalCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
-from fme.core.ocean_data import LAYER_OHC_DEFAULT_BANDS, layer_ohc_name
+from fme.core.ocean_data import LAYER_OHC_DEFAULT_BANDS, OceanData, layer_ohc_name
 from fme.core.ocean_eos import (
     G_EARTH,
+    MLD_REF_LAYER,
     RHO_0,
     boussinesq_pressure,
     interface_to_center_depth,
@@ -169,7 +176,8 @@ class OptimizedDerivedVariableConfig:
             the globally demeaned ``-(1/RHO_0) sum_k rho_wright97_k dz_k`` [m].
             ``"layer_ohc"`` produces one ``layer_ohc_{a}_{b}`` per band, the
             ocean heat content [J m-2] of ``thetao_{k}`` between depths ``a``
-            and ``b`` (see ``layer_ohc_name``).
+            and ``b`` (see ``layer_ohc_name``). ``"mld_wright97"`` produces
+            ``mld_wright97``, ``OceanData.mld_wright97`` [m].
         weight: Loss weight of every name this variable produces.
         levels: Levels ``k`` to produce; all levels of the depth coordinate by
             default. Must be unset for the column variables, which use every
@@ -178,11 +186,13 @@ class OptimizedDerivedVariableConfig:
             ``rho_wright97``, ``PBO_WRIGHT97_STD`` /
             ``STERIC_HEIGHT_WRIGHT97_STD`` for the column variables, the
             ``LAYER_OHC_DEFAULT_STDS`` for the default ``layer_ohc`` bands and
-            the correlated linearized bound for other bands).
+            the correlated linearized bound for other bands). Required for
+            ``mld_wright97``, which has no default.
         thetao_clamp: ``[min, max]`` [degC] ``thetao_k`` is clamped to before
-            the EOS, for prediction and target. Not used by ``layer_ohc``.
+            the EOS, for prediction and target. Not used by ``layer_ohc`` or
+            ``mld_wright97``.
         so_clamp: ``[min, max]`` [PSU] ``so_k`` is clamped to before the EOS.
-            Not used by ``layer_ohc``.
+            Not used by ``layer_ohc`` or ``mld_wright97``.
         bands: ``layer_ohc`` only: depth bands ``[top, bottom]`` [m], ``0 <=
             top < bottom``, ``bottom`` None (sea floor) on the last band only.
             ``LAYER_OHC_DEFAULT_BANDS`` by default. Bands may overlap or leave
@@ -192,7 +202,11 @@ class OptimizedDerivedVariableConfig:
     """
 
     name: Literal[
-        "rho_wright97", "pbo_wright97", "steric_height_wright97", "layer_ohc"
+        "rho_wright97",
+        "pbo_wright97",
+        "steric_height_wright97",
+        "layer_ohc",
+        "mld_wright97",
     ] = "rho_wright97"
     weight: float = 1.0
     levels: list[int] | None = None
@@ -212,16 +226,20 @@ class OptimizedDerivedVariableConfig:
             if self.bands is None:
                 self.bands = [list(band) for band in LAYER_OHC_DEFAULT_BANDS]
             _validate_bands(self.bands)
-            if self.thetao_clamp != list(THETAO_CLAMP_RANGE) or self.so_clamp != list(
-                SO_CLAMP_RANGE
-            ):
-                raise ValueError(
-                    "thetao_clamp and so_clamp are unused by 'layer_ohc' (no EOS); "
-                    "leave them at their defaults."
-                )
         elif self.bands is not None:
             raise ValueError(f"bands is only for 'layer_ohc', got name {self.name!r}")
-        if self.name in (*_COLUMN_NAMES, "layer_ohc") and self.levels is not None:
+        if self.name in ("layer_ohc", "mld_wright97") and (
+            self.thetao_clamp != list(THETAO_CLAMP_RANGE)
+            or self.so_clamp != list(SO_CLAMP_RANGE)
+        ):
+            raise ValueError(
+                f"thetao_clamp and so_clamp are unused by {self.name!r}; "
+                "leave them at their defaults."
+            )
+        if (
+            self.name in (*_COLUMN_NAMES, "layer_ohc", "mld_wright97")
+            and self.levels is not None
+        ):
             raise ValueError(
                 f"levels must be unset for {self.name!r}, which integrates every "
                 f"level, got {self.levels}"
@@ -504,6 +522,46 @@ class _LayerOhcDerivation:
         return stds
 
 
+class _MldDerivation:
+    """``mld_wright97``: ``OceanData.mld_wright97`` on a depth coordinate."""
+
+    def __init__(self, vertical_coordinate: DepthCoordinate):
+        self._coord = vertical_coordinate
+
+    def __call__(self, data: TensorMapping) -> TensorDict:
+        return {"mld_wright97": OceanData(data, self._coord).mld_wright97}
+
+
+def _build_mld(
+    config: OptimizedDerivedVariableConfig,
+    vertical_coordinate: DepthCoordinate,
+    loss_names: list[str],
+) -> _MldDerivation:
+    if "mld_wright97" not in config.stds:
+        raise ValueError(
+            "optimized derived variable 'mld_wright97' has no default loss scale; "
+            "set stds: {mld_wright97: <std [m]>}."
+        )
+    n_levels = len(vertical_coordinate) - 1
+    if n_levels < MLD_REF_LAYER + 2:
+        raise ValueError(
+            "optimized derived variable 'mld_wright97' needs at least "
+            f"{MLD_REF_LAYER + 2} levels, got {n_levels}."
+        )
+    missing = [
+        n
+        for k in range(n_levels)
+        for n in (f"so_{k}", f"thetao_{k}")
+        if n not in loss_names
+    ]
+    if missing:
+        raise ValueError(
+            "optimized derived variable 'mld_wright97' needs these inputs among the "
+            f"loss names: {missing}."
+        )
+    return _MldDerivation(vertical_coordinate)
+
+
 def layer_ohc_derivation(
     vertical_coordinate: DepthCoordinate,
 ) -> _LayerOhcDerivation | None:
@@ -602,7 +660,12 @@ def build_optimized_derived_variables(
     means: dict[str, float] = {}
     stds: dict[str, float] = {}
     for config in configs:
-        if config.name not in ("rho_wright97", "layer_ohc", *_COLUMN_NAMES):
+        if config.name not in (
+            "rho_wright97",
+            "layer_ohc",
+            "mld_wright97",
+            *_COLUMN_NAMES,
+        ):
             raise ValueError(f"unknown optimized derived variable {config.name!r}")
         # Only a DepthCoordinate carries the idepth and mask rho_wright97 needs; the
         # VerticalCoordinate interface has no depth accessor to use instead.
@@ -622,6 +685,19 @@ def build_optimized_derived_variables(
             )
             _add_names(
                 config, derivation.names, default_stds, loss_names, weights, means, stds
+            )
+            derivations.append(derivation)
+            continue
+        if config.name == "mld_wright97":
+            derivation = _build_mld(config, vertical_coordinate, loss_names)
+            _add_names(
+                config,
+                ["mld_wright97"],
+                {},
+                loss_names,
+                weights,
+                means,
+                stds,
             )
             derivations.append(derivation)
             continue

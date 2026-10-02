@@ -967,7 +967,16 @@ def _regular_and_optimized(vertical_coordinate: DepthCoordinate, seed=0):
             OptimizedDerivedVariableConfig(name="pbo_wright97"),
             OptimizedDerivedVariableConfig(name="steric_height_wright97"),
         ]
-        + ([OptimizedDerivedVariableConfig(name="layer_ohc")] if nz > 2 else []),
+        + (
+            [
+                OptimizedDerivedVariableConfig(name="layer_ohc"),
+                OptimizedDerivedVariableConfig(
+                    name="mld_wright97", stds={"mld_wright97": 1.0}
+                ),
+            ]
+            if nz > 2
+            else []
+        ),
         vertical_coordinate=vertical_coordinate,
         network_normalizer=normalizer,
         loss_normalizer=normalizer,
@@ -979,7 +988,9 @@ def _regular_and_optimized(vertical_coordinate: DepthCoordinate, seed=0):
 
 def test_regular_derived_equals_optimized():
     regular, optimized = _regular_and_optimized(_deep_coordinate(with_deptho=True))
-    assert len(optimized) == (len(_DEEP_IDEPTH) - 1) + 2 + len(LAYER_OHC_DEFAULT_BANDS)
+    assert len(optimized) == (len(_DEEP_IDEPTH) - 1) + 2 + len(
+        LAYER_OHC_DEFAULT_BANDS
+    ) + len(["mld_wright97"])
     for name, expected in optimized.items():
         torch.testing.assert_close(regular[name], expected, equal_nan=True)
 
@@ -1013,3 +1024,80 @@ def test_regular_column_skipped_without_cell_area_or_zos():
     )
     assert {"rho_wright97_0", "rho_wright97_1", "layer_ohc_0_130"} <= set(out)
     assert not {"pbo_wright97", "steric_height_wright97"}.intersection(out)
+
+
+def _build_mld(vertical_coordinate=None, loss_names=None, **kwargs):
+    kwargs.setdefault("stds", {"mld_wright97": 20.0})
+    coordinate = (
+        vertical_coordinate
+        if vertical_coordinate is not None
+        else _deep_coordinate(with_deptho=True)
+    )
+    nz = len(coordinate) - 1
+    names = [f"{v}_{k}" for v in ("so", "thetao") for k in range(nz)]
+    normalizer = StandardNormalizer(
+        means={n: torch.tensor(0.0) for n in names},
+        stds={n: torch.tensor(1.0) for n in names},
+    )
+    return build_optimized_derived_variables(
+        [OptimizedDerivedVariableConfig(name="mld_wright97", **kwargs)],
+        vertical_coordinate=coordinate.to(get_device()),
+        network_normalizer=normalizer,
+        loss_normalizer=normalizer,
+        loss_names=names if loss_names is None else loss_names,
+    )
+
+
+def test_mld_names_stds_and_weight():
+    derived = _build_mld(stds={"mld_wright97": 5.0}, weight=2.0)
+    assert derived.names == ["mld_wright97"]
+    assert derived.stds == {"mld_wright97": 5.0}
+    assert derived.means == {"mld_wright97": 0.0}
+    assert derived.weights == {"mld_wright97": 2.0}
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"levels": [0, 1]},
+        {"thetao_clamp": [-2.0, 30.0]},
+        {"so_clamp": [1.0, 40.0]},
+    ],
+)
+def test_mld_config_validation(kwargs):
+    with pytest.raises(ValueError):
+        OptimizedDerivedVariableConfig(name="mld_wright97", **kwargs)
+
+
+def test_mld_build_validation():
+    with pytest.raises(ValueError, match="no default loss scale"):
+        _build_mld(stds={})
+    with pytest.raises(ValueError, match="at least"):
+        _build_mld(DepthCoordinate(IDEPTH, _mask()))
+    nz = len(_DEEP_IDEPTH) - 1
+    names = [f"{v}_{k}" for v in ("so", "thetao") for k in range(nz)]
+    with pytest.raises(ValueError, match="so_4"):
+        _build_mld(loss_names=[n for n in names if n != "so_4"])
+
+
+def test_mld_gradient_reaches_thetao_and_so():
+    """d mld_wright97 / d(thetao_k, so_k) is finite everywhere and nonzero
+    where a threshold crossing is interpolated; land is NaN."""
+    nz = len(_DEEP_IDEPTH) - 1
+    g = torch.Generator().manual_seed(0)
+    shape = (2, 1, N_LAT, N_LON)
+    data = {}
+    for k in range(nz):
+        data[f"so_{k}"] = 35.0 + 0.1 * torch.rand(shape, generator=g)
+        data[f"thetao_{k}"] = 20.0 - 4.0 * k + torch.rand(shape, generator=g)
+    data = {k: v.to(get_device()).requires_grad_() for k, v in data.items()}
+    mld = _build_mld()(data)["mld_wright97"]
+    assert mld[..., 0, :].isnan().all()
+    assert mld[..., 1:, :].isfinite().all()
+    mld[..., 1:, :].sum().backward()
+    for k in range(nz):
+        for v in ("so", "thetao"):
+            grad = data[f"{v}_{k}"].grad
+            assert grad is not None and grad.isfinite().all()
+    assert (data["thetao_2"].grad != 0).any()
+    assert (data["so_2"].grad != 0).any()
