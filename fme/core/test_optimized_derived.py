@@ -1,3 +1,5 @@
+import datetime
+
 import pytest
 import torch
 
@@ -920,3 +922,94 @@ def test_layer_ohc_build_validation(kwargs, match):
         return
     with pytest.raises(ValueError, match=match):
         _build_ohc(**kwargs)
+
+
+# ------------------------------------------- regular ocean derived variables
+
+
+def _regular_and_optimized(vertical_coordinate: DepthCoordinate, seed=0):
+    """Outputs of compute_ocean_derived_quantities and of default-config
+    optimized derived variables on the same data."""
+    from fme.core.coordinates import LatLonCoordinates
+    from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
+
+    nz = len(vertical_coordinate) - 1
+    names = [f"{v}_{k}" for v in ("so", "thetao") for k in range(nz)]
+    g = torch.Generator().manual_seed(seed)
+    shape = (2, 1, N_LAT, N_LON)
+    data = {
+        **{f"so_{k}": 34.0 + 2.0 * torch.rand(shape, generator=g) for k in range(nz)},
+        **{
+            f"thetao_{k}": 2.0 + 20.0 * torch.rand(shape, generator=g)
+            for k in range(nz)
+        },
+        "zos": 0.5 * torch.randn(shape, generator=g),
+    }
+    data = {k: v.to(get_device()) for k, v in data.items()}
+    coords = LatLonCoordinates(
+        lat=torch.linspace(-60.0, 60.0, N_LAT), lon=torch.linspace(0.0, 300.0, N_LON)
+    ).to(get_device())
+    vertical_coordinate = vertical_coordinate.to(get_device())
+    regular = compute_ocean_derived_quantities(
+        dict(data),
+        depth_coordinate=vertical_coordinate,
+        timestep=datetime.timedelta(days=5),
+        cell_area_provider=coords,
+    )
+    means = {n: 35.0 if n.startswith("so") else 10.0 for n in names}
+    normalizer = StandardNormalizer(
+        means={k: torch.tensor(v) for k, v in means.items()},
+        stds={k: torch.tensor(1.0) for k in names},
+    )
+    optimized = build_optimized_derived_variables(
+        [
+            OptimizedDerivedVariableConfig(name="rho_wright97"),
+            OptimizedDerivedVariableConfig(name="pbo_wright97"),
+            OptimizedDerivedVariableConfig(name="steric_height_wright97"),
+        ]
+        + ([OptimizedDerivedVariableConfig(name="layer_ohc")] if nz > 2 else []),
+        vertical_coordinate=vertical_coordinate,
+        network_normalizer=normalizer,
+        loss_normalizer=normalizer,
+        loss_names=names + ["zos"],
+        gridded_operations=coords.get_gridded_operations(),
+    )(data)
+    return regular, optimized
+
+
+def test_regular_derived_equals_optimized():
+    regular, optimized = _regular_and_optimized(_deep_coordinate(with_deptho=True))
+    assert len(optimized) == (len(_DEEP_IDEPTH) - 1) + 2 + len(LAYER_OHC_DEFAULT_BANDS)
+    for name, expected in optimized.items():
+        torch.testing.assert_close(regular[name], expected, equal_nan=True)
+
+
+def test_regular_layer_ohc_drops_dry_bands_and_masks_match():
+    """IDEPTH ends at 1000 m: the default bands below are dry, absent from the
+    output and the masks; the masks are the present bands' finite cells."""
+    from fme.core.ocean_derived_variables import ocean_derived_spatial_masks
+
+    coordinate = DepthCoordinate(IDEPTH, _mask(), DEPTHO)
+    regular, _ = _regular_and_optimized(coordinate)
+    present = ["layer_ohc_0_130", "layer_ohc_130_450", "layer_ohc_450_1200"]
+    assert sorted(n for n in regular if n.startswith("layer_ohc")) == sorted(present)
+    masks = ocean_derived_spatial_masks(coordinate)
+    assert set(masks) == {f"mask_{n}" for n in present}
+    for name in present:
+        torch.testing.assert_close(
+            masks[f"mask_{name}"].bool().to(get_device()).expand_as(regular[name]),
+            regular[name].isfinite(),
+        )
+
+
+def test_regular_column_skipped_without_cell_area_or_zos():
+    from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
+
+    data = _data()
+    out = compute_ocean_derived_quantities(
+        dict(data),
+        depth_coordinate=DepthCoordinate(IDEPTH, _mask()).to(get_device()),
+        timestep=datetime.timedelta(days=5),
+    )
+    assert {"rho_wright97_0", "rho_wright97_1", "layer_ohc_0_130"} <= set(out)
+    assert not {"pbo_wright97", "steric_height_wright97"}.intersection(out)

@@ -50,10 +50,10 @@ from fme.core.normalizer import (
     StandardNormalizer,
 )
 from fme.core.ocean import OceanConfig
+from fme.core.ocean_derived_variables import ocean_derived_spatial_masks
 from fme.core.optimization import NullOptimization
 from fme.core.optimized_derived import (
     OptimizedDerivedVariableConfig,
-    OptimizedDerivedVariables,
     build_optimized_derived_variables,
 )
 from fme.core.rand import use_generator
@@ -344,32 +344,6 @@ def _prepend_timesteps(
     return EnsembleTensorDict(
         {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
     )
-
-
-class _DeriveWithOptimizedDerived:
-    """``derive(data, forcing) ∪ derived(data)``: the stepper's derived
-    variables plus the optimized derived variables of its loss.
-    """
-
-    def __init__(
-        self,
-        derive: Callable[[TensorMapping, TensorMapping], TensorDict],
-        derived: OptimizedDerivedVariables,
-    ):
-        self.derive = derive
-        self.derived = derived
-
-    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        out = self.derive(data, forcing_data)
-        try:
-            out.update(self.derived(data))
-        except KeyError as key_error:
-            # inputs absent, as the ocean derived-variable registry skips
-            logging.debug(
-                f"Could not compute {self.derived.names} because {key_error} "
-                "is missing"
-            )
-        return out
 
 
 def _get_time_dim_size(data: TensorDict) -> int:
@@ -879,7 +853,6 @@ class Stepper:
         self._step_obj = step
         self._dataset_info = dataset_info
         self._derive_func = derive_func
-        self._optimized_derived: OptimizedDerivedVariables | None = None
         self._output_masking = output_masking
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
@@ -919,10 +892,6 @@ class Stepper:
         """Build a StepLoss from the given config using this stepper's normalizer
         and dataset info.
 
-        The optimized derived variables also become derived outputs of this
-        stepper: ``derive_func`` adds them to generated and target data, so
-        aggregators log the fields the loss optimizes.
-
         Args:
             loss_config: The loss configuration to build from.
             optimized_derived_variables: Optional derived variables computed
@@ -950,7 +919,6 @@ class Stepper:
                     for n in derived.names
                 )
             )
-        self._optimized_derived = derived
         return loss_config.build(
             self._dataset_info.gridded_operations,
             out_names=self.loss_names,
@@ -986,22 +954,22 @@ class Stepper:
 
     @property
     def spatial_masks(self) -> dict[str, torch.Tensor]:
-        """Spatial masks of the optimized derived variables, keyed
-        ``mask_<name>``, for the aggregators' spatial mask provider; empty
-        before ``build_loss`` or without derived variables.
+        """Spatial masks of the ocean derived variables, keyed ``mask_<name>``,
+        for the aggregators' spatial mask provider.
         """
-        if self._optimized_derived is None:
+        try:
+            vertical_coordinate = self._dataset_info.vertical_coordinate
+        except MissingDatasetInfo:
             return {}
         device = get_device()
         return {
-            k: v.to(device) for k, v in self._optimized_derived.spatial_masks.items()
+            k: v.to(device)
+            for k, v in ocean_derived_spatial_masks(vertical_coordinate).items()
         }
 
     @property
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
-        if self._optimized_derived is None:
-            return self._derive_func
-        return _DeriveWithOptimizedDerived(self._derive_func, self._optimized_derived)
+        return self._derive_func
 
     def update_vertical_coordinate(
         self, vertical_coordinate: VerticalCoordinate
@@ -1748,12 +1716,11 @@ class TrainStepper(
         )
 
         self._prognostic_names = self._stepper.prognostic_names
+        self._derive_func = self._stepper.derive_func
         self._loss_obj = StepOutputLoss(
             self._stepper.build_loss(config.loss, config.optimized_derived_variables),
             self._stepper.build_corrector_loss(config.corrector_loss),
         )
-        # after build_loss, which adds the optimized derived variables to it
-        self._derive_func = self._stepper.derive_func
 
     def train_on_batch(
         self,

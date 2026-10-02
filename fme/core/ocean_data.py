@@ -36,6 +36,32 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
+# Default layer_ohc depth bands [m] (maintainer, 2026-09-30: the ranges already
+# analyzed); None is the sea floor.
+LAYER_OHC_DEFAULT_BANDS: list[list[float | None]] = [
+    [0.0, 130.0],
+    [130.0, 450.0],
+    [450.0, 1200.0],
+    [1200.0, 2700.0],
+    [2700.0, None],
+]
+
+
+def _depth_label(x: float | None) -> str:
+    if x is None:
+        return "bottom"
+    if float(x).is_integer():
+        return str(int(x))
+    return str(float(x)).replace(".", "p")
+
+
+def layer_ohc_name(band: list[float | None]) -> str:
+    """``layer_ohc_{a}_{b}``: bounds as ints when integral, else ``.`` -> ``p``;
+    an open bottom is ``bottom`` (``layer_ohc_2700_bottom``).
+    """
+    return f"layer_ohc_{_depth_label(band[0])}_{_depth_label(band[1])}"
+
+
 @runtime_checkable
 class HasOceanDepthIntegral(Protocol):
     def depth_integral(
@@ -198,6 +224,89 @@ class OceanData:
         mask_0 = mask.select(dim=-1, index=0).expand(mld.shape)
         return mld.where(mask_0 > 0, float("nan"))
 
+    def _wright97_depth_coordinate(self, label: str):
+        from fme.core.coordinates import DepthCoordinate
+
+        coord = self._depth_coordinate
+        # the derivations need idepth, mask and dz, which only DepthCoordinate has
+        if not isinstance(coord, DepthCoordinate):
+            raise ValueError(
+                f"A DepthCoordinate must be provided to compute {label}, "
+                f"got {type(coord).__name__}."
+            )
+        return coord
+
+    def _rho_wright97_derivation(self):
+        from fme.core.optimized_derived import _RhoDerivation
+
+        coord = self._wright97_depth_coordinate("rho_wright97")
+        return _RhoDerivation(list(range(len(coord) - 1)), coord.idepth, coord.mask)
+
+    @property
+    def rho_wright97(self) -> TensorDict:
+        """``rho_wright97_{k}`` [kg m-3] for every level of the depth
+        coordinate: ``rho_wright97`` of ``fme.core.optimized_derived`` with
+        the default clamps.
+
+        Raises:
+            ValueError: If the depth coordinate is not a ``DepthCoordinate``.
+            KeyError: If ``so_{k}`` or ``thetao_{k}`` is missing.
+        """
+        return self._rho_wright97_derivation()(self.data)
+
+    def _column_wright97(self, name: str) -> torch.Tensor:
+        from fme.core.optimized_derived import _ColumnDerivation
+
+        coord = self._wright97_depth_coordinate(name)
+        if self._cell_area_provider is None:
+            raise KeyError(f"cell area, needed for the global mean of {name}")
+        derivation = _ColumnDerivation(
+            name,
+            self._rho_wright97_derivation(),
+            dz=coord.dz,
+            surface_mask=coord.mask[..., 0],
+            gridded_operations=_CellAreaMean(self._cell_area_provider.area_weights_m2),
+        )
+        return derivation(self.data)[name]
+
+    @property
+    def pbo_wright97(self) -> torch.Tensor:
+        """Globally demeaned bottom pressure anomaly [Pa]: ``pbo_wright97`` of
+        ``fme.core.optimized_derived``, with the global mean weighted by
+        ``area_weights_m2`` of the cell area provider.
+
+        Raises:
+            ValueError: If the depth coordinate is not a ``DepthCoordinate``.
+            KeyError: If ``so_{k}``, ``thetao_{k}``, ``zos`` or the cell area
+                provider is missing.
+        """
+        return self._column_wright97("pbo_wright97")
+
+    @property
+    def steric_height_wright97(self) -> torch.Tensor:
+        """Globally demeaned steric height [m]: ``steric_height_wright97`` of
+        ``fme.core.optimized_derived``, global mean as ``pbo_wright97``.
+        """
+        return self._column_wright97("steric_height_wright97")
+
+    @property
+    def layer_ohc(self) -> TensorDict:
+        """``layer_ohc_{a}_{b}`` [J m-2] for ``LAYER_OHC_DEFAULT_BANDS``:
+        ``layer_ohc`` of ``fme.core.optimized_derived``.
+
+        Raises:
+            ValueError: If the depth coordinate is not a ``DepthCoordinate``.
+            KeyError: If a ``thetao_{k}`` of a band is missing, or no band
+                has a wet layer. Bands without one are left out.
+        """
+        from fme.core.optimized_derived import layer_ohc_derivation
+
+        coord = self._wright97_depth_coordinate("layer_ohc")
+        derivation = layer_ohc_derivation(coord)
+        if derivation is None:
+            raise KeyError("a wet layer_ohc band")
+        return derivation(self.data)
+
     @property
     def sea_surface_fraction(self) -> torch.Tensor:
         """Returns the sea surface fraction."""
@@ -312,3 +421,25 @@ class OceanData:
     def sea_ice_volume(self) -> torch.Tensor:
         """Returns the sea ice volume."""
         return self._get("sea_ice_volume")
+
+
+class _CellAreaMean:
+    """``regional_area_weighted_mean`` of ``GriddedOperations``, area from
+    ``area_weights_m2``.
+    """
+
+    def __init__(self, area_weights_m2: torch.Tensor):
+        self._area = area_weights_m2
+
+    def regional_area_weighted_mean(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+    ) -> torch.Tensor:
+        from fme.core.distributed import Distributed
+
+        weights = regional_weights * self._area.to(device=data.device, dtype=data.dtype)
+        return Distributed.get_instance().weighted_mean(
+            data, weights, dim=(-2, -1), keepdim=keepdim
+        )

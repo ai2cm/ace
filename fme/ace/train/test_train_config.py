@@ -45,7 +45,6 @@ from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import StepLossConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
-from fme.core.optimized_derived import OptimizedDerivedVariableConfig
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
@@ -642,7 +641,7 @@ class TestGetInferenceCallback:
 
 def _layer_ohc_dataset_info():
     """Ocean grid with a land row and a shelf row (wet only above 10 m), so
-    no stored mask equals the band masks of [0, 100] or [100, bottom]."""
+    no stored mask equals the band masks of [130, 450] or [450, 1200]."""
     device = get_device()
     img_shape, n_levels = (4, 6), 2
     mask = torch.ones(*img_shape, n_levels, device=device)
@@ -666,10 +665,10 @@ def _layer_ohc_dataset_info():
 
 def test_layer_ohc_aggregator_means_finite(tmp_path):
     """Issue 15: train, validation, and inline-inference aggregators built
-    through TrainConfig.build_trainer log finite layer_ohc_* metrics."""
+    through TrainConfig.build_trainer log finite metrics of the regular
+    layer_ohc_* derived variables, with no optimized derived variables."""
     torch.manual_seed(0)
-    bands: list[list[float | None]] = [[0.0, 100.0], [100.0, None]]
-    ohc_names = ["layer_ohc_0_100", "layer_ohc_100_bottom"]
+    ohc_names = ["layer_ohc_0_130", "layer_ohc_130_450", "layer_ohc_450_1200"]
     dataset_info = _layer_ohc_dataset_info()
     data = _data(n_timesteps=2)
     inference = _make_inference_config(name="inference")
@@ -680,9 +679,6 @@ def test_layer_ohc_aggregator_means_finite(tmp_path):
         stepper_training=TrainStepperConfig(
             n_forward_steps=1,
             loss=StepLossConfig(type="MSE"),
-            optimized_derived_variables=[
-                OptimizedDerivedVariableConfig(name="layer_ohc", bands=bands)
-            ],
         ),
     )
     train_data = MagicMock(dataset_info=dataset_info, variable_metadata={})

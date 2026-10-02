@@ -5,7 +5,9 @@ enter the training loss as extra channels, for both prediction and target.
     L  = StepLoss over out_names ∪ derived names, weight w_d per derived name
 
 Nothing is added to the dataset or to the stepper checkpoint; the feature is
-configured on the training side only.
+configured on the training side only. Each registered variable is also a regular
+ocean derived variable (``fme.core.ocean_derived_variables``, default config,
+default ``layer_ohc`` bands), which is what aggregators log.
 
 Registered variables:
 
@@ -56,7 +58,7 @@ training data this bound is far above the data std of the default bands.
 
 import dataclasses
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, Protocol
 
 import torch
 
@@ -64,6 +66,7 @@ from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WA
 from fme.core.coordinates import DepthCoordinate, VerticalCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
+from fme.core.ocean_data import LAYER_OHC_DEFAULT_BANDS, layer_ohc_name
 from fme.core.ocean_eos import (
     G_EARTH,
     RHO_0,
@@ -72,6 +75,16 @@ from fme.core.ocean_eos import (
     wright97_anomaly,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+class HasRegionalAreaWeightedMean(Protocol):
+    def regional_area_weighted_mean(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+    ) -> torch.Tensor: ...
+
 
 # Values substituted for masked or NaN inputs before the EOS, so its gradient
 # is finite there; the output is NaN at those points either way.
@@ -101,16 +114,6 @@ _DEFAULT_COLUMN_STDS = {
     "steric_height_wright97": STERIC_HEIGHT_WRIGHT97_STD,
 }
 
-# Default layer_ohc depth bands [m] (maintainer, 2026-09-30: the ranges already
-# analyzed); None is the sea floor.
-LAYER_OHC_DEFAULT_BANDS: list[list[float | None]] = [
-    [0.0, 130.0],
-    [130.0, 450.0],
-    [450.0, 1200.0],
-    [1200.0, 2700.0],
-    [2700.0, None],
-]
-
 # Default loss scales of the default layer_ohc bands [J m-2]: std of the target
 # field's per-cell time anomaly, area-weighted over the cells where the band
 # exists, over the training windows
@@ -125,21 +128,6 @@ LAYER_OHC_DEFAULT_STDS = {
     "layer_ohc_1200_2700": 2.5e8,
     "layer_ohc_2700_bottom": 1.3e8,
 }
-
-
-def _depth_label(x: float | None) -> str:
-    if x is None:
-        return "bottom"
-    if float(x).is_integer():
-        return str(int(x))
-    return str(float(x)).replace(".", "p")
-
-
-def layer_ohc_name(band: list[float | None]) -> str:
-    """``layer_ohc_{a}_{b}``: bounds as ints when integral, else ``.`` -> ``p``;
-    an open bottom is ``bottom`` (``layer_ohc_2700_bottom``).
-    """
-    return f"layer_ohc_{_depth_label(band[0])}_{_depth_label(band[1])}"
 
 
 def _validate_bands(bands: list[list[float | None]]) -> None:
@@ -271,18 +259,6 @@ class OptimizedDerivedVariables:
         self.means = means
         self.stds = stds
 
-    @property
-    def spatial_masks(self) -> dict[str, torch.Tensor]:
-        """``mask_<name>`` for each derived field whose NaN pattern no data
-        mask matches (``layer_ohc_*``: the cells where the band exists), for
-        the aggregators' spatial mask provider. Not part of the loss or the
-        stepper checkpoint.
-        """
-        masks: dict[str, torch.Tensor] = {}
-        for derivation in self._derivations:
-            masks.update(getattr(derivation, "spatial_masks", {}))
-        return masks
-
     def __call__(self, data: TensorMapping) -> TensorDict:
         """The derived fields only, computed from ``data``."""
         out: TensorDict = {}
@@ -385,7 +361,7 @@ class _ColumnDerivation:
         rho: _RhoDerivation,
         dz: torch.Tensor,
         surface_mask: torch.Tensor,
-        gridded_operations: GriddedOperations,
+        gridded_operations: HasRegionalAreaWeightedMean,
     ):
         if name not in _COLUMN_NAMES:
             raise ValueError(f"unknown column variable {name!r}")
@@ -442,7 +418,7 @@ class _LayerOhcDerivation:
         idepth: torch.Tensor,
         dz: torch.Tensor,
         surface_mask: torch.Tensor,
-        gridded_operations: GriddedOperations,
+        gridded_operations: GriddedOperations | None = None,
     ):
         self.names = [layer_ohc_name(band) for band in bands]
         z_top = idepth[:-1].to(dz.dtype).cpu()
@@ -510,6 +486,7 @@ class _LayerOhcDerivation:
         """``RHO_0 c_p sum_k hbar_k std(thetao_k)`` per band, ``hbar_k`` the
         area-weighted mean of ``h_k`` over the cells where the band exists.
         """
+        assert self._ops is not None
         stds = {}
         for b, name in enumerate(self.names):
             hbar = self._ops.regional_area_weighted_mean(
@@ -525,6 +502,30 @@ class _LayerOhcDerivation:
                 DENSITY_OF_SEA_WATER_CM4 * SPECIFIC_HEAT_OF_SEA_WATER_CM4 * s
             )
         return stds
+
+
+def layer_ohc_derivation(
+    vertical_coordinate: DepthCoordinate,
+) -> _LayerOhcDerivation | None:
+    """``layer_ohc`` on the ``LAYER_OHC_DEFAULT_BANDS`` that contain a wet
+    layer of ``vertical_coordinate``, as the regular ocean derived variable and
+    its spatial masks use it; None if no band does.
+    """
+
+    def build(bands: list[list[float | None]]) -> _LayerOhcDerivation:
+        return _LayerOhcDerivation(
+            bands,
+            vertical_coordinate.idepth,
+            dz=vertical_coordinate.dz,
+            surface_mask=vertical_coordinate.mask[..., 0],
+        )
+
+    bands = [list(band) for band in LAYER_OHC_DEFAULT_BANDS]
+    derivation = build(bands)
+    wet = [band for band, ks in zip(bands, derivation.band_levels) if ks]
+    if not wet:
+        return None
+    return derivation if len(wet) == len(bands) else build(wet)
 
 
 def _build_layer_ohc(

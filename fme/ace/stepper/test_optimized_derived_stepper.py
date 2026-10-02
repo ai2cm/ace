@@ -269,19 +269,11 @@ def _expected_rho(data, k: int) -> torch.Tensor:
 
 
 def test_train_output_derives_rho_for_aggregators():
-    """With the config, TrainOutput's derived gen and target data carry
-    rho_wright97_k = W97(so_k, thetao_k, p_k), computed by the loss's own
-    OptimizedDerivedVariables."""
+    """Without any optimized derived config, TrainOutput's derived gen and
+    target data carry rho_wright97_k = W97(so_k, thetao_k, p_k) from the
+    regular ocean derived variables."""
     torch.manual_seed(0)
-    stepper = _train_stepper(
-        _AddBias(len(NAMES)),
-        loss=StepLossConfig(type="MSE"),
-        optimized_derived_variables=[OptimizedDerivedVariableConfig()],
-    )
-    assert (
-        stepper._derive_func.derived  # type: ignore[attr-defined]
-        is stepper._loss_obj.step_loss._derive
-    )
+    stepper = _train_stepper(_AddBias(len(NAMES)), loss=StepLossConfig(type="MSE"))
     stepped = stepper.train_on_batch(
         _data(), optimization=NullOptimization(), compute_derived_variables=True
     )
@@ -297,8 +289,8 @@ def test_train_output_derives_rho_for_aggregators():
 
 
 def test_predict_paired_derives_rho_for_inference():
-    """Inline inference (predict_paired) derives rho_wright97_k for prediction
-    and reference."""
+    """Inline inference (predict_paired) derives rho_wright97_k on every level
+    for prediction and reference, whatever levels the loss optimizes."""
     torch.manual_seed(0)
     stepper = _train_stepper(
         _AddBias(len(NAMES)),
@@ -309,32 +301,48 @@ def test_predict_paired_derives_rho_for_inference():
     ic = data.get_start(stepper._stepper.prognostic_names, stepper.n_ic_timesteps)
     paired, _ = stepper.predict_paired(ic, data, compute_derived_variables=True)
     for side in (paired.prediction, paired.reference):
-        assert RHO_NAMES[0] not in side
-        torch.testing.assert_close(
-            side[RHO_NAMES[1]], _expected_rho(side, 1), equal_nan=True
+        for k, name in enumerate(RHO_NAMES):
+            torch.testing.assert_close(
+                side[name], _expected_rho(side, k), equal_nan=True
+            )
+
+
+def test_derived_outputs_independent_of_optimized_config():
+    """derive_func is the vertical coordinate's own, and derived train and
+    inference outputs are identical with and without optimized derived
+    variables in the loss."""
+    outputs = []
+    for configs in (None, [OptimizedDerivedVariableConfig(levels=[1])]):
+        torch.manual_seed(0)
+        stepper = _train_stepper(
+            _AddBias(len(NAMES)),
+            loss=StepLossConfig(type="MSE"),
+            optimized_derived_variables=configs,
         )
-
-
-def test_no_config_derived_outputs_unchanged():
-    """No config: derive_func is the vertical coordinate's own, and no
-    rho_wright97_* appears in derived train or inference outputs."""
-    torch.manual_seed(0)
-    stepper = _train_stepper(_AddBias(len(NAMES)), loss=StepLossConfig(type="MSE"))
-    assert stepper._stepper.derive_func is stepper._stepper._derive_func
-    assert stepper._derive_func is stepper._stepper._derive_func
-    data = _data()
-    stepped = stepper.train_on_batch(
-        data, optimization=NullOptimization(), compute_derived_variables=True
-    )
-    ic = data.get_start(stepper._stepper.prognostic_names, stepper.n_ic_timesteps)
-    paired, _ = stepper.predict_paired(ic, data, compute_derived_variables=True)
-    for side in (
-        stepped.gen_data,
-        stepped.target_data,
-        paired.prediction,
-        paired.reference,
-    ):
-        assert not any(n.startswith("rho_wright97") for n in side)
+        assert stepper._stepper.derive_func is stepper._stepper._derive_func
+        assert stepper._derive_func is stepper._stepper._derive_func
+        data = _data()
+        stepped = stepper.train_on_batch(
+            data, optimization=NullOptimization(), compute_derived_variables=True
+        )
+        ic = data.get_start(stepper._stepper.prognostic_names, stepper.n_ic_timesteps)
+        paired, _ = stepper.predict_paired(ic, data, compute_derived_variables=True)
+        outputs.append(
+            [
+                dict(side)
+                for side in (
+                    stepped.gen_data,
+                    stepped.target_data,
+                    paired.prediction,
+                    paired.reference,
+                )
+            ]
+        )
+    for without, with_ in zip(*outputs):
+        assert set(without) == set(with_)
+        assert {*RHO_NAMES, "steric_height_wright97", "layer_ohc_0_130"} <= set(without)
+        for name in without:
+            torch.testing.assert_close(without[name], with_[name], equal_nan=True)
 
 
 OHC_NAMES = NAMES + ["hfds_total_area"]
@@ -473,8 +481,8 @@ def test_train_on_batch_with_pbo():
 
 def test_train_on_batch_with_layer_ohc():
     """layer_ohc alone carries loss weight: its gradient moves the thetao
-    channels and not so, and TrainOutput's derived gen and target data carry
-    every band."""
+    channels and not so. TrainOutput's derived gen and target data carry the
+    regular default bands, not the optimized ones."""
     torch.manual_seed(0)
     bands: list[list[float | None]] = [[0.0, 100.0], [100.0, None]]
     ohc_names = ["layer_ohc_0_100", "layer_ohc_100_bottom"]
@@ -501,6 +509,7 @@ def test_train_on_batch_with_layer_ohc():
     assert not any(moved[f"so_{k}"] for k in range(N_LEVELS))
     wet = _dataset_info().vertical_coordinate.mask[..., 0] > 0  # type: ignore
     for data in (stepped.gen_data, stepped.target_data):
-        for name in ohc_names:
+        assert not set(ohc_names).intersection(data)
+        for name in ("layer_ohc_0_130", "layer_ohc_130_450"):
             ohc = data[name]
             assert ohc[..., ~wet].isnan().all() and ohc[..., wet].isfinite().all()

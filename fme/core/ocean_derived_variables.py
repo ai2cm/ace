@@ -1,29 +1,44 @@
 import datetime
 import logging
 from collections.abc import Callable, MutableMapping
+from typing import TYPE_CHECKING
 
 import torch
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.ocean_data import (
+    LAYER_OHC_DEFAULT_BANDS,
     HasCellAreaInMetersSquared,
     HasOceanDepthIntegral,
     OceanData,
+    layer_ohc_name,
 )
 from fme.core.typing_ import TensorDict
 
+if TYPE_CHECKING:
+    from fme.core.coordinates import VerticalCoordinate
+
 OceanDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], torch.Tensor]
+OceanMultiDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], TensorDict]
 
 _OCEAN_DERIVED_VARIABLE_REGISTRY: MutableMapping[
     str, tuple[OceanDerivedVariableFunc, VariableMetadata, bool]
 ] = {}
 
+# label -> (func, metadata of the output names known before computing)
+_OCEAN_MULTI_DERIVED_VARIABLE_REGISTRY: MutableMapping[
+    str, tuple[OceanMultiDerivedVariableFunc, dict[str, VariableMetadata]]
+] = {}
+
 
 def get_ocean_derived_variable_metadata() -> dict[str, VariableMetadata]:
-    return {
+    metadata = {
         label: metadata
         for label, (_, metadata, _) in _OCEAN_DERIVED_VARIABLE_REGISTRY.items()
     }
+    for _, names_metadata in _OCEAN_MULTI_DERIVED_VARIABLE_REGISTRY.values():
+        metadata.update(names_metadata)
+    return metadata
 
 
 def register(metadata: VariableMetadata, exists_ok: bool = False):
@@ -35,6 +50,55 @@ def register(metadata: VariableMetadata, exists_ok: bool = False):
         return func
 
     return decorator
+
+
+def register_multi(metadata: dict[str, VariableMetadata]):
+    """Register a function returning several derived variables, keyed by name.
+
+    Args:
+        metadata: Metadata of those output names known at registration; names
+            that depend on the data (e.g. one per depth level) may be absent.
+    """
+
+    def decorator(func: OceanMultiDerivedVariableFunc):
+        label = func.__name__
+        if (
+            label in _OCEAN_DERIVED_VARIABLE_REGISTRY
+            or label in _OCEAN_MULTI_DERIVED_VARIABLE_REGISTRY
+        ):
+            raise ValueError(f"Function {label} has already been added to registry.")
+        _OCEAN_MULTI_DERIVED_VARIABLE_REGISTRY[label] = (func, metadata)
+        return func
+
+    return decorator
+
+
+def _compute_ocean_multi_derived_variable(
+    data: TensorDict,
+    depth_coordinate: HasOceanDepthIntegral | None,
+    timestep: datetime.timedelta,
+    label: str,
+    func: OceanMultiDerivedVariableFunc,
+    cell_area_provider: HasCellAreaInMetersSquared | None = None,
+) -> TensorDict:
+    """``data`` with the outputs of ``func`` added; unchanged if an input is
+    missing. No output name may already exist in ``data``.
+    """
+    ocean_data = OceanData(
+        data, depth_coordinate, cell_area_provider=cell_area_provider
+    )
+    try:
+        output = func(ocean_data, timestep)
+    except KeyError as key_error:
+        logging.debug(f"Could not compute {label} because {key_error} is missing")
+        return data
+    existing = sorted(set(output).intersection(data))
+    if existing:
+        raise ValueError(
+            f"Variables {existing} of {label} already exist. It is not permitted "
+            "to have derived variables with same name as existing variables."
+        )
+    return {**data, **output}
 
 
 def _compute_ocean_derived_variable(
@@ -122,6 +186,15 @@ def compute_ocean_derived_quantities(
             exists_ok=exists_ok,
             cell_area_provider=cell_area_provider,
         )
+    for label, (multi_func, _) in _OCEAN_MULTI_DERIVED_VARIABLE_REGISTRY.items():
+        data = _compute_ocean_multi_derived_variable(
+            data,
+            depth_coordinate,
+            timestep,
+            label,
+            multi_func,
+            cell_area_provider=cell_area_provider,
+        )
     return data
 
 
@@ -187,6 +260,69 @@ def mld_wright97(
 ) -> torch.Tensor:
     """Density-threshold mixed layer depth, positive down."""
     return data.mld_wright97
+
+
+@register_multi({})
+def rho_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> TensorDict:
+    """``rho_wright97_{k}``, Wright (1997) in-situ density anomaly [kg/m**3]."""
+    return data.rho_wright97
+
+
+@register(
+    VariableMetadata("Pa", "Globally demeaned bottom pressure anomaly, Wright (1997)")
+)
+def pbo_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.pbo_wright97
+
+
+@register(VariableMetadata("m", "Globally demeaned steric height, Wright (1997)"))
+def steric_height_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.steric_height_wright97
+
+
+@register_multi(
+    {
+        layer_ohc_name(band): VariableMetadata(
+            "J/m**2",
+            f"Ocean heat content from {band[0]:g} m to "
+            + ("the sea floor" if band[1] is None else f"{band[1]:g} m"),
+        )
+        for band in LAYER_OHC_DEFAULT_BANDS
+    }
+)
+def layer_ohc(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> TensorDict:
+    """``layer_ohc_{a}_{b}`` on ``LAYER_OHC_DEFAULT_BANDS``."""
+    return data.layer_ohc
+
+
+def ocean_derived_spatial_masks(
+    depth_coordinate: "VerticalCoordinate",
+) -> dict[str, torch.Tensor]:
+    """``mask_<name>`` for each registered derived variable whose NaN pattern
+    no data mask matches (``layer_ohc_*``: the cells where the band exists),
+    for the aggregators' spatial mask provider; empty without a
+    ``DepthCoordinate``.
+    """
+    from fme.core.coordinates import DepthCoordinate
+    from fme.core.optimized_derived import layer_ohc_derivation
+
+    # layer_ohc needs idepth, mask and dz, which only DepthCoordinate has
+    if not isinstance(depth_coordinate, DepthCoordinate):
+        return {}
+    derivation = layer_ohc_derivation(depth_coordinate)
+    return {} if derivation is None else derivation.spatial_masks
 
 
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
