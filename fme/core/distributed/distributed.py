@@ -366,6 +366,61 @@ class Distributed:
         """
         return self._distributed.gather(tensor, gather_list=gather_list)
 
+    def data_parallel_gather(
+        self,
+        tensor: torch.Tensor,
+        gather_list: list[torch.Tensor] | None = None,
+    ) -> list[torch.Tensor] | None:
+        """Gather a tensor from all data-parallel ranks to the data-parallel root.
+
+        Under spatial parallelism each spatial position gathers independently
+        across its data-parallel co-ranks.
+
+        Returns:
+            A list of tensors on the data-parallel root, ``None`` on other
+            data-parallel ranks.
+        """
+        return self._distributed.data_parallel_gather(
+            tensor, gather_list=gather_list
+        )
+
+    def data_parallel_scatter(
+        self,
+        tensor: torch.Tensor,
+        scatter_list: list[torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Scatter tensors from the data-parallel root to all data-parallel ranks.
+
+        Inverse of ``data_parallel_gather``. All ranks provide ``tensor`` (a
+        pre-allocated receive buffer). The data-parallel root also provides
+        ``scatter_list`` (one tensor per data-parallel rank).
+
+        Returns:
+            ``tensor``, populated with this rank's shard.
+        """
+        return self._distributed.data_parallel_scatter(
+            tensor, scatter_list=scatter_list
+        )
+
+    def data_parallel_gather_object(self, obj: T) -> list[T] | None:
+        """Gather a picklable object from all data-parallel ranks to the
+        data-parallel root.
+        """
+        return self._distributed.data_parallel_gather_object(obj)
+
+    def data_parallel_broadcast_object(self, obj: T | None) -> T:
+        """Broadcast a picklable object from the data-parallel root to all
+        data-parallel ranks.
+        """
+        result = self._distributed.data_parallel_broadcast_object(obj)
+        if result is None:
+            raise RuntimeError("data_parallel_broadcast_object returned None")
+        return result
+
+    def is_data_parallel_root(self) -> bool:
+        """Whether this rank is the root of its data-parallel group."""
+        return self._distributed.data_parallel_rank == 0
+
     def gather_global(
         self, tensor: torch.Tensor, global_shape, data_parallel_dim: int = 0
     ) -> torch.Tensor | None:
