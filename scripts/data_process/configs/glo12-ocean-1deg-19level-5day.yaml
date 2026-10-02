@@ -1,0 +1,18 @@
+# Normalization stats for the GLO12 operational-analysis 5-day ocean training set
+# produced by scripts/glorys/pipeline/glorys-pipeline.py --product glo12. The run
+# name matches `make glo12_dataflow` in scripts/glorys/Makefile
+# (DATE-GLO12_DATASET_NAME); update it whenever that pipeline is re-run.
+#
+# Stats end at 2024-12-31: in the fine-tune plan, stage 4 trains on GLO12 through
+# 2024 and 2025 is the operational hindcast hold-out, so it must not leak into
+# the normalization. Whether stage 4 uses these stats or keeps the GLORYS12 ones
+# is a training-design choice these do not make.
+runs:
+  2026-09-28-glo12-ocean-1deg-19level-5day-2022-2025: ""
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/glo12-ocean-1deg-19level-5day-stats
+  beaker_dataset: glo12-ocean-1deg-19level-5day-stats
+  data_type: UFS_REPLAY  # same variable set and layout as the UFS replay ocean
+  start_date: "2022-06-01"
+  end_date: "2024-12-31"
