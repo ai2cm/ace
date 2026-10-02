@@ -19,6 +19,9 @@ class MockWandB:
         self._last_step = 0
         self._id: str | None = None
         self._disk_logger: DiskMetricLogger | None = None
+        self._recent_rows: wandb.RecentRows | None = None
+        self._previous_rows: dict[int, dict[str, Any]] | None = None
+        self._resumed_next_step: int | None = None
         self._runs: list[dict[str, Any]] = []
         # wandb reads WANDB_NAME only on the first init; model that one-time
         # snapshot so an explicit `name` is needed to rename subsequent runs.
@@ -56,6 +59,11 @@ class MockWandB:
                         wandb_id=self.get_id,
                         **kwargs,
                     )
+                    path = os.path.join(experiment_dir, wandb.RECENT_ROWS_FILE)
+                    self._previous_rows = wandb.read_recent_rows(path)
+                    if self._recent_rows is not None:
+                        self._recent_rows.close()
+                    self._recent_rows = wandb.RecentRows(path, self._previous_rows)
             else:
                 self._wandb_init(resume="never", **kwargs)
 
@@ -106,6 +114,10 @@ class MockWandB:
         # snapshot persists, mirroring wandb's setup singleton across finish().
         self._id = None
         self._last_step = 0
+        if self._recent_rows is not None:
+            self._recent_rows.close()
+        self._recent_rows = None
+        self._previous_rows = None
 
     @property
     def runs(self) -> list[dict[str, Any]]:
@@ -117,7 +129,13 @@ class MockWandB:
             # wandb.watch(modules)
             pass
 
-    def log(self, data: Mapping[str, Any], step: int, sleep=None):
+    def log(
+        self,
+        data: Mapping[str, Any],
+        step: int,
+        sleep=None,
+        commit: bool | None = None,
+    ):
         if step < self._last_step:
             raise ValueError(
                 f"step {step} is less than last step {self._last_step}, "
@@ -127,21 +145,47 @@ class MockWandB:
         # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)
+        if self._recent_rows is not None:
+            if self._previous_rows is not None:
+                self._previous_rows = None
+                self._recent_rows.drop_after(step - 1)
+            self._recent_rows.record(data, step)
         if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
 
-    def resumed_next_step(self) -> int | None:
-        if not self._enabled:
-            return None
-        return max(self._logs, default=-1) + 1
+    def set_resumed_next_step(self, step: int):
+        """Set the step after the last one the resumed run received, for a
+        mock that does not hold the previous job's logs.
+        """
+        self._resumed_next_step = step
+
+    def restore_unsent(self, resume_step: int):
+        """Mirrors ``WandB.restore_unsent``, taking the step after the last
+        logged one (or ``set_resumed_next_step``) as the run's next step, and
+        restoring nothing if neither is known.
+        """
+        previous_rows = self._previous_rows
+        self._previous_rows = None
+        if self._recent_rows is not None:
+            self._recent_rows.drop_after(resume_step)
+        next_step = self._resumed_next_step
+        if next_step is None and self._logs:
+            next_step = max(self._logs) + 1
+        if not self._enabled or not previous_rows or next_step is None:
+            return
+        for step, row, _ in wandb.rows_to_restore(
+            previous_rows, next_step, resume_step
+        ):
+            self._logs[step].update(row)
+            self._last_step = step
 
     def drop_logs_from(self, step: int):
         """Simulate wandb never receiving the logs at ``step`` and later, e.g.
-        because the job was killed before its background uploader synced them.
+        because the job was killed before its background uploader sent them.
         """
         for logged_step in [s for s in self._logs if s >= step]:
             del self._logs[logged_step]
-        self._last_step = min(self._last_step, step)
+        self._last_step = max(self._logs, default=0)
 
     def get_logs(self) -> list[dict[str, Any]]:
         if len(self._logs) == 0:

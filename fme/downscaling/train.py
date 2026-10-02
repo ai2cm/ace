@@ -379,15 +379,17 @@ class Trainer:
                     self.save_best_checkpoint(generation_summary)
             else:
                 valid_end = train_end
-            if dist.is_root():
-                self.save_epoch_checkpoints()
             epoch_end = time.time()
             timings = {
                 "epoch_train_seconds": train_end - start_time,
                 "epoch_valid_seconds": valid_end - train_end,
                 "epoch_total_seconds": epoch_end - start_time,
             }
-            wandb.log(timings, step=self.num_batches_seen)
+            # the step's last log: commit so wandb sends the row now, not at
+            # the next train log
+            wandb.log(timings, step=self.num_batches_seen, commit=True)
+            if dist.is_root():
+                self.save_epoch_checkpoints()
 
 
 @dataclasses.dataclass
@@ -546,6 +548,7 @@ def main(config_path: str):
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer)
+        WandB.get_instance().restore_unsent(resume_step=trainer.num_batches_seen)
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 

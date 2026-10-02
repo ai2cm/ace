@@ -1,5 +1,4 @@
 import contextlib
-import json
 import os
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
@@ -635,99 +634,6 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert stepper.loaded_state["foo"] == "bar"
     assert "modules" in stepper.loaded_state
     assert len(stepper.loaded_state) == 2
-
-
-def _get_logging_trainer(tmp_path: str, max_epochs: int) -> Trainer:
-    """A trainer logging to the active mock wandb, resuming from tmp_path."""
-    LoggingConfig(log_to_wandb=True)._configure_wandb(
-        experiment_dir=tmp_path, config={}, resumable=True
-    )
-    _, trainer = get_trainer(
-        tmp_path,
-        checkpoint_save_epochs=Slice(start=0, stop=0),
-        max_epochs=max_epochs,
-        n_train_batches=5,
-    )
-    return trainer
-
-
-def _epoch_log_steps(log_mock: unittest.mock.MagicMock) -> list[int]:
-    """The steps of the end-of-epoch logs among the recorded log calls."""
-    return [
-        call.kwargs["step"]
-        for call in log_mock.call_args_list
-        if "epoch" in call.args[0]
-    ]
-
-
-def test_last_epoch_logs_file_holds_scalars(tmp_path: str):
-    with mock_wandb():
-        trainer = _get_logging_trainer(tmp_path, max_epochs=1)
-        trainer._end_of_epoch_callback = lambda epoch: {
-            "numpy_scalar": np.float32(1.5),
-            "torch_scalar": torch.tensor(2.0),
-            "vector": torch.zeros(2),
-            "figure": object(),
-        }
-        trainer.train()
-    with open(trainer.paths.last_epoch_logs_path) as f:
-        data = json.load(f)
-    assert data["step"] == 5
-    assert data["epoch"] == 1
-    logs = data["logs"]
-    assert logs["epoch"] == 1
-    assert "lr" in logs
-    assert logs["numpy_scalar"] == 1.5
-    assert logs["torch_scalar"] == 2.0
-    assert "vector" not in logs
-    assert "figure" not in logs
-
-
-def test_resume_relogs_epoch_logs_wandb_lost(tmp_path: str):
-    with mock_wandb() as wandb:
-        _get_logging_trainer(tmp_path, max_epochs=2).train()
-        epoch_logs = dict(wandb.get_logs()[10])
-        wandb.drop_logs_from(10)  # killed before wandb uploaded epoch 2's row
-        _get_logging_trainer(tmp_path, max_epochs=2).train()
-        relogged = wandb.get_logs()[10]
-    assert relogged["epoch"] == 2
-    assert relogged["lr"] == epoch_logs["lr"]
-    assert relogged["val/mean/loss"] == epoch_logs["val/mean/loss"]
-
-
-def test_resume_does_not_relog_epoch_logs_wandb_has(tmp_path: str):
-    with mock_wandb() as wandb:
-        _get_logging_trainer(tmp_path, max_epochs=2).train()
-        with unittest.mock.patch.object(wandb, "log", wraps=wandb.log) as log_mock:
-            _get_logging_trainer(tmp_path, max_epochs=2).train()
-    assert log_mock.call_count == 0
-
-
-def test_resume_from_pre_validation_checkpoint_logs_epoch_once(tmp_path: str):
-    with mock_wandb() as wandb:
-        trainer = _get_logging_trainer(tmp_path, max_epochs=2)
-        # killed after logging epoch 2 but before its post-log checkpoint
-        with fail_after_calls_patch(trainer, "save_all_checkpoints", 2):
-            trainer.train()
-        with open(trainer.paths.last_epoch_logs_path) as f:
-            assert json.load(f)["epoch"] == 2
-        wandb.drop_logs_from(10)
-        with unittest.mock.patch.object(wandb, "log", wraps=wandb.log) as log_mock:
-            _get_logging_trainer(tmp_path, max_epochs=2).train()
-        assert wandb.get_logs()[10]["epoch"] == 2
-    assert _epoch_log_steps(log_mock) == [10]
-
-
-def test_resume_without_last_epoch_logs_file(tmp_path: str):
-    with mock_wandb() as wandb:
-        trainer = _get_logging_trainer(tmp_path, max_epochs=1)
-        trainer.train()
-        os.remove(trainer.paths.last_epoch_logs_path)
-        wandb.drop_logs_from(5)
-        _get_logging_trainer(tmp_path, max_epochs=2).train()
-        logs = wandb.get_logs()
-    assert "epoch" not in logs[5]
-    assert logs[10]["epoch"] == 2
 
 
 def get_batch_indices(batches) -> list[int]:
@@ -2051,3 +1957,119 @@ class TestBuildInferenceCallback:
             callback(epoch=1)
             callback(epoch=2)
         assert factory.call_count == 2
+
+
+def _configure_resumable_wandb(tmp_path: str):
+    LoggingConfig(log_to_wandb=True)._configure_wandb(
+        experiment_dir=tmp_path, config={}, resumable=True
+    )
+
+
+def _scalars(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in row.items() if isinstance(v, int | float)}
+
+
+def test_resume_relogs_epoch_row_wandb_did_not_receive(tmp_path: str):
+    n_train_batches = 5
+    with mock_wandb() as wandb:
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=2, n_train_batches=n_train_batches
+        )
+        # stop at the start of epoch 2, after epoch 1's checkpoints are saved
+        with fail_after_calls_patch(trainer, "train_one_epoch", 2):
+            trainer.train()
+        epoch_row = _scalars(wandb.get_logs()[n_train_batches])
+        assert epoch_row["epoch"] == 1
+        wandb.drop_logs_from(n_train_batches)
+        _configure_resumable_wandb(tmp_path)  # the resumed job's init
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=2, n_train_batches=n_train_batches
+        )
+        trainer.train()
+        logs = wandb.get_logs()
+    assert _scalars(logs[n_train_batches]) == epoch_row
+    assert logs[2 * n_train_batches]["epoch"] == 2
+
+
+def test_resume_from_pre_validation_checkpoint_merges_one_row(tmp_path: str):
+    n_train_batches = 5
+    with mock_wandb() as wandb:
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=2, n_train_batches=n_train_batches
+        )
+        # killed after epoch 1's log, before its post-validation checkpoint,
+        # so the job resumes from the checkpoint saved before validation
+        with fail_after_calls_patch(trainer, "save_all_checkpoints", 1):
+            trainer.train()
+        previous_row = _scalars(wandb.get_logs()[n_train_batches])
+        wandb.drop_logs_from(n_train_batches)
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=2, n_train_batches=n_train_batches
+        )
+        assert trainer.num_batches_seen == n_train_batches
+        trainer.train()
+        merged_row = wandb.get_logs()[n_train_batches]
+    # the restored row holds the lost per-batch train metrics, and the resumed
+    # job's validation logs merge into it at the same step
+    assert merged_row["epoch"] == 1
+    assert "val/mean/loss" in merged_row
+    for name in previous_row:
+        if name.startswith("batch_"):
+            assert merged_row[name] == previous_row[name]
+
+
+def test_resume_relogs_last_batch_row_before_terminate_checkpoint(
+    tmp_path: str, monkeypatch
+):
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
+    batches_before_interrupt = 7
+    n_train_batches = 10
+    with mock_wandb() as wandb:
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=1, n_train_batches=n_train_batches
+        )
+        with unittest.mock.patch.object(
+            trainer, "_log_first_batch_metrics", return_value=None
+        ):
+            with fail_after_calls_patch(
+                trainer.stepper, "train_on_batch", batches_before_interrupt + 1
+            ):
+                trainer.train()
+        (save_on_terminate,) = registered_callbacks
+        save_on_terminate()
+        last_row = wandb.get_logs()[batches_before_interrupt]
+        assert "lr" in last_row
+        # the SIGTERM path exits before wandb sends the uncommitted last row
+        wandb.drop_logs_from(batches_before_interrupt)
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=1, n_train_batches=n_train_batches
+        )
+        assert trainer.num_batches_seen == batches_before_interrupt
+        trainer.train()
+        logs = wandb.get_logs()
+    assert logs[batches_before_interrupt] == _scalars(last_row)
+
+
+def test_end_of_epoch_log_is_committed(tmp_path: str):
+    n_train_batches = 5
+    with mock_wandb() as wandb:
+        _configure_resumable_wandb(tmp_path)
+        _, trainer = get_trainer(
+            tmp_path, max_epochs=2, n_train_batches=n_train_batches
+        )
+        with unittest.mock.patch.object(wandb, "log", wraps=wandb.log) as log:
+            trainer.train()
+    for epoch in (1, 2):
+        step = epoch * n_train_batches
+        calls_at_step = [c for c in log.call_args_list if c.kwargs["step"] == step]
+        assert calls_at_step[-1].args[0]["epoch"] == epoch
+        assert calls_at_step[-1].kwargs["commit"] is True

@@ -302,6 +302,41 @@ def test_resume(default_trainer_config, tmp_path):
             mock.assert_called()
 
 
+def test_resume_relogs_epoch_row_wandb_did_not_receive(
+    default_trainer_config, tmp_path
+):
+    trainer_config_segment_one = dict(default_trainer_config)
+    trainer_config_segment_one["max_epochs"] = 2
+    trainer_config_segment_one["segment_epochs"] = 1
+    trainer_config_segment_two = dict(default_trainer_config)
+    trainer_config_segment_two["max_epochs"] = 2
+    trainer_config_segment_two["segment_epochs"] = None
+    config_segment_one_path = _store_config(
+        tmp_path, trainer_config_segment_one, "config-segment-one.yaml"
+    )
+    config_segment_two_path = _store_config(
+        tmp_path, trainer_config_segment_two, "config-segment-two.yaml"
+    )
+    with mock_wandb() as wandb:
+        main(config_segment_one_path)
+        logs = wandb.get_logs()
+        epoch_step = max(i for i, log in enumerate(logs) if "epoch" in log)
+        epoch_row = {
+            k: v for k, v in logs[epoch_step].items() if isinstance(v, int | float)
+        }
+        assert "epoch_total_seconds" in epoch_row
+        id = wandb.get_id()
+    with mock_wandb() as wandb:
+        wandb.set_id(id)
+        # wandb received the steps before the end of the first epoch only
+        wandb.set_resumed_next_step(epoch_step)
+        main(config_segment_two_path)
+        restored_row = wandb.get_logs()[epoch_step]
+    # the resumed job validates again at the restored step, merging into it
+    for name in ("epoch", "epoch_train_seconds", "epoch_total_seconds"):
+        assert restored_row[name] == epoch_row[name]
+
+
 @pytest.mark.slow
 @pytest.mark.serial
 def test_resume_two_workers(default_trainer_config, tmp_path):

@@ -52,7 +52,6 @@ import abc
 import contextlib
 import dataclasses
 import gc
-import json
 import logging
 import os
 import time
@@ -60,7 +59,6 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Generic, Protocol, TypeVar
 
-import numpy as np
 import torch
 
 import fme
@@ -217,10 +215,6 @@ class CheckpointPaths:
     def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
-    @property
-    def last_epoch_logs_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "last_epoch_logs.json")
-
 
 class Trainer:
     def __init__(
@@ -311,7 +305,7 @@ class Trainer:
         if resuming:
             logging.info(f"Resuming training from {self.paths.latest_checkpoint_path}")
             self.restore_checkpoint(self.paths.latest_checkpoint_path)
-            self._relog_lost_epoch_logs()
+            WandB.get_instance().restore_unsent(resume_step=self.num_batches_seen)
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
@@ -524,83 +518,12 @@ class Trainer:
             if inference_end is not None:
                 all_logs["epoch_inference_seconds"] = inference_end - valid_end
             wandb = WandB.get_instance()
-            wandb.log(all_logs, step=self.num_batches_seen)
+            # commit so wandb sends the row now, not at the next train log
+            wandb.log(all_logs, step=self.num_batches_seen, commit=True)
 
             if self._should_save_checkpoints():
-                # wandb uploads in the background, so a job killed after this
-                # point can lose the row; keep it on disk for the resume
-                self._save_last_epoch_logs(all_logs)
                 logging.info(f"Saving checkpoints for epoch {self._epochs_trained}")
                 self.save_all_checkpoints(valid_loss, inference_error)
-
-    def _save_last_epoch_logs(self, logs: Mapping[str, Any]):
-        """Write the scalar end-of-epoch logs for ``_relog_lost_epoch_logs``."""
-        data = {
-            "step": self.num_batches_seen,
-            "epoch": self._epochs_trained,
-            "logs": _scalar_logs(logs),
-        }
-        path = self.paths.last_epoch_logs_path
-        # the .tmp name is removed by remove_stale_tmp_checkpoints if left behind
-        temporary_location = os.path.join(os.path.dirname(path), f".{uuid.uuid4()}.tmp")
-        try:
-            with open(temporary_location, "w") as f:
-                json.dump(data, f)
-            os.replace(temporary_location, path)
-        finally:
-            if os.path.exists(temporary_location):
-                os.remove(temporary_location)
-
-    def _relog_lost_epoch_logs(self):
-        """Re-log the last end-of-epoch logs if the resumed wandb run lacks them.
-
-        Must be called on all ranks after restoring the checkpoint. A job
-        killed after logging an epoch to wandb but before wandb uploaded it
-        loses that row, while the checkpoint saved after logging marks the
-        epoch done, so the resumed job would never log it again.
-        """
-        dist = Distributed.get_instance()
-        wandb = WandB.get_instance()
-        logs: dict[str, Any] = {}
-        step = -1
-        if dist.is_root():
-            lost = self._read_lost_epoch_logs(wandb.resumed_next_step())
-            if lost is not None:
-                step, logs = lost
-        step = dist.scatter_object(step)
-        if step >= 0:
-            if dist.is_root():
-                logging.info(
-                    f"Re-logging end-of-epoch scalars for epoch {logs.get('epoch')} "
-                    f"at step {step}, which the resumed wandb run did not receive"
-                )
-            wandb.log(logs, step=step)
-
-    def _read_lost_epoch_logs(
-        self, wandb_next_step: int | None
-    ) -> tuple[int, dict[str, Any]] | None:
-        """Return the stored end-of-epoch (step, logs) if wandb lacks them."""
-        path = self.paths.last_epoch_logs_path
-        if wandb_next_step is None or not os.path.isfile(path):
-            return None
-        try:
-            with open(path) as f:
-                data = json.load(f)
-            step = int(data["step"])
-            epoch = int(data["epoch"])
-            logs = dict(data["logs"])
-        except (ValueError, KeyError, TypeError) as err:
-            logging.warning(
-                f"Not re-logging end-of-epoch logs, {path} is invalid: {err}"
-            )
-            return None
-        if wandb_next_step > step:
-            return None  # wandb uploads in order, so it has this row
-        if self._epochs_trained < epoch:
-            # resuming from the checkpoint saved before this epoch's
-            # validation, which redoes validation and logs this step itself
-            return None
-        return step, logs
 
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
@@ -1069,22 +992,6 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
     trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
-
-
-def _scalar_logs(logs: Mapping[str, Any]) -> dict[str, int | float | bool]:
-    """Return the scalar values of ``logs``, dropping figures, tables, etc."""
-    # log values are heterogeneous by design, so filter by type
-    scalars: dict[str, int | float | bool] = {}
-    for key, value in logs.items():
-        if isinstance(value, bool | int | float):
-            scalars[key] = value
-        elif isinstance(value, np.generic | np.ndarray | torch.Tensor) and (
-            value.ndim == 0
-        ):
-            item = value.item()
-            if isinstance(item, bool | int | float):
-                scalars[key] = item
-    return scalars
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:

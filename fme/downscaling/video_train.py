@@ -473,11 +473,15 @@ class VideoTrainer:
                 self.log_validation_visualizations()  # all ranks (barrier-safe)
             if epoch % self.config.test_interval == 0:
                 self.evaluate_test()  # all ranks (barrier-safe)
+            # the step's last log: commit so wandb sends the row now, not at
+            # the next train log
+            wandb.log(
+                {"epoch_seconds": time.time() - start},
+                step=self.num_batches_seen,
+                commit=True,
+            )
             if dist.is_root() and self.config.save_checkpoints:
                 self.save_epoch_checkpoint()
-            wandb.log(
-                {"epoch_seconds": time.time() - start}, step=self.num_batches_seen
-            )
 
 
 def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
@@ -517,6 +521,7 @@ def main(config_path: str):
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer)
+        WandB.get_instance().restore_unsent(resume_step=trainer.num_batches_seen)
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 
