@@ -143,12 +143,7 @@ class OceanData:
 
     @property
     def sea_surface_height(self) -> torch.Tensor:
-        """Returns the sea surface height in m, including its global mean.
-
-        Unlike ``sea_surface_height_above_geoid`` (zos), which has its global
-        mean removed at every snapshot, this height keeps the global mean, so
-        its change over a step measures the water added to the ocean.
-        """
+        """Returns the sea surface height (SSH), including its global mean."""
         return self._get("sea_surface_height")
 
     @property

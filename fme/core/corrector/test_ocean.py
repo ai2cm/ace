@@ -9,6 +9,7 @@ from fme import get_device
 from fme.core.constants import EARTH_RADIUS
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.corrector.ocean import (
+    IceVolumeSaltBudgetConfig,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     OceanSaltContentBudgetConfig,
@@ -600,6 +601,19 @@ def _salt_ocean_and_ice_masks() -> tuple[torch.Tensor, torch.Tensor]:
     return ocean_mask, ice_mask
 
 
+def _ice_volume_salt_config(slope_psu: float, **kwargs) -> OceanSaltContentBudgetConfig:
+    """The ice volume budget on the unweighted salt content, or no budget for a
+    zero slope."""
+    kwargs.setdefault("weight_by_sea_surface_fraction", False)
+    return OceanSaltContentBudgetConfig(
+        method="scaled_salinity",
+        budget_config=(
+            None if slope_psu == 0.0 else IceVolumeSaltBudgetConfig(slope_psu)
+        ),
+        **kwargs,
+    )
+
+
 def test_ocean_salt_content_correction():
     torch.manual_seed(0)
     ocean_mask, ice_mask = _salt_ocean_and_ice_masks()
@@ -609,10 +623,8 @@ def test_ocean_salt_content_correction():
     ocean_cell_area = _ocean_cell_area_m2(ocean_mask)
     slope, constant = 40.0, 3e-9
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
-            ice_volume_salt_slope_psu=slope,
-            constant_unaccounted_salting=constant,
+        ocean_salt_content_correction=_ice_volume_salt_config(
+            slope, constant_unaccounted_salting=constant
         )
     )
     corrector = config.get_corrector(dataset_info)
@@ -672,9 +684,7 @@ def test_ocean_salt_content_correction_ignores_ice_outside_mask():
     # a fractional mask value, which the output masking rounds to outside
     ice_mask[1, 0] = 0.4
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=40.0
-        )
+        ocean_salt_content_correction=_ice_volume_salt_config(40.0)
     )
     corrector = config.get_corrector(
         _salt_dataset_info(ocean_mask, (10.0, 20.0), ice_mask)
@@ -730,9 +740,7 @@ def test_ocean_salt_content_correction_counts_all_ice_without_mask(
     )
     slope = 40.0
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=slope
-        )
+        ocean_salt_content_correction=_ice_volume_salt_config(slope)
     )
     corrector = config.get_corrector(dataset_info)
     input_data = {
@@ -766,9 +774,7 @@ def test_ocean_salt_content_correction_without_sea_ice_volume(slope):
     ocean_mask, _ = _salt_ocean_and_ice_masks()
     layer_thickness = (10.0, 20.0)
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=slope
-        )
+        ocean_salt_content_correction=_ice_volume_salt_config(slope)
     )
     corrector = config.get_corrector(_salt_dataset_info(ocean_mask, layer_thickness))
     input_data = {
@@ -803,9 +809,8 @@ def test_ocean_salt_content_correction_weights_content_by_sea_surface_fraction()
     sea_surface_fraction[0, :] = 1.0  # some wholly-ocean cells too
     slope, constant = 40.0, 3e-9
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
-            ice_volume_salt_slope_psu=slope,
+        ocean_salt_content_correction=_ice_volume_salt_config(
+            slope,
             constant_unaccounted_salting=constant,
             weight_by_sea_surface_fraction=True,
         )
@@ -864,9 +869,7 @@ def test_ocean_salt_content_correction_float64_meets_budget_for_float32_state():
     ocean_cell_area = _ocean_cell_area_m2(ocean_mask)
     slope = 40.0
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=slope, use_float64=True
-        )
+        ocean_salt_content_correction=_ice_volume_salt_config(slope, use_float64=True)
     )
     corrector = config.get_corrector(dataset_info)
     gen_ice = torch.zeros(nlat, nlon, device=DEVICE)
@@ -897,8 +900,7 @@ def _ssh_budget_corrector(
     config = OceanCorrectorConfig(
         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
             method="scaled_salinity",
-            weight_by_sea_surface_fraction=True,
-            sea_surface_height_budget=SeaSurfaceHeightSaltBudgetConfig(
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(
                 reference_salinity_psu=reference_salinity_psu
             ),
         )
@@ -1046,30 +1048,72 @@ def test_ocean_salt_content_correction_sea_surface_height_budget_without_ssh():
         corrector(input_data, gen_data, forcing_data, None)
 
 
+def test_ocean_salt_content_budget_config_rejects_unweighted_sea_surface_height():
+    with pytest.raises(ValueError, match="weight_by_sea_surface_fraction"):
+        OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(),
+            weight_by_sea_surface_fraction=False,
+        )
+
+
 @pytest.mark.parametrize(
-    "kwargs, match",
+    "budget_config, expected",
     [
+        pytest.param(None, None, id="none"),
         pytest.param(
-            {"ice_volume_salt_slope_psu": 40.0, "weight_by_sea_surface_fraction": True},
-            "ice_volume_salt_slope_psu",
-            id="with_ice_volume_slope",
+            {"type": "ice_volume", "slope_psu": 41.6},
+            IceVolumeSaltBudgetConfig(slope_psu=41.6),
+            id="ice_volume",
         ),
         pytest.param(
-            {"weight_by_sea_surface_fraction": False},
-            "weight_by_sea_surface_fraction",
-            id="without_sea_surface_fraction_weighting",
+            {"type": "sea_surface_height"},
+            SeaSurfaceHeightSaltBudgetConfig(),
+            id="sea_surface_height",
+        ),
+        pytest.param(
+            {"type": "sea_surface_height", "reference_salinity_psu": 34.0},
+            SeaSurfaceHeightSaltBudgetConfig(reference_salinity_psu=34.0),
+            id="sea_surface_height_reference_salinity",
         ),
     ],
 )
-def test_ocean_salt_content_budget_config_rejects_invalid_sea_surface_height_budget(
-    kwargs, match
+def test_ocean_salt_content_budget_config_from_state(budget_config, expected):
+    state = {"method": "scaled_salinity", "budget_config": budget_config}
+    config = OceanCorrectorConfig.from_state({"ocean_salt_content_correction": state})
+    assert config.ocean_salt_content_correction is not None
+    assert config.ocean_salt_content_correction.budget_config == expected
+
+
+@pytest.mark.parametrize(
+    "slope, expected_budget",
+    [
+        pytest.param(0.0, None, id="zero_slope"),
+        pytest.param(39.617, IceVolumeSaltBudgetConfig(39.617), id="slope"),
+    ],
+)
+def test_ocean_salt_content_budget_config_loads_deprecated_ice_volume_slope(
+    slope, expected_budget
 ):
-    with pytest.raises(ValueError, match=match):
-        OceanSaltContentBudgetConfig(
-            method="scaled_salinity",
-            sea_surface_height_budget=SeaSurfaceHeightSaltBudgetConfig(),
-            **kwargs,
-        )
+    # Configs from before budget_config set ice_volume_salt_slope_psu, fitted
+    # to the unweighted salt content, and must load with the same behavior.
+    state = {
+        "ocean_salt_content_correction": {
+            "method": "scaled_salinity",
+            "ice_volume_salt_slope_psu": slope,
+            "constant_unaccounted_salting": 5e-11,
+        }
+    }
+    with pytest.warns(DeprecationWarning, match="ice_volume_salt_slope_psu"):
+        config = OceanCorrectorConfig.from_state(state)
+    assert config.ocean_salt_content_correction == OceanSaltContentBudgetConfig(
+        method="scaled_salinity",
+        budget_config=expected_budget,
+        constant_unaccounted_salting=5e-11,
+        weight_by_sea_surface_fraction=False,
+    )
+    # the input state is not modified
+    assert "ice_volume_salt_slope_psu" in state["ocean_salt_content_correction"]
 
 
 def test_ocean_salt_content_correction_sea_surface_height_budget_float64():
@@ -1101,9 +1145,8 @@ def test_ocean_salt_content_correction_sea_surface_height_budget_float64():
         config = OceanCorrectorConfig(
             ocean_salt_content_correction=OceanSaltContentBudgetConfig(
                 method="scaled_salinity",
-                weight_by_sea_surface_fraction=True,
                 use_float64=use_float64,
-                sea_surface_height_budget=SeaSurfaceHeightSaltBudgetConfig(
+                budget_config=SeaSurfaceHeightSaltBudgetConfig(
                     reference_salinity_psu=reference_salinity
                 ),
             )
@@ -1124,15 +1167,13 @@ def test_ocean_salt_content_correction_sea_surface_height_budget_float64():
 
 @pytest.mark.parametrize("slope, raises", [(0.0, False), (40.0, True)])
 def test_ocean_salt_content_correction_spatial_parallelism(slope: float, raises: bool):
-    # The ice-volume total is a plain sum over the local grid, so a nonzero
-    # slope must fail at build time under spatial parallelism instead of
-    # silently using a per-rank total. Without the ice term, the area-weighted
-    # sums already reduce across ranks.
+    # The ice-volume total is a plain sum over the local grid, so the ice
+    # volume budget must fail at build time under spatial parallelism instead of
+    # silently using a per-rank total. Without a budget, the area-weighted sums
+    # already reduce across ranks.
     dataset_info = _salt_dataset_info(torch.ones(4, 8), (1000.0, 3000.0))
     config = OceanCorrectorConfig(
-        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
-            method="scaled_salinity", ice_volume_salt_slope_psu=slope
-        )
+        ocean_salt_content_correction=_ice_volume_salt_config(slope)
     )
     with patch.object(
         Distributed,
@@ -1234,7 +1275,7 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
         ),
         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
             method="scaled_salinity",
-            ice_volume_salt_slope_psu=40.0,
+            budget_config=IceVolumeSaltBudgetConfig(slope_psu=40.0),
             constant_unaccounted_salting=1e-9,
         ),
     )
