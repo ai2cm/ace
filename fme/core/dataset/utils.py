@@ -11,6 +11,7 @@ import torch
 import xarray as xr
 import zarr
 
+from fme.core.cloud import get_zarr_store
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -150,7 +151,9 @@ def _get_array_selection(
 @functools.cache
 def _open_async_group(path: str):
     loop = asyncio.get_event_loop()
-    return loop.run_until_complete(zarr.api.asynchronous.open(store=path))
+    return loop.run_until_complete(
+        zarr.api.asynchronous.open(store=get_zarr_store(path))
+    )
 
 
 @functools.cache
