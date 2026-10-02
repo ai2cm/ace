@@ -138,8 +138,9 @@ class WandB:
         Initialize wandb, potentially with resumption logic.
 
         A resumable init also restores the disk metrics a previous job logged up
-        to its last ``mark_checkpoint``, and re-logs to the resumed wandb run the
-        ones it never received. Must be called on all ranks.
+        to its last ``mark_checkpoint``, and, if it resumes a wandb run rather
+        than starting a new one, re-logs to that run the ones it never received.
+        Must be called on all ranks.
 
         Args:
             resumable: If True, attempt to resume the run in the experiment directory,
@@ -152,6 +153,7 @@ class WandB:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
+        resumed_run = False
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -159,6 +161,9 @@ class WandB:
                         "must provide `experiment_dir` when `resumable` is True"
                     )
                 else:
+                    resumed_run = os.path.exists(
+                        os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
+                    )
                     id_ = init_wandb_with_resumption(
                         experiment_dir, direct_access=False, **kwargs
                     )
@@ -171,7 +176,7 @@ class WandB:
                 logging.info(f"New non-resuming wandb run with id: {id_}.")
             self._id = id_
         if resumable:
-            self._restore_disk_metrics()
+            self._restore_disk_metrics(relog=resumed_run)
             Distributed.get_instance().barrier()
 
     def finish(self):
@@ -221,14 +226,16 @@ class WandB:
         if self._disk_logger is not None:
             self._disk_logger.write_checkpoint_mark()
 
-    def _restore_disk_metrics(self):
+    def _restore_disk_metrics(self, relog: bool):
         """Restore the disk metrics a previous job logged up to its last
-        checkpoint mark, and re-log to wandb the ones it never received.
+        checkpoint mark, and if ``relog``, re-log to the resumed wandb run the
+        ones it never received. A new wandb run (e.g. ``resume_wandb: false``)
+        did not lose them, so it is not given them.
         """
         if self._disk_logger is None:
             return
         mark = self._disk_logger.restore_to_checkpoint_mark()
-        if mark is None or not self._enabled or wandb.run is None:
+        if mark is None or not relog or wandb.run is None:
             return
         if wandb.run.offline:
             logging.info(

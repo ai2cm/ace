@@ -46,6 +46,7 @@ class MockWandB:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
+        resumed_run = False
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -53,6 +54,9 @@ class MockWandB:
                         "must provide `experiment_dir` when `resumable` is True"
                     )
                 else:
+                    resumed_run = os.path.exists(
+                        os.path.join(experiment_dir, wandb.WANDB_RUN_ID_FILE)
+                    )
                     wandb.init_wandb_with_resumption(
                         experiment_dir,
                         direct_access=False,
@@ -63,7 +67,7 @@ class MockWandB:
             else:
                 self._wandb_init(resume="never", **kwargs)
         if resumable:
-            self._restore_disk_metrics()
+            self._restore_disk_metrics(relog=resumed_run)
 
     def _wandb_init(
         self,
@@ -146,14 +150,14 @@ class MockWandB:
         if self._disk_logger is not None:
             self._disk_logger.write_checkpoint_mark()
 
-    def _restore_disk_metrics(self):
+    def _restore_disk_metrics(self, relog: bool):
         """Mirror wandb: a resumed run continues after the last step it
         received, and a committed step rejects later logs at that step.
         """
         if self._disk_logger is None:
             return
         mark = self._disk_logger.restore_to_checkpoint_mark()
-        if mark is None or not self._enabled:
+        if mark is None or not relog:
             return
         received_steps = list(self._logs)
         if self._last_received_step is not None:

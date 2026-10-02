@@ -102,6 +102,7 @@ def test_video_trainer_resume_recovers_wandb_logs_lost_before_upload(tmp_path):
     metrics_log_dir = os.path.join(tmp_path, "metrics")
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True, metrics_log_dir=metrics_log_dir)
+        wandb.init(resumable=True, experiment_dir=str(tmp_path))
         trainer = config.build()
         trainer.train()
         last_step = trainer.num_batches_seen

@@ -89,10 +89,15 @@ def _resume_wandb(
     run_step: int,
     offline: bool = False,
     resumable: bool = True,
+    new_run: bool = False,
 ) -> list[tuple[dict, int, bool | None]]:
     """Start a job whose resumed wandb run continues at ``run_step``, and
-    return the calls it made to wandb.log.
+    return the calls it made to wandb.log. With ``new_run``, the experiment
+    directory has no wandb run id, so the job starts a new wandb run instead.
     """
+    if not new_run:
+        with open(tmp_path / fme.core.wandb.WANDB_RUN_ID_FILE, "w") as f:
+            f.write("run-id")
     logged: list[tuple[dict, int, bool | None]] = []
     monkeypatch.setattr(
         fme.core.wandb.wandb,
@@ -160,6 +165,14 @@ def test_resume_does_not_relog_mark_step_wandb_received(tmp_path, monkeypatch):
     _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS, MARK_AFTER)
     logged = _resume_wandb(monkeypatch, tmp_path, log_dir, run_step=31)
     assert logged == []
+
+
+def test_new_wandb_run_restores_disk_metrics_without_relogging(tmp_path, monkeypatch):
+    log_dir = str(tmp_path / "metrics")
+    _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS, MARK_AFTER)
+    logged = _resume_wandb(monkeypatch, tmp_path, log_dir, run_step=0, new_run=True)
+    assert logged == []
+    assert [r["step"] for r in read_metrics(log_dir)] == [10, 20, 20, 30, 30]
 
 
 def test_resume_without_checkpoint_mark_restores_nothing(tmp_path, monkeypatch):
