@@ -13,7 +13,7 @@ from fme.core.disk_metric_logger import DiskMetricLogger
 from fme.core.distributed import Distributed
 
 WANDB_RUN_ID_FILE = "wandb_run_id"
-RECENT_ROWS_FILE = "wandb_recent_rows.json"
+RECENT_ROWS_FILE = "wandb_recent_rows.jsonl"
 # wandb uploads rows in order within seconds of logging them, so the rows a
 # killed job never sent are among the last few it logged
 N_RECENT_ROWS = 16
@@ -163,6 +163,8 @@ class WandB:
                     )
                     path = os.path.join(experiment_dir, RECENT_ROWS_FILE)
                     self._previous_rows = read_recent_rows(path)
+                    if self._recent_rows is not None:
+                        self._recent_rows.close()
                     self._recent_rows = RecentRows(path, self._previous_rows)
             else:
                 wandb.init(**kwargs)
@@ -320,7 +322,7 @@ class RecentRows:
         # the SIGTERM path ends in os._exit, which skips flushing buffers
         self._file.flush()
         self._n_appended += 1
-        if self._n_appended > COMPACT_EVERY_N_LINES:
+        if self._n_appended >= COMPACT_EVERY_N_LINES:
             self._compact()
 
     def drop_after(self, step: int):
