@@ -32,6 +32,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.ema import load_ema_params_if_available
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -1953,12 +1954,15 @@ def load_stepper_config_with_override(
 def load_stepper(
     checkpoint_path: str | pathlib.Path,
     override_config: StepperOverrideConfig | None = None,
+    use_ema_if_available: bool = False,
 ) -> Stepper:
     """Load a stepper, optionally overriding certain aspects.
 
     Args:
         checkpoint_path: The path to the serialized checkpoint.
         override_config: Configuration options to override (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights,
+            use them in place of the stepper weights.
 
     Returns:
         The stepper serialized in the checkpoint, with appropriate options
@@ -1966,6 +1970,8 @@ def load_stepper(
     """
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    if use_ema_if_available:
+        load_ema_params_if_available(checkpoint, stepper.modules, str(checkpoint_path))
     apply_stepper_override(stepper, override_config)
     return stepper
 
