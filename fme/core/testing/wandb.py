@@ -130,6 +130,19 @@ class MockWandB:
         if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
 
+    def resumed_next_step(self) -> int | None:
+        if not self._enabled:
+            return None
+        return max(self._logs, default=-1) + 1
+
+    def drop_logs_from(self, step: int):
+        """Simulate wandb never receiving the logs at ``step`` and later, e.g.
+        because the job was killed before its background uploader synced them.
+        """
+        for logged_step in [s for s in self._logs if s >= step]:
+            del self._logs[logged_step]
+        self._last_step = min(self._last_step, step)
+
     def get_logs(self) -> list[dict[str, Any]]:
         if len(self._logs) == 0:
             return []

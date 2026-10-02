@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
@@ -634,6 +635,99 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert stepper.loaded_state["foo"] == "bar"
     assert "modules" in stepper.loaded_state
     assert len(stepper.loaded_state) == 2
+
+
+def _get_logging_trainer(tmp_path: str, max_epochs: int) -> Trainer:
+    """A trainer logging to the active mock wandb, resuming from tmp_path."""
+    LoggingConfig(log_to_wandb=True)._configure_wandb(
+        experiment_dir=tmp_path, config={}, resumable=True
+    )
+    _, trainer = get_trainer(
+        tmp_path,
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=max_epochs,
+        n_train_batches=5,
+    )
+    return trainer
+
+
+def _epoch_log_steps(log_mock: unittest.mock.MagicMock) -> list[int]:
+    """The steps of the end-of-epoch logs among the recorded log calls."""
+    return [
+        call.kwargs["step"]
+        for call in log_mock.call_args_list
+        if "epoch" in call.args[0]
+    ]
+
+
+def test_last_epoch_logs_file_holds_scalars(tmp_path: str):
+    with mock_wandb():
+        trainer = _get_logging_trainer(tmp_path, max_epochs=1)
+        trainer._end_of_epoch_callback = lambda epoch: {
+            "numpy_scalar": np.float32(1.5),
+            "torch_scalar": torch.tensor(2.0),
+            "vector": torch.zeros(2),
+            "figure": object(),
+        }
+        trainer.train()
+    with open(trainer.paths.last_epoch_logs_path) as f:
+        data = json.load(f)
+    assert data["step"] == 5
+    assert data["epoch"] == 1
+    logs = data["logs"]
+    assert logs["epoch"] == 1
+    assert "lr" in logs
+    assert logs["numpy_scalar"] == 1.5
+    assert logs["torch_scalar"] == 2.0
+    assert "vector" not in logs
+    assert "figure" not in logs
+
+
+def test_resume_relogs_epoch_logs_wandb_lost(tmp_path: str):
+    with mock_wandb() as wandb:
+        _get_logging_trainer(tmp_path, max_epochs=2).train()
+        epoch_logs = dict(wandb.get_logs()[10])
+        wandb.drop_logs_from(10)  # killed before wandb uploaded epoch 2's row
+        _get_logging_trainer(tmp_path, max_epochs=2).train()
+        relogged = wandb.get_logs()[10]
+    assert relogged["epoch"] == 2
+    assert relogged["lr"] == epoch_logs["lr"]
+    assert relogged["val/mean/loss"] == epoch_logs["val/mean/loss"]
+
+
+def test_resume_does_not_relog_epoch_logs_wandb_has(tmp_path: str):
+    with mock_wandb() as wandb:
+        _get_logging_trainer(tmp_path, max_epochs=2).train()
+        with unittest.mock.patch.object(wandb, "log", wraps=wandb.log) as log_mock:
+            _get_logging_trainer(tmp_path, max_epochs=2).train()
+    assert log_mock.call_count == 0
+
+
+def test_resume_from_pre_validation_checkpoint_logs_epoch_once(tmp_path: str):
+    with mock_wandb() as wandb:
+        trainer = _get_logging_trainer(tmp_path, max_epochs=2)
+        # killed after logging epoch 2 but before its post-log checkpoint
+        with fail_after_calls_patch(trainer, "save_all_checkpoints", 2):
+            trainer.train()
+        with open(trainer.paths.last_epoch_logs_path) as f:
+            assert json.load(f)["epoch"] == 2
+        wandb.drop_logs_from(10)
+        with unittest.mock.patch.object(wandb, "log", wraps=wandb.log) as log_mock:
+            _get_logging_trainer(tmp_path, max_epochs=2).train()
+        assert wandb.get_logs()[10]["epoch"] == 2
+    assert _epoch_log_steps(log_mock) == [10]
+
+
+def test_resume_without_last_epoch_logs_file(tmp_path: str):
+    with mock_wandb() as wandb:
+        trainer = _get_logging_trainer(tmp_path, max_epochs=1)
+        trainer.train()
+        os.remove(trainer.paths.last_epoch_logs_path)
+        wandb.drop_logs_from(5)
+        _get_logging_trainer(tmp_path, max_epochs=2).train()
+        logs = wandb.get_logs()
+    assert "epoch" not in logs[5]
+    assert logs[10]["epoch"] == 2
 
 
 def get_batch_indices(batches) -> list[int]:

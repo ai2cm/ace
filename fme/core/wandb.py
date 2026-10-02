@@ -188,6 +188,15 @@ class WandB:
         dist = Distributed.get_instance()
         dist.barrier()
 
+    def resumed_next_step(self) -> int | None:
+        """The first step the active wandb run has not received, e.g. after
+        resuming a run whose previous job was killed before uploading its last
+        logs. None if logging to wandb is disabled or offline.
+        """
+        if not self._enabled or wandb.run is None or wandb.run.offline:
+            return None
+        return wandb.run.step
+
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
             data_or_path = scale_image(data_or_path)
