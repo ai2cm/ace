@@ -167,6 +167,20 @@ class OceanHeatContentBudgetConfig:
             into the ocean when conserving the heat content. This can be useful
             for correcting errors in heat budget in target data. The same
             additional heating is imposed at all time steps and grid cells.
+        flux_source: Where the net surface heat flux that the column budget
+            closes against comes from.
+
+            - "generated": the stepper's own flux, i.e. the network's output
+              after any surface energy flux correction (default; the flux the
+              rollout logs).
+            - "forcing": the ``hfds_total_area`` supplied in the forcing data
+              (``next_step_input_data``) for the output time, which at
+              inference is the target dataset's own flux. Use it to close the
+              budget against the data's flux rather than the rebuilt one, e.g.
+              to test whether a drift is the budget target. The field must be
+              present in the forcing data; the simplest way to get it there is
+              ``prescribed_prognostic_names: [hfds_total_area]``, which also
+              makes the logged flux the same one the budget used.
 
     """
 
@@ -174,6 +188,7 @@ class OceanHeatContentBudgetConfig:
         "scaled_temperature", "uniform_temperature", "anomaly_scaled_temperature"
     ]
     constant_unaccounted_heating: float = 0.0
+    flux_source: Literal["generated", "forcing"] = "generated"
     reference_temperature: list[float] | None = None
     max_anomaly_contraction: float = 0.1
     shape_restoring_rate: float = 0.0
@@ -355,6 +370,7 @@ class OceanHeatContentCorrection:
     max_anomaly_contraction: float = 0.1
     shape_restoring_rate: float = 0.0
     max_scaled_contraction: float | None = None
+    flux_source: Literal["generated", "forcing"] = "generated"
 
     def __call__(
         self,
@@ -387,6 +403,7 @@ class OceanHeatContentCorrection:
             self.max_anomaly_contraction,
             self.shape_restoring_rate,
             self.max_scaled_contraction,
+            self.flux_source,
         )
         return corrected, corrector_state
 
@@ -514,6 +531,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.max_anomaly_contraction,
                     self.ocean_heat_content_correction.shape_restoring_rate,
                     self.ocean_heat_content_correction.max_scaled_contraction,
+                    self.ocean_heat_content_correction.flux_source,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -655,6 +673,7 @@ def _force_conserve_ocean_heat_content(
     max_anomaly_contraction: float = 0.1,
     shape_restoring_rate: float = 0.0,
     max_scaled_contraction: float | None = None,
+    flux_source: Literal["generated", "forcing"] = "generated",
 ) -> TensorDict:
     if method not in (
         "scaled_temperature",
@@ -686,23 +705,42 @@ def _force_conserve_ocean_heat_content(
         keepdim=True,
         name="ocean_heat_content",
     )
-    try:
-        # First priority: pre-weighted heat flux in gen_data
-        net_energy_flux_into_ocean = (
-            gen.net_downward_surface_heat_flux_total_area
-            + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
-        )
-    except KeyError:
+    if flux_source == "forcing":
+        # Close against the flux the forcing data carries for the output time
+        # (the target's own flux at inference), not the stepper's. Only the
+        # pre-weighted field is accepted, so the ocean-area convention is never
+        # ambiguous.
         try:
-            # Second priority: standard heat flux in gen_data
             net_energy_flux_into_ocean = (
-                gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-            ) * forcing.sea_surface_fraction
+                forcing.net_downward_surface_heat_flux_total_area
+                + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
+            )
+        except KeyError as err:
+            raise ValueError(
+                "ocean_heat_content_correction.flux_source is 'forcing' but "
+                "hfds_total_area is not in the forcing data; add it with "
+                "prescribed_prognostic_names: [hfds_total_area]."
+            ) from err
+    elif flux_source == "generated":
+        try:
+            # First priority: pre-weighted heat flux in gen_data
+            net_energy_flux_into_ocean = (
+                gen.net_downward_surface_heat_flux_total_area
+                + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
+            )
         except KeyError:
-            # Third priority: standard heat flux in input_data
-            net_energy_flux_into_ocean = (
-                input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-            ) * forcing.sea_surface_fraction
+            try:
+                # Second priority: standard heat flux in gen_data
+                net_energy_flux_into_ocean = (
+                    gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+                ) * forcing.sea_surface_fraction
+            except KeyError:
+                # Third priority: standard heat flux in input_data
+                net_energy_flux_into_ocean = (
+                    input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+                ) * forcing.sea_surface_fraction
+    else:
+        raise NotImplementedError(f"flux_source {flux_source!r} not implemented")
     energy_flux_global_mean = area_weighted_mean(
         net_energy_flux_into_ocean,
         keepdim=True,
