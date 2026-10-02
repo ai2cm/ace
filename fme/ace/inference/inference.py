@@ -70,7 +70,7 @@ class InitialConditionConfig:
     """
 
     path: str
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["netcdf4", "zarr"] = "netcdf4"
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
