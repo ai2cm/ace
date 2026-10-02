@@ -109,13 +109,13 @@ class SwinTransformerNet(nn.Module):
         drop_path_rate: Maximum stochastic-depth rate.
         use_skip: Whether to concatenate each encoder stage's output into the
             matching decoder stage.
-        skip_projection: When True (and ``use_skip``), project each
+        skip_projection: When True, project each
             concatenated ``2 * embed_dim`` skip back to ``embed_dim`` with a
             linear layer so the decoder stages run at ``embed_dim`` channels
             rather than ``2 * embed_dim``. The last decoder stage runs on the
             full-resolution grid, so this removes roughly a quarter of the
-            network's FLOPs at the cost of decoder width. Ignored when
-            ``use_skip`` is False.
+            network's FLOPs at the cost of decoder width. Requires
+            ``use_skip``.
         context_config: Conditioning configuration.  In ``"adaln"`` mode,
             scalar and label conditioning are applied as independent additive
             AdaLN projections; ``None`` (or both 0) disables AdaLN.  In
@@ -155,11 +155,13 @@ class SwinTransformerNet(nn.Module):
             raise ValueError(f"patch_size entries must be >= 1, got {patch_size}")
         if num_levels < 1:
             raise ValueError(f"num_levels must be >= 1, got {num_levels}")
+        if skip_projection and not use_skip:
+            raise ValueError("skip_projection=True requires use_skip=True")
         self.in_chans = in_chans
         self.out_chans = out_chans
         self.img_shape = img_shape
         self.use_skip = use_skip
-        self.skip_projection = skip_projection and use_skip
+        self.skip_projection = skip_projection
         self.window_size = window_size
         self.patch_size = patch_size
         self.num_levels = num_levels

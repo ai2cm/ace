@@ -162,20 +162,12 @@ def test_skip_projection_runs_decoder_at_embed_dim():
         assert param.grad is not None, f"No gradient for {name}"
 
 
-@pytest.mark.parametrize(
-    "options, decoder_dim",
-    [({}, 64), (dict(use_skip=False, skip_projection=True), 32)],
-    ids=["default", "no_skip"],
-)
-def test_skip_projection_absent_by_default_and_without_skip(
-    options: dict, decoder_dim: int
-):
-    """The default adds no parameters, so existing checkpoints keep loading;
-    without a skip there is nothing to project."""
-    net = _build_net(5, 3, (16, 32), **options)
+def test_skip_projection_absent_by_default():
+    """The default adds no parameters, so existing checkpoints keep loading."""
+    net = _build_net(5, 3, (16, 32))
     assert len(net.skip_projs) == 0
     assert not any("skip_proj" in k for k in net.state_dict())
-    assert net.layer4.blocks[0].dim == decoder_dim
+    assert net.layer4.blocks[0].dim == 64
 
 
 _EARTH_PADDING_CONF = {
@@ -249,7 +241,11 @@ def test_default_options_keep_parameter_shapes():
 
 @pytest.mark.parametrize(
     "options, match",
-    [(dict(patch_size=(0, 2)), "patch_size"), (dict(num_levels=0), "num_levels")],
+    [
+        (dict(patch_size=(0, 2)), "patch_size"),
+        (dict(num_levels=0), "num_levels"),
+        (dict(use_skip=False, skip_projection=True), "requires use_skip"),
+    ],
 )
 def test_option_validation(options: dict, match: str):
     with pytest.raises(ValueError, match=match):
