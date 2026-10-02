@@ -78,5 +78,19 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|ace-samudra-cm4|silm932h|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
 
 # rs1: stage-1 inline rollouts diverged from epoch 53; launched from best_ckpt
-# anyway on elynn's call (see header).
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+# anyway on elynn's call (see header). LAUNCHED 2026-09-23 as
+# 01M38X5HTGQ359BM50D9Y6WRC4; flipped to skip 2026-10-02.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra-cm4|7wx3n420|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+# ---------------------------------------------------------------------------
+# MEAN-FILL COMPLETE-MASK arm (fmma), added 2026-10-02. Same template, same
+# schedule, same seed as rs0 above; resumes the fmma stage-1 best_ckpt
+# (jnot63js, epoch 75), whose stepper.input_masking (fill_value mean, exclude
+# only land_fraction + sea_surface_fraction) carries in via
+# create_finetune_config.sh's stepper merge. The generated finetune-config.yaml
+# differs from rs0's in those masking keys and nothing else. Result dataset
+# pinned: the stage-1 run took nine jobs (eight preempted), so its final
+# dataset does not share the experiment id's prefix.
+# min_runtime 5h, not rs0's 3h: stage 1 lost eight jobs to preemption at 3h.
+# A scheduling knob only; no effect on numerics.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-samudra-cm4|jnot63js|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M3YQM96665A45GXEE3CQXC96|5h
