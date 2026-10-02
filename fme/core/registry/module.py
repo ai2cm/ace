@@ -151,6 +151,11 @@ def _drop_unused_label_weights(
     (e.g. SwinTransformer used as a secondary decoder, which is never given
     labels) allocated label weights from the dataset's labels. Those weights
     never affected outputs, so dropping them keeps such checkpoints loadable.
+
+    Only keys the module does not expect are candidates, and of those only
+    the label-conditioning submodules, which are named ``*_labels`` (e.g.
+    ``W_scale_labels``, ``W_bias_labels``, ``adaln_labels``). Any other
+    unexpected key still fails the strict ``load_state_dict`` below.
     """
     unused = {k for k in state if k not in expected and "_labels." in k}
     if unused:
