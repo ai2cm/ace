@@ -25,6 +25,11 @@ from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
 
+# Stride between per-rank seeds under data parallelism.  Must exceed the
+# largest component-level offset applied by callers (currently +1 for the
+# coupled ocean), so per-rank and per-component seeds never collide.
+_RANK_SEED_STRIDE = 1_000_000
+
 # ``BatchData`` serializes to an xarray ``Dataset`` in which the prognostic
 # ``data`` variables keep their plain names (so the file stays a normal,
 # inspectable netCDF), and the round-trippable extras that a plain data+time
@@ -171,6 +176,10 @@ class PrognosticState:
         does not check the config seed against the seed that created the
         restored state.
 
+        Under multi-GPU data parallelism each rank offsets the seed by
+        ``data_parallel_rank * _RANK_SEED_STRIDE`` so that ranks draw
+        independent noise sequences.
+
         Args:
             seed: The configured seed, or None to leave the state unseeded.
             label: Name of the state, used to say which one skipped its seed
@@ -187,7 +196,9 @@ class PrognosticState:
                 "instead."
             )
             return self
-        return self.with_random_state(RandomState.from_seed(seed))
+        dist = Distributed.get_instance()
+        rank_seed = seed + dist.data_parallel_rank * _RANK_SEED_STRIDE
+        return self.with_random_state(RandomState.from_seed(rank_seed))
 
     def as_batch_data(self) -> "BatchData":
         return self._data
