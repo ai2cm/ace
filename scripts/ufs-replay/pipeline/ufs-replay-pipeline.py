@@ -495,9 +495,15 @@ def _apply_nn_fill(
 # ---------------------------------------------------------------------------
 
 
+# Public buckets read without credentials, so a missing or expired login on
+# the submitting machine or a worker cannot break input access.
+ANONYMOUS_BUCKET_PREFIXES = ("gs://noaa-ufs-gefsv13replay/",)
+
+
 def _make_zarr_store(url: str, read_only: bool = True):
     if url.startswith("gs://"):
-        return ObjectStore(from_url(url), read_only=read_only)
+        anonymous = read_only and url.startswith(ANONYMOUS_BUCKET_PREFIXES)
+        return ObjectStore(from_url(url, skip_signature=anonymous), read_only=read_only)
     else:
         return url
 
