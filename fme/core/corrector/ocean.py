@@ -178,6 +178,7 @@ class OceanHeatContentBudgetConfig:
 
     method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
+    flux_source: Literal["generated", "forcing"] = "generated"
     max_scaled_contraction: float | None = None
     unaccounted_heating_source: Literal["constant", "generated"] = "constant"
     unaccounted_heating_name: str = "unaccounted_heating"
@@ -764,23 +765,42 @@ def _force_conserve_ocean_heat_content(
         keepdim=True,
         name="ocean_heat_content",
     )
-    try:
-        # First priority: pre-weighted heat flux in gen_data
-        net_energy_flux_into_ocean = (
-            gen.net_downward_surface_heat_flux_total_area
-            + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
-        )
-    except KeyError:
+    if flux_source == "forcing":
+        # Close against the flux the forcing data carries for the output time
+        # (the target's own flux at inference), not the stepper's. Only the
+        # pre-weighted field is accepted, so the ocean-area convention is never
+        # ambiguous.
         try:
-            # Second priority: standard heat flux in gen_data
             net_energy_flux_into_ocean = (
-                gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-            ) * forcing.sea_surface_fraction
+                forcing.net_downward_surface_heat_flux_total_area
+                + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
+            )
+        except KeyError as err:
+            raise ValueError(
+                "ocean_heat_content_correction.flux_source is 'forcing' but "
+                "hfds_total_area is not in the forcing data; add it with "
+                "prescribed_prognostic_names: [hfds_total_area]."
+            ) from err
+    elif flux_source == "generated":
+        try:
+            # First priority: pre-weighted heat flux in gen_data
+            net_energy_flux_into_ocean = (
+                gen.net_downward_surface_heat_flux_total_area
+                + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
+            )
         except KeyError:
-            # Third priority: standard heat flux in input_data
-            net_energy_flux_into_ocean = (
-                input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
-            ) * forcing.sea_surface_fraction
+            try:
+                # Second priority: standard heat flux in gen_data
+                net_energy_flux_into_ocean = (
+                    gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+                ) * forcing.sea_surface_fraction
+            except KeyError:
+                # Third priority: standard heat flux in input_data
+                net_energy_flux_into_ocean = (
+                    input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
+                ) * forcing.sea_surface_fraction
+    else:
+        raise NotImplementedError(f"flux_source {flux_source!r} not implemented")
     energy_flux_global_mean = area_weighted_mean(
         net_energy_flux_into_ocean,
         keepdim=True,

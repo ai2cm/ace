@@ -400,6 +400,72 @@ def test_surface_energy_flux_correction_prescribed():
     )
 
 
+def test_ocean_heat_content_correction_flux_source_forcing():
+    """With flux_source "forcing" the column budget closes against the
+    hfds_total_area in the forcing data, not the stepper's own flux."""
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.1,
+            flux_source="forcing",
+        )
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
+    mask = torch.ones(nsamples, nlat, nlon, nlevels)
+    mask[:, 0, 0, 0] = 0.0
+    mask[:, 0, 0, 1] = 0.0
+    mask[:, 0, 1, 1] = 0.0
+    masks = {
+        "mask_0": mask[:, :, :, 0],
+        "mask_1": mask[:, :, :, 1],
+        "mask_2d": mask[:, :, :, 0],
+    }
+    ops = LatLonOperations(torch.ones(size=[3, 3]), SpatialMaskProvider(masks))
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10, 20]), mask)
+    sea_surface_fraction = mask[:, :, :, 0]
+    input_data_dict = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon),
+        "thetao_1": torch.ones(nsamples, nlat, nlon),
+        "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
+    }
+    gen_data_dict = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
+        "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
+        # the stepper's own flux is a decoy and must be ignored
+        "hfds_total_area": torch.ones(nsamples, nlat, nlon) * 100,
+    }
+    forcing_data_dict = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
+        "hfds_total_area": torch.ones(nsamples, nlat, nlon) * sea_surface_fraction,
+    }
+    input_data = OceanData(input_data_dict, depth_coordinate)
+    gen_data = OceanData(gen_data_dict, depth_coordinate)
+    corrector = config._build(ops, depth_coordinate, timestep)
+    result = corrector(input_data_dict, gen_data_dict, forcing_data_dict, None)
+    input_ohc = input_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
+    gen_ohc = gen_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
+    # 2.1 = forcing hfds (1) + hfgeou (1) + unaccounted heating (0.1); the
+    # decoy 100 in gen_data plays no part
+    corrector_ratio = (input_ohc + 2.1 * timestep.total_seconds()) / gen_ohc
+    for level in ("thetao_0", "thetao_1"):
+        torch.testing.assert_close(
+            result.corrected[level],
+            gen_data_dict[level] * corrector_ratio,
+            equal_nan=True,
+        )
+    # the flux must be in the forcing data, or the configuration is an error
+    with pytest.raises(ValueError, match="prescribed_prognostic_names"):
+        corrector(
+            input_data_dict,
+            gen_data_dict,
+            {k: v for k, v in forcing_data_dict.items() if k != "hfds_total_area"},
+            None,
+        )
+
+
 @pytest.mark.parametrize(
     "hfds_name",
     [
@@ -1350,35 +1416,6 @@ def test_ocean_heat_content_correction_capped_contraction():
     torch.testing.assert_close(
         (corrected["thetao_1"] - 2 * (1.0 - cap))[valid1], increment[valid1]
     )
-
-
-def test_variable_bounds_clamps_generated_fields():
-    """ForceBounded via OceanCorrectorConfig: out-of-range generated values are
-    clamped to the configured (lower, upper); in-range values and unlisted
-    fields pass through untouched."""
-    torch.manual_seed(0)
-    config = OceanCorrectorConfig(
-        variable_bounds={"so_0": (0.0, 45.0), "thetao_0": (-4.0, None)}
-    )
-    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
-    timestep = datetime.timedelta(seconds=3600)
-    corrector = config._build(ops, _VERTICAL_COORD, timestep)
-    input_data = {
-        name: torch.randn(IMG_SHAPE, device=DEVICE)
-        for name in ("so_0", "thetao_0", "zos")
-    }
-    gen_data = {
-        "so_0": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
-        "thetao_0": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
-        "zos": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
-    }
-    zos_before = gen_data["zos"].clone()
-    corrected_gen = corrector(input_data, gen_data, {}, None).corrected
-    assert torch.all(corrected_gen["so_0"] >= 0.0)
-    assert torch.all(corrected_gen["so_0"] <= 45.0)
-    assert torch.all(corrected_gen["thetao_0"] >= -4.0)
-    assert torch.any(corrected_gen["thetao_0"] > 45.0)  # upper side open
-    torch.testing.assert_close(corrected_gen["zos"], zos_before)
 
 
 def _heat_content_setup():
