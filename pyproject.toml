@@ -30,6 +30,7 @@ dependencies = [
     "moviepy",
     "netcdf4",
     "numpy",
+    "obstore",
     "omegaconf>=2.1.0",
     "pandas",
     "plotly",
