@@ -10,16 +10,19 @@ def _reference_forward(inputs: torch.Tensor, cap_value: float) -> torch.Tensor:
     return torch.clamp(x, max=cap_value)
 
 
-def _inputs_spanning_cap(cap_value: float) -> torch.Tensor:
+def _inputs_spanning_cap(cap_value: float, dtype: torch.dtype) -> torch.Tensor:
     """Random inputs whose GELU outputs fall on both sides of the cap."""
     torch.manual_seed(0)
-    return torch.randn(64, 3, 8, 16) * cap_value * 2.0
+    return (torch.randn(64, 3, 8, 16) * cap_value * 2.0).to(dtype)
 
 
 @pytest.mark.parametrize("cap_value", [1.0, 10.0])
-def test_capped_gelu_matches_item_based_reference(cap_value: float):
+# the cap buffer stays float32, so a lower-precision input checks that the
+# tensor bound is cast to the input dtype rather than promoting the output
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+def test_capped_gelu_matches_item_based_reference(cap_value: float, dtype: torch.dtype):
     module = CappedGELU(cap_value=cap_value)
-    inputs = _inputs_spanning_cap(cap_value)
+    inputs = _inputs_spanning_cap(cap_value, dtype)
     result = module(inputs)
     assert (result == cap_value).any(), "inputs should exercise the cap"
     assert (result < cap_value).any(), "inputs should exercise the uncapped path"
