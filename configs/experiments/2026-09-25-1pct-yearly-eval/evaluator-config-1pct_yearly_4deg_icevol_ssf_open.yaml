@@ -1,13 +1,15 @@
 # evaluator-config-1pct_yearly_4deg.yaml plus a stepper_override that adds the
 # sea-surface-fraction-weighted ice volume salt content correction to a
 # checkpoint trained without one. The override replaces the trained corrector
-# entirely, so it repeats the corrector of
-# ../2026-09-30-resid-thetao-no-sal-baseline (surface_energy_flux_correction
-# prescribed; the 2026-09-28/09-29 no-salt runs and
-# 2026-10-01-direct-ssh-no-sal-baseline use prescribed_open_ocean, in
-# evaluator-config-1pct_yearly_4deg_icevol_ssf_open.yaml) and adds the salt
-# term, with the slope and constant fit to the sea-surface-fraction-weighted
-# salt content. Keep everything outside stepper_override in sync with
+# entirely, so it repeats the corrector of the no-salt runs trained with
+# surface_energy_flux_correction prescribed_open_ocean
+# (../2026-09-28-test-no-sal-correct, ../2026-09-29-test-resid-no-sal-correct
+# and ../2026-10-01-direct-ssh-no-sal-baseline, which are identical) and adds
+# the salt term, with the slope and constant fit to the
+# sea-surface-fraction-weighted salt content. Twin of
+# evaluator-config-1pct_yearly_4deg_icevol_ssf.yaml (for the prescribed run),
+# differing only in surface_energy_flux_correction; keep the two in sync, and
+# everything outside stepper_override in sync with
 # evaluator-config-1pct_yearly_4deg.yaml.
 experiment_dir: /results
 n_forward_steps: 10147
@@ -43,7 +45,7 @@ stepper_override:
     type: ocean_corrector
     config:
       surface_energy_flux_correction:
-        method: prescribed
+        method: prescribed_open_ocean
       ocean_heat_content_correction:
         method: scaled_temperature
       ocean_salt_content_correction:

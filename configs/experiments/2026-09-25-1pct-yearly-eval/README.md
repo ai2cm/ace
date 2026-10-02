@@ -10,6 +10,7 @@ lives with each training experiment and just names the checkpoint.
 | --- | --- | --- |
 | `evaluator-config-1pct_yearly_4deg.yaml` | `run_1pct_yearly_4deg` | 4deg zarrs (`2026-07-22-cm4-*-4deg-coupled-ocean`, `2026-07-15-om4-*-4deg-ocean-5daily`) |
 | `evaluator-config-1pct_yearly_4deg_icevol_ssf.yaml` | `run_1pct_yearly_4deg_icevol_ssf` | `2026-09-30-resid-thetao-no-sal-baseline` only; same as above plus a `stepper_override` that repeats that run's corrector (surface energy flux `prescribed`) and adds the sea-surface-fraction-weighted ice volume salt correction |
+| `evaluator-config-1pct_yearly_4deg_icevol_ssf_open.yaml` | `run_1pct_yearly_4deg_icevol_ssf_open` | the no-salt runs trained with surface energy flux `prescribed_open_ocean` (`2026-09-28-test-no-sal-correct`, `2026-09-29-test-resid-no-sal-correct`, `2026-10-01-direct-ssh-no-sal-baseline`); the same salt correction with that corrector repeated |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
 (`2026-07-15-om4-1pctco2-1deg-coupled-ocean`,
