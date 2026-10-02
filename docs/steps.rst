@@ -38,3 +38,9 @@ The following step builders are available:
    :undoc-members:
    :show-inheritance:
    :noindex:
+
+.. autoclass:: fme.core.step.EnsembleStepConfig
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:

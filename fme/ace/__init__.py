@@ -57,6 +57,7 @@ from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
     InferenceEvaluatorConfig,
     ValidationConfig,
+    WeightedCheckpointPath,
     run_evaluator_from_config,
 )
 from fme.ace.inference.inference import (
@@ -126,6 +127,7 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import (
+    EnsembleStepConfig,
     MultiCallStepConfig,
     SeparateRadiationStepConfig,
     SingleModuleStepConfig,

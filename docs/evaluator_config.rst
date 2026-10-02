@@ -61,6 +61,10 @@ The top-level configuration is the :class:`fme.ace.InferenceEvaluatorConfig` cla
 
 The sub-configurations are:
 
+.. autoclass:: fme.ace.WeightedCheckpointPath
+   :show-inheritance:
+   :noindex:
+
 .. autoclass:: fme.ace.LoggingConfig
    :show-inheritance:
    :noindex:
