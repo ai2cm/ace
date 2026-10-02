@@ -2512,6 +2512,10 @@ def test_single_module_step_sets_float32_matmul_precision(precision: str):
     setting, so it takes effect at inference as well as training."""
     original = torch.get_float32_matmul_precision()
     try:
+        # Start from a different setting so the assertion fails if the step
+        # does not apply the configured value (torch defaults to "highest").
+        other = "medium" if precision != "medium" else "high"
+        torch.set_float32_matmul_precision(other)
         config = dict(
             get_single_module_selector().config, float32_matmul_precision=precision
         )
