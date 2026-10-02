@@ -13,7 +13,9 @@ import pytest
 import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
+from zarrs import ZarrsCodecPipeline
 
+from fme.core.cloud import get_zarr_store
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -24,7 +26,7 @@ from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
-from fme.core.dataset.utils import FillNaNsConfig
+from fme.core.dataset.utils import FillNaNsConfig, _get_async_array
 from fme.core.dataset.xarray import (
     GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD,
     OverwriteConfig,
@@ -40,6 +42,7 @@ from fme.core.dataset.xarray import (
     get_xarray_dataset,
 )
 from fme.core.spatial_mask_provider import SpatialMaskProvider
+from fme.core.testing import mock_object_store
 from fme.core.typing_ import Slice
 
 from .utils import as_broadcasted_tensor
@@ -592,6 +595,37 @@ def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
                 data[name].shape,
             )
             np.testing.assert_array_equal(data[name].numpy(), expected)
+
+
+def test_zarr_dataset_reads_from_object_store(mock_monthly_zarr, tmp_path):
+    """A zarr dataset under a remote URL is read via obstore, with the zarrs
+    codec pipeline."""
+    mock_data: MockData = mock_monthly_zarr
+    source = xr.open_dataset(
+        mock_data.tmpdir / "data.zarr", engine="zarr", decode_timedelta=False
+    )
+    data_path = "memory://bucket/remote-zarr-dataset"
+    names = list(mock_data.var_names.time_dependent_names)
+    with mock_object_store(tmp_path / "remote"):
+        source.to_zarr(
+            get_zarr_store(f"{data_path}/data.zarr", read_only=False),
+            zarr_format=3,
+            consolidated=False,
+        )
+        config = XarrayDataConfig(
+            data_path=data_path, file_pattern="*.zarr", engine="zarr"
+        )
+        dataset = xarray_dataset_constructor(config, names, 3)
+        data = dataset[5][0]
+        array = _get_async_array(f"{data_path}/data.zarr", names[0])
+        assert isinstance(array.codec_pipeline, ZarrsCodecPipeline)
+    for name in names:
+        expected = source[name].isel(time=slice(5, 8)).values
+        expected = np.broadcast_to(
+            expected.reshape(expected.shape + (1,) * (3 - expected.ndim)),
+            data[name].shape,
+        )
+        np.testing.assert_array_equal(data[name].numpy(), expected)
 
 
 def _count_file_opens_while_reading(

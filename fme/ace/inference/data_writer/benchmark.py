@@ -40,7 +40,7 @@ class BenchmarkConfig:
 
     Parameters:
         experiment_dir: Directory to write output to. May be local or a remote
-            path recognized by fsspec, such as ``gs://bucket/results``. Each run
+            object store path, such as ``gs://bucket/results``. Each run
             writes into its own timestamped subdirectory, so a rerun neither
             overwrites nor deletes earlier output and its timing is unaffected
             by what is already there.

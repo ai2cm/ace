@@ -45,8 +45,8 @@ class MonthlyZarrWriter:
     the new data into their stored means using the stored counts, and writes
     them back.
 
-    The store may live on any fsspec-compatible filesystem, unlike the netCDF
-    writer's.
+    The store may be local or in an object store (e.g. ``gs://``), unlike the
+    netCDF writer's.
     """
 
     def __init__(
@@ -63,7 +63,7 @@ class MonthlyZarrWriter:
     ):
         """
         Args:
-            path: Path of the zarr store, on any fsspec-compatible filesystem.
+            path: Path of the zarr store, local or in an object store.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
             n_timesteps: Total number of inference forward steps, used to size

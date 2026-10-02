@@ -4,13 +4,13 @@ from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import cftime
-import fsspec
 import numpy as np
 import xarray as xr
 import zarr
 from zarr.api.asynchronous import open_group
 from zarr.core.sync import sync
 
+from fme.core.cloud import exists, get_zarr_store
 from fme.core.dataset.utils import zarrs_codec_pipeline
 from fme.core.distributed import Distributed
 
@@ -77,7 +77,7 @@ async def _insert_into_zarr_async(
     leaves the store untouched.
     """
     names = list(data)
-    group = await open_group(store=path, mode="r+")
+    group = await open_group(store=get_zarr_store(path, read_only=False), mode="r+")
     arrays = await asyncio.gather(*(group.getitem(name) for name in names))
     slices_tuples = []
     for name in names:
@@ -119,7 +119,7 @@ async def _read_from_zarr_async(
     names: Sequence[str],
     insert_slices: Mapping[int, slice],
 ) -> dict[str, np.ndarray]:
-    group = await open_group(store=path, mode="r")
+    group = await open_group(store=get_zarr_store(path), mode="r")
     arrays = await asyncio.gather(*(group.getitem(name) for name in names))
     read_slices = [
         tuple(
@@ -162,7 +162,7 @@ def _initialize_zarr(
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
     """
-    root = zarr.open_group(path, mode=mode)
+    root = zarr.open_group(get_zarr_store(path, read_only=False), mode=mode)
     root.update_attributes(group_attributes or {})
     chunks_tuple = tuple(
         [chunks.get(dim, dim_sizes[d]) for d, dim in enumerate(dim_names)]
@@ -364,12 +364,7 @@ class ZarrWriter:
                 )
 
     def _path_exists(self) -> bool:
-        fs = fsspec.url_to_fs(self._path)[0]
-
-        if fs.exists(self._path):
-            return True
-        else:
-            return False
+        return exists(self._path)
 
     def record_batch(
         self, data: Mapping[str, np.ndarray], position_slices: Mapping[str, slice]

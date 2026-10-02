@@ -9,7 +9,9 @@ import xarray as xr
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import MonthlyDataWriter
 from fme.ace.inference.data_writer.monthly_zarr import MonthlyZarrWriter
+from fme.core.cloud import get_zarr_store
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.testing import mock_object_store
 from fme.core.timing import GlobalTimer
 
 TIMESTEP = datetime.timedelta(days=5)
@@ -207,17 +209,19 @@ def test_monthly_zarr_writer_rejects_chunked_time_or_sample(tmp_path, dim: str):
         )
 
 
-def test_monthly_zarr_writer_writes_to_non_local_filesystem():
-    writer = _writer(
-        "memory://experiment_dir/monthly.zarr",
-        np.array([cftime.DatetimeProlepticGregorian(2020, 1, 1)]),
-        n_timesteps=1,
-    )
-    writer.append_batch(
-        *_batch([[1.0]], [[cftime.DatetimeProlepticGregorian(2020, 1, 6)]])
-    )
-    writer.finalize()
-    ds = xr.open_zarr("memory://experiment_dir/monthly.zarr", decode_timedelta=False)
+def test_monthly_zarr_writer_writes_to_non_local_filesystem(tmp_path):
+    path = "memory://experiment_dir/monthly.zarr"
+    with mock_object_store(tmp_path / "remote"):
+        writer = _writer(
+            path,
+            np.array([cftime.DatetimeProlepticGregorian(2020, 1, 1)]),
+            n_timesteps=1,
+        )
+        writer.append_batch(
+            *_batch([[1.0]], [[cftime.DatetimeProlepticGregorian(2020, 1, 6)]])
+        )
+        writer.finalize()
+        ds = xr.open_zarr(get_zarr_store(path), decode_timedelta=False).load()
     np.testing.assert_allclose(ds["foo"].isel(sample=0, time=0, lat=0, lon=0), 1.0)
 
 

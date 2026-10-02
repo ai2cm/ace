@@ -35,7 +35,12 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import is_local, makedirs, open_dataset_via_inter_filesystem_copy
+from fme.core.cloud import (
+    get_zarr_store,
+    is_local,
+    makedirs,
+    open_dataset_via_inter_filesystem_copy,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
@@ -78,7 +83,7 @@ class InitialConditionConfig:
             decode_timedelta=False,
         )
         if self.engine == "zarr" or is_local(self.path):
-            ds = xr.open_dataset(self.path, **open_kwargs)
+            ds = xr.open_dataset(get_zarr_store(self.path), **open_kwargs)
         else:
             # netCDF can't be read directly from remote stores (e.g. gs://);
             # copy to a local temp first (covers cross-segment restart.nc ICs).
@@ -217,8 +222,8 @@ class InferenceConfig:
 
     Parameters:
         experiment_dir: Directory to save results to. This can be a local
-            directory, like ``/results``, or a remote directory prefixed with a
-            protocol recognized by ``fsspec``, like ``gs://bucket/results``.
+            directory, like ``/results``, or a remote object store directory,
+            like ``gs://bucket/results`` or ``s3://bucket/results``.
 
             .. note::
                 While most types of output can be written to a remote

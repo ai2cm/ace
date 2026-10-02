@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import cftime
 import dacite
-import fsspec
 import numpy as np
 import pytest
 import torch
@@ -44,6 +43,7 @@ from fme.ace.stepper.time_length_probabilities import (
 )
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
+from fme.core.cloud import exists
 from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
@@ -60,7 +60,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing import mock_wandb
+from fme.core.testing import mock_object_store, mock_wandb
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
@@ -1296,7 +1296,7 @@ def test_evaluator_with_derived_forcings(
 
 @pytest.mark.medium_duration
 def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
-    # Use an in-memory filesystem for the experiment directory to test using
+    # Back the experiment directory with a mocked object store to test using
     # an experiment_dir on a non-local filesystem.
     experiment_dir = "memory://experiment_dir"
 
@@ -1350,9 +1350,13 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
 
-    with pytest.warns(UserWarning, match="local file system"):
-        main(yaml_config=str(config_filename))
+    with mock_object_store(tmp_path / "remote"):
+        with pytest.warns(UserWarning, match="local file system"):
+            main(yaml_config=str(config_filename))
+        _assert_non_local_experiment_dir_contents(experiment_dir)
 
+
+def _assert_non_local_experiment_dir_contents(experiment_dir: str):
     expected_files = [
         "config.yaml",
         "initial_condition.nc",
@@ -1363,18 +1367,15 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         "time_mean_diagnostics.nc",
         "time_mean_norm_diagnostics.nc",
     ]
-    fs, _ = fsspec.url_to_fs(experiment_dir)
     for file in expected_files:
-        assert fs.exists(os.path.join(experiment_dir, file))
+        assert exists(os.path.join(experiment_dir, file))
 
     expected_directories = [
         "autoregressive_predictions.zarr",
         "autoregressive_target.zarr",
     ]
     for directory in expected_directories:
-        assert fs.isdir(os.path.join(experiment_dir, directory))
-
-    fs.rm(experiment_dir, recursive=True)
+        assert exists(os.path.join(experiment_dir, directory, "zarr.json"))
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [2, 3])
