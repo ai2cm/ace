@@ -201,8 +201,10 @@ def implied_tendency_of_ocean_salt_content_due_to_advection(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     """Implied tendency of ocean salt content due to advection.
-    This is computed as a residual from the column salt budget, using the net
-    salt flux when available and the virtual salt flux otherwise.
+    This is computed as a residual from the column salt budget. A missing sea
+    ice salt flux is taken as zero, in which case net_salt_flux_into_ocean_column
+    is not computed. The missing brine regection term is globally small, and this
+    implied tendancy is locally noisier than the net salt flux term.
     """
     column_salt_tendency = ocean_salt_content_tendency(data, timestep)
     try:
@@ -223,6 +225,22 @@ def net_energy_flux_into_ocean_column(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return data.net_energy_flux_into_ocean
+
+
+@register(VariableMetadata("g/m**2/s", "Virtual salt flux through surface into ocean"))
+def net_virtual_salt_flux_into_ocean_column(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.net_virtual_salt_flux_into_ocean
+
+
+@register(VariableMetadata("g/m**2/s", "Net salt flux through surface into ocean"))
+def net_salt_flux_into_ocean_column(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return data.net_salt_flux_into_ocean
 
 
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
