@@ -172,10 +172,8 @@ def test_salt_budget_closes(
     wfo: float, sfdsi: float | None, sea_surface_fraction: float
 ):
     """A salinity change set by the surface salt fluxes leaves no implied
-    advection, also in a cell that is partly land. Salinity, wfo and sfdsi are
-    ocean-area means, so the salt content and the fluxes must all be weighted by
-    the sea surface fraction. A missing sfdsi, or a NaN sfdsi where there is no
-    sea ice, contributes no flux.
+    advection, including in a cell that is partly land, when sfdsi is missing,
+    and when sfdsi is NaN.
     """
     dz = 10.0
     initial_salinity = 35.0

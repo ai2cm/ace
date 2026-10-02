@@ -157,11 +157,7 @@ class OceanData:
     @property
     def ocean_salt_content(self) -> torch.Tensor:
         """Returns column-integrated ocean salt content in g/m2, per unit
-        total cell area.
-
-        Salinity is an ocean-area mean, so the column integral is weighted by
-        the sea surface fraction, consistent with
-        ``net_virtual_salt_flux_into_ocean``.
+        total cell area, weighted by the sea surface fraction.
         """
         if self._depth_coordinate is None:
             raise ValueError(
@@ -223,40 +219,34 @@ class OceanData:
 
     @property
     def downward_sea_ice_basal_salt_flux(self) -> torch.Tensor:
-        """Returns the salt flux from sea ice into the ocean in kg/m2/s,
-        or zeros if not available.
-
-        Falling back to zeros is acceptable for the global salt budget: on
-        OM4 data the sfdsi term is about a tenth of the wfo term and adding it
-        does not measurably change the global closure.
-
-        NaN is treated as zero everywhere: some stores leave sfdsi NaN in
-        ocean cells that never carry sea ice, where there is no basal salt flux.
+        """Returns the salt flux from sea ice into the ocean in kg/m2/s, with
+        NaN as zero.
         """
-        try:
-            return torch.nan_to_num(
-                self._get("downward_sea_ice_basal_salt_flux"), nan=0.0
-            )
-        except KeyError:
-            return torch.zeros_like(self.sea_surface_fraction)
+        return torch.nan_to_num(self._get("downward_sea_ice_basal_salt_flux"), nan=0.0)
 
     @property
     def net_virtual_salt_flux_into_ocean(self) -> torch.Tensor:
         """Virtual salt flux into the ocean column in g/m2/s, per unit total
-        cell area.
-
-        We represent the net change in salinity through a virtual flux that
-        accounts for the addition of freshwater and the salt directly exchanged
-        with sea ice. The dilution uses a fixed reference salinity rather than
-        the local surface salinity. The salt exchanged with sea ice (sfdsi)
-        is added, since melting ice is not fresh and some salt remains in newly
-        formed ice. Both fluxes are ocean-area means, so they are weighted by the
-        sea surface fraction, like ``ocean_salt_content``.
+        cell area: the water flux into sea water times a fixed reference
+        salinity, weighted by the sea surface fraction.
         """
         return (
-            -REFERENCE_SALINITY * self.water_flux_into_sea_water
-            + 1000 * self.downward_sea_ice_basal_salt_flux  # kg -> g
-        ) * self.sea_surface_fraction
+            -REFERENCE_SALINITY
+            * self.water_flux_into_sea_water
+            * self.sea_surface_fraction
+        )
+
+    @property
+    def net_salt_flux_into_ocean(self) -> torch.Tensor:
+        """Net salt flux into the ocean column in g/m2/s, per unit total cell
+        area: the virtual salt flux plus the salt flux from sea ice, weighted
+        by the sea surface fraction.
+        """
+        sea_ice_salt_flux = 1000 * self.downward_sea_ice_basal_salt_flux  # kg -> g
+        return (
+            self.net_virtual_salt_flux_into_ocean
+            + sea_ice_salt_flux * self.sea_surface_fraction
+        )
 
     @property
     def sea_ice_fraction(self) -> torch.Tensor:

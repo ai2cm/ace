@@ -201,10 +201,14 @@ def implied_tendency_of_ocean_salt_content_due_to_advection(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     """Implied tendency of ocean salt content due to advection.
-    This is computed as a residual from the column salt budget.
+    This is computed as a residual from the column salt budget, using the net
+    salt flux when available and the virtual salt flux otherwise.
     """
     column_salt_tendency = ocean_salt_content_tendency(data, timestep)
-    flux_through_surface = data.net_virtual_salt_flux_into_ocean
+    try:
+        flux_through_surface = data.net_salt_flux_into_ocean
+    except KeyError:
+        flux_through_surface = data.net_virtual_salt_flux_into_ocean
     return column_salt_tendency - flux_through_surface
 
 
