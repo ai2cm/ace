@@ -192,6 +192,10 @@ class WandB:
         """The first step the active wandb run has not received, e.g. after
         resuming a run whose previous job was killed before uploading its last
         logs. None if logging to wandb is disabled or offline.
+
+        Only meaningful before this process logs anything: wandb sets
+        ``run.step`` to the resumed run's last step + 1 at init, but a later
+        ``log(..., step=s)`` moves it to ``s``, a step already received.
         """
         if not self._enabled or wandb.run is None or wandb.run.offline:
             return None
