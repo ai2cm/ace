@@ -6,15 +6,21 @@ import torch
 import xarray as xr
 
 from fme import get_device
-from fme.core.coordinates import DepthCoordinate
+from fme.core.coordinates import (
+    DepthCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     RunoffHeatFluxConfig,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
+    UnderIceHeatFluxConfig,
     _compute_ocean_net_surface_energy_flux,
 )
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -564,6 +570,141 @@ def test_prescribed_cell_mean_runoff_map_shape_mismatch(tmp_path):
     corrector = _build_cell_mean_corrector(RunoffHeatFluxConfig(path=runoff_path))
     with pytest.raises(ValueError, match="shape"):
         corrector(input_data, gen_data, forcing_data, None)
+
+
+_CELL_AREA = 1.0e10  # m**2
+_TIMESTEP = datetime.timedelta(days=5)
+_RHO_L = 905.0 * 334000.0
+
+
+def _build_under_ice_corrector(under_ice: UnderIceHeatFluxConfig):
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_cell_mean", under_ice=under_ice
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    area = torch.full(IMG_SHAPE, _CELL_AREA, device=DEVICE)
+    return config._build(ops, None, _TIMESTEP, cell_area_m2=area)
+
+
+def _with_ice_volume(input_data, gen_data, v_in, v_out):
+    input_data = {**input_data, "sea_ice_volume": v_in}
+    gen_data = {**gen_data, "sea_ice_volume": v_out}
+    return input_data, gen_data
+
+
+def test_prescribed_cell_mean_under_ice_storage():
+    input_data, gen_data, forcing_data, net_flux = _make_cell_mean_case()
+    has_sea = forcing_data["sea_surface_fraction"] > 0
+    v_in = torch.full(IMG_SHAPE, 1.0e9, device=DEVICE)  # m**3 per cell
+    v_out = v_in.clone()
+    v_out[_ROW_ICE, :] = 2.0e9  # growth
+    v_out[_ROW_COAST_ICE, :] = 0.5e9  # melt
+    input_data, gen_data = _with_ice_volume(input_data, gen_data, v_in, v_out)
+    corrector = _build_under_ice_corrector(UnderIceHeatFluxConfig())
+    out = corrector(input_data, gen_data, forcing_data, None).corrected[
+        "hfds_total_area"
+    ]
+    release = _RHO_L * (v_out - v_in) / (_CELL_AREA * _TIMESTEP.total_seconds())
+    torch.testing.assert_close(out, (net_flux + release) * has_sea)
+    # growth releases latent heat: the ocean loses less than the atmosphere took
+    assert torch.all(out[_ROW_ICE, :] > net_flux[_ROW_ICE, :])
+    # melt takes heat before it reaches the water
+    assert torch.all(out[_ROW_COAST_ICE, :] < net_flux[_ROW_COAST_ICE, :])
+    # no volume change: the atmosphere's flux, with no network share anywhere
+    torch.testing.assert_close(out[_ROW_OPEN, :], net_flux[_ROW_OPEN, :])
+    gen_data = {**gen_data, "hfds_total_area": gen_data["hfds_total_area"] + 100.0}
+    out2 = corrector(input_data, gen_data, forcing_data, None).corrected[
+        "hfds_total_area"
+    ]
+    torch.testing.assert_close(out2, out)
+    # all land: nothing
+    torch.testing.assert_close(out[_ROW_LAND, :], torch.zeros_like(out[_ROW_LAND, :]))
+
+
+@pytest.mark.parametrize("gradient", [True, False])
+def test_under_ice_gradient_through_ice_volume(gradient):
+    input_data, gen_data, forcing_data, _ = _make_cell_mean_case()
+    v_in = torch.full(IMG_SHAPE, 1.0e9, device=DEVICE)
+    v_out = torch.full(IMG_SHAPE, 1.5e9, device=DEVICE, requires_grad=True)
+    input_data, gen_data = _with_ice_volume(input_data, gen_data, v_in, v_out)
+    corrector = _build_under_ice_corrector(
+        UnderIceHeatFluxConfig(gradient_through_ice_volume=gradient)
+    )
+    out = corrector(input_data, gen_data, forcing_data, None).corrected[
+        "hfds_total_area"
+    ]
+    if gradient:
+        out.sum().backward()
+        assert v_out.grad is not None and torch.any(v_out.grad != 0)
+    else:
+        assert not out.requires_grad
+
+
+def test_under_ice_requires_ice_volume():
+    input_data, gen_data, forcing_data, _ = _make_cell_mean_case()
+    corrector = _build_under_ice_corrector(UnderIceHeatFluxConfig())
+    with pytest.raises(KeyError, match="sea_ice_volume"):
+        corrector(input_data, gen_data, forcing_data, None)
+
+
+def test_under_ice_requires_cell_area():
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_cell_mean", under_ice=UnderIceHeatFluxConfig()
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    with pytest.raises(ValueError, match="cell areas"):
+        config._build(ops, None, _TIMESTEP)
+
+
+def test_under_ice_cell_area_from_dataset_info():
+    # the production path: cell areas come from the dataset's lat-lon grid
+    lat = torch.linspace(-80.0, 80.0, IMG_SHAPE[0])
+    lon = torch.linspace(0.0, 288.0, IMG_SHAPE[1])
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=coords,
+        vertical_coordinate=NullVerticalCoordinate(),
+        timestep=_TIMESTEP,
+    )
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_cell_mean", under_ice=UnderIceHeatFluxConfig()
+        ),
+    )
+    corrector = config._get_corrector(dataset_info)
+    input_data, gen_data, forcing_data, net_flux = _make_cell_mean_case()
+    v_in = torch.zeros(IMG_SHAPE, device=DEVICE)
+    v_out = torch.full(IMG_SHAPE, 1.0e9, device=DEVICE)
+    input_data, gen_data = _with_ice_volume(input_data, gen_data, v_in, v_out)
+    out = corrector(input_data, gen_data, forcing_data, None).corrected[
+        "hfds_total_area"
+    ]
+    area = coords.area_weights_m2.to(DEVICE)
+    release = _RHO_L * 1.0e9 / (area * _TIMESTEP.total_seconds())
+    has_sea = forcing_data["sea_surface_fraction"] > 0
+    torch.testing.assert_close(out, (net_flux + release) * has_sea)
+
+
+def test_under_ice_only_with_prescribed_cell_mean():
+    with pytest.raises(ValueError, match="prescribed_cell_mean"):
+        SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed", under_ice=UnderIceHeatFluxConfig()
+        )
+
+
+def test_under_ice_config_round_trip():
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_cell_mean",
+            under_ice=UnderIceHeatFluxConfig(gradient_through_ice_volume=False),
+        ),
+    )
+    state = dataclasses.asdict(config)
+    assert OceanCorrectorConfig.from_state(state) == config
 
 
 def test_runoff_heat_flux_only_with_prescribed_cell_mean():
