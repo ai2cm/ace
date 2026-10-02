@@ -1,3 +1,7 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_mld|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.zos_global_mean_correction.reference_global_mean=-1.3e-4|8h
+cm4_1pct_46to125_piC_156to235-ocean_mld|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.zos_global_mean_correction.reference_global_mean=-1.3e-4|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_mld_wright97pbo_w1w0p1|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.zos_global_mean_correction.reference_global_mean=-1.3e-4 'stepper_training.optimized_derived_variables=[{name: rho_wright97, weight: 1.0}, {name: pbo_wright97, weight: 0.1}]'|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_mld_wgrad|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.step.config.corrector.config.corrector_disabled_epochs=1 stepper.step.config.corrector.config.zos_global_mean_correction.reference_global_mean=-1.3e-4 stepper.step.config.corrector.config.ocean_heat_content_correction.detach_weights=false|8h
