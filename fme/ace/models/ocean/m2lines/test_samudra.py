@@ -173,6 +173,47 @@ def test_samudra_output_is_unchanged():
     )
 
 
+@pytest.mark.medium_duration
+@pytest.mark.parametrize("zonally_periodic_upsample", [False, True])
+def test_samudra_forward_compiles_in_one_graph(zonally_periodic_upsample: bool):
+    """Samudra's forward must trace end to end, with no graph breaks.
+
+    A graph break in the decoder loop splits the network into one graph per
+    layer, which costs most of what compilation buys. The image shape is odd
+    on both axes so that the upsampled tensor has to be cropped back onto the
+    skip connection, which is the part of the loop that is easiest to write in
+    a way dynamo cannot trace.
+    """
+    torch.manual_seed(0)
+    model = Samudra(
+        input_channels=2,
+        output_channels=3,
+        ch_width=[3, 3],
+        dilation=[1, 2],
+        n_layers=[1, 1],
+        norm="batch",
+        zonally_periodic_upsample=zonally_periodic_upsample,
+    )
+    model.eval()
+    x = torch.randn(2, 2, 9, 18)
+
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(model)(x)
+        assert explanation.graph_break_count == 0, explanation.break_reasons
+        assert explanation.graph_count == 1
+
+        # aot_eager runs the full tracing path without inductor's codegen cost
+        compiled = torch.compile(model, backend="aot_eager")
+        with torch.no_grad():
+            eager_output = model(x)
+            compiled_output = compiled(x)
+    finally:
+        torch._dynamo.reset()
+
+    torch.testing.assert_close(compiled_output, eager_output, atol=1e-4, rtol=1e-4)
+
+
 def test_released_checkpoint_still_loads():
     """A released checkpoint must keep loading into this module.
 
