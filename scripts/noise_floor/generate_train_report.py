@@ -57,6 +57,7 @@ def main(
     project: str,
     entity: str,
     name: str,
+    metrics_log_dir: str,
 ):
     rmse_means = rmse_means.load()
     rmse_stdevs = rmse_stdevs.load()
@@ -73,8 +74,7 @@ def main(
         stds[varname] = fitted_model(window_years)
 
     wandb = WandB.get_instance()
-    # these runs are never resumed, so the on-disk metrics are not needed
-    wandb.configure(log_to_wandb=True, metrics_log_dir=tempfile.mkdtemp())
+    wandb.configure(log_to_wandb=True, metrics_log_dir=metrics_log_dir)
     config = {
         "window_years": window_years,
         "batches": batches,
@@ -154,7 +154,8 @@ if __name__ == "__main__":
         )
 
     rmse_means, rmse_stdevs = data_config.get_datasets()
-    with Distributed.context():
+    # these runs are never resumed, so the on-disk metrics are not needed
+    with Distributed.context(), tempfile.TemporaryDirectory() as metrics_log_dir:
         main(
             rmse_means=rmse_means,
             rmse_stdevs=rmse_stdevs,
@@ -164,4 +165,5 @@ if __name__ == "__main__":
             project=args.project,
             entity=args.entity,
             name=args.name,
+            metrics_log_dir=metrics_log_dir,
         )
