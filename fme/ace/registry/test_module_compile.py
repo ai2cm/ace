@@ -467,6 +467,9 @@ def test_compiled_module_matches_eager(case: BuilderCase):
     module = _build_module(case)
     module.torch_module.eval()
     compiled = module.compile(backend="aot_eager")
+    # aot_eager is bit-identical to eager, so the output comparison below
+    # cannot by itself tell a compiled forward from an uncompiled one
+    assert compiled.is_compiled
     x = _make_input(case)
     labels = _make_labels(case)
 
@@ -528,6 +531,7 @@ def test_compiled_module_backward_matches_eager(case: BuilderCase):
     module = _build_module(case)
     module.torch_module.train()
     compiled = module.compile(backend="aot_eager")
+    assert compiled.is_compiled
     x = _make_input(case)
     labels = _make_labels(case)
 
