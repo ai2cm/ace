@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from fme.core import wandb
-from fme.core.disk_metric_logger import DiskMetricLogger
+from fme.core.disk_metric_logger import DiskMetricLogger, read_metrics_by_step
 from fme.core.distributed import Distributed
 
 
@@ -17,6 +17,7 @@ class MockWandB:
         self._configured = False
         self._logs: dict[int, dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
+        self._last_received_step: int | None = None
         self._id: str | None = None
         self._disk_logger: DiskMetricLogger | None = None
         self._runs: list[dict[str, Any]] = []
@@ -29,6 +30,9 @@ class MockWandB:
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
+        if self._disk_logger is not None:
+            self._disk_logger.close()
+            self._disk_logger = None
         if metrics_log_dir is not None and dist.is_root():
             self._disk_logger = DiskMetricLogger(metrics_log_dir)
 
@@ -101,6 +105,12 @@ class MockWandB:
     def set_id(self, id: str):
         self._id = id
 
+    def set_last_received_step(self, step: int):
+        """Simulate resuming a wandb run that received logs through ``step``
+        in a previous job, whose logs this mock does not hold.
+        """
+        self._last_received_step = step
+
     def finish(self):
         # Reset per-run state so the next init starts fresh; the env-name
         # snapshot persists, mirroring wandb's setup singleton across finish().
@@ -129,6 +139,51 @@ class MockWandB:
             self._logs[step].update(data)
         if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
+
+    @property
+    def disk_metrics_offset(self) -> int | None:
+        if self._disk_logger is None:
+            return None
+        return self._disk_logger.offset
+
+    def restore_disk_metrics(
+        self, offset: int | None, resume_step: int, step_continues: bool
+    ):
+        if self._disk_logger is None or offset is None:
+            return
+        if self._disk_logger.restore(offset):
+            self._relog_unsynced_disk_metrics(resume_step, step_continues)
+
+    def restore_disk_metrics_through_step(self, last_step: int):
+        if self._disk_logger is None:
+            return
+        if self._disk_logger.restore_through_step(last_step):
+            self._relog_unsynced_disk_metrics(last_step, step_continues=False)
+
+    def _relog_unsynced_disk_metrics(self, resume_step: int, step_continues: bool):
+        """Mirror wandb: a resumed run continues after the last step it
+        received, and a committed step rejects later logs at that step.
+        """
+        if not self._enabled or self._disk_logger is None:
+            return
+        received_steps = list(self._logs)
+        if self._last_received_step is not None:
+            received_steps.append(self._last_received_step)
+        first_step = max(received_steps, default=-1) + 1
+        for step, data in read_metrics_by_step(
+            self._disk_logger.directory, first_step
+        ).items():
+            commit = not (step_continues and step == resume_step)
+            self._last_step = step + 1 if commit else step
+            self._logs[step].update(data)
+
+    def drop_logs_after(self, step: int):
+        """Simulate wandb never receiving logs after ``step``, e.g. because
+        the job was killed before its background uploader synced them.
+        """
+        for logged_step in [s for s in self._logs if s > step]:
+            del self._logs[logged_step]
+        self._last_step = min(self._last_step, step)
 
     def get_logs(self) -> list[dict[str, Any]]:
         if len(self._logs) == 0:

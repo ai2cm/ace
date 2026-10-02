@@ -825,11 +825,13 @@ def test_resume(tmp_path, nettype):
                 max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
             )
             assert not mock.called
-            # need to persist the id since mock_wandb doesn't
+            # need to persist the id and last step since mock_wandb doesn't
             id = wandb.get_id()
+            last_step = len(wandb.get_logs()) - 1
         with mock_wandb() as wandb:
             # set the id so that we can check it matches what's in the experiment dir
             wandb.set_id(id)
+            wandb.set_last_received_step(last_step)
             train_main(yaml_config=train_config)
             mock.assert_called()
             assert (
