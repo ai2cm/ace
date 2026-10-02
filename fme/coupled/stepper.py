@@ -392,10 +392,11 @@ class CoupledStepperConfig:
         same name in ``CoupledStepper._get_atmosphere_forcings``.
 
         Called at construction, and again after inference-time overrides
-        mutate the component step configs (the only supported coupled override
-        is ``prescribed_prognostic_names``). No ocean-side check is needed:
-        atmosphere-supplied ocean forcings are input-only names, which cannot
-        be prognostic and therefore cannot be prescribed.
+        mutate the component step configs (of the supported coupled overrides,
+        only ``prescribed_prognostic_names`` can change the result). No
+        ocean-side check is needed: atmosphere-supplied ocean forcings are
+        input-only names, which cannot be prognostic and therefore cannot be
+        prescribed.
         """
         prescribed = self.atmosphere.stepper.get_prescribed_prognostic_names()
         clobbered = sorted(set(prescribed) & self._ocean_supplied_atmosphere_names())

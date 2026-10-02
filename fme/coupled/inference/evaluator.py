@@ -44,13 +44,15 @@ from fme.coupled.stepper import (
 def _validate_coupled_component_override(
     override: StepperOverrideConfig | None,
 ) -> None:
-    """Restrict coupled inference overrides to ``prescribed_prognostic_names``.
+    """Restrict coupled inference overrides to those that preserve names.
 
     ``CoupledStepperConfig`` caches cross-component forcing-name sets and
-    validates component compatibility at construction. Only
-    ``prescribed_prognostic_names`` is recomputed on demand; an ``ocean``,
+    validates component compatibility at construction. An ``ocean``,
     ``multi_call`` or ``derived_forcings`` override applied afterward would leave
     those caches stale, so reject them rather than silently use stale values.
+    ``prescribed_prognostic_names`` is recomputed on demand, and a
+    ``corrector`` config feeds no input, output or forcing names, so neither
+    invalidates the caches.
     """
     if override is None:
         return
@@ -65,7 +67,8 @@ def _validate_coupled_component_override(
     ]
     if unsupported:
         raise ValueError(
-            "Coupled inference overrides only support prescribed_prognostic_names, "
+            "Coupled inference overrides only support "
+            "prescribed_prognostic_names and corrector, "
             f"but got unsupported override(s): {sorted(unsupported)}."
         )
 

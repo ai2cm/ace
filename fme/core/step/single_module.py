@@ -320,6 +320,9 @@ class SingleModuleStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
+
     def get_step(
         self,
         dataset_info: DatasetInfo,
