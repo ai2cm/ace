@@ -1487,6 +1487,8 @@ class TrainStepperConfig:
             is trained on inputs it produced itself without being asked to
             improve the steps that produced them. Must be less than the number
             of loss steps. Cannot be combined with optimize_last_step_only.
+            The aggregate ``loss`` metric, including the validation loss used
+            to select the best checkpoint, sums only the optimized steps.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
@@ -1518,6 +1520,17 @@ class TrainStepperConfig:
         if self.pushforward_steps > 0 and self.optimize_last_step_only:
             raise ValueError(
                 "pushforward_steps cannot be combined with optimize_last_step_only"
+            )
+        schedule = self.n_forward_steps_schedule
+        if (
+            self.pushforward_steps > 0
+            and schedule is not None
+            and self.pushforward_steps >= schedule.min_n_forward_steps
+        ):
+            raise ValueError(
+                f"pushforward_steps ({self.pushforward_steps}) must be less than "
+                "the fewest forward steps n_forward_steps can sample "
+                f"({schedule.min_n_forward_steps})"
             )
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":

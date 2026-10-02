@@ -669,11 +669,33 @@ def test_train_on_batch_pushforward_steps_must_leave_a_loss_step():
     [
         {"pushforward_steps": -1},
         {"pushforward_steps": 1, "optimize_last_step_only": True},
+        {"pushforward_steps": 2, "n_forward_steps": 2},
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthSchedule(
+                start_value=3,
+                milestones=[
+                    TimeLengthMilestone(
+                        epoch=2,
+                        value=TimeLengthProbabilities(
+                            outcomes=[
+                                TimeLengthProbability(steps=1, probability=0.5),
+                                TimeLengthProbability(steps=3, probability=0.5),
+                            ]
+                        ),
+                    )
+                ],
+            ),
+        },
     ],
 )
 def test_train_stepper_config_invalid_pushforward_steps(kwargs):
     with pytest.raises(ValueError, match="pushforward_steps"):
         TrainStepperConfig(**kwargs)
+
+
+def test_train_stepper_config_valid_pushforward_steps():
+    TrainStepperConfig(pushforward_steps=1, n_forward_steps=2)
 
 
 def test_per_channel_losses_bounded_by_accumulated_loss():
