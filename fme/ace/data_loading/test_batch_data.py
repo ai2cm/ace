@@ -1710,7 +1710,7 @@ class TestSelectSampleSlice:
 
 
 @pytest.mark.parallel
-class TestGather:
+class TestDataParallelGather:
     def setup_method(self):
         dist = Distributed.get_instance()
         if dist.has_spatial_parallelism:
@@ -1726,7 +1726,7 @@ class TestGather:
                 dims=["sample", "time"],
             ),
         )
-        result = local.gather(dist)
+        result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
             assert result.data["x"].shape[0] == dist.world_size
@@ -1747,7 +1747,7 @@ class TestGather:
                 dims=["sample", "time"],
             ),
         )
-        result = local.gather(dist)
+        result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
             assert result.time.sizes["sample"] == dist.world_size
@@ -1763,7 +1763,7 @@ class TestGather:
             ),
             labels=BatchLabels(torch.tensor([[float(rank)]]), names=["label"]),
         )
-        result = local.gather(dist)
+        result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
             assert result.labels is not None
@@ -1784,7 +1784,7 @@ class TestGather:
                 )
             ),
         )
-        result = local.gather(dist)
+        result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
             assert result.stepper_state is not None
@@ -1802,20 +1802,38 @@ class TestGather:
                 dims=["sample", "time"],
             ),
         )
-        result = local.gather(dist)
+        result = local.data_parallel_gather(dist)
         if dist.is_root():
             assert result is not None
             assert result.labels is None
             assert result.stepper_state is None
             assert result.data_mask is None
 
+    def test_result_is_on_cpu(self):
+        dist = Distributed.get_instance()
+        rank = dist.rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.full((1, 1, 2, 3), float(rank))},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1 + rank)]]),
+                dims=["sample", "time"],
+            ),
+        )
+        result = local.data_parallel_gather(dist)
+        if dist.is_root():
+            assert result is not None
+            for tensor in result.data.values():
+                assert tensor.device == torch.device("cpu")
 
-def test_gather_covers_all_fields():
-    """Fail if a new field is added to BatchData but not handled by gather."""
+
+def test_data_parallel_gather_covers_all_fields():
+    """Fail if a new field is added to BatchData but not handled by
+    data_parallel_gather."""
     actual_fields = {f.name for f in dataclasses.fields(BatchData)}
     covered = _METADATA_FIELDS | _NON_METADATA_FIELDS
     unknown = actual_fields - covered
     assert not unknown, (
         f"BatchData has new fields {unknown} not covered by "
-        f"TestGather. Update gather and add a test for each new field."
+        f"TestDataParallelGather. Update data_parallel_gather and add a "
+        f"test for each new field."
     )
