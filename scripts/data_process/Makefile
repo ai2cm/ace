@@ -31,6 +31,8 @@ ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmos
 ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.12.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 HEALPIX_PROCESSING_IMAGE = dlwp-ace-datapipe
 HEALPIX_PROCESSING_IMAGE_VERSION = v2025.09.0  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
+COUPLED_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/coupled-processing
+COUPLED_PROCESSING_IMAGE_VERSION = v2026.09.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
 ifeq ($(RESOLUTION),1deg)
 	ROOT_INTERMEDIATE ?= $(ROOT_INTERMEDIATE_CLIMSST_1DEG)
@@ -338,6 +340,14 @@ build_healpix_processing_image:
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
 
+.PHONY: build_coupled_processing_image
+build_coupled_processing_image:
+	docker build -f coupled.Dockerfile -t $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION) .
+
+.PHONY: push_coupled_processing_image
+push_coupled_processing_image:
+	docker push $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+
 .PHONY: cm4_piControl_ocean_stats
 cm4_piControl_ocean_stats:
 	./compute_stats.sh --config configs/CM4-piControl-ocean-$(RESOLUTION)-200yr.yaml
@@ -360,33 +370,66 @@ create_coupled_datasets_env:
 	conda run --no-capture-output -n create_coupled_datasets python -m pip install uv
 	conda run --no-capture-output -n create_coupled_datasets uv pip install -r requirements-coupled.txt
 
+CONFIG_CM4_PICONTROL_COUPLED = configs/CM4-piControl-coupled-$(RESOLUTION)-200yr.yaml
+CONFIG_CM4_1PCTCO2_COUPLED = configs/CM4-1pctCO2-coupled-$(RESOLUTION)-140yr.yaml
+CONFIG_CM4_PICONTROL_COUPLED_1DAILY = configs/CM4-piControl-coupled-$(RESOLUTION)-1daily-200yr.yaml
+CONFIG_CM4_1PCTCO2_COUPLED_1DAILY = configs/CM4-1pctCO2-coupled-$(RESOLUTION)-1daily-140yr.yaml
+CONFIG_E3SMV3_PICONTROL_COUPLED = configs/E3SMv3-piControl-100yr-coupled.yaml
+CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED = configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
+
 .PHONY: cm4_piControl_coupled
 cm4_piControl_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-$(RESOLUTION)-200yr.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_PICONTROL_COUPLED)
+
+.PHONY: cm4_piControl_coupled_argo
+cm4_piControl_coupled_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_PICONTROL_COUPLED) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
 .PHONY: cm4_1pctCO2_coupled
 cm4_1pctCO2_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-$(RESOLUTION)-140yr.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_1PCTCO2_COUPLED)
+
+.PHONY: cm4_1pctCO2_coupled_argo
+cm4_1pctCO2_coupled_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_1PCTCO2_COUPLED) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
 .PHONY: cm4_piControl_coupled_1daily
 cm4_piControl_coupled_1daily:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-$(RESOLUTION)-1daily-200yr.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_PICONTROL_COUPLED_1DAILY)
+
+.PHONY: cm4_piControl_coupled_1daily_argo
+cm4_piControl_coupled_1daily_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_PICONTROL_COUPLED_1DAILY) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
 .PHONY: cm4_1pctCO2_coupled_1daily
 cm4_1pctCO2_coupled_1daily:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-$(RESOLUTION)-1daily-140yr.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_1PCTCO2_COUPLED_1DAILY)
+
+.PHONY: cm4_1pctCO2_coupled_1daily_argo
+cm4_1pctCO2_coupled_1daily_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_1PCTCO2_COUPLED_1DAILY) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+
+# The 1pctCO2 coupled configs read their sea ice mask from the piControl
+# coupled ocean store, so one workflow runs piControl then 1pctCO2.
+.PHONY: cm4_coupled_argo
+cm4_coupled_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_PICONTROL_COUPLED) --dependent-config $(CONFIG_CM4_1PCTCO2_COUPLED) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+
+.PHONY: cm4_coupled_1daily_argo
+cm4_coupled_1daily_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_PICONTROL_COUPLED_1DAILY) --dependent-config $(CONFIG_CM4_1PCTCO2_COUPLED_1DAILY) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/E3SMv3-piControl-100yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_E3SMV3_PICONTROL_COUPLED)
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
 	./compute_dataset.sh --dataset --stats $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
 
-.PHONY:
+.PHONY: cm4_like_am4_random_co2_ensemble_coupled
 cm4_like_am4_random_co2_ensemble_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED)
 
 .PHONY: shield_amip_constant_co2_c96_dataset
 shield_amip_constant_co2_c96_dataset:
