@@ -1,5 +1,9 @@
+import dataclasses
 import datetime
+from collections.abc import Mapping
+from typing import Any
 
+import dacite
 import pytest
 import torch
 
@@ -207,3 +211,36 @@ def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
     enabled = corrector({}, gen_data, {}, None)
     assert set(enabled.modified_names) == {"a"}
     torch.testing.assert_close(enabled.diagnostics.delta["a"], torch.full((2, 2), 1.0))
+
+
+@CorrectorSelector.register("_test_deprecated_key_corrector")
+@dataclasses.dataclass
+class _DeprecatedKeyCorrectorConfig(CorrectorConfigABC):
+    value: int = 0
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        state = dict(state)
+        state.pop("old_key", None)
+        return state
+
+    def _get_corrector(self, dataset_info: DatasetInfo) -> CorrectorABC:
+        return CorrectionSequence([])
+
+
+def test_corrector_selector_remove_deprecated_keys_builds():
+    selector = CorrectorSelector(
+        type="_test_deprecated_key_corrector",
+        config={"value": 42, "old_key": "should_be_dropped"},
+    )
+    built = selector._corrector_config_instance
+    assert isinstance(built, _DeprecatedKeyCorrectorConfig)
+    assert built.value == 42
+
+
+def test_corrector_selector_unknown_key_raises():
+    with pytest.raises(dacite.UnexpectedDataError):
+        CorrectorSelector(
+            type="_test_deprecated_key_corrector",
+            config={"value": 1, "totally_unknown_key": "bad"},
+        )

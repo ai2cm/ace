@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
 import torch
 from torch import nn
@@ -69,6 +70,10 @@ class AnkurLocalNetBuilder(ModuleConfig):
     disco_kernel_size: int = 3
     pos_embed: bool = False
     activation_function: str = "gelu"
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,
@@ -180,6 +185,10 @@ class LocalNetBuilder(ModuleConfig):
     affine_norms: bool = True
     lora_rank: int = 0
     lora_alpha: float | None = None
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,

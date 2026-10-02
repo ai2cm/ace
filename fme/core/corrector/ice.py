@@ -1,5 +1,7 @@
 import dataclasses
 import datetime
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 
@@ -233,6 +235,10 @@ class IceBudgetCorrection:
 @dataclasses.dataclass
 class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def _get_corrector(
         self,

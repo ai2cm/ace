@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
-from collections.abc import Callable
-from typing import Literal, Protocol
+from collections.abc import Callable, Mapping
+from typing import Any, Literal, Protocol
 
 import torch
 
@@ -319,6 +319,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             the latent heat of freezing. Defaults to False so that previously
             trained checkpoints, which did not apply this clip, are unaffected.
     """
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     conserve_dry_air: bool = False
     zero_global_mean_moisture_advection: bool = False

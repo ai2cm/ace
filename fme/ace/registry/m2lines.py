@@ -52,6 +52,10 @@ class SamudraBuilder(ModuleConfig):
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have num_features")
@@ -131,6 +135,10 @@ class FloeNetBuilder(ModuleConfig):
     processor_steps: int = 4
     residual: bool = True
     is_ocean: bool = True
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,

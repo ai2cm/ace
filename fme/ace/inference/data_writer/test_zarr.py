@@ -13,6 +13,7 @@ from fme.ace.inference.data_writer.zarr import (
     _get_ace_time_coords,
     ensure_numpy_coords,
 )
+from fme.core.timing import GlobalTimer
 
 
 def get_batch_time(n_batch_times, n_initial_conditions, calendar="julian"):
@@ -96,16 +97,8 @@ def test__get_ace_time_coords(calendar):
     )
 
 
-@pytest.mark.parametrize("writer_cls", [ZarrWriterAdapter, SeparateICZarrWriterAdapter])
-def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
-    data = {"foo": torch.zeros((1, 2, 2, 2))}
-    timestep = datetime.timedelta(days=1)
-    initial_condition_times = np.array([cftime.datetime(2019, 12, 31)])
-    time = xr.DataArray(
-        [[cftime.datetime(2020, 1, 1), cftime.datetime(2020, 1, 2)]],
-        dims=("sample", "time"),
-    )
-    args = dict(
+def get_adapter_args(tmpdir, writer_cls) -> dict:
+    return dict(
         path=str(tmpdir / "test.zarr"),
         dims=("sample", "time", "lat", "lon")
         if writer_cls == ZarrWriterAdapter
@@ -117,14 +110,40 @@ def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
                 "ak": xr.DataArray([0, 1], dims=["z_interface"]),
             }
         ),
-        timestep=timestep,
+        timestep=datetime.timedelta(days=1),
         n_timesteps=2,
-        initial_condition_times=initial_condition_times,
+        initial_condition_times=np.array([cftime.datetime(2019, 12, 31)]),
     )
+
+
+def get_two_step_batch() -> tuple[dict[str, torch.Tensor], xr.DataArray]:
+    data = {"foo": torch.zeros((1, 2, 2, 2))}
+    time = xr.DataArray(
+        [[cftime.datetime(2020, 1, 1), cftime.datetime(2020, 1, 2)]],
+        dims=("sample", "time"),
+    )
+    return data, time
+
+
+@pytest.mark.parametrize("writer_cls", [ZarrWriterAdapter, SeparateICZarrWriterAdapter])
+def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
+    data, time = get_two_step_batch()
+    args = get_adapter_args(tmpdir, writer_cls)
     adapter = writer_cls(**args)  # type: ignore
     adapter.append_batch(data, time)
     adapter = writer_cls(**args)  # type: ignore
     adapter.append_batch(data, time)
+
+
+@pytest.mark.parametrize("writer_cls", [ZarrWriterAdapter, SeparateICZarrWriterAdapter])
+def test_zarr_adapters_record_data_writer_io(tmpdir, writer_cls):
+    data, time = get_two_step_batch()
+    adapter = writer_cls(**get_adapter_args(tmpdir, writer_cls))  # type: ignore
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        adapter.append_batch(data, time)
+        durations = timer.get_durations()
+    assert durations["data_writer_io"] > 0.0
 
 
 @pytest.mark.parametrize("calendar", ["julian", "proleptic_gregorian", "noleap"])

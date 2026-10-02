@@ -42,13 +42,16 @@ class CorrectorConfigABC(abc.ABC):
         return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
     @classmethod
+    @abc.abstractmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove or transform deprecated keys from a serialized config before
+        it is loaded.
+
+        Must be implemented by every subclass. Must return a new dict and never
+        mutate the input. Implement as ``return dict(state)`` when there is
+        nothing to remove.
         """
-        This method is used to remove or transform any deprecated keys from the
-        state dict before loading it into a CorrectorConfigABC instance. It is
-        optional to implement this method on subclasses.
-        """
-        return dict(state)
+        ...
 
     @final
     def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":

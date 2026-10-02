@@ -65,7 +65,7 @@ from fme.core.step.multi_call import (
     replace_multi_call,
 )
 from fme.core.step.output import StepOutput
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import (
@@ -319,7 +319,9 @@ class SingleModuleStepperConfig:
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
             prescribed_prognostic_names=self.prescribed_prognostic_names,
-            residual_prediction=self.residual_prediction,
+            residual_prediction=(
+                ResidualPredictionConfig() if self.residual_prediction else None
+            ),
             global_mean_removal=self.global_mean_removal,
         )
 
@@ -752,6 +754,9 @@ class StepperConfig:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.step.get_prescribed_prognostic_names()
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.step.replace_corrector(corrector)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1022,6 +1027,20 @@ class Stepper:
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._config.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """
+        Replace the step's corrector configuration with a new one.
+
+        Args:
+            corrector: The new corrector configuration.
+        """
+        self._config.replace_corrector(corrector)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
@@ -1906,12 +1925,30 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        corrector: Corrector configuration to replace that used in producing a
+            serialized stepper. Options not restated here fall back to their
+            defaults, not to the checkpoint's values. For example::
+
+                corrector:
+                  type: atmosphere_corrector
+                  config:
+                    conserve_dry_air: true
+                    total_energy_budget_correction:
+                      method: constant_temperature
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    corrector: Literal["keep"] | CorrectorSelector = "keep"
+
+    def __post_init__(self):
+        if self.corrector != "keep" and not self.corrector.training_is_default():
+            raise ValueError(
+                "StepperOverrideConfig.corrector must not set training-only "
+                "options such as corrector_disabled_epochs."
+            )
 
 
 def load_stepper_config(
@@ -2004,6 +2041,12 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
+        )
+        stepper.replace_corrector(override_config.corrector)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2043,3 +2086,9 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
+        )
+        stepper_config.replace_corrector(override_config.corrector)

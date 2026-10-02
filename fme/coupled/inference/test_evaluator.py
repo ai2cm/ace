@@ -14,8 +14,10 @@ import yaml
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.stepper import StepperOverrideConfig
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -393,6 +395,39 @@ def test_apply_coupled_overrides_rejects_non_prescribed_override(override):
         apply_coupled_stepper_config_inference_overrides(
             config, ocean_override=override, atmosphere_override=None
         )
+
+
+def test_apply_coupled_overrides_accepts_corrector():
+    config = get_stepper_config(
+        ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["exog", "ocean_frac", "sfc_temp"],
+        atmosphere_out_names=["a_diag", "sfc_temp"],
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["sfc_temp"]
+        ),
+    )
+    atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
+    assert atmosphere_corrector["force_positive_names"] == ["sfc_temp"]
+    ocean_forcing_names_before = set(config.ocean_forcing_window_names)
+
+    apply_coupled_stepper_config_inference_overrides(
+        config,
+        ocean_override=None,
+        atmosphere_override=StepperOverrideConfig(
+            corrector=CorrectorSelector(type="atmosphere_corrector", config={})
+        ),
+    )
+    atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
+    assert atmosphere_corrector == {
+        "type": "atmosphere_corrector",
+        "config": {},
+        "corrector_disabled_epochs": 0,
+    }
+    assert set(config.ocean_forcing_window_names) == ocean_forcing_names_before
 
 
 def test_apply_coupled_overrides_rejects_ocean_supplied_prescribed_collision():

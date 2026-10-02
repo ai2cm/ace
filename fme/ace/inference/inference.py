@@ -227,10 +227,9 @@ class InferenceConfig:
                 - To write raw or time-coarsened data, the zarr writer must be
                   used. See the ``files`` parameter of the
                   :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Note that monthly coarsened data cannot
-                  currently be written to zarr, and hence a remote directory,
-                  since it uses a different code path than uniformly coarsened
-                  data.
+                  can be configured. Monthly coarsened data configured through
+                  ``files`` can be written to zarr. The legacy
+                  ``save_monthly_files`` option remains netCDF-only.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the
