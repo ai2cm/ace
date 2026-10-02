@@ -411,7 +411,10 @@ def run_inference_from_config(config: InferenceConfig):
             stepper_metadata=stepper.training_variable_metadata,
             stepper_all_names=stepper_config.all_names,
         )
-        dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+        # Aggregator-only masks for derived fields (layer_ohc_*).
+        dataset_info = data.dataset_info.update_variable_metadata(
+            variable_metadata
+        ).update_spatial_masks(stepper.spatial_masks)
         aggregator = config.aggregator.build(
             dataset_info=dataset_info,
             n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,

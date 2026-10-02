@@ -8,6 +8,7 @@ import torch
 import xarray as xr
 
 from fme.ace.inference.evaluator import main as inference_evaluator_main
+from fme.ace.inference.inference import main as inference_main
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.ace.testing.fv3gfs_data import get_nd_dataset
 from fme.ace.train.train import main as train_main
@@ -21,6 +22,7 @@ def save_ocean_nd_netcdf(
     variable_names: list[str],
     timestep_days: float = 1.0,
     nz_levels: int = 2,  # Number of ocean levels for thetao_0, mask_0 etc.
+    max_depth_m: float = 1000.0,
 ):
     """
     Saves a netCDF file with synthetic ocean data, including masks and NaNs.
@@ -95,7 +97,6 @@ def save_ocean_nd_netcdf(
             f"dim_sizes.nz_interface ({dim_sizes.nz_interface}) "
             f"must be nz_levels ({nz_levels}) + 1."
         )
-    max_depth_m = 1000.0
     interface_depths = np.linspace(0.0, max_depth_m, dim_sizes.nz_interface)
     for i in range(dim_sizes.nz_interface):
         idepth_name = f"idepth_{i}"
@@ -411,6 +412,7 @@ def _setup(
     inference_forward_steps=10,
     save_per_epoch_diagnostics=True,
     nz_levels=2,
+    max_depth_m=1000.0,
 ):
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
@@ -462,6 +464,7 @@ def _setup(
         variable_names=all_variable_names_for_data_gen,
         timestep_days=timestep_days,
         nz_levels=nz_levels,
+        max_depth_m=max_depth_m,
     )
     _save_ocean_scalar_stats_netcdf(
         stats_dir / "stats-mean.nc",
@@ -600,3 +603,80 @@ def test_train_and_inference(tmp_path):
         assert len(ds) > 0
         for var in ds.data_vars:
             assert not np.isnan(ds[var].values).any()
+
+
+_FORCING_INFERENCE_CONFIG_TEMPLATE = """
+experiment_dir: {experiment_dir}
+n_forward_steps: 6
+forward_steps_in_memory: 2
+checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+initial_condition:
+  path: '{ic_path}'
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+    interval: 1
+forcing_loader:
+  dataset:
+    data_path: '{data_path}'
+    spatial_dimensions: latlon
+    fill_nans:
+      method: constant
+      value: 0.0
+data_writer:
+  save_prediction_files: false
+"""
+
+
+def _layer_ohc_float_logs(wandb_logs) -> dict[str, float]:
+    return {
+        k: v
+        for log in wandb_logs
+        for k, v in log.items()
+        if "layer_ohc" in k and isinstance(v, float | np.floating)
+    }
+
+
+@pytest.mark.medium_duration
+def test_standalone_inference_layer_ohc_means_finite(tmp_path):
+    """Evaluator and forcing-only inference log finite layer_ohc_* metrics
+    where band 130-450 exists only in columns with mask_1 wet."""
+    train_config, evaluator_config = _setup(tmp_path, max_depth_m=260.0)
+    data_path = tmp_path / "data"
+    with xr.open_dataset(data_path / "data.nc", decode_timedelta=False) as ds:
+        band_absent = (ds["mask_0"] > 0) & (ds["mask_1"] == 0)
+        assert bool(band_absent.any())
+        ic_path = tmp_path / "ic.nc"
+        ds.fillna(0.0).astype(np.float32).to_netcdf(ic_path)
+    with mock_wandb():
+        train_main(yaml_config=train_config)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        inference_evaluator_main(yaml_config=evaluator_config)
+        evaluator_logs = _layer_ohc_float_logs(wandb.get_logs())
+
+    forcing_dir = tmp_path / "forcing_inference"
+    forcing_dir.mkdir()
+    forcing_config = forcing_dir / "config.yaml"
+    forcing_config.write_text(
+        _FORCING_INFERENCE_CONFIG_TEMPLATE.format(
+            experiment_dir=forcing_dir,
+            results_dir=tmp_path / "results",
+            ic_path=ic_path,
+            data_path=data_path,
+        )
+    )
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        inference_main(yaml_config=str(forcing_config))
+        forcing_logs = _layer_ohc_float_logs(wandb.get_logs())
+
+    for label, logs in (("evaluator", evaluator_logs), ("inference", forcing_logs)):
+        assert any("layer_ohc_130_450" in k for k in logs), (label, sorted(logs))
+        bad = sorted(k for k, v in logs.items() if not np.isfinite(v))
+        assert not bad, f"{label} non-finite: {bad}"
