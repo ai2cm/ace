@@ -1,0 +1,85 @@
+# evaluator-config-1pct_yearly_4deg.yaml plus a stepper_override that adds the
+# sea-surface-fraction-weighted ice volume salt content correction to a
+# checkpoint trained without one. The override replaces the trained corrector
+# entirely, so it repeats the corrector of
+# ../2026-09-30-resid-thetao-no-sal-baseline (surface_energy_flux_correction
+# prescribed; the 2026-09-28/09-29 no-salt runs and
+# 2026-10-01-direct-ssh-no-sal-baseline use prescribed_open_ocean and need
+# their own copy) and adds the salt term, with the slope and constant fit to
+# the sea-surface-fraction-weighted salt content. Keep everything outside
+# stepper_override in sync with evaluator-config-1pct_yearly_4deg.yaml.
+experiment_dir: /results
+n_forward_steps: 10147
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0002-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  save_step_diagnostics: true
+  time_coarsen:
+    coarsen_factor: 73
+stepper_override:
+  corrector:
+    type: ocean_corrector
+    config:
+      surface_energy_flux_correction:
+        method: prescribed
+      ocean_heat_content_correction:
+        method: scaled_temperature
+      ocean_salt_content_correction:
+        method: scaled_salinity
+        budget_config:
+          type: ice_volume
+          slope_psu: 41.639
+        constant_unaccounted_salting: 1.70e-10 # psu m / s
+        weight_by_sea_surface_fraction: true
+        use_float64: true
+      force_positive_names:
+      - so_0
+      - so_1
+      - so_2
+      - so_3
+      - so_4
+      - so_5
+      - so_6
+      - so_7
+      - so_8
+      - so_9
+      - so_10
+      - so_11
+      - so_12
+      - so_13
+      - so_14
+      - so_15
+      - so_16
+      - so_17
+      - so_18
+      - sea_ice_volume
+      sea_ice_fraction_correction:
+        sea_ice_fraction_name: ocean_sea_ice_fraction
+        land_fraction_name: land_fraction
+        remove_negative_ocean_fraction: false
+        zero_where_ice_free_names:
+        - sea_ice_volume
+        - sfdsi
+        - UI
+        - VI
