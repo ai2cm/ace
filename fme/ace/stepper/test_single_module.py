@@ -2201,14 +2201,19 @@ def test_load_stepper_and_load_stepper_config(
     assert isinstance(stepper.forcing_deriver, ForcingDeriver)
 
 
-def _get_inner_single_module_config(stepper: Stepper):
+def _get_inner_single_module_step(stepper: Stepper) -> SingleModuleStep:
+    """Get the built SingleModuleStep from a stepper (MultiCallStep or single)."""
+    step = stepper._step_obj
+    if isinstance(step, MultiCallStep):
+        step = step._wrapped_step
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def _get_inner_single_module_config(stepper: Stepper) -> SingleModuleStepConfig:
     """Get the inner SingleModuleStep config from a stepper
     (MultiCallStep or single)."""
-    from fme.core.step.multi_call import MultiCallStep
-
-    if isinstance(stepper._step_obj, MultiCallStep):
-        return stepper._step_obj._wrapped_step.config
-    return stepper._step_obj.config
+    return _get_inner_single_module_step(stepper).config
 
 
 def validate_stepper_prescribed_prognostic_names(
@@ -2218,15 +2223,6 @@ def validate_stepper_prescribed_prognostic_names(
     prescribed_prognostic_names."""
     config = _get_inner_single_module_config(stepper)
     assert config.prescribed_prognostic_names == expected
-
-
-def _get_inner_single_module_step(stepper: Stepper) -> SingleModuleStep:
-    """Get the built SingleModuleStep from a stepper (MultiCallStep or single)."""
-    step = stepper._step_obj
-    if isinstance(step, MultiCallStep):
-        step = step._wrapped_step
-    assert isinstance(step, SingleModuleStep)
-    return step
 
 
 @pytest.mark.parametrize(
