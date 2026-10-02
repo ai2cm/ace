@@ -9,6 +9,7 @@ from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
+    REFERENCE_SALINITY_PSU,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
     SPHERE_AREA_M2,
 )
@@ -142,6 +143,44 @@ class OceanHeatContentBudgetConfig:
 
 
 @dataclasses.dataclass
+class SeaSurfaceHeightSaltBudgetConfig:
+    """Configuration for a salt budget from the change of the sea surface
+    height.
+
+    The rise of the free surface over the step is the water the model added to
+    the ocean, and that water dilutes the salt at the reference salinity. The
+    expected change of the total salt content (psu m**3) is
+
+        E = -S_ref * sum over cells of (SSH_gen - SSH_input) * ssf * A_cell,
+
+    with ssf the sea surface fraction (read from the forcing data) and A_cell
+    the cell area: a rising surface (water in) gives a negative E. It needs no
+    flux field, no sea ice field and no calibration, and it keeps the salt
+    budget consistent with the mass budget the model carries as height: the
+    water the model puts into the ocean as height is the water that dilutes the
+    salt, however wrong either is. On the target data it matches the
+    surface-flux budget (-S_ref * wfo + sfdsi) per step.
+
+    Requires ``SSH`` in the model's inputs and outputs, as the height
+    *including its global mean*. ``zos`` cannot be used: it has its global
+    mean removed at every snapshot, and the global mean is the budget. The
+    sea surface height already contains the melt water of the sea ice, so this
+    budget replaces the sea ice volume budget rather than adding to it.
+
+    The budget is only as good as the model's global-mean SSH change, which
+    must be right to about 0.1 mm per 5-day step (0.02 mm/day of water flux,
+    or 3.5e-3 psu m of global-mean column salt content per step) for this
+    budget to drift less than the sea ice volume budget.
+
+    Parameters:
+        reference_salinity_psu: Salinity at which the added water dilutes the
+            salt, in psu.
+    """
+
+    reference_salinity_psu: float = REFERENCE_SALINITY_PSU
+
+
+@dataclasses.dataclass
 class OceanSaltContentBudgetConfig:
     """Configuration for ocean salt content budget correction.
 
@@ -154,6 +193,8 @@ class OceanSaltContentBudgetConfig:
     - the exchange with the sea-ice reservoir, whose volume the model predicts,
       through an empirical slope fitted to the total sea ice volume so it does
       not depend on the grid (``ice_volume_salt_slope_psu``);
+    - the dilution by the water the model adds to the ocean, from the change
+      of the sea surface height (``sea_surface_height_budget``);
     - nothing, holding the salt content fixed (the default).
 
     Assumes a global lat-lon grid: absolute totals are formed as the
@@ -186,6 +227,10 @@ class OceanSaltContentBudgetConfig:
             False to keep the slope calibration of existing configurations;
             a slope fitted against the unweighted content must be refit when
             this is turned on.
+        sea_surface_height_budget: Use the budget from the change of the sea
+            surface height (see ``SeaSurfaceHeightSaltBudgetConfig``). Requires
+            ``weight_by_sea_surface_fraction`` and a zero
+            ``ice_volume_salt_slope_psu``.
     """
 
     method: Literal["scaled_salinity"]
@@ -193,6 +238,25 @@ class OceanSaltContentBudgetConfig:
     constant_unaccounted_salting: float = 0.0
     use_float64: bool = True
     weight_by_sea_surface_fraction: bool = False
+    sea_surface_height_budget: SeaSurfaceHeightSaltBudgetConfig | None = None
+
+    def __post_init__(self):
+        if self.sea_surface_height_budget is not None:
+            if self.ice_volume_salt_slope_psu != 0.0:
+                raise ValueError(
+                    "sea_surface_height_budget cannot be combined with a nonzero "
+                    "ice_volume_salt_slope_psu: the sea surface height already "
+                    "contains the melt water of the sea ice, so the ice term "
+                    "would count it twice."
+                )
+            if not self.weight_by_sea_surface_fraction:
+                raise ValueError(
+                    "sea_surface_height_budget requires "
+                    "weight_by_sea_surface_fraction=True: the water it measures "
+                    "enters over the sea surface part of each cell, so the salt "
+                    "content it dilutes must be weighted by the sea surface "
+                    "fraction too."
+                )
 
     def build_budget(
         self, sea_ice_volume_valid: torch.Tensor | None
@@ -205,6 +269,10 @@ class OceanSaltContentBudgetConfig:
                 prediction is kept by the stepper's output masking, or None to
                 count every cell.
         """
+        if self.sea_surface_height_budget is not None:
+            return SeaSurfaceHeightSaltBudget(
+                self.sea_surface_height_budget.reference_salinity_psu
+            )
         if self.ice_volume_salt_slope_psu != 0.0:
             return IceVolumeSaltBudget(
                 slope_psu=self.ice_volume_salt_slope_psu,
@@ -729,6 +797,48 @@ class IceVolumeSaltBudget:
         # ranks, and sea_ice_volume_valid would need slicing to the local chunk.
         total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
         return self.slope_psu * total_ice_volume_change
+
+
+@dataclasses.dataclass
+class SeaSurfaceHeightSaltBudget:
+    """Expected salt content change from the change of the sea surface height:
+    the water the model added to the ocean, diluting the salt at the reference
+    salinity. See ``SeaSurfaceHeightSaltBudgetConfig``.
+
+    Parameters:
+        reference_salinity_psu: Salinity at which the added water dilutes the
+            salt, in psu.
+    """
+
+    reference_salinity_psu: float
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        try:
+            gen_height = gen.sea_surface_height.to(dtype)
+            input_height = input.sea_surface_height.to(dtype)
+        except KeyError as err:
+            raise ValueError(
+                "The sea surface height salt budget requires SSH, the sea surface "
+                "height including its global mean (not zos, which has the global "
+                "mean removed), in the model's inputs and outputs."
+            ) from err
+        height_change = gen_height - input_height  # m
+        # the height is NaN over land; zero it there so the total does not
+        # depend on the ocean mask dropping those cells
+        height_change = torch.where(
+            torch.isnan(height_change), torch.zeros_like(height_change), height_change
+        )
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+        added_water_volume = global_total(height_change * sea_surface_fraction)  # m**3
+        return -self.reference_salinity_psu * added_water_volume
 
 
 def _force_conserve_ocean_salt_content(
