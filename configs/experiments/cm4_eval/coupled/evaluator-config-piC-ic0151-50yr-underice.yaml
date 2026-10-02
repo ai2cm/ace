@@ -1,0 +1,125 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+experiment_dir: /results
+n_coupled_steps: 3654
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+# The cell-mean hand-off rollout (evaluator-config-piC-ic0151-50yr-cellmean.yaml) with the
+# energy-conserving under-ice option (ace#1556): the network's flux is not used under sea
+# ice either; the ice part gets the atmosphere's flux plus the latent heat released by
+# ice growth over the step, from the predicted sea_ice_volume. sea_ice_volume is added
+# to the ocean's monthly output so the interface split can include the storage term.
+# Base description of the cell-mean rollout:
+# `prescribed_cell_mean` hands the ocean the atmosphere's unscaled cell-mean
+# net flux over the ice-free part of every sea-containing cell (land part
+# included) plus CM4's river-runoff heat (OM4's `hfrunoffds`, 200-yr piC time
+# mean, per unit sea area x sea_surface_fraction), and keeps the ocean
+# network's flux under sea ice only. Everything else in the override restates
+# the arms' training corrector (identical across crps4 / mae2ftn / lt0lt), since
+# an override replaces the corrector wholesale. Tests the reports#135 fix:
+# does the ~1 W/m2 atmosphere-ocean interface gap close, and what SST drift
+# does the atmosphere's own flux deficit then produce?
+# 50-yr surface energy budget of the early piControl ocean heat uptake:
+# 3654 = 203 x 18 coupled steps (5-day), years 151-200 plus 4 days.
+# seed: 0 matches the 2026-09-17 flux wave (exp/gulf-stream-followups), so
+# arms it ran are the same realization. Global monthly means of the
+# surface flux components and the ocean's predicted heat flux, prediction
+# and target: ~260 KB per field-month, ~2 GB per source over 50 yr, small
+# enough for netCDF in the result dataset. Names a realm does not carry are
+# skipped by the writer.
+seed: 0
+ocean_stepper_override:
+  corrector:
+    type: ocean_corrector
+    config:
+      surface_energy_flux_correction:
+        method: prescribed_cell_mean
+        runoff_heat_flux:
+          path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-1deg-ocean-5daily-stats/time-mean.nc
+          name: hfrunoffds
+          per_unit_sea_area: true
+        under_ice:
+          sea_ice_volume_name: sea_ice_volume
+      force_positive_names:
+        - so_0
+        - so_1
+        - so_2
+        - so_3
+        - so_4
+        - so_5
+        - so_6
+        - so_7
+        - so_8
+        - so_9
+        - so_10
+        - so_11
+        - so_12
+        - so_13
+        - so_14
+        - so_15
+        - so_16
+        - so_17
+        - so_18
+        - sea_ice_volume
+      sea_ice_fraction_correction:
+        sea_ice_fraction_name: ocean_sea_ice_fraction
+        land_fraction_name: land_fraction
+        remove_negative_ocean_fraction: false
+        zero_where_ice_free_names:
+          - sea_ice_volume
+          - sfdsi
+          - UI
+          - VI
+      ocean_heat_content_correction:
+        method: scaled_temperature
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: sfc_budget_monthly
+        names: [hfds, hfds_total_area, sea_ice_fraction, ocean_sea_ice_fraction,
+                sst, ocean_heat_content, sea_surface_fraction, land_fraction,
+                sea_ice_volume]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: sfc_budget_monthly
+        names: [DSWRFsfc, USWRFsfc, DLWRFsfc, ULWRFsfc, LHTFLsfc, SHTFLsfc,
+                total_frozen_precipitation_rate, PRATEsfc, ocean_fraction,
+                land_fraction, sea_ice_fraction]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'

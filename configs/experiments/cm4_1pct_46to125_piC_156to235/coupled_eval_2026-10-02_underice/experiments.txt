@@ -1,0 +1,19 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# =====================================================================
+# Physical hand-off + energy-conserving under-ice flux, inference-only (2026-10-02). The three
+# 50-yr piControl surface-budget arms of coupled_eval_2026-10-01_sfcflux
+# (crps4, mae2ftn, lt0lt; same best_inference_ckpt, pinned training result
+# datasets, IC 0151, seed 0, monthly flux output), rerun with the ocean
+# corrector overridden to `prescribed_cell_mean` + CM4 runoff heat + `under_ice`
+# (evaluator-config-piC-ic0151-50yr-underice.yaml). Needs ace PRs #1441
+# (corrector override), #1550 and #1556, all merged into this branch.
+#
+#   job_runner/evaluate.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_eval_2026-10-02_underice . \
+#     --config-dir configs/experiments/cm4_eval/coupled
+
+# --- piC-ic0151-50yr-underice ---
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-50yr-underice|best_inference_ckpt|high|--min-runtime 4h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mae2ftn_a2s-fto|o2a0rs0|01M2P6CJ9QXYPQCRJDWN2XT4NR|run_piC-ic0151-50yr-underice|best_inference_ckpt|high|--min-runtime 4h||01M2P6CJA3EWPJB8YRGG7EQC3V|ai2/ace|jupiter
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto|o0a0rs0|01M339VK884YE3B2M5YM1RQ966|run_piC-ic0151-50yr-underice|best_inference_ckpt|high|--min-runtime 4h||01M3DN0NDP94TNHZ4M3VWVSAM4|ai2/ace|jupiter
