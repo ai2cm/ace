@@ -1977,33 +1977,7 @@ def apply_stepper_override(
 
     Used by load_stepper and by coupled inference when loading component steppers.
     """
-    if override_config is None:
-        override_config = StepperOverrideConfig()
-    if override_config.ocean != "keep":
-        logging.info(
-            "Overriding training ocean configuration with a new ocean configuration."
-        )
-        stepper.replace_ocean(override_config.ocean)
-    if override_config.multi_call != "keep":
-        logging.info(
-            "Overriding training multi_call configuration with a new "
-            "multi_call configuration."
-        )
-        stepper.replace_multi_call(override_config.multi_call)
-    if override_config.derived_forcings != "keep":
-        logging.info(
-            "Overriding training derived_forcings configuration with a new "
-            "derived_forcings configuration."
-        )
-        stepper.replace_derived_forcings(override_config.derived_forcings)
-    if override_config.prescribed_prognostic_names != "keep":
-        logging.info(
-            "Overriding prescribed_prognostic_names with %s.",
-            override_config.prescribed_prognostic_names,
-        )
-        stepper.replace_prescribed_prognostic_names(
-            override_config.prescribed_prognostic_names
-        )
+    _apply_stepper_override(stepper, stepper.replace_multi_call, override_config)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2017,29 +1991,45 @@ def apply_stepper_override_to_stepper_config(
     weights). A ``multi_call`` override is rejected because replacing it needs
     the serialized step state, which only a full ``Stepper`` carries.
     """
+
+    def reject_multi_call(multi_call: MultiCallConfig | None) -> None:
+        raise ValueError(
+            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
+            "without a built Stepper; load the full Stepper to override multi_call."
+        )
+
+    _apply_stepper_override(stepper_config, reject_multi_call, override_config)
+
+
+def _apply_stepper_override(
+    target: Stepper | StepperConfig,
+    replace_multi_call: Callable[[MultiCallConfig | None], None],
+    override_config: StepperOverrideConfig | None = None,
+) -> None:
     if override_config is None:
         override_config = StepperOverrideConfig()
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
         )
-        stepper_config.replace_ocean(override_config.ocean)
+        target.replace_ocean(override_config.ocean)
     if override_config.multi_call != "keep":
-        raise ValueError(
-            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
-            "without a built Stepper; load the full Stepper to override multi_call."
+        logging.info(
+            "Overriding training multi_call configuration with a new "
+            "multi_call configuration."
         )
+        replace_multi_call(override_config.multi_call)
     if override_config.derived_forcings != "keep":
         logging.info(
             "Overriding training derived_forcings configuration with a new "
             "derived_forcings configuration."
         )
-        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+        target.replace_derived_forcings(override_config.derived_forcings)
     if override_config.prescribed_prognostic_names != "keep":
         logging.info(
             "Overriding prescribed_prognostic_names with %s.",
             override_config.prescribed_prognostic_names,
         )
-        stepper_config.replace_prescribed_prognostic_names(
+        target.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )

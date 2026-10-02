@@ -40,6 +40,7 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    apply_stepper_override_to_stepper_config,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -2277,6 +2278,19 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
     output, _ = stepper.predict(input_data, forcing_data)
     expected_var = forcing_data.data["var"][:, 1 : n_steps + 1]
     torch.testing.assert_close(output.data["var"], expected_var)
+
+
+def test_apply_stepper_override_to_stepper_config():
+    config = _get_stepper_config(["a", "b"], ["a"])
+    assert config.get_prescribed_prognostic_names() == []
+    apply_stepper_override_to_stepper_config(
+        config, StepperOverrideConfig(prescribed_prognostic_names=["a"])
+    )
+    assert config.get_prescribed_prognostic_names() == ["a"]
+    with pytest.raises(ValueError, match="multi_call cannot be applied"):
+        apply_stepper_override_to_stepper_config(
+            config, StepperOverrideConfig(multi_call=None)
+        )
 
 
 class _LargeLinear(torch.nn.Module):
