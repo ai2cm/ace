@@ -336,6 +336,10 @@ def test_resume_recovers_wandb_logs_lost_before_upload(
         recovered_logs = wandb.get_logs()[last_step]
     assert recovered_logs["epoch"] == last_step_logs["epoch"]
     assert "epoch_total_seconds" in recovered_logs
+    # merged with the validation the resumed job redoes at the same step; only
+    # the lost training figures, which are not on disk, are missing
+    missing = last_step_logs.keys() - recovered_logs.keys()
+    assert missing and all(key.startswith("train/") for key in missing)
 
 
 @pytest.mark.slow

@@ -1,3 +1,4 @@
+import dataclasses
 import io
 import json
 import logging
@@ -6,6 +7,20 @@ import time
 from typing import Any
 
 METRICS_FILENAME = "metrics.jsonl"
+CHECKPOINT_MARK_FILENAME = "checkpoint_mark.json"
+
+
+@dataclasses.dataclass(frozen=True)
+class CheckpointMark:
+    """Where the metrics file stood when a resume checkpoint was saved.
+
+    Parameters:
+        offset: Size in bytes of the metrics file.
+        last_step: The last step logged, or None if nothing was logged.
+    """
+
+    offset: int
+    last_step: int | None
 
 
 class DiskMetricLogger:
@@ -13,9 +28,11 @@ class DiskMetricLogger:
 
     Each line in the file is a JSON object with a "step" key and scalar metric
     key-value pairs. On construction, a metrics file a previous job left in the
-    directory is moved aside, so the file holds only this job's metrics. A job
-    resuming from a checkpoint calls ``restore`` to bring back the metrics
-    logged up to the checkpoint.
+    directory is moved aside, so the file holds only this job's metrics.
+    ``write_checkpoint_mark`` records in the directory where the file stands
+    when a resume checkpoint is saved, and a job resuming from that checkpoint
+    calls ``restore_to_checkpoint_mark`` to bring back the metrics logged up to
+    it.
 
     Non-JSON-serializable values (e.g. images, tensors) are silently dropped.
     """
@@ -24,6 +41,7 @@ class DiskMetricLogger:
         os.makedirs(directory, exist_ok=True)
         self.directory = directory
         self._path = os.path.join(directory, METRICS_FILENAME)
+        self._mark_path = os.path.join(directory, CHECKPOINT_MARK_FILENAME)
         self._previous_path: str | None = None
         if os.path.exists(self._path) and os.path.getsize(self._path) > 0:
             self._previous_path = _unused_path(f"{self._path}.{_timestamp()}")
@@ -34,12 +52,11 @@ class DiskMetricLogger:
             )
         self._file: io.BufferedWriter | None = open(self._path, "wb")
         self._offset = 0
+        self._last_step: int | None = None
 
     @property
     def offset(self) -> int:
-        """Size in bytes of the metrics file, which a checkpoint records so a
-        job resuming from it can ``restore`` the metrics logged before it.
-        """
+        """Size in bytes of the metrics file."""
         return self._offset
 
     def log(self, data: dict[str, Any], step: int) -> None:
@@ -47,6 +64,7 @@ class DiskMetricLogger:
 
         Non-serializable values are dropped.
         """
+        self._last_step = step
         scalars = _extract_serializable(data)
         if not scalars:
             return
@@ -57,38 +75,79 @@ class DiskMetricLogger:
         self._file.flush()
         self._offset += len(line)
 
-    def restore(self, offset: int) -> bool:
-        """Restore the metrics logged before a checkpoint.
+    def write_checkpoint_mark(self) -> None:
+        """Record that a resume checkpoint holds the training logged so far.
 
-        Cuts the metrics file at ``offset``, the checkpoint's ``offset``. If
-        this logger has not logged anything, the file is the one a previous job
-        left, which is moved back into place first. Metrics logged after the
-        checkpoint are from training the resumed job redoes, so they are moved
+        Writes the current offset and last logged step to the checkpoint mark
+        file, replacing it atomically. This runs on the termination listener's
+        thread when a job is preempted, so it must not use the logging module
+        (see `fme.core.distributed.shutdown.add_post_abort_callback`).
+        """
+        tmp_path = f"{self._mark_path}.tmp"
+        with open(tmp_path, "w") as f:
+            json.dump({"offset": self._offset, "last_step": self._last_step}, f)
+        os.replace(tmp_path, self._mark_path)
+
+    def restore_to_checkpoint_mark(self) -> CheckpointMark | None:
+        """Restore the metrics logged before the last checkpoint mark.
+
+        Keeps the metrics file up to the mark, plus the lines right after it at
+        the mark's last step, which the resumed job does not necessarily log
+        again. If this logger has not logged anything, the file is the one a
+        previous job left, which is moved back into place first. The lines
+        after those are from training the resumed job redoes, so they are moved
         to a separate file rather than kept.
 
         Returns:
-            Whether the metrics were restored. They are not if there is no
-            metrics file to restore, or if it is shorter than ``offset`` (e.g.
-            ``metrics_log_dir`` changed since the checkpoint was saved).
+            The mark the metrics were restored to, or None if they were not
+            restored: there is no mark, no metrics file to restore, or the file
+            is shorter than the mark's offset.
         """
+        mark = self._read_checkpoint_mark()
+        if mark is None:
+            return None
         source_path = self._restore_source_path()
         if source_path is None:
             logging.warning(
                 "No metrics file to restore in %s, so no disk metrics are restored",
                 self.directory,
             )
-            return False
+            return None
         source_size = os.path.getsize(source_path)
-        if source_size < offset:
+        if source_size < mark.offset:
             logging.warning(
-                "Metrics file %s has %d bytes but the checkpoint expects at "
+                "Metrics file %s has %d bytes but the checkpoint mark expects at "
                 "least %d, so it is not the checkpoint's metrics file and no "
                 "disk metrics are restored",
                 source_path,
                 source_size,
-                offset,
+                mark.offset,
             )
-            return False
+            return None
+        offset = mark.offset
+        with open(source_path, "rb") as f:
+            f.seek(offset)
+            for line in f:
+                if not line.endswith(b"\n"):
+                    break
+                record = _parse_record(line)
+                if record is not None and record["step"] != mark.last_step:
+                    break
+                offset += len(line)
+        self._restore(source_path, offset)
+        self._last_step = mark.last_step
+        return mark
+
+    def _read_checkpoint_mark(self) -> CheckpointMark | None:
+        try:
+            with open(self._mark_path) as f:
+                mark = json.load(f)
+        except FileNotFoundError:
+            return None
+        return CheckpointMark(offset=mark["offset"], last_step=mark["last_step"])
+
+    def _restore(self, source_path: str, offset: int) -> None:
+        """Make ``source_path`` this logger's file, cut at ``offset``."""
         self.close()
         if source_path != self._path:
             os.replace(source_path, self._path)
@@ -107,28 +166,6 @@ class DiskMetricLogger:
             f.truncate(offset)
         self._file = open(self._path, "ab")
         self._offset = offset
-        return True
-
-    def restore_through_step(self, last_step: int) -> bool:
-        """Restore the previous job's metrics through ``last_step``, for a
-        checkpoint that does not record an ``offset``.
-
-        The metrics are cut before the first line with a step after
-        ``last_step``. See ``restore`` for the rest.
-        """
-        source_path = self._restore_source_path()
-        if source_path is None:
-            return self.restore(0)
-        offset = 0
-        with open(source_path, "rb") as f:
-            for line in f:
-                if not line.endswith(b"\n"):
-                    break
-                record = _parse_record(line)
-                if record is not None and record["step"] > last_step:
-                    break
-                offset += len(line)
-        return self.restore(offset)
 
     def _restore_source_path(self) -> str | None:
         """The metrics file to restore: this logger's own if it has logged

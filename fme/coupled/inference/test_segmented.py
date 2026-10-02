@@ -438,7 +438,9 @@ def test_segmented_inference_wandb_run_per_segment(monkeypatch):
         config_filename = make_config(tmp_path / "segmented_run", 2)
         monkeypatch.setenv("WANDB_NAME", "myrun")
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
+            wandb.configure(
+                log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics")
+            )
             main(yaml_config=config_filename, segments=2)
             assert [run["name"] for run in wandb.runs] == [
                 "myrun-segment_19700101T00",

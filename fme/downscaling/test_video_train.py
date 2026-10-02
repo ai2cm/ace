@@ -102,15 +102,17 @@ def test_video_trainer_resume_recovers_wandb_logs_lost_before_upload(tmp_path):
     metrics_log_dir = os.path.join(tmp_path, "metrics")
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True, metrics_log_dir=metrics_log_dir)
+        wandb.init(resumable=True, experiment_dir=str(tmp_path))
         trainer = config.build()
         trainer.train()
         last_step = trainer.num_batches_seen
         last_step_logs = wandb.get_logs()[last_step]
         assert "epoch_seconds" in last_step_logs
-        # the job is killed before wandb uploads its last step
+        # the job is killed before wandb uploads its last step, which has the
+        # epoch time logged after the checkpoint
         wandb.drop_logs_after(last_step - 1)
         wandb.configure(log_to_wandb=True, metrics_log_dir=metrics_log_dir)
-        restore_checkpoint(config.build())
+        wandb.init(resumable=True, experiment_dir=str(tmp_path))
         recovered_logs = wandb.get_logs()[last_step]
     assert recovered_logs["epoch"] == last_step_logs["epoch"]
     assert recovered_logs["epoch_seconds"] == last_step_logs["epoch_seconds"]
