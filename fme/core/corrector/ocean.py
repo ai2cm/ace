@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import functools
-import operator
 import warnings
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
@@ -12,7 +11,6 @@ from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     DENSITY_OF_SEA_ICE,
     DENSITY_OF_SEA_WATER_CM4,
-    DENSITY_OF_WATER,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     REFERENCE_SALINITY_PSU,
@@ -36,6 +34,10 @@ from fme.core.ocean_data import (
     OceanData,
 )
 from fme.core.registry.corrector import CorrectorSelector
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -70,25 +72,6 @@ class SaltBudget(Protocol):
         timestep_seconds: float,
         dtype: torch.dtype,
     ) -> torch.Tensor: ...
-
-
-class GlobalWaterFlux(Protocol):
-    """Total water flux into the ocean, in kg/s, keeping the horizontal
-    dimensions.
-    """
-
-    def __call__(
-        self,
-        input: OceanData,
-        gen: OceanData,
-        forcing: OceanData,
-        global_total: GlobalTotal,
-        timestep_seconds: float,
-        dtype: torch.dtype,
-    ) -> torch.Tensor: ...
-
-
-_M3_PER_S_PER_SVERDRUP = 1e6
 
 
 @dataclasses.dataclass
@@ -171,6 +154,19 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+def _sea_ice_volume_output_mask(
+    spatial_mask_provider: SpatialMaskProviderABC,
+) -> torch.Tensor | None:
+    """Cells where the stepper keeps the sea_ice_volume prediction, or None for
+    every cell.
+    """
+    mask = spatial_mask_provider.get_mask_tensor_for("sea_ice_volume")
+    if mask is None:
+        return None
+    # rounded as the stepper's output masking does, so the two agree
+    return torch.round(mask.to(get_device())) != 0
+
+
 def _require_sea_surface_fraction_weighting(
     budget_type: str, weight_by_sea_surface_fraction: bool
 ) -> None:
@@ -197,12 +193,14 @@ class IceVolumeSaltBudgetConfig:
     def validate(self, weight_by_sea_surface_fraction: bool) -> None:
         pass
 
-    def build(self, sea_ice_volume_valid: torch.Tensor | None) -> SaltBudget:
+    def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
         Distributed.get_instance().require_no_spatial_parallelism(
             "The ice volume salt budget sums sea_ice_volume over the local "
             "spatial chunk only."
         )
-        return IceVolumeSaltBudget(self.slope_psu, sea_ice_volume_valid)
+        return IceVolumeSaltBudget(
+            self.slope_psu, _sea_ice_volume_output_mask(spatial_mask_provider)
+        )
 
 
 @dataclasses.dataclass
@@ -224,116 +222,85 @@ class SeaSurfaceHeightSaltBudgetConfig:
             self.type, weight_by_sea_surface_fraction
         )
 
-    def build(self, sea_ice_volume_valid: torch.Tensor | None) -> SaltBudget:
+    def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
         return SeaSurfaceHeightSaltBudget(self.reference_salinity_psu)
 
 
 @dataclasses.dataclass
-class WaterFluxCompositionConfig:
-    """Global water flux into the ocean as a sum of terms.
+class WaterFluxRegimesConfig:
+    """Regimes of the water flux salt budget, from the input and generated
+    states.
 
     Parameters:
-        precipitation_minus_evaporation_weight: Per-cell weight of the forcing
-            PRATEsfc - LHTFLsfc / L_v: the sea surface fraction, the open water
-            fraction (1 - land_fraction - sea_ice_fraction) of the input
-            state, or "none" to omit the term.
-        ice_mass_term: Add -rho_ice * sum(delta sea_ice_volume) / DT.
-        sea_ice_density_kg_m3: Density of sea ice for the ice mass term.
-        constant_runoff_sv: Constant fresh water runoff, in Sv.
+        sea_ice_fraction_threshold: Cells whose sea ice fraction exceeds this at
+            either step are ice covered.
+        coast_sea_surface_fraction_threshold: Cells that are not ice covered and
+            whose sea surface fraction is below this are coast; the rest is
+            open water.
     """
 
-    precipitation_minus_evaporation_weight: Literal[
-        "none", "sea_surface_fraction", "open_water_fraction"
-    ]
-    ice_mass_term: bool = False
-    sea_ice_density_kg_m3: float = DENSITY_OF_SEA_ICE
-    constant_runoff_sv: float = 0.0
-
-    def validate(self) -> None:
-        if (
-            self.precipitation_minus_evaporation_weight == "none"
-            and not self.ice_mass_term
-            and self.constant_runoff_sv == 0.0
-        ):
-            raise ValueError("The water flux composition has no terms.")
-        if self.sea_ice_density_kg_m3 <= 0.0:
-            raise ValueError(
-                "sea_ice_density_kg_m3 must be positive, got "
-                f"{self.sea_ice_density_kg_m3}."
-            )
-
-    def build(self, sea_ice_volume_valid: torch.Tensor | None) -> GlobalWaterFlux:
-        terms: list[GlobalWaterFlux] = []
-        if self.precipitation_minus_evaporation_weight != "none":
-            terms.append(
-                PrecipitationMinusEvaporationWaterFlux(
-                    self.precipitation_minus_evaporation_weight
-                )
-            )
-        if self.ice_mass_term:
-            Distributed.get_instance().require_no_spatial_parallelism(
-                "The ice mass term of the composed water flux sums "
-                "sea_ice_volume over the local spatial chunk only."
-            )
-            terms.append(
-                SeaIceMassWaterFlux(self.sea_ice_density_kg_m3, sea_ice_volume_valid)
-            )
-        if self.constant_runoff_sv != 0.0:
-            terms.append(
-                ConstantWaterFlux(
-                    self.constant_runoff_sv * _M3_PER_S_PER_SVERDRUP * DENSITY_OF_WATER
-                )
-            )
-        return ComposedWaterFlux(terms)
+    sea_ice_fraction_threshold: float = 0.0
+    coast_sea_surface_fraction_threshold: float = 1.0
 
 
 @dataclasses.dataclass
 class WaterFluxSaltBudgetConfig:
     """Salt budget from the surface water flux and the sea ice basal salt
-    flux, (DT / rho_0) * sum((-S_ref * wfo + 1000 * sfdsi) * ssf * A).
+    flux, (DT / rho_0) * sum((-S_ref * wfo + 1000 * sfdsi) * ssf * A), with
+    the enabled terms in place of wfo and sfdsi in their regimes. wfo and
+    sfdsi are read from the generated data, or from the forcing data if they
+    are not predicted.
 
     Parameters:
-        water_flux_source: wfo from the generated data ("predicted"), from the
-            forcing data ("given"), or built from ``composition``
-            ("composed").
-        brine_rejection: sfdsi from the generated data ("predicted"), from the
-            forcing data ("given"), or omitted ("none").
+        open_water_precipitation_minus_evaporation: Use the forcing
+            precipitation minus evaporation in place of wfo over open water.
+        sea_ice_mass: Use -rho_ice * delta(sea_ice_volume) / DT in place of
+            wfo where ice covered.
+        sea_ice_salinity_psu: With ``sea_ice_mass``, use
+            -rho_ice * S_ice * delta(sea_ice_volume) / DT in place of sfdsi
+            where ice covered. None keeps sfdsi there.
+        brine_rejection: Include the sea ice salt flux.
         reference_salinity_psu: Reference salinity of the virtual salt flux,
             in psu.
-        composition: Terms of the composed water flux; required if and only if
-            ``water_flux_source`` is "composed".
+        sea_ice_density_kg_m3: Density of sea ice.
+        regimes: Thresholds defining the regimes.
         type: Selects this budget.
     """
 
-    water_flux_source: Literal["predicted", "given", "composed"]
-    brine_rejection: Literal["none", "predicted", "given"] = "predicted"
+    open_water_precipitation_minus_evaporation: bool = False
+    sea_ice_mass: bool = False
+    sea_ice_salinity_psu: float | None = None
+    brine_rejection: bool = True
     reference_salinity_psu: float = REFERENCE_SALINITY_PSU
-    composition: WaterFluxCompositionConfig | None = None
+    sea_ice_density_kg_m3: float = DENSITY_OF_SEA_ICE
+    regimes: WaterFluxRegimesConfig = dataclasses.field(
+        default_factory=WaterFluxRegimesConfig
+    )
     type: Literal["water_flux"] = "water_flux"
 
     def validate(self, weight_by_sea_surface_fraction: bool) -> None:
         _require_sea_surface_fraction_weighting(
             self.type, weight_by_sea_surface_fraction
         )
-        if (self.water_flux_source == "composed") != (self.composition is not None):
+        if self.sea_ice_salinity_psu is not None and not self.sea_ice_mass:
+            raise ValueError("sea_ice_salinity_psu requires sea_ice_mass.")
+        if self.sea_ice_salinity_psu is not None and not self.brine_rejection:
+            raise ValueError("sea_ice_salinity_psu requires brine_rejection.")
+        if self.sea_ice_density_kg_m3 <= 0.0:
             raise ValueError(
-                "composition must be set if and only if water_flux_source is "
-                f"'composed', got water_flux_source={self.water_flux_source!r}."
+                "sea_ice_density_kg_m3 must be positive, got "
+                f"{self.sea_ice_density_kg_m3}."
             )
-        if self.composition is not None:
-            self.composition.validate()
 
-    def build(self, sea_ice_volume_valid: torch.Tensor | None) -> SaltBudget:
-        water_flux: GlobalWaterFlux
-        if self.composition is not None:
-            water_flux = self.composition.build(sea_ice_volume_valid)
-        elif self.water_flux_source == "given":
-            water_flux = WaterFluxField("given")
-        else:
-            water_flux = WaterFluxField("predicted")
-        return WaterFluxSaltBudget(
-            water_flux, self.brine_rejection, self.reference_salinity_psu
-        )
+    def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
+        ice_volume_mask = None
+        if self.sea_ice_mass:
+            Distributed.get_instance().require_no_spatial_parallelism(
+                "The sea ice mass term of the water flux salt budget sums "
+                "sea_ice_volume over the local spatial chunk only."
+            )
+            ice_volume_mask = _sea_ice_volume_output_mask(spatial_mask_provider)
+        return WaterFluxSaltBudget(self, ice_volume_mask)
 
 
 SaltBudgetConfig = (
@@ -628,21 +595,16 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
-        sea_ice_volume_mask = None
-        if self.ocean_salt_content_correction is not None:
-            try:
-                sea_ice_volume_mask = (
-                    dataset_info.spatial_mask_provider.get_mask_tensor_for(
-                        "sea_ice_volume"
-                    )
-                )
-            except MissingDatasetInfo:
-                pass
+        spatial_mask_provider: SpatialMaskProviderABC
+        try:
+            spatial_mask_provider = dataset_info.spatial_mask_provider
+        except MissingDatasetInfo:
+            spatial_mask_provider = NullSpatialMaskProvider
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
-            sea_ice_volume_mask=sea_ice_volume_mask,
+            spatial_mask_provider=spatial_mask_provider,
         )
 
     def _build(
@@ -650,7 +612,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
-        sea_ice_volume_mask: torch.Tensor | None = None,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -685,13 +647,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             )
         if self.ocean_salt_content_correction is not None:
             salt_config = self.ocean_salt_content_correction
-            if sea_ice_volume_mask is None:
-                sea_ice_volume_valid = None
-            else:
-                # rounded as the stepper's output masking does, so the two agree
-                sea_ice_volume_valid = (
-                    torch.round(sea_ice_volume_mask.to(get_device())) != 0
-                )
             corrections.append(
                 OceanSaltContentCorrection(
                     gridded_operations.area_weighted_sum,
@@ -701,7 +656,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     (
                         None
                         if salt_config.budget_config is None
-                        else salt_config.budget_config.build(sea_ice_volume_valid)
+                        else salt_config.budget_config.build(spatial_mask_provider)
                     ),
                     salt_config.constant_unaccounted_salting,
                     salt_config.weight_by_sea_surface_fraction,
@@ -863,7 +818,7 @@ def _force_conserve_ocean_heat_content(
 def _total_sea_ice_volume_change(
     input: OceanData,
     gen: OceanData,
-    sea_ice_volume_valid: torch.Tensor | None,
+    ice_volume_mask: torch.Tensor | None,
     dtype: torch.dtype,
     required_by: str,
 ) -> torch.Tensor:
@@ -872,8 +827,7 @@ def _total_sea_ice_volume_change(
     Args:
         input: Ocean data at the previous step.
         gen: Generated ocean data at the current step.
-        sea_ice_volume_valid: Cells whose sea_ice_volume prediction the
-            stepper keeps; None counts every cell.
+        ice_volume_mask: Cells to count; None counts every cell.
         dtype: dtype of the sum.
         required_by: Names the caller in the error for a missing field.
     """
@@ -883,9 +837,9 @@ def _total_sea_ice_volume_change(
     except KeyError as err:
         raise ValueError(f"sea_ice_volume is required by {required_by}.") from err
     ice_volume_change = gen_ice_volume - input_ice_volume
-    if sea_ice_volume_valid is not None:
+    if ice_volume_mask is not None:
         ice_volume_change = torch.where(
-            sea_ice_volume_valid,
+            ice_volume_mask,
             ice_volume_change,
             torch.zeros_like(ice_volume_change),
         )
@@ -901,12 +855,12 @@ class IceVolumeSaltBudget:
     Parameters:
         slope_psu: Change in total salt content (psu m**3) per change in total
             sea ice volume (m**3).
-        sea_ice_volume_valid: Cells whose sea_ice_volume prediction the
-            stepper keeps; None counts every cell.
+        ice_volume_mask: Cells whose sea_ice_volume prediction the stepper
+            keeps; None counts every cell.
     """
 
     slope_psu: float
-    sea_ice_volume_valid: torch.Tensor | None
+    ice_volume_mask: torch.Tensor | None
 
     def __call__(
         self,
@@ -920,7 +874,7 @@ class IceVolumeSaltBudget:
         total_ice_volume_change = _total_sea_ice_volume_change(
             input,
             gen,
-            self.sea_ice_volume_valid,
+            self.ice_volume_mask,
             dtype,
             required_by="the ice volume salt budget",
         )
@@ -963,175 +917,68 @@ class SeaSurfaceHeightSaltBudget:
         return -self.reference_salinity_psu * added_water_volume
 
 
-_SOURCE_DATA_NAME = {"predicted": "generated", "given": "forcing"}
-
-
-def _flux_source_data(
-    source: Literal["predicted", "given"], gen: OceanData, forcing: OceanData
-) -> OceanData:
-    return gen if source == "predicted" else forcing
-
-
-@dataclasses.dataclass
-class WaterFluxField:
-    """Global water flux sum(wfo * ssf * A), with wfo from the generated
-    ("predicted") or forcing ("given") data.
+def _generated_or_forcing(
+    standard_name: str, gen: OceanData, forcing: OceanData
+) -> OceanData | None:
+    """The data holding a field: the generated data, or the forcing data if
+    the field is not predicted. None if neither has it.
     """
+    names = OCEAN_FIELD_NAME_PREFIXES[standard_name]
+    in_gen = any(name in gen.data for name in names)
+    in_forcing = any(name in forcing.data for name in names)
+    if in_gen and in_forcing:
+        raise ValueError(
+            f"{names[0]} cannot be in both the generated and forcing data."
+        )
+    if in_gen:
+        return gen
+    if in_forcing:
+        return forcing
+    return None
 
-    source: Literal["predicted", "given"]
 
-    def __call__(
-        self,
-        input: OceanData,
-        gen: OceanData,
-        forcing: OceanData,
-        global_total: GlobalTotal,
-        timestep_seconds: float,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
+def _sea_ice_fraction(data: OceanData) -> torch.Tensor | None:
+    """ocean_sea_ice_fraction if present, else sea_ice_fraction, with NaN as
+    zero; None if neither is available.
+    """
+    for name in ("ocean_sea_ice_fraction", "sea_ice_fraction"):
         try:
-            wfo = _flux_source_data(self.source, gen, forcing).water_flux_into_sea_water
-        except KeyError as err:
-            raise ValueError(
-                "The water flux salt budget needs wfo in the "
-                f"{_SOURCE_DATA_NAME[self.source]} data."
-            ) from err
-        wfo = torch.nan_to_num(wfo.to(dtype))  # NaN over land
-        return global_total(wfo * forcing.sea_surface_fraction.to(dtype))
-
-
-@dataclasses.dataclass
-class PrecipitationMinusEvaporationWaterFlux:
-    """Global water flux from the forcing PRATEsfc - LHTFLsfc / L_v, weighted
-    per cell by the sea surface or open water fraction.
-    """
-
-    weight: Literal["sea_surface_fraction", "open_water_fraction"]
-
-    def __call__(
-        self,
-        input: OceanData,
-        gen: OceanData,
-        forcing: OceanData,
-        global_total: GlobalTotal,
-        timestep_seconds: float,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        atmosphere = AtmosphereData(forcing.data)
-        try:
-            precipitation_minus_evaporation = atmosphere.precipitation_rate.to(
-                dtype
-            ) - atmosphere.evaporation_rate.to(dtype)
-        except KeyError as err:
-            raise ValueError(
-                "The composed water flux needs PRATEsfc and LHTFLsfc in the "
-                "forcing data."
-            ) from err
-        if self.weight == "sea_surface_fraction":
-            weight = forcing.sea_surface_fraction.to(dtype)
-        else:
-            try:
-                open_water_fraction = input.ocean_fraction
-            except KeyError as err:
-                raise ValueError(
-                    "The open water fraction weight needs land_fraction and the "
-                    "sea ice fraction in the input data."
-                ) from err
-            weight = torch.nan_to_num(open_water_fraction.to(dtype))
-        return global_total(precipitation_minus_evaporation * weight)
-
-
-@dataclasses.dataclass
-class SeaIceMassWaterFlux:
-    """Global water flux -rho_ice * sum(delta sea_ice_volume) / DT.
-
-    Parameters:
-        density_kg_m3: Density of sea ice.
-        sea_ice_volume_valid: Cells whose sea_ice_volume prediction the
-            stepper keeps; None counts every cell.
-    """
-
-    density_kg_m3: float
-    sea_ice_volume_valid: torch.Tensor | None
-
-    def __call__(
-        self,
-        input: OceanData,
-        gen: OceanData,
-        forcing: OceanData,
-        global_total: GlobalTotal,
-        timestep_seconds: float,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        total_ice_volume_change = _total_sea_ice_volume_change(
-            input,
-            gen,
-            self.sea_ice_volume_valid,
-            dtype,
-            required_by="the ice mass term of the composed water flux",
-        )
-        return -self.density_kg_m3 * total_ice_volume_change / timestep_seconds
-
-
-@dataclasses.dataclass
-class ConstantWaterFlux:
-    """Constant global water flux, in kg/s."""
-
-    kg_per_s: float
-
-    def __call__(
-        self,
-        input: OceanData,
-        gen: OceanData,
-        forcing: OceanData,
-        global_total: GlobalTotal,
-        timestep_seconds: float,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        sea_surface_fraction = forcing.sea_surface_fraction
-        return sea_surface_fraction.new_full(
-            sea_surface_fraction.shape[:-2] + (1, 1), self.kg_per_s, dtype=dtype
-        )
-
-
-@dataclasses.dataclass
-class ComposedWaterFlux:
-    """Sum of global water flux terms."""
-
-    terms: list[GlobalWaterFlux]
-
-    def __call__(
-        self,
-        input: OceanData,
-        gen: OceanData,
-        forcing: OceanData,
-        global_total: GlobalTotal,
-        timestep_seconds: float,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        return functools.reduce(
-            operator.add,
-            (
-                term(input, gen, forcing, global_total, timestep_seconds, dtype)
-                for term in self.terms
-            ),
-        )
+            return torch.nan_to_num(data[name])
+        except KeyError:
+            continue
+    return None
 
 
 @dataclasses.dataclass
 class WaterFluxSaltBudget:
-    """Salt budget (DT / rho_0) * (-S_ref * W + 1000 * sum(sfdsi * ssf * A)),
-    with W the global water flux in kg/s.
+    """Salt budget from the surface water flux and the sea ice basal salt
+    flux, with terms in place of wfo and sfdsi in their regimes. See
+    ``WaterFluxSaltBudgetConfig``.
 
     Parameters:
-        water_flux: Global water flux into the ocean, W.
-        brine_rejection: Source of sfdsi, or "none" to omit it.
-        reference_salinity_psu: Reference salinity S_ref.
+        config: The budget configuration.
+        ice_volume_mask: Cells whose sea_ice_volume prediction the stepper
+            keeps; None counts every cell.
     """
 
-    water_flux: GlobalWaterFlux
-    brine_rejection: Literal["none", "predicted", "given"]
-    reference_salinity_psu: float
+    config: WaterFluxSaltBudgetConfig
+    ice_volume_mask: torch.Tensor | None
+
+    def _ice_covered(self, input: OceanData, gen: OceanData) -> torch.Tensor:
+        fractions = [
+            fraction
+            for fraction in (_sea_ice_fraction(input), _sea_ice_fraction(gen))
+            if fraction is not None
+        ]
+        if len(fractions) == 0:
+            raise ValueError(
+                "The water flux salt budget regimes need the sea ice fraction in "
+                "the input or generated data."
+            )
+        threshold = self.config.regimes.sea_ice_fraction_threshold
+        return functools.reduce(
+            torch.logical_or, [fraction > threshold for fraction in fractions]
+        )
 
     def __call__(
         self,
@@ -1142,39 +989,80 @@ class WaterFluxSaltBudget:
         timestep_seconds: float,
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        water_kg_per_s = self.water_flux(
-            input, gen, forcing, global_total, timestep_seconds, dtype
-        )
-        salt_g_per_s = -self.reference_salinity_psu * water_kg_per_s
-        if self.brine_rejection != "none":
-            salt_g_per_s = salt_g_per_s + 1000.0 * _global_sea_ice_salt_flux(
-                self.brine_rejection, gen, forcing, global_total, dtype
+        config = self.config
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+        wfo_data = _generated_or_forcing("water_flux_into_sea_water", gen, forcing)
+        if wfo_data is None:
+            raise ValueError(
+                "The water flux salt budget needs wfo in the generated or forcing "
+                "data."
             )
+        # fluxes per unit total cell area; wfo is NaN over land
+        water = torch.nan_to_num(wfo_data.water_flux_into_sea_water.to(dtype))
+        water = water * sea_surface_fraction  # kg/m**2/s
+        salt = torch.zeros_like(water)  # g/m**2/s
+        if config.brine_rejection:
+            sfdsi_data = _generated_or_forcing(
+                "downward_sea_ice_basal_salt_flux", gen, forcing
+            )
+            if sfdsi_data is None:
+                raise ValueError(
+                    "The water flux salt budget needs sfdsi in the generated or "
+                    "forcing data; set brine_rejection to False to omit it."
+                )
+            sfdsi = sfdsi_data.downward_sea_ice_basal_salt_flux.to(dtype)
+            salt = 1000.0 * sfdsi * sea_surface_fraction
+        ice_mass_change_kg_per_s: torch.Tensor | float = 0.0
+        ice_salt_change_g_per_s: torch.Tensor | float = 0.0
+        if config.open_water_precipitation_minus_evaporation or config.sea_ice_mass:
+            ice_covered = self._ice_covered(input, gen)
+        if config.open_water_precipitation_minus_evaporation:
+            try:
+                precipitation_minus_evaporation = (
+                    forcing.precipitation_minus_evaporation.to(dtype)
+                )
+            except KeyError as err:
+                raise ValueError(
+                    "The water flux salt budget needs PRATEsfc and LHTFLsfc in the "
+                    "forcing data."
+                ) from err
+            coast = (
+                sea_surface_fraction
+                < config.regimes.coast_sea_surface_fraction_threshold
+            )
+            water = torch.where(
+                ~ice_covered & ~coast,
+                precipitation_minus_evaporation * sea_surface_fraction,
+                water,
+            )
+        if config.sea_ice_mass:
+            water = torch.where(ice_covered, torch.zeros_like(water), water)
+            ice_volume_mask = (
+                ice_covered
+                if self.ice_volume_mask is None
+                else ice_covered & self.ice_volume_mask
+            )
+            ice_mass_change_kg_per_s = (
+                config.sea_ice_density_kg_m3
+                * _total_sea_ice_volume_change(
+                    input,
+                    gen,
+                    ice_volume_mask,
+                    dtype,
+                    required_by="the sea ice mass term of the water flux salt budget",
+                )
+                / timestep_seconds
+            )
+            if config.sea_ice_salinity_psu is not None:
+                salt = torch.where(ice_covered, torch.zeros_like(salt), salt)
+                ice_salt_change_g_per_s = (
+                    config.sea_ice_salinity_psu * ice_mass_change_kg_per_s
+                )
+        water_kg_per_s = global_total(water) - ice_mass_change_kg_per_s
+        salt_g_per_s = global_total(salt) - ice_salt_change_g_per_s
+        salt_g_per_s = salt_g_per_s - config.reference_salinity_psu * water_kg_per_s
         # g/s * s / (kg/m**3) = (g/kg) m**3 = psu m**3
         return salt_g_per_s * timestep_seconds / DENSITY_OF_SEA_WATER_CM4
-
-
-def _global_sea_ice_salt_flux(
-    source: Literal["predicted", "given"],
-    gen: OceanData,
-    forcing: OceanData,
-    global_total: GlobalTotal,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    """sum(sfdsi * ssf * A) in kg/s, with sfdsi from the given source."""
-    data = _flux_source_data(source, gen, forcing)
-    # OceanData reads a missing sfdsi as zero
-    if not any(
-        name in data.data
-        for name in OCEAN_FIELD_NAME_PREFIXES["downward_sea_ice_basal_salt_flux"]
-    ):
-        raise ValueError(
-            "The water flux salt budget needs sfdsi in the "
-            f"{_SOURCE_DATA_NAME[source]} data; set brine_rejection to 'none' to "
-            "omit it."
-        )
-    sfdsi = data.downward_sea_ice_basal_salt_flux.to(dtype)  # NaN as zero
-    return global_total(sfdsi * forcing.sea_surface_fraction.to(dtype))
 
 
 def _force_conserve_ocean_salt_content(

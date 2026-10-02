@@ -4,6 +4,7 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
+from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY_PSU,
@@ -185,6 +186,14 @@ class OceanData:
     def water_flux_into_sea_water(self) -> torch.Tensor:
         """Returns water flux into sea water in kg/m2/s."""
         return self._get("water_flux_into_sea_water")
+
+    @property
+    def precipitation_minus_evaporation(self) -> torch.Tensor:
+        """Returns the atmosphere's precipitation minus evaporation in kg/m2/s,
+        per unit total cell area.
+        """
+        atmosphere = AtmosphereData(self.data)
+        return atmosphere.precipitation_rate - atmosphere.evaporation_rate
 
     @property
     def sea_surface_fraction(self) -> torch.Tensor:

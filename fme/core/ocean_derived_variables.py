@@ -219,6 +219,15 @@ def net_energy_flux_into_ocean_column(
     return data.net_energy_flux_into_ocean
 
 
+@register(VariableMetadata("kg/m**2/s", "Precipitation minus evaporation"))
+def precipitation_minus_evaporation(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Compute the precipitation minus evaporation."""
+    return data.precipitation_minus_evaporation
+
+
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
 def sea_ice_fraction(
     data: OceanData,

@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
+from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
+    LATENT_HEAT_OF_VAPORIZATION,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.coordinates import DepthCoordinate
 from fme.core.ocean_data import OceanData
 
@@ -188,3 +192,13 @@ def test_getitem():
         AttributeError, match="object has no attribute 'nonexistent_field'"
     ):
         _ = ocean_data["nonexistent_field"]
+
+
+def test_precipitation_minus_evaporation():
+    precipitation = torch.rand(2, 3)
+    latent_heat_flux = 100.0 * torch.rand(2, 3)
+    data = OceanData({"PRATEsfc": precipitation, "LHTFLsfc": latent_heat_flux})
+    torch.testing.assert_close(
+        data.precipitation_minus_evaporation,
+        precipitation - latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION,
+    )
