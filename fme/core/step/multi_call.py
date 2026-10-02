@@ -72,7 +72,10 @@ class MultiCallStepConfig(StepConfigABC):
     Configuration for a multi-call step.
 
     Parameters:
-        wrapped_step: The step to wrap.
+        wrapped_step: The step to wrap. Multi-call adds no modules of its own,
+            so ``torch.compile`` is configured through the wrapped step's own
+            ``compile`` option and is inherited from it; the extra forward
+            passes this step makes go through the same compiled modules.
         config: The multi-call configuration.
         include_multi_call_in_loss: Whether to include multi-call diagnostics in the
             loss.
