@@ -1,7 +1,13 @@
+import math
+
 import pytest
 import torch
 
-from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
+from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
+    REFERENCE_SALINITY,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.coordinates import DepthCoordinate
 from fme.core.ocean_data import OceanData
 
@@ -49,6 +55,78 @@ def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
         ocean_data = OceanData(data)
         with pytest.raises(ValueError, match="Depth coordinate must be provided"):
             _ = ocean_data.ocean_heat_content
+
+
+@pytest.mark.parametrize("has_depth_coordinate", [True, False])
+def test_column_integrated_ocean_salt_content(has_depth_coordinate: bool):
+    """Test column-integrated ocean salt content, which is weighted by the sea
+    surface fraction.
+    """
+    n_samples, n_time_steps, nlat, nlon, nlevels = 2, 2, 2, 2, 2
+    shape_2d = (n_samples, n_time_steps, nlat, nlon)
+    so_0, so_1, sea_surface_fraction = 34.0, 36.0, 0.5
+
+    data = {
+        "so_0": torch.full(shape_2d, so_0),
+        "so_1": torch.full(shape_2d, so_1),
+        "sea_surface_fraction": torch.full(shape_2d, sea_surface_fraction),
+    }
+
+    if has_depth_coordinate:
+        idepth = torch.tensor([2.5, 10, 20])
+        lev_thickness = idepth.diff(dim=-1)
+        mask = torch.ones(n_samples, n_time_steps, nlat, nlon, nlevels)
+        mask[:, :, 0, 0, 0] = 0.0
+        mask[:, :, 0, 0, 1] = 0.0
+        mask[:, :, 0, 1, 1] = 0.0
+
+        # 3 of 4 columns are ocean at level 0, 2 of 4 at level 1
+        expected_osc = (
+            DENSITY_OF_SEA_WATER_CM4
+            * sea_surface_fraction
+            * n_samples
+            * n_time_steps
+            * (3 * lev_thickness[0] * so_0 + 2 * lev_thickness[1] * so_1)
+        )
+        depth_coordinate = DepthCoordinate(idepth, mask)
+        ocean_data = OceanData(data, depth_coordinate)
+        assert ocean_data.ocean_salt_content.shape == shape_2d
+        torch.testing.assert_close(ocean_data.ocean_salt_content.nansum(), expected_osc)
+    else:
+        ocean_data = OceanData(data)
+        with pytest.raises(ValueError, match="Depth coordinate must be provided"):
+            _ = ocean_data.ocean_salt_content
+
+
+@pytest.mark.parametrize("sfdsi", [2e-7, float("nan"), None])
+def test_salt_fluxes_into_ocean(sfdsi: float | None):
+    """Test the virtual and net salt fluxes, where the net salt flux is only
+    defined when sfdsi is available.
+    """
+    shape = (1, 1, 1, 1)
+    wfo, sea_surface_fraction = 1e-5, 0.5
+    data = {
+        "wfo": torch.full(shape, wfo),
+        "sea_surface_fraction": torch.full(shape, sea_surface_fraction),
+    }
+    if sfdsi is not None:
+        data["sfdsi"] = torch.full(shape, sfdsi)
+    ocean_data = OceanData(data)
+
+    expected_virtual = -REFERENCE_SALINITY * wfo * sea_surface_fraction
+    torch.testing.assert_close(
+        ocean_data.net_virtual_salt_flux_into_ocean,
+        torch.full(shape, expected_virtual),
+    )
+    if sfdsi is None:
+        with pytest.raises(KeyError, match="downward_sea_ice_basal_salt_flux"):
+            _ = ocean_data.net_salt_flux_into_ocean
+    else:
+        sfdsi_flux = 0.0 if math.isnan(sfdsi) else sfdsi
+        expected_net = expected_virtual + 1000.0 * sfdsi_flux * sea_surface_fraction
+        torch.testing.assert_close(
+            ocean_data.net_salt_flux_into_ocean, torch.full(shape, expected_net)
+        )
 
 
 def test_get_3d_fields():

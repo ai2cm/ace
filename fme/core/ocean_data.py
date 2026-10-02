@@ -4,7 +4,11 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
+from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
+    REFERENCE_SALINITY,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -24,6 +28,8 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "net_downward_surface_heat_flux": ["hfds"],
         "net_downward_surface_heat_flux_total_area": ["hfds_total_area"],
         "geothermal_heat_flux": ["hfgeou"],
+        "water_flux_into_sea_water": ["wfo"],
+        "downward_sea_ice_basal_salt_flux": ["sfdsi"],
         "sea_surface_fraction": ["sea_surface_fraction"],
     }
 )
@@ -149,6 +155,28 @@ class OceanData:
         )
 
     @property
+    def ocean_salt_content(self) -> torch.Tensor:
+        """Returns column-integrated ocean salt content in g/m2, per unit
+        total cell area, weighted by the sea surface fraction.
+        """
+        if self._depth_coordinate is None:
+            raise ValueError(
+                "Depth coordinate must be provided to compute column-integrated "
+                "ocean salt content."
+            )
+        return (
+            self._depth_coordinate.depth_integral(
+                self.sea_water_salinity * DENSITY_OF_SEA_WATER_CM4
+            )
+            * self.sea_surface_fraction
+        )
+
+    @property
+    def water_flux_into_sea_water(self) -> torch.Tensor:
+        """Returns water flux into sea water in kg/m2/s."""
+        return self._get("water_flux_into_sea_water")
+
+    @property
     def sea_surface_fraction(self) -> torch.Tensor:
         """Returns the sea surface fraction."""
         try:
@@ -188,6 +216,37 @@ class OceanData:
         return (
             self.net_downward_surface_heat_flux + self.geothermal_heat_flux
         ) * self.sea_surface_fraction
+
+    @property
+    def downward_sea_ice_basal_salt_flux(self) -> torch.Tensor:
+        """Returns the salt flux from sea ice into the ocean in kg/m2/s, with
+        NaN as zero.
+        """
+        return torch.nan_to_num(self._get("downward_sea_ice_basal_salt_flux"), nan=0.0)
+
+    @property
+    def net_virtual_salt_flux_into_ocean(self) -> torch.Tensor:
+        """Virtual salt flux into the ocean column in g/m2/s, per unit total
+        cell area: the water flux into sea water times a fixed reference
+        salinity, weighted by the sea surface fraction.
+        """
+        return (
+            -REFERENCE_SALINITY
+            * self.water_flux_into_sea_water
+            * self.sea_surface_fraction
+        )
+
+    @property
+    def net_salt_flux_into_ocean(self) -> torch.Tensor:
+        """Net salt flux into the ocean column in g/m2/s, per unit total cell
+        area: the virtual salt flux plus the salt flux from sea ice, weighted
+        by the sea surface fraction.
+        """
+        sea_ice_salt_flux = 1000 * self.downward_sea_ice_basal_salt_flux  # kg -> g
+        return (
+            self.net_virtual_salt_flux_into_ocean
+            + sea_ice_salt_flux * self.sea_surface_fraction
+        )
 
     @property
     def sea_ice_fraction(self) -> torch.Tensor:
