@@ -74,7 +74,7 @@ class DiskMetricLogger:
         source_path = self._restore_source_path()
         if source_path is None:
             logging.warning(
-                "No metrics file to restore in %s, so no disk metrics are " "restored",
+                "No metrics file to restore in %s, so no disk metrics are restored",
                 self.directory,
             )
             return False
