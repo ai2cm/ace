@@ -35,12 +35,12 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
-from typing import List, Optional
 
 import dacite
 import fsspec
 import xarray as xr
 import yaml
+from fs_utils import is_local, makedirs
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT_REL = pathlib.Path(__file__).resolve().relative_to(REPO_ROOT)
@@ -89,7 +89,7 @@ HORIZONTAL_DIMS = [
 ZARR_ROOT_MARKERS = ("zarr.json", ".zmetadata")
 
 
-def _resolve_zarr_stores(dataset: str) -> List[str]:
+def _resolve_zarr_stores(dataset: str) -> list[str]:
     """Resolve a config `dataset` entry to the zarr store path(s) it contains.
 
     The entry may point directly at a store, or at a directory that contains one
@@ -126,36 +126,50 @@ def _resolve_zarr_stores(dataset: str) -> List[str]:
 
 @dataclasses.dataclass
 class DatasetPair:
+    """One zarr store (or directory of stores) plus the time slice to use.
+
+    Parameters:
+        dataset: Path to a zarr store, or to a directory containing stores.
+        start_time: Inclusive start of the time slice; None for the first step.
+        end_time: Inclusive end of the time slice; None for the last step.
+        group: Name of the group this entry's stores belong to, for `groups`
+            pooling. A store may belong to several groups at once (e.g. a
+            fine-grained "amip" group and a coarse "c96" group), in which case
+            list them under `groups` instead.
+        groups: Names of the groups this entry's stores belong to.
+    """
+
     dataset: str
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    # tolerate the alternate `stop_time` key seen in some configs
-    stop_time: Optional[str] = None
-    # Optional tag naming which group(s) this entry's stores belong to, for
-    # `groups` pooling below. A store may belong to several groups at once,
-    # e.g. a fine-grained "amip" group and a coarse "c96" group.
-    group: Optional[str] = None
-    groups: Optional[List[str]] = None
+    start_time: str | None = None
+    end_time: str | None = None
+    group: str | None = None
+    groups: list[str] | None = None
 
     def __post_init__(self):
         if self.group is not None and self.groups is not None:
             raise ValueError(f"{self.dataset}: set only one of group/groups, not both.")
 
     @property
-    def end(self) -> Optional[str]:
-        if self.end_time is not None and self.stop_time is not None:
-            raise ValueError(
-                f"{self.dataset}: set only one of end_time/stop_time, not both."
-            )
-        return self.end_time if self.end_time is not None else self.stop_time
+    def time_slice(self) -> slice:
+        return slice(self.start_time, self.end_time)
 
     @property
-    def group_names(self) -> List[str]:
+    def group_names(self) -> list[str]:
         if self.groups is not None:
             return list(self.groups)
         if self.group is not None:
             return [self.group]
         return []
+
+    def output_subdir(self, index: int, store: str) -> str:
+        """Per-pair output subdirectory name. The leading index keeps it unique
+        even when the same store appears with overlapping/identical slices."""
+        name = store.rstrip("/").rsplit("/", 1)[-1]
+        if name.endswith(".zarr"):
+            name = name[: -len(".zarr")]
+        start = self.start_time or "min"
+        end = self.end_time or "max"
+        return f"{index:02d}_{name}_{start}_{end}"
 
 
 @dataclasses.dataclass
@@ -171,10 +185,12 @@ class Config:
             root pooled stats.
     """
 
-    dataset_pairs: List[DatasetPair]
-    groups: List[str] = dataclasses.field(default_factory=list)
+    dataset_pairs: list[DatasetPair]
+    groups: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
+        if len(self.dataset_pairs) == 0:
+            raise ValueError("dataset_pairs must list at least one dataset.")
         claimed = {name for pair in self.dataset_pairs for name in pair.group_names}
         missing = set(self.groups) - claimed
         if missing:
@@ -188,6 +204,16 @@ class Config:
                 "listed in `groups`; add them or remove the tag."
             )
 
+    @classmethod
+    def from_file(cls, path: str) -> "Config":
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+        # strict so a misspelled key (e.g. `stop_time`) raises instead of
+        # silently leaving the time slice open-ended.
+        return dacite.from_dict(
+            data_class=cls, data=data, config=dacite.Config(strict=True)
+        )
+
 
 def copy(source: str, destination: str):
     """Copy between any two 'filesystems'. Do not use for large files."""
@@ -196,7 +222,7 @@ def copy(source: str, destination: str):
             shutil.copyfileobj(f_source, f_destination)
 
 
-def _reduction_dims(ds: xr.Dataset) -> List[str]:
+def _reduction_dims(ds: xr.Dataset) -> list[str]:
     dims = [d for d in HORIZONTAL_DIMS if d in ds.dims]
     if not dims:
         raise ValueError(
@@ -206,10 +232,10 @@ def _reduction_dims(ds: xr.Dataset) -> List[str]:
     return ["time"] + dims
 
 
-def compute_store_stats(store: str, pair: DatasetPair) -> dict:
-    """Open one zarr store, slice it with the pair's time bounds, and return its
-    centering / full-field / residual stats plus the timestep count used as the
-    pooling weight."""
+def compute_store_stats(store: str, time_slice: slice) -> dict:
+    """Open one zarr store, slice it in time, and return its centering /
+    full-field / residual stats plus the timestep count used as the pooling
+    weight."""
     # Imported here, not at module level, so the Config can be loaded (e.g. by
     # scripts/data_process/test_config.py) without dask installed.
     import dask
@@ -218,20 +244,18 @@ def compute_store_stats(store: str, pair: DatasetPair) -> dict:
         ds = xr.open_zarr(store, chunks={"time": "auto"})
 
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
-    ds = ds.sel(time=slice(pair.start_time, pair.end))
+    ds = ds.sel(time=time_slice)
 
+    bounds = f"[{time_slice.start}, {time_slice.stop}]"
     n_samples = len(ds.time)
     if n_samples < 2:
         raise ValueError(
-            f"{store} sliced to [{pair.start_time}, {pair.end}] has "
-            f"{n_samples} timesteps; check the time bounds in the config."
+            f"{store} sliced to {bounds} has {n_samples} timesteps; check the "
+            "time bounds in the config."
         )
 
     dims = _reduction_dims(ds)
-    logging.info(
-        f"{store} [{pair.start_time}, {pair.end}]: {n_samples} steps, "
-        f"reducing over {dims}"
-    )
+    logging.info(f"{store} {bounds}: {n_samples} steps, reducing over {dims}")
 
     # Build all three reductions lazily, then compute them together so the zarr is
     # read from storage only once: the shared dask graph dedups the source reads.
@@ -251,7 +275,7 @@ def compute_store_stats(store: str, pair: DatasetPair) -> dict:
 
 
 def _stats_files(stats: dict) -> dict:
-    """Map a per-pair / pooled stats dict to its {filename: DataArray} layout."""
+    """Map a per-store stats dict to its {filename: Dataset} output layout."""
     return {
         "centering.nc": stats["centering"],
         "scaling-full-field.nc": stats["scaling_full_field"],
@@ -259,18 +283,7 @@ def _stats_files(stats: dict) -> dict:
     }
 
 
-def _pair_subdir(index: int, pair: DatasetPair, store: str) -> str:
-    """Per-pair output subdirectory name. The leading index keeps it unique even
-    when the same store appears with overlapping/identical slices."""
-    name = store.rstrip("/").rsplit("/", 1)[-1]
-    if name.endswith(".zarr"):
-        name = name[: -len(".zarr")]
-    start = pair.start_time or "min"
-    end = pair.end or "max"
-    return f"{index:02d}_{name}_{start}_{end}"
-
-
-def pool_stats(per_pair: List[dict]) -> dict:
+def pool_stats(per_pair: list[dict]) -> dict:
     """Pool per-pair stats weighted by timestep count.
 
     - centering: weighted mean of the means.
@@ -300,34 +313,27 @@ def pool_stats(per_pair: List[dict]) -> dict:
     }
 
 
-def write_stats(
-    stats: dict, out_dir: str, config_yaml: str, n_samples: Optional[int] = None
-):
-    """Write the three stats netCDFs to `out_dir`.
+def write_stats(stats: dict, out_dir: str, config_yaml: str, n_samples: int):
+    """Write the three stats netCDFs to `out_dir` (local or remote).
 
     `n_samples` is recorded in the file attrs so a later re-pooling of a subset
     of these stats has its weights without re-reading any zarr.
     """
     history = f"Created by scripts/data_process/get_pooled_stats.py from {config_yaml}."
-    if out_dir.endswith("/"):
-        out_dir = out_dir[:-1]
+    out_dir = out_dir.rstrip("/")
+    if is_local(out_dir):
+        makedirs(out_dir)
 
-    if out_dir.startswith("gs:"):
-        tmp = tempfile.TemporaryDirectory()
-        local_dir, remote_dir = tmp.name, out_dir
-    else:
-        os.makedirs(out_dir, exist_ok=True)
-        local_dir, remote_dir = out_dir, None
-
-    for filename, da in stats.items():
-        da.attrs["history"] = history
-        if n_samples is not None:
-            da.attrs["n_samples"] = n_samples
-        local_path = os.path.join(local_dir, filename)
-        da.to_netcdf(local_path)
-        if remote_dir is not None:
-            copy(local_path, remote_dir + "/" + filename)
-        logging.info(f"Wrote {(remote_dir or local_dir)}/{filename}")
+    # netCDFs are written locally first since xarray cannot write directly to
+    # remote storage; `copy` handles both local and remote destinations.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for filename, ds in stats.items():
+            ds.attrs["history"] = history
+            ds.attrs["n_samples"] = n_samples
+            local_path = os.path.join(tmpdir, filename)
+            ds.to_netcdf(local_path)
+            copy(local_path, out_dir + "/" + filename)
+            logging.info(f"Wrote {out_dir}/{filename}")
 
 
 def compute(config_yaml: str, output_directory: str):
@@ -335,17 +341,8 @@ def compute(config_yaml: str, output_directory: str):
     container, or locally if you have the data access and dependencies."""
     logging.basicConfig(level=logging.INFO)
 
-    with open(config_yaml, "r") as f:
-        config_data = yaml.safe_load(f)
-    config = dacite.from_dict(data_class=Config, data=config_data)
-
-    if output_directory.endswith("/"):
-        output_directory = output_directory[:-1]
-
-    # Create the output directory if it doesn't exist. gs:// has no real dirs, so
-    # only local paths need this.
-    if not output_directory.startswith("gs:"):
-        os.makedirs(output_directory, exist_ok=True)
+    config = Config.from_file(config_yaml)
+    output_directory = output_directory.rstrip("/")
 
     # Start a dask distributed client so the per-store reads/reductions run across
     # many workers, mirroring get_stats.py. Imported here for the same reason as
@@ -363,10 +360,10 @@ def compute(config_yaml: str, output_directory: str):
             if stores != [pair.dataset.rstrip("/")]:
                 logging.info(f"Resolved {pair.dataset} -> {stores}")
             for store in stores:
-                stats = compute_store_stats(store, pair)
+                stats = compute_store_stats(store, pair.time_slice)
                 stats["groups"] = pair.group_names
                 per_pair.append(stats)
-                subdir = _pair_subdir(index, pair, store)
+                subdir = pair.output_subdir(index, store)
                 write_stats(
                     _stats_files(stats),
                     output_directory + "/" + subdir,

@@ -111,11 +111,7 @@ def test_valid_create_coupled_ic_config(filename):
 
 @pytest.mark.parametrize("filename", POOLED_STATS_CONFIG_YAMLS)
 def test_valid_pooled_stats_config(filename):
-    with open(filename, "r") as f:
-        config_data = yaml.load(f, Loader=yaml.CLoader)
-    config = dacite.from_dict(data_class=PooledStatsConfig, data=config_data)
-    for pair in config.dataset_pairs:
-        _ = pair.end  # raises if both end_time and stop_time are set
+    PooledStatsConfig.from_file(filename)
 
 
 NATIVE_DATA_DIRECTORY = "gs://bucket/native-6hourly"
