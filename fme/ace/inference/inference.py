@@ -222,8 +222,8 @@ class InferenceConfig:
 
     Parameters:
         experiment_dir: Directory to save results to. This can be a local
-            directory, like ``/results``, or a remote directory prefixed with a
-            protocol recognized by ``fsspec``, like ``gs://bucket/results``.
+            directory, like ``/results``, or a remote object store directory,
+            like ``gs://bucket/results`` or ``s3://bucket/results``.
 
             .. note::
                 While most types of output can be written to a remote
