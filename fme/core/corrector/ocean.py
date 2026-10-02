@@ -215,10 +215,11 @@ class OceanSaltContentBudgetConfig:
             useful for correcting a residual in the salt budget of target data.
             In current data, this may be below precision.
         use_float64: Compute the global sums, expected change and correction
-            ratio in float64 instead of the data's dtype. The expected change is
-            only a couple of float32 epsilons of the salt content, so in float32
-            it is applied with a ~25-30% error per step. Defaults to True for
-            that reason.
+            ratio in float64 instead of the data's dtype, whichever budget is
+            selected: the fields each budget reads are cast to float64 before
+            they are reduced. The expected change is only a couple of float32
+            epsilons of the salt content, so in float32 it is applied with a
+            ~25-30% error per step. Defaults to True for that reason.
         weight_by_sea_surface_fraction: Weight the column salt content (and
             the ocean area the constant term applies over) by the sea surface
             fraction before the global reduction. Salinity is an ocean-area

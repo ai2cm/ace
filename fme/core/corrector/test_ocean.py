@@ -1070,6 +1070,56 @@ def test_ocean_salt_content_budget_config_rejects_invalid_sea_surface_height_bud
         )
 
 
+def test_ocean_salt_content_correction_sea_surface_height_budget_float64():
+    # At realistic magnitudes (column salt ~1e5 psu m, a budget of ~3e-2 psu m
+    # per unit area, i.e. ~1 mm of sea level) the SSH budget is met closely
+    # from a float32 state with use_float64, as the ice volume budget is, and
+    # the corrected salinity keeps the state's float32 dtype.
+    torch.manual_seed(0)
+    nlat, nlon = 32, 64
+    ocean_mask = torch.ones(nlat, nlon)
+    layer_thickness = (1000.0, 3000.0)
+    dataset_info = _salt_dataset_info(ocean_mask, layer_thickness)
+    reference_salinity = 35.0
+    rise_m = 3e-2 / reference_salinity
+    sea_surface_fraction = torch.ones(nlat, nlon, device=DEVICE)
+    sea_surface_fraction[: nlat // 4] = 0.5  # partly-land cells
+    input_ssh = 0.5 * torch.randn(nlat, nlon, device=DEVICE)
+    input_so = 35.0 + torch.rand(2, nlat, nlon, device=DEVICE)
+    gen_so = input_so + 1e-3 + 1e-4 * torch.randn(2, nlat, nlon, device=DEVICE)
+    input_data = {"so_0": input_so[0], "so_1": input_so[1], "SSH": input_ssh}
+    gen_data = {"so_0": gen_so[0], "so_1": gen_so[1], "SSH": input_ssh + rise_m}
+    forcing_data = {"sea_surface_fraction": sea_surface_fraction}
+    sea_surface_area = _ocean_cell_area_m2(ocean_mask) * sea_surface_fraction.double()
+    expected_change = -reference_salinity * float(
+        ((gen_data["SSH"].double() - input_ssh.double()) * sea_surface_area).sum()
+    )
+
+    def miss(use_float64: bool) -> float:
+        config = OceanCorrectorConfig(
+            ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+                method="scaled_salinity",
+                weight_by_sea_surface_fraction=True,
+                use_float64=use_float64,
+                sea_surface_height_budget=SeaSurfaceHeightSaltBudgetConfig(
+                    reference_salinity_psu=reference_salinity
+                ),
+            )
+        )
+        corrected = config.get_corrector(dataset_info)(
+            input_data, gen_data, forcing_data, None
+        ).corrected
+        assert corrected["so_0"].dtype == torch.float32
+        return float(
+            _total_salt_content(corrected, sea_surface_area, layer_thickness)
+            - _total_salt_content(input_data, sea_surface_area, layer_thickness)
+            - expected_change
+        )
+
+    assert abs(miss(use_float64=True)) < 0.05 * abs(expected_change)
+    assert abs(miss(use_float64=True)) < abs(miss(use_float64=False))
+
+
 def test_ocean_corrector_config_fields_are_known():
     # Staleness guard: if a new corrector option is added to
     # OceanCorrectorConfig this fails, flagging that the corrector delta/
