@@ -48,7 +48,6 @@ def _save_checkpoint(trainer: "Trainer", path: str) -> None:
                 "best_valid_loss": trainer.best_valid_loss,
                 "best_histogram_tail_metric": trainer.best_histogram_tail_metric,
                 "validate_using_ema": trainer.validate_using_ema,
-                "disk_metrics_offset": WandB.get_instance().disk_metrics_offset,
             },
             temporary_location,
         )
@@ -81,11 +80,6 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     )
     ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
-    WandB.get_instance().restore_disk_metrics(
-        checkpoint.get("disk_metrics_offset"),
-        resume_step=trainer.num_batches_seen,
-        step_continues=True,
-    )
 
 
 class Trainer:
@@ -345,6 +339,7 @@ class Trainer:
         if self.epoch_checkpoint_path is not None:
             logging.info(f"Saving latest checkpoint")
             _save_checkpoint(self, self.epoch_checkpoint_path)
+            WandB.get_instance().mark_checkpoint()
             with self._ema_context():
                 _save_checkpoint(self, self.ema_checkpoint_path)
         else:
@@ -385,6 +380,8 @@ class Trainer:
                     self.save_best_checkpoint(generation_summary)
             else:
                 valid_end = train_end
+            if dist.is_root():
+                self.save_epoch_checkpoints()
             epoch_end = time.time()
             timings = {
                 "epoch_train_seconds": train_end - start_time,
@@ -392,8 +389,6 @@ class Trainer:
                 "epoch_total_seconds": epoch_end - start_time,
             }
             wandb.log(timings, step=self.num_batches_seen)
-            if dist.is_root():
-                self.save_epoch_checkpoints()
 
 
 @dataclasses.dataclass

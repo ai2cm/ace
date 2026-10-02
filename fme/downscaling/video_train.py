@@ -78,7 +78,6 @@ def _save_checkpoint(trainer: "VideoTrainer", path: str) -> None:
                 "num_batches_seen": trainer.num_batches_seen,
                 "startEpoch": trainer.startEpoch,
                 "best_valid_loss": trainer.best_valid_loss,
-                "disk_metrics_offset": WandB.get_instance().disk_metrics_offset,
             },
             temporary_location,
         )
@@ -98,11 +97,6 @@ def restore_checkpoint(trainer: "VideoTrainer") -> None:
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
     trainer.ema = EMATracker.from_state(checkpoint["ema"], trainer.model.modules)
-    WandB.get_instance().restore_disk_metrics(
-        checkpoint.get("disk_metrics_offset"),
-        resume_step=trainer.num_batches_seen,
-        step_continues=True,
-    )
 
 
 @dataclasses.dataclass
@@ -452,6 +446,7 @@ class VideoTrainer:
     def save_epoch_checkpoint(self) -> None:
         if self.epoch_checkpoint_path is not None:
             _save_checkpoint(self, self.epoch_checkpoint_path)
+            WandB.get_instance().mark_checkpoint()
 
     def train(self) -> None:
         logging.info("Running initial validation.")
@@ -479,11 +474,11 @@ class VideoTrainer:
                 self.log_validation_visualizations()  # all ranks (barrier-safe)
             if epoch % self.config.test_interval == 0:
                 self.evaluate_test()  # all ranks (barrier-safe)
+            if dist.is_root() and self.config.save_checkpoints:
+                self.save_epoch_checkpoint()
             wandb.log(
                 {"epoch_seconds": time.time() - start}, step=self.num_batches_seen
             )
-            if dist.is_root() and self.config.save_checkpoints:
-                self.save_epoch_checkpoint()
 
 
 def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):

@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
@@ -9,7 +10,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.disk_metric_logger import (
-    METRICS_FILENAME,
+    CHECKPOINT_MARK_FILENAME,
     DiskMetricLogger,
     read_metrics,
     read_metrics_by_step,
@@ -648,16 +649,17 @@ RESUME_LAST_EPOCH_STEP = RESUME_MAX_EPOCHS * RESUME_N_TRAIN_BATCHES
 BATCH_LOG_KEY = "training_samples_per_second_on_rank_0"
 
 
-def _start_job(experiment_dir: str) -> Trainer:
+def _start_job(experiment_dir: str, **trainer_kwargs: Any) -> Trainer:
     """Configure logging and build a trainer, as a new training job does."""
     LoggingConfig(log_to_wandb=True)._configure_wandb(
         experiment_dir=experiment_dir, config={}, resumable=True
     )
-    _, trainer = get_trainer(
-        experiment_dir,
-        max_epochs=RESUME_MAX_EPOCHS,
-        n_train_batches=RESUME_N_TRAIN_BATCHES,
-    )
+    trainer_kwargs = {
+        "max_epochs": RESUME_MAX_EPOCHS,
+        "n_train_batches": RESUME_N_TRAIN_BATCHES,
+        **trainer_kwargs,
+    }
+    _, trainer = get_trainer(experiment_dir, **trainer_kwargs)
     return trainer
 
 
@@ -669,8 +671,22 @@ def _train_until_last_epoch_checkpoints(trainer: Trainer):
         trainer.train()
 
 
+def _metrics_dir(experiment_dir: str) -> str:
+    return os.path.join(experiment_dir, "metrics")
+
+
 def _disk_metrics(experiment_dir: str) -> dict[int, dict[str, Any]]:
-    return read_metrics_by_step(os.path.join(experiment_dir, "metrics"), 0)
+    return read_metrics_by_step(_metrics_dir(experiment_dir), 0)
+
+
+def _discarded_steps(experiment_dir: str) -> list[int]:
+    metrics_dir = _metrics_dir(experiment_dir)
+    steps: list[int] = []
+    for name in os.listdir(metrics_dir):
+        if ".discarded." in name:
+            with open(os.path.join(metrics_dir, name)) as f:
+                steps.extend(json.loads(line)["step"] for line in f)
+    return steps
 
 
 def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str):
@@ -703,19 +719,63 @@ def test_resume_merges_recovered_batch_logs_with_redone_epoch_logs(tmp_path: str
     assert disk_logs.keys() == wandb_logs.keys()
 
 
-def test_resume_discards_disk_logs_after_checkpoint(tmp_path: str):
-    with mock_wandb():
-        _train_until_last_epoch_checkpoints(_start_job(tmp_path))
-        _start_job(tmp_path).train()
-    records = read_metrics(os.path.join(tmp_path, "metrics"))
-    epochs_logged = [r["epoch"] for r in records if "epoch" in r]
-    assert epochs_logged == list(range(1, RESUME_MAX_EPOCHS + 1))
-    (discarded,) = [
-        name
-        for name in os.listdir(os.path.join(tmp_path, "metrics"))
-        if ".discarded." in name
-    ]
-    assert discarded.startswith(METRICS_FILENAME)
+def test_resume_does_not_relog_rows_redone_after_periodic_checkpoint(tmp_path: str):
+    checkpoint_every_n_batches = 2
+    n_batches_before_interrupt = 3
+    with mock_wandb() as wandb:
+        trainer = _start_job(
+            tmp_path,
+            max_epochs=1,
+            checkpoint_every_n_batches=checkpoint_every_n_batches,
+        )
+        # one call logs the first batch's metrics before training
+        with fail_after_calls_patch(
+            trainer.stepper, "train_on_batch", n_batches_before_interrupt + 2
+        ):
+            trainer.train()
+        # wandb never received the checkpoint's step or the batch after it
+        wandb.drop_logs_after(checkpoint_every_n_batches - 1)
+        # the resumed job logs the batch after the checkpoint again; the mock
+        # rejects it if that batch's lost logs were re-logged and committed
+        _start_job(
+            tmp_path,
+            max_epochs=1,
+            checkpoint_every_n_batches=checkpoint_every_n_batches,
+        ).train()
+        assert BATCH_LOG_KEY in wandb.get_logs()[checkpoint_every_n_batches]
+    records = read_metrics(_metrics_dir(tmp_path))
+    batch_log_steps = [r["step"] for r in records if BATCH_LOG_KEY in r]
+    assert batch_log_steps == list(range(1, RESUME_N_TRAIN_BATCHES + 1))
+    assert _discarded_steps(tmp_path) == [n_batches_before_interrupt]
+
+
+def test_resume_recovers_last_batch_logs_before_preemption_checkpoint(
+    tmp_path: str, monkeypatch
+):
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
+    n_batches_before_interrupt = 3
+    with mock_wandb() as wandb:
+        trainer = _start_job(tmp_path, max_epochs=1)
+        # one call logs the first batch's metrics before training
+        with fail_after_calls_patch(
+            trainer.stepper, "train_on_batch", n_batches_before_interrupt + 2
+        ):
+            trainer.train()
+        # invoke the trainer's registered callback as the termination listener
+        # would after the abort, as
+        # test_resume_after_interrupted_training_during_epoch does
+        (save_on_terminate,) = registered_callbacks
+        save_on_terminate()
+        last_batch_logs = wandb.get_logs()[n_batches_before_interrupt]
+        # wandb holds the last logged step until a later one is logged, so the
+        # process exiting from the listener thread loses it
+        wandb.drop_logs_after(n_batches_before_interrupt - 1)
+        _start_job(tmp_path, max_epochs=1).train()
+        assert wandb.get_logs()[n_batches_before_interrupt] == last_batch_logs
 
 
 def test_resume_recovers_logs_after_two_preemptions(tmp_path: str):
@@ -730,24 +790,20 @@ def test_resume_recovers_logs_after_two_preemptions(tmp_path: str):
         assert wandb.get_logs()[RESUME_LAST_EPOCH_STEP] == last_epoch_logs
 
 
-def test_resume_from_checkpoint_without_disk_metrics_offset(tmp_path: str):
+def test_resume_without_checkpoint_mark_does_not_recover_logs(tmp_path: str):
     with mock_wandb() as wandb:
-        trainer = _start_job(tmp_path)
-        trainer.train()
-        last_epoch_logs = wandb.get_logs()[RESUME_LAST_EPOCH_STEP]
-        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
-        # a checkpoint saved before checkpoints recorded disk_metrics_offset
-        checkpoint_path = trainer.paths.latest_checkpoint_path
-        checkpoint = torch.load(checkpoint_path, weights_only=False)
-        del checkpoint["disk_metrics_offset"]
-        torch.save(checkpoint, checkpoint_path)
         _start_job(tmp_path).train()
-        assert wandb.get_logs()[RESUME_LAST_EPOCH_STEP] == last_epoch_logs
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        # a job started before checkpoints were marked
+        os.remove(os.path.join(_metrics_dir(tmp_path), CHECKPOINT_MARK_FILENAME))
+        _start_job(tmp_path).train()
+        assert len(wandb.get_logs()) == RESUME_LAST_EPOCH_STEP
+    assert _disk_metrics(tmp_path) == {}
 
 
 def test_resume_does_not_recover_disk_logs_from_previous_run(tmp_path: str):
     # a previous run in this directory left metrics on disk but no checkpoint
-    previous_run = DiskMetricLogger(os.path.join(tmp_path, "metrics"))
+    previous_run = DiskMetricLogger(_metrics_dir(tmp_path))
     for step in range(RESUME_LAST_EPOCH_STEP + 1):
         previous_run.log({"previous_run_loss": 1.0}, step=step)
     previous_run.close()
