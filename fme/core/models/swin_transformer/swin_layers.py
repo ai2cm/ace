@@ -206,7 +206,8 @@ class WindowAttention2D(nn.Module):
         self.register_buffer("band_index", band_index, persistent=False)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
+        # Applied inside F.scaled_dot_product_attention, so only the rate is kept.
+        self.attn_drop_rate = attn_drop
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
@@ -284,7 +285,7 @@ class WindowAttention2D(nn.Module):
             k,
             v,
             attn_mask=attn_bias,
-            dropout_p=self.attn_drop.p if self.training else 0.0,
+            dropout_p=self.attn_drop_rate if self.training else 0.0,
             scale=1.0,
         )
         x = x.transpose(1, 2).reshape(B_, N, C)
