@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-BASE_SHA=8932a8612
+BASE_SHA=8932a8612c75a82eee2dab3e06eb7b07be554bb4  # full SHA: gantry's clone is shallow and fetch-by-SHA needs it
 ROUNDS=3
 ITERS=100
 BENCHMARKS="csfno_block_disco csfno_block"
@@ -30,7 +30,7 @@ fme/test_fft.py"
 
 cd "$(git rev-parse --show-toplevel)"
 PR_SHA=$(git rev-parse HEAD)
-git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch -q origin "$BASE_SHA"
+git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch -q --depth=1 origin "$BASE_SHA" || git fetch -q --unshallow origin
 
 checkout_variant() {
   git checkout -q -f "$PR_SHA"
