@@ -252,14 +252,16 @@ class WaterFluxSaltBudgetConfig:
     are not predicted.
 
     Parameters:
-        open_water_precipitation_minus_evaporation: Use the forcing
+        use_precipitation_minus_evaporation_over_open_water: Use the forcing
             precipitation minus evaporation in place of wfo over open water.
-        sea_ice_mass: Use -rho_ice * delta(sea_ice_volume) / DT in place of
-            wfo where ice covered.
-        sea_ice_salinity_psu: With ``sea_ice_mass``, use
+        use_sea_ice_mass_change_under_ice: Use
+            -rho_ice * delta(sea_ice_volume) / DT in place of wfo where ice
+            covered.
+        sea_ice_mass_change_salinity_psu: With
+            ``use_sea_ice_mass_change_under_ice``, use
             -rho_ice * S_ice * delta(sea_ice_volume) / DT in place of sfdsi
-            where ice covered. None keeps sfdsi there.
-        brine_rejection: Include the sea ice salt flux.
+            where ice covered, with this S_ice. None keeps sfdsi there.
+        include_brine_rejection: Include the sea ice salt flux.
         reference_salinity_psu: Reference salinity of the virtual salt flux,
             in psu.
         sea_ice_density_kg_m3: Density of sea ice.
@@ -267,10 +269,10 @@ class WaterFluxSaltBudgetConfig:
         type: Selects this budget.
     """
 
-    open_water_precipitation_minus_evaporation: bool = False
-    sea_ice_mass: bool = False
-    sea_ice_salinity_psu: float | None = None
-    brine_rejection: bool = True
+    use_precipitation_minus_evaporation_over_open_water: bool = False
+    use_sea_ice_mass_change_under_ice: bool = False
+    sea_ice_mass_change_salinity_psu: float | None = None
+    include_brine_rejection: bool = True
     reference_salinity_psu: float = REFERENCE_SALINITY_PSU
     sea_ice_density_kg_m3: float = DENSITY_OF_SEA_ICE
     regimes: WaterFluxRegimesConfig = dataclasses.field(
@@ -282,10 +284,17 @@ class WaterFluxSaltBudgetConfig:
         _require_sea_surface_fraction_weighting(
             self.type, weight_by_sea_surface_fraction
         )
-        if self.sea_ice_salinity_psu is not None and not self.sea_ice_mass:
-            raise ValueError("sea_ice_salinity_psu requires sea_ice_mass.")
-        if self.sea_ice_salinity_psu is not None and not self.brine_rejection:
-            raise ValueError("sea_ice_salinity_psu requires brine_rejection.")
+        if self.sea_ice_mass_change_salinity_psu is not None:
+            if not self.use_sea_ice_mass_change_under_ice:
+                raise ValueError(
+                    "sea_ice_mass_change_salinity_psu requires "
+                    "use_sea_ice_mass_change_under_ice."
+                )
+            if not self.include_brine_rejection:
+                raise ValueError(
+                    "sea_ice_mass_change_salinity_psu requires "
+                    "include_brine_rejection."
+                )
         if self.sea_ice_density_kg_m3 <= 0.0:
             raise ValueError(
                 "sea_ice_density_kg_m3 must be positive, got "
@@ -294,7 +303,7 @@ class WaterFluxSaltBudgetConfig:
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
         ice_volume_mask = None
-        if self.sea_ice_mass:
+        if self.use_sea_ice_mass_change_under_ice:
             Distributed.get_instance().require_no_spatial_parallelism(
                 "The sea ice mass term of the water flux salt budget sums "
                 "sea_ice_volume over the local spatial chunk only."
@@ -1001,22 +1010,25 @@ class WaterFluxSaltBudget:
         water = torch.nan_to_num(wfo_data.water_flux_into_sea_water.to(dtype))
         water = water * sea_surface_fraction  # kg/m**2/s
         salt = torch.zeros_like(water)  # g/m**2/s
-        if config.brine_rejection:
+        if config.include_brine_rejection:
             sfdsi_data = _generated_or_forcing(
                 "downward_sea_ice_basal_salt_flux", gen, forcing
             )
             if sfdsi_data is None:
                 raise ValueError(
                     "The water flux salt budget needs sfdsi in the generated or "
-                    "forcing data; set brine_rejection to False to omit it."
+                    "forcing data; set include_brine_rejection to False to omit it."
                 )
             sfdsi = sfdsi_data.downward_sea_ice_basal_salt_flux.to(dtype)
             salt = 1000.0 * sfdsi * sea_surface_fraction
         ice_mass_change_kg_per_s: torch.Tensor | float = 0.0
         ice_salt_change_g_per_s: torch.Tensor | float = 0.0
-        if config.open_water_precipitation_minus_evaporation or config.sea_ice_mass:
+        if (
+            config.use_precipitation_minus_evaporation_over_open_water
+            or config.use_sea_ice_mass_change_under_ice
+        ):
             ice_covered = self._ice_covered(input, gen)
-        if config.open_water_precipitation_minus_evaporation:
+        if config.use_precipitation_minus_evaporation_over_open_water:
             try:
                 precipitation_minus_evaporation = (
                     forcing.precipitation_minus_evaporation.to(dtype)
@@ -1035,7 +1047,7 @@ class WaterFluxSaltBudget:
                 precipitation_minus_evaporation * sea_surface_fraction,
                 water,
             )
-        if config.sea_ice_mass:
+        if config.use_sea_ice_mass_change_under_ice:
             water = torch.where(ice_covered, torch.zeros_like(water), water)
             ice_volume_mask = (
                 ice_covered
@@ -1053,10 +1065,10 @@ class WaterFluxSaltBudget:
                 )
                 / timestep_seconds
             )
-            if config.sea_ice_salinity_psu is not None:
+            if config.sea_ice_mass_change_salinity_psu is not None:
                 salt = torch.where(ice_covered, torch.zeros_like(salt), salt)
                 ice_salt_change_g_per_s = (
-                    config.sea_ice_salinity_psu * ice_mass_change_kg_per_s
+                    config.sea_ice_mass_change_salinity_psu * ice_mass_change_kg_per_s
                 )
         water_kg_per_s = global_total(water) - ice_mass_change_kg_per_s
         salt_g_per_s = global_total(salt) - ice_salt_change_g_per_s
