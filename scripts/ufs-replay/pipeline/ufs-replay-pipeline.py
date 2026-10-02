@@ -89,29 +89,107 @@ GAUSSIAN_GRID_N = {
 # 3-D ocean variables that get vertically coarsened and split per-level
 VARS_3D = ("thetao", "so", "uo", "vo")
 
-# Default vertical coarsening: 75 MOM6 levels → 19 coarse levels matching
-# CM4 target depths.  Each [start, end) pair defines a contiguous group.
-DEFAULT_VERTICAL_COARSENING_INDICES = [
-    [0, 3],
-    [3, 8],
-    [8, 13],
-    [13, 17],
-    [17, 20],
-    [20, 25],
-    [25, 29],
-    [29, 33],
-    [33, 37],
-    [37, 41],
-    [41, 44],
-    [44, 47],
-    [47, 50],
-    [50, 53],
-    [53, 57],
-    [57, 61],
-    [61, 66],
-    [66, 71],
-    [71, 75],
+# CM4's 19 ocean level interfaces (metres).  The UFS replay ocean is
+# vertically coarsened onto these so that every per-level variable means
+# the same depth band in the UFS and CM4 training sets.
+CM4_INTERFACE_DEPTHS = [
+    5.0,
+    15.0,
+    30.0,
+    50.0,
+    80.0,
+    130.0,
+    200.0,
+    300.0,
+    450.0,
+    650.0,
+    900.0,
+    1200.0,
+    1600.0,
+    2100.0,
+    2700.0,
+    3500.0,
+    4500.0,
+    5500.0,
+    6500.0,
 ]
+
+# Default vertical coarsening: 75 MOM6 z* levels → 19 coarse levels whose
+# bottom interfaces are the native interfaces nearest to CM4's.  Each
+# [start, end) pair is a contiguous group of native layers.  Derived from
+# the replay store's layer-centre coordinate with
+# ``cm4_matched_coarsening_indices`` and checked against it at template
+# time, so a change in the native grid fails loudly instead of silently
+# shifting the bands.  Band bottoms land within 16 m of CM4's down to
+# 1600 m and within 100 m below that; the last band ends at the native
+# bottom (6004 m) rather than CM4's 6500 m.
+DEFAULT_VERTICAL_COARSENING_INDICES = [
+    [0, 4],
+    [4, 10],
+    [10, 14],
+    [14, 18],
+    [18, 22],
+    [22, 26],
+    [26, 30],
+    [30, 34],
+    [34, 38],
+    [38, 42],
+    [42, 45],
+    [45, 48],
+    [48, 51],
+    [51, 54],
+    [54, 58],
+    [58, 62],
+    [62, 68],
+    [68, 73],
+    [73, 75],
+]
+
+# Tolerance for the template-time check that each band bottom is the
+# native interface nearest to its CM4 target: half the local native
+# layer thickness would be exact, so a full native layer is generous.
+MAX_INTERFACE_MISMATCH_LAYERS = 1.0
+
+
+def native_interfaces_from_layer_centers(layer_centers) -> np.ndarray:
+    """Reconstruct level interfaces from a contiguous grid's layer centres.
+
+    The replay store carries only the layer-centre depth coordinate.  For a
+    contiguous grid z_c[k] = (z_i[k] + z_i[k+1]) / 2 with z_i[0] = 0, so
+    z_i[k+1] = 2 z_c[k] - z_i[k] recovers the interfaces exactly.
+    """
+    centers = np.asarray(layer_centers, dtype=float)
+    interfaces = np.zeros(len(centers) + 1)
+    for k, c in enumerate(centers):
+        interfaces[k + 1] = 2.0 * c - interfaces[k]
+    if np.any(np.diff(interfaces) <= 0):
+        raise ValueError("layer centres do not describe a contiguous grid")
+    return interfaces
+
+
+def cm4_matched_coarsening_indices(layer_centers, targets=CM4_INTERFACE_DEPTHS):
+    """Group native layers so each band's bottom is the native interface
+    nearest to the corresponding CM4 interface; the last band always ends
+    at the native bottom."""
+    interfaces = native_interfaces_from_layer_centers(layer_centers)
+    ends = [int(np.argmin(np.abs(interfaces - d))) for d in targets]
+    ends[-1] = len(interfaces) - 1
+    groups = [[0 if i == 0 else ends[i - 1], ends[i]] for i in range(len(ends))]
+    if any(e <= s for s, e in groups):
+        raise ValueError(f"empty vertical band in {groups}")
+    return groups
+
+
+def check_coarsening_indices(layer_centers, indices, targets=CM4_INTERFACE_DEPTHS):
+    """Raise if ``indices`` are not the CM4-matched grouping of this grid."""
+    expected = cm4_matched_coarsening_indices(layer_centers, targets)
+    actual = [list(pair) for pair in indices]
+    if actual != expected:
+        raise ValueError(
+            "vertical_coarsening_indices do not match the CM4 interfaces for "
+            f"this native grid: got {actual}, expected {expected}"
+        )
+
 
 # MOM6 variable rename map
 OCEAN_RENAME = {"temp": "thetao", "SSH": "zos"}
@@ -881,16 +959,21 @@ def _extract_invariant_fields(
 
     # idepth scalars: level interfaces (N+1 boundaries for N layers).
     # ACE's DepthCoordinate expects idepth[i] to be the upper boundary
-    # of layer i, with idepth[N] being the bottom of the last layer.
-    depths = ds_ocean[VDIM].values
+    # of layer i, with idepth[N] being the bottom of the last layer.  The
+    # store's vertical coordinate holds layer CENTRES, so the interfaces
+    # are reconstructed from them; each band's bottom is the native
+    # interface below its last layer (an earlier version wrote that
+    # layer's centre here, which made every layer thinner than it is).
+    centers = ds_ocean[VDIM].values
+    check_coarsening_indices(centers, vertical_coarsening_indices)
+    interfaces = native_interfaces_from_layer_centers(centers)
     invariant["idepth_0"] = xr.DataArray(
         0.0,
         attrs={"units": "meters", "long_name": "Depth interface 0 (surface)"},
     )
     for i, (start, end) in enumerate(vertical_coarsening_indices):
-        bottom_depth = float(depths[end - 1])
         invariant[f"idepth_{i + 1}"] = xr.DataArray(
-            bottom_depth,
+            float(interfaces[end]),
             attrs={"units": "meters", "long_name": f"Depth interface {i + 1}"},
         )
 

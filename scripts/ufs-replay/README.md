@@ -29,12 +29,19 @@ regridding) — see "Downstream time coarsening" below.
 
 Ocean stream (6-hourly MOM6 chunks):
 
-1. Thickness-weighted (`ho`) vertical coarsening (75 → 19 levels matching
-   CM4) at native horizontal resolution, splitting 3-D fields into
-   per-level 2-D variables — done before horizontal regridding since
-   thickness-weighted vertical averaging and horizontal regridding don't
-   commute, matching the CM4 convention (and cheaper, since only 19
-   levels then need to go through the regridder instead of 75)
+1. Thickness-weighted (`ho`) vertical coarsening (75 → 19 levels) at
+   native horizontal resolution, splitting 3-D fields into per-level 2-D
+   variables — done before horizontal regridding since thickness-weighted
+   vertical averaging and horizontal regridding don't commute, matching
+   the CM4 convention (and cheaper, since only 19 levels then need to go
+   through the regridder instead of 75). The 19 bands are chosen so that
+   each band's bottom is the native MOM6 interface nearest to the
+   corresponding CM4 interface (5, 15, 30, ... 5500 m; the last band ends
+   at the native bottom, 6004 m), so `thetao_k` means the same depth band
+   in the UFS and CM4 training sets; `idepth_*` are the true band
+   interfaces, reconstructed from the store's layer-centre coordinate.
+   (Stores produced before 2026-10-02 used shallower bands and wrote
+   layer centres as interfaces; see the git history.)
 2. Regrid to Gaussian grid (F90 = 1°) via xESMF
 3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.)
 4. Insert NaN on land, nearest-neighbour fill residual coastal NaN
@@ -46,6 +53,15 @@ Atmosphere stream (3-hourly FV3 chunks):
    regridding, to minimize how many timesteps pass through the regridder
 3. Regrid to Gaussian grid via xESMF
 4. Mask sea-ice variables to the ocean
+
+## 4-degree product
+
+`make ufs_replay_dataflow_four_degree` runs the same pipeline with
+`--output_grid F22.5`, the Gaussian grid of the CM4 4-degree stores, so the
+UFS and CM4 4-degree training sets share grid, mask convention and vertical
+bands. `make ufs_replay_dataflow_both` produces the 1-degree and 4-degree
+stores; `make coarsen_5day[_four_degree]` and
+`make compute_stats[_four_degree]` follow.
 
 ## Downstream time coarsening
 

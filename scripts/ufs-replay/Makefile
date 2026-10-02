@@ -3,6 +3,7 @@ IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/ufs-replay-ingest-dat
 LOCAL_ENVIRONMENT ?= ufs-replay-ingest
 DATE := $(shell date +%Y-%m-%d)
 DATASET_NAME ?= ufs-replay-ocean-1deg-19level-1994-2023
+DATASET_NAME_FOUR_DEGREE ?= ufs-replay-ocean-4deg-19level-1994-2023
 
 # Production run parameters
 # Ocean (MOM6): 1993-12-31 18:00 to 2023-12-31 00:00
@@ -15,6 +16,10 @@ START_TIME=1994-01-01T00:00:00
 END_TIME=2023-10-12T18:00:00
 OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME).zarr
 OUTPUT_GRID_ONE_DEGREE=F90
+# 4-degree product on the F22.5 Gaussian grid, the grid of the CM4 4-degree
+# stores (gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr).
+OUTPUT_PATH_FOUR_DEGREE=gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME_FOUR_DEGREE).zarr
+OUTPUT_GRID_FOUR_DEGREE=F22.5
 
 # Test run parameters (Dataflow)
 START_TIME_TEST_RUN ?= 2023-10-01T00:00:00
@@ -55,6 +60,20 @@ ufs_replay_dataflow_one_degree:
 		$(START_TIME) \
 		$(END_TIME)
 
+.PHONY: ufs_replay_dataflow_four_degree
+ufs_replay_dataflow_four_degree:
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-dataflow.sh \
+		DataflowRunner \
+		$(OUTPUT_PATH_FOUR_DEGREE) \
+		$(OUTPUT_GRID_FOUR_DEGREE) \
+		$(START_TIME) \
+		$(END_TIME)
+
+.PHONY: ufs_replay_dataflow_both
+ufs_replay_dataflow_both: ufs_replay_dataflow_one_degree ufs_replay_dataflow_four_degree
+
 .PHONY: ufs_replay_dataflow_test_run
 ufs_replay_dataflow_test_run:
 	cd pipeline && \
@@ -90,6 +109,25 @@ ufs_replay_local_debug:
 compute_stats:
 	cd ../data_process && \
 		./compute_stats.sh --config configs/ufs-replay-ocean-1deg-19level.yaml
+
+.PHONY: compute_stats_four_degree
+compute_stats_four_degree:
+	cd ../data_process && \
+		./compute_stats.sh --config configs/ufs-replay-ocean-4deg-19level.yaml
+
+# Time-coarsen the raw 6-hourly output to 5-day (the SamudrACE ocean step):
+# state variables snapshotted, forcing/flux variables window-averaged, same
+# classification as the daily config. The run name in each config must match
+# the dated production output; update it whenever the pipeline is re-run.
+.PHONY: coarsen_5day coarsen_5day_four_degree
+coarsen_5day:
+	cd ../data_process && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		python time_coarsen.py configs/ufs-replay-ocean-1deg-19level-5day.yaml 0
+coarsen_5day_four_degree:
+	cd ../data_process && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		python time_coarsen.py configs/ufs-replay-ocean-4deg-19level-5day.yaml 0
 
 # Time-coarsen the raw 6-hourly output to daily via data_process/time_coarsen.py:
 # ocean/sea-ice state variables are snapshotted, forcing/flux variables are
