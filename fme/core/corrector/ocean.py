@@ -368,6 +368,51 @@ class SurfaceEnergyFluxCorrectionConfig:
                     f"'prescribed_cell_mean' method, got method={self.method!r}."
                 )
 
+    @property
+    def requires_cell_area(self) -> bool:
+        """Whether ``build`` needs the grid's cell areas."""
+        return self.under_ice is not None
+
+    @property
+    def requires_img_shape(self) -> bool:
+        """Whether ``build`` validates against the grid's horizontal shape."""
+        return self.runoff_heat_flux is not None
+
+    def load(self):
+        """Update the configuration in place so it does not depend on external
+        files.
+        """
+        if self.runoff_heat_flux is not None:
+            self.runoff_heat_flux.load()
+
+    def build(
+        self,
+        timestep_seconds: float,
+        cell_area_m2: torch.Tensor | None = None,
+        img_shape: tuple[int, int] | None = None,
+    ) -> "SurfaceEnergyFluxCorrection":
+        """Build the correction.
+
+        Args:
+            timestep_seconds: Model timestep in seconds.
+            cell_area_m2: Cell areas in m**2, required if ``requires_cell_area``.
+            img_shape: Horizontal shape of the ocean grid, to validate the
+                runoff heat map against. Not validated if None.
+        """
+        return SurfaceEnergyFluxCorrection(
+            self.method,
+            runoff_heat_flux=(
+                None
+                if self.runoff_heat_flux is None
+                else self.runoff_heat_flux.build(img_shape)
+            ),
+            under_ice=(
+                None
+                if self.under_ice is None
+                else self.under_ice.build(cell_area_m2, timestep_seconds)
+            ),
+        )
+
 
 @dataclasses.dataclass
 class SeaIceFractionCorrection:
@@ -536,10 +581,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
-    def load(self):
-        sefc = self.surface_energy_flux_correction
-        if sefc is not None and sefc.runoff_heat_flux is not None:
-            sefc.runoff_heat_flux.load()
+    def load(self) -> None:
+        if self.surface_energy_flux_correction is not None:
+            self.surface_energy_flux_correction.load()
 
     def _get_corrector(
         self,
@@ -547,10 +591,10 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     ) -> "OceanCorrector":
         cell_area_m2 = None
         img_shape = None
-        sefc = self.surface_energy_flux_correction
-        if sefc is not None and sefc.under_ice is not None:
+        flux_correction = self.surface_energy_flux_correction
+        if flux_correction is not None and flux_correction.requires_cell_area:
             cell_area_m2 = dataset_info.horizontal_coordinates.area_weights_m2
-        if sefc is not None and sefc.runoff_heat_flux is not None:
+        if flux_correction is not None and flux_correction.requires_img_shape:
             img_shape = dataset_info.img_shape
         return self._build(
             dataset_info.gridded_operations,
@@ -586,21 +630,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                 )
             )
         if self.surface_energy_flux_correction is not None:
-            runoff_config = self.surface_energy_flux_correction.runoff_heat_flux
-            under_ice_config = self.surface_energy_flux_correction.under_ice
             corrections.append(
-                SurfaceEnergyFluxCorrection(
-                    self.surface_energy_flux_correction.method,
-                    runoff_heat_flux=(
-                        None
-                        if runoff_config is None
-                        else runoff_config.build(img_shape)
-                    ),
-                    under_ice=(
-                        None
-                        if under_ice_config is None
-                        else under_ice_config.build(cell_area_m2, timestep_seconds)
-                    ),
+                self.surface_energy_flux_correction.build(
+                    timestep_seconds, cell_area_m2=cell_area_m2, img_shape=img_shape
                 )
             )
         if self.ocean_heat_content_correction is not None:
