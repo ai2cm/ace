@@ -19,6 +19,6 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 #
 # job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled cellmean \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
-# with WANDB_USERNAME=elynnw.
+# with WANDB_USERNAME=elynnwu.
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8|1000GiB|3|ai2/ace|seed=0|3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8|1000GiB|3|ai2/ace|seed=0|8h

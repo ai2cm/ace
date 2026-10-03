@@ -7,7 +7,7 @@
 #
 # job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled cellmean \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
-# with WANDB_USERNAME=elynnw.
+# with WANDB_USERNAME=elynnwu.
 #
 # The source template's header follows unchanged.
 # job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled . \
