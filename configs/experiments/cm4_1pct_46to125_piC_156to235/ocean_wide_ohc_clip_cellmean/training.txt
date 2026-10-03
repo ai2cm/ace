@@ -7,7 +7,7 @@
 # dec4478ad). override_args are owc rs2's verbatim.
 #
 # Launch with --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
-# (what owc rs2 mounted) and WANDB_USERNAME=elynnw.
+# (what owc rs2 mounted) and WANDB_USERNAME=elynnwu.
 #
 # min_runtime is new vs owc rs2 (0s then): Beaker has required one since
 # 2026-08-28.
