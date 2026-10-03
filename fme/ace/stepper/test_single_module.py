@@ -3815,6 +3815,121 @@ def _residual_stepper_config(
     )
 
 
+class _OutputFirstChannels(torch.nn.Module):
+    """Returns the first ``n_out`` input channels; module scope so it can be
+    pickled by torch.save."""
+
+    def __init__(self, n_out: int):
+        super().__init__()
+        self.n_out = n_out
+
+    def forward(self, x):
+        return x[:, : self.n_out]
+
+
+def test_runoff_heat_map_restored_from_checkpoint_without_stats_file(
+    tmp_path: pathlib.Path,
+):
+    """The prescribed_cell_mean runoff heat map is read from the stats file
+    when the checkpoint is written and restored from the checkpoint, so
+    inference from it needs no stats file.
+    """
+    img_shape = (5, 5)
+    runoff = np.full(img_shape, 10.0, dtype=np.float32)
+    runoff[0, :] = np.nan  # land in the ocean model's diagnostic
+    stats_path = tmp_path / "time-mean.nc"
+    xr.Dataset({"hfrunoffds": (("lat", "lon"), runoff)}).to_netcdf(stats_path)
+    out_names = ["sst", "hfds_total_area"]
+    forcing_names = [
+        "sea_ice_fraction",
+        "land_fraction",
+        "sea_surface_fraction",
+        "DSWRFsfc",
+        "USWRFsfc",
+        "DLWRFsfc",
+        "ULWRFsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "PRATEsfc",
+        "total_frozen_precipitation_rate",
+    ]
+    in_names = out_names + forcing_names
+    corrector_config = {
+        "surface_energy_flux_correction": {
+            "method": "prescribed_cell_mean",
+            "runoff_heat_flux": {"path": str(stats_path)},
+        }
+    }
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt",
+                        config={"module": _OutputFirstChannels(len(out_names))},
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(in_names),
+                    corrector=CorrectorSelector("ocean_corrector", corrector_config),
+                )
+            ),
+        ),
+    )
+    stepper = config.get_stepper(_get_ocean_dataset_info(img_shape))
+    data = {name: torch.rand(2, *img_shape, device=DEVICE) for name in in_names}
+    data["sst"] = data["sst"] + 290.0
+    data["land_fraction"][:, 0, :] = 1.0
+    data["land_fraction"][:, 1:, :] = 0.5
+    data["sea_surface_fraction"] = 1.0 - data["land_fraction"]
+    data["sea_ice_fraction"] = data["sea_ice_fraction"] * 0.5
+    args = StepArgs(input=data, next_step_input_data=data, labels=None)
+    expected = stepper.step(args).output["hfds_total_area"]
+
+    state = stepper.get_state()
+    runoff_state = state["config"]["step"]["config"]["corrector"]["config"][
+        "surface_energy_flux_correction"
+    ]["runoff_heat_flux"]
+    assert runoff_state["path"] is None
+    np.testing.assert_array_equal(
+        np.array(runoff_state["values"]), np.nan_to_num(runoff)
+    )
+    checkpoint_path = tmp_path / "ckpt.tar"
+    torch.save({"stepper": state}, checkpoint_path)
+    stats_path.unlink()
+
+    loaded = load_stepper(checkpoint_path)
+    torch.testing.assert_close(
+        loaded.step(args).output["hfds_total_area"], expected, rtol=0, atol=0
+    )
+
+    # an inference-time corrector override may still give a path, read when
+    # the overriding corrector is built
+    override_path = tmp_path / "override-time-mean.nc"
+    xr.Dataset(
+        {"hfrunoffds": (("lat", "lon"), np.full(img_shape, 20.0, dtype=np.float32))}
+    ).to_netcdf(override_path)
+    override_corrector = CorrectorSelector(
+        "ocean_corrector",
+        {
+            "surface_energy_flux_correction": {
+                "method": "prescribed_cell_mean",
+                "runoff_heat_flux": {"path": str(override_path)},
+            }
+        },
+    )
+    overridden = load_stepper(
+        checkpoint_path,
+        override_config=StepperOverrideConfig(corrector=override_corrector),
+    )
+    # 10 more W/m2 of sea, nothing on the all-land row
+    torch.testing.assert_close(
+        overridden.step(args).output["hfds_total_area"] - expected,
+        10.0 * data["sea_surface_fraction"],
+    )
+
+
 @pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
 def test_legacy_residual_prediction_bool_checkpoint_steps_identically(
     tmp_path: pathlib.Path, legacy: bool
