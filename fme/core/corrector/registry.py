@@ -50,6 +50,11 @@ class CorrectorConfigABC(abc.ABC):
         """
         return dict(state)
 
+    def load(self) -> None:
+        """Update the configuration in place so it does not depend on external
+        files. Default implementation is a no-op.
+        """
+
     @final
     def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
         """Build the corrector, applying ``corrector_disabled_epochs``.

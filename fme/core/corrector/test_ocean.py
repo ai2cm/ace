@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import pathlib
 
 import pytest
 import torch
@@ -23,6 +24,7 @@ from fme.core.corrector.ocean import (
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
@@ -676,6 +678,95 @@ def test_ocean_corrector_config_round_trip_with_runoff_heat_flux():
     loaded = OceanCorrectorConfig.from_state(state)
     assert loaded.surface_energy_flux_correction is not None
     assert loaded.surface_energy_flux_correction.runoff_heat_flux is None
+
+
+def _coastal_runoff_map() -> torch.Tensor:
+    """Runoff heat per unit sea area in the coastal rows, NaN over land."""
+    runoff = torch.zeros(IMG_SHAPE)
+    runoff[_ROW_COAST, :] = 10.0
+    runoff[_ROW_COAST_ICE, :] = 10.0
+    runoff[_ROW_LAND, :] = float("nan")
+    return runoff
+
+
+def _cell_mean_dataset_info(img_shape=IMG_SHAPE) -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.linspace(-80.0, 80.0, img_shape[0]),
+            lon=torch.linspace(0.0, 288.0, img_shape[1]),
+        ),
+        vertical_coordinate=NullVerticalCoordinate(),
+        timestep=_TIMESTEP,
+    )
+
+
+def test_runoff_heat_flux_load_embeds_map(tmp_path):
+    runoff = _coastal_runoff_map()
+    runoff_path = _write_runoff_file(tmp_path, runoff)
+    config = RunoffHeatFluxConfig(path=runoff_path)
+    config.load()
+    assert config.path is None
+    assert config.values is not None
+    torch.testing.assert_close(
+        torch.tensor(config.values), torch.nan_to_num(runoff), rtol=0, atol=0
+    )
+    config.load()  # idempotent once loaded
+    assert config.path is None
+
+
+def test_runoff_heat_flux_needs_path_or_values():
+    with pytest.raises(ValueError, match="exactly one"):
+        RunoffHeatFluxConfig()
+    with pytest.raises(ValueError, match="exactly one"):
+        RunoffHeatFluxConfig(path="unused.nc", values=[[0.0]])
+
+
+def test_runoff_heat_map_shape_validated_at_build(tmp_path):
+    runoff_path = _write_runoff_file(tmp_path, torch.zeros((3, 3)))
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_cell_mean",
+            runoff_heat_flux=RunoffHeatFluxConfig(path=runoff_path),
+        ),
+    )
+    with pytest.raises(ValueError, match="shape"):
+        config._get_corrector(_cell_mean_dataset_info())
+
+
+def test_loaded_runoff_heat_flux_survives_missing_file(tmp_path):
+    """The serialized corrector config holds the runoff map after load, so a
+    corrector built from it reproduces the correction once the file is gone.
+    """
+    runoff_path = _write_runoff_file(tmp_path, _coastal_runoff_map())
+    selector = CorrectorSelector(
+        "ocean_corrector",
+        dataclasses.asdict(
+            OceanCorrectorConfig(
+                surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                    method="prescribed_cell_mean",
+                    runoff_heat_flux=RunoffHeatFluxConfig(path=runoff_path),
+                ),
+            )
+        ),
+    )
+    dataset_info = _cell_mean_dataset_info()
+    input_data, gen_data, forcing_data, _ = _make_cell_mean_case()
+    expected = selector.get_corrector(dataset_info)(
+        input_data, gen_data, forcing_data, None
+    ).corrected["hfds_total_area"]
+    selector.load()
+    state = dataclasses.asdict(selector)
+    pathlib.Path(runoff_path).unlink()
+    reloaded = CorrectorSelector.from_state(state)
+    out = reloaded.get_corrector(dataset_info)(
+        input_data, gen_data, forcing_data, None
+    ).corrected["hfds_total_area"]
+    torch.testing.assert_close(out, expected, rtol=0, atol=0)
+    # the runoff term is in the result: coast is not the bare atmosphere flux
+    no_runoff = _build_cell_mean_corrector(None)(
+        input_data, gen_data, forcing_data, None
+    ).corrected["hfds_total_area"]
+    assert torch.all(out[_ROW_COAST, :] > no_runoff[_ROW_COAST, :])
 
 
 @pytest.mark.parametrize(
