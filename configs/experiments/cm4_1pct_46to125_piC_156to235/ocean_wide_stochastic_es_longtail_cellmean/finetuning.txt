@@ -13,4 +13,4 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 # with WANDB_USERNAME=elynnw.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|ace-samudra-cm4|STAGE1_WANDB_ID|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|ace-samudra-cm4|STAGE1_WANDB_ID|best_ckpt|skip|high|jupiter+titan|4|500GiB|3|ai2/ace|seed=0||3h

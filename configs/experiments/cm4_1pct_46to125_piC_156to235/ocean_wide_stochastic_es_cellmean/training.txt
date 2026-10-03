@@ -9,7 +9,11 @@
 #   configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_es_cellmean . \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 # with WANDB_USERNAME=elynnw.
+#
+# cluster jupiter+titan (job_runner/lib.sh alias: --cluster jupiter --cluster
+# titan, workspace ai2/ace) where rs0 ran on jupiter only; 4 GPUs as rs0.
+# batch_size is global, so the cluster does not change the optimization.
 
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean|rs0|train|high|jupiter+titan|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0|3h
