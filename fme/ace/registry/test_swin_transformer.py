@@ -129,10 +129,15 @@ def test_swin_transformer_conditional_with_labels():
     assert net.embed_dim_labels == len(all_labels)
 
 
-def test_swin_transformer_unconditional_builds_label_weights_from_dataset_labels():
+def test_swin_transformer_unconditional_builds_no_label_weights():
+    """An unconditional build allocates no label weights, labeled data or not.
+
+    Labels can be present for reasons unrelated to conditioning, such as
+    selecting per-group normalization constants, and an unconditional module is
+    never given them.
+    """
     n_in, n_out = 5, 3
-    all_labels = {"label_a", "label_b"}
-    dataset_info = _get_dataset_info(all_labels=all_labels)
+    dataset_info = _get_dataset_info(all_labels={"label_a", "label_b"})
     selector = ModuleSelector(
         type="SwinTransformer",
         config=dataclasses.asdict(_builder()),
@@ -144,7 +149,40 @@ def test_swin_transformer_unconditional_builds_label_weights_from_dataset_labels
     out = module(x)
     assert out.shape == (2, n_out, *IMG_SHAPE)
     net = getattr(module.torch_module, "module")
-    assert net.embed_dim_labels == len(all_labels)
+    assert net.embed_dim_labels == 0
+
+
+def test_unconditional_swin_transformer_loads_state_with_unused_label_weights():
+    """A state saved with label weights by an older unconditional build loads.
+
+    Before unconditional modules were built without labels, an unconditional
+    SwinTransformer on a labeled dataset (e.g. as a secondary decoder, which is
+    never given labels) allocated label weights it never used. Such a state
+    must still load, and give the same outputs, now that the weights are gone.
+    """
+    n_in, n_out = 5, 3
+    dataset_info = _get_dataset_info(all_labels={"label_a", "label_b"})
+    # Build the way an unconditional selector did before labels were hidden.
+    old_net = (
+        _builder()
+        .build(n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info)
+        .to(fme.get_device())
+    )
+    old_state = {**old_net.state_dict(), "label_encoding": None}
+    assert any("_labels." in k for k in old_state)
+    selector = ModuleSelector(
+        type="SwinTransformer",
+        config=dataclasses.asdict(_builder()),
+    )
+    module = selector.build(
+        n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info
+    ).to(fme.get_device())
+    module.load_state(old_state)
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    old_net.eval()
+    module.torch_module.eval()
+    with torch.no_grad():
+        torch.testing.assert_close(module(x), old_net(x))
 
 
 def test_nc_swin_transformer_is_registered():
@@ -194,10 +232,10 @@ def test_nc_swin_transformer_raises_for_healpix():
         _nc_builder().build(n_in, n_out, dataset_info)
 
 
-def test_nc_swin_transformer_unconditional_builds_label_weights_from_dataset_labels():
+def test_nc_swin_transformer_unconditional_builds_no_label_weights():
+    """See test_swin_transformer_unconditional_builds_no_label_weights."""
     n_in, n_out = 5, 3
-    all_labels = {"label_a", "label_b"}
-    dataset_info = _get_dataset_info(all_labels=all_labels)
+    dataset_info = _get_dataset_info(all_labels={"label_a", "label_b"})
     selector = ModuleSelector(
         type="NoiseConditionedSwinTransformer",
         config=dataclasses.asdict(_nc_builder()),
@@ -206,7 +244,7 @@ def test_nc_swin_transformer_unconditional_builds_label_weights_from_dataset_lab
         n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info
     )
     net = getattr(module.torch_module, "conditional_model")
-    assert net.embed_dim_labels == len(all_labels)
+    assert net.embed_dim_labels == 0
 
 
 def test_swin_transformer_cpb_mlp_exists():
