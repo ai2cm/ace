@@ -3904,6 +3904,31 @@ def test_runoff_heat_map_restored_from_checkpoint_without_stats_file(
         loaded.step(args).output["hfds_total_area"], expected, rtol=0, atol=0
     )
 
+    # an inference-time corrector override may still give a path, read when
+    # the overriding corrector is built
+    override_path = tmp_path / "override-time-mean.nc"
+    xr.Dataset(
+        {"hfrunoffds": (("lat", "lon"), np.full(img_shape, 20.0, dtype=np.float32))}
+    ).to_netcdf(override_path)
+    override_corrector = CorrectorSelector(
+        "ocean_corrector",
+        {
+            "surface_energy_flux_correction": {
+                "method": "prescribed_cell_mean",
+                "runoff_heat_flux": {"path": str(override_path)},
+            }
+        },
+    )
+    overridden = load_stepper(
+        checkpoint_path,
+        override_config=StepperOverrideConfig(corrector=override_corrector),
+    )
+    # 10 more W/m2 of sea, nothing on the all-land row
+    torch.testing.assert_close(
+        overridden.step(args).output["hfds_total_area"] - expected,
+        10.0 * data["sea_surface_fraction"],
+    )
+
 
 @pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
 def test_legacy_residual_prediction_bool_checkpoint_steps_identically(
