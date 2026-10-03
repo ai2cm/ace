@@ -256,6 +256,7 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def load(self):
         self.normalization.load()
+        self.corrector.load()
 
 
 class SingleModuleStep(StepABC):
