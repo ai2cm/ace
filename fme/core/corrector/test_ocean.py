@@ -1365,18 +1365,22 @@ def test_water_flux_salt_budget_from_wfo(include_brine_rejection):
 
 
 @pytest.mark.parametrize("name", ["wfo", "sfdsi"])
-def test_water_flux_salt_budget_reads_fluxes_from_forcing_if_not_predicted(name):
+def test_water_flux_salt_budget_does_not_fall_back_to_forcing(name):
+    # A flux missing from the generated data is not taken from the forcing
+    # data, where it would be the target.
+    state = _water_flux_salt_state()
+    state.forcing_data[name] = state.gen_data.pop(name)
+    with pytest.raises(ValueError, match=f"needs {name} in the generated data"):
+        _correct_with_water_flux_budget(state, {})
+
+
+def test_water_flux_salt_budget_fluxes_from_forcing():
     state = _water_flux_salt_state()
     expected = _salt_content_change(state, _correct_with_water_flux_budget(state, {}))
-    state.forcing_data[name] = state.gen_data.pop(name)
-    torch.testing.assert_close(
-        _salt_content_change(state, _correct_with_water_flux_budget(state, {})),
-        expected,
-    )
-    # but not when it is in both
-    state.gen_data[name] = state.forcing_data[name]
-    with pytest.raises(ValueError, match="both the generated and forcing data"):
-        _correct_with_water_flux_budget(state, {})
+    for name in ("wfo", "sfdsi"):
+        state.forcing_data[name] = state.gen_data.pop(name)
+    corrected = _correct_with_water_flux_budget(state, {"fluxes_from_forcing": True})
+    torch.testing.assert_close(_salt_content_change(state, corrected), expected)
 
 
 def test_water_flux_salt_budget_terms_replace_wfo_in_their_regimes():
@@ -1406,39 +1410,71 @@ def test_water_flux_salt_budget_terms_replace_wfo_in_their_regimes():
             torch.testing.assert_close(change, baseline)
 
 
-@pytest.mark.parametrize("sea_ice_mass_change_salinity_psu", [None, 4.0])
-def test_water_flux_salt_budget_with_terms(sea_ice_mass_change_salinity_psu):
+def _counted_ice_mass_change_kg_per_s(
+    state: _WaterFluxSaltState, region: torch.Tensor
+) -> float:
+    """float64 reference rho_ice * sum(delta sea_ice_volume) / DT over the
+    region, inside the sea_ice_volume mask only."""
+    counted = region & (state.ice_mask.to(DEVICE) > 0)
+    ice_volume_change = (
+        state.gen_data["sea_ice_volume"] - state.input_data["sea_ice_volume"]
+    )
+    return 905.0 * float(ice_volume_change[counted].sum()) / state.timestep_seconds
+
+
+@pytest.mark.parametrize(
+    "sea_ice_salinity_psu, use_computed_brine_under_ice",
+    [(None, False), (4.0, False), (4.0, True)],
+)
+def test_water_flux_salt_budget_with_terms(
+    sea_ice_salinity_psu, use_computed_brine_under_ice
+):
     # P - E over open water, the sea ice mass change under ice (inside the
     # sea_ice_volume mask only: the large prediction outside it would miss the
-    # budget if counted) and wfo at the coast; sfdsi, or the salt of the ice
-    # mass change under ice.
+    # budget if counted) and wfo at the coast; the predicted sfdsi, replaced by
+    # the computed sea ice salt flux under ice only when asked for.
     state = _water_flux_salt_state()
     corrected = _correct_with_water_flux_budget(
         state,
         {
             "use_precipitation_minus_evaporation_over_open_water": True,
             "use_sea_ice_mass_change_under_ice": True,
-            "sea_ice_mass_change_salinity_psu": sea_ice_mass_change_salinity_psu,
+            "sea_ice_salinity_psu": sea_ice_salinity_psu,
+            "use_computed_brine_under_ice": use_computed_brine_under_ice,
         },
     )
     ice_covered, _, open_water = state.regimes()
-    forcing, gen, input_data = state.forcing_data, state.gen_data, state.input_data
+    forcing, gen = state.forcing_data, state.gen_data
     precipitation_minus_evaporation = forcing["PRATEsfc"] - forcing["LHTFLsfc"] / 2.5e6
     water = torch.where(open_water, precipitation_minus_evaporation, gen["wfo"])
     water = torch.where(ice_covered, 0.0, water)
+    ice_mass_change = _counted_ice_mass_change_kg_per_s(state, ice_covered)
     salt = gen["sfdsi"]
-    if sea_ice_mass_change_salinity_psu is not None:
+    ice_salt_change = 0.0
+    if use_computed_brine_under_ice:
         salt = torch.where(ice_covered, 0.0, salt)
-    counted = ice_covered & (state.ice_mask.to(DEVICE) > 0)
-    ice_mass_change = (
-        905.0
-        * float((gen["sea_ice_volume"] - input_data["sea_ice_volume"])[counted].sum())
-        / state.timestep_seconds
-    )
-    ice_salt_change = (sea_ice_mass_change_salinity_psu or 0.0) * ice_mass_change
+        ice_salt_change = sea_ice_salinity_psu * ice_mass_change
     expected = _flux_salt_change(state, water, salt) + (
         state.timestep_seconds / 1035.0
     ) * (35.0 * ice_mass_change - ice_salt_change)
+    _assert_salt_change(state, corrected, expected)
+
+
+def test_water_flux_salt_budget_computes_sfdsi_if_not_predicted():
+    # Without a predicted sfdsi, the sea ice salt flux is computed from the ice
+    # volume change everywhere inside the sea_ice_volume mask.
+    state = _water_flux_salt_state()
+    del state.gen_data["sfdsi"]
+    # a cell in the mask with no ice fraction at either step still counts
+    for data in (state.input_data, state.gen_data):
+        data["ocean_sea_ice_fraction"][0, 0] = 0.0
+    corrected = _correct_with_water_flux_budget(state, {"sea_ice_salinity_psu": 3.0})
+    everywhere = torch.ones_like(state.ice_mask, dtype=torch.bool, device=DEVICE)
+    ice_salt_change = 3.0 * _counted_ice_mass_change_kg_per_s(state, everywhere)
+    expected = (
+        _flux_salt_change(state, state.gen_data["wfo"], torch.zeros(1))
+        - state.timestep_seconds / 1035.0 * ice_salt_change
+    )
     _assert_salt_change(state, corrected, expected)
 
 
@@ -1499,23 +1535,22 @@ def test_water_flux_salt_budget_missing_field_raises(budget, data_name, missing,
             {
                 "budget_config": {
                     "type": "water_flux",
-                    "sea_ice_mass_change_salinity_psu": 4.0,
-                }
-            },
-            "requires use_sea_ice_mass_change_under_ice",
-            id="ice_salinity_without_ice_mass",
-        ),
-        pytest.param(
-            {
-                "budget_config": {
-                    "type": "water_flux",
-                    "use_sea_ice_mass_change_under_ice": True,
-                    "sea_ice_mass_change_salinity_psu": 4.0,
+                    "sea_ice_salinity_psu": 4.0,
                     "include_brine_rejection": False,
                 }
             },
             "requires include_brine_rejection",
             id="ice_salinity_without_brine_rejection",
+        ),
+        pytest.param(
+            {
+                "budget_config": {
+                    "type": "water_flux",
+                    "use_computed_brine_under_ice": True,
+                }
+            },
+            "requires sea_ice_salinity_psu",
+            id="computed_brine_without_ice_salinity",
         ),
         pytest.param(
             {
