@@ -1,0 +1,17 @@
+# ONE-VARIABLE FORK of ../ocean_wide_ohc's ocean_wide_ohc_clip rs2 row (owc
+# rs2: wandb pjxiw906, beaker 01M0FY2JC8QWR61KBKXY57B0J4, launched at
+# dec4478ad). train-config.yaml differs from ../ocean_wide_ohc/train-config.yaml
+# only in surface_energy_flux_correction (prescribed -> prescribed_cell_mean,
+# with runoff heat from /ocean_stats/time-mean.nc and the under-ice term with
+# no gradient through sea_ice_volume; ai2cm/ace#1559, cherry-picked onto
+# dec4478ad). override_args are owc rs2's verbatim.
+#
+# Launch with --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+# (what owc rs2 mounted) and WANDB_USERNAME=elynnw.
+#
+# min_runtime is new vs owc rs2 (0s then): Beaker has required one since
+# 2026-08-28.
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0|3h
