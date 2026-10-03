@@ -63,6 +63,10 @@ class CorrectorSelector(CorrectorConfigABC):
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         return dict(state)
 
+    def load(self) -> None:
+        self._corrector_config_instance.load()
+        self.config = dataclasses.asdict(self._corrector_config_instance)
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
