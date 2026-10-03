@@ -9,15 +9,16 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # ../train-config-template.yaml only in the ocean corrector (see its header).
 #
 # Cluster/resources differ from crps4's row, which ran 4xB200 (b200|4|500GiB,
-# min_runtime 0): jupiter is 8xH100-80GB, and 4xB200 coupled runs in this
-# line peak at ~84 GiB/GPU (inline inference), more than an H100 holds, so it
-# runs on a full jupiter node. batch_size
-# is global, so the GPU count does not change the optimization. shared_mem
-# scales with it (125 GiB/GPU, as crps4). min_runtime is required by Beaker
-# since 2026-08-28.
+# min_runtime 0). jupiter+titan (job_runner/lib.sh alias: --cluster jupiter
+# --cluster titan, workspace ai2/ace) takes whichever has room. 8 GPUs because
+# a jupiter node is 8xH100-80GB and 4xB200 coupled runs in this line peak at
+# ~84 GiB/GPU (inline inference, fp32), more than an H100 holds; 8 is a full
+# node on either cluster. batch_size (8) is global, so the GPU count does not
+# change the optimization. shared_mem scales with it (125 GiB/GPU, as crps4).
+# min_runtime is required by Beaker since 2026-08-28.
 #
 # job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled cellmean \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 # with WANDB_USERNAME=elynnw.
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8|1000GiB|3|ai2/ace|seed=0|3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8|1000GiB|3|ai2/ace|seed=0|3h
