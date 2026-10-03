@@ -64,3 +64,14 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks|rs1|training|high|ju
 # Question: does the input treatment carry the out-of-sample surface result
 # over to the stochastic model? One seed (rs0, paired with silm932h).
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'|3h
+
+# PILOT B (2026-10-03, branch exp/stochastic-es-meanfill-sozero = the fmma branch
+# + ace#1458 per-channel fill): the fmma row with salinity zero-filled at every
+# level (fill_value_overrides so_: 0.0), everything else mean-filled. Restores
+# the out-of-range marker zero-filled salinity gives below-seafloor cells; the
+# fmma model without it grows a deterministic grid-scale mode in the deep basins
+# (research repo experiments/2026-10-02-fmma-depth-noise-diag). so_0 rides the
+# prefix into zero-fill (mask_0 == mask_2d), as in Arm D/E. normal priority,
+# jupiter (elynn, 2026-10-03). Read inline rollout error at epochs 1-5 against
+# jnot63js and silm932h; runs the full schedule so a passing pilot is the stage 1.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero|rs0|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_weight=0.0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{so_: 0.0}'|5h
