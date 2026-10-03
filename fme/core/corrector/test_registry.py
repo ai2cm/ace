@@ -1,4 +1,5 @@
 import datetime
+from typing import Any
 
 import pytest
 import torch
@@ -207,3 +208,25 @@ def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
     enabled = corrector({}, gen_data, {}, None)
     assert set(enabled.modified_names) == {"a"}
     torch.testing.assert_close(enabled.diagnostics.delta["a"], torch.full((2, 2), 1.0))
+
+
+@pytest.mark.parametrize(
+    "corrector_type, config",
+    [
+        ("atmosphere_corrector", {"conserve_dry_air": True}),
+        (
+            "ocean_corrector",
+            {"surface_energy_flux_correction": {"method": "prescribed"}},
+        ),
+        ("ice_corrector", {}),
+    ],
+)
+def test_corrector_selector_load_keeps_config_without_external_files(
+    corrector_type: str, config: dict[str, Any]
+):
+    """A corrector config that depends on no files is stored as given, without
+    defaults filled in, so its checkpoint stays loadable by code predating a
+    newer field of the config."""
+    selector = CorrectorSelector(type=corrector_type, config=dict(config))
+    selector.load()
+    assert selector.config == config
