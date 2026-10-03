@@ -1,1 +1,3 @@
 # Training rows appended by uncoupled_train.sh.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-maskin|rs0|01M405F91896H0AYMH6D8PV2TV|training|best_inference_ckpt|normal|--min-runtime 8h
