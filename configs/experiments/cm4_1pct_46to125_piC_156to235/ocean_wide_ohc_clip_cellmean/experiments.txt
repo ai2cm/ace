@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|training|best_inference_ckpt|normal|--min-runtime 8h
