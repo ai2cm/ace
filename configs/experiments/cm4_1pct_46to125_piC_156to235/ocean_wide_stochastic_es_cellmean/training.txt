@@ -8,7 +8,7 @@
 # job_runner/uncoupled_train.sh \
 #   configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_es_cellmean . \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
-# with WANDB_USERNAME=elynnw.
+# with WANDB_USERNAME=elynnwu.
 #
 # cluster jupiter+titan (job_runner/lib.sh alias: --cluster jupiter --cluster
 # titan, workspace ai2/ace) where rs0 ran on jupiter only; 4 GPUs as rs0.
