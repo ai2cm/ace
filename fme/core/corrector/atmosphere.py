@@ -324,6 +324,9 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         return dict(state)
 
+    def load(self) -> None:
+        pass
+
     conserve_dry_air: bool = False
     zero_global_mean_moisture_advection: bool = False
     moisture_budget_correction: (

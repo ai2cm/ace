@@ -53,10 +53,15 @@ class CorrectorConfigABC(abc.ABC):
         """
         ...
 
+    @abc.abstractmethod
     def load(self) -> None:
         """Update the configuration in place so it does not depend on external
-        files. Default implementation is a no-op.
+        files.
+
+        Must be implemented by every subclass. Implement as ``pass`` when the
+        configuration reads no external files.
         """
+        ...
 
     @final
     def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":

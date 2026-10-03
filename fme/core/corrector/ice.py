@@ -240,6 +240,9 @@ class IceCorrectorConfig(CorrectorConfigABC):
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         return dict(state)
 
+    def load(self) -> None:
+        pass
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
