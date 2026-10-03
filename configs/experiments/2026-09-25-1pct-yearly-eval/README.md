@@ -11,6 +11,9 @@ lives with each training experiment and just names the checkpoint.
 | `evaluator-config-1pct_yearly_4deg.yaml` | `run_1pct_yearly_4deg` | 4deg zarrs (`2026-07-22-cm4-*-4deg-coupled-ocean`, `2026-07-15-om4-*-4deg-ocean-5daily`) |
 | `evaluator-config-1pct_yearly_4deg_icevol_ssf.yaml` | `run_1pct_yearly_4deg_icevol_ssf` | `2026-09-30-resid-thetao-no-sal-baseline` only; same as above plus a `stepper_override` that repeats that run's corrector (surface energy flux `prescribed`) and adds the sea-surface-fraction-weighted ice volume salt correction |
 | `evaluator-config-1pct_yearly_4deg_icevol_ssf_open.yaml` | `run_1pct_yearly_4deg_icevol_ssf_open` | the no-salt runs trained with surface energy flux `prescribed_open_ocean` (`2026-09-28-test-no-sal-correct`, `2026-09-29-test-resid-no-sal-correct`, `2026-10-01-direct-ssh-no-sal-baseline`); the same salt correction with that corrector repeated |
+| `evaluator-config-1pct_yearly_4deg_ssh_open.yaml` | `run_1pct_yearly_4deg_ssh_open` | `2026-10-01-direct-ssh-no-sal-baseline` only (needs `SSH`, not `zos`); the `_icevol_ssf_open` corrector with the salt budget from the change of the sea surface height |
+| `evaluator-config-1pct_yearly_4deg_wfo_regimes_open.yaml` | `run_1pct_yearly_4deg_wfo_regimes_open` | the `prescribed_open_ocean` no-salt runs; the `_icevol_ssf_open` corrector with a water flux salt budget: P − E over open water, the sea ice volume change under ice, the predicted `wfo` at ice-free coasts, plus the predicted `sfdsi` |
+| `evaluator-config-1pct_yearly_4deg_wfo_pe_open.yaml` | `run_1pct_yearly_4deg_wfo_pe_open` | the `prescribed_open_ocean` no-salt runs; as `_wfo_regimes_open` but with the predicted `wfo` under ice too |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
 (`2026-07-15-om4-1pctco2-1deg-coupled-ocean`,
