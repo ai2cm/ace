@@ -11,7 +11,12 @@
 #
 # min_runtime is new vs owc rs2 (0s then): Beaker has required one since
 # 2026-08-28.
+#
+# cluster jupiter+titan (job_runner/lib.sh alias: --cluster jupiter --cluster
+# titan, workspace ai2/ace) where owc rs2 ran on jupiter only; 4 GPUs as owc
+# rs2, which fit an 8xH100-80GB node's GPUs. batch_size is global, so the
+# cluster does not change the optimization.
 
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|train|high|jupiter+titan|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0|3h
