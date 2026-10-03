@@ -320,6 +320,9 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             trained checkpoints, which did not apply this clip, are unaffected.
     """
 
+    def load(self) -> None:
+        pass
+
     conserve_dry_air: bool = False
     zero_global_mean_moisture_advection: bool = False
     moisture_budget_correction: (

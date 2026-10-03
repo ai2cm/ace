@@ -234,6 +234,9 @@ class IceBudgetCorrection:
 class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
 
+    def load(self) -> None:
+        pass
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
