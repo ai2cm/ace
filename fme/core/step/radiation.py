@@ -241,6 +241,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def load(self):
         self.normalization.load()
+        self.corrector.load()
 
 
 class SeparateRadiationStep(StepABC):

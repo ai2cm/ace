@@ -51,6 +51,10 @@ class CorrectorSelector(CorrectorConfigABC):
         """This class method is used to expose all available types of Correctors."""
         return set(cls.registry._types.keys())
 
+    def load(self) -> None:
+        self._corrector_config_instance.load()
+        self.config = dataclasses.asdict(self._corrector_config_instance)
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,

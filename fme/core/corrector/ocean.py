@@ -123,7 +123,7 @@ SurfaceEnergyFluxMethod = Literal[
 @dataclasses.dataclass
 class RunoffHeatFluxConfig:
     """A static map of the heat carried into the ocean by river and iceberg
-    runoff, read once from a netCDF file.
+    runoff.
 
     The atmosphere's surface fluxes do not carry this term (runoff comes from
     the land model), but an ocean heat budget that books the heat content of
@@ -132,49 +132,84 @@ class RunoffHeatFluxConfig:
     own diagnostic (``hfrunoffds`` in a stats ``time-mean.nc``) is the
     intended source.
 
+    Give either ``path`` or ``values``. A training config gives ``path``;
+    ``load`` reads the map once into ``values`` and clears ``path``, so a
+    checkpoint holds the map itself and inference from it reads no file.
+
     Parameters:
         path: Path to a netCDF file (any fsspec filesystem) holding the map on
-            the model's ``(lat, lon)`` grid.
+            the model's ``(lat, lon)`` grid. NaN cells (land in the ocean
+            model's diagnostic) are read as zero.
         name: Variable name within the file.
         per_unit_sea_area: If True (the MOM6 convention), the map is per unit
             sea area and is multiplied by ``sea_surface_fraction`` to give a
             flux per unit cell area. If False it is used as is.
+        values: The map itself, as rows of latitude. Set by ``load``; not
+            meant to be written in a config by hand.
     """
 
-    path: str
+    path: str | None = None
     name: str = "hfrunoffds"
     per_unit_sea_area: bool = True
+    values: list[list[float]] | None = None
 
-    def build(self) -> "StaticRunoffHeatFlux":
-        return StaticRunoffHeatFlux(self)
+    def __post_init__(self):
+        if (self.path is None) == (self.values is None):
+            raise ValueError(
+                "runoff_heat_flux needs exactly one of path or values, got "
+                f"path={self.path!r} and "
+                f"{'no values' if self.values is None else 'values'}."
+            )
+
+    def load(self):
+        """Read the map from ``path`` into ``values``, so the configuration no
+        longer depends on the file.
+        """
+        if self.path is not None:
+            self.values = _read_runoff_heat_map(self.path, self.name).tolist()
+            self.path = None
+
+    def build(self, img_shape: tuple[int, int] | None = None) -> "StaticRunoffHeatFlux":
+        """Build the runoff heat flux, reading the map from ``path`` if it has
+        not been loaded.
+
+        Args:
+            img_shape: Horizontal shape of the ocean grid, to validate the map
+                against. Not validated if None.
+        """
+        if self.values is not None:
+            runoff_map = torch.tensor(self.values, dtype=torch.float32)
+        else:
+            assert self.path is not None  # guaranteed by __post_init__
+            runoff_map = _read_runoff_heat_map(self.path, self.name)
+        if img_shape is not None and tuple(runoff_map.shape) != tuple(img_shape):
+            raise ValueError(
+                f"Runoff heat map has shape {tuple(runoff_map.shape)} but the "
+                f"ocean grid has horizontal shape {tuple(img_shape)}."
+            )
+        return StaticRunoffHeatFlux(runoff_map, self.per_unit_sea_area)
+
+
+def _read_runoff_heat_map(path: str, name: str) -> torch.Tensor:
+    """Read a ``(lat, lon)`` map from netCDF as float32, NaN read as zero."""
+    ds = open_dataset_via_inter_filesystem_copy(path)
+    da = ds[name]
+    if set(da.dims) != {"lat", "lon"}:
+        raise ValueError(
+            f"Runoff heat map {name!r} in {path!r} must have dims (lat, lon), "
+            f"got {da.dims}."
+        )
+    values = da.transpose("lat", "lon").values
+    return torch.nan_to_num(torch.as_tensor(values, dtype=torch.float32), nan=0.0)
 
 
 class StaticRunoffHeatFlux:
-    """Loads the runoff heat map lazily and caches it per device.
+    """A static runoff heat map, cached per device."""
 
-    NaN cells (land in the ocean model's diagnostic) are read as zero.
-    """
-
-    def __init__(self, config: RunoffHeatFluxConfig):
-        self._config = config
-        self._map: torch.Tensor | None = None
+    def __init__(self, runoff_map: torch.Tensor, per_unit_sea_area: bool):
+        self._map = runoff_map
+        self._per_unit_sea_area = per_unit_sea_area
         self._by_device: dict[torch.device, torch.Tensor] = {}
-
-    def _load(self) -> torch.Tensor:
-        if self._map is None:
-            ds = open_dataset_via_inter_filesystem_copy(self._config.path)
-            da = ds[self._config.name]
-            if set(da.dims) != {"lat", "lon"}:
-                raise ValueError(
-                    f"Runoff heat map {self._config.name!r} in "
-                    f"{self._config.path!r} must have dims (lat, lon), "
-                    f"got {da.dims}."
-                )
-            values = da.transpose("lat", "lon").values
-            self._map = torch.nan_to_num(
-                torch.as_tensor(values, dtype=torch.float32), nan=0.0
-            )
-        return self._map
 
     def __call__(self, sea_surface_fraction: torch.Tensor) -> torch.Tensor:
         """Return the runoff heat flux per unit cell area, on the device and
@@ -182,7 +217,7 @@ class StaticRunoffHeatFlux:
         """
         device = sea_surface_fraction.device
         if device not in self._by_device:
-            self._by_device[device] = self._load().to(device)
+            self._by_device[device] = self._map.to(device)
         runoff = self._by_device[device]
         if runoff.shape != sea_surface_fraction.shape[-2:]:
             raise ValueError(
@@ -190,7 +225,7 @@ class StaticRunoffHeatFlux:
                 f"ocean fields have horizontal shape "
                 f"{tuple(sea_surface_fraction.shape[-2:])}."
             )
-        if self._config.per_unit_sea_area:
+        if self._per_unit_sea_area:
             return runoff * sea_surface_fraction
         return runoff.expand_as(sea_surface_fraction)
 
@@ -501,19 +536,28 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
+    def load(self):
+        sefc = self.surface_energy_flux_correction
+        if sefc is not None and sefc.runoff_heat_flux is not None:
+            sefc.runoff_heat_flux.load()
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
         cell_area_m2 = None
+        img_shape = None
         sefc = self.surface_energy_flux_correction
         if sefc is not None and sefc.under_ice is not None:
             cell_area_m2 = dataset_info.horizontal_coordinates.area_weights_m2
+        if sefc is not None and sefc.runoff_heat_flux is not None:
+            img_shape = dataset_info.img_shape
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
             cell_area_m2=cell_area_m2,
+            img_shape=img_shape,
         )
 
     def _build(
@@ -522,6 +566,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
         cell_area_m2: torch.Tensor | None = None,
+        img_shape: tuple[int, int] | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -547,7 +592,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                 SurfaceEnergyFluxCorrection(
                     self.surface_energy_flux_correction.method,
                     runoff_heat_flux=(
-                        None if runoff_config is None else runoff_config.build()
+                        None
+                        if runoff_config is None
+                        else runoff_config.build(img_shape)
                     ),
                     under_ice=(
                         None
