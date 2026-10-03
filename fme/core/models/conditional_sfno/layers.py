@@ -242,6 +242,68 @@ class ConditionalLayerNorm(nn.Module):
             torch.nn.init.constant_(self.W_bias_pos.weight, 0.0)
         # no bias on 2d layers as it is already handled in the non-2d layers
 
+    def _scale_and_bias(
+        self, x: torch.Tensor, context: Context, channels_last: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Conditional scale and bias, each broadcastable against ``x``.
+
+        Batch-wide terms (scalar and label embeddings) are ``(batch_size,
+        channels)`` vectors broadcast over the spatial dims. Spatial terms
+        (noise and position fields) are 1x1 convolutions in channels-first
+        layout; in channels-last layout the same conv weights are applied as
+        linear maps, so both layouts share one set of parameters.
+        """
+        if context.labels is None and (
+            self.W_scale_labels is not None or self.W_bias_labels is not None
+        ):
+            raise ValueError("labels must be provided")
+        batch_size, n_channels = x.shape[0], self.n_channels
+        if self.W_scale is not None:
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar must be provided")
+            scale = _batch_term(self.W_scale(context.embedding_scalar), channels_last)
+        else:
+            scale = _batch_term(
+                torch.ones(batch_size, n_channels, device=x.device, dtype=x.dtype),
+                channels_last,
+            )
+        if self.W_scale_2d is not None:
+            if context.noise is None:
+                raise ValueError("embedding_2d must be provided")
+            scale = scale + _spatial_term(self.W_scale_2d, context.noise, channels_last)
+        if self.W_bias is not None:
+            if context.embedding_scalar is None:
+                raise ValueError("embedding_scalar must be provided")
+            bias = _batch_term(self.W_bias(context.embedding_scalar), channels_last)
+        else:
+            bias = _batch_term(
+                torch.zeros(batch_size, n_channels, device=x.device, dtype=x.dtype),
+                channels_last,
+            )
+        if self.W_scale_labels is not None:
+            scale = scale + _batch_term(
+                self.W_scale_labels(context.labels), channels_last
+            )
+        if self.W_bias_labels is not None:
+            bias = bias + _batch_term(self.W_bias_labels(context.labels), channels_last)
+        if self.W_bias_2d is not None:
+            if context.noise is None:
+                raise ValueError("embedding_2d must be provided")
+            bias = bias + _spatial_term(self.W_bias_2d, context.noise, channels_last)
+        if self.W_scale_pos is not None:
+            if context.embedding_pos is None:
+                raise ValueError("embedding_pos must be provided")
+            scale = scale + _spatial_term(
+                self.W_scale_pos, context.embedding_pos, channels_last
+            )
+        if self.W_bias_pos is not None:
+            if context.embedding_pos is None:
+                raise ValueError("embedding_pos must be provided")
+            bias = bias + _spatial_term(
+                self.W_bias_pos, context.embedding_pos, channels_last
+            )
+        return scale, bias
+
     def forward(
         self,
         x: torch.Tensor,
@@ -262,62 +324,64 @@ class ConditionalLayerNorm(nn.Module):
         Returns:
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
-        if context.labels is None and (
-            self.W_scale_labels is not None or self.W_bias_labels is not None
-        ):
-            raise ValueError("labels must be provided")
         with timer.child("compute_scaling_and_bias"):
-            if self.W_scale is not None:
-                if context.embedding_scalar is None:
-                    raise ValueError("embedding_scalar must be provided")
-                scale: torch.Tensor = (
-                    self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
-                )
-            else:
-                scale = torch.ones(
-                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
-                )
-
-            if self.W_scale_2d is not None:
-                if context.noise is None:
-                    raise ValueError("embedding_2d must be provided")
-                scale = scale + self.W_scale_2d(context.noise)
-            if self.W_bias is not None:
-                if context.embedding_scalar is None:
-                    raise ValueError("embedding_scalar must be provided")
-                bias: torch.Tensor = (
-                    self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
-                )
-            else:
-                bias = torch.zeros(
-                    list(x.shape[:-2]) + [1, 1], device=x.device, dtype=x.dtype
-                )
-
-            if self.W_scale_labels is not None:
-                scale = scale + self.W_scale_labels(context.labels).unsqueeze(
-                    -1
-                ).unsqueeze(-1)
-            if self.W_bias_labels is not None:
-                bias = bias + self.W_bias_labels(context.labels).unsqueeze(
-                    -1
-                ).unsqueeze(-1)
-            if self.W_bias_2d is not None:
-                if context.noise is None:
-                    raise ValueError("embedding_2d must be provided")
-                bias = bias + self.W_bias_2d(context.noise)
-            if self.W_scale_pos is not None:
-                if context.embedding_pos is None:
-                    raise ValueError("embedding_pos must be provided")
-                scale = scale + self.W_scale_pos(context.embedding_pos)
-            if self.W_bias_pos is not None:
-                if context.embedding_pos is None:
-                    raise ValueError("embedding_pos must be provided")
-                bias = bias + self.W_bias_pos(context.embedding_pos)
+            scale, bias = self._scale_and_bias(x, context, channels_last=False)
         with timer.child("normalize"):
             x_norm: torch.Tensor = self.norm(x)
         with timer.child("apply_scaling_and_bias"):
             return_value = x_norm * scale + bias
         return return_value
+
+    def forward_channels_last(self, x: torch.Tensor, context: Context) -> torch.Tensor:
+        """
+        Channels-last variant of ``forward`` for callers whose activations are
+        laid out as (batch_size, height, width, channels).
+
+        Computes the same function as ``forward`` (per-pixel layer norm over
+        channels, then conditional scale and bias) without transposing the
+        activations. The spatial conditioning fields in ``context`` (``noise``
+        and ``embedding_pos``) must also be channels-last, i.e.
+        (batch_size, height, width, embed_dim).
+
+        Args:
+            x: The input tensor to normalize, of shape
+                (batch_size, height, width, channels).
+            context: The context to condition on, with channels-last
+                spatial fields.
+
+        Returns:
+            The normalized tensor, of shape (batch_size, height, width, channels).
+        """
+        if self._global_layer_norm:
+            raise NotImplementedError(
+                "forward_channels_last only supports per-pixel layer norm "
+                "(global_layer_norm=False)"
+            )
+        scale, bias = self._scale_and_bias(x, context, channels_last=True)
+        x_norm = F.layer_norm(
+            x,
+            (self.n_channels,),
+            weight=self.norm.weight,
+            bias=self.norm.bias,
+            eps=self.epsilon,
+        )
+        return x_norm * scale + bias
+
+
+def _batch_term(term: torch.Tensor, channels_last: bool) -> torch.Tensor:
+    """Reshape a ``(batch_size, channels)`` term to broadcast over a 4D field."""
+    if channels_last:
+        return term[:, None, None, :]
+    return term[:, :, None, None]
+
+
+def _spatial_term(
+    conv: nn.Conv2d, field: torch.Tensor, channels_last: bool
+) -> torch.Tensor:
+    """Apply a 1x1 convolution to ``field`` in either layout."""
+    if channels_last:
+        return F.linear(field, conv.weight.view(conv.weight.shape[0], -1))
+    return conv(field)
 
 
 @torch.jit.script
