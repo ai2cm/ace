@@ -64,6 +64,17 @@ build_cluster_args() {
             --cluster jupiter
             --cluster saturn
         )
+    elif [[ "$CLUSTER" == "jupiter+titan" ]]; then
+        # 8xH100-80GB or 8xB200 nodes, whichever has room first; n_gpus must
+        # fit an H100 node's memory.
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster jupiter
+            --cluster titan
+        )
     elif [[ "$CLUSTER" == "a100" ]]; then
         if [[ -z "$WORKSPACE" ]]; then
             WORKSPACE=ai2/ace
