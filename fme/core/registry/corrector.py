@@ -52,8 +52,15 @@ class CorrectorSelector(CorrectorConfigABC):
         return set(cls.registry._types.keys())
 
     def load(self) -> None:
+        # Re-serialize only when loading changed the wrapped config, so a
+        # config that depends on no external files is stored exactly as given
+        # (without every default filled in, which code predating a newer field
+        # could not load).
+        before = dataclasses.asdict(self._corrector_config_instance)
         self._corrector_config_instance.load()
-        self.config = dataclasses.asdict(self._corrector_config_instance)
+        after = dataclasses.asdict(self._corrector_config_instance)
+        if after != before:
+            self.config = after
 
     def _get_corrector(
         self,
