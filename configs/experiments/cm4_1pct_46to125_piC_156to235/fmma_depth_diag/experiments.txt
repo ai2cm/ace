@@ -1,0 +1,19 @@
+# DIAGNOSTIC rows: why the stochastic ES + mean-fill complete-mask model fills
+# its deep levels with grid-scale noise in free rollouts. Each runs the 4-yr
+# evaluator-config-piC-4yr-deep.yaml from best_ckpt, 1 GPU.
+#   ft-*  : stage 2 io0orbd4 best_ckpt (epoch 5, inline error 0.72)
+#   s1-*  : fmma stage 1 jnot63js best_ckpt (inline NaN from epoch 2)
+#   s1zf  : zero-fill twin silm932h best_ckpt, the stable control
+# *-nonoise sets FME_NOISE_SCALE=0 (this branch's diagnostic hook in
+# fme/ace/registry/stochastic_sfno.py), riding the min-runtime field, which
+# evaluate.sh passes to gantry unquoted. Results datasets pinned.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-fmma-depth-diag|ft-e5-noise|01M3Z84921KMWJB6A7Y7KNQ2RQ|run_piC-4yr-deep|best_ckpt|high|--min-runtime 1h||01M3Z84929JSSJE4D6GCJAEH9P|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-fmma-depth-diag|ft-e5-nonoise|01M3Z84921KMWJB6A7Y7KNQ2RQ|run_piC-4yr-deep|best_ckpt|high|--min-runtime 1h --env FME_NOISE_SCALE=0||01M3Z84929JSSJE4D6GCJAEH9P|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-fmma-depth-diag|s1-noise|01M3STD98XSPDHFX9WN1NXSS4H|run_piC-4yr-deep|best_ckpt|high|--min-runtime 1h||01M3YQM96665A45GXEE3CQXC96|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-fmma-depth-diag|s1-nonoise|01M3STD98XSPDHFX9WN1NXSS4H|run_piC-4yr-deep|best_ckpt|high|--min-runtime 1h --env FME_NOISE_SCALE=0||01M3YQM96665A45GXEE3CQXC96|ai2/ace|jupiter|||20GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-fmma-depth-diag|s1zf-noise|01M3307J8RAC4VP280SN2CTSZS|run_piC-4yr-deep|best_ckpt|high|--min-runtime 1h||01M3307J8Z0DZAGDE3DEBTF1C4|ai2/ace|jupiter|||20GiB

@@ -1,5 +1,6 @@
 import dataclasses
 import math
+import os
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
@@ -16,6 +17,16 @@ from fme.core.models.conditional_sfno.sfnonet import (
     get_lat_lon_sfnonet,
 )
 from fme.core.rand import randn
+
+# DIAGNOSTIC ONLY (exp/fmma-depth-noise-diag, not main-bound): scales the
+# conditioning noise at every forward call, so an evaluator run with
+# FME_NOISE_SCALE=0 rolls the stochastic model out on zero noise. Unset = 1.0,
+# the trained behavior.
+_NOISE_SCALE_ENV = "FME_NOISE_SCALE"
+
+
+def _noise_scale() -> float:
+    return float(os.environ.get(_NOISE_SCALE_ENV, "1.0"))
 
 
 def isotropic_noise(
@@ -143,6 +154,10 @@ class NoiseConditionedModel(torch.nn.Module):
                 device=x.device,
                 dtype=x.dtype,
             )
+
+        noise_scale = _noise_scale()
+        if noise_scale != 1.0:
+            noise = noise * noise_scale
 
         if labels is not None and self.label_embedding is not None:
             labels = self.label_embedding(labels)
