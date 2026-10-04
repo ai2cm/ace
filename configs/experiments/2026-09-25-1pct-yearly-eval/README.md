@@ -14,6 +14,7 @@ lives with each training experiment and just names the checkpoint.
 | `evaluator-config-1pct_yearly_4deg_ssh_open.yaml` | `run_1pct_yearly_4deg_ssh_open` | `2026-10-01-direct-ssh-no-sal-baseline` only (needs `SSH`, not `zos`); the `_icevol_ssf_open` corrector with the salt budget from the change of the sea surface height |
 | `evaluator-config-1pct_yearly_4deg_wfo_regimes_open.yaml` | `run_1pct_yearly_4deg_wfo_regimes_open` | the `prescribed_open_ocean` no-salt runs; the `_icevol_ssf_open` corrector with a water flux salt budget: P − E over open water, the sea ice volume change under ice, the predicted `wfo` at ice-free coasts, plus the predicted `sfdsi` |
 | `evaluator-config-1pct_yearly_4deg_wfo_pe_open.yaml` | `run_1pct_yearly_4deg_wfo_pe_open` | the `prescribed_open_ocean` no-salt runs; as `_wfo_regimes_open` but with the predicted `wfo` under ice too |
+| `evaluator-config-1pct_yearly_4deg_wfo_fullice_open.yaml` | `run_1pct_yearly_4deg_wfo_fullice_open` | the `prescribed_open_ocean` no-salt runs; as `_wfo_regimes_open` but with the sea ice volume term only under full ice cover (fraction at least 0.99 at both steps), and the predicted `wfo` under partial ice |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
 (`2026-07-15-om4-1pctco2-1deg-coupled-ocean`,

@@ -1460,6 +1460,36 @@ def test_water_flux_salt_budget_with_terms(
     _assert_salt_change(state, corrected, expected)
 
 
+def test_water_flux_salt_budget_full_ice_cover_threshold():
+    # With a full ice cover threshold, the sea ice mass change replaces wfo
+    # only where the ice fraction reaches it at both steps; the other
+    # ice-covered cells keep wfo and are still left out of P - E.
+    state = _water_flux_salt_state()
+    for data in (state.input_data, state.gen_data):
+        data["ocean_sea_ice_fraction"][0, :4] = 1.0
+    state.input_data["ocean_sea_ice_fraction"][0, 4] = 1.0  # at one step only
+    corrected = _correct_with_water_flux_budget(
+        state,
+        {
+            "use_precipitation_minus_evaporation_over_open_water": True,
+            "use_sea_ice_mass_change_under_ice": True,
+            "regimes": {"full_ice_cover_threshold": 1.0},
+        },
+    )
+    _, _, open_water = state.regimes()
+    full_ice_cover = torch.zeros_like(open_water)
+    full_ice_cover[0, :4] = True
+    forcing, gen = state.forcing_data, state.gen_data
+    precipitation_minus_evaporation = forcing["PRATEsfc"] - forcing["LHTFLsfc"] / 2.5e6
+    water = torch.where(open_water, precipitation_minus_evaporation, gen["wfo"])
+    water = torch.where(full_ice_cover, 0.0, water)
+    ice_mass_change = _counted_ice_mass_change_kg_per_s(state, full_ice_cover)
+    expected = _flux_salt_change(state, water, gen["sfdsi"]) + (
+        state.timestep_seconds / 1035.0
+    ) * (35.0 * ice_mass_change)
+    _assert_salt_change(state, corrected, expected)
+
+
 def test_water_flux_salt_budget_computes_sfdsi_if_not_predicted():
     # Without a predicted sfdsi, the sea ice salt flux is computed from the ice
     # volume change everywhere inside the sea_ice_volume mask.
@@ -1562,6 +1592,30 @@ def test_water_flux_salt_budget_missing_field_raises(budget, data_name, missing,
             },
             "sea_ice_density_kg_m3 must be positive",
             id="nonpositive_ice_density",
+        ),
+        pytest.param(
+            {
+                "budget_config": {
+                    "type": "water_flux",
+                    "regimes": {"full_ice_cover_threshold": 1.0},
+                }
+            },
+            "full_ice_cover_threshold requires",
+            id="full_ice_cover_without_ice_terms",
+        ),
+        pytest.param(
+            {
+                "budget_config": {
+                    "type": "water_flux",
+                    "use_sea_ice_mass_change_under_ice": True,
+                    "regimes": {
+                        "sea_ice_fraction_threshold": 0.5,
+                        "full_ice_cover_threshold": 0.5,
+                    },
+                }
+            },
+            "must exceed sea_ice_fraction_threshold",
+            id="full_ice_cover_not_above_ice_covered",
         ),
         pytest.param(
             {
