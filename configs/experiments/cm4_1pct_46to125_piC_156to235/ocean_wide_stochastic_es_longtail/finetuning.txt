@@ -91,6 +91,18 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra
 # differs from rs0's in those masking keys and nothing else. Result dataset
 # pinned: the stage-1 run took nine jobs (eight preempted), so its final
 # dataset does not share the experiment id's prefix.
+# LAUNCHED 2026-10-02 as 01M3Z84921KMWJB6A7Y7KNQ2RQ (io0orbd4), STOPPED at epoch 5:
+# deep grid-scale instability. Flipped to skip.
 # min_runtime 5h, not rs0's 3h: stage 1 lost eight jobs to preemption at 3h.
 # A scheduling knob only; no effect on numerics.
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-samudra-cm4|jnot63js|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M3YQM96665A45GXEE3CQXC96|5h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-samudra-cm4|jnot63js|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M3YQM96665A45GXEE3CQXC96|5h
+
+# ---------------------------------------------------------------------------
+# PILOT B stage 2 (fmma-sozero), added 2026-10-04: long-tail finetune of the
+# stage-1 iu095u06 best_ckpt (mean-fill, salinity zero-filled via ace#1458's
+# fill_value_overrides {so_: 0.0}; the stepper merge carries it in, which is
+# why this row runs from exp/stochastic-es-meanfill-sozero). Same template,
+# schedule and seed as rs0 (19yl0189); the generated config differs from rs0's
+# in stepper.input_masking only. normal priority, jupiter (elynn, 2026-10-02/04).
+# STATUS AND RESULTS DATASET are set at launch, once stage 1 finishes.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|ace-samudra-cm4|iu095u06|best_ckpt|skip|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|RESULTS_DATASET_AT_LAUNCH|5h
