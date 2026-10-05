@@ -64,17 +64,6 @@ build_cluster_args() {
             --cluster jupiter
             --cluster saturn
         )
-    elif [[ "$CLUSTER" == "jupiter+titan" ]]; then
-        # 8xH100-80GB or 8xB200 nodes, whichever has room first; n_gpus must
-        # fit an H100 node's memory.
-        if [[ -z "$WORKSPACE" ]]; then
-            WORKSPACE=ai2/ace
-        fi
-        CLUSTER_ARGS=(
-            --workspace "$WORKSPACE"
-            --cluster jupiter
-            --cluster titan
-        )
     elif [[ "$CLUSTER" == "a100" ]]; then
         if [[ -z "$WORKSPACE" ]]; then
             WORKSPACE=ai2/ace
@@ -116,38 +105,55 @@ build_cluster_args() {
     export WORKSPACE
 }
 
-# Build CM_PRIORITY_ARGS array, the gantry flags that opt a job in to the
-# Beaker priority balancer (scripts/beaker_balancer).
-#
-# The balancer only manages jobs that set the CM_PRIORITY env var, and uses it
-# both as the ranking for a scarce urgent slot and as the priority the job rests
-# at when it doesn't get one. We default it to the priority from the input file
-# (training.txt, experiments.txt, ...), so jobs are managed by default and the
-# ranking matches what the file already asks for.
-#
-# Args: $1 = PRIORITY (the Beaker priority from the input file)
-# Env: CM_PRIORITY - if set, overrides the input-file priority for all jobs in
-#      this invocation. Set it to "none" to opt out of the balancer entirely.
-# Sets global CM_PRIORITY_ARGS array and JOB_CM_PRIORITY variable.
-build_cm_priority_args() {
-    local FILE_PRIORITY="$1"
+# Default --shared-memory from the node caps table when the job row leaves it blank.
+# Args: $1 = CLUSTER alias or beaker cluster name, $2 = N_GPUS
+# Env:  SHARED_MEM_FRACTION (default 0.8) of the job's N_GPUS/gpus_per_node slice of node RAM
+# Prints e.g. "1494GiB". Aliases spanning several clusters take the smallest node.
+# Unrecognized clusters fall back to N_GPUS x 64GiB.
+default_shared_mem() {
+    local CLUSTER="$1"
+    local N_GPUS="$2"
+    local FALLBACK="64GiB"
+    if [[ "$N_GPUS" =~ ^[1-9][0-9]*$ ]]; then
+        FALLBACK="$((N_GPUS * 64))GiB"
+    fi
+    local FRACTION="${SHARED_MEM_FRACTION:-0.8}"
+    local CAPS_FILE
+    CAPS_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/node_caps.txt"
 
-    JOB_CM_PRIORITY="${CM_PRIORITY:-$FILE_PRIORITY}"
-
-    case "$JOB_CM_PRIORITY" in
-        low | normal | high | urgent)
-            CM_PRIORITY_ARGS=(--env CM_PRIORITY="$JOB_CM_PRIORITY")
-            ;;
-        *)
-            # The balancer accepts only the four values above; "immediate" in
-            # particular is a deliberate human decision it must not undo. Anything
-            # else (including an empty priority field) leaves the job unmanaged.
-            CM_PRIORITY_ARGS=()
-            JOB_CM_PRIORITY="(unmanaged)"
-            ;;
+    local MEMBERS
+    case "$CLUSTER" in
+        ""|h100)   MEMBERS="ceres jupiter" ;;
+        a100)      MEMBERS="saturn" ;;
+        b200)      MEMBERS="titan" ;;
+        a100+h100) MEMBERS="saturn ceres jupiter" ;;
+        *)         MEMBERS="${CLUSTER#ai2/}" ;;
     esac
 
-    export JOB_CM_PRIORITY
+    if [[ ! -f "$CAPS_FILE" || ! "$N_GPUS" =~ ^[0-9]+$ || "$N_GPUS" -eq 0 ]]; then
+        echo "$FALLBACK"
+        return
+    fi
+
+    # min over members of fraction * n_gpus/gpus_per_node * node_mem_limit_gib, floored
+    local RESULT
+    RESULT=$(awk -F'|' -v members="$MEMBERS" -v n="$N_GPUS" -v f="$FRACTION" '
+        BEGIN { split(members, m, " "); for (i in m) want[m[i]] = 1; best = -1 }
+        /^#/ || $1 == "cluster" { next }
+        ($1 in want) {
+            v = int(f * n / $3 * $4); found[$1] = 1
+            if (best < 0 || v < best) best = v
+        }
+        END {
+            for (c in want) if (!(c in found)) { best = -1; break }
+            if (best > 0) printf "%dGiB\n", best
+        }' "$CAPS_FILE")
+
+    if [[ -n "$RESULT" ]]; then
+        echo "$RESULT"
+    else
+        echo "$FALLBACK"
+    fi
 }
 
 # Build STATS_DATASET_ARGS array based on stats configuration
@@ -242,8 +248,6 @@ run_gantry_training_job() {
         CHECKPOINT_DATASET_ARGS=()
     fi
 
-    build_cm_priority_args "$PRIORITY"
-
     local EXPERIMENT_ID=$(
         gantry run \
             --name "$JOB_NAME" \
@@ -261,7 +265,6 @@ run_gantry_training_job() {
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
             --env NCCL_DEBUG=WARN \
             --env NCCL_DEBUG_FILE=/results/nccl_debug.log \
-            "${CM_PRIORITY_ARGS[@]}" \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${STATS_DATASET_ARGS[@]}" \
@@ -317,6 +320,26 @@ build_job_name() {
         echo "${GROUP}-${TAG}-${SUFFIX}"
     else
         echo "${GROUP}-${SUFFIX}"
+    fi
+}
+
+# Longest experiment name the beaker server accepts. gantry passes --name
+# through unchecked, so an over-long name only fails at submission.
+MAX_JOB_NAME_LENGTH=128
+
+# Stop the submission loop if JOB_NAME is longer than MAX_JOB_NAME_LENGTH.
+# Runs in dry-run mode too, so an over-long name is caught before launch.
+# Args: JOB_NAME
+require_job_name_length() {
+    local JOB_NAME="$1"
+    local LENGTH=${#JOB_NAME}
+
+    if (( LENGTH > MAX_JOB_NAME_LENGTH )); then
+        echo >&2
+        echo "Error: job name is ${LENGTH} characters, $((LENGTH - MAX_JOB_NAME_LENGTH)) over the ${MAX_JOB_NAME_LENGTH}-character beaker limit:" >&2
+        echo "  ${JOB_NAME}" >&2
+        echo "This job and any remaining jobs in the input file were not submitted." >&2
+        exit 1
     fi
 }
 
@@ -388,6 +411,75 @@ parse_dry_run_flag() {
     export DRY_RUN
 }
 
+# Parse --config-dir argument from arguments
+# Sets global CONFIG_DIR_OVERRIDE variable (empty when the flag is absent)
+# Usage: parse_config_dir_arg "$@"
+parse_config_dir_arg() {
+    CONFIG_DIR_OVERRIDE=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --config-dir)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --config-dir requires a path argument" >&2
+                    exit 1
+                fi
+                CONFIG_DIR_OVERRIDE="$2"
+                shift 2
+                ;;
+            *)
+                # Unknown option - let the caller handle it
+                shift
+                ;;
+        esac
+    done
+    export CONFIG_DIR_OVERRIDE
+}
+
+# Resolve the repo-root-relative directory the config yaml is read from
+# Args: $1 = EXPERIMENT_DIR, $2 = CONFIG_SUBDIR, $3 = CONFIG_DIR_OVERRIDE (may be empty)
+# Requires REPO_ROOT, so call after init_script_environment
+# Outputs: repo-root-relative directory to stdout
+#
+# An absolute override is taken as given, a relative one is resolved against
+# REPO_ROOT, matching how <experiment_dir> is already interpreted. gantry uploads
+# the repository and runs the job from its root, so a config directory outside
+# REPO_ROOT is invisible to the job and is rejected here instead of failing on
+# the cluster.
+resolve_config_dir() {
+    local EXPERIMENT_DIR="$1"
+    local CONFIG_SUBDIR="$2"
+    local OVERRIDE="${3:-}"
+
+    if [[ -z "$OVERRIDE" ]]; then
+        echo "${EXPERIMENT_DIR}/${CONFIG_SUBDIR}"
+        return
+    fi
+
+    local CANDIDATE="$OVERRIDE"
+    if [[ "$CANDIDATE" != /* ]]; then
+        CANDIDATE="$REPO_ROOT/$CANDIDATE"
+    fi
+
+    if [[ ! -d "$CANDIDATE" ]]; then
+        echo "Error: --config-dir is not a directory: $OVERRIDE" >&2
+        exit 1
+    fi
+
+    # `cd ... && pwd -P` rather than `realpath`, which is absent on stock macOS.
+    # It also collapses ../ segments, so an override climbing out of the
+    # repository is caught by the containment check below.
+    local RESOLVED ROOT_RESOLVED
+    RESOLVED=$(cd "$CANDIDATE" && pwd -P)
+    ROOT_RESOLVED=$(cd "$REPO_ROOT" && pwd -P)
+
+    if [[ "$RESOLVED" != "$ROOT_RESOLVED"/* ]]; then
+        echo "Error: --config-dir must be inside the repository root ${ROOT_RESOLVED}; ${OVERRIDE} resolves to ${RESOLVED}" >&2
+        exit 1
+    fi
+
+    echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
+}
+
 # Print dry-run header
 print_dry_run_header() {
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -414,7 +506,6 @@ print_detailed_job_info() {
     echo "  TAG: ${TAG:-(empty)}"
     echo "  STATUS: $STATUS"
     echo "  PRIORITY: $PRIORITY"
-    echo "  CM_PRIORITY: ${JOB_CM_PRIORITY:-(unmanaged)}"
     echo "  CLUSTER: ${CLUSTER:-(default: H100 clusters)}"
     echo "  N_GPUS: $N_GPUS"
     echo "  SHARED_MEM: $SHARED_MEM"
@@ -441,9 +532,8 @@ print_condensed_job_info() {
     local SHARED_MEM="$5"
     local PRIORITY="$6"
 
-    printf "  - %-50s | %s | GPUs: %2s | Mem: %7s | Priority: %-8s | CM_PRIORITY: %-11s | Cluster: %s\n" \
-        "$JOB_NAME" "$CONFIG_PATH" "$N_GPUS" "$SHARED_MEM" "$PRIORITY" \
-        "${JOB_CM_PRIORITY:-(unmanaged)}" "${CLUSTER:-(default)}"
+    printf "  - %-50s | %s | GPUs: %2s | Mem: %7s | Priority: %-8s | Cluster: %s\n" \
+        "$JOB_NAME" "$CONFIG_PATH" "$N_GPUS" "$SHARED_MEM" "$PRIORITY" "${CLUSTER:-(default)}"
 }
 
 # Wrapper for gantry job that respects dry-run mode
@@ -455,6 +545,67 @@ run_gantry_training_job_with_dry_run() {
     else
         run_gantry_training_job "$@"
     fi
+}
+
+# Submission bookkeeping, used to report what made it to beaker if one of the
+# submissions in a loop fails.
+SUBMITTED_JOB_NAMES=()
+SUBMITTED_EXPERIMENT_IDS=()
+
+# Report the jobs submitted so far. With a FAILED_JOB_NAME, reports it as the
+# submission that stopped the loop.
+# Args: [FAILED_JOB_NAME]
+print_submission_report() {
+    local FAILED_JOB_NAME="${1:-}"
+    local i
+
+    echo
+    echo "----------------------------------------"
+    if [[ -n "$FAILED_JOB_NAME" ]]; then
+        echo "SUBMISSION FAILED"
+    else
+        echo "SUBMITTED"
+    fi
+    echo "----------------------------------------"
+    if [[ ${#SUBMITTED_JOB_NAMES[@]} -eq 0 ]]; then
+        echo "Submitted: none"
+    else
+        echo "Submitted (${#SUBMITTED_JOB_NAMES[@]}):"
+        for i in "${!SUBMITTED_JOB_NAMES[@]}"; do
+            printf "  - %-60s %s\n" "${SUBMITTED_JOB_NAMES[$i]}" "${SUBMITTED_EXPERIMENT_IDS[$i]}"
+        done
+    fi
+    if [[ -n "$FAILED_JOB_NAME" ]]; then
+        echo "Failed: ${FAILED_JOB_NAME}"
+        echo "  no beaker experiment ID returned; nothing appended to experiments.txt"
+        echo "Any remaining jobs in the input file were not submitted."
+    fi
+    echo "----------------------------------------"
+}
+
+# Print the end-of-run submission report; dry runs get print_dry_run_summary
+# instead.
+print_submission_summary() {
+    if [[ "$DRY_RUN" != "true" ]]; then
+        print_submission_report
+    fi
+}
+
+# Guard against a failed beaker submission: gantry's exit status is masked by the
+# pipeline that extracts the experiment ID, so an empty ID is the failure signal.
+# Records the submission on success; reports and exits 1 on failure.
+# Args: EXPERIMENT_ID, JOB_NAME
+require_experiment_id() {
+    local EXPERIMENT_ID="$1"
+    local JOB_NAME="$2"
+
+    if [[ -z "$EXPERIMENT_ID" ]]; then
+        print_submission_report "$JOB_NAME"
+        exit 1
+    fi
+
+    SUBMITTED_JOB_NAMES+=("$JOB_NAME")
+    SUBMITTED_EXPERIMENT_IDS+=("$EXPERIMENT_ID")
 }
 
 # Wrapper for git operations that respects dry-run mode

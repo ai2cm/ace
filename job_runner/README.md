@@ -70,6 +70,9 @@ cd job_runner
 # Evaluation (coupled or uncoupled)
 ./evaluate.sh configs/experiments/my-exper/ocean config-v1
 
+# Evaluation / inference reading configs from a shared directory
+./evaluate.sh configs/experiments/my-exper/ocean config-v1 --config-dir configs/baselines/cm4-piControl
+
 # All scripts support stats overrides and dry-run:
 ./uncoupled_train.sh configs/experiments/my-exper/ocean config-v1 --atmos_stats path/to/stats --dry-run
 ./coupled_train.sh configs/experiments/my-exper/coupled config-v1 --coupled_stats path/to/stats --dry-run
@@ -102,6 +105,37 @@ If none are specified, defaults to:
 - Atmosphere: `jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere`
 - Ocean: `jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean`
 
+## Shared Config Directory (`--config-dir`)
+
+`evaluate.sh` and `inference.sh` accept an optional `--config-dir <path>` that
+redirects where the config yaml is read from, so several experiment directories
+can evaluate against one maintained set of `evaluator-config-*.yaml` /
+`inference-config-*.yaml` files instead of each keeping a copy.
+
+```bash
+# default: configs are read from <experiment_dir>/<config_subdirectory>/
+./job_runner/evaluate.sh configs/experiments/my-exper/coupled v1 --dry-run
+
+# shared: configs are read from the given directory instead
+./job_runner/evaluate.sh configs/experiments/my-exper/coupled v1 \
+    --config-dir configs/baselines/cm4-piControl --dry-run
+```
+
+- The config filename is unchanged: `<config-dir>/evaluator-config-<tag>.yaml`,
+  with `<tag>` still the `experiments.txt` row's `status` field minus its `run_`
+  prefix (`run_inf_` for `inference.sh`).
+- `experiments.txt` is **always** read from
+  `<experiment_dir>/<config_subdirectory>/`. The shared directory supplies
+  configs, not the job list.
+- Module selection (`fme.coupled.*` vs `fme.ace.*`) stays keyed off
+  `<experiment_dir>`.
+- An absolute path is taken as given; a relative path is resolved against the
+  repository root, matching how `<experiment_dir>` is already interpreted.
+- The resolved path must lie inside the repository root — `gantry` uploads the
+  repository and runs the job from its root, so a config outside it is invisible
+  to the job. The script exits non-zero naming the offending path.
+- `--config-dir` is hyphenated, unlike the underscored `--atmos_stats` family.
+
 ## Dry-Run Mode
 
 All wrapper scripts support a `--dry-run` flag that allows you to preview actions without launching jobs or committing changes:
@@ -118,6 +152,7 @@ In dry-run mode:
 - No gantry jobs are launched
 - No git commits or pushes are made
 - No files are modified
+- The environment header names the directory configs are read from
 - Detailed output shows what would be executed:
   - First job: Full detailed configuration
   - Subsequent jobs: Condensed summary
@@ -141,7 +176,10 @@ This is useful for:
 
 **Cluster and Job Configuration:**
 - `build_cluster_args()`: Construct `CLUSTER_ARGS` array for gantry
-- `build_cm_priority_args()`: Construct `CM_PRIORITY_ARGS` array that opts the job in to the Beaker priority balancer
+- `default_shared_mem()`: Fill a blank `shared_mem` column from `node_caps.txt`:
+  `SHARED_MEM_FRACTION` (default 0.8) x `n_gpus/gpus_per_node` x node memory
+  limit, min over the alias's clusters; unknown clusters fall back to
+  `n_gpus` x 64GiB
 - `get_beaker_username()`: Get Beaker username from account info
 - `build_job_name()`: Build job name from group, tag, and suffix
 
@@ -162,6 +200,8 @@ This is useful for:
 **Script Initialization:**
 - `init_script_environment()`: Initialize REPO_ROOT, GIT_BRANCH, and BEAKER_USERNAME variables
 - `parse_dry_run_flag()`: Parse `--dry-run` flag from arguments
+- `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
+- `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
 
 **Output and Logging:**
 - `print_dry_run_header()`: Print dry-run mode header
@@ -178,8 +218,8 @@ Each job type reads from a pipe-delimited text file:
 - **Coupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Uncoupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Resume**: `resuming.txt` (16 fields)
-- **Evaluate / Inference**: `experiments.txt` (14 fields; `inference.sh` reads the
-  first 13 and ignores `shared_mem`)
+- **Evaluate / Inference**: `experiments.txt` (14 fields), always read from
+  `<experiment_dir>/<config_subdirectory>/`, never from `--config-dir`
 
 ### `min_runtime` Field (Optional, Training Inputs)
 
@@ -194,32 +234,6 @@ is protected from preemption before it can be interrupted.
   `--no-auto-resume` is never emitted on the training path.
 - **Example values**: `0` for short test runs, `1h` to protect a checkpoint cycle,
   `8h` for a fully protected run.
-
-### `CM_PRIORITY` and the Beaker priority balancer
-
-Every job launched by these scripts is submitted with a `CM_PRIORITY` env var,
-which opts it in to the Beaker priority balancer (`scripts/beaker_balancer`).
-The balancer keeps the team inside its urgent-GPU allocation by moving the
-Beaker priority of opted-in jobs up and down; jobs without the env var are never
-touched, but their urgent slots still count against the allocation.
-
-- **Default**: the `priority` field from the input file (`training.txt`,
-  `pretraining.txt`, `finetuning.txt`, `resuming.txt`, `experiments.txt`). A job
-  asking for `urgent` is therefore first in line for a scarce urgent slot and
-  falls back to `high` when it doesn't get one; a job asking for `normal` ranks
-  below it and rests at `normal`.
-- **Accepted values**: `low`, `normal`, `high`, `urgent`. Anything else —
-  including `immediate` and an empty `priority` field — submits no `CM_PRIORITY`
-  and leaves the job unmanaged. `immediate` is a deliberate, human-justified
-  decision the balancer must not undo.
-- **Override**: set `CM_PRIORITY` in the environment to apply one value to every
-  job in an invocation, e.g. `CM_PRIORITY=low job_runner/uncoupled_train.sh ...`.
-  Use `CM_PRIORITY=none` to opt out of the balancer entirely.
-
-Note that `CM_PRIORITY` is a ranking, not a ceiling: a job labelled `low` can
-still be promoted to `urgent` when the cluster is quiet — it is simply the first
-to be dropped when the allocation gets tight. See
-`scripts/beaker_balancer/README.md` for the full model.
 
 ### TAG Field (Optional)
 

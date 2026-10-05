@@ -73,6 +73,9 @@ while read RESUMING; do
     CLUSTER=$(echo "$RESUMING" | cut -d"|" -f7)
     N_GPUS=$(echo "$RESUMING" | cut -d"|" -f8)
     SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f9)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$RESUMING" | cut -d"|" -f10)
     WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f11)
     OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f12)
@@ -98,6 +101,7 @@ while read RESUMING; do
 
     JOB_GROUP="${GROUP}"
     JOB_NAME=$(build_job_name "$JOB_GROUP" "$TAG" "train")
+    require_job_name_length "$JOB_NAME"
 
     # Get experiment dataset
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then
@@ -107,7 +111,6 @@ while read RESUMING; do
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
-    build_cm_priority_args "$PRIORITY"
     build_stats_dataset_args
 
     # Set config path variable for print functions
@@ -127,7 +130,6 @@ while read RESUMING; do
         echo " - Job name: ${JOB_NAME}"
         echo " - Resuming results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Priority: ${PRIORITY}"
-        echo " - CM_PRIORITY: ${JOB_CM_PRIORITY}"
         echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
         echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"
@@ -164,11 +166,15 @@ while read RESUMING; do
     # Run the job using run_gantry_training_job
     EXPERIMENT_ID=$(MIN_RUNTIME="$MIN_RUNTIME" run_gantry_training_job_with_dry_run "Resume ${EXPERIMENT_DIR} pretraining: ${JOB_GROUP}")
 
+    # Stop the loop if beaker did not return an experiment ID
+    require_experiment_id "$EXPERIMENT_ID" "$JOB_NAME"
+
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
         "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 
-# Print dry-run summary
+# Print submission and dry-run summaries
+print_submission_summary
 print_dry_run_summary "$TOTAL_JOBS" "$PROCESSED_JOBS" "$SKIPPED_JOBS"

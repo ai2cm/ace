@@ -7,32 +7,14 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 ### Added
 
-- Submit all jobs with a `CM_PRIORITY` env var to opt them in to the Beaker
-  priority balancer ([#1419](https://github.com/ai2cm/ace/pull/1419)). It
-  defaults to the `priority` field from the input file and can be overridden for
-  a whole invocation with the `CM_PRIORITY` environment variable.
-
-## [0.0.1] - 2025-11-06
-
-### Added
-
-- job_runner
-
-### Changed
-
-- job_runner
-
-### Fixed
-
-- job_runner
-
-## [x.x.x] - yyyy-mm-dd
-
-### Added
-
 - CHANGELOG.md
 - [FEAT] Changelog TODO automation
 - `make jr_change`
+- [FEAT] Add `--config-dir` arg to `{evaluate,inference}.sh` for shared eval
+  configs
+- [FEAT] Default `SHARED_MEM` of `N_GPUS` / `N_TOTAL_GPUS_ON_NODE` times 80% the
+  node total RAM
+- [FEAT] Validate job name <= 128 characters (beaker max)
 
 ### Changed
 
@@ -60,10 +42,26 @@ https://github.com/ai2cm/full-model/compare/job_runner
   evaluation silently skipped the component checkpoint mounts and fell back to
   an empty cluster and shared memory. Header corrected in all three template
   branches, and in README.md.
+- [ISSUE] Catch failed beaker submission and avoid adding rows with empty
+  experiment ID in `experiments.txt`
+
+## [0.0.1] - 2025-11-06
+
+### Added
+
+- job_runner
+
+### Changed
+
+- job_runner
+
+### Fixed
+
+- job_runner
 
 ## Releases
 
-[unreleased]: https://github.com/ai2cm/full-model/compare/job_runner..ee9a4d2
+[unreleased]: https://github.com/ai2cm/full-model/compare/ee9a4d2..job_runner
 [0.0.1] https://github.com/ai2cm/full-model/tree/ee9a4d2d3cc735027163fe56ae14c403c975484d
 
 ## TODO
@@ -79,11 +77,11 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [ISSUE] `init_exper.sh` populates top-level `n_coupled_steps` with inference value
 - [ISSUE] Ignore header and empty lines in input .txt files when using `--dry-run`
 - [ISSUE] Don't commit if gantry fails.
-- [ISSUE] `sed` usage not working on macOS
-- [CHORE] Work out which `job_runner/` changes made on experiment branches need
-  to go back into the `job_runner` branch. Fixes have been landing directly on
-  `exper/*` branches because that is where they are discovered, and the two
-  above did as well — they are on `exper/2026-07-16-jamesd`, not on
-  `job_runner`. Nothing reconciles the two automatically, so the next person to
-  branch from `job_runner` gets the old behaviour. Needs a deliberate pass, not
-  a per-fix cherry-pick habit.
+- [CHORE] Automate porting of experiment-branch-to-job_runner-branch updates
+- [ISSUE] `make jr_changelog` doesn't properly handle insertion after multi-line
+  items
+- [FEAT] `train.sh` and `finetune.sh` with `--coupled` flag
+- [FEAT] Keyword-based job specification in `*.txt` files
+- [FEAT] Automated `run_` to `ran_` in `experiments.txt`
+- [FEAT] Document `*.txt` headers in each launcher script `--help`.
+- [FEAT] `--dry-run` skip header / comments / whitespace

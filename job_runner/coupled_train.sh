@@ -84,6 +84,9 @@ while read PRETRAINING; do
     CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f11)
     N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f12)
     SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f13)
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
     RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
     WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
     OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
@@ -106,6 +109,7 @@ while read PRETRAINING; do
 
     JOB_GROUP="${GROUP}"
     JOB_NAME=$(build_job_name "$JOB_GROUP" "$TAG" "train")
+    require_job_name_length "$JOB_NAME"
 
     # Get experiment IDs and datasets
     ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
@@ -115,7 +119,6 @@ while read PRETRAINING; do
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
-    build_cm_priority_args "$PRIORITY"
     build_stats_dataset_args
 
     # Create config from template
@@ -151,7 +154,6 @@ while read PRETRAINING; do
         echo " - Ocean results dataset ID: ${EXISTING_RESULTS_OCEAN_DATASET}"
         echo " - Ocean checkpoint type: ${OCEAN_CKPT}"
         echo " - Priority: ${PRIORITY}"
-        echo " - CM_PRIORITY: ${JOB_CM_PRIORITY}"
         echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
         echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"
@@ -176,11 +178,15 @@ while read PRETRAINING; do
     # Run the job (use relative path for CONFIG_PATH)
     CONFIG_PATH="$CONFIG_PATH_REL" MIN_RUNTIME="$MIN_RUNTIME" EXPERIMENT_ID=$(run_gantry_training_job_with_dry_run "Run coupled training from uncoupled pretraining: ${JOB_GROUP}")
 
+    # Stop the loop if beaker did not return an experiment ID
+    require_experiment_id "$EXPERIMENT_ID" "$JOB_NAME"
+
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
         "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 
-# Print dry-run summary
+# Print submission and dry-run summaries
+print_submission_summary
 print_dry_run_summary "$TOTAL_JOBS" "$PROCESSED_JOBS" "$SKIPPED_JOBS"

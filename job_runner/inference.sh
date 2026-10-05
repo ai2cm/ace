@@ -1,6 +1,6 @@
 #!/bin/bash
 # Wrapper script for inference jobs
-# Usage: inference.sh <experiment_dir> <config_subdirectory> [--dry-run]
+# Usage: inference.sh <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>]
 
 set -e
 
@@ -11,10 +11,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 if [[ "$#" -lt 2 ]]; then
-  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run]"
+  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled or experiments/2025-08-08-jamesd/uncoupled)"
   echo "  - <config_subdirectory>: Subdirectory containing the inference config files (inference-config-*.yaml)"
   echo "  - --dry-run: Preview actions without launching jobs"
+  echo "  - --config-dir <path>: Read the inference config files from this directory instead of"
+  echo "      <experiment_dir>/<config_subdirectory>/. Absolute, or relative to the repo root,"
+  echo "      and must resolve inside it. experiments.txt is read from <experiment_dir>/<config_subdirectory>/ either way."
   exit 1
 fi
 
@@ -25,6 +28,9 @@ shift 2
 
 # Parse dry-run flag
 parse_dry_run_flag "$@"
+
+# Parse --config-dir flag
+parse_config_dir_arg "$@"
 
 # Initialize script environment
 init_script_environment
@@ -42,6 +48,10 @@ fi
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
 INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments.txt"
 
+# Directory the config yaml files are read from; --config-dir redirects it.
+# INPUT_PATH above is unaffected: experiments.txt always comes from the experiment directory.
+CONFIG_DIR=$(resolve_config_dir "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$CONFIG_DIR_OVERRIDE")
+
 # Print dry-run header (no stats for inference)
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "========================================"
@@ -52,6 +62,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  Repository Root: $REPO_ROOT"
     echo "  Git Branch: $GIT_BRANCH"
     echo "  Beaker Username: $BEAKER_USERNAME"
+    echo "  Config Directory: $CONFIG_DIR"
     echo
 fi
 
@@ -79,6 +90,7 @@ while read TRAIN_EXPER; do
     CLUSTER=$(echo "$TRAIN_EXPER" | cut -d"|" -f11)
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f12)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
+    SHARED_MEM=$(echo "$TRAIN_EXPER" | cut -d"|" -f14)
 
     # Check if STATUS starts with "run_inf_"
     if [[ ! "$STATUS" =~ ^run_inf_ ]]; then
@@ -104,11 +116,11 @@ while read TRAIN_EXPER; do
         JOB_NAME="${JOB_GROUP}"
     fi
 
-    # Construct absolute path for file operations
-    CONFIG_PATH="${FULL_EXPERIMENT_DIR}/${CONFIG_SUBDIR}/${CURRENT_CONFIG_FILENAME}"
-
     # Construct relative path for gantry/python commands
-    CONFIG_PATH_REL="${EXPERIMENT_DIR}/${CONFIG_SUBDIR}/${CURRENT_CONFIG_FILENAME}"
+    CONFIG_PATH_REL="${CONFIG_DIR}/${CURRENT_CONFIG_FILENAME}"
+
+    # Construct absolute path for file operations
+    CONFIG_PATH="${REPO_ROOT}/${CONFIG_PATH_REL}"
 
     if [[ ! -f "$CONFIG_PATH" ]]; then
         echo "Error: Config file not found at ${CONFIG_PATH} for JOB_NAME: ${JOB_NAME}. Skipping."
@@ -116,6 +128,8 @@ while read TRAIN_EXPER; do
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
         continue
     fi
+
+    require_job_name_length "$JOB_NAME"
 
     if [[ -z $PRIORITY ]]; then
         PRIORITY=normal
@@ -147,23 +161,16 @@ while read TRAIN_EXPER; do
         )
     fi
 
-
-    if [[ -z "$WORKSPACE" ]]; then
-        WORKSPACE=ai2/ace
-    fi
-
-    if [[ -z "$CLUSTER" ]]; then
-        CLUSTER="a100+h100"
-    fi
-
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
     N_GPUS=1
-    SHARED_MEM="20GiB"
-    FME_MODULE="$FME_MODULE_INFERENCE"
+
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
+    fi
+    FME_MODULE="$FME_MODULE_EVALUATOR"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
-    build_cm_priority_args "$PRIORITY"
 
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -181,8 +188,8 @@ while read TRAIN_EXPER; do
         echo " - Checkpoint: ${CKPT}"
         echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Cluster: ${CLUSTER}"
+        echo " - Shared memory: ${SHARED_MEM}"
         echo " - Priority: ${PRIORITY}"
-        echo " - CM_PRIORITY: ${JOB_CM_PRIORITY}"
         echo " - ${MIN_RUNTIME}"
         echo " - --override args: ${OVERRIDE_ARGS}"
 
@@ -207,19 +214,17 @@ while read TRAIN_EXPER; do
             $MIN_RUNTIME \
             --no-auto-resume \
             "${CLUSTER_ARGS[@]}" \
-            --workspace "$WORKSPACE" \
             --weka climate-default:/climate-default \
             --env WANDB_USERNAME="$WANDB_USERNAME" \
             --env WANDB_NAME="$JOB_NAME" \
             --env WANDB_JOB_TYPE=inference \
             --env WANDB_RUN_GROUP="$JOB_GROUP" \
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-            "${CM_PRIORITY_ARGS[@]}" \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus 1 \
-            --shared-memory 20GiB \
+            --shared-memory $SHARED_MEM \
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
