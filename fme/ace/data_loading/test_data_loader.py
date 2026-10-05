@@ -504,10 +504,21 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "num_data_workers, force_forkserver",
-    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium_duration)],
+    "num_data_workers, force_forkserver, force_zarr_engine_used",
+    [
+        (0, False, False),
+        (0, True, False),
+        (0, False, True),
+        (3, False, False),
+        pytest.param(3, True, False, marks=pytest.mark.medium_duration),
+    ],
 )
-def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
+def test_inference_data_loader(
+    tmp_path,
+    num_data_workers: int,
+    force_forkserver: bool,
+    force_zarr_engine_used: bool,
+):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -521,6 +532,9 @@ def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver
         ),
         num_data_workers=num_data_workers,
     )
+    if force_zarr_engine_used:
+        assert hasattr(config, "_zarr_engine_used")
+        config._zarr_engine_used = True
     n_forward_steps_in_memory = 3
     window_requirements = DataRequirements(
         names=["foo", "bar"],
@@ -1475,3 +1489,40 @@ def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_pat
     assert batch_data.data_mask is not None
     assert batch_data.data_mask["foo"].all()
     assert not batch_data.data_mask["nonexistent_var"].any()
+
+
+class TestLocalIcRange:
+    """Tests for the local_ic_range helper used for contiguous IC sharding."""
+
+    def test_single_rank(self):
+        from fme.ace.data_loading.inference import local_ic_range
+
+        assert local_ic_range(4, 0, 1) == (0, 4)
+
+    def test_two_ranks(self):
+        from fme.ace.data_loading.inference import local_ic_range
+
+        assert local_ic_range(4, 0, 2) == (0, 2)
+        assert local_ic_range(4, 1, 2) == (2, 4)
+
+    def test_contiguous_full_coverage(self):
+        from fme.ace.data_loading.inference import local_ic_range
+
+        n_ic, world_size = 8, 4
+        all_ics: list[int] = []
+        for r in range(world_size):
+            start, end = local_ic_range(n_ic, r, world_size)
+            all_ics.extend(range(start, end))
+        assert all_ics == list(range(n_ic))
+
+    def test_not_divisible_raises(self):
+        from fme.ace.data_loading.inference import local_ic_range
+
+        with pytest.raises(ValueError, match="divisible"):
+            local_ic_range(5, 0, 2)
+
+    def test_zero_world_size_raises(self):
+        from fme.ace.data_loading.inference import local_ic_range
+
+        with pytest.raises(ValueError, match="positive"):
+            local_ic_range(4, 0, 0)

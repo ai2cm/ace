@@ -1,4 +1,4 @@
-coupled_config_path: configs/CM4-piControl-200yr-coupled.yaml
+coupled_config_path: configs/CM4-piControl-coupled-1deg-200yr.yaml
 coupled_ocean_zarr: /climate-default/2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
 coupled_atmosphere_zarr: /climate-default/2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-interpolate_sst-atmosphere.zarr
 time:

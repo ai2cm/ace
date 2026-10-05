@@ -1,0 +1,394 @@
+{
+ "_comment": [
+  "Structural fingerprint of a RELEASED checkpoint: what parameter names and",
+  "shapes it contains, and the builder config it was trained with. The test",
+  "that reads this rebuilds the module from `builder` and asserts its",
+  "state_dict matches `parameters` exactly, which is the condition",
+  "load_state_dict(strict=True) needs. Committing this instead of the 327 MB",
+  "artifact keeps the check in every CI run.",
+  "",
+  "DO NOT regenerate this from the code it constrains -- that would make it",
+  "self-fulfilling. It is derived only from the released artifact named in",
+  "`provenance`, whose sha256 must be verified first. Nothing in the test",
+  "suite writes this file."
+ ],
+ "provenance": {
+  "model": "SamudrACE-E3SMv3 (ocean component)",
+  "url": "https://huggingface.co/allenai/SamudrACE-E3SMv3/blob/main/SamudrACE-E3SMv3-ocean.tar",
+  "tar_sha256": "4a28ffa0f16e08632a642121c1c647fef2df1839a2704dc174af14cd72350e02",
+  "recorded": "2026-08-28",
+  "note": "The tar holds an unzipped torch save directory; re-zip it (stored, no compression) to torch.load it."
+ },
+ "n_in_channels": 92,
+ "n_out_channels": 80,
+ "img_shape": [
+  180,
+  360
+ ],
+ "builder": {
+  "type": "Samudra",
+  "config": {
+   "ch_width": [
+    280,
+    380,
+    480,
+    520
+   ],
+   "n_layers": [
+    1,
+    1,
+    1,
+    1
+   ],
+   "dilation": [
+    1,
+    2,
+    4,
+    8
+   ],
+   "pad": "circular",
+   "norm": "instance",
+   "norm_kwargs": {},
+   "upscale_factor": 2,
+   "checkpoint_strategy": "all",
+   "zonally_periodic_upsample": true
+  },
+  "conditional": false,
+  "allow_missing_variables": false
+ },
+ "parameters": {
+  "layers.0.skip_module.weight": [
+   280,
+   92,
+   1,
+   1
+  ],
+  "layers.0.skip_module.bias": [
+   280
+  ],
+  "layers.0.convblock.0.weight": [
+   184,
+   92,
+   3,
+   3
+  ],
+  "layers.0.convblock.0.bias": [
+   184
+  ],
+  "layers.0.convblock.2.cap": [],
+  "layers.0.convblock.3.weight": [
+   184,
+   184,
+   3,
+   3
+  ],
+  "layers.0.convblock.3.bias": [
+   184
+  ],
+  "layers.0.convblock.5.cap": [],
+  "layers.0.convblock.6.weight": [
+   280,
+   184,
+   1,
+   1
+  ],
+  "layers.0.convblock.6.bias": [
+   280
+  ],
+  "layers.2.skip_module.weight": [
+   380,
+   280,
+   1,
+   1
+  ],
+  "layers.2.skip_module.bias": [
+   380
+  ],
+  "layers.2.convblock.0.weight": [
+   560,
+   280,
+   3,
+   3
+  ],
+  "layers.2.convblock.0.bias": [
+   560
+  ],
+  "layers.2.convblock.2.cap": [],
+  "layers.2.convblock.3.weight": [
+   560,
+   560,
+   3,
+   3
+  ],
+  "layers.2.convblock.3.bias": [
+   560
+  ],
+  "layers.2.convblock.5.cap": [],
+  "layers.2.convblock.6.weight": [
+   380,
+   560,
+   1,
+   1
+  ],
+  "layers.2.convblock.6.bias": [
+   380
+  ],
+  "layers.4.skip_module.weight": [
+   480,
+   380,
+   1,
+   1
+  ],
+  "layers.4.skip_module.bias": [
+   480
+  ],
+  "layers.4.convblock.0.weight": [
+   760,
+   380,
+   3,
+   3
+  ],
+  "layers.4.convblock.0.bias": [
+   760
+  ],
+  "layers.4.convblock.2.cap": [],
+  "layers.4.convblock.3.weight": [
+   760,
+   760,
+   3,
+   3
+  ],
+  "layers.4.convblock.3.bias": [
+   760
+  ],
+  "layers.4.convblock.5.cap": [],
+  "layers.4.convblock.6.weight": [
+   480,
+   760,
+   1,
+   1
+  ],
+  "layers.4.convblock.6.bias": [
+   480
+  ],
+  "layers.6.skip_module.weight": [
+   520,
+   480,
+   1,
+   1
+  ],
+  "layers.6.skip_module.bias": [
+   520
+  ],
+  "layers.6.convblock.0.weight": [
+   960,
+   480,
+   3,
+   3
+  ],
+  "layers.6.convblock.0.bias": [
+   960
+  ],
+  "layers.6.convblock.2.cap": [],
+  "layers.6.convblock.3.weight": [
+   960,
+   960,
+   3,
+   3
+  ],
+  "layers.6.convblock.3.bias": [
+   960
+  ],
+  "layers.6.convblock.5.cap": [],
+  "layers.6.convblock.6.weight": [
+   520,
+   960,
+   1,
+   1
+  ],
+  "layers.6.convblock.6.bias": [
+   520
+  ],
+  "layers.8.convblock.0.weight": [
+   1040,
+   520,
+   3,
+   3
+  ],
+  "layers.8.convblock.0.bias": [
+   1040
+  ],
+  "layers.8.convblock.2.cap": [],
+  "layers.8.convblock.3.weight": [
+   1040,
+   1040,
+   3,
+   3
+  ],
+  "layers.8.convblock.3.bias": [
+   1040
+  ],
+  "layers.8.convblock.5.cap": [],
+  "layers.8.convblock.6.weight": [
+   520,
+   1040,
+   1,
+   1
+  ],
+  "layers.8.convblock.6.bias": [
+   520
+  ],
+  "layers.10.skip_module.weight": [
+   480,
+   520,
+   1,
+   1
+  ],
+  "layers.10.skip_module.bias": [
+   480
+  ],
+  "layers.10.convblock.0.weight": [
+   1040,
+   520,
+   3,
+   3
+  ],
+  "layers.10.convblock.0.bias": [
+   1040
+  ],
+  "layers.10.convblock.2.cap": [],
+  "layers.10.convblock.3.weight": [
+   1040,
+   1040,
+   3,
+   3
+  ],
+  "layers.10.convblock.3.bias": [
+   1040
+  ],
+  "layers.10.convblock.5.cap": [],
+  "layers.10.convblock.6.weight": [
+   480,
+   1040,
+   1,
+   1
+  ],
+  "layers.10.convblock.6.bias": [
+   480
+  ],
+  "layers.12.skip_module.weight": [
+   380,
+   480,
+   1,
+   1
+  ],
+  "layers.12.skip_module.bias": [
+   380
+  ],
+  "layers.12.convblock.0.weight": [
+   960,
+   480,
+   3,
+   3
+  ],
+  "layers.12.convblock.0.bias": [
+   960
+  ],
+  "layers.12.convblock.2.cap": [],
+  "layers.12.convblock.3.weight": [
+   960,
+   960,
+   3,
+   3
+  ],
+  "layers.12.convblock.3.bias": [
+   960
+  ],
+  "layers.12.convblock.5.cap": [],
+  "layers.12.convblock.6.weight": [
+   380,
+   960,
+   1,
+   1
+  ],
+  "layers.12.convblock.6.bias": [
+   380
+  ],
+  "layers.14.skip_module.weight": [
+   280,
+   380,
+   1,
+   1
+  ],
+  "layers.14.skip_module.bias": [
+   280
+  ],
+  "layers.14.convblock.0.weight": [
+   760,
+   380,
+   3,
+   3
+  ],
+  "layers.14.convblock.0.bias": [
+   760
+  ],
+  "layers.14.convblock.2.cap": [],
+  "layers.14.convblock.3.weight": [
+   760,
+   760,
+   3,
+   3
+  ],
+  "layers.14.convblock.3.bias": [
+   760
+  ],
+  "layers.14.convblock.5.cap": [],
+  "layers.14.convblock.6.weight": [
+   280,
+   760,
+   1,
+   1
+  ],
+  "layers.14.convblock.6.bias": [
+   280
+  ],
+  "layers.16.convblock.0.weight": [
+   560,
+   280,
+   3,
+   3
+  ],
+  "layers.16.convblock.0.bias": [
+   560
+  ],
+  "layers.16.convblock.2.cap": [],
+  "layers.16.convblock.3.weight": [
+   560,
+   560,
+   3,
+   3
+  ],
+  "layers.16.convblock.3.bias": [
+   560
+  ],
+  "layers.16.convblock.5.cap": [],
+  "layers.16.convblock.6.weight": [
+   280,
+   560,
+   1,
+   1
+  ],
+  "layers.16.convblock.6.bias": [
+   280
+  ],
+  "layers.17.weight": [
+   80,
+   280,
+   3,
+   3
+  ],
+  "layers.17.bias": [
+   80
+  ]
+ }
+}

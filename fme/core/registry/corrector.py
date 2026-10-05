@@ -42,6 +42,14 @@ class CorrectorSelector(CorrectorConfigABC):
             )
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
+    def training_is_default(self) -> bool:
+        """Whether the wrapped config leaves its training schedule at the default.
+
+        A scheduled corrector cannot load state from a checkpoint trained
+        without a schedule, and the schedule has no effect at inference.
+        """
+        return self._corrector_config_instance.corrector_disabled_epochs == 0
+
     @classmethod
     def register(cls, type_name):
         return cls.registry.register(type_name)
@@ -50,6 +58,10 @@ class CorrectorSelector(CorrectorConfigABC):
     def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Correctors."""
         return set(cls.registry._types.keys())
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def _get_corrector(
         self,

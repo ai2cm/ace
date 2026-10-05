@@ -1,3 +1,4 @@
+import json
 import math
 import os
 
@@ -10,13 +11,14 @@ from fme.ace.models.ocean.m2lines.layers import (
     MultiResolutionFiLM,
     ZonallyPeriodicBilinearUpsample,
 )
+from fme.ace.models.ocean.m2lines.samudra import Samudra
+from fme.ace.registry.registry import ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.testing import validate_tensor
 
 DIR = os.path.abspath(os.path.dirname(__file__))
-
-from fme.ace.models.ocean.m2lines.samudra import Samudra
 
 
 @pytest.mark.parametrize(
@@ -169,6 +171,44 @@ def test_samudra_output_is_unchanged():
         output,
         os.path.join(DIR, "testdata/test_samudra_output_is_unchanged.pt"),
     )
+
+
+def test_released_checkpoint_still_loads():
+    """A released checkpoint must keep loading into this module.
+
+    Checked against a committed manifest of the SamudrACE-E3SMv3 ocean
+    checkpoint -- its builder config and the name and shape of every parameter
+    -- rather than the 327 MB artifact. Matching the rebuilt state_dict against
+    the recorded parameters is the condition ``load_state_dict(strict=True)``
+    needs, and is the property structural edits to ``ConvNeXtBlock`` break;
+    numerics are pinned separately by ``test_samudra_output_is_unchanged``.
+    See the manifest's ``_comment`` for how to regenerate it.
+    """
+    path = os.path.join(DIR, "testdata/samudrace_e3smv3_ocean_manifest.json")
+    with open(path) as f:
+        manifest = json.load(f)
+
+    # via ModuleSelector rather than the builder directly, so the
+    # dacite(strict=True) deserialization of the stored config dict -- its own
+    # compatibility surface -- is covered too
+    selector = ModuleSelector(**manifest["builder"])
+    module = selector.build(
+        manifest["n_in_channels"],
+        manifest["n_out_channels"],
+        DatasetInfo(img_shape=tuple(manifest["img_shape"])),
+    )
+    built = {k: list(v.shape) for k, v in module.torch_module.state_dict().items()}
+    recorded = manifest["parameters"]
+
+    assert set(built) == set(recorded), (
+        f"state dict keys drifted from the released checkpoint; "
+        f"missing {sorted(set(recorded) - set(built))}, "
+        f"unexpected {sorted(set(built) - set(recorded))}"
+    )
+    mismatched = {
+        k: (recorded[k], built[k]) for k in recorded if recorded[k] != built[k]
+    }
+    assert not mismatched, f"parameter shapes drifted: {mismatched}"
 
 
 def _samudra(**kwargs):

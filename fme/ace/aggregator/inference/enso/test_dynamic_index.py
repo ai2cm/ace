@@ -15,6 +15,7 @@ from fme.core.typing_ import TensorMapping
 
 from ..utils import (
     LatLonRegion,
+    _calculate_power_spectrum_by_sample,
     _calculate_sample_average_power_spectrum,
     _compute_sample_mean_std,
     anomalies_from_monthly_climo,
@@ -576,6 +577,35 @@ def test__calculate_sample_average_power_spectrum():
         )
     assert freq.shape == power_spectrum.shape
     assert freq.shape == (3,)
+
+
+def test__calculate_power_spectrum_by_sample_keeps_samples():
+    data = [
+        [0.0, 1.0, 2.0, 5.0, 9.0, 10.0, 11.0],
+        [np.nan, np.nan, 3.0, 4.0, 6.0, 7.0, 8.0],
+    ]
+    with pytest.warns(UserWarning, match="Samples have different lengths"):
+        freq, power_by_sample = _calculate_power_spectrum_by_sample(
+            timeseries=xr.DataArray(data, dims=("sample", "time"))
+        )
+    assert power_by_sample.shape == (2, freq.shape[0])
+    average = _calculate_sample_average_power_spectrum(
+        timeseries=xr.DataArray(data, dims=("sample", "time"))
+    )[1]
+    np.testing.assert_allclose(power_by_sample.mean(axis=0), average)
+
+
+@pytest.mark.parametrize("n_times", [240, 241], ids=["even", "odd"])
+def test_power_spectrum_integrates_to_mean_square(n_times):
+    """The spectrum is a density: integrating it over frequency gives the mean
+    square of the timeseries, which is what makes the plotted power per octave
+    comparable between runs of different length."""
+    rng = np.random.default_rng(0)
+    values = rng.normal(size=(3, n_times))
+    data = xr.DataArray(values, dims=("sample", "time"))
+    freq, power_by_sample = _calculate_power_spectrum_by_sample(data)
+    integral = power_by_sample.sum(axis=1) * (freq[1] - freq[0])
+    np.testing.assert_allclose(integral, (values**2).mean(axis=1), rtol=1e-10)
 
 
 def test_compute_psd_band_power():
