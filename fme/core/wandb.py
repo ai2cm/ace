@@ -145,10 +145,11 @@ class WandB:
         """
         Initialize wandb, potentially with resumption logic.
 
-        If `resumable`, restores the metrics logged to disk before the last
-        checkpoint, and re-logs any that the resumed wandb run did not
-        receive. The disk restore happens whether or not logging to wandb is
-        enabled. Must be called on all ranks.
+        If `resumable`, truncates the on-disk metrics file back to the last
+        checkpoint, and if the wandb run was resumed, re-logs to it the rows
+        it never received. The truncation happens even when logging to wandb
+        is off, so the file does not keep rows from training the resumed job
+        redoes. Must be called on all ranks.
 
         Args:
             resumable: If True, attempt to resume the run in the experiment directory,
@@ -247,9 +248,6 @@ class WandB:
                 "previous job's offline wandb files hold them"
             )
             return
-        # wandb.run.resumed, not the run id file, tells a resumed run from a
-        # new one: init_wandb_with_resumption writes the file for a new run
-        # too, so by this point it always exists.
         if not wandb.run.resumed:
             return
         first_step = wandb.run.step
@@ -314,10 +312,14 @@ def scale_image(
 
 
 def build_disk_logger(metrics_log_dir: str) -> DiskMetricLogger | None:
-    """Build a DiskMetricLogger for this rank.
+    """Build the DiskMetricLogger for this process, or None if it should not
+    log metrics to disk.
 
-    Returns None on non-root ranks, which do not log metrics, and when
-    ``metrics_log_dir`` is not on a local file system.
+    In distributed training every process has a rank, and only the root
+    rank (rank 0) logs metrics, to wandb and to disk. Other ranks get None
+    so that one process owns the metrics file and the checkpoint mark. The
+    root rank also gets None, with a warning, when ``metrics_log_dir`` is
+    not on a local file system.
     """
     if not Distributed.get_instance().is_root():
         return None
@@ -343,21 +345,50 @@ class WandBLogCall:
 def metrics_to_relog(
     directory: str | os.PathLike, first_step: int, mark: CheckpointMark
 ) -> list[WandBLogCall]:
-    """Determine the calls to ``wandb.log`` that give a resumed run the
-    metrics it did not receive from the previous job.
+    """Build the ``wandb.log`` calls that fill the gap between what wandb
+    received before the previous job was killed and what that job logged to
+    disk.
+
+    For example, with these lines in the restored metrics file, a checkpoint
+    mark with ``last_step=30``, and wandb having received step 10 so that
+    ``first_step=11``::
+
+        {"step": 10, "batch_loss": 0.5}
+        {"step": 20, "batch_loss": 0.4}
+        {"step": 20, "val_loss": 0.3}
+        {"step": 30, "batch_loss": 0.2}
+
+    the result is::
+
+        [
+            WandBLogCall({"batch_loss": 0.4, "val_loss": 0.3}, step=20, commit=True),
+            WandBLogCall({"batch_loss": 0.2}, step=30, commit=False),
+        ]
+
+    Step 10 is dropped since wandb has it, the two step-20 lines are merged
+    into one call, and step 30 is left uncommitted since it is the mark's
+    ``last_step``.
 
     Args:
         directory: Directory holding the restored metrics file.
-        first_step: The step the resumed run continues at, i.e. the step after
-            the last one it received. wandb rejects logs at earlier steps.
-        mark: The checkpoint mark the metrics were restored to.
+        first_step: The first step wandb does not have. On resume this is
+            ``wandb.run.step``. Earlier steps are skipped, since wandb rejects
+            logs at steps it already passed.
+        mark: The checkpoint mark written by
+            ``DiskMetricLogger.write_checkpoint_mark`` when the checkpoint
+            being resumed from was saved. Only ``mark.last_step`` is used:
+            the ``step`` passed to the last ``WandB.log`` call before that
+            checkpoint was saved, i.e. the step the resumed job starts
+            logging at again.
 
     Returns:
-        One call per step from ``first_step`` on, in step order, with the
-        metrics logged at that step merged. The call at the mark's last step
-        has ``commit=False``, so that if the resumed job logs at that step
-        again (e.g. the end-of-epoch metrics after a checkpoint saved before
-        validation) those logs are added to the step instead of rejected.
+        One call per step from ``first_step`` on, in ascending order, each
+        holding every metric logged at that step. Every call has
+        ``commit=True`` except the one at ``mark.last_step``, the step the
+        resumed job starts logging at again (e.g. end-of-epoch metrics after
+        a checkpoint saved before validation). That call has
+        ``commit=False`` so wandb holds the step open and the resumed job's
+        logs merge into it instead of being rejected.
     """
     return [
         WandBLogCall(data=data, step=step, commit=step != mark.last_step)

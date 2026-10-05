@@ -79,10 +79,13 @@ class DiskMetricLogger:
         """Record that a checkpoint has been saved.
 
         Writes the metrics file's current size and the last logged step to the
-        checkpoint mark file, replacing it atomically. When a job is preempted
-        this runs on the termination listener's thread, so it must not use the
-        logging module (see
-        `fme.core.distributed.shutdown.add_post_abort_callback`).
+        checkpoint mark file, replacing it atomically.
+
+        When a job is preempted, this method runs on the termination
+        listener's thread while the main thread may be stuck mid-log, holding
+        the logging handler's lock. A log call from this method would wait on
+        that lock forever and the mark would never be written, so it does not
+        log (see `fme.core.distributed.shutdown.add_post_abort_callback`).
         """
         tmp_path = f"{self._mark_path}.tmp"
         with open(tmp_path, "w") as f:
@@ -90,14 +93,17 @@ class DiskMetricLogger:
         os.replace(tmp_path, self._mark_path)
 
     def restore_to_checkpoint_mark(self) -> CheckpointMark | None:
-        """Restore the metrics logged before the last checkpoint mark.
+        """Truncate the metrics file to what was logged before the last
+        checkpoint, so the resumed job appends to it from there.
 
-        The metrics file is cut at the mark, keeping any lines right after it
-        that are at the mark's last step, since the resumed job may not log
-        those again. Later lines are from training the resumed job redoes, so
-        they are moved to a separate file. If this logger has not logged
-        anything yet, the file restored is the one moved aside on
-        construction.
+        The checkpoint mark (see ``write_checkpoint_mark``) records the size
+        of the metrics file when the checkpoint was saved. This method keeps
+        the file up to that size, plus any lines just past it that are at the
+        mark's last step (ie. step 1000), since the resumed job may not log
+        those again. Lines after that come from training the resumed job
+        redoes, so they are moved to a ``metrics.jsonl.discarded.<timestamp>``
+        file. If this logger has not logged anything yet, the file it restores
+        is the previous job's file that was moved aside on construction.
 
         Returns:
             The mark restored to, or None if nothing was restored because
@@ -250,11 +256,27 @@ def read_metrics(directory: str | os.PathLike) -> list[dict[str, Any]]:
 def read_metrics_by_step(
     directory: str | os.PathLike, first_step: int
 ) -> dict[int, dict[str, Any]]:
-    """Read metric records with ``step >= first_step``.
+    """Read the metrics file into a dict keyed by step.
 
-    Records logged at the same step are merged, since a step may be logged in
-    several calls. Returns a dict from step to metrics, excluding the "step"
-    key, sorted by step.
+    Each line of the metrics file is a JSON object with a "step" and the
+    scalar metrics logged at that step, e.g.::
+
+        {"step": 10, "loss": 0.5}
+        {"step": 20, "loss": 0.4}
+        {"step": 20, "val_loss": 0.3}
+
+    With ``first_step=20`` this returns::
+
+        {20: {"loss": 0.4, "val_loss": 0.3}}
+
+    Args:
+        directory: Directory holding the metrics file.
+        first_step: Lines with a smaller step are left out.
+
+    Returns:
+        A dict from step to the metrics logged at that step, in ascending
+        step order. Lines at the same step are combined into one dict, and a
+        later line's value wins for a repeated key.
     """
     by_step: dict[int, dict[str, Any]] = {}
     for record in read_metrics(directory):
