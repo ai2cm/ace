@@ -4,6 +4,6 @@
 # Configs: --config-dir configs/experiments/cm4_eval/coupled.
 # Checkpoint: best_inference_ckpt from the arm's final (exit-0) training job's result dataset, pinned in field 9.
 
-# piC-ic0151-50yr-sfcflux-trained
+# piC-50yr-sfc-trained
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_piC-ic0151-50yr-sfcflux-trained|best_inference_ckpt|high|--min-runtime 4h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_piC-50yr-sfc-trained|best_inference_ckpt|high|--min-runtime 4h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
