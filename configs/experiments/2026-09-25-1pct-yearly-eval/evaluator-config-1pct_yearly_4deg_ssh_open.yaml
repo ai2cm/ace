@@ -45,6 +45,7 @@ stepper_override:
         method: scaled_salinity
         budget_config:
           type: sea_surface_height
+          include_brine_rejection: false  # as launched, before the SSH budget had sfdsi
         weight_by_sea_surface_fraction: true
         use_float64: true
       force_positive_names:

@@ -203,27 +203,148 @@ class IceVolumeSaltBudgetConfig:
         )
 
 
+def _validate_sea_ice_salt_flux(
+    include_brine_rejection: bool,
+    sea_ice_salinity_psu: float | None,
+    use_computed_brine_under_ice: bool,
+    sea_ice_density_kg_m3: float,
+) -> None:
+    if sea_ice_salinity_psu is not None and not include_brine_rejection:
+        raise ValueError("sea_ice_salinity_psu requires include_brine_rejection.")
+    if use_computed_brine_under_ice and sea_ice_salinity_psu is None:
+        raise ValueError("use_computed_brine_under_ice requires sea_ice_salinity_psu.")
+    if sea_ice_density_kg_m3 <= 0.0:
+        raise ValueError(
+            f"sea_ice_density_kg_m3 must be positive, got {sea_ice_density_kg_m3}."
+        )
+
+
+def _validate_full_ice_cover_threshold(
+    full_ice_cover_threshold: float | None,
+    sea_ice_fraction_threshold: float,
+    uses_sea_ice_terms: bool,
+    sea_ice_terms: str,
+) -> None:
+    if full_ice_cover_threshold is None:
+        return
+    if not uses_sea_ice_terms:
+        raise ValueError(f"full_ice_cover_threshold requires {sea_ice_terms}.")
+    if full_ice_cover_threshold <= sea_ice_fraction_threshold:
+        raise ValueError(
+            "full_ice_cover_threshold must exceed sea_ice_fraction_threshold, got "
+            f"{full_ice_cover_threshold} and {sea_ice_fraction_threshold}."
+        )
+
+
+def _require_local_sea_ice_volume_sum() -> None:
+    Distributed.get_instance().require_no_spatial_parallelism(
+        "The sea ice terms of the salt budgets sum sea_ice_volume over the local "
+        "spatial chunk only."
+    )
+
+
+def _build_sea_ice_salt_flux(
+    include_brine_rejection: bool,
+    sea_ice_salinity_psu: float | None,
+    use_computed_brine_under_ice: bool,
+    fluxes_from_forcing: bool,
+    sea_ice_density_kg_m3: float,
+    spatial_mask_provider: SpatialMaskProviderABC,
+) -> "SeaIceSaltFlux | None":
+    if not include_brine_rejection:
+        return None
+    ice_volume_mask = None
+    if sea_ice_salinity_psu is not None:
+        _require_local_sea_ice_volume_sum()
+        ice_volume_mask = _sea_ice_volume_output_mask(spatial_mask_provider)
+    return SeaIceSaltFlux(
+        sea_ice_salinity_psu,
+        use_computed_brine_under_ice,
+        fluxes_from_forcing,
+        sea_ice_density_kg_m3,
+        ice_volume_mask,
+    )
+
+
 @dataclasses.dataclass
 class SeaSurfaceHeightSaltBudgetConfig:
-    """Salt budget from the change of the sea surface height. Requires ``SSH``,
-    the height including its global mean, in the inputs and outputs.
+    """Salt budget from the change of the sea surface height and the sea ice
+    basal salt flux, -S_ref * sum((SSH_gen - SSH_input) * ssf * A) +
+    (DT / rho_0) * sum(1000 * sfdsi * ssf * A). Requires ``SSH``, the height
+    including its global mean, in the inputs and outputs.
+
+    sfdsi is read from the generated data, or only from the forcing data with
+    ``fluxes_from_forcing``; there is no fallback from one to the other. With
+    ``include_brine_rejection``, the sea ice salt flux is, in order of
+    preference:
+
+    1. sfdsi from that data, replaced under full ice cover by the computed
+       flux -rho_ice * S_ice * delta(sea_ice_volume) / DT if
+       ``use_computed_brine_under_ice``;
+    2. the computed flux everywhere, if sfdsi is missing and
+       ``sea_ice_salinity_psu`` is set;
+    3. otherwise an error.
 
     Parameters:
         reference_salinity_psu: Salinity at which the added water dilutes the
             salt, in psu.
+        include_brine_rejection: Include the sea ice salt flux.
+        sea_ice_salinity_psu: Sea ice salinity S_ice of the computed sea ice
+            salt flux, in psu. None never computes it.
+        use_computed_brine_under_ice: Use the computed sea ice salt flux in
+            place of sfdsi under full ice cover.
+        sea_ice_fraction_threshold: Cells whose sea ice fraction exceeds this at
+            either step are ice covered.
+        full_ice_cover_threshold: Ice-covered cells whose sea ice fraction is
+            at least this at both steps are under full ice cover. None puts
+            every ice-covered cell under full ice cover.
+        fluxes_from_forcing: Read sfdsi from the forcing data instead of the
+            generated data.
+        sea_ice_density_kg_m3: Density of sea ice.
         type: Selects this budget.
     """
 
     reference_salinity_psu: float = REFERENCE_SALINITY_PSU
+    include_brine_rejection: bool = True
+    sea_ice_salinity_psu: float | None = None
+    use_computed_brine_under_ice: bool = False
+    sea_ice_fraction_threshold: float = 0.0
+    full_ice_cover_threshold: float | None = None
+    fluxes_from_forcing: bool = False
+    sea_ice_density_kg_m3: float = DENSITY_OF_SEA_ICE
     type: Literal["sea_surface_height"] = "sea_surface_height"
 
     def validate(self, weight_by_sea_surface_fraction: bool) -> None:
         _require_sea_surface_fraction_weighting(
             self.type, weight_by_sea_surface_fraction
         )
+        _validate_sea_ice_salt_flux(
+            self.include_brine_rejection,
+            self.sea_ice_salinity_psu,
+            self.use_computed_brine_under_ice,
+            self.sea_ice_density_kg_m3,
+        )
+        _validate_full_ice_cover_threshold(
+            self.full_ice_cover_threshold,
+            self.sea_ice_fraction_threshold,
+            self.use_computed_brine_under_ice,
+            "use_computed_brine_under_ice",
+        )
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
-        return SeaSurfaceHeightSaltBudget(self.reference_salinity_psu)
+        return SeaSurfaceHeightSaltBudget(
+            self.reference_salinity_psu,
+            self.sea_ice_fraction_threshold,
+            self.full_ice_cover_threshold,
+            _build_sea_ice_salt_flux(
+                self.include_brine_rejection,
+                self.sea_ice_salinity_psu,
+                self.use_computed_brine_under_ice,
+                self.fluxes_from_forcing,
+                self.sea_ice_density_kg_m3,
+                spatial_mask_provider,
+            ),
+        )
 
 
 @dataclasses.dataclass
@@ -303,48 +424,36 @@ class WaterFluxSaltBudgetConfig:
         _require_sea_surface_fraction_weighting(
             self.type, weight_by_sea_surface_fraction
         )
-        if self.sea_ice_salinity_psu is not None and not self.include_brine_rejection:
-            raise ValueError("sea_ice_salinity_psu requires include_brine_rejection.")
-        if self.use_computed_brine_under_ice and self.sea_ice_salinity_psu is None:
-            raise ValueError(
-                "use_computed_brine_under_ice requires sea_ice_salinity_psu."
-            )
-        if self.sea_ice_density_kg_m3 <= 0.0:
-            raise ValueError(
-                "sea_ice_density_kg_m3 must be positive, got "
-                f"{self.sea_ice_density_kg_m3}."
-            )
-        full_ice_cover_threshold = self.regimes.full_ice_cover_threshold
-        if full_ice_cover_threshold is not None:
-            if not (
-                self.use_sea_ice_mass_change_under_ice
-                or self.use_computed_brine_under_ice
-            ):
-                raise ValueError(
-                    "full_ice_cover_threshold requires "
-                    "use_sea_ice_mass_change_under_ice or "
-                    "use_computed_brine_under_ice."
-                )
-            if full_ice_cover_threshold <= self.regimes.sea_ice_fraction_threshold:
-                raise ValueError(
-                    "full_ice_cover_threshold must exceed "
-                    "sea_ice_fraction_threshold, got "
-                    f"{full_ice_cover_threshold} and "
-                    f"{self.regimes.sea_ice_fraction_threshold}."
-                )
+        _validate_sea_ice_salt_flux(
+            self.include_brine_rejection,
+            self.sea_ice_salinity_psu,
+            self.use_computed_brine_under_ice,
+            self.sea_ice_density_kg_m3,
+        )
+        _validate_full_ice_cover_threshold(
+            self.regimes.full_ice_cover_threshold,
+            self.regimes.sea_ice_fraction_threshold,
+            self.use_sea_ice_mass_change_under_ice or self.use_computed_brine_under_ice,
+            "use_sea_ice_mass_change_under_ice or use_computed_brine_under_ice",
+        )
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
         ice_volume_mask = None
-        if (
-            self.use_sea_ice_mass_change_under_ice
-            or self.sea_ice_salinity_psu is not None
-        ):
-            Distributed.get_instance().require_no_spatial_parallelism(
-                "The sea ice terms of the water flux salt budget sum "
-                "sea_ice_volume over the local spatial chunk only."
-            )
+        if self.use_sea_ice_mass_change_under_ice:
+            _require_local_sea_ice_volume_sum()
             ice_volume_mask = _sea_ice_volume_output_mask(spatial_mask_provider)
-        return WaterFluxSaltBudget(self, ice_volume_mask)
+        return WaterFluxSaltBudget(
+            self,
+            ice_volume_mask,
+            _build_sea_ice_salt_flux(
+                self.include_brine_rejection,
+                self.sea_ice_salinity_psu,
+                self.use_computed_brine_under_ice,
+                self.fluxes_from_forcing,
+                self.sea_ice_density_kg_m3,
+                spatial_mask_provider,
+            ),
+        )
 
 
 SaltBudgetConfig = (
@@ -925,17 +1034,163 @@ class IceVolumeSaltBudget:
         return self.slope_psu * total_ice_volume_change
 
 
+def _has_ocean_field(data: OceanData, standard_name: str) -> bool:
+    return any(name in data.data for name in OCEAN_FIELD_NAME_PREFIXES[standard_name])
+
+
+def _sea_ice_fraction(data: OceanData) -> torch.Tensor | None:
+    """ocean_sea_ice_fraction if present, else sea_ice_fraction, with NaN as
+    zero; None if neither is available.
+    """
+    for name in ("ocean_sea_ice_fraction", "sea_ice_fraction"):
+        try:
+            return torch.nan_to_num(data[name])
+        except KeyError:
+            continue
+    return None
+
+
+def _ice_regimes(
+    input: OceanData,
+    gen: OceanData,
+    sea_ice_fraction_threshold: float,
+    full_ice_cover_threshold: float | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Cells whose sea ice fraction exceeds sea_ice_fraction_threshold at
+    either step (ice covered), and within them the cells whose fraction is at
+    least full_ice_cover_threshold at both steps (under full ice cover; all
+    ice-covered cells if None).
+    """
+    fractions = [
+        fraction
+        for fraction in (_sea_ice_fraction(input), _sea_ice_fraction(gen))
+        if fraction is not None
+    ]
+    if len(fractions) == 0:
+        raise ValueError(
+            "The salt budget needs the sea ice fraction in the input or generated "
+            "data to find ice covered cells."
+        )
+    ice_covered = functools.reduce(
+        torch.logical_or,
+        [fraction > sea_ice_fraction_threshold for fraction in fractions],
+    )
+    if full_ice_cover_threshold is None:
+        return ice_covered, ice_covered
+    full_ice_cover = functools.reduce(
+        torch.logical_and,
+        [fraction >= full_ice_cover_threshold for fraction in fractions],
+    )
+    return ice_covered, ice_covered & full_ice_cover
+
+
+def _sea_ice_mass_change_kg_per_s(
+    input: OceanData,
+    gen: OceanData,
+    region: torch.Tensor,
+    ice_volume_mask: torch.Tensor | None,
+    sea_ice_density_kg_m3: float,
+    timestep_seconds: float,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """rho_ice * sum(delta sea_ice_volume) / DT over the region, inside the
+    ice volume mask.
+    """
+    mask = region if ice_volume_mask is None else region & ice_volume_mask
+    ice_volume_change = _total_sea_ice_volume_change(
+        input,
+        gen,
+        mask,
+        dtype,
+        required_by="the sea ice terms of the salt budget",
+    )
+    return sea_ice_density_kg_m3 * ice_volume_change / timestep_seconds
+
+
+@dataclasses.dataclass
+class SeaIceSaltFlux:
+    """Global sea ice salt flux into the ocean, in g/s, as described in
+    ``WaterFluxSaltBudgetConfig``.
+
+    Parameters:
+        sea_ice_salinity_psu: Sea ice salinity of the computed flux, or None.
+        use_computed_brine_under_ice: Use the computed flux in place of sfdsi
+            where ice covered.
+        from_forcing: Read sfdsi from the forcing data instead of the
+            generated data.
+        sea_ice_density_kg_m3: Density of sea ice.
+        ice_volume_mask: Cells whose sea_ice_volume prediction the stepper
+            keeps; None counts every cell.
+    """
+
+    sea_ice_salinity_psu: float | None
+    use_computed_brine_under_ice: bool
+    from_forcing: bool
+    sea_ice_density_kg_m3: float
+    ice_volume_mask: torch.Tensor | None
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        full_ice_cover: torch.Tensor,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        source, source_name = (
+            (forcing, "forcing") if self.from_forcing else (gen, "generated")
+        )
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+        salinity = self.sea_ice_salinity_psu
+        if _has_ocean_field(source, "downward_sea_ice_basal_salt_flux"):
+            sfdsi = source.downward_sea_ice_basal_salt_flux.to(dtype)  # NaN as 0
+            salt = 1000.0 * sfdsi * sea_surface_fraction  # g/m**2/s
+            if not self.use_computed_brine_under_ice or salinity is None:
+                return global_total(salt)
+            computed_region = full_ice_cover
+            salt = torch.where(computed_region, torch.zeros_like(salt), salt)
+        elif salinity is not None:
+            computed_region = torch.ones_like(full_ice_cover)
+            salt = torch.zeros_like(sea_surface_fraction)
+        else:
+            raise ValueError(
+                f"The salt budget needs sfdsi in the {source_name} data, or "
+                "sea_ice_salinity_psu to compute it; set include_brine_rejection "
+                "to False to omit it."
+            )
+        ice_mass_change = _sea_ice_mass_change_kg_per_s(
+            input,
+            gen,
+            computed_region,
+            self.ice_volume_mask,
+            self.sea_ice_density_kg_m3,
+            timestep_seconds,
+            dtype,
+        )
+        return global_total(salt) - salinity * ice_mass_change
+
+
 @dataclasses.dataclass
 class SeaSurfaceHeightSaltBudget:
-    """Salt budget from the change of the sea surface height,
-    -S_ref * sum((SSH_gen - SSH_input) * ssf * A).
+    """Salt budget from the change of the sea surface height and the sea ice
+    salt flux. See ``SeaSurfaceHeightSaltBudgetConfig``.
 
     Parameters:
         reference_salinity_psu: Salinity at which the added water dilutes the
             salt, in psu.
+        sea_ice_fraction_threshold: Cells whose sea ice fraction exceeds this at
+            either step are ice covered.
+        full_ice_cover_threshold: Ice-covered cells whose sea ice fraction is
+            at least this at both steps are under full ice cover; None for all.
+        sea_ice_salt_flux: The sea ice salt flux, or None to omit it.
     """
 
     reference_salinity_psu: float
+    sea_ice_fraction_threshold: float
+    full_ice_cover_threshold: float | None
+    sea_ice_salt_flux: SeaIceSaltFlux | None
 
     def __call__(
         self,
@@ -958,68 +1213,48 @@ class SeaSurfaceHeightSaltBudget:
         height_change = torch.nan_to_num(gen_height - input_height)  # m
         sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
         added_water_volume = global_total(height_change * sea_surface_fraction)  # m**3
-        return -self.reference_salinity_psu * added_water_volume
-
-
-def _has_ocean_field(data: OceanData, standard_name: str) -> bool:
-    return any(name in data.data for name in OCEAN_FIELD_NAME_PREFIXES[standard_name])
-
-
-def _sea_ice_fraction(data: OceanData) -> torch.Tensor | None:
-    """ocean_sea_ice_fraction if present, else sea_ice_fraction, with NaN as
-    zero; None if neither is available.
-    """
-    for name in ("ocean_sea_ice_fraction", "sea_ice_fraction"):
-        try:
-            return torch.nan_to_num(data[name])
-        except KeyError:
-            continue
-    return None
+        expected_change = -self.reference_salinity_psu * added_water_volume
+        if self.sea_ice_salt_flux is not None:
+            full_ice_cover = torch.zeros_like(height_change, dtype=torch.bool)
+            if self.sea_ice_salt_flux.use_computed_brine_under_ice:
+                _, full_ice_cover = _ice_regimes(
+                    input,
+                    gen,
+                    self.sea_ice_fraction_threshold,
+                    self.full_ice_cover_threshold,
+                )
+            salt_g_per_s = self.sea_ice_salt_flux(
+                input,
+                gen,
+                forcing,
+                full_ice_cover,
+                global_total,
+                timestep_seconds,
+                dtype,
+            )
+            # g/s * s / (kg/m**3) = (g/kg) m**3 = psu m**3
+            expected_change = (
+                expected_change
+                + salt_g_per_s * timestep_seconds / DENSITY_OF_SEA_WATER_CM4
+            )
+        return expected_change
 
 
 @dataclasses.dataclass
 class WaterFluxSaltBudget:
-    """Salt budget from the surface water flux and the sea ice basal salt
-    flux, with terms in place of wfo and sfdsi in their regimes. See
-    ``WaterFluxSaltBudgetConfig``.
+    """Salt budget from the surface water flux and the sea ice salt flux, with
+    terms in place of wfo in their regimes. See ``WaterFluxSaltBudgetConfig``.
 
     Parameters:
         config: The budget configuration.
         ice_volume_mask: Cells whose sea_ice_volume prediction the stepper
             keeps; None counts every cell.
+        sea_ice_salt_flux: The sea ice salt flux, or None to omit it.
     """
 
     config: WaterFluxSaltBudgetConfig
     ice_volume_mask: torch.Tensor | None
-
-    def _ice_regimes(
-        self, input: OceanData, gen: OceanData
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Returns the ice-covered cells and, within them, the cells under
-        full ice cover.
-        """
-        fractions = [
-            fraction
-            for fraction in (_sea_ice_fraction(input), _sea_ice_fraction(gen))
-            if fraction is not None
-        ]
-        if len(fractions) == 0:
-            raise ValueError(
-                "The water flux salt budget regimes need the sea ice fraction in "
-                "the input or generated data."
-            )
-        regimes = self.config.regimes
-        ice_covered = functools.reduce(
-            torch.logical_or,
-            [fraction > regimes.sea_ice_fraction_threshold for fraction in fractions],
-        )
-        if regimes.full_ice_cover_threshold is None:
-            return ice_covered, ice_covered
-        full_ice_cover = functools.reduce(
-            torch.logical_and,
-            [fraction >= regimes.full_ice_cover_threshold for fraction in fractions],
-        )
-        return ice_covered, ice_covered & full_ice_cover
+    sea_ice_salt_flux: SeaIceSaltFlux | None
 
     def __call__(
         self,
@@ -1041,9 +1276,8 @@ class WaterFluxSaltBudget:
             raise ValueError(
                 f"The water flux salt budget needs wfo in the {source_name} data."
             ) from err
-        # fluxes per unit total cell area; wfo is NaN over land
+        # per unit total cell area; wfo is NaN over land
         water = torch.nan_to_num(wfo) * sea_surface_fraction  # kg/m**2/s
-        salt = torch.zeros_like(water)  # g/m**2/s
         ice_covered = torch.zeros_like(water, dtype=torch.bool)
         full_ice_cover = ice_covered
         if (
@@ -1051,39 +1285,12 @@ class WaterFluxSaltBudget:
             or config.use_sea_ice_mass_change_under_ice
             or config.use_computed_brine_under_ice
         ):
-            ice_covered, full_ice_cover = self._ice_regimes(input, gen)
-
-        def ice_mass_change_kg_per_s(region: torch.Tensor) -> torch.Tensor:
-            mask = (
-                region
-                if self.ice_volume_mask is None
-                else region & self.ice_volume_mask
-            )
-            ice_volume_change = _total_sea_ice_volume_change(
+            ice_covered, full_ice_cover = _ice_regimes(
                 input,
                 gen,
-                mask,
-                dtype,
-                required_by="the sea ice terms of the water flux salt budget",
+                config.regimes.sea_ice_fraction_threshold,
+                config.regimes.full_ice_cover_threshold,
             )
-            return config.sea_ice_density_kg_m3 * ice_volume_change / timestep_seconds
-
-        computed_brine_region = None
-        if config.include_brine_rejection:
-            if _has_ocean_field(source, "downward_sea_ice_basal_salt_flux"):
-                sfdsi = source.downward_sea_ice_basal_salt_flux.to(dtype)  # NaN as 0
-                salt = 1000.0 * sfdsi * sea_surface_fraction
-                if config.use_computed_brine_under_ice:
-                    salt = torch.where(full_ice_cover, torch.zeros_like(salt), salt)
-                    computed_brine_region = full_ice_cover
-            elif config.sea_ice_salinity_psu is not None:
-                computed_brine_region = torch.ones_like(ice_covered)
-            else:
-                raise ValueError(
-                    f"The water flux salt budget needs sfdsi in the {source_name} "
-                    "data, or sea_ice_salinity_psu to compute it; set "
-                    "include_brine_rejection to False to omit it."
-                )
         if config.use_precipitation_minus_evaporation_over_open_water:
             try:
                 precipitation_minus_evaporation = (
@@ -1103,22 +1310,30 @@ class WaterFluxSaltBudget:
                 precipitation_minus_evaporation * sea_surface_fraction,
                 water,
             )
-        water_kg_per_s = global_total(water)
         if config.use_sea_ice_mass_change_under_ice:
             water = torch.where(full_ice_cover, torch.zeros_like(water), water)
-            water_kg_per_s = global_total(water) - ice_mass_change_kg_per_s(
-                full_ice_cover
+            water_kg_per_s = global_total(water) - _sea_ice_mass_change_kg_per_s(
+                input,
+                gen,
+                full_ice_cover,
+                self.ice_volume_mask,
+                config.sea_ice_density_kg_m3,
+                timestep_seconds,
+                dtype,
             )
-        salt_g_per_s = global_total(salt)
-        if (
-            computed_brine_region is not None
-            and config.sea_ice_salinity_psu is not None
-        ):
-            salt_g_per_s = salt_g_per_s - (
-                config.sea_ice_salinity_psu
-                * ice_mass_change_kg_per_s(computed_brine_region)
+        else:
+            water_kg_per_s = global_total(water)
+        salt_g_per_s = -config.reference_salinity_psu * water_kg_per_s
+        if self.sea_ice_salt_flux is not None:
+            salt_g_per_s = salt_g_per_s + self.sea_ice_salt_flux(
+                input,
+                gen,
+                forcing,
+                full_ice_cover,
+                global_total,
+                timestep_seconds,
+                dtype,
             )
-        salt_g_per_s = salt_g_per_s - config.reference_salinity_psu * water_kg_per_s
         # g/s * s / (kg/m**3) = (g/kg) m**3 = psu m**3
         return salt_g_per_s * timestep_seconds / DENSITY_OF_SEA_WATER_CM4
 

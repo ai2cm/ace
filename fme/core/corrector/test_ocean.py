@@ -903,7 +903,8 @@ def _ssh_budget_corrector(
         ocean_salt_content_correction=OceanSaltContentBudgetConfig(
             method="scaled_salinity",
             budget_config=SeaSurfaceHeightSaltBudgetConfig(
-                reference_salinity_psu=reference_salinity_psu
+                reference_salinity_psu=reference_salinity_psu,
+                include_brine_rejection=False,
             ),
         )
     )
@@ -1026,7 +1027,12 @@ def test_ocean_salt_content_correction_sea_surface_height_nan_over_land():
     def unmasked_total(data: torch.Tensor) -> torch.Tensor:
         return data.sum(dim=(-2, -1), keepdim=True)
 
-    budget = SeaSurfaceHeightSaltBudget(reference_salinity_psu=35.0)
+    budget = SeaSurfaceHeightSaltBudget(
+        reference_salinity_psu=35.0,
+        sea_ice_fraction_threshold=0.0,
+        full_ice_cover_threshold=None,
+        sea_ice_salt_flux=None,
+    )
     expected_change = budget(
         OceanData(input_data),
         OceanData(gen_data),
@@ -1168,7 +1174,8 @@ def test_ocean_salt_content_correction_sea_surface_height_budget_float64():
                 method="scaled_salinity",
                 use_float64=use_float64,
                 budget_config=SeaSurfaceHeightSaltBudgetConfig(
-                    reference_salinity_psu=reference_salinity
+                    reference_salinity_psu=reference_salinity,
+                    include_brine_rejection=False,
                 ),
             )
         )
@@ -1334,8 +1341,10 @@ def _flux_salt_change(
 
 
 def _assert_salt_change(state, corrected, expected_change):
+    # the change is the difference of two totals ~1e6 times larger, so float64
+    # rounding of the totals limits the relative precision of the change
     torch.testing.assert_close(
-        _salt_content_change(state, corrected), expected_change, rtol=1e-10, atol=0.0
+        _salt_content_change(state, corrected), expected_change, rtol=1e-9, atol=0.0
     )
     # by one ratio applied to every level
     ratio = corrected["so_0"] / state.gen_data["so_0"]
@@ -1662,6 +1671,162 @@ def test_water_flux_salt_budget_spatial_parallelism(
                 config.get_corrector(dataset_info)
         else:
             config.get_corrector(dataset_info)
+
+
+def _ssh_state_with_sea_ice() -> _WaterFluxSaltState:
+    """The water flux test state with a sea surface height in place of wfo."""
+    state = _water_flux_salt_state()
+    ocean = state.ocean_mask.to(DEVICE) > 0
+    shape = state.ocean_mask.shape
+    input_ssh = 0.5 * torch.randn(shape, dtype=torch.float64, device=DEVICE)
+    gen_ssh = input_ssh + 1e-3 * torch.randn(shape, dtype=torch.float64, device=DEVICE)
+    state.input_data["SSH"] = input_ssh.where(ocean, float("nan"))
+    state.gen_data["SSH"] = gen_ssh.where(ocean, float("nan"))
+    del state.gen_data["wfo"]
+    return state
+
+
+def _correct_with_ssh_budget(
+    state: _WaterFluxSaltState, ssh_budget: dict
+) -> TensorMapping:
+    config = OceanCorrectorConfig.from_state(
+        {
+            "ocean_salt_content_correction": {
+                "method": "scaled_salinity",
+                "budget_config": {"type": "sea_surface_height", **ssh_budget},
+            }
+        }
+    )
+    corrector = config.get_corrector(
+        _salt_dataset_info(state.ocean_mask, _WATER_FLUX_LAYERS, state.ice_mask)
+    )
+    return corrector(
+        state.input_data, state.gen_data, state.forcing_data, None
+    ).corrected
+
+
+def _ssh_height_salt_change(state: _WaterFluxSaltState) -> float:
+    """float64 reference -S_ref * sum(delta SSH * ssf * A) in psu m**3."""
+    height_change = (state.gen_data["SSH"] - state.input_data["SSH"]).nan_to_num()
+    return -35.0 * float((height_change * state.sea_surface_area).sum())
+
+
+@pytest.mark.parametrize(
+    "sea_ice_salinity_psu, use_computed_brine_under_ice",
+    [(None, False), (3.0, False), (3.0, True)],
+)
+def test_sea_surface_height_salt_budget_with_sea_ice_salt_flux(
+    sea_ice_salinity_psu, use_computed_brine_under_ice
+):
+    # The height term plus the predicted sfdsi, replaced by the computed sea
+    # ice salt flux under ice only when asked for.
+    state = _ssh_state_with_sea_ice()
+    corrected = _correct_with_ssh_budget(
+        state,
+        {
+            "sea_ice_salinity_psu": sea_ice_salinity_psu,
+            "use_computed_brine_under_ice": use_computed_brine_under_ice,
+        },
+    )
+    ice_covered, _, _ = state.regimes()
+    salt = state.gen_data["sfdsi"]
+    ice_salt_change = 0.0
+    if use_computed_brine_under_ice:
+        salt = torch.where(ice_covered, 0.0, salt)
+        ice_salt_change = sea_ice_salinity_psu * _counted_ice_mass_change_kg_per_s(
+            state, ice_covered
+        )
+    expected = (
+        _ssh_height_salt_change(state)
+        + _flux_salt_change(state, torch.zeros(1), salt)
+        - state.timestep_seconds / 1035.0 * ice_salt_change
+    )
+    _assert_salt_change(state, corrected, expected)
+
+
+def test_sea_surface_height_salt_budget_full_ice_cover_threshold():
+    # With a full ice cover threshold, the computed sea ice salt flux replaces
+    # sfdsi only where the ice fraction reaches it at both steps.
+    state = _ssh_state_with_sea_ice()
+    for data in (state.input_data, state.gen_data):
+        data["ocean_sea_ice_fraction"][0, :4] = 1.0
+    state.input_data["ocean_sea_ice_fraction"][0, 4] = 1.0  # at one step only
+    corrected = _correct_with_ssh_budget(
+        state,
+        {
+            "sea_ice_salinity_psu": 3.0,
+            "use_computed_brine_under_ice": True,
+            "full_ice_cover_threshold": 1.0,
+        },
+    )
+    full_ice_cover = torch.zeros_like(state.ice_mask, dtype=torch.bool, device=DEVICE)
+    full_ice_cover[0, :4] = True
+    salt = torch.where(full_ice_cover, 0.0, state.gen_data["sfdsi"])
+    ice_salt_change = 3.0 * _counted_ice_mass_change_kg_per_s(state, full_ice_cover)
+    expected = (
+        _ssh_height_salt_change(state)
+        + _flux_salt_change(state, torch.zeros(1), salt)
+        - state.timestep_seconds / 1035.0 * ice_salt_change
+    )
+    _assert_salt_change(state, corrected, expected)
+
+
+def test_sea_surface_height_salt_budget_computes_sfdsi_if_not_predicted():
+    state = _ssh_state_with_sea_ice()
+    del state.gen_data["sfdsi"]
+    corrected = _correct_with_ssh_budget(state, {"sea_ice_salinity_psu": 3.0})
+    everywhere = torch.ones_like(state.ice_mask, dtype=torch.bool, device=DEVICE)
+    ice_salt_change = 3.0 * _counted_ice_mass_change_kg_per_s(state, everywhere)
+    expected = (
+        _ssh_height_salt_change(state)
+        - state.timestep_seconds / 1035.0 * ice_salt_change
+    )
+    _assert_salt_change(state, corrected, expected)
+
+
+def test_sea_surface_height_salt_budget_sfdsi_source():
+    # sfdsi missing from the generated data is not taken from the forcing data
+    # unless fluxes_from_forcing asks for it.
+    state = _ssh_state_with_sea_ice()
+    expected = _salt_content_change(state, _correct_with_ssh_budget(state, {}))
+    state.forcing_data["sfdsi"] = state.gen_data.pop("sfdsi")
+    with pytest.raises(ValueError, match="needs sfdsi in the generated data"):
+        _correct_with_ssh_budget(state, {})
+    corrected = _correct_with_ssh_budget(state, {"fluxes_from_forcing": True})
+    torch.testing.assert_close(_salt_content_change(state, corrected), expected)
+
+
+@pytest.mark.parametrize(
+    "ssh_budget, match",
+    [
+        pytest.param(
+            {"use_computed_brine_under_ice": True},
+            "requires sea_ice_salinity_psu",
+            id="computed_brine_without_ice_salinity",
+        ),
+        pytest.param(
+            {"full_ice_cover_threshold": 1.0},
+            "full_ice_cover_threshold requires use_computed_brine_under_ice",
+            id="full_ice_cover_without_computed_brine",
+        ),
+        pytest.param(
+            {
+                "sea_ice_salinity_psu": 3.0,
+                "use_computed_brine_under_ice": True,
+                "sea_ice_fraction_threshold": 0.5,
+                "full_ice_cover_threshold": 0.5,
+            },
+            "must exceed sea_ice_fraction_threshold",
+            id="full_ice_cover_not_above_ice_covered",
+        ),
+    ],
+)
+def test_sea_surface_height_salt_budget_config_validation(ssh_budget, match):
+    with pytest.raises(ValueError, match=match):
+        OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(**ssh_budget),
+        )
 
 
 def test_ocean_corrector_config_fields_are_known():
