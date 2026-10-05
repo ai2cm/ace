@@ -1,10 +1,9 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
-import dacite
 import torch
 from torch import nn
 
@@ -229,58 +228,56 @@ class FCN3StepConfig(StepConfigABC):
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            names=sorted(self._normalize_names) + extra_names,
+            residual_scaled_names=sorted(self.prognostic_names)
+            + extra_residual_scaled_names,
         )
 
     @classmethod
-    def from_state(cls, state) -> "FCN3StepConfig":
-        state = cls._remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     @property
-    def _normalize_names(self):
+    def _normalize_names(self) -> frozenset[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.out_names))
+        return frozenset(set(self.in_names).union(self.out_names))
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
         if self.ocean is None:
-            return self.in_names
+            return frozenset(self.in_names)
         else:
-            return list(set(self.in_names).union(self.ocean.forcing_names))
+            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> list[str]:
+    def diagnostic_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
-        return []  # not currently supported
+        return frozenset()  # not currently supported
 
     @property
-    def output_names(self) -> list[str]:
-        return self.out_names
+    def output_names(self) -> frozenset[str]:
+        return frozenset(self.out_names)
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
         result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
         result = result.union(self.prescribed_prognostic_names)
-        return list(result)
+        return frozenset(result)
 
     @property
     def loss_names(self) -> list[str]:
-        return self.output_names
+        return sorted(self.output_names)
 
     def replace_ocean(self, ocean: OceanConfig | None):
         """
@@ -307,11 +304,6 @@ class FCN3StepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
 
-    @classmethod
-    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
-        state_copy = state.copy()
-        return state_copy
-
     def get_step(
         self,
         dataset_info: DatasetInfo,
@@ -319,7 +311,9 @@ class FCN3StepConfig(StepConfigABC):
     ) -> "FCN3Step":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
-        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        normalizer = self.normalization.get_network_normalizer(
+            sorted(self._normalize_names)
+        )
         return FCN3Step(
             config=self,
             dataset_info=dataset_info,
@@ -480,8 +474,9 @@ class FCN3Step(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            residual_names=(
+                self.prognostic_names if self._config.residual_prediction else None
+            ),
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             stepper_state=args.stepper_state,
         )

@@ -104,6 +104,11 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig
+from fme.core.corrector.loss_config import (
+    CorrectorLossConfig,
+    CorrectorRegularizationConfig,
+    PreCorrectorOptimizationConfig,
+)
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig

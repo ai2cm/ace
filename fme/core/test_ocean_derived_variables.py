@@ -178,7 +178,7 @@ def test_sea_ice_thickness_derived_variable(case):
         land_frac = 1 - sea_surface_frac
         effective_sea_ice_frac = sea_ice_frac * sea_surface_frac / (1 - land_frac)
         fake_data = {
-            "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac / 1e9,
+            "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac,
             "sea_ice_fraction": sea_ice_frac,
             "land_fraction": land_frac,
             "sea_surface_fraction": sea_surface_frac,
@@ -187,7 +187,7 @@ def test_sea_ice_thickness_derived_variable(case):
         ocean_sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
         effective_sea_ice_frac = ocean_sea_ice_frac * sea_surface_frac
         fake_data = {
-            "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac / 1e9,
+            "sea_ice_volume": thickness_in_m * cell_area * effective_sea_ice_frac,
             "ocean_sea_ice_fraction": ocean_sea_ice_frac,
             "sea_surface_fraction": sea_surface_frac,
         }

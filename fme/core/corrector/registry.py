@@ -42,16 +42,24 @@ class CorrectorConfigABC(abc.ABC):
         return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
     @classmethod
+    @abc.abstractmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove or transform deprecated keys from a serialized config before
+        it is loaded.
+
+        Must be implemented by every subclass. Must return a new dict and never
+        mutate the input. Implement as ``return dict(state)`` when there is
+        nothing to remove.
         """
-        This method is used to remove or transform any deprecated keys from the
-        state dict before loading it into a CorrectorConfigABC instance. It is
-        optional to implement this method on subclasses.
-        """
-        return dict(state)
+        ...
 
     @final
     def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
+        """Build the corrector, applying ``corrector_disabled_epochs``.
+
+        Args:
+            dataset_info: Information about the dataset the corrector runs on.
+        """
         corrector = self._get_corrector(dataset_info)
         if self.corrector_disabled_epochs == 0:
             return corrector
@@ -84,6 +92,9 @@ class Correction(Protocol):
     variables the correction is responsible for writing. Because the returned
     dict is exactly what gets applied, the returned keys are the single source of
     truth for what changed and cannot drift from the write.
+
+    The key set a correction returns may depend on its config and on which keys
+    are present in its inputs, never on tensor values.
     """
 
     def __call__(

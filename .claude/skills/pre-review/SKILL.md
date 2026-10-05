@@ -11,7 +11,7 @@ For example, this could mean:
  - Re-structuring the PR, either by splitting it into multiple smaller PRs or by re-ordering commits, to make it easier to review.
  - Catching and fixing any issues you can find before the PR is seen by the reviewer.
  - Making comments on the PR to point out potential issues or areas of concern for the reviewer to focus on.
- - Improving the PR description and title.
+ - Improving the PR title and description (title and description edits should use the `write-pr-prose` skill).
 
 Focus specifically on making the reviewer's job easier, not on making the PR perfect.
 Issues involving readability might be particularly important, especially if the changes are hard to understand or the reason for them is not immediately clear.
@@ -120,3 +120,5 @@ Start each audit pass with a ✅ if clear, or a ⚠️ or ❌ (depending on seve
 Then, under a separate heading, revisit the overall purpose of the pre-review.
 Give the user a clear summary of the state of the PR and what you recommend for next steps.
 When giving this summary, do not re-cap on each successful check that has no actions required, but you could give a summary of the overall state.
+
+When posting this summary to the PR itself, lead your comment with up to two sentences summarizing the overall review, then use the `<details>` tag to collapse the full review for readers who want more details, using "Full review" as the summary.

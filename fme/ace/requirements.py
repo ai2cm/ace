@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Collection
 
 from fme.core.dataset.schedule import IntSchedule
 
@@ -15,7 +15,7 @@ class InitialConditionRequirements:
         n_ensemble: Number of ensemble members per initial state.
     """
 
-    prognostic_names: Sequence[str]
+    prognostic_names: Collection[str]
     labels: list[str] | None = None
     n_ensemble: int = 1
 
@@ -30,7 +30,7 @@ class PrognosticStateDataRequirements:
         n_timesteps: Number of consecutive timesteps that must be stored.
     """
 
-    names: list[str]
+    names: Collection[str]
     n_timesteps: int
 
 

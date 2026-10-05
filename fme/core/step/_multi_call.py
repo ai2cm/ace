@@ -1,6 +1,6 @@
 import dataclasses
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 from torch import nn
 
@@ -77,7 +77,7 @@ class MultiCallConfig:
             names.append(get_multi_call_name(name, suffix))
         return names
 
-    def validate(self, in_names: list[str], out_names: list[str]):
+    def validate(self, in_names: Collection[str], out_names: Collection[str]):
         if self.forcing_name not in in_names:
             raise ValueError(
                 f"forcing name {self.forcing_name} not in input names. It is required "

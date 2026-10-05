@@ -8,9 +8,6 @@ Installation
 
 All commands here are run from the top-level directory of the repository, unless otherwise stated.
 
-This is unsupported, pre-alpha software: use at your own risk! We are actively developing this software
-and will be making breaking changes to the API.
-
 PyPI
 ----
 

@@ -235,8 +235,9 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
     aggregator.record_batch(outputs_a)
     aggregator.record_batch(outputs_b)
 
-    # Binning happens in record_batch, not get_wandb.
-    assert int(aggregator._total_count.sum().item()) == 3
+    # Binning happens in record_batch, not get_wandb. Every (sample, channel)
+    # pair is its own point: (2 samples + 1 sample) * 2 channels = 6.
+    assert int(aggregator._total_count.sum().item()) == 6
     assert int(aggregator._channel_count["x"].sum().item()) == 3
     assert int(aggregator._channel_count["y"].sum().item()) == 3
 
@@ -248,6 +249,56 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
     }
     for value in logs.values():
         assert isinstance(value, wandb.Image)
+
+
+def test_loss_vs_noise_aggregator_shared_sigma_matches_channelwise_path():
+    """Shared sigma is just channelwise sigma broadcast to every channel, so
+    it goes through the same per-(sample, channel)-point path: total_sum is
+    the sum of every individual value, and total_count is n_samples *
+    n_channels (not n_samples), so all_channels is a mean across
+    (sample, channel) pairs.
+    """
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([1.0, 1.0], device=get_device()),  # shared, same bin
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 3.0], device=get_device()),
+            "y": torch.tensor([2.0, 5.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    assert aggregator._total_sum.sum().item() == pytest.approx(1.0 + 2.0 + 3.0 + 5.0)
+    assert int(aggregator._total_count.sum().item()) == 4
+    # per-channel totals are unaffected by how all_channels aggregates
+    assert aggregator._channel_sum["x"].sum().item() == pytest.approx(4.0)
+    assert aggregator._channel_sum["y"].sum().item() == pytest.approx(7.0)
+
+
+def test_loss_vs_noise_aggregator_accepts_channelwise_sigma():
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([[0.1, 1000.0], [1.0, 2000.0]], device=get_device()),
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 2.0], device=get_device()),
+            "prate": torch.tensor([3.0, 4.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    assert int(aggregator._total_count.sum().item()) == 4
+    assert int(aggregator._channel_count["x"].sum().item()) == 2
+    assert int(aggregator._channel_count["prate"].sum().item()) == 2
 
 
 @pytest.mark.parametrize("n_latent_steps", [0, 2])

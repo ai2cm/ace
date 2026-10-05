@@ -24,10 +24,14 @@ class SecondaryDecoderConfig:
             diagnosed directly from outputs without access to latent variables (i.e.,
             column-locally).
         network: Configuration for the decoder network.
+        include_input_step: If True, the channels provided as inputs to the
+            primary network are concatenated with its outputs before being
+            passed to this decoder.
     """
 
     secondary_diagnostic_names: list[str]
     network: ModuleSelector
+    include_input_step: bool = False
 
     def build(
         self,

@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import datetime
 import logging
 import os
 from typing import List, Sequence, Tuple
@@ -152,7 +153,6 @@ class Config:
         )
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
-        assert data.properties.timestep is not None
         coords = {
             **data.properties.horizontal_coordinates.coords,
             **data.properties.vertical_coordinate.coords,
@@ -163,6 +163,9 @@ class Config:
             label="monthly_mean_data",
             save_names=None,  # save all data given
             initial_condition_times=initial_condition_times,
+            # unlike an inference run, the first time here is itself written,
+            # so it is month 0 rather than the step before it
+            timestep=datetime.timedelta(0),
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
             dataset_metadata=DatasetMetadata.from_env(),
