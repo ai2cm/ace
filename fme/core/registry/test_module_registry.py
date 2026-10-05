@@ -206,15 +206,25 @@ def test_unconditional_build_is_unaffected_by_dataset_labels():
     should see any difference.
     """
     selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
+
+    def _build_label_sized(n_in_channels, n_out_channels, dataset_info):
+        # Size a weight from the labels, as the conditional builders do; the
+        # plain mock builder ignores dataset_info and so could not tell.
+        return MockModule([(1, 2, 3), (len(dataset_info.all_labels),)])
+
     shapes = []
-    for all_labels in (set(), {"a", "b"}):
-        set_seed(0)
-        module = selector.build(
-            n_in_channels=1,
-            n_out_channels=1,
-            dataset_info=DatasetInfo(all_labels=all_labels, img_shape=(16, 32)),
-        )
-        shapes.append({k: v.shape for k, v in module.torch_module.state_dict().items()})
+    with unittest.mock.patch.object(
+        selector.module_config, "build", _build_label_sized
+    ):
+        for all_labels in (set(), {"a", "b"}):
+            module = selector.build(
+                n_in_channels=1,
+                n_out_channels=1,
+                dataset_info=DatasetInfo(all_labels=all_labels, img_shape=(16, 32)),
+            )
+            shapes.append(
+                {k: v.shape for k, v in module.torch_module.state_dict().items()}
+            )
     assert shapes[0] == shapes[1]
 
 
@@ -247,9 +257,12 @@ def get_dbc2925_ncsfno_module(
     )
     selector = ModuleSelector(
         type="NoiseConditionedSFNO",
-        # The frozen checkpoint holds label weights sized from all_labels, so
-        # it is a conditional module. Pass conditional=False to build the same
-        # architecture the way an unconditional config does; see
+        # The frozen .pt was saved by an unconditional build (its
+        # label_encoding is None) from before unconditional builds hid the
+        # dataset labels, so it holds label weights sized from all_labels.
+        # Building conditional=True allocates those weights so the strict load
+        # still succeeds. Pass conditional=False to build the same
+        # architecture the way an unconditional config does today; see
         # test_unconditional_build_drops_only_the_label_weights.
         conditional=conditional,
         config={
