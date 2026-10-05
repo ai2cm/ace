@@ -1,0 +1,65 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+experiment_dir: /results
+n_coupled_steps: 3654
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+# 50-yr piControl surface-budget rollout of a checkpoint TRAINED under the
+# conserving hand-off (prescribed_cell_mean + runoff + under_ice), e.g. arm C
+# coupled_cellmean-owc_a2s. No ocean_stepper_override: the checkpoint's own
+# corrector runs, so this is the trained counterpart of the inference-only
+# evaluator-config-piC-ic0151-50yr-underice.yaml run on crps4 (same IC, seed,
+# length and monthly sfc_budget output), read with the same interface split.
+# 3654 = 203 x 18 coupled steps (5-day), years 151-200 plus 4 days.
+seed: 0
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: sfc_budget_monthly
+        names: [hfds, hfds_total_area, sea_ice_fraction, ocean_sea_ice_fraction,
+                sst, ocean_heat_content, sea_surface_fraction, land_fraction,
+                sea_ice_volume]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: sfc_budget_monthly
+        names: [DSWRFsfc, USWRFsfc, DLWRFsfc, ULWRFsfc, LHTFLsfc, SHTFLsfc,
+                total_frozen_precipitation_rate, PRATEsfc, ocean_fraction,
+                land_fraction, sea_ice_fraction]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
