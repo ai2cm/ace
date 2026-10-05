@@ -105,6 +105,18 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  # Staged-config guard: a fine-tune whose pretrain has not finished carries the
+  # placeholder PRETRAIN_RESULT_DATASET in its "# arg:" dataset mount. Refuse to
+  # submit it (an unfiltered ./run-train.sh must not launch a doomed job).
+  local a
+  for a in "${extra_args[@]+"${extra_args[@]}"}"; do
+    if [[ "$a" == *PRETRAIN_RESULT_DATASET* ]]; then
+      echo "ERROR: $config_filename still carries the PRETRAIN_RESULT_DATASET placeholder;" >&2
+      echo "       fill in the pretrain's result dataset id (see the config header) before launching." >&2
+      exit 1
+    fi
+  done
+
   # This suite deliberately sets no CM_PRIORITY label (the reference launcher's
   # default is dropped): the jobs run at beaker priority "normal", unmanaged by
   # the priority balancer.
@@ -145,6 +157,13 @@ run_training "ace2s-pretrain-deterministic.yaml" "1deg-daily-ace2s-det-pretrain-
 run_training "ace2s-pretrain-crps-only.yaml" "1deg-daily-ace2s-crps-only-pretrain-rs0" 8
 run_training "ace2s-pretrain-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck-pretrain-rs0" 8
 run_training "ace2s-pretrain-6hourly.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
+
+# Shared temperature normalization arm (added 2026-10-01).
+run_training "ace2s-pretrain-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-pretrain-rs0" 8
+
+# Shared-T-norm arm, stage 2 (staged 2026-10-01; launchable once the pretrain's
+# result dataset id replaces the placeholder in the config, see its header)
+run_training "ace2s-finetune-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-ft3-detached-rs0" 8
 # Resume of the 6-hourly arm after its epoch-10 NCCL-timeout failure (same
 # wandb name so the run keeps its id; beaker suffixes the experiment name).
 run_training "ace2s-pretrain-6hourly-resume.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
@@ -175,6 +194,11 @@ run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck
 
 # 6-hourly arm, stage 2: 3-step (18 h) detached fine-tune, horizon decided 2026-09-28
 run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
+
+# Pushforward trick (stepper_training.pushforward_steps: 1), 40- and 120-epoch
+# pretrain donors (added 2026-10-02)
+run_training "ace2s-finetune-pushforward1-40ep.yaml" "1deg-daily-ace2s-pushforward1-ft3-detached-40ep-rs0" 8
+run_training "ace2s-finetune-pushforward1-120ep.yaml" "1deg-daily-ace2s-pushforward1-ft3-detached-120ep-rs0" 8
 
 # Variogram-score fine-tunes of the paper pretrain; vs-measure set the
 # measured arms' weights and is stopped after pre-training validation

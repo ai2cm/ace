@@ -21,6 +21,8 @@ every 10 epochs (`ema_checkpoint_save_epochs`).
 | `ace2s-pretrain-deterministic.yaml` | `noise_embed_dim: 0`; MSE on one member with the ACE2 per-variable weights; inline inference with 1 member |
 | `ace2s-pretrain-crps-only.yaml` | loss split 1.0 CRPS / 0.0 energy score (recipe: 0.9 / 0.1) |
 | `ace2s-pretrain-no-bottleneck.yaml` | `filter_num_groups` and `spectral_ratio` dropped |
+| `ace2s-pretrain-shared-tnorm.yaml` | shared temperature normalization: `global_mean_removal: {kind: shared, reference_field: surface_temperature, append_as_input: true}` on the step, so each sample's cellwise-mean surface temperature is removed from every temperature field before normalization and restored after, and appended as an extra input channel |
+| `ace2s-finetune-shared-tnorm.yaml` | stage 2 of the shared T-norm arm, staged with a `PRETRAIN_RESULT_DATASET` placeholder that `run-train.sh` refuses to submit; fill it with the pretrain's result dataset id when the pretrain finishes (procedure in the config header) |
 | `ace2s-pretrain-6hourly.yaml` | Troy's 6-hourly 2026-03-19 store and stats, 54 outputs (no `*_mean`); evaluation horizons in steps x4, 81-year rollout at epochs 10/20/30/40 |
 | `ace2s-pretrain-4deg.yaml` | 4-degree: the regenerated `2026-09-08-era5-4deg-8layer-daily-1940-2025` store (`*_mean` fields plus PRMSL and the surface stresses in one store, from main's `scripts/data_process/configs/era5-4deg-8layer-1940-2025.yaml`); one GPU, batch size 8, loader parameters from the 4-degree daily v2 config; spectral bottleneck kept |
 | `ace2s-pretrain-4deg-rs{1,2,3}.yaml` | the 4-degree arm with seeds 1-3 (a 4-member seed ensemble at 4 degrees, since one-GPU runs are cheap) |
