@@ -664,8 +664,8 @@ def _start_job(experiment_dir: str, **trainer_kwargs: Any) -> Trainer:
 
 
 def _train_until_last_epoch_checkpoints(trainer: Trainer):
-    """Train until just before the last epoch's checkpoints are saved, after
-    its end-of-epoch logs, as a job preempted then would.
+    """Train through the last epoch's end-of-epoch logs but stop before its
+    checkpoints are saved, as a job preempted at that point would.
     """
     with fail_after_calls_patch(trainer, "save_all_checkpoints", RESUME_MAX_EPOCHS):
         trainer.train()
@@ -719,7 +719,7 @@ def test_resume_merges_recovered_batch_logs_with_redone_epoch_logs(tmp_path: str
     assert disk_logs.keys() == wandb_logs.keys()
 
 
-def test_resume_does_not_relog_rows_redone_after_periodic_checkpoint(tmp_path: str):
+def test_resume_does_not_relog_steps_redone_after_periodic_checkpoint(tmp_path: str):
     checkpoint_every_n_batches = 2
     n_batches_before_interrupt = 3
     with mock_wandb() as wandb:
@@ -728,7 +728,8 @@ def test_resume_does_not_relog_rows_redone_after_periodic_checkpoint(tmp_path: s
             max_epochs=1,
             checkpoint_every_n_batches=checkpoint_every_n_batches,
         )
-        # one call logs the first batch's metrics before training
+        # + 1 for the call _log_first_batch_metrics makes before training,
+        # + 1 for the call that raises
         with fail_after_calls_patch(
             trainer.stepper, "train_on_batch", n_batches_before_interrupt + 2
         ):
@@ -760,7 +761,8 @@ def test_resume_recovers_last_batch_logs_before_preemption_checkpoint(
     n_batches_before_interrupt = 3
     with mock_wandb() as wandb:
         trainer = _start_job(tmp_path, max_epochs=1)
-        # one call logs the first batch's metrics before training
+        # + 1 for the call _log_first_batch_metrics makes before training,
+        # + 1 for the call that raises
         with fail_after_calls_patch(
             trainer.stepper, "train_on_batch", n_batches_before_interrupt + 2
         ):

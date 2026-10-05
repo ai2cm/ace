@@ -12,7 +12,7 @@ CHECKPOINT_MARK_FILENAME = "checkpoint_mark.json"
 
 @dataclasses.dataclass(frozen=True)
 class CheckpointMark:
-    """Where the metrics file stood when a resume checkpoint was saved.
+    """The state of the metrics file when a checkpoint was saved.
 
     Parameters:
         offset: Size in bytes of the metrics file.
@@ -26,15 +26,15 @@ class CheckpointMark:
 class DiskMetricLogger:
     """Logs scalar metrics to a JSONL file on disk.
 
-    Each line in the file is a JSON object with a "step" key and scalar metric
-    key-value pairs. On construction, a metrics file a previous job left in the
-    directory is moved aside, so the file holds only this job's metrics.
-    ``write_checkpoint_mark`` records in the directory where the file stands
-    when a resume checkpoint is saved, and a job resuming from that checkpoint
-    calls ``restore_to_checkpoint_mark`` to bring back the metrics logged up to
-    it.
+    Each line in the file is a JSON object with a "step" key and the scalar
+    metrics logged at that step. A metrics file left in the directory by a
+    previous job is moved aside on construction, so the file holds only this
+    job's metrics. To support resuming from a checkpoint, call
+    ``write_checkpoint_mark`` when the checkpoint is saved, and
+    ``restore_to_checkpoint_mark`` in the resumed job to bring back the
+    metrics logged before it.
 
-    Non-JSON-serializable values (e.g. images, tensors) are silently dropped.
+    Values that are not JSON-serializable (e.g. images, tensors) are dropped.
     """
 
     def __init__(self, directory: str | os.PathLike):
@@ -64,24 +64,25 @@ class DiskMetricLogger:
 
         Non-serializable values are dropped.
         """
+        if self._file is None:
+            raise RuntimeError("DiskMetricLogger is closed")
         self._last_step = step
         scalars = _extract_serializable(data)
         if not scalars:
             return
         line = (json.dumps({"step": step, **scalars}) + "\n").encode()
-        if self._file is None:
-            raise RuntimeError("DiskMetricLogger is closed")
         self._file.write(line)
         self._file.flush()
         self._offset += len(line)
 
     def write_checkpoint_mark(self) -> None:
-        """Record that a resume checkpoint holds the training logged so far.
+        """Record that a checkpoint has been saved.
 
-        Writes the current offset and last logged step to the checkpoint mark
-        file, replacing it atomically. This runs on the termination listener's
-        thread when a job is preempted, so it must not use the logging module
-        (see `fme.core.distributed.shutdown.add_post_abort_callback`).
+        Writes the metrics file's current size and the last logged step to the
+        checkpoint mark file, replacing it atomically. When a job is preempted
+        this runs on the termination listener's thread, so it must not use the
+        logging module (see
+        `fme.core.distributed.shutdown.add_post_abort_callback`).
         """
         tmp_path = f"{self._mark_path}.tmp"
         with open(tmp_path, "w") as f:
@@ -91,17 +92,17 @@ class DiskMetricLogger:
     def restore_to_checkpoint_mark(self) -> CheckpointMark | None:
         """Restore the metrics logged before the last checkpoint mark.
 
-        Keeps the metrics file up to the mark, plus the lines right after it at
-        the mark's last step, which the resumed job does not necessarily log
-        again. If this logger has not logged anything, the file is the one a
-        previous job left, which is moved back into place first. The lines
-        after those are from training the resumed job redoes, so they are moved
-        to a separate file rather than kept.
+        The metrics file is cut at the mark, keeping any lines right after it
+        that are at the mark's last step, since the resumed job may not log
+        those again. Later lines are from training the resumed job redoes, so
+        they are moved to a separate file. If this logger has not logged
+        anything yet, the file restored is the one moved aside on
+        construction.
 
         Returns:
-            The mark the metrics were restored to, or None if they were not
-            restored: there is no mark, no metrics file to restore, or the file
-            is shorter than the mark's offset.
+            The mark restored to, or None if nothing was restored because
+            there is no mark, no metrics file, or the file is shorter than the
+            mark's offset.
         """
         mark = self._read_checkpoint_mark()
         if mark is None:
