@@ -2788,6 +2788,59 @@ def test_get_stepper_with_input_masking_raises():
         )
 
 
+class _RecordingIdentity(torch.nn.Module):
+    """Identity module which records the normalized input it receives."""
+
+    def __init__(self):
+        super().__init__()
+        self.last_input: torch.Tensor | None = None
+
+    def forward(self, x):
+        self.last_input = x
+        return x
+
+
+def test_input_masking_mean_fill_uses_network_normalizer_means():
+    """A "mean" input fill reaches the network as the normalizer mean, i.e. as
+    zero in normalized space, while unmasked points are normalized as usual."""
+    mean, std = 3.0, 2.0
+    mask = torch.ones(5, 5, device=DEVICE)
+    mask[0, 0] = 0.0
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _RecordingIdentity()}
+                    ),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=trivial_network_and_loss_normalization(
+                        ["a"], mean=mean, std=std
+                    ),
+                )
+            ),
+        ),
+        input_masking=StaticSpatialMaskingConfig(mask_value=0, fill_value="mean"),
+    )
+    stepper = config.get_stepper(
+        get_dataset_info(
+            img_shape=(5, 5),
+            spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+            device=DEVICE,
+        )
+    )
+    input_data = {"a": torch.full((2, 5, 5), 10.0, device=DEVICE)}
+    stepper.step(StepArgs(input=input_data, next_step_input_data={}, labels=None))
+    network_input = stepper.modules[0].module.last_input[:, 0]  # channel "a"
+    torch.testing.assert_close(network_input[:, 0, 0], torch.zeros(2, device=DEVICE))
+    torch.testing.assert_close(
+        network_input[:, 1:, :],
+        torch.full((2, 4, 5), (10.0 - mean) / std, device=DEVICE),
+    )
+
+
 @pytest.mark.parametrize("n_ensemble", [1, 3])
 def test_predict_with_derived_forcing(n_ensemble):
     insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)

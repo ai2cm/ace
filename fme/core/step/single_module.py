@@ -16,6 +16,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -373,9 +374,7 @@ class SingleModuleStep(StepABC):
         super().__init__()
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
-                config.global_mean_removal.build(
-                    normalizer=normalizer, in_names=config.in_names
-                )
+                config.global_mean_removal.build(in_names=config.in_names)
             )
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
@@ -468,6 +467,9 @@ class SingleModuleStep(StepABC):
     def normalizer(self) -> StandardNormalizer:
         return self._normalizer
 
+    def network_normalizer(self, labels: BatchLabels | None) -> StandardNormalizer:
+        return self._normalizer
+
     @property
     def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
@@ -555,7 +557,7 @@ class SingleModuleStep(StepABC):
             input=args.input,
             next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
-            normalizer=self.normalizer,
+            normalizer=self.network_normalizer(args.labels),
             corrector=self._corrector,
             ocean=self.ocean,
             residual_names=self._residual_names,
@@ -743,7 +745,7 @@ def step_with_adjustments(
             at the output timestep for the ocean model and corrector.
         network_calls: Callable[[TensorMapping], TensorDict] that takes a
             normalized input and returns a normalized output.
-        normalizer: The normalizer to use.
+        normalizer: The normalizer to use, also by ``global_mean_removal``.
         corrector: The corrector to use at the end of each step.
         ocean: The ocean model to use.
         residual_names: Names stepped as residuals (network output added to the
@@ -779,7 +781,7 @@ def step_with_adjustments(
     gmr_state: GlobalMeanRemovalState | None = None
     if global_mean_removal is not None:
         network_input, gmr_state = global_mean_removal.forward_transform(
-            input, data_mask
+            input, data_mask, normalizer
         )
         input_norm = normalizer.normalize(network_input)
         # Synthetic GMR channels are produced in normalized space; merge
