@@ -1,0 +1,93 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled_prescribed_tau
+experiment_dir: /results
+n_coupled_steps: 14598
+#
+# The shared piC config with one change: the atmosphere's two surface wind
+# stress outputs (the ocean's only stress inputs, not atmosphere inputs) are
+# overwritten with CM4's at every atmosphere step, so the ocean receives CM4's
+# wind stress while every other coupling field stays free-running.
+atmosphere_stepper_override:
+  prescribed_prognostic_names:
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: kuroshio_extension_monthly
+        names: [sst]
+        lat_extent: [30.0, 40.0]
+        lon_extent: [140.0, 180.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: gulf_stream_monthly
+        names: [sst]
+        lat_extent: [35.0, 45.0]
+        lon_extent: [285.0, 315.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: n_atlantic_subpolar_monthly
+        names: [sst]
+        lat_extent: [50.0, 65.0]
+        lon_extent: [300.0, 340.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: acc_monthly
+        names: [sst]
+        lat_extent: [-60.0, -45.0]
+        lon_extent: [0.0, 360.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: n_pacific_gyre_monthly
+        names: [sst]
+        lat_extent: [25.0, 40.0]
+        lon_extent: [180.0, 220.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: nino3_nino34_monthly
+        names: [sst]
+        lat_extent: [-5.0, 5.0]
+        lon_extent: [190.0, 270.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
