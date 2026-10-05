@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="hiro-ace2s-inference-bora-1yr-timing"
+JOB_NAME="hiro-ace2s-inference-bora-1yr-timing_b200"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="downscale-ace2s-croatia-1yr.yaml"
+CONFIG_FILENAME="downscale-ace2s-croatia-1yr-b200.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

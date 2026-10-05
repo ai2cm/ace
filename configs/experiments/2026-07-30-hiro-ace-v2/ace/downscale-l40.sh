@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="hiro-ace2s-inference-bora-1yr-timing"
+JOB_NAME="hiro-ace2s-inference-bora-1yr-timing_l40"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="downscale-ace2s-croatia-1yr.yaml"
+CONFIG_FILENAME="downscale-ace2s-croatia-1yr-l40.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -43,7 +43,7 @@ gantry run \
     --workspace ai2/ace \
     --priority urgent \
     --min-runtime 8h \
-    --cluster ai2/titan \
+    --cluster ai2/triton \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \

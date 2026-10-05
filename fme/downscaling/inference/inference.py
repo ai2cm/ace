@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import time
 from dataclasses import dataclass, field
 
 import dacite
@@ -8,8 +9,11 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory
+from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
+from fme.core.wandb import WandB
 
 from ..data import DataLoaderConfig
 from ..models import CheckpointModelConfig, DiffusionModel
@@ -23,6 +27,11 @@ from ..predictors import (
 )
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
+
+
+def _synchronize():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 
 class Downscaler:
@@ -42,6 +51,52 @@ class Downscaler:
         self.model = model
         self.outputs = outputs
         self.output_dir = output_dir
+        # wandb steps must increase monotonically across all outputs
+        self._wandb_step = 0
+
+    def _log_batch_timing(
+        self, output_name: str, generate_seconds: float, n_samples: int
+    ):
+        """Log the slowest rank's model-call time for this batch to wandb."""
+        max_seconds = Distributed.get_instance().reduce_max(
+            torch.tensor(generate_seconds, device=get_device())
+        )
+        logging.info(
+            f"[{output_name}] generate: {generate_seconds:.3f}s this rank, "
+            f"{max_seconds.item():.3f}s max across ranks, {n_samples} samples"
+        )
+        WandB.get_instance().log(
+            {
+                "timing/generate_seconds": max_seconds.item(),
+                "timing/generate_seconds_per_sample": max_seconds.item() / n_samples,
+            },
+            step=self._wandb_step,
+        )
+        self._wandb_step += 1
+
+    def _log_output_timing_summary(self, output_name: str, generate_times: list[float]):
+        """
+        Log total and steady-state model-call time for an output to wandb.
+        Totals are maxed across ranks, since ranks run in parallel and the
+        slowest one sets wall time. The first batch is excluded from the
+        steady-state mean because it includes CUDA warmup.
+        """
+        dist = Distributed.get_instance()
+        device = get_device()
+        total = dist.reduce_max(torch.tensor(sum(generate_times), device=device))
+        steady = generate_times[1:] if len(generate_times) > 1 else generate_times
+        mean_steady = dist.reduce_max(
+            torch.tensor(float(np.mean(steady)), device=device)
+        )
+        summary = {
+            "timing/total_generate_seconds": total.item(),
+            "timing/mean_generate_seconds_excl_first_batch": (mean_steady.item()),
+            "timing/n_batches_per_rank": len(generate_times),
+        }
+        for key, value in summary.items():
+            logging.info(f"{key}: {value}")
+        WandB.get_instance().log(summary, step=self._wandb_step)
+        self._wandb_step += 1
 
     def run_all(self):
         """Run generation for all outputs."""
@@ -104,6 +159,7 @@ class Downscaler:
 
         writer = None
         total_batches = len(output.data.loader)
+        generate_times: list[float] = []
 
         loaded_item: LoadedSliceWorkItem
         for i, loaded_item in enumerate(output.data.get_generator()):
@@ -120,10 +176,22 @@ class Downscaler:
                 f"generating work slice {loaded_item.dim_insert_slices} "
             )
 
+            # Synchronize so the timer covers only the model call, not pending
+            # host-to-device copies or the device-to-host copy below.
+            _synchronize()
+            start = time.perf_counter()
             output_data = model.generate_on_batch_no_target(
                 loaded_item.batch,
                 n_samples=loaded_item.n_ens,
             )
+            _synchronize()
+            generate_seconds = time.perf_counter() - start
+            n_samples = (
+                loaded_item.time_slice.stop - loaded_item.time_slice.start
+            ) * loaded_item.n_ens
+            self._log_batch_timing(output.name, generate_seconds, n_samples)
+            generate_times.append(generate_seconds)
+
             output_np = {key: value.cpu().numpy() for key, value in output_data.items()}
             insert_slices = loaded_item.dim_insert_slices
 
@@ -132,6 +200,8 @@ class Downscaler:
             else:
                 logging.info("Skipping padding work item. No data will be written.")
 
+        if generate_times:
+            self._log_output_timing_summary(output.name, generate_times)
         logging.info(f"Completed generation for output: {output.name}")
 
 
