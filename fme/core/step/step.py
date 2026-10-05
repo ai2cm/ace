@@ -11,6 +11,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
@@ -128,6 +129,10 @@ class StepConfigABC(abc.ABC):
         The getter half of ``replace_prescribed_prognostic_names``. Wrapping
         step configs (e.g. multi-call) delegate to the wrapped config.
         """
+
+    @abc.abstractmethod
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """Replace this step's corrector configuration wholesale, in place."""
 
     @property
     @abc.abstractmethod
@@ -254,6 +259,10 @@ class StepSelector(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._step_config_instance.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self._step_config_instance.replace_corrector(corrector)
+        self.config = dataclasses.asdict(self._step_config_instance)
 
     @property
     def allow_missing_variables(self) -> bool:

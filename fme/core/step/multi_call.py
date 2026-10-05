@@ -10,6 +10,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
@@ -207,6 +208,9 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.wrapped_step.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.wrapped_step.replace_corrector(corrector)
 
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call

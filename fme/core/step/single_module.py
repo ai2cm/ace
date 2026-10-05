@@ -72,15 +72,13 @@ class ResidualPredictionConfig:
     names: list[str] | None = None
     normalized: bool = False
 
-    def __post_init__(self):
+    def validate_names(self, prognostic_names: Collection[str]) -> None:
         if self.names is not None and len(self.names) == 0:
             raise ValueError(
                 "residual_prediction.names must not be empty; use names: null "
                 "to step every prognostic as a residual, or residual_prediction:"
                 " null to disable residual prediction"
             )
-
-    def validate_names(self, prognostic_names: Collection[str]) -> None:
         for name in self.names or []:
             if name not in prognostic_names:
                 raise ValueError(
@@ -111,9 +109,8 @@ class SingleModuleStepConfig(StepConfigABC):
         residual_prediction: When set, predict prognostics as tendencies
             added to the input rather than as states. See
             ``ResidualPredictionConfig`` for the per-variable and normalization
-            options. The deprecated bool form is still accepted, from
-            serialized configs and direct construction alike, meaning every
-            prognostic (True) or none (False).
+            options. A bool is also accepted: True steps every prognostic
+            as a residual, False disables residual prediction.
         include_channel_mask_inputs: Whether to append per-variable mask indicator
             channels to the network input. When True, the network receives
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
@@ -144,24 +141,25 @@ class SingleModuleStepConfig(StepConfigABC):
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
-    residual_prediction: ResidualPredictionConfig | None = None
+    residual_prediction: ResidualPredictionConfig | bool | None = None
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        if isinstance(self.residual_prediction, bool):
-            # residual_prediction was a bool before it grew options. Serialized
-            # state migrates in remove_deprecated_keys; this isinstance keeps
-            # direct construction with the old bool working too, since the
-            # config is public API (exported from fme.ace).
-            self.residual_prediction = (
-                ResidualPredictionConfig() if self.residual_prediction else None
+        residual_prediction = self.residual_prediction
+        if isinstance(residual_prediction, bool):
+            # bool spelling: True = every prognostic, False = disabled
+            residual_prediction = (
+                ResidualPredictionConfig() if residual_prediction else None
             )
-        if self.residual_prediction is not None:
-            self.residual_prediction.validate_names(self.prognostic_names)
-            if self.residual_prediction.normalized:
+        self._residual_prediction_config: ResidualPredictionConfig | None = (
+            residual_prediction
+        )
+        if self._residual_prediction_config is not None:
+            self._residual_prediction_config.validate_names(self.prognostic_names)
+            if self._residual_prediction_config.normalized:
                 # Report the loss conflict directly. Otherwise the user is told
                 # to add a residual block, then told it conflicts with the loss
                 # block, with neither message naming the option behind it.
@@ -247,13 +245,6 @@ class SingleModuleStepConfig(StepConfigABC):
         state_copy = dict(state)
         if "crps_training" in state_copy:
             del state_copy["crps_training"]
-        if isinstance(state_copy.get("residual_prediction"), bool):
-            # residual_prediction was a bool before it grew per-variable and
-            # normalization options. True meant every prognostic, full-field
-            # normalized. Both checkpoints and user yaml reach this hook.
-            state_copy["residual_prediction"] = (
-                {} if state_copy["residual_prediction"] else None
-            )
         return state_copy
 
     @property
@@ -265,9 +256,10 @@ class SingleModuleStepConfig(StepConfigABC):
         normalization.residual block purely to scale the loss, which has
         always applied to all prognostics.
         """
-        if self.residual_prediction is None or self.residual_prediction.names is None:
+        config = self._residual_prediction_config
+        if config is None or config.names is None:
             return self.prognostic_names
-        return frozenset(self.residual_prediction.names)
+        return frozenset(config.names)
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -343,6 +335,9 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
 
     def get_step(
         self,
@@ -428,14 +423,12 @@ class SingleModuleStep(StepABC):
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         self._grouped_normalizer = grouped_normalizer
-        if config.residual_prediction is None:
+        residual_prediction = config._residual_prediction_config
+        if residual_prediction is None:
             self._residual_names: frozenset[str] | None = None
         else:
             self._residual_names = config.residual_names
-        if (
-            config.residual_prediction is not None
-            and config.residual_prediction.normalized
-        ):
+        if residual_prediction is not None and residual_prediction.normalized:
             assert config.normalization.residual is not None
             residual_normalizer = config.normalization.residual.build(
                 names=sorted(config.residual_names)
