@@ -93,4 +93,4 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|ace-samudra
 # dataset does not share the experiment id's prefix.
 # min_runtime 5h, not rs0's 3h: stage 1 lost eight jobs to preemption at 3h.
 # A scheduling knob only; no effect on numerics.
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-samudra-cm4|jnot63js|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M3YQM96665A45GXEE3CQXC96|5h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-samudra-cm4|jnot63js|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M3YQM96665A45GXEE3CQXC96|5h
