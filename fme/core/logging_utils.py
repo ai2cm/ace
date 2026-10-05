@@ -40,13 +40,11 @@ class LoggingConfig:
         log_to_screen: Whether to log to the screen.
         log_to_file: Whether to log to a file.
         log_to_wandb: Whether to log to Weights & Biases.
-        metrics_log_dir: Directory to write scalar metrics to disk as JSONL,
-            so they survive the job being killed before wandb uploads them; a
-            resumed job restores them from there and re-logs the ones wandb
-            lost. Required, since preemption recovery depends on it. Relative
-            paths are resolved against the experiment directory. Must be on a
-            local file system; if the experiment directory is not local, disk
-            metric logging is skipped with a warning.
+        metrics_log_dir: Subdirectory of the experiment directory to write
+            scalar metrics to disk as JSONL, so a resumed job can recover any
+            that wandb lost. Required, since recovering metrics after
+            preemption needs it. If the experiment directory is not on a local
+            file system, disk metric logging is skipped with a warning.
         log_format: Format of the log messages.
         level: Sets the logging level.
         wandb_dir_in_experiment_dir: Whether to create the wandb_dir in the
@@ -65,12 +63,16 @@ class LoggingConfig:
     wandb_dir_in_experiment_dir: bool = False
 
     def __post_init__(self):
-        if not is_local(self.metrics_log_dir):
+        if os.path.isabs(self.metrics_log_dir) or "://" in self.metrics_log_dir:
             raise ValueError(
-                "Disk metric logging is only supported on a local file system, "
-                f"got metrics_log_dir={self.metrics_log_dir!r}"
+                "metrics_log_dir must be a relative path, a subdirectory of the "
+                f"experiment directory, got {self.metrics_log_dir!r}"
             )
         self._dist = Distributed.get_instance()
+
+    def get_metrics_log_dir(self, experiment_dir: str) -> str:
+        """The full path of the metrics directory under ``experiment_dir``."""
+        return os.path.join(experiment_dir, self.metrics_log_dir)
 
     def configure_logging(
         self,
@@ -161,7 +163,7 @@ class LoggingConfig:
         wandb = WandB.get_instance()
         wandb.configure(
             log_to_wandb=self.log_to_wandb,
-            metrics_log_dir=os.path.join(experiment_dir, self.metrics_log_dir),
+            metrics_log_dir=self.get_metrics_log_dir(experiment_dir),
         )
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(

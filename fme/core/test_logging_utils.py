@@ -23,15 +23,12 @@ def test_metrics_written_under_experiment_dir_by_default(tmp_path):
     assert records == [{"step": 1, "loss": 1.0}]
 
 
-def test_absolute_metrics_log_dir_is_used_as_is(tmp_path):
-    experiment_dir = os.path.join(tmp_path, "experiment")
-    metrics_log_dir = os.path.join(tmp_path, "elsewhere")
-    os.makedirs(experiment_dir)
-    _configure_and_log(
-        experiment_dir,
-        LoggingConfig(log_to_wandb=True, metrics_log_dir=metrics_log_dir),
-    )
-    assert read_metrics(metrics_log_dir) == [{"step": 1, "loss": 1.0}]
+@pytest.mark.parametrize(
+    "metrics_log_dir", ["/absolute/metrics", "memory://bucket/metrics"]
+)
+def test_non_relative_metrics_log_dir_is_rejected(metrics_log_dir):
+    with pytest.raises(ValueError, match="relative path"):
+        LoggingConfig(metrics_log_dir=metrics_log_dir)
 
 
 def test_null_metrics_log_dir_is_rejected():
@@ -47,8 +44,3 @@ def test_no_metrics_written_for_non_local_experiment_dir():
         )
         wandb.log({"loss": 1.0}, step=1)
         assert wandb._disk_logger is None
-
-
-def test_non_local_metrics_log_dir_raises():
-    with pytest.raises(ValueError, match="local file system"):
-        LoggingConfig(metrics_log_dir="memory://bucket/metrics")
