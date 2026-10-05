@@ -15,8 +15,10 @@ cm4_1pct_46to125_piC_156to235-ocean_wright97w1|rs0|01M3BJQMAKKVAN62Y3YXVW5T8E|ra
 cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w0p1|rs0|01M3CNPRG4MKKREEF3334RPA7T|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w0p1|rs0|01M3CNPRG4MKKREEF3334RPA7T|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1|rs0|01M3MW5HN8HDC1CZBEMZEM9961|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1|rs0|01M3MW5HN8HDC1CZBEMZEM9961|canceled|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1w0p1|rs0|01M3QJVWY2AHP121B320K9AY9R|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1w0p1|rs0|01M3QJVWY2AHP121B320K9AY9R|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1w0p1|rs0|01M3QJVWY2AHP121B320K9AY9R|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1w0p1_zoscorr|rs0|01M3TS8BFW9NQ314R9SMWAW9KF|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1w0p1_zoscorr|rs0|01M3TS8BFW9NQ314R9SMWAW9KF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wright97pbo_w1w0p1_zoscorr|rs0|01M3TS8BFW9NQ314R9SMWAW9KF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
