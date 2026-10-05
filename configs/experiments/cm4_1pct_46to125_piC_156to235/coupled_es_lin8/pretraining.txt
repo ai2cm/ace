@@ -1,0 +1,16 @@
+# SPECTRAL-ES OCEAN, LIN8 COUPLED SCHEDULE -- arm `es0lin8_a2s`. One row.
+#
+# es0lt_a2s's row (../coupled_es_lt) with the group renamed and the cluster
+# widened: same ocean init 19yl0189 (best_inference_ckpt), same frozen ACE2S
+# j0ng1tw3, seed=0, high, 8 GPUs, 3 retries, ai2/ace, min_runtime 8h,
+# MALLOC_ARENA_MAX=4. The template differs only in the schedule block.
+#
+# CLUSTER jupiter+titan: whichever has a whole 8-GPU node first. 8 GPUs is a
+# whole node on both (8xH100-80GB / 8xB200), so per-rank batch and host RAM
+# match es0lt either way; lin8's depth-8 peak was 75.2 GiB on H100. shared_mem
+# blank -> default_shared_mem takes the smaller node (jupiter): 1494GiB, as
+# es0lt.
+
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|env
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-es0lin8_a2s-fto|o0a0rs0|ace-samudra-cm4|19yl0189|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
