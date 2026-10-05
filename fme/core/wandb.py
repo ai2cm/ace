@@ -122,7 +122,12 @@ class WandB:
         self._disk_logger: DiskMetricLogger | None = None
 
     def configure(self, log_to_wandb: bool, metrics_log_dir: str):
-        """Set up logging to wandb and to disk. Must be called before ``init``.
+        """Set up logging to wandb and to disk.
+
+        Must be called before ``init``, which raises if ``configure`` has not
+        been called: ``init`` only starts a wandb run if ``configure`` enabled
+        wandb logging, and on resume ``init`` restores the disk metrics from
+        ``metrics_log_dir``.
 
         Args:
             log_to_wandb: Whether to log to Weights & Biases.
@@ -146,10 +151,12 @@ class WandB:
         Initialize wandb, potentially with resumption logic.
 
         If `resumable`, truncates the on-disk metrics file back to the last
-        checkpoint, and if the wandb run was resumed, re-logs to it the rows
-        it never received. The truncation happens even when logging to wandb
+        checkpoint, and if the wandb run was resumed, re-logs to wandb the rows
+        wandb never received. The truncation happens even when logging to wandb
         is off, so the file does not keep rows from training the resumed job
-        redoes. Must be called on all ranks.
+        redoes. Must be called on all ranks: the root rank does this restore
+        and then waits at a barrier for every other rank, so no rank starts
+        training before the restore is done.
 
         Args:
             resumable: If True, attempt to resume the run in the experiment directory,
@@ -213,27 +220,31 @@ class WandB:
         dist.barrier()
 
     def mark_checkpoint(self):
-        """Record that a checkpoint has been saved.
+        """Write the checkpoint mark file, recording the current size of the
+        on-disk metrics file and the last step logged.
 
         Call right after saving a checkpoint that training can resume from.
-        wandb uploads logs in the background, so a job killed shortly after
-        logging loses the logs not yet uploaded. A job resuming from this
-        checkpoint restores the metrics logged to disk up to this point and
-        re-logs to wandb the ones it did not receive. Only scalars are logged
-        to disk, so figures are not recovered.
-
-        Safe to call from the termination listener's thread, since it only
-        writes a local file (see
+        On resume, ``init`` truncates the metrics file back to this size and
+        re-logs to wandb the scalars up to this step that wandb never
+        received. Only the root rank writes the file; other ranks do nothing.
+        Does no logging and no collectives, so it is safe to call from the
+        termination listener's thread (see
         `fme.core.distributed.shutdown.add_post_abort_callback`).
         """
         if self._disk_logger is not None:
             self._disk_logger.write_checkpoint_mark()
 
     def _restore_disk_metrics(self):
-        """Restore the metrics logged to disk before the last checkpoint, and
-        if this job resumed the previous wandb run, re-log to it any metrics
-        it did not receive. Nothing is re-logged to a new wandb run (e.g. with
-        ``resume_wandb: false``), since it has not lost any logs.
+        """Truncate the on-disk metrics file back to the checkpoint mark, then
+        if this job resumed an online wandb run, re-log to wandb the scalars
+        from ``wandb.run.step`` up to the mark's last step (see
+        ``metrics_to_relog``).
+
+        Skips the truncation if this rank has no disk logger or no mark file
+        exists. Skips the re-log if this rank has no wandb run, the run is
+        offline (the previous job's offline files hold the metrics), or the run
+        is new rather than resumed (e.g. ``resume_wandb: false``), since a new
+        run has lost nothing.
         """
         if self._disk_logger is None:
             return
