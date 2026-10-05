@@ -711,6 +711,7 @@ def _build_full_atmosphere_corrector(tensor_shape):
         force_positive_names=["PRATEsfc"],
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
         clip_frozen_precipitation=True,
+        zero_specific_total_water_0_in_budgets=True,
     )
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
@@ -726,6 +727,90 @@ def _build_full_atmosphere_corrector(tensor_shape):
     return corrector, input_data, gen_data, forcing_data
 
 
+def _build_budget_corrector(
+    tensor_shape, vertical_coord, zero_specific_total_water_0_in_budgets: bool
+):
+    """Build a corrector with every option that reads specific total water."""
+    config = AtmosphereCorrectorConfig(
+        conserve_dry_air=True,
+        zero_global_mean_moisture_advection=True,
+        moisture_budget_correction="advection_and_precipitation",
+        force_positive_names=["specific_total_water_0"],
+        total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
+        zero_specific_total_water_0_in_budgets=zero_specific_total_water_0_in_budgets,
+    )
+    ops = LatLonOperations(
+        torch.ones(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    return config._build(ops, vertical_coord, datetime.timedelta(seconds=3600))
+
+
+def test_budget_corrections_require_specific_total_water_0_in_input_by_default():
+    torch.manual_seed(0)
+    tensor_shape = (2, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    input_data.pop("specific_total_water_0")
+    corrector = _build_budget_corrector(
+        tensor_shape, vertical_coord, zero_specific_total_water_0_in_budgets=False
+    )
+    with pytest.raises(ValueError, match="Missing level 0"):
+        corrector(input_data, gen_data, forcing_data, None)
+
+
+def test_zero_specific_total_water_0_in_budgets():
+    """With the option on, the budget corrections behave as if
+    specific_total_water_0 were zero in both the input and generated data, the
+    input does not need to contain it, and the generated value is passed
+    through (subject only to force_positive_names).
+    """
+    torch.manual_seed(0)
+    tensor_shape = (2, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    # some negative values so the force-positive clamp has an effect
+    gen_data["specific_total_water_0"] = gen_data["specific_total_water_0"] - 0.00105
+    assert (gen_data["specific_total_water_0"] < 0).any()
+
+    corrector = _build_budget_corrector(
+        tensor_shape, vertical_coord, zero_specific_total_water_0_in_budgets=True
+    )
+    input_without_level_0 = {
+        k: v for k, v in input_data.items() if k != "specific_total_water_0"
+    }
+    result = corrector(input_without_level_0, gen_data, forcing_data, None)
+
+    reference_corrector = _build_budget_corrector(
+        tensor_shape, vertical_coord, zero_specific_total_water_0_in_budgets=False
+    )
+    zero = torch.zeros_like(gen_data["specific_total_water_0"])
+    reference = reference_corrector(
+        {**input_data, "specific_total_water_0": zero},
+        {**gen_data, "specific_total_water_0": zero},
+        forcing_data,
+        None,
+    )
+
+    assert set(result.corrected) == set(reference.corrected)
+    for name in result.corrected:
+        if name == "specific_total_water_0":
+            torch.testing.assert_close(
+                result.corrected[name], gen_data[name].clamp(min=0.0)
+            )
+        else:
+            torch.testing.assert_close(
+                result.corrected[name], reference.corrected[name]
+            )
+    assert result.corrector_state is not None
+    assert reference.corrector_state is not None
+    torch.testing.assert_close(
+        result.corrector_state.global_dry_air_mass,
+        reference.corrector_state.global_dry_air_mass,
+    )
+
+
 def test_atmosphere_corrector_config_fields_are_exercised():
     # Staleness guard: the full-corrector builder above enables every
     # field-modifying option. If a new corrector option is added to
@@ -739,6 +824,7 @@ def test_atmosphere_corrector_config_fields_are_exercised():
         "total_energy_budget_correction",
         "keep_gradient_through_clamps",
         "clip_frozen_precipitation",
+        "zero_specific_total_water_0_in_budgets",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}

@@ -1152,6 +1152,113 @@ def test_stepper_corrector(
             assert stepped.gen_data[name][:, :, 1:].min() >= 0.0
 
 
+class _AppendScaledSecondChannel(torch.nn.Module):
+    """Returns the input plus one extra channel, a scaled copy of the second
+    input channel, for testing a stepper with one more output than inputs."""
+
+    def forward(self, x):
+        return torch.cat([x, 0.01 * x[:, 1:2]], dim=1)
+
+
+@pytest.mark.parametrize("zero_specific_total_water_0_in_budgets", [False, True])
+def test_stepper_corrector_with_diagnostic_specific_total_water_0(
+    zero_specific_total_water_0_in_budgets: bool,
+):
+    """specific_total_water_0 as a diagnostic is absent from the initial
+    condition, so the budget corrections can only run if they treat it as zero.
+    """
+    torch.random.manual_seed(0)
+    device = get_device()
+    n_forward_steps = 3
+    shape = (3, n_forward_steps + 1, 5, 5)
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=shape),
+        "specific_total_water_1": torch.rand(size=shape),
+        "PRATEsfc": torch.rand(size=shape),
+        "LHTFLsfc": torch.rand(size=shape),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(size=shape),
+        "specific_total_water_0": 0.01 * torch.rand(size=shape),
+    }
+    in_names = [name for name in data if name != "specific_total_water_0"]
+    out_names = list(data)
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    ).to(device)
+    dataset_info = get_dataset_info(
+        vertical_coordinate=vertical_coordinate,
+        horizontal_coordinate=LatLonCoordinates(
+            lat=torch.linspace(-89.5, 89.5, 5, device=device),
+            lon=torch.linspace(-179.5, 179.5, 5, device=device),
+        ),
+    )
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt",
+                        config={"module": _AppendScaledSecondChannel()},
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(out_names),
+                    corrector=AtmosphereCorrectorConfig(
+                        conserve_dry_air=True,
+                        zero_global_mean_moisture_advection=True,
+                        moisture_budget_correction="advection_and_precipitation",
+                        zero_specific_total_water_0_in_budgets=(
+                            zero_specific_total_water_0_in_budgets
+                        ),
+                    ),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(stepper_config, dataset_info)
+    time = xr.DataArray(
+        [
+            xr.date_range(
+                "2000", freq="6h", periods=n_forward_steps + 1, use_cftime=True
+            )
+            for _ in range(shape[0])
+        ],
+        dims=["sample", "time"],
+    )
+    batch_data = BatchData.new_on_cpu(
+        data=data, time=time, labels=None, epoch=0
+    ).to_device()
+
+    def train_on_batch():
+        with torch.no_grad():
+            return stepper.train_on_batch(
+                data=batch_data, optimization=NullOptimization()
+            )
+
+    if not zero_specific_total_water_0_in_budgets:
+        with pytest.raises(ValueError, match="Missing level 0"):
+            train_on_batch()
+        return
+
+    gen_data = train_on_batch().gen_data
+    # the diagnostic is the network's prediction, not the zero the corrections see
+    torch.testing.assert_close(
+        gen_data["specific_total_water_0"][:, 1:],
+        0.01 * gen_data["specific_total_water_1"][:, :-1],
+    )
+    # dry air is conserved when specific_total_water_0 is counted as zero
+    zeroed = {
+        **gen_data,
+        "specific_total_water_0": torch.zeros_like(gen_data["specific_total_water_0"]),
+    }
+    dry_air = dataset_info.gridded_operations.area_weighted_mean(
+        AtmosphereData(zeroed, vertical_coordinate).surface_pressure_due_to_dry_air
+    )
+    torch.testing.assert_close(
+        dry_air[:, 1:], dry_air[:, :1].expand_as(dry_air[:, 1:]), rtol=0, atol=1e-4
+    )
+
+
 def _get_stepper_config(
     in_names: list[str],
     out_names: list[str],

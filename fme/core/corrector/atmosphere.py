@@ -218,6 +218,49 @@ class TotalEnergyBudgetCorrection:
         return corrected, corrector_state
 
 
+@dataclasses.dataclass
+class WithZeroedFields:
+    """Apply a correction as if the named fields were zero in both
+    ``input_data`` and ``gen_data``.
+
+    The named fields need not be present in ``input_data`` (e.g. a diagnostic
+    variable absent from the initial condition), but must be present in
+    ``gen_data``, whose values the wrapped correction never sees and so cannot
+    modify.
+    """
+
+    correction: Correction
+    names: list[str]
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        missing = [name for name in self.names if name not in gen_data]
+        if missing:
+            raise ValueError(
+                f"Fields to treat as zero are missing from the generated data: "
+                f"{missing}"
+            )
+        zeros = {name: torch.zeros_like(gen_data[name]) for name in self.names}
+        changed, corrector_state = self.correction(
+            {**input_data, **zeros},
+            {**gen_data, **zeros},
+            forcing_data,
+            corrector_state,
+        )
+        overwritten = set(changed).intersection(self.names)
+        if overwritten:
+            raise RuntimeError(
+                f"Correction modified fields it was meant to treat as zero: "
+                f"{sorted(overwritten)}"
+            )
+        return changed, corrector_state
+
+
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
 class AtmosphereCorrectorConfig(CorrectorConfigABC):
@@ -318,6 +361,14 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             since frozen precipitation contributes to the surface energy flux via
             the latent heat of freezing. Defaults to False so that previously
             trained checkpoints, which did not apply this clip, are unaffected.
+        zero_specific_total_water_0_in_budgets: If True, the dry air, moisture
+            budget, and total energy budget corrections treat
+            ``specific_total_water_0`` as zero in both the input and generated
+            data. This allows it to be a diagnostic variable, absent from the
+            initial condition. The generated ``specific_total_water_0`` is left
+            unmodified by these corrections (``force_positive_names`` still
+            applies to it), so its contribution to total water, dry air, and
+            energy is not conserved.
     """
 
     @classmethod
@@ -339,6 +390,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
     clip_frozen_precipitation: bool = False
+    zero_specific_total_water_0_in_budgets: bool = False
 
     def _get_corrector(
         self,
@@ -358,6 +410,12 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     ) -> "AtmosphereCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
+
+        def reads_water(correction: Correction) -> Correction:
+            if self.zero_specific_total_water_0_in_budgets:
+                return WithZeroedFields(correction, ["specific_total_water_0"])
+            return correction
+
         corrections: list[Correction] = []
         if len(self.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
@@ -374,28 +432,34 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             else:
                 precision = torch.float64
             corrections.append(
-                ConserveDryAir(area_weighted_mean, vertical_coordinate, precision)
+                reads_water(
+                    ConserveDryAir(area_weighted_mean, vertical_coordinate, precision)
+                )
             )
         if self.zero_global_mean_moisture_advection:
             corrections.append(ZeroGlobalMeanMoistureAdvection(area_weighted_mean))
         if self.moisture_budget_correction is not None:
             corrections.append(
-                MoistureBudgetCorrection(
-                    area_weighted_mean,
-                    vertical_coordinate,
-                    timestep_seconds,
-                    self.moisture_budget_correction,
-                    clip_frozen_precipitation=self.clip_frozen_precipitation,
+                reads_water(
+                    MoistureBudgetCorrection(
+                        area_weighted_mean,
+                        vertical_coordinate,
+                        timestep_seconds,
+                        self.moisture_budget_correction,
+                        clip_frozen_precipitation=self.clip_frozen_precipitation,
+                    )
                 )
             )
         if self.total_energy_budget_correction is not None:
             corrections.append(
-                TotalEnergyBudgetCorrection(
-                    area_weighted_mean,
-                    vertical_coordinate,
-                    timestep_seconds,
-                    self.total_energy_budget_correction.method,
-                    self.total_energy_budget_correction.constant_unaccounted_heating,
+                reads_water(
+                    TotalEnergyBudgetCorrection(
+                        area_weighted_mean,
+                        vertical_coordinate,
+                        timestep_seconds,
+                        self.total_energy_budget_correction.method,
+                        self.total_energy_budget_correction.constant_unaccounted_heating,
+                    )
                 )
             )
         return AtmosphereCorrector(corrections)
