@@ -5,8 +5,8 @@
 
 # 1pct-ic0001-130yr
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
 
 # piC-ic0151-200yr
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
