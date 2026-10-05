@@ -2,4 +2,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 cm4_1pct_46to125_piC_156to235-ocean_layer_ohc_w0p1|rs0|01M3T8SJAY91QYEQDXZG9HAJCY|resumed|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_layer_ohc_w0p1|rs0|01M3V3ZDFK9ETKXJT21B6JZ1NS|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_layer_ohc_w0p1|rs0|01M3V3ZDFK9ETKXJT21B6JZ1NS|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_layer_ohc_w0p1|rs0|01M3V3ZDFK9ETKXJT21B6JZ1NS|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
