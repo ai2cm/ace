@@ -12,3 +12,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3Q
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-es0v4_a2s-fto|o0a0rs0|01M3GQZ1WGRBKXTKRP1TVP79FR|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M3N68V4XWWW0FJDX7P36C5CK|ai2/ace|jupiter+titan
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3QPMZEBQ8BP8G4901N6ED9Y|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M41458F0VV2X6NBDH03KCVVE|ai2/ace|jupiter+titan
+
+# Launched 2026-10-04 from e5f092421 (rows retired to launched_* so a rerun does not relaunch):
+#   es0v4 1pct 01M459H3RW2TRASGFCEB37A9VT, piC 01M459HHNF9G91ZAMYKCBZJJRM
+#   lin8-mae2ftn 1pct 01M459HAVVJAGRVHY11QB3VRR9, piC 01M459HR28PKBK23RK5PYGV531
