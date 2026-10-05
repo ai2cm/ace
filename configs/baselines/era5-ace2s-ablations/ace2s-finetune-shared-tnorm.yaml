@@ -1,4 +1,4 @@
-# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+# arg: --dataset 01M4144YR0XPDHMY57E7CBGX12:/weights
 #
 # Shared-temperature-normalization arm, stage 2: the paper model's 3-step
 # DETACHED fine-tune recipe (configs/baselines/era5/ace-train-config-ft3-
@@ -8,12 +8,12 @@
 # dataset mounted at /weights). Seed 0 throughout.
 #
 # STAGED, NOT YET LAUNCHABLE: the `# arg:` line above carries the placeholder
-# PRETRAIN_RESULT_DATASET until the pretrain finishes. run-train.sh refuses to
+# 01M4144YR0XPDHMY57E7CBGX12 until the pretrain finishes. run-train.sh refuses to
 # submit while the placeholder is present. To launch, once the pretrain job
 # has exit code 0 and is finalized:
 #   id=$(beaker experiment get 01M3W87J5ZYV4J77220GHH8Q56 --format json \
 #        | jq -r '.[0].jobs[-1] | select(.status.exitCode == 0 and .status.finalized != null) | .result.beaker')
-#   sed -i "s/PRETRAIN_RESULT_DATASET/$id/" ace2s-finetune-shared-tnorm.yaml
+#   sed -i "s/01M4144YR0XPDHMY57E7CBGX12/$id/" ace2s-finetune-shared-tnorm.yaml
 #   git commit -am "Fill the shared-T-norm fine-tune's pretrain dataset" && git push origin HEAD:experiment/ace2s-paper-ablations
 #   WANDB_USERNAME=mcgibbon ./run-train.sh finetune-shared-tnorm
 #
