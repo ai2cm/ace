@@ -89,20 +89,19 @@ def _resume_wandb(
     run_step: int,
     offline: bool = False,
     resumable: bool = True,
-    new_run: bool = False,
+    resumed: bool = True,
 ) -> list[tuple[dict, int, bool | None]]:
-    """Start a job whose resumed wandb run continues at ``run_step``, and
-    return the calls it made to wandb.log. With ``new_run``, the experiment
-    directory has no wandb run id, so the job starts a new wandb run instead.
+    """Start a job whose wandb run continues at ``run_step``, and return the
+    calls it made to wandb.log. With ``resumed`` False the job starts a new
+    wandb run, as when the experiment directory has no wandb run id.
     """
-    if not new_run:
-        with open(tmp_path / fme.core.wandb.WANDB_RUN_ID_FILE, "w") as f:
-            f.write("run-id")
     logged: list[tuple[dict, int, bool | None]] = []
+    # offline wandb ignores resume, so an offline run is never resumed
+    resumed = resumed and not offline
     monkeypatch.setattr(
         fme.core.wandb.wandb,
         "run",
-        SimpleNamespace(id="run-id", step=run_step, offline=offline),
+        SimpleNamespace(id="run-id", step=run_step, offline=offline, resumed=resumed),
     )
     monkeypatch.setattr(fme.core.wandb.wandb, "init", lambda **kwargs: None)
     monkeypatch.setattr(
@@ -143,7 +142,7 @@ def _discarded_steps(log_dir: str) -> list[int]:
         return [json.loads(line)["step"] for line in f]
 
 
-def test_resume_relogs_rows_wandb_lacks(tmp_path, monkeypatch, caplog):
+def test_resume_relogs_steps_wandb_lacks(tmp_path, monkeypatch, caplog):
     log_dir = str(tmp_path / "metrics")
     _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS, MARK_AFTER)
     # wandb received step 10
@@ -171,7 +170,7 @@ def test_resume_does_not_relog_mark_step_wandb_received(tmp_path, monkeypatch):
 def test_new_wandb_run_restores_disk_metrics_without_relogging(tmp_path, monkeypatch):
     log_dir = str(tmp_path / "metrics")
     _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS, MARK_AFTER)
-    logged = _resume_wandb(monkeypatch, tmp_path, log_dir, run_step=0, new_run=True)
+    logged = _resume_wandb(monkeypatch, tmp_path, log_dir, run_step=0, resumed=False)
     assert logged == []
     assert [r["step"] for r in read_metrics(log_dir)] == [10, 20, 20, 30, 30]
 
@@ -192,11 +191,13 @@ def test_non_resumable_init_restores_nothing(tmp_path, monkeypatch):
     assert read_metrics(log_dir) == []
 
 
-def test_resume_does_not_relog_to_offline_wandb(tmp_path, monkeypatch):
+def test_resume_does_not_relog_to_offline_wandb(tmp_path, monkeypatch, caplog):
     log_dir = str(tmp_path / "metrics")
     _log_previous_job(log_dir, PREVIOUS_JOB_RECORDS, MARK_AFTER)
-    logged = _resume_wandb(monkeypatch, tmp_path, log_dir, run_step=0, offline=True)
+    with caplog.at_level(logging.INFO):
+        logged = _resume_wandb(monkeypatch, tmp_path, log_dir, run_step=0, offline=True)
     assert logged == []
+    assert "wandb is offline, so disk metrics are not re-logged" in caplog.text
     assert [r["step"] for r in read_metrics(log_dir)] == [10, 20, 20, 30, 30]
 
 

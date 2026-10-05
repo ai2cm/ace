@@ -19,6 +19,7 @@ class MockWandB:
         self._last_step = 0
         self._last_received_step: int | None = None
         self._id: str | None = None
+        self._resumed = False
         self._disk_logger: DiskMetricLogger | None = None
         self._runs: list[dict[str, Any]] = []
         # wandb reads WANDB_NAME only on the first init; model that one-time
@@ -44,7 +45,7 @@ class MockWandB:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
-        resumed_run = False
+        self._resumed = False
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -52,9 +53,6 @@ class MockWandB:
                         "must provide `experiment_dir` when `resumable` is True"
                     )
                 else:
-                    resumed_run = os.path.exists(
-                        os.path.join(experiment_dir, wandb.WANDB_RUN_ID_FILE)
-                    )
                     wandb.init_wandb_with_resumption(
                         experiment_dir,
                         direct_access=False,
@@ -65,7 +63,7 @@ class MockWandB:
             else:
                 self._wandb_init(resume="never", **kwargs)
         if resumable:
-            self._restore_disk_metrics(relog=resumed_run)
+            self._restore_disk_metrics()
 
     def _wandb_init(
         self,
@@ -89,6 +87,7 @@ class MockWandB:
             else:
                 if id != self._id:
                     raise ValueError("resume='must' and id does not match previous id")
+            self._resumed = True
         else:
             if id is not None:
                 raise ValueError("resume='never' and id is not None")
@@ -110,8 +109,9 @@ class MockWandB:
         self._id = id
 
     def set_last_received_step(self, step: int):
-        """Simulate resuming a wandb run that received logs through ``step``
-        in a previous job, whose logs this mock does not hold.
+        """Simulate a previous job having logged through ``step`` to the run
+        this mock will resume. Use when that job ran under a separate
+        ``mock_wandb``, so its logs are not in this mock.
         """
         self._last_received_step = step
 
@@ -119,6 +119,7 @@ class MockWandB:
         # Reset per-run state so the next init starts fresh; the env-name
         # snapshot persists, mirroring wandb's setup singleton across finish().
         self._id = None
+        self._resumed = False
         self._last_step = 0
 
     @property
@@ -148,24 +149,24 @@ class MockWandB:
         if self._disk_logger is not None:
             self._disk_logger.write_checkpoint_mark()
 
-    def _restore_disk_metrics(self, relog: bool):
-        """Mirror wandb: a resumed run continues after the last step it
-        received, and a committed step rejects later logs at that step.
+    def _restore_disk_metrics(self):
+        """Mirror wandb: a resumed run continues at the step after the last
+        one it received, and rejects logs at any step already committed.
         """
         if self._disk_logger is None:
             return
         mark = self._disk_logger.restore_to_checkpoint_mark()
-        if mark is None or not relog:
+        if mark is None or not self._resumed:
             return
         received_steps = list(self._logs)
         if self._last_received_step is not None:
             received_steps.append(self._last_received_step)
         first_step = max(received_steps, default=-1) + 1
-        for step, data, commit in wandb.metrics_to_relog(
+        for call in wandb.metrics_to_relog(
             self._disk_logger.directory, first_step, mark
         ):
-            self._last_step = step + 1 if commit else step
-            self._logs[step].update(data)
+            self._last_step = call.step + 1 if call.commit else call.step
+            self._logs[call.step].update(call.data)
 
     def drop_logs_after(self, step: int):
         """Simulate wandb never receiving logs after ``step``, e.g. because

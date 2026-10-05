@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import time
@@ -117,16 +118,16 @@ class WandB:
         self._enabled = False
         self._configured = False
         self._id = None
-        # None on non-root ranks and for a non-local metrics_log_dir (see
-        # build_disk_logger); the None-guards below are for those cases only
+        # only the root rank logs metrics to disk, see build_disk_logger
         self._disk_logger: DiskMetricLogger | None = None
 
     def configure(self, log_to_wandb: bool, metrics_log_dir: str):
-        """
+        """Set up logging to wandb and to disk. Must be called before ``init``.
+
         Args:
             log_to_wandb: Whether to log to Weights & Biases.
-            metrics_log_dir: Directory to write scalar metrics to disk, which
-                resumable runs restore from on resume.
+            metrics_log_dir: Directory to write scalar metrics to on disk, so
+                a resumed job can recover any that wandb lost.
         """
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
@@ -144,10 +145,10 @@ class WandB:
         """
         Initialize wandb, potentially with resumption logic.
 
-        A resumable init also restores the disk metrics a previous job logged up
-        to its last ``mark_checkpoint``, and, if it resumes a wandb run rather
-        than starting a new one, re-logs to that run the ones it never received.
-        Must be called on all ranks.
+        If `resumable`, restores the metrics logged to disk before the last
+        checkpoint, and re-logs any that the resumed wandb run did not
+        receive. The disk restore happens whether or not logging to wandb is
+        enabled. Must be called on all ranks.
 
         Args:
             resumable: If True, attempt to resume the run in the experiment directory,
@@ -160,7 +161,6 @@ class WandB:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
-        resumed_run = False
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -168,9 +168,6 @@ class WandB:
                         "must provide `experiment_dir` when `resumable` is True"
                     )
                 else:
-                    resumed_run = os.path.exists(
-                        os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
-                    )
                     id_ = init_wandb_with_resumption(
                         experiment_dir, direct_access=False, **kwargs
                     )
@@ -183,7 +180,7 @@ class WandB:
                 logging.info(f"New non-resuming wandb run with id: {id_}.")
             self._id = id_
         if resumable:
-            self._restore_disk_metrics(relog=resumed_run)
+            self._restore_disk_metrics()
             Distributed.get_instance().barrier()
 
     def finish(self):
@@ -215,34 +212,34 @@ class WandB:
         dist.barrier()
 
     def mark_checkpoint(self):
-        """Record that a resume checkpoint holds the training logged so far.
+        """Record that a checkpoint has been saved.
 
-        Call right after the checkpoint is saved. When a later job resumes the
-        wandb run, ``init`` restores the disk metrics logged up to this mark
-        and re-logs the ones wandb never received: wandb uploads logs in the
-        background, so a job killed (e.g. preempted) shortly after logging
-        loses whatever was still queued, and wandb holds the last logged step
-        uncommitted until a later step is logged. Only scalars are on disk, so
-        figures in lost logs stay lost.
+        Call right after saving a checkpoint that training can resume from.
+        wandb uploads logs in the background, so a job killed shortly after
+        logging loses the logs not yet uploaded. A job resuming from this
+        checkpoint restores the metrics logged to disk up to this point and
+        re-logs to wandb the ones it did not receive. Only scalars are logged
+        to disk, so figures are not recovered.
 
-        A no-op unless disk metric logging is enabled, which it is only on the
-        root rank. Safe to call on the termination listener's thread: it only
+        Safe to call from the termination listener's thread, since it only
         writes a local file (see
         `fme.core.distributed.shutdown.add_post_abort_callback`).
         """
         if self._disk_logger is not None:
             self._disk_logger.write_checkpoint_mark()
 
-    def _restore_disk_metrics(self, relog: bool):
-        """Restore the disk metrics a previous job logged up to its last
-        checkpoint mark, and if ``relog``, re-log to the resumed wandb run the
-        ones it never received. A new wandb run (e.g. ``resume_wandb: false``)
-        did not lose them, so it is not given them.
+    def _restore_disk_metrics(self):
+        """Restore the metrics logged to disk before the last checkpoint, and
+        if this job resumed the previous wandb run, re-log to it any metrics
+        it did not receive. Nothing is re-logged to a new wandb run (e.g. with
+        ``resume_wandb: false``), since it has not lost any logs.
         """
         if self._disk_logger is None:
             return
         mark = self._disk_logger.restore_to_checkpoint_mark()
-        if mark is None or not relog or wandb.run is None:
+        if mark is None:
+            return
+        if wandb.run is None:  # this rank does not log to wandb
             return
         if wandb.run.offline:
             logging.info(
@@ -250,19 +247,24 @@ class WandB:
                 "previous job's offline wandb files hold them"
             )
             return
+        # wandb.run.resumed, not the run id file, tells a resumed run from a
+        # new one: init_wandb_with_resumption writes the file for a new run
+        # too, so by this point it always exists.
+        if not wandb.run.resumed:
+            return
         first_step = wandb.run.step
         logging.info(
             f"Checking disk metrics for steps wandb lacks: wandb resumed at "
             f"step {first_step}, checkpoint mark at step {mark.last_step}"
         )
-        rows = metrics_to_relog(self._disk_logger.directory, first_step, mark)
-        for step, data, commit in rows:
-            wandb.log(data, step=step, commit=commit)
-        if rows:
-            epochs = [data["epoch"] for _, data, _ in rows if "epoch" in data]
+        calls = metrics_to_relog(self._disk_logger.directory, first_step, mark)
+        for call in calls:
+            wandb.log(call.data, step=call.step, commit=call.commit)
+        if calls:
+            epochs = [call.data["epoch"] for call in calls if "epoch" in call.data]
             logging.info(
-                f"Recovered wandb logs for {len(rows)} steps from disk "
-                f"(steps {rows[0][0]} to {rows[-1][0]}, epochs {epochs})"
+                f"Recovered wandb logs for {len(calls)} steps from disk "
+                f"(steps {calls[0].step} to {calls[-1].step}, epochs {epochs})"
             )
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
@@ -312,14 +314,14 @@ def scale_image(
 
 
 def build_disk_logger(metrics_log_dir: str) -> DiskMetricLogger | None:
-    """Build the disk metric logger for this rank, or None if it has none: only
-    the root rank logs metrics to disk, and only to a local file system.
+    """Build a DiskMetricLogger for this rank.
+
+    Returns None on non-root ranks, which do not log metrics, and when
+    ``metrics_log_dir`` is not on a local file system.
     """
     if not Distributed.get_instance().is_root():
         return None
     if not is_local(metrics_log_dir):
-        # reachable only through a non-local experiment directory, since
-        # LoggingConfig rejects a non-local metrics_log_dir itself
         logging.warning(
             f"Disk metric logging is only supported on a local file system. "
             f"Got metrics_log_dir={metrics_log_dir!r}, so no metrics will be "
@@ -329,21 +331,36 @@ def build_disk_logger(metrics_log_dir: str) -> DiskMetricLogger | None:
     return DiskMetricLogger(metrics_log_dir)
 
 
+@dataclasses.dataclass(frozen=True)
+class WandBLogCall:
+    """The arguments of one call to ``wandb.log``."""
+
+    data: dict[str, Any]
+    step: int
+    commit: bool
+
+
 def metrics_to_relog(
     directory: str | os.PathLike, first_step: int, mark: CheckpointMark
-) -> list[tuple[int, dict[str, Any], bool]]:
-    """The restored disk metrics to re-log to a resumed wandb run, as
-    ``(step, data, commit)``.
+) -> list[WandBLogCall]:
+    """Determine the calls to ``wandb.log`` that give a resumed run the
+    metrics it did not receive from the previous job.
 
-    A resumed wandb run continues at ``first_step``, the step after the last one
-    it received, and rejects logs at earlier steps, so the metrics from that
-    step on are re-logged at their original steps, merged by step. The mark's
-    last step is left uncommitted: the resumed job may log at it again, e.g.
-    the end-of-epoch logs after a checkpoint saved before validation, and those
-    logs then update it rather than being rejected.
+    Args:
+        directory: Directory holding the restored metrics file.
+        first_step: The step the resumed run continues at, i.e. the step after
+            the last one it received. wandb rejects logs at earlier steps.
+        mark: The checkpoint mark the metrics were restored to.
+
+    Returns:
+        One call per step from ``first_step`` on, in step order, with the
+        metrics logged at that step merged. The call at the mark's last step
+        has ``commit=False``, so that if the resumed job logs at that step
+        again (e.g. the end-of-epoch metrics after a checkpoint saved before
+        validation) those logs are added to the step instead of rejected.
     """
     return [
-        (step, data, step != mark.last_step)
+        WandBLogCall(data=data, step=step, commit=step != mark.last_step)
         for step, data in read_metrics_by_step(directory, first_step).items()
     ]
 
