@@ -1,0 +1,5 @@
+# Animation rollout for m2lines (research tasks/2026-10-05-stochastic-samudra-animation-m2lines).
+# Row mirrors ../ocean_wide_stochastic_es_longtail/experiments.txt's rs0 piC row
+# (same training experiment, checkpoint and pinned results dataset). ~50-yr
+# rollout, ~20 min on the 200-yr's ~65 min, so 3h min_runtime is ample.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|run_piC-animation|best_inference_ckpt|high|--min-runtime 3h||01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter|||20GiB

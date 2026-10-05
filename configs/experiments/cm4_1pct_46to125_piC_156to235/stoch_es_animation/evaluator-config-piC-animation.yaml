@@ -1,0 +1,58 @@
+# Animation frames of stochastic Samudra for m2lines: does the noise keep the
+# fields coherent? (research tasks/2026-10-05-stochastic-samudra-animation-m2lines)
+#
+# Model: spectral-ES stage-2 long-tail rs0 (wandb 19yl0189), best_inference_ckpt,
+# the checkpoint its piC 200-yr / 1pct 130-yr evaluations used. Uncoupled, so
+# with identical CM4 forcing the two members differ only through Samudra's own
+# noise; their difference field is the coherence test.
+#
+# Rollout: the icx1-1deg-picontrol-200yr IC (0151-01-06) and stores, cut to
+# 3680 steps x 5 days (~50.4 yr, through ~0201-06): far enough for the late
+# animation window. Windows are cut at render time, not here -- the zarr writer
+# rejects time_selection -- so every step is written:
+#   early  0151-01-06 -> 0152-12-31  146 frames: members diverge from one IC
+#   late   0200                       73 frames: no grid-scale build-up by year 50
+# Native 5-day snapshots, no time_coarsen: a monthly mean would smooth away the
+# incoherence being checked. sst + zos only; zos gradients are the currents, so
+# grid-scale noise shows there first. Reference written for the CM4 panel.
+#
+# experiment_dir is on GCS so the zarr frames are directly readable and the
+# beaker result dataset stays empty (~8 GB: 3680 steps x 2 fields x
+# 2 members x (prediction + reference) x 360x180 float32). Remote experiment_dir
+# requires log_to_file: false.
+experiment_dir: gs://vcm-ml-intermediate/elynnwu-research/2026-10-05-stochastic-samudra-animation-m2lines/piC-ic0151
+n_forward_steps: 3680
+forward_steps_in_memory: 40
+n_ensemble_per_ic: 2
+seed: 0
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: frames
+    names: [sst, zos]
+    save_reference: true
+    format:
+      name: zarr
+aggregator:
+  log_histograms: false
