@@ -8,8 +8,10 @@ import numpy as np
 import pytest
 import xarray as xr
 import zarr
+from zarrs import ZarrsCodecPipeline
 
 from fme.core.writer import (
+    ZARRS_WRITE_THREADS,
     ZarrWriter,
     _initialize_zarr,
     _insert_into_zarr,
@@ -322,6 +324,120 @@ def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
     read_all = writer.read_batch(["var"], position_slices={})
     assert read_all["var"].shape == (4, NLAT, NLON)
     np.testing.assert_array_equal(read_all["var"][:2], 0.0)
+
+
+def _spy_on(method):
+    return patch.object(
+        ZarrsCodecPipeline,
+        method,
+        autospec=True,
+        side_effect=getattr(ZarrsCodecPipeline, method),
+    )
+
+
+def test_ZarrWriter_uses_zarrs_pipeline_for_local_store(tmp_path):
+    """The writer's I/O must go through zarrs, not silently fall back to zarr's
+    default pipeline. The spies prove zarr built the zarrs pipeline at all: for a
+    store zarrs does not support, zarr substitutes its default pipeline without a
+    warning, even in strict mode. Strict mode covers the other fallback, where the
+    zarrs pipeline hands unsupported metadata or dtypes to its own Python
+    implementation instead of raising."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    data = np.random.rand(2, NLAT, NLON).astype("f4")
+    with (
+        zarr.config.set({"codec_pipeline.strict": True}),
+        _spy_on("write") as zarrs_write,
+        _spy_on("read") as zarrs_read,
+    ):
+        writer.record_batch(data={"var": data}, position_slices={"time": slice(0, 2)})
+        read = writer.read_batch(["var"], position_slices={"time": slice(0, 2)})
+    assert zarrs_write.called
+    assert zarrs_read.called
+    np.testing.assert_array_equal(read["var"], data)
+
+
+def test_ZarrWriter_caps_zarrs_threads(tmp_path):
+    """A pool of one thread per logical CPU burns several times the CPU of a small
+    pool for the same wall time, so the writer builds its arrays with a capped pool."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    max_workers_at_write = []
+
+    def record_and_write(*args, **kwargs):
+        max_workers_at_write.append(zarr.config.get("threading.max_workers"))
+        return ZarrsCodecPipeline.write(*args, **kwargs)
+
+    with patch.object(
+        ZarrsCodecPipeline, "write", autospec=True, side_effect=record_and_write
+    ):
+        writer.record_batch(
+            data={"var": np.random.rand(2, NLAT, NLON).astype("f4")},
+            position_slices={"time": slice(0, 2)},
+        )
+    assert max_workers_at_write == [ZARRS_WRITE_THREADS]
+    assert zarr.config.get("threading.max_workers") is None
+
+
+def _create_multi_var_store(path, names, n_times=4):
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+    _initialize_zarr(
+        path=path,
+        vars=names,
+        dim_sizes=(n_times, NLAT, NLON),
+        chunks={"time": 1, "lat": NLAT, "lon": NLON},
+        shards=None,
+        dim_names=("time", "lat", "lon"),
+        coords={"time": times},
+        dtype="f4",
+    )
+
+
+def test_insert_into_zarr_writes_many_variables(tmp_path):
+    """Every variable's slice lands correctly when they are written together."""
+    names = [f"var{i}" for i in range(5)]
+    path = os.path.join(tmp_path, "test.zarr")
+    _create_multi_var_store(path, names)
+
+    expected = {name: np.random.rand(2, NLAT, NLON).astype("f4") for name in names}
+    _insert_into_zarr(path, expected, {0: slice(1, 3)}, overwrite_check=True)
+
+    ds = xr.open_zarr(path)
+    for name in names:
+        np.testing.assert_allclose(ds[name].values[1:3], expected[name], rtol=1e-6)
+        # the untouched slices keep the fill value
+        np.testing.assert_array_equal(ds[name].values[0], 0.0)
+        np.testing.assert_array_equal(ds[name].values[3], 0.0)
+
+
+def test_insert_into_zarr_overwrite_conflict_writes_nothing(tmp_path):
+    """A conflict on one variable must not leave the others partially written.
+
+    The occupied variable is the last one inserted, so an implementation that
+    checks and writes one variable at a time would write the earlier variables
+    before reaching the conflict.
+    """
+    names = ["var0", "var1", "var2"]
+    path = os.path.join(tmp_path, "test.zarr")
+    _create_multi_var_store(path, names)
+    slices = {0: slice(0, 2)}
+
+    occupied = np.random.rand(2, NLAT, NLON).astype("f4") + 1.0
+    _insert_into_zarr(path, {names[-1]: occupied}, slices, overwrite_check=False)
+
+    retry = {name: np.full((2, NLAT, NLON), 5.0, dtype="f4") for name in names}
+    with pytest.raises(RuntimeError, match="Attempting to overwrite"):
+        _insert_into_zarr(path, retry, slices, overwrite_check=True)
+
+    ds = xr.open_zarr(path)
+    np.testing.assert_allclose(ds[names[-1]].values[0:2], occupied, rtol=1e-6)
+    for name in names[:-1]:
+        np.testing.assert_array_equal(ds[name].values[0:2], 0.0)
 
 
 def test_ZarrWriter_read_batch_before_initialization_errors(tmp_path):

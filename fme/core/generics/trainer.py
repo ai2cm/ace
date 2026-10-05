@@ -65,7 +65,7 @@ import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
-from fme.core.ema import EMATracker
+from fme.core.ema import EMA_CHECKPOINT_KEY, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
@@ -707,12 +707,12 @@ class Trainer:
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
                 "stepper": self.stepper.get_state(),
-                "ema": self._ema.get_state(),
+                EMA_CHECKPOINT_KEY: self._ema.get_state(
+                    include_params=include_optimization
+                ),
             }
             if include_optimization:
                 data["optimization"] = self.optimization.get_state()
-            else:
-                data["ema"].pop("ema_params")  # don't need if not saving optimization
             torch.save(data, temporary_location)
             os.replace(temporary_location, checkpoint_path)
         finally:
@@ -989,7 +989,9 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._epochs_trained = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
-    trainer._ema = EMATracker.from_state(checkpoint["ema"], trainer.stepper.modules)
+    trainer._ema = EMATracker.from_state(
+        checkpoint[EMA_CHECKPOINT_KEY], trainer.stepper.modules
+    )
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
