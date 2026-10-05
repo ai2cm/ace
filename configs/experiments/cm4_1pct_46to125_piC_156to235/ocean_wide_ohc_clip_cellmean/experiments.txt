@@ -4,6 +4,9 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT7
 # Century evals (2026-10-05) of best_inference_ckpt with the shared cm4_eval/ocean configs
 # (piC carries the six regional monthly-SST box writers incl. Gulf Stream, from ace#1525).
 # Launch: job_runner/evaluate.sh <this dir> . --config-dir configs/experiments/cm4_eval/ocean
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|launched_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h||01M402P8E9Y1XAP9PW5D6RX0WK|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|crashed_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h||01M402P8E9Y1XAP9PW5D6RX0WK|ai2/ace|jupiter+titan|||64GiB
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|launched_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M402P8E9Y1XAP9PW5D6RX0WK|ai2/ace|jupiter+titan|||64GiB
 # Launched 2026-10-05 from 6e1c00dac: 1pct 01M46YTDKC4SQ667TGC44D5TJH, piC 01M46YTKZS49JPK6RKSB8KPGRV
+# 1pct 01M46YTDKC4SQ667TGC44D5TJH crashed at the end (Nino3.4 plot, year-0001 date axis): 6e1c00dac
+# predates #1439. Relaunch with #1439 cherry-picked:
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h||01M402P8E9Y1XAP9PW5D6RX0WK|ai2/ace|jupiter+titan|||64GiB
