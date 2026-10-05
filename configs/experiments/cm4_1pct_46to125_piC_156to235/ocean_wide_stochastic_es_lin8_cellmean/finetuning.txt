@@ -1,0 +1,12 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# STAGE 2 of the CELL-MEAN fork, lin8 schedule. Same row as
+# ../ocean_wide_stochastic_es_longtail_cellmean/finetuning.txt (same stage-1
+# checkpoint, seed, footprint); only the template's schedule differs.
+#
+# job_runner/uncoupled_finetune.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235 ocean_wide_stochastic_es_lin8_cellmean \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+# with WANDB_USERNAME=elynnwu.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlin8|rs0|ace-samudra-cm4|605j05ok|best_ckpt|train|high|jupiter+titan|4|500GiB|3|ai2/ace|seed=0|01M402PJCP2B9QRZXGB2D31VKD|5h

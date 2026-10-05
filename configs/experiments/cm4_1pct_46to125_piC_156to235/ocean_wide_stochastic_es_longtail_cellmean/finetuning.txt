@@ -2,15 +2,19 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 
 # STAGE 2 of the CELL-MEAN fork, long-tail schedule. Fork of
 # ../ocean_wide_stochastic_es_longtail/finetuning.txt's rs0 row (launched at
-# aa7bbb308); only the stage-1 checkpoint differs.
+# aa7bbb308 as wandb 19yl0189); only the stage-1 checkpoint differs.
 #
-# NOT READY: STAGE1_WANDB_ID is a placeholder for the wandb id of
-# ../ocean_wide_stochastic_es_cellmean's rs0 run. Fill it in and flip
-# skip -> train once that run finishes.
+# Stage 1: ../ocean_wide_stochastic_es_cellmean rs0, beaker
+# 01M402PJCEJR34C6M6BS2BA7P3, wandb 605j05ok, 75/75 epochs, final
+# val_piC/mean/loss 0.04889 (control silm932h 0.04837). results_dataset is
+# pinned to that experiment's single job's result dataset.
+#
+# Scheduling differs from 19yl0189 (jupiter -> jupiter+titan, min_runtime
+# 3h -> 5h; stage-1 runs lost jobs to preemption at 3h). No effect on the run.
 #
 # job_runner/uncoupled_finetune.sh \
-#   configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_es_longtail_cellmean . \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235 ocean_wide_stochastic_es_longtail_cellmean \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 # with WANDB_USERNAME=elynnwu.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|ace-samudra-cm4|STAGE1_WANDB_ID|best_ckpt|skip|high|jupiter+titan|4|500GiB|3|ai2/ace|seed=0||3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|ace-samudra-cm4|605j05ok|best_ckpt|train|high|jupiter+titan|4|500GiB|3|ai2/ace|seed=0|01M402PJCP2B9QRZXGB2D31VKD|5h
