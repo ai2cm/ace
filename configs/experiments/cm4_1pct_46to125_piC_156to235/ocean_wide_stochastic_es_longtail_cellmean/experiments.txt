@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|01M46YMF1GQ07DH3DWAEC7WN5W|training|best_inference_ckpt|normal|--min-runtime 8h
