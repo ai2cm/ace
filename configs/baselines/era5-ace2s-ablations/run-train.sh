@@ -189,3 +189,7 @@ run_training "ace2s-finetune-vs-w5-0p5.yaml" "1deg-daily-ace2s-vs-w5-0p5-ft3-det
 # Variogram-score pretrain (seed 0): the paper pretrain with the
 # vs-w3-measured fine-tune's loss in place of the energy score
 run_training "ace2s-pretrain-vs-w3.yaml" "1deg-daily-ace2s-vs-w3-pretrain-rs0" 8
+
+# Resume of the variogram-score pretrain (ufmvxvq7) to 120 epochs (same wandb
+# name so the run keeps its id and name; beaker suffixes the experiment name).
+run_training "ace2s-pretrain-vs-w3-resume120.yaml" "1deg-daily-ace2s-vs-w3-pretrain-rs0" 8
