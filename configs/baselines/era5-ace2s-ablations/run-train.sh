@@ -189,3 +189,6 @@ run_training "ace2s-finetune-vs-w5-0p5.yaml" "1deg-daily-ace2s-vs-w5-0p5-ft3-det
 # Variogram-score pretrain (seed 0): the paper pretrain with the
 # vs-w3-measured fine-tune's loss in place of the energy score
 run_training "ace2s-pretrain-vs-w3.yaml" "1deg-daily-ace2s-vs-w3-pretrain-rs0" 8
+
+# Variogram-score pretrain, stage 2: the vs-w3-measured fine-tune of it
+run_training "ace2s-finetune-vs-w3-pretrain.yaml" "1deg-daily-ace2s-vs-w3-pretrain-ft3-detached-rs0" 8
