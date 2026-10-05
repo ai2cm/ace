@@ -1,0 +1,14 @@
+# Century evals of mfcm0_a2s (mean-fill complete-mask ocean coupled finetune, finished 2026-10-05).
+# Configs: --config-dir configs/experiments/cm4_eval/coupled (exper/2026-07-16-jamesd).
+# Branch = exp/coupled-eval-2026-10-04 + ace#1458's spatial_masking commits, so the checkpoint's
+# stepper config (which carries fill_value_overrides) parses under the strict loader.
+# Checkpoint: best_inference_ckpt from the final (exit-0) job's result dataset, pinned in field 9.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mfcm0_a2s-fto|o0a0rs0|01M3R62ZGTQX9HPMXWSQ855MKV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M457JZYSFCKWM2KPB8J57XC3|ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-mfcm0_a2s-fto|o0a0rs0|01M3R62ZGTQX9HPMXWSQ855MKV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M457JZYSFCKWM2KPB8J57XC3|ai2/ace|jupiter+titan
