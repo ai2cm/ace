@@ -1,0 +1,12 @@
+# Century evals of es0lt_a2s (spectral-ES ocean, cap-16 long-tail coupled unroll), finished training 2026-10-05.
+# Same evaluation as coupled_eval_2026-10-04 (es0v4): --config-dir configs/experiments/cm4_eval/coupled (exper/2026-07-16-jamesd).
+# Checkpoint: best_inference_ckpt (epoch 5) from the final (exit-0) training job's result dataset, pinned in field 9.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es0lt_a2s-fto|o0a0rs0|01M3GR06BZNXA18Q4WH543QPR1|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M459HZHDVGJVN5FJDCTBSXCV|ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es0lt_a2s-fto|o0a0rs0|01M3GR06BZNXA18Q4WH543QPR1|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M459HZHDVGJVN5FJDCTBSXCV|ai2/ace|jupiter+titan
