@@ -5,3 +5,9 @@ cm4_1pct_46to125_piC_156to235-ocean_mld|rs0|01M3WEXG0KF75FBBPBQ5FS6XK4|ran_piC-i
 
 cm4_1pct_46to125_piC_156to235-ocean_mld_wright97pbo_w1w0p1|rs0|01M3YMX0J4FB0C18AGRXSTG09G|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_mld_wright97pbo_w1w0p1|rs0|01M3YMX0J4FB0C18AGRXSTG09G|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_1pct_46to125_piC_156to235-ocean_mld|rs0|01M3WEXG0KF75FBBPBQ5FS6XK4|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_mld_wright97pbo_w1w0p1|rs0|01M3YMX0J4FB0C18AGRXSTG09G|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_1pct_46to125_piC_156to235-ocean_mld|rs0|01M3WEXG0KF75FBBPBQ5FS6XK4|run_1pct-ic0001-130yr-hfds|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_mld_wright97pbo_w1w0p1|rs0|01M3YMX0J4FB0C18AGRXSTG09G|run_1pct-ic0001-130yr-hfds|best_inference_ckpt|high|--min-runtime 1h
