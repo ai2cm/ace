@@ -51,11 +51,11 @@ def test_stepper_training_metadata_roundtrip():
     assert new_history == history
 
 
-def test_get_job_id_wandb():
+def test_get_job_id_wandb(tmp_path):
     with mock_wandb(), mock_distributed():
         wandb = WandB.get_instance()
         assert get_job_id() is None, "wandb is not enabled/configured"
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         wandb.init()
         job_id = get_job_id()
         assert wandb.get_id() == job_id

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from fme.core import wandb
-from fme.core.disk_metric_logger import DiskMetricLogger, read_metrics_by_step
+from fme.core.disk_metric_logger import DiskMetricLogger
 from fme.core.distributed import Distributed
 
 
@@ -26,15 +26,13 @@ class MockWandB:
         self._env_name_snapshot: str | None = None
         self._env_name_snapshot_taken = False
 
-    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
+    def configure(self, log_to_wandb: bool, metrics_log_dir: str):
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
         if self._disk_logger is not None:
             self._disk_logger.close()
-            self._disk_logger = None
-        if metrics_log_dir is not None and dist.is_root():
-            self._disk_logger = DiskMetricLogger(metrics_log_dir)
+        self._disk_logger = wandb.build_disk_logger(metrics_log_dir)
 
     def init(
         self,
@@ -46,6 +44,7 @@ class MockWandB:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
+        resumed_run = False
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -53,6 +52,9 @@ class MockWandB:
                         "must provide `experiment_dir` when `resumable` is True"
                     )
                 else:
+                    resumed_run = os.path.exists(
+                        os.path.join(experiment_dir, wandb.WANDB_RUN_ID_FILE)
+                    )
                     wandb.init_wandb_with_resumption(
                         experiment_dir,
                         direct_access=False,
@@ -62,6 +64,8 @@ class MockWandB:
                     )
             else:
                 self._wandb_init(resume="never", **kwargs)
+        if resumable:
+            self._restore_disk_metrics(relog=resumed_run)
 
     def _wandb_init(
         self,
@@ -140,40 +144,26 @@ class MockWandB:
         if self._disk_logger is not None:
             self._disk_logger.log(dict(data), step=step)
 
-    @property
-    def disk_metrics_offset(self) -> int | None:
-        if self._disk_logger is None:
-            return None
-        return self._disk_logger.offset
+    def mark_checkpoint(self):
+        if self._disk_logger is not None:
+            self._disk_logger.write_checkpoint_mark()
 
-    def restore_disk_metrics(
-        self, offset: int | None, resume_step: int, step_continues: bool
-    ):
-        if self._disk_logger is None or offset is None:
-            return
-        if self._disk_logger.restore(offset):
-            self._relog_unsynced_disk_metrics(resume_step, step_continues)
-
-    def restore_disk_metrics_through_step(self, last_step: int):
-        if self._disk_logger is None:
-            return
-        if self._disk_logger.restore_through_step(last_step):
-            self._relog_unsynced_disk_metrics(last_step, step_continues=False)
-
-    def _relog_unsynced_disk_metrics(self, resume_step: int, step_continues: bool):
+    def _restore_disk_metrics(self, relog: bool):
         """Mirror wandb: a resumed run continues after the last step it
         received, and a committed step rejects later logs at that step.
         """
-        if not self._enabled or self._disk_logger is None:
+        if self._disk_logger is None:
+            return
+        mark = self._disk_logger.restore_to_checkpoint_mark()
+        if mark is None or not relog:
             return
         received_steps = list(self._logs)
         if self._last_received_step is not None:
             received_steps.append(self._last_received_step)
         first_step = max(received_steps, default=-1) + 1
-        for step, data in read_metrics_by_step(
-            self._disk_logger.directory, first_step
-        ).items():
-            commit = not (step_continues and step == resume_step)
+        for step, data, commit in wandb.metrics_to_relog(
+            self._disk_logger.directory, first_step, mark
+        ):
             self._last_step = step + 1 if commit else step
             self._logs[step].update(data)
 

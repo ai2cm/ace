@@ -179,7 +179,7 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
     single_dir = tmp_path / "non_segmented_run"
     monkeypatch.setenv("WANDB_NAME", "myrun")
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(make_config(run_dir, 3), 2)
         assert [run["name"] for run in wandb.runs] == [
             "myrun-segment_20000101T06",
@@ -442,7 +442,9 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
         with open(config_path, "w") as f:
             yaml.dump(dataclasses.asdict(config), f)
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=False)
+            wandb.configure(
+                log_to_wandb=False, metrics_log_dir=str(tmp_path / "metrics")
+            )
             main(config_path, segments)
 
     # Two segments of 3 steps each, seeded.

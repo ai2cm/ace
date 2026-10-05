@@ -5,7 +5,9 @@ import os
 
 import pytest
 
+from fme.core import disk_metric_logger
 from fme.core.disk_metric_logger import (
+    CHECKPOINT_MARK_FILENAME,
     METRICS_FILENAME,
     DiskMetricLogger,
     read_metrics,
@@ -46,24 +48,38 @@ def test_log_flushes_each_line(log_dir):
     logger.close()
 
 
-def _log_steps(log_dir: str, steps: range) -> list[int]:
-    """Log one record per step and return the offset after each."""
+def _log_steps(log_dir: str, steps: range, mark_after: int | None = None):
+    """Log one record per step, writing a checkpoint mark after ``mark_after``."""
     logger = DiskMetricLogger(log_dir)
-    offsets = []
     for step in steps:
         logger.log({"loss": float(step)}, step=step)
-        offsets.append(logger.offset)
+        if step == mark_after:
+            logger.write_checkpoint_mark()
     logger.close()
-    return offsets
 
 
 def _other_files(log_dir: str) -> list[str]:
-    return sorted(name for name in os.listdir(log_dir) if name != METRICS_FILENAME)
+    return sorted(
+        name
+        for name in os.listdir(log_dir)
+        if name not in (METRICS_FILENAME, CHECKPOINT_MARK_FILENAME)
+    )
 
 
 def _read_lines(path: str) -> list[dict]:
     with open(path) as f:
         return [json.loads(line) for line in f]
+
+
+def _read_mark(log_dir: str) -> dict:
+    with open(os.path.join(log_dir, CHECKPOINT_MARK_FILENAME)) as f:
+        return json.load(f)
+
+
+def _write_mark(log_dir: str, offset: int, last_step: int | None):
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, CHECKPOINT_MARK_FILENAME), "w") as f:
+        json.dump({"offset": offset, "last_step": last_step}, f)
 
 
 def test_previous_job_metrics_are_moved_aside(log_dir):
@@ -89,12 +105,51 @@ def test_moved_aside_files_get_unique_names(log_dir):
     assert len(_other_files(log_dir)) == 3
 
 
-def test_restore_cuts_at_offset_and_continues(log_dir):
-    offsets = _log_steps(log_dir, range(5))
+def test_checkpoint_mark_records_offset_and_last_step(log_dir):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"loss": 0.0}, step=0)
+    logger.log({"image": object()}, step=1)  # nothing on disk, but logged
+    logger.write_checkpoint_mark()
+    assert _read_mark(log_dir) == {"offset": logger.offset, "last_step": 1}
+    logger.close()
+    assert sorted(os.listdir(log_dir)) == sorted(
+        [METRICS_FILENAME, CHECKPOINT_MARK_FILENAME]
+    )
+
+
+def test_checkpoint_mark_before_any_log(log_dir):
+    logger = DiskMetricLogger(log_dir)
+    logger.write_checkpoint_mark()
+    logger.close()
+    assert _read_mark(log_dir) == {"offset": 0, "last_step": None}
+
+
+def test_checkpoint_mark_is_replaced_atomically(log_dir, monkeypatch):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"loss": 0.0}, step=0)
+    logger.write_checkpoint_mark()
+    previous_mark = _read_mark(log_dir)
+    logger.log({"loss": 1.0}, step=1)
+
+    def fail_mid_write(obj, f):
+        f.write('{"offset": ')
+        raise OSError("killed mid-write")
+
+    monkeypatch.setattr(disk_metric_logger.json, "dump", fail_mid_write)
+    with pytest.raises(OSError):
+        logger.write_checkpoint_mark()
+    monkeypatch.undo()
+    logger.close()
+    assert _read_mark(log_dir) == previous_mark
+
+
+def test_restore_to_checkpoint_mark_cuts_and_continues(log_dir):
+    _log_steps(log_dir, range(5), mark_after=2)
 
     logger = DiskMetricLogger(log_dir)
-    assert logger.restore(offsets[2])
-    assert logger.offset == offsets[2]
+    mark = logger.restore_to_checkpoint_mark()
+    assert mark is not None and mark.last_step == 2
+    assert logger.offset == mark.offset
     logger.log({"loss": 30.0}, step=3)
     logger.close()
 
@@ -112,29 +167,34 @@ def test_restore_cuts_at_offset_and_continues(log_dir):
     ]
 
 
-def test_restore_keeps_every_record_at_the_checkpoint_step(log_dir):
+def test_restore_keeps_records_at_the_mark_step_logged_after_it(log_dir):
     logger = DiskMetricLogger(log_dir)
     logger.log({"batch_loss": 1.0}, step=5)
-    offset = logger.offset
-    logger.log({"val_loss": 2.0}, step=5)  # logged after the checkpoint
+    logger.write_checkpoint_mark()
+    logger.log({"timing": 2.0}, step=5)  # logged after the checkpoint
+    logger.log({"batch_loss": 3.0}, step=6)
     logger.close()
 
     logger = DiskMetricLogger(log_dir)
-    assert logger.restore(offset)
-    logger.log({"val_loss": 3.0}, step=5)
+    assert logger.restore_to_checkpoint_mark() is not None
+    logger.log({"val_loss": 4.0}, step=5)
     logger.close()
 
     assert read_metrics_by_step(log_dir, first_step=0) == {
-        5: {"batch_loss": 1.0, "val_loss": 3.0}
+        5: {"batch_loss": 1.0, "timing": 2.0, "val_loss": 4.0}
     }
+    (discarded,) = _other_files(log_dir)
+    assert _read_lines(os.path.join(log_dir, discarded)) == [
+        {"step": 6, "batch_loss": 3.0}
+    ]
 
 
 def test_restore_after_logging_cuts_current_file(log_dir):
     logger = DiskMetricLogger(log_dir)
     logger.log({"loss": 0.0}, step=0)
-    offset = logger.offset
+    logger.write_checkpoint_mark()
     logger.log({"loss": 1.0}, step=1)
-    assert logger.restore(offset)
+    assert logger.restore_to_checkpoint_mark() is not None
     logger.log({"loss": 10.0}, step=1)
     logger.close()
 
@@ -144,10 +204,22 @@ def test_restore_after_logging_cuts_current_file(log_dir):
     ]
 
 
+def test_restore_without_checkpoint_mark_keeps_previous_file_aside(log_dir):
+    _log_steps(log_dir, range(2))
+
+    logger = DiskMetricLogger(log_dir)
+    assert logger.restore_to_checkpoint_mark() is None
+    logger.close()
+
+    assert read_metrics(log_dir) == []
+    assert len(_other_files(log_dir)) == 1
+
+
 def test_restore_without_previous_file_warns(log_dir, caplog):
+    _write_mark(log_dir, offset=10, last_step=0)
     logger = DiskMetricLogger(log_dir)
     with caplog.at_level(logging.WARNING):
-        assert not logger.restore(10)
+        assert logger.restore_to_checkpoint_mark() is None
     logger.close()
     assert "no disk metrics are restored" in caplog.text
 
@@ -155,21 +227,22 @@ def test_restore_without_previous_file_warns(log_dir, caplog):
 def test_restore_after_metrics_file_is_deleted_warns(log_dir, caplog):
     logger = DiskMetricLogger(log_dir)
     logger.log({"loss": 0.0}, step=0)
-    offset = logger.offset
+    logger.write_checkpoint_mark()
     os.remove(os.path.join(log_dir, METRICS_FILENAME))
     with caplog.at_level(logging.WARNING):
-        assert not logger.restore(offset)
-        assert not logger.restore_through_step(0)
+        assert logger.restore_to_checkpoint_mark() is None
     logger.close()
     assert "no disk metrics are restored" in caplog.text
 
 
 def test_restore_from_shorter_file_warns_and_keeps_it_aside(log_dir, caplog):
-    offsets = _log_steps(log_dir, range(2))
+    _log_steps(log_dir, range(2))
+    size = os.path.getsize(os.path.join(log_dir, METRICS_FILENAME))
+    _write_mark(log_dir, offset=size + 1, last_step=1)
 
     logger = DiskMetricLogger(log_dir)
     with caplog.at_level(logging.WARNING):
-        assert not logger.restore(offsets[-1] + 1)
+        assert logger.restore_to_checkpoint_mark() is None
     logger.log({"loss": 5.0}, step=0)
     logger.close()
 
@@ -179,35 +252,12 @@ def test_restore_from_shorter_file_warns_and_keeps_it_aside(log_dir, caplog):
 
 
 def test_restore_drops_line_cut_off_mid_write(log_dir):
-    offsets = _log_steps(log_dir, range(2))
-    with open(os.path.join(log_dir, METRICS_FILENAME), "a") as f:
-        f.write('{"step": 2, "lo')
-
-    logger = DiskMetricLogger(log_dir)
-    assert logger.restore(offsets[-1])
-    logger.log({"loss": 2.0}, step=2)
-    logger.close()
-
-    assert [r["step"] for r in read_metrics(log_dir)] == [0, 1, 2]
-
-
-def test_restore_through_step(log_dir):
-    _log_steps(log_dir, range(5))
-
-    logger = DiskMetricLogger(log_dir)
-    assert logger.restore_through_step(2)
-    logger.close()
-
-    assert [r["step"] for r in read_metrics(log_dir)] == [0, 1, 2]
-
-
-def test_restore_through_step_stops_at_line_cut_off_mid_write(log_dir):
-    _log_steps(log_dir, range(2))
+    _log_steps(log_dir, range(2), mark_after=1)
     with open(os.path.join(log_dir, METRICS_FILENAME), "a") as f:
         f.write('{"step": 1, "lo')
 
     logger = DiskMetricLogger(log_dir)
-    assert logger.restore_through_step(5)
+    assert logger.restore_to_checkpoint_mark() is not None
     logger.log({"loss": 2.0}, step=2)
     logger.close()
 
