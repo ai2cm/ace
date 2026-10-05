@@ -1,2 +1,8 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Century evals (2026-10-05) of best_inference_ckpt with the shared cm4_eval/ocean configs
+# (piC carries the six regional monthly-SST box writers incl. Gulf Stream, from ace#1525).
+# Launch: job_runner/evaluate.sh <this dir> . --config-dir configs/experiments/cm4_eval/ocean
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h||01M402P8E9Y1XAP9PW5D6RX0WK|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cellmean|rs2|01M402P8E2DQ34CT73SQ04DXMA|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h||01M402P8E9Y1XAP9PW5D6RX0WK|ai2/ace|jupiter+titan|||64GiB
