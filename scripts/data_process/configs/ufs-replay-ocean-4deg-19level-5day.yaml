@@ -21,6 +21,17 @@ stats:
   end_date: "2021-12-31"
 time_coarsen:
   factor: 20 # 6-hourly -> 5-day
+  # Explicit full-extent spatial chunks: the raw store's static 2-D fields (deptho,
+  # masks) carry their own chunking, and xpartition requires every variable's inner
+  # chunks to divide its shards.
+  chunking:
+    time: 1
+    lat: 45
+    lon: 90
+  sharding:
+    time: 360
+    lat: 45
+    lon: 90
   data_output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-4deg-19level-5day
   stats_output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-4deg-19level-5day-stats
   snapshot_names:
