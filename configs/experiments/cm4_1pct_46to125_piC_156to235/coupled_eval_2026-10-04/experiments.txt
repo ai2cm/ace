@@ -1,0 +1,14 @@
+# Century evals of the coupled arms that finished training 2026-09-29..10-04.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled (exper/2026-07-16-jamesd).
+# Checkpoint: best_inference_ckpt from each arm's final (exit-0) job's result dataset, pinned in field 9.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-es0v4_a2s-fto|o0a0rs0|01M3GQZ1WGRBKXTKRP1TVP79FR|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M3N68V4XWWW0FJDX7P36C5CK|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3QPMZEBQ8BP8G4901N6ED9Y|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M41458F0VV2X6NBDH03KCVVE|ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-es0v4_a2s-fto|o0a0rs0|01M3GQZ1WGRBKXTKRP1TVP79FR|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M3N68V4XWWW0FJDX7P36C5CK|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3QPMZEBQ8BP8G4901N6ED9Y|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M41458F0VV2X6NBDH03KCVVE|ai2/ace|jupiter+titan
