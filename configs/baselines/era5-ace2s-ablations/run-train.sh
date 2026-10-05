@@ -199,3 +199,11 @@ run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
 # pretrain donors (added 2026-10-02)
 run_training "ace2s-finetune-pushforward1-40ep.yaml" "1deg-daily-ace2s-pushforward1-ft3-detached-40ep-rs0" 8
 run_training "ace2s-finetune-pushforward1-120ep.yaml" "1deg-daily-ace2s-pushforward1-ft3-detached-120ep-rs0" 8
+
+# 6-hourly pushforward and 12-step variants (added 2026-10-05)
+run_training "ace2s-finetune-6hourly-pushforward.yaml" "1deg-6h-ace2s-pushforward1-ft3-detached-rs0" 8
+run_training "ace2s-finetune-6hourly-12step.yaml" "1deg-6h-ace2s-ft12-detached-rs0" 8
+
+# Daily pushforward variants of CRPS-only and deterministic (added 2026-10-05)
+run_training "ace2s-finetune-crps-only-pushforward.yaml" "1deg-daily-ace2s-crps-only-pushforward1-ft3-detached-rs0" 8
+run_training "ace2s-finetune-deterministic-pushforward.yaml" "1deg-daily-ace2s-det-pushforward1-ft3-detached-rs0" 8
