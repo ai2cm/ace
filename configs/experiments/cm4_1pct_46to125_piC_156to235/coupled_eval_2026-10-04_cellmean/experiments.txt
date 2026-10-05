@@ -10,3 +10,6 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M40
 # piC-ic0151-200yr
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
+
+# Launched 2026-10-04 from 64f0fa114 (rows retired to launched_*):
+#   cellmean 1pct 01M459J754JBMPQCGMM0P1BVD8, piC 01M459JEEB5E2GG7BXTHY41C2S
