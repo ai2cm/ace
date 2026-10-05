@@ -1,9 +1,14 @@
 import datetime
+import math
 
 import pytest
 import torch
 
-from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
+from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
+    REFERENCE_SALINITY,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
@@ -150,6 +155,99 @@ def test_metadata_registry():
     assert (
         metadata["ocean_heat_content"].long_name
         == "Column-integrated ocean heat content"
+    )
+
+
+def _compute_salt_budget(
+    wfo: float, sfdsi: float | None, sea_surface_fraction: float
+) -> tuple[TensorDict, float]:
+    """Computes the ocean derived quantities for a single-level column whose
+    salinity changes only through the surface salt fluxes, where sfdsi of None
+    means it is missing from the data.
+
+    Returns the derived quantities and the surface salt flux in g/m2/s per
+    unit ocean area.
+    """
+    dz = 10.0
+    initial_salinity = 35.0
+    # sfdsi is in kg/m2/s
+    sfdsi_flux = 0.0 if sfdsi is None or math.isnan(sfdsi) else sfdsi
+    salt_flux = -REFERENCE_SALINITY * wfo + 1000.0 * sfdsi_flux
+    salinity_change = (
+        salt_flux * TIMESTEP.total_seconds() / (DENSITY_OF_SEA_WATER_CM4 * dz)
+    )
+    shape = (1, 2, 1, 1)
+    data = {
+        "so_0": torch.tensor(
+            [initial_salinity, initial_salinity + salinity_change],
+            dtype=torch.float64,
+        ).reshape(shape),
+        "wfo": torch.full(shape, wfo, dtype=torch.float64),
+        "sea_surface_fraction": torch.full(
+            shape, sea_surface_fraction, dtype=torch.float64
+        ),
+    }
+    if sfdsi is not None:
+        data["sfdsi"] = torch.full(shape, sfdsi, dtype=torch.float64)
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, dz], dtype=torch.float64),
+        mask=torch.ones(*shape, 1, dtype=torch.float64),
+    )
+    out = compute_ocean_derived_quantities(
+        data, depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    return out, salt_flux
+
+
+@pytest.mark.parametrize(
+    "wfo, sfdsi, sea_surface_fraction",
+    [
+        pytest.param(1e-5, 0.0, 1.0, id="wfo"),
+        pytest.param(0.0, 2e-7, 0.5, id="sfdsi-partial-ocean"),
+        pytest.param(1e-5, 2e-7, 0.5, id="wfo-and-sfdsi-partial-ocean"),
+        pytest.param(1e-5, float("nan"), 0.5, id="wfo-sfdsi-nan-ice-free"),
+    ],
+)
+def test_salt_budget_closes(wfo: float, sfdsi: float, sea_surface_fraction: float):
+    """A salinity change set by the surface salt fluxes leaves no implied
+    advection, including in a cell that is partly land and when sfdsi is NaN.
+    """
+    out, salt_flux = _compute_salt_budget(wfo, sfdsi, sea_surface_fraction)
+    expected_flux = torch.full(
+        (1, 1, 1), salt_flux * sea_surface_fraction, dtype=torch.float64
+    )
+    torch.testing.assert_close(out["ocean_salt_content_tendency"][:, 1], expected_flux)
+    torch.testing.assert_close(
+        out["net_salt_flux_into_ocean_column"][:, 1], expected_flux
+    )
+    torch.testing.assert_close(
+        out["implied_tendency_of_ocean_salt_content_due_to_advection"][:, 1],
+        torch.zeros((1, 1, 1), dtype=torch.float64),
+        atol=1e-12,
+        rtol=0.0,
+    )
+
+
+def test_salt_budget_without_sfdsi():
+    """Without sfdsi, the net salt flux is not computed, and the implied
+    advection closes with the virtual salt flux alone.
+    """
+    wfo, sea_surface_fraction = 1e-5, 0.5
+    out, _ = _compute_salt_budget(wfo, None, sea_surface_fraction)
+    assert "net_salt_flux_into_ocean_column" not in out
+    torch.testing.assert_close(
+        out["implied_tendency_of_ocean_salt_content_due_to_advection"][:, 1],
+        torch.zeros((1, 1, 1), dtype=torch.float64),
+        atol=1e-12,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        out["net_virtual_salt_flux_into_ocean_column"],
+        torch.full(
+            (1, 2, 1, 1),
+            -REFERENCE_SALINITY * wfo * sea_surface_fraction,
+            dtype=torch.float64,
+        ),
     )
 
 
