@@ -6,4 +6,7 @@
 
 # piC-50yr-sfc-trained
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|run_piC-50yr-sfc-trained|best_inference_ckpt|high|--min-runtime 4h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_cellmean-owc_a2s-fto|o2a0rs0|01M402Q2RKJ59NND040003V3QB|launched_piC-50yr-sfc-trained|best_inference_ckpt|high|--min-runtime 4h||01M402Q2RXK160EQ06FV4XF3J8|ai2/ace|jupiter+titan|||64GiB
+
+# Launched 2026-10-05 from 7910f407f (row retired to launched_* so a rerun does not relaunch):
+#   01M45CRAEG7MPPRNNPR6PPP5XR
