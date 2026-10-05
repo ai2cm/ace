@@ -1,0 +1,15 @@
+# Century evals of coupled_tail-es1lt_a2s (stage-1 spectral-ES ocean, long-tail cap 16) at epoch 5,
+# while training continues toward epoch 16.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled. On this branch the 1pct config carries
+# the same six regional monthly-SST writers as the piC one (ace#1525).
+# Checkpoint: best_inference_ckpt (epoch 5) from the finalized result dataset of training job
+# 01M4145JAG3ZYRNM2WBVX89SGT, pinned in field 9; the live job's dataset is still being written.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es1lt_a2s-fto|o0a0rs0|01M3MXRQ93ASER06A5JQSBZGPH|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M4145J78TMF7TT6284342JZ3|ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es1lt_a2s-fto|o0a0rs0|01M3MXRQ93ASER06A5JQSBZGPH|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M4145J78TMF7TT6284342JZ3|ai2/ace|jupiter+titan
