@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
+import warnings
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
@@ -25,6 +26,10 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -37,6 +42,27 @@ class AreaWeightedMean(Protocol):
 class AreaWeightedSum(Protocol):
     def __call__(
         self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
+    ) -> torch.Tensor: ...
+
+
+GlobalTotal = Callable[[torch.Tensor], torch.Tensor]
+"""Sum of a per-cell field times the cell area over the ocean, keeping the
+horizontal dimensions."""
+
+
+class SaltBudget(Protocol):
+    """Expected change of the total ocean salt content over one step, in
+    psu m**3, keeping the horizontal dimensions.
+    """
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
     ) -> torch.Tensor: ...
 
 
@@ -120,39 +146,66 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+def _sea_ice_volume_output_mask(
+    spatial_mask_provider: SpatialMaskProviderABC,
+) -> torch.Tensor | None:
+    """Cells where the stepper keeps the sea_ice_volume prediction, or None for
+    every cell.
+    """
+    mask = spatial_mask_provider.get_mask_tensor_for("sea_ice_volume")
+    if mask is None:
+        return None
+    # rounded as the stepper's output masking does, so the two agree
+    return torch.round(mask.to(get_device())) != 0
+
+
+@dataclasses.dataclass
+class IceVolumeSaltBudgetConfig:
+    """Salt budget from the change of the total sea ice volume.
+
+    Parameters:
+        slope_psu: Change in total salt content (psu m**3) per change in total
+            sea ice volume (m**3).
+        type: Selects this budget.
+    """
+
+    slope_psu: float
+    type: Literal["ice_volume"] = "ice_volume"
+
+    def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "The ice volume salt budget sums sea_ice_volume over the local "
+            "spatial chunk only."
+        )
+        return IceVolumeSaltBudget(
+            self.slope_psu, _sea_ice_volume_output_mask(spatial_mask_provider)
+        )
+
+
+SaltBudgetConfig = IceVolumeSaltBudgetConfig
+
+
 @dataclasses.dataclass
 class OceanSaltContentBudgetConfig:
     """Configuration for ocean salt content budget correction.
 
-    This constrains the salinity budget through the exchange with the sea-ice
-    reservoir, whose volume the model predicts. This represents the expected
-    change purely from the model's own outputs. We fit the change to the total
-    sea ice volume, so the slope does not depend on the grid. Assumes a global
-    lat-lon grid: absolute totals are formed as the area-weighted sum times
-    4 pi R**2, which requires area weights normalized over the whole sphere.
+    Assumes area weights normalized over the whole sphere.
 
     Parameters:
-        method: Method to use for salt budget correction. The available option
-            is "scaled_salinity", which enforces the budget by scaling the
-            predicted salinity by a vertically and horizontally uniform
-            correction factor.
-        ice_volume_salt_slope_psu: Empirical slope of the change in total
-            column salt content (psu m**3) against the change in total sea ice
-            volume (m**3), in psu. Calibrate against the target data; set to 0
-            to hold salt content fixed.
+        method: Method to use when applying the salt budget correction
+            computed from the budget. "scaled_salinity". scales the predicted
+            salinity by a vertically and horizontally uniform factor.
+        budget_config: Budget for the expected change of the salt content
+            over a step. None holds the salt content fixed, up to the constant
+            term.
         constant_unaccounted_salting: Area-weighted global mean rate of column
-            salt content change, in psu m / s, added at every step. This can be
-            useful for correcting a residual in the salt budget of target data.
-            In current data, this may be below precision.
-        use_float64: Compute the global sums, expected change and correction
-            ratio in float64 instead of the data's dtype. The expected change is
-            only a couple of float32 epsilons of the salt content, so in float32
-            it is applied with a ~25-30% error per step. Defaults to True for
-            that reason.
+            salt content change added at every step, in psu m / s.
+        use_float64: Compute the global sums, budget and correction ratio in
+            float64 instead of the data's dtype.
     """
 
     method: Literal["scaled_salinity"]
-    ice_volume_salt_slope_psu: float = 0.0
+    budget_config: SaltBudgetConfig | None = None
     constant_unaccounted_salting: float = 0.0
     use_float64: bool = True
 
@@ -295,9 +348,8 @@ class OceanSaltContentCorrection:
     vertical_coordinate: HasOceanDepthIntegral | None
     timestep_seconds: float
     method: Literal["scaled_salinity"]
-    ice_volume_salt_slope_psu: float
+    budget: SaltBudget | None
     unaccounted_salting: float
-    sea_ice_volume_valid: torch.Tensor | None
     use_float64: bool
 
     def __call__(
@@ -320,13 +372,13 @@ class OceanSaltContentCorrection:
         corrected = _force_conserve_ocean_salt_content(
             input_data,
             gen_data,
+            forcing_data,
             self.area_weighted_sum,
             self.vertical_coordinate,
             self.timestep_seconds,
             self.method,
-            self.ice_volume_salt_slope_psu,
+            self.budget,
             self.unaccounted_salting,
-            self.sea_ice_volume_valid,
             self.use_float64,
         )
         return corrected, corrector_state
@@ -386,27 +438,34 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     sif.setdefault("zero_where_ice_free_names", []).append(
                         thickness_name
                     )
+        salt = state_copy.get("ocean_salt_content_correction")
+        if isinstance(salt, dict) and "ice_volume_salt_slope_psu" in salt:
+            warnings.warn(
+                "ocean_salt_content_correction.ice_volume_salt_slope_psu is "
+                "deprecated; use budget_config with type 'ice_volume'.",
+                DeprecationWarning,
+            )
+            salt = dict(salt)
+            slope = salt.pop("ice_volume_salt_slope_psu")
+            if slope != 0.0:
+                salt["budget_config"] = {"type": "ice_volume", "slope_psu": slope}
+            state_copy["ocean_salt_content_correction"] = salt
         return state_copy
 
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
-        sea_ice_volume_mask = None
-        if self.ocean_salt_content_correction is not None:
-            try:
-                sea_ice_volume_mask = (
-                    dataset_info.spatial_mask_provider.get_mask_tensor_for(
-                        "sea_ice_volume"
-                    )
-                )
-            except MissingDatasetInfo:
-                pass
+        spatial_mask_provider: SpatialMaskProviderABC
+        try:
+            spatial_mask_provider = dataset_info.spatial_mask_provider
+        except MissingDatasetInfo:
+            spatial_mask_provider = NullSpatialMaskProvider
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
-            sea_ice_volume_mask=sea_ice_volume_mask,
+            spatial_mask_provider=spatial_mask_provider,
         )
 
     def _build(
@@ -414,7 +473,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
-        sea_ice_volume_mask: torch.Tensor | None = None,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -449,28 +508,18 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             )
         if self.ocean_salt_content_correction is not None:
             salt_config = self.ocean_salt_content_correction
-            if salt_config.ice_volume_salt_slope_psu != 0.0:
-                Distributed.get_instance().require_no_spatial_parallelism(
-                    "Ocean salt content correction with a nonzero "
-                    "ice_volume_salt_slope_psu sums sea_ice_volume over the "
-                    "local spatial chunk only."
-                )
-            if sea_ice_volume_mask is None:
-                sea_ice_volume_valid = None
-            else:
-                # rounded as the stepper's output masking does, so the two agree
-                sea_ice_volume_valid = (
-                    torch.round(sea_ice_volume_mask.to(get_device())) != 0
-                )
             corrections.append(
                 OceanSaltContentCorrection(
                     gridded_operations.area_weighted_sum,
                     vertical_coordinate,
                     timestep_seconds,
                     salt_config.method,
-                    salt_config.ice_volume_salt_slope_psu,
+                    (
+                        None
+                        if salt_config.budget_config is None
+                        else salt_config.budget_config.build(spatial_mask_provider)
+                    ),
                     salt_config.constant_unaccounted_salting,
-                    sea_ice_volume_valid,
                     salt_config.use_float64,
                 )
             )
@@ -626,16 +675,59 @@ def _force_conserve_ocean_heat_content(
     return out
 
 
+@dataclasses.dataclass
+class IceVolumeSaltBudget:
+    """Salt budget from the change of the total sea ice volume.
+
+    Parameters:
+        slope_psu: Change in total salt content (psu m**3) per change in total
+            sea ice volume (m**3).
+        ice_volume_mask: Cells whose sea_ice_volume prediction the stepper
+            keeps; None counts every cell.
+    """
+
+    slope_psu: float
+    ice_volume_mask: torch.Tensor | None
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        try:
+            gen_ice_volume = gen.sea_ice_volume.to(dtype)
+            input_ice_volume = input.sea_ice_volume.to(dtype)
+        except KeyError as err:
+            raise ValueError(
+                "sea_ice_volume is required by the ice volume salt budget."
+            ) from err
+        ice_volume_change = gen_ice_volume - input_ice_volume
+        if self.ice_volume_mask is not None:
+            ice_volume_change = torch.where(
+                self.ice_volume_mask,
+                ice_volume_change,
+                torch.zeros_like(ice_volume_change),
+            )
+        # sea_ice_volume is per cell (m**3), so its total is a plain sum over
+        # the local grid; IceVolumeSaltBudgetConfig rejects spatial parallelism.
+        total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
+        return self.slope_psu * total_ice_volume_change
+
+
 def _force_conserve_ocean_salt_content(
     input_data: TensorMapping,
     gen_data: TensorMapping,
+    forcing_data: TensorMapping,
     area_weighted_sum: AreaWeightedSum,
     vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
     method: Literal["scaled_salinity"],
-    ice_volume_salt_slope_psu: float,
+    budget: SaltBudget | None,
     unaccounted_salting: float,
-    sea_ice_volume_valid: torch.Tensor | None,
     use_float64: bool,
 ) -> TensorDict:
     if method != "scaled_salinity":
@@ -644,6 +736,7 @@ def _force_conserve_ocean_salt_content(
         )
     input = OceanData(input_data, vertical_coordinate)
     gen = OceanData(gen_data, vertical_coordinate)
+    forcing = OceanData(forcing_data)
     dtype = torch.float64 if use_float64 else gen.data["so_0"].dtype
 
     def global_total(data: torch.Tensor) -> torch.Tensor:
@@ -660,28 +753,9 @@ def _force_conserve_ocean_salt_content(
     global_input_salt_content = global_salt_content(input)
     ocean_area = global_total(torch.ones_like(gen.data["so_0"], dtype=dtype))  # m**2
     expected_change = unaccounted_salting * timestep_seconds * ocean_area
-    if ice_volume_salt_slope_psu != 0.0:
-        try:
-            gen_ice_volume = gen.sea_ice_volume.to(dtype)
-            input_ice_volume = input.sea_ice_volume.to(dtype)
-        except KeyError as err:
-            raise ValueError(
-                "sea_ice_volume is required to force ocean salt content "
-                "conservation with a nonzero ice_volume_salt_slope_psu; set it to "
-                "0 to hold salt content fixed."
-            ) from err
-        ice_volume_change = gen_ice_volume - input_ice_volume
-        if sea_ice_volume_valid is not None:
-            ice_volume_change = torch.where(
-                sea_ice_volume_valid,
-                ice_volume_change,
-                torch.zeros_like(ice_volume_change),
-            )
-        # sea_ice_volume is per cell (m**3), so its total is a plain sum over
-        # the local grid; OceanCorrectorConfig rejects spatial parallelism here.
-        total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
-        expected_change = (
-            expected_change + ice_volume_salt_slope_psu * total_ice_volume_change
+    if budget is not None:
+        expected_change = expected_change + budget(
+            input, gen, forcing, global_total, timestep_seconds, dtype
         )
     salt_content_correction_ratio = (
         global_input_salt_content + expected_change
