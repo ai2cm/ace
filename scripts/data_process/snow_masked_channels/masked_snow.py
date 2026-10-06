@@ -19,6 +19,10 @@ as a fraction in [0, 1], and applies the shared static snow mask (NaN outside):
 
 Used by ``build_masked_snow_channels.py`` (store) and ``fit_masked_snow_stats.py``
 (normalization statistics) so the data and its statistics cannot drift apart.
+
+The CM4 scenario-training parents (2026-06-19 piControl, 1pctCO2 and the nine
+random-CO2 ensemble members) share the CM4 definition; ``SOURCE_SETS`` names the
+parents that make up each training source set.
 """
 
 import dataclasses
@@ -98,25 +102,74 @@ PARENTS = {
         stats_stop=None,
         stats_pair_stride_days=8,
     ),
+    # Scenario-training parents (2026-06-19 processing). The stats windows are the
+    # training windows of the piControl + 1pctCO2 (+ random-CO2) recipe, matching
+    # the windows of each parent's daily stats, and the pooled statistics are fit
+    # over all parents of a source set together (fit_masked_snow_stats.py --pool).
     "cm4-1pctco2": Parent(
         name="2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily",
         directory=(
             "gs://vcm-ml-intermediate/"
             "2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily"
         ),
-        # Evaluation only: the scenario rollouts normalize from the checkpoint, so
-        # no stats are fit for this parent and this URL is never read.
         stats_url=(
             "gs://vcm-ml-intermediate/"
-            "2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-stats/"
-            "combined"
+            "2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-stats-0046-0126/"
+            "2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily"
         ),
         cover_scale=100.0,
         divide_by_land_fraction=False,
-        stats_start=None,
-        stats_stop=None,
+        stats_start="0046-01-01",
+        stats_stop="0126-01-01",
         stats_pair_stride_days=8,
     ),
+    "cm4-picontrol-2026": Parent(
+        name="2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily",
+        directory=(
+            "gs://vcm-ml-intermediate/"
+            "2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily"
+        ),
+        stats_url=(
+            "gs://vcm-ml-intermediate/"
+            "2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-stats-0156-0236/"
+            "2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily"
+        ),
+        cover_scale=100.0,
+        divide_by_land_fraction=False,
+        stats_start="0156-01-01",
+        stats_stop="0236-01-01",
+        stats_pair_stride_days=8,
+    ),
+}
+
+RANDCO2_LEVELS = ("1xCO2", "2xCO2", "4xCO2")
+RANDCO2_DIRECTORY = (
+    "gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily"
+)
+RANDCO2_STATS = (
+    "gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily-stats"
+)
+for _level in RANDCO2_LEVELS:
+    for _ic in (1, 2, 3):
+        _member = f"random-CO2-{_level}-ic_{_ic:04d}"
+        # Members are 5.25 years, so pairs are sampled every other day; ic_0003 is
+        # validation and evaluation only (no stats are pooled from it).
+        PARENTS[f"cm4-randco2-{_level}-ic{_ic}"] = Parent(
+            name=_member,
+            directory=RANDCO2_DIRECTORY,
+            stats_url=f"{RANDCO2_STATS}/{_member}",
+            cover_scale=100.0,
+            divide_by_land_fraction=False,
+            stats_start="0153-01-01",
+            stats_stop=None,
+            stats_pair_stride_days=2,
+        )
+
+# The parents of each scenario-training source set, in the training config's order.
+SOURCE_SETS = {
+    "pic-1pct": ["cm4-picontrol-2026", "cm4-1pctco2"],
+    "pic-1pct-randco2": ["cm4-picontrol-2026", "cm4-1pctco2"]
+    + [f"cm4-randco2-{level}-ic{ic}" for level in RANDCO2_LEVELS for ic in (1, 2)],
 }
 
 

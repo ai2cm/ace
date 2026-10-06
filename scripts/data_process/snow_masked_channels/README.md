@@ -40,10 +40,12 @@ and the stats script.
 
 | file | role |
 |---|---|
-| `masked_snow.py` | parent definitions (`era5`, `cm4`, `cm4-1pctco2`), mask loading, the shared transform |
+| `masked_snow.py` | parent definitions (`era5`, `cm4`, `cm4-1pctco2`, `cm4-picontrol-2026`, the nine `cm4-randco2-*` members), the scenario-training `SOURCE_SETS`, mask loading, the shared transform |
 | `build_masked_snow_channels.py` | writes `store-out/<parent>-land-snow-masked.zarr` (4 variables, parent time coordinate, chunk 1 / shard 360) |
-| `fit_masked_snow_stats.py` | copies the parent's stats files and adds `_masked` entries (mean, std, one-day residual std over valid cells) and valid-domain time-mean maps |
-| `run_data_pipeline.sh` | both stores, both stats, GCS uploads, Beaker stats datasets |
+| `fit_masked_snow_stats.py` | copies the parent's (or pooled) stats files and adds `_masked` entries (mean, std, one-day residual std over valid cells) and valid-domain time-mean maps; `--pool <source set>` fits over several parents with running moments |
+| `pool_daily_stats.py` | pools the per-store daily stats of a source set with `combine_stats.combine_stats` (the control arms' stats and the base of the treatment arms') |
+| `run_data_pipeline.sh` | both original stores, both stats, GCS uploads, Beaker stats datasets |
+| `run_scenario_pipeline.sh` | the scenario-training stores (2026-06-19 piControl, nine random-CO2 members), pooled and masked stats per source set, uploads |
 | `build_snow_mask.py`, `snow_mask.nc` | mask definition and the committed mask (identical to the 2026-08-12 one) |
 | `test_masked_snow.py` | unit tests of the transform |
 
@@ -53,7 +55,20 @@ and the stats script.
 |---|---|---|
 | ERA5 | `gs://vcm-ml-intermediate/2026-08-07-era5-1deg-8layer-daily-1940-2025/2026-08-07-era5-1deg-8layer-daily-1940-2025-land-snow-masked.zarr` | `2026-08-07-era5-1deg-8layer-daily-1940-2025-land-snow-masked-stats-1990-2019` |
 | CM4 | `gs://vcm-ml-intermediate/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr` | `2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked-stats` |
-| CM4 1pctCO2 | `gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-land-snow-masked.zarr` | none; evaluation only, so `fit_masked_snow_stats.py` is not run for this parent |
+| CM4 1pctCO2 | `gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-land-snow-masked.zarr` | pooled, see below |
+| CM4 piControl (2026-06-19) | `gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr` | pooled, see below |
+| CM4 random-CO2 members | `gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily/random-CO2-<level>-ic_<n>-land-snow-masked.zarr` | pooled, see below |
+
+### Scenario-training stats
+
+Training on piControl + 1pctCO2 (`pic-1pct`) or + the random-CO2 ensemble (`pic-1pct-randco2`)
+normalizes with stats pooled over the training windows of every parent in the source set
+(piControl 0156-0235, 1pctCO2 0046-0125, random-CO2 ic_0001 and ic_0002 from 0153), which is
+what gives `carbon_dioxide` a usable standard deviation. `pool_daily_stats.py` pools the
+per-store daily stats the data pipeline computed over those windows; `fit_masked_snow_stats.py
+--pool` adds the `_masked` entries fit over all the parents' valid cells, weighting each parent by
+its sampled cells. Two Beaker datasets per source set: `<date>-cm4-<set>-daily-stats` (control
+arms) and `<date>-cm4-<set>-daily-land-snow-masked-stats` (treatment arms).
 
 The earlier stores (`...-snow-masked.zarr`, per-cell-area ERA5, percent CM4 cover) and their
 stats datasets stay in place so the 2026-08-12 and 2026-09-17 masked-naive checkpoints remain
