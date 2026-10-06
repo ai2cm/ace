@@ -2,9 +2,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3P96T8P7FSRZFF5G1BAZH90|resumed|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 30m
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 30m
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 30m
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 30m
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs1|01M3QVGRHWN9JG5E3K9JZH4R8T|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs1|01M3QVGRHWN9JG5E3K9JZH4R8T|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor|rs1|01M3QVGRHWN9JG5E3K9JZH4R8T|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_r_diag_floor|rs0|01M3R7CFQ80KSVBRNJ14P7FYTV|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_r_diag_floor|rs0|01M3R7CFQ80KSVBRNJ14P7FYTV|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_r_diag_floor|rs0|01M3R7CFQ80KSVBRNJ14P7FYTV|run_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 1h
