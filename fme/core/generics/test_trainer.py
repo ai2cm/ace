@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import os
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
@@ -8,7 +9,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.ema import EMAConfig, EMATracker
+from fme.core.ema import EMAConfig, EMATracker, load_ema_params_if_available
 from fme.core.generics.aggregator import (
     AggregatorABC,
     AggregatorSummary,
@@ -1510,6 +1511,31 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         stage2_trainer.optimization.scheduler.state_dict()
         == fresh_scheduler.state_dict()
     )
+
+
+@pytest.mark.parametrize("include_optimization", [True, False])
+def test_saved_checkpoint_ema_params_load_into_model(
+    tmp_path: str, include_optimization: bool
+):
+    """EMA weights in a checkpoint written by the Trainer can be loaded into a
+    model, and only when the checkpoint includes the optimization state."""
+    _, trainer = get_trainer(tmp_path, ema_decay=0.5)
+    modules = trainer.stepper.modules
+    modules[0].weight.data.fill_(1.0)
+    trainer._ema(model=modules)
+    with trainer._ema.applied_params(modules):
+        ema_weight = modules[0].weight.detach().clone()
+    stepper_weight = modules[0].weight.detach().clone()
+    assert not torch.equal(ema_weight, stepper_weight)
+    checkpoint_path = os.path.join(tmp_path, "ckpt.tar")
+    trainer.save_checkpoint(checkpoint_path, include_optimization=include_optimization)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    loaded = copy.deepcopy(modules)
+    loaded.load_state_dict(checkpoint["stepper"]["modules"])
+    loaded_ema = load_ema_params_if_available(checkpoint, loaded, checkpoint_path)
+    assert loaded_ema == include_optimization
+    expected = ema_weight if include_optimization else stepper_weight
+    torch.testing.assert_close(loaded[0].weight, expected)
 
 
 def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):

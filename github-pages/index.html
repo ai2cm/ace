@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSU / Ai2 ACE Workshop Notebooks</title>
+  <meta name="description" content="Colab-ready notebooks for the CSU / Ai2 climate model emulation workshop — run ACE climate emulators on free T4 GPUs." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap"
+  />
+
+  <style>
+    /* ──────────────────────────────────────────────────────────────
+       Strata design tokens (from strata/DESIGN.md), scoped as CSS vars.
+       This page is external-facing comms, so body copy uses Manrope and
+       headings fall back to Manrope (PP Telegraf is licensed and not
+       embedded here) — matching the design system's own fallback chain.
+       ────────────────────────────────────────────────────────────── */
+    :root {
+      /* Primitives */
+      --extra-dark-teal: #032629;
+      --dark-teal: #0a3235;
+      --cream: #faf2e9;
+      --teal: #105257;
+      --teal-20: #cbd2cc;
+      --teal-80: #3f7274;
+      --pink: #f0529c;
+      --pink-60: #f492bb;
+      --green: #0fcb8c;
+      --green-60: #6ddbb1;
+      --white: #ffffff;
+
+      /* Opacity primitives (extra-dark-teal alpha) */
+      --edt-10: #0326291a;
+      --edt-20: #03262933;
+      --edt-50: #03262980;
+
+      /* Semantic aliases (light) */
+      --background: var(--cream);
+      --surface: var(--white);
+      --text: var(--dark-teal);
+      --text-muted: var(--teal);
+      --interactive-primary: var(--pink);
+      --interactive-primary-hover: var(--pink-60);
+      --interactive-secondary: var(--green);
+      --border: var(--edt-20);
+      --border-subtle: var(--edt-10);
+
+      /* Typography */
+      --font-heading: "PP Telegraf", Manrope, Arial, sans-serif;
+      --font-body: Manrope, Arial, sans-serif;
+      --font-mono: "Roboto Mono", monospace;
+
+      /* Spacing scale */
+      --sp-2xs: 8px;
+      --sp-xs: 12px;
+      --sp-md: 16px;
+      --sp-xl: 20px;
+      --sp-2xl: 24px;
+      --sp-3xl: 32px;
+      --sp-6xl: 48px;
+
+      /* Radii */
+      --r-3xs: 4px;
+      --r-2xs: 8px;
+      --r-md: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: var(--extra-dark-teal);
+        --surface: var(--dark-teal);
+        --text: var(--cream);
+        --text-muted: var(--teal-20);
+        --border: #faf2e933;
+        --border-subtle: #faf2e91a;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--interactive-primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 var(--sp-2xl);
+    }
+
+    /* ── Topbar ──────────────────────────────────────────────── */
+    .topbar {
+      border-bottom: 1px solid var(--border);
+      padding: var(--sp-md) 0;
+      position: sticky;
+      top: 0;
+      background: color-mix(in srgb, var(--background) 88%, transparent);
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+    .topbar .wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-md);
+    }
+    .brand { display: flex; align-items: center; gap: var(--sp-2xs); }
+    .brand img { height: 26px; width: auto; display: block; }
+    .topbar-links { display: flex; gap: var(--sp-xl); font-size: 14px; }
+    .topbar-links a { color: var(--text-muted); }
+    .topbar-links a:hover { color: var(--interactive-primary); }
+
+    /* ── Hero ────────────────────────────────────────────────── */
+    .hero { padding: var(--sp-6xl) 0 var(--sp-3xl); }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--interactive-primary);
+      margin: 0 0 var(--sp-md);
+    }
+    h1 {
+      font-family: var(--font-heading);
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1.15;
+      margin: 0 0 var(--sp-xl);
+      letter-spacing: -0.01em;
+    }
+    .lede {
+      font-size: 18px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      max-width: 62ch;
+      margin: 0 0 var(--sp-2xl);
+    }
+
+    /* ── Resource chips ──────────────────────────────────────── */
+    .resources {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-xs);
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2xs);
+      height: 36px;
+      padding: 0 var(--sp-md);
+      border-radius: var(--r-3xs);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 150ms ease-in-out;
+    }
+    .chip:hover {
+      border-color: var(--interactive-primary);
+      color: var(--interactive-primary);
+      text-decoration: none;
+    }
+    .chip svg { width: 15px; height: 15px; opacity: 0.7; }
+
+    /* ── Sections ────────────────────────────────────────────── */
+    section { padding: var(--sp-3xl) 0; }
+    h2 {
+      font-family: var(--font-heading);
+      font-size: 1.5rem;
+      font-weight: 600;
+      line-height: 1.3;
+      margin: 0 0 var(--sp-xl);
+    }
+    .section-divider { border-top: 1px solid var(--border-subtle); }
+
+    /* ── How-to steps ────────────────────────────────────────── */
+    ol.steps {
+      list-style: none;
+      counter-reset: step;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: var(--sp-md);
+    }
+    ol.steps li {
+      counter-increment: step;
+      display: flex;
+      align-items: flex-start;
+      gap: var(--sp-md);
+    }
+    ol.steps li::before {
+      content: counter(step);
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: var(--r-3xs);
+      background: var(--interactive-secondary);
+      color: var(--extra-dark-teal);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 500;
+      margin-top: 1px;
+    }
+    ol.steps code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      background: var(--border-subtle);
+      padding: 1px 6px;
+      border-radius: var(--r-3xs);
+    }
+
+    /* ── Notebook cards ──────────────────────────────────────── */
+    .notebooks { display: grid; gap: var(--sp-md); }
+    .notebook {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-xl);
+      padding: var(--sp-xl);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      background: var(--surface);
+      transition: border-color 150ms ease-in-out, transform 150ms ease-in-out;
+    }
+    .notebook:hover {
+      border-color: var(--interactive-primary);
+      transform: translateY(-1px);
+    }
+    .nb-num {
+      flex: none;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      width: 24px;
+    }
+    .nb-body { flex: 1; min-width: 0; }
+    .nb-title {
+      font-family: var(--font-heading);
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 0 0 2px;
+      color: var(--text);
+    }
+    .nb-desc { font-size: 14px; color: var(--text-muted); margin: 0; }
+
+    .btn-colab {
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2xs);
+      height: 40px;
+      padding: 0 var(--sp-md);
+      border-radius: var(--r-3xs);
+      background: var(--interactive-primary);
+      color: var(--extra-dark-teal);
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: background 150ms ease-in-out;
+    }
+    .btn-colab:hover { background: var(--interactive-primary-hover); text-decoration: none; }
+    .btn-colab svg { width: 18px; height: 18px; }
+
+    @media (max-width: 620px) {
+      .notebook { flex-wrap: wrap; gap: var(--sp-md); }
+      .nb-num { width: auto; }
+      .btn-colab { width: 100%; justify-content: center; }
+      .topbar-links { display: none; }
+      h1 { font-size: 2rem; }
+    }
+
+    /* ── Footer ──────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: var(--sp-3xl) 0 var(--sp-6xl);
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    footer h2 { font-size: 1.25rem; }
+    footer p { margin: 0 0 var(--sp-2xs); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="https://allenai.org" aria-label="Ai2">
+        <img src="assets/logo.svg" alt="Ai2" />
+      </a>
+      <nav class="topbar-links">
+        <a href="https://github.com/ai2cm/ace.git">Code</a>
+        <a href="https://ai2-climate-emulator.readthedocs.io/en/latest/">Docs</a>
+        <a href="https://huggingface.co/collections/allenai/ace">HuggingFace</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap">
+      <!-- Hero -->
+      <div class="hero">
+        <p class="eyebrow">Climate Model Emulation Workshop</p>
+        <h1>CSU / Ai2 ACE Workshop Notebooks</h1>
+        <p class="lede">
+          Welcome! These are the notebooks from the climate model emulation
+          <a href="https://snnvl.github.io/ACEWorkshop.html">workshop</a> at CSU on
+          May 14–15, 2026. Everything has been adjusted to run on the free
+          resources (T4 GPUs) on Google Colaboratory. You can also download the
+          notebooks and assets from HuggingFace to run locally on your own
+          infrastructure.
+        </p>
+        <div class="resources">
+          <a class="chip" href="https://github.com/ai2cm/ace.git">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.17 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 016 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.25 2.87.12 3.17.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.82 1.1.82 2.22v3.29c0 .32.22.7.83.58A12.01 12.01 0 0024 12.5C24 5.87 18.63.5 12 .5z"/></svg>
+            GitHub
+          </a>
+          <a class="chip" href="https://ai2-climate-emulator.readthedocs.io/en/latest/">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+            Documentation
+          </a>
+          <a class="chip" href="https://huggingface.co/collections/allenai/ace">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm-3.5 8a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm7 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM12 18c-2.3 0-4.2-1.5-4.8-3.5-.1-.4.2-.8.6-.8h8.4c.4 0 .7.4.6.8C16.2 16.5 14.3 18 12 18z"/></svg>
+            HuggingFace
+          </a>
+        </div>
+      </div>
+
+      <!-- How to use -->
+      <section class="section-divider">
+        <h2>How to use these notebooks</h2>
+        <ol class="steps">
+          <li>Click any <strong>Open in Colab</strong> button below.</li>
+          <li>Sign in with your Google account if prompted.</li>
+          <li>
+            Set <code>Runtime → Change runtime type</code> to the
+            <code>T4</code> GPU (or a higher-end GPU for faster results if you
+            have credits available).
+          </li>
+          <li>Run it as you would any Jupyter notebook.</li>
+        </ol>
+      </section>
+
+      <!-- Notebooks -->
+      <section class="section-divider">
+        <h2>Notebooks</h2>
+        <div class="notebooks">
+          <a class="notebook" href="https://colab.research.google.com/drive/13iZRmjRrUqRKOSbi_zAIFbzhhueZkXcC" target="_blank" rel="noopener">
+            <span class="nb-num">01</span>
+            <div class="nb-body">
+              <p class="nb-title">ACE2-ERA5 Basic</p>
+              <p class="nb-desc">Get started with the ACE2 atmosphere emulator trained on ERA5 reanalysis.</p>
+            </div>
+            <span class="btn-colab">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 4h16v16H4z" fill="none"/><circle cx="8" cy="12" r="4"/><circle cx="16" cy="12" r="4" opacity="0.6"/></svg>
+              Open in Colab
+            </span>
+          </a>
+          <a class="notebook" href="https://colab.research.google.com/drive/1AFGY91xXpXDDAv_LBkKU9RXrLHthmxXJ" target="_blank" rel="noopener">
+            <span class="nb-num">02</span>
+            <div class="nb-body">
+              <p class="nb-title">ACE2-ERA5 Advanced</p>
+              <p class="nb-desc">Run your own custom inference loops (modified initial conditions and forcing, custom diagnostics, etc.) with the ACE2-ERA5 emulator.</p>
+            </div>
+            <span class="btn-colab">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="12" r="4"/><circle cx="16" cy="12" r="4" opacity="0.6"/></svg>
+              Open in Colab
+            </span>
+          </a>
+          <a class="notebook" href="https://colab.research.google.com/drive/1opydxmGzQ-PVc00vO_8mSIeJRIU8x_49" target="_blank" rel="noopener">
+            <span class="nb-num">03</span>
+            <div class="nb-body">
+              <p class="nb-title">ACE2-SOM</p>
+              <p class="nb-desc">ACE2 coupled to a slab (simple) ocean model.</p>
+            </div>
+            <span class="btn-colab">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="12" r="4"/><circle cx="16" cy="12" r="4" opacity="0.6"/></svg>
+              Open in Colab
+            </span>
+          </a>
+          <a class="notebook" href="https://colab.research.google.com/drive/1jLpNwUlRW-eh6X1LGE4uhnI2vGa71hkT" target="_blank" rel="noopener">
+            <span class="nb-num">04</span>
+            <div class="nb-body">
+              <p class="nb-title">SamudrACE</p>
+              <p class="nb-desc">Coupled ocean–atmosphere emulation using ACE and Samudra (an ocean emulator)</p>
+            </div>
+            <span class="btn-colab">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="12" r="4"/><circle cx="16" cy="12" r="4" opacity="0.6"/></svg>
+              Open in Colab
+            </span>
+          </a>
+          <a class="notebook" href="https://colab.research.google.com/drive/196daE0raZK7SxYFiXzrPnJkLso4M_Rrw" target="_blank" rel="noopener">
+            <span class="nb-num">05</span>
+            <div class="nb-body">
+              <p class="nb-title">HiRO-ACE</p>
+              <p class="nb-desc">Downscaled high-resolution output from ACE based on a 3 km storm-resolving simulation</p>
+            </div>
+            <span class="btn-colab">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="12" r="4"/><circle cx="16" cy="12" r="4" opacity="0.6"/></svg>
+              Open in Colab
+            </span>
+          </a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <h2>Questions or issues?</h2>
+      <p>Open an issue on <a href="https://github.com/ai2cm/ace/issues">github.com/ai2cm/ace/issues</a>.</p>
+      <p>Email: <a href="mailto:andrep@allenai.org">andrep@allenai.org</a></p>
+    </div>
+  </footer>
+</body>
+</html>

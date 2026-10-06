@@ -11,6 +11,7 @@ from typing import Literal
 from unittest.mock import patch
 
 import cftime
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -22,6 +23,7 @@ from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
     save_plus_one_stepper,
+    save_stepper_with_ema,
     validate_stepper_config,
     validate_stepper_multi_call,
     validate_stepper_ocean,
@@ -105,6 +107,7 @@ from fme.core.testing import (
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
+from fme.core.testing.ema import assert_parameters_equal
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
@@ -2279,6 +2282,110 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
     torch.testing.assert_close(output.data["var"], expected_var)
 
 
+def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
+    """Run one eval-mode step from a constant input and return the predicted
+    "var"."""
+    stepper.set_eval()
+    index = xr.date_range("2000", freq="6h", periods=2, use_cftime=True)
+    time = xr.DataArray(np.stack([index]), dims=["sample", "time"])
+    input_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 1, 4, 8), value).to(DEVICE)},
+        time=time.isel(time=[0]),
+        labels=None,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 2, 4, 8), value).to(DEVICE)},
+        time=time,
+        labels=None,
+    )
+    output, _ = stepper.predict(input_data, forcing_data)
+    return output.data["var"]
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "checkpoint_force_positive, override_force_positive, checkpoint_disabled_epochs",
+    [
+        pytest.param(False, True, 0, id="turn_on"),
+        pytest.param(True, False, 0, id="turn_off"),
+        # the checkpoint's corrector state (from its EpochScheduledCorrector)
+        # must load into the unscheduled replacement
+        pytest.param(True, False, 1, id="turn_off_scheduled_checkpoint"),
+    ],
+)
+def test_load_stepper_with_corrector_override(
+    tmp_path: pathlib.Path,
+    checkpoint_force_positive: bool,
+    override_force_positive: bool,
+    checkpoint_disabled_epochs: int,
+):
+    """The stepper adds one, so an input of -3 predicts -2, which the
+    force-positive clamp turns into 0 when the active corrector enables it."""
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=[DimSize("grid_yt", 4), DimSize("grid_xt", 8)],
+        nz_interface=4,
+    )
+
+    def force_positive_names(enabled: bool) -> list[str]:
+        return ["var"] if enabled else []
+
+    def expected(enabled: bool) -> float:
+        return 0.0 if enabled else -2.0
+
+    save_plus_one_stepper(
+        stepper_path,
+        in_names=["var"],
+        out_names=["var"],
+        normalization_names={"var"},
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=force_positive_names(checkpoint_force_positive),
+            corrector_disabled_epochs=checkpoint_disabled_epochs,
+        ),
+    )
+
+    stepper = load_stepper(stepper_path)
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(checkpoint_force_positive))
+    )
+
+    override = CorrectorSelector(
+        type="atmosphere_corrector",
+        config={"force_positive_names": force_positive_names(override_force_positive)},
+    )
+    stepper = load_stepper(stepper_path, StepperOverrideConfig(corrector=override))
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+    assert _get_inner_single_module_config(stepper).corrector == override
+    # the replacement survives serialization
+    reloaded = Stepper.from_state(stepper.get_state())
+    output = _predict_one_step(reloaded, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+
+
+def test_stepper_override_rejects_corrector_disabled_epochs():
+    with pytest.raises(ValueError, match="corrector_disabled_epochs"):
+        dacite.from_dict(
+            StepperOverrideConfig,
+            {
+                "corrector": {
+                    "type": "atmosphere_corrector",
+                    "config": {"corrector_disabled_epochs": 1},
+                }
+            },
+            config=dacite.Config(strict=True),
+        )
+
+
 class _LargeLinear(torch.nn.Module):
     """Module defined at module scope so it can be pickled by torch.save."""
 
@@ -3916,3 +4023,15 @@ def test_normalized_residual_prediction_requires_residual_block():
             ),
             residual_prediction=ResidualPredictionConfig(normalized=True),
         )
+
+
+def test_load_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Warm starts (parameter_init) load weights through load_stepper, and
+    must keep getting the stepper weights of a checkpoint that has EMA weights.
+    """
+    path = tmp_path / "ckpt.tar"
+    stepper_weights, _ = save_stepper_with_ema(path)
+
+    stepper = load_stepper(path)
+
+    assert_parameters_equal(stepper.modules, stepper_weights)

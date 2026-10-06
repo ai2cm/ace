@@ -62,6 +62,17 @@ class StepperState:
             self.random_state.pin_memory()
         return self
 
+    def select_sample_slice(self, sample_slice: slice) -> "StepperState":
+        """Select a contiguous range of samples."""
+        return StepperState(
+            corrector_state=(
+                None
+                if self.corrector_state is None
+                else self.corrector_state.select_sample_slice(sample_slice)
+            ),
+            random_state=self.random_state,
+        )
+
     def broadcast_ensemble(self, n_ensemble: int) -> "StepperState":
         return StepperState(
             corrector_state=(

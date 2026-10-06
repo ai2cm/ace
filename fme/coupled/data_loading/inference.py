@@ -11,6 +11,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
+    local_ic_range,
 )
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.dummy import DummyDataset
@@ -169,10 +170,10 @@ class InferenceDataset(torch.utils.data.Dataset):
         dist = Distributed.get_instance()
         i_start = index * self._coupled_steps_in_memory
         samples = []
-        for i_member in range(self._n_initial_conditions):
-            # check if sample is one this local rank should process
-            if i_member % dist.world_size != dist.rank:
-                continue
+        local_start, local_end = local_ic_range(
+            self._n_initial_conditions, dist.rank, dist.world_size
+        )
+        for i_member in range(local_start, local_end):
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
         return CoupledBatchData.collate_fn(
