@@ -4,6 +4,9 @@
 # Same time partition as the fine-tunes: train 1994-2001 + 2012-2021, 2002-2011 untouched, validation
 # 2022-2023, inline 10-yr rollouts from 2012-01-01 and 2013-01-05. 200 epochs x ~91 iterations (20 training
 # years) ~ 18k iterations, a third of the CM4 pretrain's 55k. Corrector: scaled heat-content correction capped at 0.5 percent.
+# NOTE (2026-10-06): in the UFS replay store eastward/northward_surface_wind_stress are MOM6's ocean-side
+# stresses (NaN over land), not the FV3 atmosphere-side stress CM4 provides, so they are NOT excluded from
+# input masking here: the ocean mask zeroes them over land. Pipeline fix (atmosphere-side stress) pending.
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -92,8 +95,6 @@ stepper:
     - LHTFLsfc
     - SHTFLsfc
     - PRATEsfc
-    - eastward_surface_wind_stress
-    - northward_surface_wind_stress
     - total_frozen_precipitation_rate
   step:
     type: single_module
