@@ -92,3 +92,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|01M38X5HTGQ
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs1|01M38X5HTGQ359BM50D9Y6WRC4|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 3h|data_writer.save_monthly_files=false|01M3DMCRNGGG8TQZ9Z5RG4HW04|ai2/ace|jupiter|||30GiB
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|01M3Z84921KMWJB6A7Y7KNQ2RQ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|01M47FFHVF22WYSM796JRTM3G7|training|best_inference_ckpt|normal|--min-runtime 8h
