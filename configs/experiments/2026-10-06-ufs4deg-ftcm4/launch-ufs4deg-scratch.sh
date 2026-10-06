@@ -3,7 +3,7 @@
 #   ARMS="scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc" ./launch-ufs4deg-scratch.sh
 set -euo pipefail
 ARMS="${ARMS:-scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc}"
-DATA_DS="${DATA_DS:-01M49332CDDHHKJZMV8188QQC7}"     # ufs-replay-ocean-4deg-19level-5day-2026-10-02-cm4vars (extra vars unused)
+DATA_DS="${DATA_DS:-01M49E2H4XGPKPHQ16RQQ0MCSN}"     # ...-cm4vars-v3: stress in CM4's atmosphere-side sign convention (extra vars unused)
 STATS_DS="${STATS_DS:-01M4925NAS522JSB9QNTDKZM0C}"   # ufs-replay-ocean-4deg-19level-5day-stats-2026-10-02 (files at the root)
 PRIORITY="${PRIORITY:-high}"
 N_GPUS="${N_GPUS:-1}"
