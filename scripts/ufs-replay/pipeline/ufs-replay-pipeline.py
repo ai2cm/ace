@@ -193,9 +193,17 @@ def check_coarsening_indices(layer_centers, indices, targets=CM4_INTERFACE_DEPTH
 
 # MOM6 variable rename map
 OCEAN_RENAME = {"temp": "thetao", "SSH": "zos"}
+# MOM6's surface stresses are the OCEAN-side stresses (stress on the sea
+# water, NaN over land, ice-ocean stress under ice): they are CM4's
+# ``tauuo``/``tauvo``.  The atmosphere-side wind stress CM4 calls
+# ``eastward/northward_surface_wind_stress`` (defined over land too, and of
+# the opposite sign: an upward momentum-flux convention) comes from FV3's
+# ``uflx_ave``/``vflx_ave`` in the atmosphere stream below, whose sign
+# already matches CM4's.  Stores produced before 2026-10-06 carried the MOM6
+# stresses under the atmosphere-side names.
 STRESS_RENAME = {
-    "taux": "eastward_surface_wind_stress",
-    "tauy": "northward_surface_wind_stress",
+    "taux": "tauuo",
+    "tauy": "tauvo",
 }
 
 # FV3 atmosphere forcing variables → output names
@@ -207,6 +215,8 @@ ATMO_FORCING_VARS = {
     "lhtfl_ave": "LHTFLsfc",
     "shtfl_ave": "SHTFLsfc",
     "prateb_ave": "PRATEsfc",
+    "uflx_ave": "eastward_surface_wind_stress",
+    "vflx_ave": "northward_surface_wind_stress",
 }
 
 # FV3 bucket-accumulated frozen precip variables — converted to a rate
@@ -728,15 +738,11 @@ def _process_ocean_chunk(
         ssv.attrs = {"long_name": "Sea surface y-velocity", "units": "m/s"}
         ds["ssv"] = ssv
 
-    # Stress aliases
-    if "eastward_surface_wind_stress" in ds:
-        tauuo = ds["eastward_surface_wind_stress"]
-        tauuo.attrs = {"long_name": "Surface Downward X Stress", "units": "N/m2"}
-        ds["tauuo"] = tauuo
-    if "northward_surface_wind_stress" in ds:
-        tauvo = ds["northward_surface_wind_stress"]
-        tauvo.attrs = {"long_name": "Surface Downward Y Stress", "units": "N/m2"}
-        ds["tauvo"] = tauvo
+    # Ocean-side stresses (MOM6 taux/tauy, renamed in _clean_ocean_dataset)
+    if "tauuo" in ds:
+        ds["tauuo"].attrs = {"long_name": "Surface Downward X Stress", "units": "N/m2"}
+    if "tauvo" in ds:
+        ds["tauvo"].attrs = {"long_name": "Surface Downward Y Stress", "units": "N/m2"}
 
     # wfo: water flux = evap + lprec + fprec + lrunoff
     if all(v in ds for v in WFO_COMPONENTS):

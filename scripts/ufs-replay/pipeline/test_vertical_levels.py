@@ -164,3 +164,11 @@ def test_check_rejects_the_pre_fix_grouping():
 def test_rejects_non_contiguous_centres():
     with pytest.raises(ValueError):
         pipeline.native_interfaces_from_layer_centers([1.0, 1.5, 1.6])
+
+
+def test_stress_fields_follow_cm4_conventions():
+    # atmosphere-side wind stress from FV3 (CM4's sign convention, defined over
+    # land); ocean-side stress from MOM6 under CM4's tauuo/tauvo names
+    assert pipeline.ATMO_FORCING_VARS["uflx_ave"] == "eastward_surface_wind_stress"
+    assert pipeline.ATMO_FORCING_VARS["vflx_ave"] == "northward_surface_wind_stress"
+    assert pipeline.STRESS_RENAME == {"taux": "tauuo", "tauy": "tauvo"}

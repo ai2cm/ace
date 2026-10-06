@@ -54,6 +54,17 @@ Atmosphere stream (3-hourly FV3 chunks):
 3. Regrid to Gaussian grid via xESMF
 4. Mask sea-ice variables to the ocean
 
+## Surface stress conventions
+
+`eastward_surface_wind_stress` / `northward_surface_wind_stress` are the
+atmosphere-side wind stresses from FV3's `uflx_ave` / `vflx_ave` (defined
+over land as well; the same sign convention as CM4's fields of those names,
+which is minus the stress on the sea water). `tauuo` / `tauvo` are MOM6's
+ocean-side stresses (`taux` / `tauy`, NaN over land, ice-ocean stress under
+ice), as in the CM4 ocean stores. Stores produced before 2026-10-06 carried
+the MOM6 stresses under the atmosphere-side names, with the opposite sign to
+CM4 and NaN over land.
+
 ## 4-degree product
 
 `make ufs_replay_dataflow_four_degree` runs the same pipeline with
