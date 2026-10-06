@@ -14,6 +14,111 @@ stats:
   start_date: "0153-01-01T06:00:00"
   data_type: CM4
   beaker_dataset: 2026-06-19-CM4-like-AM4-random-CO2-stats
+# Daily (factor 4) coarsening of the nine 6-hourly members, for training on
+# piControl + 1pctCO2 + random-CO2 at the daily step. Run with
+#   ./compute_dataset.sh --time-coarsen --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+# (never pass --dataset here, which would rewrite the 6-hourly members). The
+# 6-hourly stats already exist and are skipped; the daily stats run per member
+# from stats.start_date, and the combined daily stats pool the members. The
+# variable lists match the piControl and 1pctCO2 daily configs (same cell_methods
+# in all three 2026-06-19 store families); ocean_fraction is carried as a snapshot,
+# unlike the 4deg block, which drops it.
+time_coarsen:
+  factor: 4
+  data_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily
+  stats_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily-stats
+  beaker_dataset: 2026-06-19-CM4-like-AM4-random-CO2-1deg-daily-stats
+  n_split: 6 # 5.25 years * 365 days/yr / 360 steps per shard ~= 5.3 shards per member
+  snapshot_names:
+    - PRESsfc
+    - PRMSL
+    - Q2m
+    - TMP2m
+    - TMP850
+    - UGRD10m
+    - VGRD10m
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - column_soil_moisture
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_2
+    - eastward_wind_3
+    - eastward_wind_4
+    - eastward_wind_5
+    - eastward_wind_6
+    - eastward_wind_7
+    - h500
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_2
+    - northward_wind_3
+    - northward_wind_4
+    - northward_wind_5
+    - northward_wind_6
+    - northward_wind_7
+    - ocean_fraction
+    - sea_ice_fraction
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - surface_snow_amount
+    - surface_snow_area_fraction
+    - surface_temperature
+    - temperature_of_soil_layer_0
+    - temperature_of_soil_layer_1
+    - temperature_of_soil_layer_2
+    - temperature_of_soil_layer_3
+    - total_land_column_energy_without_rivers
+    - total_moisture_content_of_soil_layer_0
+    - total_moisture_content_of_soil_layer_1
+    - total_moisture_content_of_soil_layer_2
+    - total_moisture_content_of_soil_layer_3
+    - total_water_path
+    - total_energy
+  window_names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - DSWRFtoa
+    - GHTFLsfc
+    - LHTFLsfc
+    - PRATEsfc
+    - SHTFLsfc
+    - ULWRFsfc
+    - ULWRFtoa
+    - USWRFsfc
+    - USWRFtoa
+    - carbon_dioxide
+    - downward_longwave_radiative_flux
+    - eastward_surface_wind_stress
+    - net_surface_longwave_radiative_flux
+    - northward_surface_wind_stress
+    - tendency_of_total_water_path
+    - tendency_of_total_water_path_due_to_advection
+    - total_frozen_precipitation_rate
+    - total_precipitation_heat_flux
+    - total_vapor_sensible_heat_flux
+  constant_prefixes:
+    - HGTsfc
+    - ak_
+    - bk_
+    - glac_fraction
+    - lake_fraction
+    - land_fraction
+    - lat
+    - lon
+    - soil_fraction
 dataset_computation:
   n_split: 10
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-08-10-pre-industrial-CM4-simulation/vertical-coordinate-file/fv_core.res.nc

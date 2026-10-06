@@ -1,46 +1,39 @@
-# Produces the daily 1deg CM4-1pctCO2 atmosphere+land dataset by time-coarsening
-# the existing 6-hourly zarr store by a factor of 4, for the scenario rollouts of
-# the fine-tuned snow checkpoints and for training on piControl + 1pctCO2
-# (+ random-CO2).
+# Produces the daily 1deg CM4-piControl atmosphere+land dataset by time-coarsening
+# the 2026-06-19 6-hourly zarr store by a factor of 4, for training on piControl
+# together with the 1pctCO2 and random-CO2 scenarios. It supersedes the daily
+# store built from the 2025-03-21 6-hourly store (branch
+# scripts/cm4-picontrol-1deg-daily-dataset), which came from the earlier
+# piControl run; the 2026-06-19 reprocessing is the one the 1pctCO2 and
+# random-CO2 stores share.
 #
-# The daily store was built on 2026-09-30 with
-#   ./compute_dataset.sh --time-coarsen --config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml
-# (never pass --dataset, which would rewrite the 6-hourly source).
+# Run with (never pass --dataset, which would rewrite the 6-hourly source):
+#   ./compute_dataset.sh --time-coarsen --stats --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr-daily.yaml
 #
-# The daily stats over the scenario-training window 0046-0125 are computed by
-#   ./compute_dataset.sh --stats --config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml
-# WITHOUT --time-coarsen: time_coarsen.py's existence check is a local-path test,
-# so a second --time-coarsen run would rewrite the daily store on GCS. The
-# 6-hourly stats already exist at stats.output_directory and are skipped.
-#
-# The 6-hourly source store is written by
-# CM4-1pctCO2-atmosphere-1deg-8layer-140yr.yaml. Unlike the piControl store it
-# carries no static soil masks, so the 12 mask_ fields are appended afterwards
-# with CM4-1pctCO2-land-mask-append.yaml; without them the evaluator's
-# SpatialMaskProvider compatibility check rejects the store.
+# --stats computes the daily stats over the scenario-training window
+# 0156-0235 only, so that they can be pooled with the 1pctCO2 and random-CO2
+# daily stats over their training windows. The 6-hourly stats already exist at
+# stats.output_directory and are skipped.
 #
 # Variables in none of the three lists below are dropped by the coarsening.
 runs:
-  2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr: ""  # no real data source, config only for time coarsening
+  2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr: ""  # no real data source, config only for time coarsening
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   # The 6-hourly stats already exist here (full record) and are skipped; the
   # dates apply to the daily stats under time_coarsen.
-  output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats
-  start_date: "0046-01-01T00:00:00"
-  end_date: "0126-01-01T00:00:00"
+  output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats
+  start_date: "0156-01-01T00:00:00"
+  end_date: "0236-01-01T00:00:00"
   data_type: CM4
-  beaker_dataset: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr
+  beaker_dataset: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily
-  stats_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-stats-0046-0126
-  beaker_dataset: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-stats-0046-0126
+  data_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily
+  stats_output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-stats-0156-0236
+  beaker_dataset: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-stats-0156-0236
   output_names:
-    # Without this the coarsened store would take the source store's name, and
-    # the downstream configs expect the -daily suffix.
-    2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily
-  n_split: 140 # 140 years * 365 days/yr / 360 steps per shard ~= 142 shards, so about one shard per partition
+    2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily
+  n_split: 200 # 200 years * 365 days/yr / 360 steps per shard ~= 203 shards, so about one shard per partition
   snapshot_names:
     # variables whose cell_methods in the 6-hourly store is "time: point"
     - PRESsfc
@@ -116,7 +109,7 @@ time_coarsen:
     - ULWRFtoa
     - USWRFsfc
     - USWRFtoa
-    - carbon_dioxide  # cell_methods is "time: mean" here, a snapshot in piControl
+    - carbon_dioxide  # cell_methods is "time: mean" in the 2026-06-19 stores
     - downward_longwave_radiative_flux
     - eastward_surface_wind_stress
     - net_surface_longwave_radiative_flux
@@ -127,9 +120,7 @@ time_coarsen:
     - total_precipitation_heat_flux
     - total_vapor_sensible_heat_flux
   constant_prefixes:
-    # copied through unmodified; all are static in the 6-hourly store. mask_
-    # matches nothing here, since this store's soil masks are appended to the
-    # daily store afterwards, but is kept so the list matches the piControl one.
+    # copied through unmodified; all are static in the 6-hourly store
     - HGTsfc
     - ak_
     - bk_
@@ -138,5 +129,4 @@ time_coarsen:
     - land_fraction
     - lat
     - lon
-    - mask_
     - soil_fraction

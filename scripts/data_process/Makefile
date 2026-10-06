@@ -285,6 +285,25 @@ cm4_1pctCO2_atmosphere_8layer_140yr:
 cm4_1pctCO2_atmosphere_1deg_8layer_140yr_daily:
 	./compute_dataset.sh --time-coarsen --config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml
 
+# Daily stats of the existing daily 1pctCO2 store over its scenario-training
+# window. Not --time-coarsen: time_coarsen.py's existence check is local-only and
+# would rewrite the daily store on GCS.
+.PHONY: cm4_1pctCO2_atmosphere_1deg_8layer_140yr_daily_stats
+cm4_1pctCO2_atmosphere_1deg_8layer_140yr_daily_stats:
+	./compute_dataset.sh --stats --config configs/CM4-1pctCO2-atmosphere-1deg-8layer-140yr-daily.yaml
+
+# Time-coarsens the 2026-06-19 1deg 6-hourly piControl store to daily and
+# computes the daily stats over its scenario-training window. Never --dataset.
+.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_daily
+cm4_picontrol_atmosphere_1deg_8layer_200yr_daily:
+	./compute_dataset.sh --time-coarsen --stats --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr-daily.yaml
+
+# Time-coarsens the nine 2026-06-19 1deg 6-hourly random-CO2 members to daily
+# with per-member daily stats. Never --dataset.
+.PHONY: cm4_like_am4_random_co2_ensemble_atmosphere_1deg_daily
+cm4_like_am4_random_co2_ensemble_atmosphere_1deg_daily:
+	./compute_dataset.sh --time-coarsen --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	./convert_to_monthly_netcdf_fv3gfs.sh \
