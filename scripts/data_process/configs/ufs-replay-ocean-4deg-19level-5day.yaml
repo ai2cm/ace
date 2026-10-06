@@ -1,4 +1,4 @@
-# Time-coarsen the raw 6-hourly UFS-Replay ocean+atmosphere output (4deg, 2026-10-02 CM4-level rebuild)
+# Time-coarsen the raw 6-hourly UFS-Replay ocean+atmosphere output (4deg, 2026-10-06 CM4-level rebuild)
 # (produced by scripts/ufs-replay/pipeline/ufs-replay-pipeline.py) to
 # 5-day means/snapshots via scripts/data_process/time_coarsen.py (the SamudrACE ocean step).
 #
@@ -11,7 +11,7 @@
 # ufs_replay_dataflow` (see scripts/ufs-replay/Makefile: DATE-DATASET_NAME);
 # update it again to match whenever that pipeline is re-run.
 runs:
-  2026-10-02-ufs-replay-ocean-4deg-19level-1994-2023: ""
+  2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023: ""
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-4deg-19level-5day-stats

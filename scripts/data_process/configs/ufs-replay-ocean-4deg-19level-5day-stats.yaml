@@ -1,13 +1,13 @@
-# Normalization stats for the 5-day UFS replay ocean store (4deg, 2026-10-02 CM4-level rebuild),
+# Normalization stats for the 5-day UFS replay ocean store (4deg, 2026-10-06 CM4-level rebuild),
 # computed directly on the time-coarsened store. Kept separate from the coarsen config because
 # get_stats.py also computes stats of the raw 6-hourly run when a time_coarsen section is present,
 # and the coarsen config points both at the same output directory.
 runs:
-  2026-10-02-ufs-replay-ocean-4deg-19level-1994-2023: ""
+  2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023: ""
 data_output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-4deg-19level-5day
 stats:
-  output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-4deg-19level-5day-stats-2026-10-02
-  beaker_dataset: ufs-replay-ocean-4deg-19level-5day-stats-2026-10-02
+  output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-4deg-19level-5day-stats-2026-10-06
+  beaker_dataset: ufs-replay-ocean-4deg-19level-5day-stats-2026-10-06
   data_type: UFS_REPLAY
   start_date: "1994-01-01"
   end_date: "2021-12-31"
