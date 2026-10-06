@@ -36,7 +36,7 @@ for A in $ARMS; do
     --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=samudra-ufs4deg-ftcm4 \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset "${STATS_DS}:ocean:/ocean_stats" \
-    --dataset "${DATA_DS}:/ufs4deg" \
+    --dataset "${DATA_DS}:/ufs4deg/2026-10-02-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
     --dataset "${CKPT_DS}:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
     --gpus "$N_GPUS" --shared-memory 200GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \

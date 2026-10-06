@@ -27,7 +27,7 @@ for A in $ARMS; do
     --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=samudra-ufs4deg-scratch \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset "${STATS_DS}:/ocean_stats" \
-    --dataset "${DATA_DS}:/ufs4deg" \
+    --dataset "${DATA_DS}:/ufs4deg/2026-10-02-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
     --gpus "$N_GPUS" --shared-memory 200GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "${SCRIPT_PATH}/${A}.yaml" 2>&1)
