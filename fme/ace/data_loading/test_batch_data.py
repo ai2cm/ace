@@ -417,7 +417,8 @@ def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
         )
         ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
         seeded = ic.apply_config_seed(42)
-        gen_state = seeded.as_batch_data().stepper_state.random_state.generator.get_state()
+        stepper = seeded.as_batch_data().stepper_state
+        gen_state = stepper.random_state.generator.get_state()
         states.append(gen_state)
 
     # Each rank should produce a different generator state.
