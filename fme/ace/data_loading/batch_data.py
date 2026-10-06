@@ -12,6 +12,7 @@ import xarray as xr
 from torch.utils.data import default_collate
 
 from fme.ace.requirements import InitialConditionRequirements
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -871,6 +872,122 @@ class BatchData:
             self.subset_names(prognostic_names).select_time_slice(
                 slice(-n_ic_timesteps, None)
             )
+        )
+
+    def select_sample_slice(self: SelfType, sample_slice: slice) -> SelfType:
+        """Select a contiguous range of samples from the batch."""
+        self._raise_if_step_diagnostics("select_sample_slice")
+        return self.__class__(
+            {k: v[sample_slice] for k, v in self.data.items()},
+            time=self.time[sample_slice],
+            horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
+            labels=(
+                self.labels.select_sample_slice(sample_slice)
+                if self.labels is not None
+                else None
+            ),
+            n_ensemble=self.n_ensemble,
+            data_mask=(
+                {k: v[sample_slice] for k, v in self.data_mask.items()}
+                if self.data_mask is not None
+                else None
+            ),
+            stepper_state=(
+                self.stepper_state.select_sample_slice(sample_slice)
+                if self.stepper_state is not None
+                else None
+            ),
+        )
+
+    def gather(self, dist: Distributed | None = None) -> "BatchData | None":
+        """Gather per-rank shards to root along the sample dimension.
+
+        Returns a CPU BatchData on root, ``None`` on other ranks.
+        """
+        self._raise_if_step_diagnostics("gather")
+        if dist is None:
+            dist = Distributed.get_instance()
+        dist.require_no_spatial_parallelism("BatchData.gather")
+
+        device = get_device()
+        gathered_data: dict[str, torch.Tensor] = {}
+        for name, tensor in self.data.items():
+            rank_tensors = dist.gather(tensor.to(device).contiguous())
+            if dist.is_root():
+                if rank_tensors is None:
+                    raise RuntimeError("dist.gather returned None on root")
+                gathered_data[name] = torch.cat(rank_tensors, dim=0).cpu()
+
+        batch_cpu = self.to_cpu()
+        gathered_parts = dist.gather_object(
+            {
+                "time": batch_cpu.time,
+                "labels": batch_cpu.labels,
+                "stepper_state": batch_cpu.stepper_state,
+                "data_mask": batch_cpu.data_mask,
+            }
+        )
+
+        if not dist.is_root():
+            return None
+
+        if gathered_parts is None:
+            raise RuntimeError("dist.gather_object returned None on root")
+        gathered_time = xr.concat([p["time"] for p in gathered_parts], dim="sample")
+
+        first_labels = gathered_parts[0]["labels"]
+        if first_labels is not None:
+            gathered_labels = BatchLabels(
+                tensor=torch.cat([p["labels"].tensor for p in gathered_parts], dim=0),
+                names=first_labels.names,
+            )
+        else:
+            gathered_labels = None
+
+        first_state = gathered_parts[0]["stepper_state"]
+        if first_state is not None:
+            first_corrector = first_state.corrector_state
+            if (
+                first_corrector is not None
+                and first_corrector.global_dry_air_mass is not None
+            ):
+                gathered_corrector = CorrectorState(
+                    global_dry_air_mass=torch.cat(
+                        [
+                            p["stepper_state"].corrector_state.global_dry_air_mass
+                            for p in gathered_parts
+                        ],
+                        dim=0,
+                    )
+                )
+            else:
+                gathered_corrector = first_corrector
+            gathered_stepper_state = StepperState(
+                corrector_state=gathered_corrector,
+                random_state=first_state.random_state,
+            )
+        else:
+            gathered_stepper_state = None
+
+        first_mask = gathered_parts[0]["data_mask"]
+        if first_mask is not None:
+            gathered_mask = {
+                k: torch.cat([p["data_mask"][k] for p in gathered_parts], dim=0)
+                for k in first_mask
+            }
+        else:
+            gathered_mask = None
+
+        return BatchData(
+            data=gathered_data,
+            time=gathered_time,
+            horizontal_dims=self.horizontal_dims,
+            epoch=self.epoch,
+            labels=gathered_labels,
+            n_ensemble=self.n_ensemble,
+            stepper_state=gathered_stepper_state,
+            data_mask=gathered_mask,
         )
 
     def select_time_slice(self: SelfType, time_slice: slice) -> SelfType:

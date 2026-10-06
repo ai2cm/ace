@@ -167,6 +167,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
+
     @property
     def allow_missing_variables(self) -> bool:
         return False
