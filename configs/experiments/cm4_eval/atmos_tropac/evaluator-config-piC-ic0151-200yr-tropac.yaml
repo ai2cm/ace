@@ -1,0 +1,62 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/atmos_tropac
+#
+# The shared atmosphere-only piC config (CM4 SST prescribed) plus one monthly
+# tropical Pacific writer of SST, surface stress, surface heat fluxes and
+# precipitation, with CM4's values alongside, to measure the atmosphere's
+# response to SST against CM4's.
+experiment_dir: /results
+n_forward_steps: 291960
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  zonal_mean:
+    enabled: false
+  power_spectrum:
+     enabled: false
+  enso_coefficient:
+    enabled: false
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+    - label: tropical_pacific_monthly
+      names:
+        - surface_temperature
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+        - DSWRFsfc
+        - USWRFsfc
+        - DLWRFsfc
+        - ULWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+      lat_extent: [-20.0, 20.0]
+      lon_extent: [120.0, 290.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: true

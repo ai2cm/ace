@@ -1,0 +1,7 @@
+# Century evals of jamesd's owc_a2sLR fixed-4 coupled finetune (wandb g9bnss73): identical training
+# config to crps4 (cghk183p) except the mounted atmosphere (a2sLR wgz8np8z vs a2s j0ng1tw3).
+# Checkpoint: best_inference_ckpt from the final (exit-0) job's results dataset, field 9.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled.
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan
