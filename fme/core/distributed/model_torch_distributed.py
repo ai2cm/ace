@@ -332,9 +332,7 @@ class ModelTorchDistributed(DistributedBackend):
     def data_parallel_gather_object(self, obj: T) -> list[T] | None:
         dst = torch.distributed.get_global_rank(self._data_group, 0)
         gather_list: list[Any] | None = (
-            [None for _ in range(self._data_size)]
-            if self._data_rank == 0
-            else None
+            [None for _ in range(self._data_size)] if self._data_rank == 0 else None
         )
         torch.distributed.gather_object(
             obj, gather_list, dst=dst, group=self._data_group

@@ -380,9 +380,7 @@ class Distributed:
             A list of tensors on the data-parallel root, ``None`` on other
             data-parallel ranks.
         """
-        return self._distributed.data_parallel_gather(
-            tensor, gather_list=gather_list
-        )
+        return self._distributed.data_parallel_gather(tensor, gather_list=gather_list)
 
     def data_parallel_scatter(
         self,

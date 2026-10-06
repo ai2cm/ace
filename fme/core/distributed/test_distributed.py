@@ -285,9 +285,7 @@ def test_data_parallel_gather():
         assert gathered is not None
         assert len(gathered) == n
         for r in range(n):
-            torch.testing.assert_close(
-                gathered[r].cpu(), torch.full((2, 3), float(r))
-            )
+            torch.testing.assert_close(gathered[r].cpu(), torch.full((2, 3), float(r)))
     else:
         assert gathered is None
 
