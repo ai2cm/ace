@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|01M47FFZK89MTXMV6QM28N6AP7|training|best_inference_ckpt|normal|--min-runtime 8h
