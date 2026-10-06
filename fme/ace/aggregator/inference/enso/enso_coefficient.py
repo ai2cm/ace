@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -9,13 +10,16 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow, plot_paneled_data
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
+from ..build_context import MetricBuildContext, MetricNotSupportedError
+from ..data import InferenceBatchData, MetricBuildResult
 from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
 OVERLAP_THRESHOLD = 0.9
@@ -102,6 +106,11 @@ class EnsoCoefficientEvaluatorAggregator:
         n_samples = len(self._sample_index_series)
         self._target_covariances: list[TensorDict] = [{} for _ in range(n_samples)]
         self._gen_covariances: list[TensorDict] = [{} for _ in range(n_samples)]
+        # spatial shape of each variable, tracked on every process regardless of
+        # whether any of its samples overlap the reference index, so that a
+        # process without data can still take part in the cross-process reduction
+        self._target_spatial_shapes: dict[str, torch.Size] = {}
+        self._gen_spatial_shapes: dict[str, torch.Size] = {}
         self._index_variance: list[torch.Tensor] = [
             torch.tensor(0.0, dtype=torch.float32, device=get_device())
             for _ in range(n_samples)
@@ -114,9 +123,7 @@ class EnsoCoefficientEvaluatorAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
+        data: InferenceBatchData,
     ):
         """Record running sums of the enso index variance, and of the
         covariance of the target and generated data with the ENSO index (sum
@@ -125,9 +132,18 @@ class EnsoCoefficientEvaluatorAggregator:
         We need to track sums for each sample since the index will be different
         for each time period.
         """
+        time = data.time
+        target_data = data.target
+        gen_data = data.prediction
         assert time.sizes["sample"] == len(
             self._sample_index_series
         ), "number of index series must match number of samples"
+        for spatial_shapes, batch_data in (
+            (self._target_spatial_shapes, target_data),
+            (self._gen_spatial_shapes, gen_data),
+        ):
+            for name, tensor in batch_data.items():
+                spatial_shapes[name] = tensor.shape[2:]
         for i_sample, sample_index_series in enumerate(self._sample_index_series):
             if sample_index_series is not None:
                 sample_index_series_window = sample_index_series.sel(
@@ -139,27 +155,27 @@ class EnsoCoefficientEvaluatorAggregator:
                     dtype=torch.float32,
                 )
                 self._index_variance[i_sample] += (sample_index_series_window**2).sum()
-                for name, data in target_data.items():
+                for name, tensor in target_data.items():
                     if name not in self._target_covariances[i_sample]:
                         self._target_covariances[i_sample][name] = (
                             data_index_covariance(
-                                data[i_sample, :], sample_index_series_window
+                                tensor[i_sample, :], sample_index_series_window
                             )
                         )
                     else:
                         self._target_covariances[i_sample][name] += (
                             data_index_covariance(
-                                data[i_sample, :], sample_index_series_window
+                                tensor[i_sample, :], sample_index_series_window
                             )
                         )
-                for name, data in gen_data.items():
+                for name, tensor in gen_data.items():
                     if name not in self._gen_covariances[i_sample]:
                         self._gen_covariances[i_sample][name] = data_index_covariance(
-                            data[i_sample, :], sample_index_series_window
+                            tensor[i_sample, :], sample_index_series_window
                         )
                     else:
                         self._gen_covariances[i_sample][name] += data_index_covariance(
-                            data[i_sample, :], sample_index_series_window
+                            tensor[i_sample, :], sample_index_series_window
                         )
 
     def _compute_coefficients(
@@ -183,59 +199,12 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _get_coefficients(self) -> tuple[TensorDict | None, TensorDict | None]:
         dist = Distributed.get_instance()
-        target_coefficients = self._compute_coefficients("target")
-        gen_coefficients = self._compute_coefficients("gen")
-        # average coefficients across samples
-        target_coefficients_all, gen_coefficients_all = {}, {}
-        target_names = set(
-            [
-                name
-                for target_coefficient in target_coefficients
-                for name in target_coefficient.keys()
-            ]
+        reduced_target_coefficients = reduce_sample_coefficients(
+            dist, self._compute_coefficients("target"), self._target_spatial_shapes
         )
-        for name in target_names:
-            target_coefficients_all[name] = (
-                torch.stack(
-                    [
-                        target_coefficient[name]
-                        for target_coefficient in target_coefficients
-                        if name in target_coefficient
-                    ],
-                    dim=0,
-                )
-                .mean(dim=0)
-                .to(device=get_device())
-            )
-        gen_names = set(
-            [
-                name
-                for gen_coefficient in gen_coefficients
-                for name in gen_coefficient.keys()
-            ]
+        reduced_gen_coefficients = reduce_sample_coefficients(
+            dist, self._compute_coefficients("gen"), self._gen_spatial_shapes
         )
-        for name in gen_names:
-            gen_coefficients_all[name] = (
-                torch.stack(
-                    [
-                        gen_coefficient[name]
-                        for gen_coefficient in gen_coefficients
-                        if name in gen_coefficient
-                    ],
-                    dim=0,
-                )
-                .mean(dim=0)
-                .to(device=get_device())
-            )
-        # average coefficients across processes
-        if target_coefficients_all:
-            reduced_target_coefficients = reduce_data(dist, target_coefficients_all)
-        else:
-            reduced_target_coefficients = None
-        if gen_coefficients_all:
-            reduced_gen_coefficients = reduce_data(dist, gen_coefficients_all)
-        else:
-            reduced_gen_coefficients = None
         return reduced_target_coefficients, reduced_gen_coefficients
 
     @torch.no_grad()
@@ -247,8 +216,10 @@ class EnsoCoefficientEvaluatorAggregator:
         images, metrics = {}, {}
         for name in gen_coefficients.keys():
             if name in self._variable_metadata:
-                caption_name = self._variable_metadata[name].long_name
-                caption_units = self._variable_metadata[name].units
+                caption_name = self._variable_metadata[name].display_long_name(name)
+                caption_units = self._variable_metadata[name].display_units(
+                    "unknown units"
+                )
             else:
                 caption_name = name
                 caption_units = "unknown units"
@@ -323,8 +294,8 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _get_var_attrs(self, name: str) -> dict[str, str]:
         if name in self._variable_metadata:
-            attrs_name = self._variable_metadata[name].long_name
-            attrs_units = self._variable_metadata[name].units
+            attrs_name = self._variable_metadata[name].display_long_name(name)
+            attrs_units = self._variable_metadata[name].display_units("unknown units")
         else:
             attrs_name = name
             attrs_units = "unknown units"
@@ -430,25 +401,91 @@ def data_index_covariance(
     return (data * index_values_broadcast).sum(dim=index_dim)
 
 
-def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict | None:
-    """Reduce tensor dicts across distributed processes by taking the mean.
+def reduce_sample_coefficients(
+    dist: Distributed,
+    sample_coefficients: list[TensorDict],
+    spatial_shapes: Mapping[str, torch.Size],
+) -> TensorDict | None:
+    """Average per-sample coefficients over the samples of all processes.
+
+    Samples whose inference period does not overlap the reference index
+    contribute no coefficients, and a process may have no contributing samples
+    at all. Every process still takes part in the collectives below, and the
+    mean is weighted by each process's number of contributing samples so that
+    the processes without data neither deadlock nor bias the result.
 
     Args:
         dist: Distributed instance.
-        rank_tensor_dict: Tensor dict to reduce.
+        sample_coefficients: Coefficients for each sample, empty for samples
+            that do not overlap the reference index.
+        spatial_shapes: Spatial shape of each variable, known on every process.
 
     Returns:
-        Reduced tensor dict.
+        Mean coefficients on the root process, or None if this is not the root
+        process or if no sample on any process had coefficients.
     """
-    if dist.is_distributed():
-        # sort for determinism
-        names = sorted(list(rank_tensor_dict.keys()))
-        rank_tensor = torch.stack([rank_tensor_dict[name] for name in names], dim=0)
-        reduced_tensor = dist.reduce_mean(rank_tensor)
-        gathered_tensor_dict = {name: reduced_tensor[i] for i, name in enumerate(names)}
-    else:
-        gathered_tensor_dict = rank_tensor_dict
-    if dist.is_root():
-        return gathered_tensor_dict
-    else:
+    # sort for determinism: every process must stack its variables in the same
+    # order for the collectives below to line up across processes
+    names = sorted(spatial_shapes)
+    if not names:
+        # no batches have been recorded, which is true on all processes
         return None
+    device = get_device()
+    summed = torch.stack(
+        [
+            torch.zeros(spatial_shapes[name], dtype=torch.float32, device=device)
+            for name in names
+        ],
+        dim=0,
+    )
+    counts = torch.zeros(len(names), dtype=torch.float32, device=device)
+    for coefficients in sample_coefficients:
+        for i, name in enumerate(names):
+            if name in coefficients:
+                summed[i] += coefficients[name]
+                counts[i] += 1
+    if dist.is_distributed():
+        summed = dist.reduce_sum(summed)
+        counts = dist.reduce_sum(counts)
+    if not dist.is_root():
+        return None
+    reduced = {
+        name: summed[i] / counts[i]
+        for i, name in enumerate(names)
+        if counts[i].item() > 0
+    }
+    if not reduced:
+        # no sample on any process overlapped the reference index
+        return None
+    return reduced
+
+
+@dataclasses.dataclass
+class EnsoCoefficientMetricConfig:
+    name: str = "enso_coefficient"
+    enabled: bool = True
+    strict: bool = False
+
+    def get_name(self) -> str:
+        return self.name
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        if not isinstance(ctx.horizontal_coordinates, LatLonCoordinates):
+            raise MetricNotSupportedError(
+                "enso_coefficient metric requires LatLonCoordinates."
+            )
+        total_duration = ctx.n_timesteps * ctx.timestep
+        if total_duration <= datetime.timedelta(days=1800):
+            raise MetricNotSupportedError(
+                f"enso_coefficient metric requires > ~5 years of data, "
+                f"got {total_duration.days} days"
+            )
+        return MetricBuildResult(
+            aggregator=EnsoCoefficientEvaluatorAggregator(
+                ctx.initial_time,
+                ctx.n_timesteps - 1,
+                ctx.timestep,
+                gridded_operations=ctx.ops,
+                variable_metadata=ctx.variable_metadata,
+            )
+        )

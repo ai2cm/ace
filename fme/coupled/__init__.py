@@ -1,5 +1,6 @@
 import sys
 
+from fme.coupled.aggregator import InferenceAggregatorConfig
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
 from fme.coupled.inference.inference import (

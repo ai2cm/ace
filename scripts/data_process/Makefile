@@ -251,6 +251,14 @@ era5_1deg_stats_beaker_dataset:
 era5_1deg_16layer_stats_beaker_dataset:
 	./compute_stats.sh --config configs/era5-1deg-16layer-1940-2022.yaml
 
+.PHONY: era5_2deg_stats_beaker_dataset
+era5_2deg_stats_beaker_dataset:
+	./compute_stats.sh --config configs/era5-2deg-8layer-1940-2025.yaml
+
+.PHONY: ufs_replay_ocean_stats
+ufs_replay_ocean_stats:
+	./compute_stats.sh --config configs/ufs-replay-ocean-1deg-19level.yaml
+
 .PHONY: compute_cm4_trial_run_atmosphere_dataset
 compute_cm4_trial_run_atmosphere_dataset:
 	python -u compute_dataset.py \
@@ -264,11 +272,11 @@ compute_cm4_trial_run_atmosphere_stats:
 
 .PHONY: cm4_picontrol_atmosphere_8layer_200yr
 cm4_picontrol_atmosphere_8layer_200yr:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)deg-8layer-200yr.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)-8layer-200yr.yaml
 
 .PHONY: cm4_1pctCO2_atmosphere_8layer_140yr
 cm4_1pctCO2_atmosphere_8layer_140yr:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)deg-8layer-140yr.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)-8layer-140yr.yaml
 
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
@@ -285,10 +293,6 @@ create_ocean_data_proc_env:
 	conda run --no-capture-output -n ocean_preprocess python -m pip install uv
 	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
 	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
-
-.PHONY: cm4_trial_run_ocean_dataset_and_stats
-cm4_trial_run_ocean_dataset_and_stats:
-	./compute_ocean_dataset.sh --config configs/pre-industrial-CM4-1deg-ocean.yaml
 
 .PHONY: shield_som_c96_abrupt_4xCO2_ensemble_dataset
 shield_som_c96_abrupt4xCO2_ensemble_dataset:
@@ -312,7 +316,7 @@ xshield_amip_dataset_and_stats:
 
 .PHONY: xshield_amip_plus_4K_dataset_and_stats
 xshield_amip_plus_4K_dataset_and_stats:
-	./compute_dataset.sh --config configs/X-SHiELD-AMIP-plus-4K-1deg-$(LAYERS)-1yr.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/X-SHiELD-AMIP-plus-4K-$(RESOLUTION)-$(LAYERS)-1yr.yaml
 
 .PHONY: shield_c96_ramped_climSST_random_CO2_ensemble_dataset
 shield_c96_ramped_climSST_random_CO2_ensemble_dataset:
@@ -334,19 +338,43 @@ build_healpix_processing_image:
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
 
+.PHONY: cm4_piControl_ocean_stats
+cm4_piControl_ocean_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-$(RESOLUTION)-200yr.yaml
+
+.PHONY: cm4_1pctCO2_ocean_stats
+cm4_1pctCO2_ocean_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-$(RESOLUTION)-140yr.yaml
+
+.PHONY: cm4_piControl_ocean_1daily_stats
+cm4_piControl_ocean_1daily_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-$(RESOLUTION)-1daily-200yr.yaml
+
+.PHONY: cm4_1pctCO2_ocean_1daily_stats
+cm4_1pctCO2_ocean_1daily_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-$(RESOLUTION)-1daily-140yr.yaml
+
 .PHONY: create_coupled_datasets_env
 create_coupled_datasets_env:
 	conda create -y -n create_coupled_datasets python=3.11 pip
 	conda run --no-capture-output -n create_coupled_datasets python -m pip install uv
 	conda run --no-capture-output -n create_coupled_datasets uv pip install -r requirements-coupled.txt
 
-.PHONY: cm4_piControl_200yr_coupled_no_smoothing
-cm4_piControl_200yr_coupled_no_smoothing:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
+.PHONY: cm4_piControl_coupled
+cm4_piControl_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-$(RESOLUTION)-200yr.yaml
 
-.PHONY: cm4_1pctCO2_140yr_coupled_no_smoothing
-cm4_1pctCO2_140yr_coupled_no_smoothing:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
+.PHONY: cm4_1pctCO2_coupled
+cm4_1pctCO2_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-$(RESOLUTION)-140yr.yaml
+
+.PHONY: cm4_piControl_coupled_1daily
+cm4_piControl_coupled_1daily:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-$(RESOLUTION)-1daily-200yr.yaml
+
+.PHONY: cm4_1pctCO2_coupled_1daily
+cm4_1pctCO2_coupled_1daily:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-$(RESOLUTION)-1daily-140yr.yaml
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
@@ -354,7 +382,7 @@ e3smv3_piControl_100yr_coupled:
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
 
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:
@@ -362,4 +390,12 @@ cm4_like_am4_random_co2_ensemble_coupled:
 
 .PHONY: shield_amip_constant_co2_c96_dataset
 shield_amip_constant_co2_c96_dataset:
-	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-constant-co2-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_amip_p2k_c96_dataset
+shield_amip_p2k_c96_dataset:
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-p2k-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_amip_p4k_c96_dataset
+shield_amip_p4k_c96_dataset:
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-p4k-c96-$(RESOLUTION)-$(LAYERS).yaml

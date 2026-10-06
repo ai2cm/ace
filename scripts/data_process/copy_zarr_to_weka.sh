@@ -77,6 +77,6 @@ cd $REPO_ROOT && gantry run \
     --gpus 0 \
     --shared-memory 40GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --install "pip install --no-deps ." \
     -- bash -c "$cmds"

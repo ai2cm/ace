@@ -12,7 +12,11 @@ from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatc
 
 from .. import metrics_and_maths
 from ..models import ModelOutputs
-from .generation import GenerationAggregator
+from .generation import (
+    GenerationAggregator,
+    _get_channel_mean_scalar_metric,
+    _get_complement_percentile_prefix,
+)
 from .main import (
     LossVsNoiseAggregator,
     Mean,
@@ -231,8 +235,9 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
     aggregator.record_batch(outputs_a)
     aggregator.record_batch(outputs_b)
 
-    # Binning happens in record_batch, not get_wandb.
-    assert int(aggregator._total_count.sum().item()) == 3
+    # Binning happens in record_batch, not get_wandb. Every (sample, channel)
+    # pair is its own point: (2 samples + 1 sample) * 2 channels = 6.
+    assert int(aggregator._total_count.sum().item()) == 6
     assert int(aggregator._channel_count["x"].sum().item()) == 3
     assert int(aggregator._channel_count["y"].sum().item()) == 3
 
@@ -244,6 +249,56 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
     }
     for value in logs.values():
         assert isinstance(value, wandb.Image)
+
+
+def test_loss_vs_noise_aggregator_shared_sigma_matches_channelwise_path():
+    """Shared sigma is just channelwise sigma broadcast to every channel, so
+    it goes through the same per-(sample, channel)-point path: total_sum is
+    the sum of every individual value, and total_count is n_samples *
+    n_channels (not n_samples), so all_channels is a mean across
+    (sample, channel) pairs.
+    """
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([1.0, 1.0], device=get_device()),  # shared, same bin
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 3.0], device=get_device()),
+            "y": torch.tensor([2.0, 5.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    assert aggregator._total_sum.sum().item() == pytest.approx(1.0 + 2.0 + 3.0 + 5.0)
+    assert int(aggregator._total_count.sum().item()) == 4
+    # per-channel totals are unaffected by how all_channels aggregates
+    assert aggregator._channel_sum["x"].sum().item() == pytest.approx(4.0)
+    assert aggregator._channel_sum["y"].sum().item() == pytest.approx(7.0)
+
+
+def test_loss_vs_noise_aggregator_accepts_channelwise_sigma():
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([[0.1, 1000.0], [1.0, 2000.0]], device=get_device()),
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 2.0], device=get_device()),
+            "prate": torch.tensor([3.0, 4.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    assert int(aggregator._total_count.sum().item()) == 4
+    assert int(aggregator._channel_count["x"].sum().item()) == 2
+    assert int(aggregator._channel_count["prate"].sum().item()) == 2
 
 
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
@@ -421,3 +476,79 @@ def test_upsample_tensor():
     t = torch.tensor([[1, 2], [3, 4]])
     expected = torch.tensor([[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 4, 4], [3, 3, 4, 4]])
     assert torch.equal(expected, upsample_tensor(t, 2))
+
+
+@pytest.mark.parametrize(
+    "prefix, expected",
+    [
+        (
+            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
+            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
+        ),
+        (
+            "some_metric/percentile/99.9999/var0",
+            "some_metric/percentile/0.0001/var0",
+        ),
+        (
+            "no_percentile_here/some_metric",
+            None,
+        ),
+    ],
+)
+def test_get_complement_percentile_prefix(prefix, expected):
+    result = _get_complement_percentile_prefix(prefix)
+    assert result == expected
+
+
+def test_get_channel_mean_scalar_metric_excludes_matching_maps():
+    metrics = {
+        "generation/maps/relative_crps_bicubic/var0": object(),
+        "generation/metrics/relative_crps_bicubic/var0": 1.0,
+        "generation/metrics/relative_crps_bicubic/var1": 3.0,
+        "generation/some_other/prediction_frac_of_target/99.9999th-percentile/var0": (
+            object()
+        ),
+        "generation/histogram/prediction_frac_of_target/99.9999th-percentile/var0": (
+            1.02
+        ),
+        "generation/histogram/prediction_frac_of_target/0.0001th-percentile/var0": (
+            0.98
+        ),
+    }
+
+    best_result = _get_channel_mean_scalar_metric(
+        metrics, prefix="metrics/relative_crps_bicubic"
+    )
+    histogram_result = _get_channel_mean_scalar_metric(
+        metrics,
+        prefix="histogram/prediction_frac_of_target/99.9999th-percentile",
+    )
+
+    assert best_result == 2.0
+    assert histogram_result == 1.0
+
+
+def test_generation_aggregator_checkpoint_selection_methods():
+    aggregator = GenerationAggregator(["lat", "lon"], downscale_factor=2)
+    aggregator._wandb_logs = {
+        "generation/maps/relative_crps_bicubic/var0": object(),
+        "generation/metrics/relative_crps_bicubic/var0": 1.0,
+        "generation/metrics/relative_crps_bicubic/var1": 3.0,
+        "generation/some_other/prediction_frac_of_target/99.9999th-percentile/var0": (
+            object()
+        ),
+        "generation/histogram/prediction_frac_of_target/99.9999th-percentile/var0": (
+            1.2
+        ),
+        "generation/histogram/prediction_frac_of_target/0.0001th-percentile/var0": (
+            0.9
+        ),
+    }
+
+    assert aggregator.get_validation_loss() == 2.0
+    assert aggregator.get_histogram_tail_metric() == pytest.approx(0.05)
+
+    summary = aggregator.get_summary(prefix="generation")
+    assert summary.validation_loss == 2.0
+    assert summary.histogram_tail_metric == pytest.approx(0.05)
+    assert set(summary.logs.keys()) == set(aggregator._wandb_logs.keys())

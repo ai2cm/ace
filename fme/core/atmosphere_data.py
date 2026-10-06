@@ -16,27 +16,32 @@ from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
 ATMOSPHERE_FIELD_NAME_PREFIXES = {
-    "specific_total_water": ["specific_total_water_"],
+    "specific_total_water": ["specific_total_water_", "STW_"],
     "surface_pressure": ["PRESsfc", "PS"],
     "surface_height": ["HGTsfc"],
     "surface_geopotential": ["PHIS"],
     "tendency_of_total_water_path_due_to_advection": [
-        "tendency_of_total_water_path_due_to_advection"
+        "tendency_of_total_water_path_due_to_advection",
+        "DTENDTTW",
     ],
     "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
     "sensible_heat_flux": ["SHTFLsfc", "SHFLX"],
-    "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
+    "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate", "PRECT"],
     "sfc_down_sw_radiative_flux": ["DSWRFsfc", "FSDS"],
-    "sfc_up_sw_radiative_flux": ["USWRFsfc", "surface_upward_shortwave_flux"],
+    "sfc_up_sw_radiative_flux": ["USWRFsfc", "surface_upward_shortwave_flux", "FSUS"],
     "sfc_down_lw_radiative_flux": ["DLWRFsfc", "FLDS"],
-    "sfc_up_lw_radiative_flux": ["ULWRFsfc", "surface_upward_longwave_flux"],
+    "sfc_up_lw_radiative_flux": ["ULWRFsfc", "surface_upward_longwave_flux", "FLUS"],
     "toa_up_lw_radiative_flux": ["ULWRFtoa", "FLUT"],
-    "toa_up_sw_radiative_flux": ["USWRFtoa", "top_of_atmos_upward_shortwave_flux"],
+    "toa_up_sw_radiative_flux": [
+        "USWRFtoa",
+        "top_of_atmos_upward_shortwave_flux",
+        "FSUTOA",
+    ],
     "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
     "air_temperature": ["air_temperature_", "T_"],
     "frozen_precipitation_rate": ["total_frozen_precipitation_rate"],
-    "eastward_wind_at_10m": ["UGRD10m"],
-    "northward_wind_at_10m": ["VGRD10m"],
+    "eastward_wind_at_10m": ["UGRD10m", "Uat10m"],
+    "northward_wind_at_10m": ["VGRD10m", "Vat10m"],
 }
 
 
@@ -89,6 +94,8 @@ class AtmosphereData:
         self._prefix_map = atmosphere_field_name_prefixes
         self._vertical_coordinate = vertical_coordinate
         self._stacker = Stacker(atmosphere_field_name_prefixes)
+        # Concrete data keys written through this instance's ``set_*`` methods.
+        self._modified_keys: set[str] = set()
 
     @property
     def data(self) -> TensorDict:
@@ -110,6 +117,16 @@ class AtmosphereData:
 
     def _set_prefix(self, prefix, value):
         self.data[prefix] = value
+        self._modified_keys.add(prefix)
+
+    @property
+    def modified_data(self) -> TensorDict:
+        """Return the data keys written through this instance's setters.
+
+        The returned tensors are references into this instance's data (not
+        clones).
+        """
+        return {key: self._data[key] for key in self._modified_keys}
 
     def _get(self, name):
         for prefix in self._prefix_map[name]:
@@ -198,6 +215,9 @@ class AtmosphereData:
                 )
             except KeyError:
                 return torch.zeros_like(self.surface_pressure)
+
+    def set_frozen_precipitation_rate(self, value: torch.Tensor):
+        self._set("frozen_precipitation_rate", value)
 
     @property
     def net_surface_energy_flux_without_frozen_precip(self) -> torch.Tensor:

@@ -10,8 +10,10 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -45,12 +47,12 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         pass
 
     @property
     @abc.abstractmethod
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
         """
@@ -58,7 +60,7 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -66,8 +68,17 @@ class StepConfigABC(abc.ABC):
 
     @property
     @final
-    def prognostic_names(self) -> list[str]:
-        return list(set(self.input_names).intersection(self.output_names))
+    def prognostic_names(self) -> frozenset[str]:
+        return frozenset(set(self.input_names).intersection(self.output_names))
+
+    @property
+    def residual_names(self) -> frozenset[str]:
+        """
+        Names whose loss errors are scored in residual (tendency) units when a
+        residual loss normalization is configured. Every prognostic, unless a
+        step type narrows the set.
+        """
+        return self.prognostic_names
 
     @property
     @abc.abstractmethod
@@ -106,8 +117,25 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> OceanConfig | None:
         pass
 
+    @abc.abstractmethod
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+
+    @abc.abstractmethod
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        """Names of prognostic variables overwritten from forcing data each step.
+
+        The getter half of ``replace_prescribed_prognostic_names``. Wrapping
+        step configs (e.g. multi-call) delegate to the wrapped config.
+        """
+
+    @abc.abstractmethod
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """Replace this step's corrector configuration wholesale, in place."""
+
+    @property
+    @abc.abstractmethod
+    def allow_missing_variables(self) -> bool:
         pass
 
     @abc.abstractmethod
@@ -118,8 +146,20 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
+    @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
+
+    @classmethod
+    @abc.abstractmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove or transform deprecated keys from a serialized config.
+
+        Called by ``from_state`` before the dict is loaded via dacite.
+        Implementations must return a new dict and never mutate the input.
+        When there is nothing to remove, implement as ``return dict(state)``.
+        """
 
 
 @dataclasses.dataclass
@@ -167,18 +207,22 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.get_next_step_forcing_names()
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self._step_config_instance.input_names
 
     @property
-    def output_names(self) -> list[str]:
+    def residual_names(self) -> frozenset[str]:
+        return self._step_config_instance.residual_names
+
+    @property
+    def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
         """
         return self._step_config_instance.output_names
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -212,18 +256,54 @@ class StepSelector(StepConfigABC):
         self._step_config_instance.replace_prescribed_prognostic_names(names)
         self.config = dataclasses.asdict(self._step_config_instance)
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self._step_config_instance.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self._step_config_instance.replace_corrector(corrector)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self._step_config_instance.allow_missing_variables
+
     def load(self):
         self._step_config_instance.load()
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
+    def __init__(self) -> None:
+        # Mirrors ``torch.nn.Module.training`` so that step-level eval/train
+        # state is observable without reaching into the underlying modules.
+        self._training: bool = True
+
     @property
     @abc.abstractmethod
     def config(self) -> StepConfigABC:
         pass
+
+    def train(self, mode: bool = True) -> "StepABC":
+        """Set the step (and all submodules) to training mode.
+
+        Matches the ``torch.nn.Module.train`` signature so step instances
+        can be toggled with the same API as the modules they own.
+        """
+        self._training = mode
+        for module in self.modules:
+            module.train(mode)
+        return self
+
+    @final
+    def eval(self) -> "StepABC":
+        """Set the step (and all submodules) to evaluation mode."""
+        return self.train(False)
 
     @final
     def get_loss_normalizer(
@@ -243,17 +323,17 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self.config.input_names
 
     @property
     @final
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         return self.config.output_names
 
     @property
     @final
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         return self.config.prognostic_names
 
     @property
@@ -273,7 +353,7 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -325,7 +405,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -334,7 +414,17 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A ``StepOutput`` carrying the denormalized data at the next time
+            step, the per-sample state to thread into the next call (or
+            ``None``), and the corrector's per-variable correction diagnostics.
+        """
+        pass
+
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the stepper at the start of each training epoch.
+
+        Default implementation is a no-op. Steps which wrap another step must
+        forward the call to the wrapped step.
         """
         pass
 

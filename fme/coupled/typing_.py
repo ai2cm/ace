@@ -1,7 +1,5 @@
 import dataclasses
 
-from fme.core.typing_ import TensorMapping
-
 
 @dataclasses.dataclass
 class CoupledNames:
@@ -10,6 +8,6 @@ class CoupledNames:
 
 
 @dataclasses.dataclass
-class CoupledTensorMapping:
-    ocean: TensorMapping
-    atmosphere: TensorMapping
+class CoupledOptionalInt:
+    ocean: int | None
+    atmosphere: int | None

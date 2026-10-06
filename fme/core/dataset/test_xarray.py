@@ -39,7 +39,7 @@ from fme.core.dataset.xarray import (
     _repeat_and_increment_time,
     get_xarray_dataset,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 
 from .utils import as_broadcasted_tensor
@@ -426,7 +426,7 @@ def test_XarrayDataset_monthly(
     expected_n_samples = len(mock_data.obs_times) - 1
 
     assert len(dataset) == expected_n_samples
-    arrays, time, dataset_labels, epoch = dataset[global_idx]
+    arrays, time, dataset_labels, epoch, _ = dataset[global_idx]
     assert epoch is None
     assert dataset_labels == labels
     ds = load_files_without_dask(mock_data.tmpdir.glob(file_pattern), engine=engine)
@@ -534,7 +534,7 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx, labels):
             target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
                 "time"
             )
-            data, time, labels, epoch = dataset[global_idx]
+            data, time, labels, epoch, _ = dataset[global_idx]
             assert epoch is None
             assert labels == labels
             data_tensor = data[var_name]
@@ -556,7 +556,7 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
     )
     assert data_properties.vertical_coordinate.ak.dtype == torch.bfloat16
     assert data_properties.vertical_coordinate.bk.dtype == torch.bfloat16
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     for tensor in data.values():
         assert tensor.dtype == torch.bfloat16
 
@@ -568,6 +568,91 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     data = dataset[0][0]
     assert data["constant_var"].shape[0] == 15
     assert data["constant_scalar_var"].shape == (15, 4, 8)
+
+
+def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
+    """Cached handles must return the same data as the underlying store."""
+    mock_data: MockData = mock_monthly_zarr
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir, file_pattern="*.zarr", engine="zarr"
+    )
+    names = list(mock_data.var_names.time_dependent_names)
+    dataset = xarray_dataset_constructor(config, names, 3)
+    source = xr.open_dataset(
+        mock_data.tmpdir / "data.zarr", engine="zarr", decode_timedelta=False
+    )
+    # repeat an index to confirm cached handles are not stateful across reads
+    for idx in [0, 250, 500, 0]:
+        data = dataset[idx][0]
+        for name in names:
+            expected = source[name].isel(time=slice(idx, idx + 3)).values
+            # scalar-per-time variables are broadcast over the spatial dims
+            expected = np.broadcast_to(
+                expected.reshape(expected.shape + (1,) * (3 - expected.ndim)),
+                data[name].shape,
+            )
+            np.testing.assert_array_equal(data[name].numpy(), expected)
+
+
+def _count_file_opens_while_reading(
+    monkeypatch, dataset: XarrayDataset, indices: Sequence[int]
+) -> int:
+    """Number of times the dataset opens a file while reading the samples."""
+    n_opens = 0
+    original = XarrayDataset._open_file
+
+    def counting_open_file(self, idx):
+        nonlocal n_opens
+        n_opens += 1
+        return original(self, idx)
+
+    monkeypatch.setattr(XarrayDataset, "_open_file", counting_open_file)
+    for idx in indices:
+        dataset[idx]
+    return n_opens
+
+
+def test_time_invariant_variables_do_not_open_files_per_sample(
+    mock_monthly_netcdfs, monkeypatch
+):
+    """Requesting time-invariant variables should not add per-sample file opens.
+
+    They are loaded once at construction, so reading samples costs the same
+    number of file opens whether or not they were requested.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    names = mock_data.var_names
+    # samples spread across the underlying monthly files
+    indices = [0, 100, 400, 700, 0]
+
+    without = xarray_dataset_constructor(config, list(names.time_dependent_names), 2)
+    with_invariant = xarray_dataset_constructor(config, names.all_names, 2)
+
+    n_without = _count_file_opens_while_reading(monkeypatch, without, indices)
+    n_with = _count_file_opens_while_reading(monkeypatch, with_invariant, indices)
+
+    assert n_with == n_without
+
+
+def test_time_invariant_variable_values_match_source(mock_monthly_netcdfs):
+    """Caching must not change the values that are returned."""
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 3)
+    source = xr.open_dataset(
+        mock_data.tmpdir / f"{mock_data.start_times[0].strftime('%Y%m%d%H')}.nc",
+        decode_times=False,
+        decode_timedelta=False,
+    )
+    # read several samples spanning different files to confirm the cached
+    # tensor is not mutated or aliased between reads
+    for idx in [0, 250, 500, 0]:
+        data = dataset[idx][0]
+        expected = torch.as_tensor(source["constant_var"].values)
+        np.testing.assert_array_equal(data["constant_var"][0].numpy(), expected.numpy())
+        assert data["constant_var"].shape == (3, 4, 8)
+    source.close()
 
 
 def _get_repeat_dataset(
@@ -754,7 +839,7 @@ def test_get_sample_by_time_slice_times_n_repeats(mock_monthly_netcdfs: MockData
     unrepeated_length = len(repeated_dataset.all_times) // n_repeats
     time_slice = slice(unrepeated_length, unrepeated_length + 3)
 
-    _, result, _, _ = repeated_dataset.get_sample_by_time_slice(time_slice)
+    _, result, _, _, _ = repeated_dataset.get_sample_by_time_slice(time_slice)
     expected = xr.DataArray(
         repeated_dataset.all_times[time_slice].values, dims=["time"]
     )
@@ -792,7 +877,7 @@ def test_fill_nans(mock_data_fixture, engine, file_pattern, request):
     )
     names = mock_data.var_names.all_names
     dataset = xarray_dataset_constructor(config, names, 2)
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     assert torch.all(data["foo"][0, :, 0] == 0)
     assert torch.all(data["constant_var"][:, 0, 0] == 0)
 
@@ -801,7 +886,7 @@ def test_keep_nans(mock_monthly_netcdfs_with_nans):
     config_keep_nan = XarrayDataConfig(data_path=mock_monthly_netcdfs_with_nans.tmpdir)
     names = mock_monthly_netcdfs_with_nans.var_names.all_names
     dataset = xarray_dataset_constructor(config_keep_nan, names, 2)
-    data_with_nan, _, _, _ = dataset[0]
+    data_with_nan, _, _, _, _ = dataset[0]
     assert torch.all(torch.isnan(data_with_nan["foo"][0, :, 0]))
     assert torch.all(torch.isnan(data_with_nan["constant_var"][:, 0, 0]))
 
@@ -1092,7 +1177,7 @@ def test_dataset_with_nonspacetime_dim(
     # Omit the test variable that has mismatch dimensions
     vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
     dataset = xarray_dataset_constructor(config, vars, 2)
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     assert len(data["foo"].shape) == 4
     assert dataset.dims == ["time", "sample", "lat", "lon"]
 
@@ -1139,7 +1224,7 @@ def test_xarray_dataset_isel(mock_data_fixture, engine, file_pattern, request):
     )
     vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
     dataset = xarray_dataset_constructor(config, vars, 2)
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     # Original lat/lon sizes are 4, 8
     assert data["var_matches_sample_index"].shape == (2, 4, 8)
     assert data["constant_var"].shape == (2, 4, 8)
@@ -1226,7 +1311,50 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
     data_properties = dataset.properties
-    assert not data_properties.mask_provider.masks
-    existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
-    data_properties.update_mask_provider(existing_mask)
-    assert "mask_0" in dataset.properties.mask_provider.masks
+    assert not data_properties.spatial_mask_provider.masks
+    existing_mask = SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    data_properties.update_spatial_mask_provider(existing_mask)
+    assert "mask_0" in dataset.properties.spatial_mask_provider.masks
+
+
+def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    names = mock_data.var_names.all_names
+    dataset = xarray_dataset_constructor(config, names, 2)
+    metadata_keys = set(dataset.properties.variable_metadata.keys())
+    assert metadata_keys == set(names)
+
+
+def test_allow_missing_variables_fills_nan_for_missing(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    dataset = XarrayDataset(
+        config,
+        names_with_missing,
+        IntSchedule.from_constant(2),
+        allow_missing_variables=True,
+    )
+    sample_data, _, _, _, missing_names = dataset[0]
+    assert "nonexistent_var" in sample_data
+    assert sample_data["nonexistent_var"].isnan().all()
+    assert missing_names == frozenset({"nonexistent_var"})
+    for name in existing_names:
+        assert name in sample_data
+        assert not sample_data[name].isnan().any()
+
+
+def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    with pytest.raises(ValueError, match="Required variable not found"):
+        XarrayDataset(
+            config,
+            names_with_missing,
+            IntSchedule.from_constant(2),
+            allow_missing_variables=False,
+        )

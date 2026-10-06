@@ -1,0 +1,284 @@
+import pytest
+import torch
+
+from fme.core.device import get_device
+from fme.core.spatial_mask_provider import NullSpatialMaskProvider, SpatialMaskProvider
+
+
+def test_mask_provider_init_error():
+    with pytest.raises(ValueError, match="var_1"):
+        _ = SpatialMaskProvider(
+            masks={
+                "mask_0": torch.rand(2, 2),
+                "var_1": torch.rand(2, 2),
+            }
+        )
+
+
+def test_mask_provider_get_mask_tensor_for():
+    mask_0 = torch.rand(2, 2)
+    mask_1 = torch.rand(2, 2)
+    mask_temp_1 = torch.rand(2, 2)
+    mask_2d = torch.rand(2, 2)
+    provider = SpatialMaskProvider(
+        masks={
+            "mask_0": mask_0,
+            "mask_1": mask_1,
+            "mask_temp_1": mask_temp_1,
+            "mask_2d": mask_2d,
+        }
+    )
+    # variable specific mask
+    assert torch.equal(provider.get_mask_tensor_for("temp_1"), mask_temp_1)
+    # level specific masks
+    assert torch.equal(provider.get_mask_tensor_for("temp_0"), mask_0)
+    assert torch.equal(provider.get_mask_tensor_for("humidity_0"), mask_0)
+    assert torch.equal(provider.get_mask_tensor_for("humidity_1"), mask_1)
+    # surface mask for non-3D vars
+    assert torch.equal(provider.get_mask_tensor_for("surface_var"), mask_2d)
+
+
+def test_mask_provider_get_mask_tensor_for_no_3d():
+    mask_temp_1 = torch.rand(2, 2)
+    mask_2d = torch.rand(2, 2)
+    provider = SpatialMaskProvider(
+        masks={
+            "mask_temp_1": mask_temp_1,
+            "mask_2d": mask_2d,
+        }
+    )
+    # variable specific mask
+    assert torch.equal(provider.get_mask_tensor_for("temp_1"), mask_temp_1)
+    # 3D var doesn't trigger return of surface mask
+    assert provider.get_mask_tensor_for("temp_0") is None
+    # surface mask returned
+    assert torch.equal(provider.get_mask_tensor_for("surface_var"), mask_2d)
+
+
+def test_mask_provider_get_mask_tensor_for_var_specific_only():
+    mask_temp_1 = torch.rand(2, 2)
+    mask_var = torch.rand(2, 2)
+    provider = SpatialMaskProvider(
+        masks={
+            "mask_temp_1": mask_temp_1,
+            "mask_var": mask_var,
+        }
+    )
+    # variable specific masks
+    assert torch.equal(provider.get_mask_tensor_for("temp_1"), mask_temp_1)
+    assert torch.equal(provider.get_mask_tensor_for("var"), mask_var)
+    # other 3D vars have no mask
+    assert provider.get_mask_tensor_for("temp_0") is None
+    # other 2D vars have no mask
+    assert provider.get_mask_tensor_for("var_2d") is None
+
+
+def test_mask_provider_empty_init():
+    provider = SpatialMaskProvider()
+    assert provider.get_mask_tensor_for("temp_0") is None
+    assert provider.get_mask_tensor_for("var") is None
+
+
+def test_mask_provider_to_device():
+    # test moving masks to a different device
+    masks = {"mask_temp": torch.tensor([1, 0], dtype=torch.float32)}
+    provider = SpatialMaskProvider(masks=masks)
+    # using 'meta' device for testing without needing specific hardware
+    provider_meta = provider.to("meta")
+    assert provider_meta.masks["mask_temp"].device == torch.device("meta")
+    # original provider should be unchanged
+    assert provider.masks["mask_temp"].device == torch.device("cpu")
+
+
+def test_mask_provider_update_success():
+    # test updating masks from another provider with non-overlapping keys
+    masks1 = {"mask_temp": torch.tensor([1, 0])}
+    masks2 = {"mask_humidity": torch.tensor([0, 1])}
+    provider1 = SpatialMaskProvider(masks=masks1)
+    provider2 = SpatialMaskProvider(masks=masks2)
+
+    provider1.update(provider2)
+
+    expected_masks = {
+        "mask_temp": torch.tensor([1, 0]),
+        "mask_humidity": torch.tensor([0, 1]),
+    }
+
+    assert provider1.masks.keys() == expected_masks.keys()
+    for name, mask in provider1.masks.items():
+        assert torch.equal(mask, expected_masks[name])
+
+
+def test_mask_provider_update_uses_first_overlapped_keys():
+    # test updating masks fails when keys overlap
+    masks1 = {"mask_temp": torch.tensor([1, 0]), "mask_common": torch.tensor([0, 0])}
+    masks2 = {
+        "mask_humidity": torch.tensor([0, 1]),
+        "mask_common": torch.tensor([1, 1]),
+    }
+    provider1 = SpatialMaskProvider(masks=masks1.copy())
+    provider2 = SpatialMaskProvider(masks=masks2.copy())
+    provider1.update(provider2)
+    assert torch.equal(
+        provider1.masks["mask_common"],
+        torch.tensor([0, 0]),
+    )
+    assert "mask_humidity" in provider1.masks
+
+
+@pytest.mark.parametrize(
+    "masks1, masks2, expected_equal",
+    [
+        pytest.param(
+            {"mask_temp": torch.tensor([1, 0])},
+            {"mask_temp": torch.tensor([1, 0])},
+            True,
+            id="providers_equal",
+        ),
+        pytest.param(
+            {"mask_temp": torch.tensor([1, 0])},
+            {"mask_temp": torch.tensor([1, 1])},
+            False,
+            id="providers_unequal",
+        ),
+        pytest.param(
+            {"mask_temp": torch.tensor([1, 1]), "mask_humidity": torch.tensor([1, 1])},
+            {"mask_temp": torch.tensor([1, 0])},
+            False,
+            id="first_provider_extra_key",
+        ),
+        pytest.param(
+            {"mask_temp": torch.tensor([1, 0])},
+            {"mask_temp": torch.tensor([1, 1]), "mask_humidity": torch.tensor([1, 1])},
+            False,
+            id="second_provider_extra_key",
+        ),
+        pytest.param(
+            {"mask_temp": torch.ones(2, 2)},
+            {"mask_temp": torch.ones(4, 4)},
+            False,
+            id="providers_mask_shapes_different",
+        ),
+    ],
+)
+def test_mask_provider_eq(masks1, masks2, expected_equal: bool):
+    provider1 = SpatialMaskProvider(masks=masks1)
+    provider2 = SpatialMaskProvider(masks=masks2)
+    if expected_equal:
+        assert provider1 == provider2
+    else:
+        assert provider1 != provider2
+
+
+@pytest.mark.parametrize(
+    "spatial_mask_provider",
+    [
+        pytest.param(SpatialMaskProvider(), id="empty"),
+        pytest.param(
+            SpatialMaskProvider(masks={"mask_0": torch.ones(10, 10)}), id="single_mask"
+        ),
+        pytest.param(
+            SpatialMaskProvider(
+                masks={
+                    "mask_0": torch.ones(10, 10),
+                    "mask_temp": torch.zeros(10, 10),
+                }
+            ),
+            id="multiple_masks",
+        ),
+    ],
+)
+def test_mask_provider_round_trip(spatial_mask_provider: SpatialMaskProvider):
+    state = spatial_mask_provider.get_state()
+    reloaded_provider = SpatialMaskProvider.from_state(state)
+    device = get_device()
+    assert spatial_mask_provider.to(str(device)) == reloaded_provider
+
+
+@pytest.mark.parametrize(
+    "masks1, masks2",
+    [
+        pytest.param(
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            id="equal_providers",
+        ),
+        pytest.param(
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            {"mask_temp": torch.tensor([1.0, 0.0]), "mask_humidity": torch.ones(2)},
+            id="subset_of_other",
+        ),
+        pytest.param(
+            {},
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            id="empty_self_compatible_with_any",
+        ),
+        pytest.param(
+            {},
+            {},
+            id="both_empty",
+        ),
+    ],
+)
+def test_mask_provider_assert_compatible_with_compatible(masks1, masks2):
+    provider1 = SpatialMaskProvider(masks=masks1)
+    provider2 = SpatialMaskProvider(masks=masks2)
+    provider1.assert_compatible_with(provider2)
+
+
+@pytest.mark.parametrize(
+    "masks1, masks2, match",
+    [
+        pytest.param(
+            {"mask_temp": torch.tensor([1.0, 0.0]), "mask_humidity": torch.ones(2)},
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            "mask keys.*not found in other",
+            id="self_has_extra_key",
+        ),
+        pytest.param(
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            {"mask_humidity": torch.tensor([1.0, 0.0])},
+            "mask keys.*not found in other",
+            id="disjoint_keys",
+        ),
+        pytest.param(
+            {"mask_temp": torch.tensor([1.0, 0.0])},
+            {"mask_temp": torch.tensor([0.0, 1.0])},
+            "mask values differ for 'mask_temp'",
+            id="same_keys_different_values",
+        ),
+    ],
+)
+def test_mask_provider_assert_compatible_with_incompatible(masks1, masks2, match):
+    provider1 = SpatialMaskProvider(masks=masks1)
+    provider2 = SpatialMaskProvider(masks=masks2)
+    with pytest.raises(AssertionError, match=match):
+        provider1.assert_compatible_with(provider2)
+
+
+def test_mask_provider_assert_compatible_with_non_mask_provider():
+    provider = SpatialMaskProvider(masks={"mask_temp": torch.tensor([1.0, 0.0])})
+    with pytest.raises(AssertionError, match="expected SpatialMaskProvider"):
+        provider.assert_compatible_with("not a mask provider")
+
+
+def test_null_mask_provider_update_err():
+    mask_provider = SpatialMaskProvider(masks={"mask_2d": torch.rand(2, 2)})
+    with pytest.raises(ValueError, match="mask_2d"):
+        NullSpatialMaskProvider.update(mask_provider)
+
+
+def test_from_state_places_tensors_on_device():
+    state = {"masks": {"mask_2d": torch.tensor([[1.0, 0.0], [0.0, 1.0]], device="cpu")}}
+    provider = SpatialMaskProvider.from_state(state)
+    device = get_device()
+    for tensor in provider.masks.values():
+        assert tensor.device == device
+
+
+def test_from_state_decouples_memory():
+    masks = {"mask_2d": torch.tensor([[1.0, 0.0], [0.0, 1.0]], device="cpu")}
+    state = {"masks": masks}
+    provider = SpatialMaskProvider.from_state(state)
+    masks["mask_2d"].fill_(999.0)
+    assert provider.masks["mask_2d"].max().item() == 1.0

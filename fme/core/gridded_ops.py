@@ -11,7 +11,10 @@ from fme.core.cuhpx.sht import iSHT as CuHpxiSHT
 from fme.core.device import get_device
 from fme.core.distributed.distributed import Distributed
 from fme.core.hpx.reorder import get_reordering_xy_to_ring
-from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -265,14 +268,14 @@ def get_all_subclasses(cls: type[T]) -> list[type[T]]:
     return all_subclasses
 
 
-def _mask_area_weights(
+def _spatial_mask_area_weights(
     area_weights: torch.Tensor,
-    mask_provider: MaskProviderABC,
+    spatial_mask_provider: SpatialMaskProviderABC,
     name: str | None,
 ) -> torch.Tensor:
     if name is None:
         return area_weights
-    mask = mask_provider.get_mask_tensor_for(name)
+    mask = spatial_mask_provider.get_mask_tensor_for(name)
     if mask is None:
         return area_weights
     return area_weights * mask
@@ -284,19 +287,19 @@ class LatLonOperations(GriddedOperations):
     def __init__(
         self,
         area_weights: torch.Tensor,
-        mask_provider: MaskProviderABC = NullMaskProvider,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
         grid: str = "legendre-gauss",
     ):
         self._validate_area_weights(area_weights)
-        self._cpu_area_global = area_weights.to("cpu")
+        self._cpu_area_global = area_weights.to("cpu", copy=True)
         dist = Distributed.get_instance()
         nlat, nlon = area_weights.shape[-2], area_weights.shape[-1]
         h_slice, w_slice = dist.get_local_slices((nlat, nlon))
-        local_weights = area_weights[..., h_slice, w_slice]
-        self._device_area = local_weights.to(get_device())
-        self._cpu_area = local_weights.to("cpu")
-        self._device_mask_provider = mask_provider.to(get_device())
-        self._cpu_mask_provider = mask_provider.to("cpu")
+        local_weights = self._cpu_area_global[..., h_slice, w_slice]
+        self._device_area = local_weights.to(get_device(), copy=True)
+        self._cpu_area = local_weights.to("cpu", copy=True)
+        self._device_mask_provider = spatial_mask_provider.to(get_device())
+        self._cpu_mask_provider = spatial_mask_provider.to("cpu")
         self._grid = grid
 
     def _validate_area_weights(self, area_weights: torch.Tensor) -> None:
@@ -319,11 +322,13 @@ class LatLonOperations(GriddedOperations):
     ):
         if data.device == torch.device("cpu"):
             area_weights = self._cpu_area
-            mask_provider = self._cpu_mask_provider
+            spatial_mask_provider = self._cpu_mask_provider
         else:
             area_weights = self._device_area
-            mask_provider = self._device_mask_provider
-        area_weights = _mask_area_weights(area_weights, mask_provider, name)
+            spatial_mask_provider = self._device_mask_provider
+        area_weights = _spatial_mask_area_weights(
+            area_weights, spatial_mask_provider, name
+        )
         if regional_weights is None:
             return area_weights
         if regional_weights.device.type != data.device.type:

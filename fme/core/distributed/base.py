@@ -120,6 +120,17 @@ class DistributedBackend(ABC):
     def shutdown(self): ...
 
     @abstractmethod
+    def abort(self):
+        """Locally release the backend's communicators so this process can
+        exit without faulting its peers.
+
+        Unlike `shutdown`, this is not collective, and it must be callable
+        from a non-main thread while the main thread is blocked in a
+        collective.
+        """
+        ...
+
+    @abstractmethod
     def get_sht(
         self,
         nlat: int,
@@ -151,6 +162,17 @@ class DistributedBackend(ABC):
     @abstractmethod
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """All-reduce sum across spatial (h, w) ranks. Identity for non-spatial."""
+        ...
+
+    @abstractmethod
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Broadcast a tensor from the spatial-group root to spatial co-ranks.
+
+        Used to make a non-spatial quantity (e.g. a per-sample dropout mask)
+        identical across tiles of the same sample, while leaving data-parallel
+        ranks free to hold distinct values. Identity when there is no spatial
+        parallelism.
+        """
         ...
 
     @abstractmethod

@@ -72,11 +72,11 @@ development guidelines.
 When making new branches, use the naming convention:
 `<type>/<short-description>`, where `<type>` is one of:
 - feature: Any new functionality in the repository including workflows and scripts but not including configurations. Should be the "default" type if it's unclear which to use.
-- refactor: No changes to features, just code restructuring or simplification.
+- refactor: No changes to features or configurations, just code restructuring or simplification.
 - fix: Bug fixes.
 - exp: Branch used for running experiments that is likely not intended to merge with mainline code. Functionality changes in these branches should first be PR'd using a feature branch.
-- config: Changes to baseline and experimental configurations under config/.
-- scripts: Changes isolated to a single script under scripts/ and subject to less rigorous review than changes to core code.
+- config: Changes to baseline and experimental configurations under configs/.
+- scripts: Changes isolated to a single script or a single directory under scripts/, and subject to less rigorous review than changes to core code.
 - docs: Documentation changes only.
 
 ## Code Guidelines

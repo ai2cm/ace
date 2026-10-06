@@ -31,6 +31,7 @@ OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200, 100, 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {
     "F22.5": 22.5,
+    "F45": 45,
     "F90": 90,
     "F360": 360,
 }
@@ -114,6 +115,15 @@ FULL_37_MODEL_LEVEL_SURFACE_VARS = [
     "skin_temperature",
     "2m_temperature",
     "2m_dewpoint_temperature",
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+]
+
+FULL_37_SURFACE_MEAN_VARS = [
+    "skin_temperature",
+    "2m_temperature",
+    "2m_dewpoint_temperature",
+    "surface_pressure",
     "10m_u_component_of_wind",
     "10m_v_component_of_wind",
 ]
@@ -216,6 +226,38 @@ DESIRED_ATTRS = {
     "surface_snow_amount": {
         "long_name": "Surface snow amount",
         "units": "kg/m**2",
+    },
+    "surface_temperature_mean": {
+        "long_name": "Mean skin temperature",
+        "units": "K",
+    },
+    "TMP2m_mean": {
+        "long_name": "Mean 2m air temperature",
+        "units": "K",
+    },
+    "DPT2m_mean": {
+        "long_name": "Mean 2m dewpoint temperature",
+        "units": "K",
+    },
+    "PRESsfc_mean": {
+        "long_name": "Mean surface pressure",
+        "units": "Pa",
+    },
+    "Q2m_mean": {
+        "long_name": "Mean 2m specific humidity",
+        "units": "kg/kg",
+    },
+    "UGRD10m_mean": {
+        "long_name": "Mean 10m U component of wind",
+        "units": "m/s",
+    },
+    "VGRD10m_mean": {
+        "long_name": "Mean 10m V component of wind",
+        "units": "m/s",
+    },
+    "WIND10m_mean": {
+        "long_name": "Mean 10m wind speed",
+        "units": "m/s",
     },
     **{
         f"{soil_type}_soil_type_fraction": {
@@ -634,6 +676,59 @@ def process_mean_flux(
 
 
 # ---------------------------------------------------------------------------
+# Stream 5: Surface mean (6h mean of hourly-regridded surface fields)
+# ---------------------------------------------------------------------------
+
+
+def _process_surface_mean(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
+    """Regrid surface fields hourly, derive Q2m and wind speed, then average."""
+    xr.set_options(keep_attrs=True)
+    regridded = _regrid(ds, output_grid)
+    regridded = regridded.drop_vars(["latitude", "longitude"])
+
+    q2m = _specific_humidity_from_dewpoint(
+        regridded["2m_dewpoint_temperature"], regridded["surface_pressure"]
+    )
+    wind_speed = np.sqrt(
+        regridded["10m_u_component_of_wind"] ** 2
+        + regridded["10m_v_component_of_wind"] ** 2
+    )
+    wind_speed.attrs = {"long_name": "10m wind speed", "units": "m/s"}
+
+    output = xr.Dataset()
+    output["surface_temperature_mean"] = regridded["skin_temperature"]
+    output["PRESsfc_mean"] = regridded["surface_pressure"]
+    output["TMP2m_mean"] = regridded["2m_temperature"]
+    output["DPT2m_mean"] = regridded["2m_dewpoint_temperature"]
+    output["Q2m_mean"] = q2m
+    output["UGRD10m_mean"] = regridded["10m_u_component_of_wind"]
+    output["VGRD10m_mean"] = regridded["10m_v_component_of_wind"]
+    output["WIND10m_mean"] = wind_speed
+
+    averaged = _average_hourly_to_6hourly(output)
+
+    for name, attrs in DESIRED_ATTRS.items():
+        if name in averaged:
+            averaged[name] = averaged[name].assign_attrs(**attrs)
+
+    return averaged
+
+
+def process_surface_mean(
+    key, ds, output_grid=DEFAULT_OUTPUT_GRID, check_data_validity=False
+):
+    if check_data_validity:
+        _check_data_validity(ds)
+    output = _process_surface_mean(ds, output_grid)
+    output_time_offset = key.offsets["time"] // TIME_STEP
+    new_key = key.replace(
+        offsets={"time": output_time_offset, "latitude": 0, "longitude": 0},
+        vars=frozenset(output.keys()),
+    )
+    return new_key, output
+
+
+# ---------------------------------------------------------------------------
 # Stream 2: Surface analysis / invariant
 # ---------------------------------------------------------------------------
 
@@ -851,6 +946,7 @@ def _vertical_coarsen(
 ) -> dict:
     """Pressure-weighted vertical coarsening from 137 levels to coarse layers."""
     n_output_layers = len(output_layer_indices) - 1
+    long_name = var.attrs["long_name"]
     results = {}
     for i in range(n_output_layers):
         fine_slice = slice(output_layer_indices[i], output_layer_indices[i + 1])
@@ -858,7 +954,8 @@ def _vertical_coarsen(
         dp_fine = dp.isel(hybrid=fine_slice)
         weighted = (var_fine * dp_fine).sum("hybrid")
         total_dp = dp_fine.sum("hybrid")
-        results[i] = (weighted / total_dp).astype(np.float32)
+        coarsened = (weighted / total_dp).astype(np.float32)
+        results[i] = coarsened.assign_attrs(long_name=f"{long_name} level-{i}")
     return results
 
 
@@ -900,7 +997,7 @@ def _process_model_level_data(
         + ds_model["specific_cloud_ice_water_content"]
         + ds_model["specific_rain_water_content"]
         + ds_model["specific_snow_water_content"]
-    )
+    ).assign_attrs(long_name="Specific total water")
 
     logging.info("Computing layer thicknesses")
     surface_pressure = ds_surface["surface_pressure"]
@@ -997,6 +1094,7 @@ def _make_template(
     ds_model_level,
     ds_model_level_surface,
     ds_flux,
+    ds_surface_mean,
     ds_surface_analysis,
     ds_pressure_level,
     ds_co2,
@@ -1014,6 +1112,10 @@ def _make_template(
     # Process one timestep from each stream
     flux_one = _average_hourly_to_6hourly(ds_flux.isel(time=slice(0, 6)).load())
     ds_flux_regridded = _process_mean_flux(flux_one, output_grid)
+
+    ds_surface_mean_regridded = _process_surface_mean(
+        ds_surface_mean.isel(time=slice(0, 6)).load(), output_grid
+    )
 
     # Use a time from the output range for invariant data (values are constant
     # in time, but early times in the store may contain NaN fill values)
@@ -1043,6 +1145,7 @@ def _make_template(
     ds_regridded = xr.merge(
         [
             ds_flux_regridded,
+            ds_surface_mean_regridded,
             ds_sfc_an_regridded,
             ds_ml_regridded,
             ds_inv_regridded,
@@ -1087,7 +1190,10 @@ def _get_parser():
         "--output_grid",
         type=str,
         default="F90",
-        help="Output grid specification: 'F90' for 1 degree, 'F360' for 0.25 degree.",
+        help=(
+            "Output grid specification: 'F22.5' for 4 degree, 'F45' for 2 degree, "
+            "'F90' for 1 degree, 'F360' for 0.25 degree."
+        ),
     )
     parser.add_argument(
         "--output_time_chunksize",
@@ -1168,6 +1274,9 @@ def main():
     # Stream 1: Mean flux (hourly data)
     ds_flux = open_full_37(FULL_37_MEAN_FLUX_VARS, flux_time_slice)
 
+    # Stream 5: Surface mean (hourly data, same time range as flux)
+    ds_surface_mean = open_full_37(FULL_37_SURFACE_MEAN_VARS, flux_time_slice)
+
     # Stream 2: Surface analysis (6-hourly)
     ds_surface_analysis = open_full_37(FULL_37_SURFACE_ANALYSIS_VARS, output_time_slice)
 
@@ -1196,6 +1305,7 @@ def main():
         ds_model_level,
         ds_model_level_surface,
         ds_flux,
+        ds_surface_mean,
         ds_surface_analysis,
         ds_pressure_level,
         ds_co2,
@@ -1224,6 +1334,27 @@ def main():
             )
             | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "mean_flux_to_zarr"
+            >> xbeam.ChunksToZarr(
+                output_store,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
+        )
+
+        # Stream 5: Surface mean (hourly -> regrid -> derive -> average)
+        (
+            p
+            | "surface_mean_DatasetToChunks"
+            >> xbeam.DatasetToChunks(ds_surface_mean, chunks={"time": 6})
+            | beam.MapTuple(
+                process_surface_mean,
+                output_grid=args.output_grid,
+                check_data_validity=args.check_data_validity,
+            )
+            | "surface_mean_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
+            | "surface_mean_to_zarr"
             >> xbeam.ChunksToZarr(
                 output_store,
                 template,

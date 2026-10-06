@@ -11,7 +11,9 @@ from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
 from fme.downscaling.predictors.composite import (
+    PatchPredictionConfig,
     PatchPredictor,
+    check_input_shape_supported,
     composite_patch_predictions,
 )
 
@@ -41,6 +43,35 @@ def test_composite_predictions():
                 device=predictions[0]["x"].device,
             ),
         )
+
+
+_COMPOSITE_PATCH = PatchPredictionConfig(
+    divide_generation=True, composite_prediction=True
+)
+_NO_PATCH = PatchPredictionConfig()
+
+
+def test_check_input_shape_supported_exact_match():
+    """Exact match is supported regardless of patch config (does not raise)."""
+    check_input_shape_supported((16, 16), (16, 16), _NO_PATCH)
+
+
+def test_check_input_shape_supported_larger_with_composite():
+    """A larger extent is supported when composite patch prediction is configured."""
+    check_input_shape_supported((16, 16), (32, 32), _COMPOSITE_PATCH)
+
+
+@pytest.mark.parametrize("input_shape", [(8, 16), (16, 8), (8, 8)])
+def test_check_input_shape_supported_raises_when_too_small(input_shape):
+    """Raise when the input is smaller than the model patch in any dimension."""
+    with pytest.raises(ValueError, match="smaller spatial extent"):
+        check_input_shape_supported((16, 16), input_shape, _COMPOSITE_PATCH)
+
+
+def test_check_input_shape_supported_raises_when_larger_without_patching():
+    """Raise when the extent differs from the patch but patching isn't configured."""
+    with pytest.raises(ValueError, match="requires patch prediction"):
+        check_input_shape_supported((16, 16), (32, 32), _NO_PATCH)
 
 
 class DummyModel:
@@ -132,7 +163,6 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
 
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=downscale_factor),  # type: ignore
-        coarse_extent,
         coarse_horizontal_overlap=1,
     )
     n_samples_generate = 2
@@ -161,7 +191,6 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     )
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=2),  # type: ignore
-        coarse_extent,
         coarse_horizontal_overlap=1,
     )
     n_samples_generate = 2
@@ -170,3 +199,20 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
         coarse_batch_data, n_samples=n_samples_generate
     )
     assert prediction["x"].shape == (batch_size, n_samples_generate, 8, 8)
+
+
+@pytest.mark.parametrize(
+    "divide_generation, composite_prediction, error_submessage",
+    [
+        (True, False, "divide_generation=True requires composite_prediction=True."),
+        (False, True, "composite_prediction=True requires divide_generation=True."),
+    ],
+)
+def test_PatchPredictionConfig_disallowed_configs(
+    divide_generation, composite_prediction, error_submessage
+):
+    with pytest.raises(ValueError, match=error_submessage):
+        PatchPredictionConfig(
+            divide_generation=divide_generation,
+            composite_prediction=composite_prediction,
+        )

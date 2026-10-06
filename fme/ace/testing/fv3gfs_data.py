@@ -101,9 +101,26 @@ def save_nd_netcdf(
 def save_scalar_netcdf(
     filename,
     variable_names: list[str],
+    fill_value: float | None = None,
+    center: float = 0.0,
 ):
-    ds = get_scalar_dataset(variable_names)
+    ds = get_scalar_dataset(variable_names, fill_value=fill_value, center=center)
     ds.to_netcdf(filename, format="NETCDF4_CLASSIC")
+
+
+def save_stats_netcdfs(
+    mean_filename,
+    std_filename,
+    variable_names: list[str],
+):
+    """Write a paired (mean, std) stats file with sensible centers.
+
+    Means are centered at 0 and stds at 1 so that random per-variable noise
+    never produces a near-zero or negative std, which would cause normalized
+    inputs to blow up.
+    """
+    save_scalar_netcdf(mean_filename, variable_names=variable_names)
+    save_scalar_netcdf(std_filename, variable_names=variable_names, center=1.0)
 
 
 @dataclasses.dataclass
@@ -112,11 +129,8 @@ class StatsData:
     names: list[str]
 
     def __post_init__(self):
-        save_scalar_netcdf(
+        save_stats_netcdfs(
             self.mean_filename,
-            variable_names=self.names,
-        )
-        save_scalar_netcdf(
             self.std_filename,
             variable_names=self.names,
         )
@@ -294,13 +308,14 @@ def get_nd_dataset(
 def get_scalar_dataset(
     variable_names: Iterable[str],
     fill_value: float | None = None,
+    center: float = 0.0,
 ):
     data_vars = {}
     for name in variable_names:
         if fill_value is not None:
             value = fill_value
         else:
-            value = np.random.randn()
+            value = center + np.random.uniform(-0.05, 0.05)
         data_vars[name] = xr.DataArray(value, attrs={"units": "m", "long_name": name})
 
     ds = xr.Dataset(data_vars=data_vars)

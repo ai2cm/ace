@@ -82,14 +82,14 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
             ocean=DatasetInfo(
                 horizontal_coordinates=self._ocean.horizontal_coordinates,
                 vertical_coordinate=self._ocean.vertical_coordinate,
-                mask_provider=self._ocean.mask_provider,
+                spatial_mask_provider=self._ocean.spatial_mask_provider,
                 timestep=self._ocean.timestep,
                 variable_metadata=self._properties.variable_metadata,
             ),
             atmosphere=DatasetInfo(
                 horizontal_coordinates=self._atmosphere.horizontal_coordinates,
                 vertical_coordinate=self._atmosphere.vertical_coordinate,
-                mask_provider=self._atmosphere.mask_provider,
+                spatial_mask_provider=self._atmosphere.spatial_mask_provider,
                 timestep=self._atmosphere.timestep,
                 variable_metadata=self._properties.variable_metadata,
             ),
@@ -199,6 +199,13 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     def initial_condition(self) -> CoupledPrognosticState:
         return self._initial_condition
 
+    def apply_config_seed(self, seed: int | None) -> None:
+        """Seed the initial condition's random state from ``config.seed``,
+        unless it already carries one (see
+        ``CoupledPrognosticState.apply_config_seed``).
+        """
+        self._initial_condition = self._initial_condition.apply_config_seed(seed)
+
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:
         def on_device(x: CoupledBatchData) -> CoupledBatchData:
@@ -211,13 +218,13 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         ocean = DatasetInfo(
             horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
             vertical_coordinate=self._properties.ocean.vertical_coordinate,
-            mask_provider=self._properties.ocean.mask_provider,
+            spatial_mask_provider=self._properties.ocean.spatial_mask_provider,
             timestep=self.ocean_timestep,
         )
         atmosphere = DatasetInfo(
             horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
             vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
-            mask_provider=self._properties.atmosphere.mask_provider,
+            spatial_mask_provider=self._properties.atmosphere.spatial_mask_provider,
             timestep=self.atmosphere_timestep,
         )
         return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere)

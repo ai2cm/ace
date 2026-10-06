@@ -1,7 +1,12 @@
 import dataclasses
+import datetime
 from collections.abc import Sequence
+from typing import final
 
-from torch.utils.data import DataLoader, Dataset, RandomSampler
+import numpy as np
+import torch
+import xarray as xr
+from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
@@ -26,9 +31,118 @@ from fme.downscaling.data.datasets import (
 from fme.downscaling.data.utils import (
     ClosedInterval,
     adjust_fine_coord_range,
+    find_roll_anchor,
+    find_roll_anchor_from_interval,
     get_latlon_coords_from_properties,
+    roll_lon_coords,
+)
+from fme.downscaling.data.video_datasets import (
+    PairedVideoBatchData,
+    PairedVideoGriddedData,
+    VideoBatchItemDatasetAdapter,
+    VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.requirements import DataRequirements
+
+
+def _expand_clip_starts_to_frame_times(
+    clip_start_times: xr.CFTimeIndex,
+    n_timesteps: int,
+    timestep: datetime.timedelta,
+) -> tuple[xr.CFTimeIndex, np.ndarray]:
+    """Sorted, deduplicated union of every clip's frame times, plus the index
+    of each clip's start time within that union.
+
+    Expands per clip start rather than from one global anchor, so this only
+    ever extrapolates within a clip's own span -- exactly what a non-None
+    ``timestep`` (see ``_get_timestep``) already guarantees is safe, since a
+    clip never spans a dataset boundary.
+    """
+    frame_time_set = {
+        t + j * timestep for t in clip_start_times for j in range(n_timesteps)
+    }
+    frame_times = xr.CFTimeIndex(sorted(frame_time_set))
+    clip_start_indices = np.array([frame_times.get_loc(t) for t in clip_start_times])
+    return frame_times, clip_start_indices
+
+
+def _roll_lons_to_extent_convention(
+    coarse_lon: torch.Tensor,
+    fine_lon: torch.Tensor,
+    lon_extent: ClosedInterval,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Roll coarse and fine lon coords into the convention of lon_extent so that
+    adjust_fine_coord_range can align fine and coarse subselection for domains
+    crossing the prime meridian (lon_start < 0 or lon_stop > 360). No-op for
+    in-range extents.
+
+    The fine roll is anchored one half-coarse-spacing before lon_start so the
+    fine half-cells below the first coarse grid point remain accessible.
+    """
+    lon_start, _ = lon_extent.finite_values
+    coarse_roll = find_roll_anchor_from_interval(coarse_lon, lon_extent)
+    rolled_coarse_lon = roll_lon_coords(coarse_lon, coarse_roll, lon_start)
+
+    if coarse_roll > 0 and len(rolled_coarse_lon) >= 2:
+        coarse_spacing = float((rolled_coarse_lon[1] - rolled_coarse_lon[0]).item())
+        fine_anchor = lon_start - coarse_spacing / 2
+        fine_roll = find_roll_anchor(fine_lon, fine_anchor % 360.0)
+        rolled_fine_lon = roll_lon_coords(fine_lon, fine_roll, fine_anchor)
+    else:
+        rolled_fine_lon = fine_lon
+
+    return rolled_coarse_lon, rolled_fine_lon
+
+
+def _build_aligned_subset_pair(
+    dataset_fine: XarrayConcat,
+    properties_fine: DatasetProperties,
+    dataset_coarse: XarrayConcat,
+    properties_coarse: DatasetProperties,
+    lat_extent: ClosedInterval,
+    lon_extent: ClosedInterval,
+) -> tuple[HorizontalSubsetDataset, HorizontalSubsetDataset]:
+    """Subset fine and coarse datasets so their selections align exactly.
+
+    The coarse dataset is subset with the requested lat/lon extent. The fine
+    extent is adjusted (adjust_fine_coord_range) so the fine subselection lines up
+    with the coarse one; both grids are first rolled into the extent's longitude
+    convention so this holds for prime-meridian-crossing domains as well (see
+    _roll_lons_to_extent_convention).
+    """
+    coarse_coords = get_latlon_coords_from_properties(properties_coarse)
+    fine_coords = get_latlon_coords_from_properties(properties_fine)
+
+    rolled_coarse_lon, rolled_fine_lon = _roll_lons_to_extent_convention(
+        coarse_lon=coarse_coords.lon,
+        fine_lon=fine_coords.lon,
+        lon_extent=lon_extent,
+    )
+    fine_lat_extent = adjust_fine_coord_range(
+        lat_extent,
+        full_coarse_coord=coarse_coords.lat,
+        full_fine_coord=fine_coords.lat,
+    )
+    fine_lon_extent = adjust_fine_coord_range(
+        lon_extent,
+        full_coarse_coord=rolled_coarse_lon,
+        full_fine_coord=rolled_fine_lon,
+    )
+
+    dataset_fine_subset = HorizontalSubsetDataset(
+        dataset_fine,
+        properties=properties_fine,
+        lat_interval=fine_lat_extent,
+        lon_interval=fine_lon_extent,
+    )
+    dataset_coarse_subset = HorizontalSubsetDataset(
+        dataset_coarse,
+        properties=properties_coarse,
+        lat_interval=lat_extent,
+        lon_interval=lon_extent,
+    )
+    return dataset_fine_subset, dataset_coarse_subset
 
 
 def enforce_lat_bounds(lat: ClosedInterval):
@@ -299,6 +413,7 @@ class DataLoaderConfig:
             dims=example.latlon_coordinates.dims,
             variable_metadata=dataset.variable_metadata,
             all_times=all_times,
+            coarse_extent_latlon_coords=example.latlon_coordinates,
         )
 
 
@@ -374,6 +489,7 @@ class PairedDataLoaderConfig:
                 "within the model when it is first built and trained."
             )
 
+    @final
     def _first_data_config(
         self,
         config: XarrayDataConfig | MergeNoConcatDatasetConfig,
@@ -383,9 +499,11 @@ class PairedDataLoaderConfig:
             return config
         return config.merge[0]
 
+    @final
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
+    @final
     def _mp_context(self):
         mp_context = None
         if self.num_data_workers == 0:
@@ -401,11 +519,13 @@ class PairedDataLoaderConfig:
         return mp_context
 
     @property
+    @final
     def coarse_full_config(
         self,
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         return _full_configs(self.coarse)
 
+    @final
     def build(
         self,
         train: bool,
@@ -461,30 +581,13 @@ class PairedDataLoaderConfig:
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
-        # Ensure fine data subselection lines up exactly with coarse data
-        fine_lat_extent = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
-            full_fine_coord=properties_fine.horizontal_coordinates.lat,
-        )
-        fine_lon_extent = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
-            full_fine_coord=properties_fine.horizontal_coordinates.lon,
-        )
-
-        dataset_fine_subset = HorizontalSubsetDataset(
-            dataset_fine,
-            properties=properties_fine,
-            lat_interval=fine_lat_extent,
-            lon_interval=fine_lon_extent,
-        )
-
-        dataset_coarse_subset = HorizontalSubsetDataset(
-            dataset_coarse,
-            properties=properties_coarse,
-            lat_interval=self.lat_extent,
-            lon_interval=self.lon_extent,
+        dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
+            dataset_fine=dataset_fine,
+            properties_fine=properties_fine,
+            dataset_coarse=dataset_coarse,
+            properties_coarse=properties_coarse,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
         )
 
         # Convert datasets to produce BatchItems
@@ -534,8 +637,10 @@ class PairedDataLoaderConfig:
             variable_metadata=variable_metadata,
             all_times=all_times,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
+            coarse_extent_latlon_coords=example.coarse.latlon_coordinates,
         )
 
+    @final
     def _get_sampler(
         self, dataset: Dataset, dist: Distributed, train: bool, drop_last: bool = False
     ) -> RandomSampler | DistributedSampler | None:
@@ -561,3 +666,186 @@ class PairedDataLoaderConfig:
             sampler = None
 
         return sampler
+
+
+@dataclasses.dataclass
+class PairedVideoLoaderConfig(PairedDataLoaderConfig):
+    """
+    Configuration for loading video (temporal) downscaling data: fixed-length
+    clips of ``n_timesteps`` consecutive frames with an explicit leading time
+    axis, built from the same fine/coarse loading machinery as
+    ``PairedDataLoaderConfig`` (see its docstring for the args inherited
+    below).
+
+    Args:
+        n_timesteps: Number of consecutive frames in each clip.
+        time_stride: Frames between consecutive clip starts. Defaults to
+            ``n_timesteps - 1`` (clips overlapping by exactly one shared
+            boundary frame). Set to 1 for a full sliding window over every
+            possible clip start; set higher to skip clip starts and reduce
+            the number of samples.
+    """
+
+    n_timesteps: int = 1
+    time_stride: int | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.n_timesteps < 1:
+            raise ValueError(f"n_timesteps must be >= 1, got {self.n_timesteps}.")
+        if self.time_stride is not None and self.time_stride < 1:
+            raise ValueError(f"time_stride must be >= 1, got {self.time_stride}.")
+
+    @property
+    def clip_start_stride(self) -> int:
+        """Frames between consecutive video-clip starts; defaults to
+        ``n_timesteps - 1`` (clips sharing only their boundary frame).
+        """
+        if self.time_stride is not None:
+            return self.time_stride
+        return max(1, self.n_timesteps - 1)
+
+    @final
+    def build_video(
+        self,
+        train: bool,
+        requirements: DataRequirements,
+        dist: Distributed | None = None,
+        drop_last: bool | None = None,
+    ) -> PairedVideoGriddedData:
+        """Build a paired fine/coarse loader of video clips.
+
+        Each sample is a clip of ``self.n_timesteps`` consecutive frames with an
+        explicit leading time axis, spaced ``self.clip_start_stride`` apart.
+
+        Args:
+            train: Whether this is the training split (enables shuffling).
+            requirements: Which fine/coarse variables to load.
+            dist: Distributed instance; defaults to the global singleton.
+            drop_last: Override for whether trailing partial batches are
+                dropped, both across ranks (sampler) and within a rank's
+                final batch (dataloader). Defaults to ``self.drop_last`` for
+                the sampler and ``True`` for the dataloader, matching
+                training's tolerance for slightly uneven batches. Pass
+                ``False`` (e.g. for test-set inference) to guarantee no
+                samples are silently dropped.
+        """
+        if dist is None:
+            dist = Distributed.get_instance()
+
+        n_timesteps = IntSchedule.from_constant(self.n_timesteps)
+        dataset_fine, properties_fine = build_from_config_sequence(
+            configs=self.fine,
+            names=requirements.fine_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
+        )
+        dataset_coarse, properties_coarse = build_from_config_sequence(
+            configs=self.coarse,
+            names=requirements.coarse_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
+        )
+
+        if not isinstance(
+            properties_coarse.horizontal_coordinates, LatLonCoordinates
+        ) or not isinstance(properties_fine.horizontal_coordinates, LatLonCoordinates):
+            raise ValueError(
+                "Downscaling data loader only supports datasets with latlon coords."
+            )
+        if not dataset_fine.sample_start_times.equals(
+            dataset_coarse.sample_start_times
+        ):
+            raise ValueError(
+                "Fine and coarse datasets must have the same sample start times."
+            )
+        if dataset_fine.sample_n_times != self.n_timesteps:
+            raise ValueError(
+                f"Expected clips of {self.n_timesteps} timesteps, got "
+                f"{dataset_fine.sample_n_times}."
+            )
+        fine_start_times = dataset_fine.sample_start_times
+        if properties_fine.timestep is None:
+            raise ValueError(
+                "Video clips require a uniform timestep; set infer_timestep=True "
+                "(the default) on the fine XarrayDataConfig(s)."
+            )
+
+        dataset_fine = self._repeat_if_requested(dataset_fine)
+        dataset_coarse = self._repeat_if_requested(dataset_coarse)
+
+        dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
+            dataset_fine=dataset_fine,
+            properties_fine=properties_fine,
+            dataset_coarse=dataset_coarse,
+            properties_coarse=properties_coarse,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
+        )
+
+        fine_adapter = VideoBatchItemDatasetAdapter(
+            dataset_fine_subset,
+            dataset_fine_subset.subset_latlon_coordinates,
+            properties=properties_fine,
+        )
+        coarse_adapter = VideoBatchItemDatasetAdapter(
+            dataset_coarse_subset,
+            dataset_coarse_subset.subset_latlon_coordinates,
+            properties=properties_coarse,
+        )
+
+        paired_dataset = VideoFineCoarsePairedDataset(fine_adapter, coarse_adapter)
+
+        # Subsample the (stride-one) clip starts to the requested clip spacing.
+        stride = self.clip_start_stride
+        dataset: Dataset
+        if stride > 1:
+            keep = list(range(0, len(paired_dataset), stride))
+            dataset = Subset(paired_dataset, keep)
+            clip_start_times = fine_start_times[::stride]
+        else:
+            dataset = paired_dataset
+            clip_start_times = fine_start_times
+
+        frame_times, clip_start_indices = _expand_clip_starts_to_frame_times(
+            clip_start_times, self.n_timesteps, properties_fine.timestep
+        )
+
+        sampler = self._get_sampler(
+            dataset=dataset,
+            dist=dist,
+            train=train,
+            drop_last=self.drop_last if drop_last is None else drop_last,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=dist.local_batch_size(int(self.batch_size)),
+            num_workers=self.num_data_workers,
+            shuffle=(sampler is None) and train,
+            sampler=sampler,
+            drop_last=True if drop_last is None else drop_last,
+            pin_memory=using_gpu(),
+            collate_fn=PairedVideoBatchData.from_sequence,
+            multiprocessing_context=self._mp_context(),
+            persistent_workers=True if self.num_data_workers > 0 else False,
+        )
+
+        example = dataset[0]
+        variable_metadata = {
+            **fine_adapter.variable_metadata,
+            **coarse_adapter.variable_metadata,
+        }
+        return PairedVideoGriddedData(
+            _loader=dataloader,
+            coarse_shape=example.coarse.horizontal_shape,
+            downscale_factor=example.downscale_factor,
+            n_timesteps=self.n_timesteps,
+            dims=example.fine.latlon_coordinates.dims,
+            variable_metadata=variable_metadata,
+            clip_start_times=clip_start_times,
+            timestep=properties_fine.timestep,
+            frame_times=frame_times,
+            clip_start_indices=clip_start_indices,
+            fine_coords=get_latlon_coords_from_properties(properties_fine),
+            fine_extent_latlon_coords=example.fine.latlon_coordinates,
+        )

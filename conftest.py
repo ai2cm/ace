@@ -54,6 +54,33 @@ def pytest_configure(config):
         "markers",
         "serial: test must run without interference from any other test process",
     )
+    config.addinivalue_line(
+        "markers",
+        "slow: slow test, deselected when --fast or --very-fast is given",
+    )
+    config.addinivalue_line(
+        "markers",
+        "medium_duration: not very fast test, deselected when --very-fast is given",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    very_fast_only = config.getoption("--very-fast")
+    skip_slow = very_fast_only or config.getoption("--fast")
+    if not skip_slow:
+        return
+    deselected = []
+    selected = []
+    for item in items:
+        if item.get_closest_marker("slow") is not None or (
+            very_fast_only and item.get_closest_marker("medium_duration") is not None
+        ):
+            deselected.append(item)
+        else:
+            selected.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = selected
 
 
 def _lock_path(config: pytest.Config) -> Path:
@@ -93,16 +120,6 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 @pytest.fixture
-def skip_slow(request, very_fast_only):
-    return very_fast_only or request.config.getoption("--fast")
-
-
-@pytest.fixture
-def very_fast_only(request):
-    return request.config.getoption("--very-fast")
-
-
-@pytest.fixture
 def meta_get_device(request):
     return request.config.getoption("--meta-get-device")
 
@@ -127,18 +144,22 @@ def no_timeout(request):
 
 @pytest.fixture(autouse=True, scope="session")
 def distributed_context():
-    with Distributed.context():
+    # no signal handler: this context spans the whole session, so installing one
+    # would make Ctrl-C tear the backend down and register as a test failure,
+    # leaving the rest of the run without a process group. The tests that want
+    # the listener open their own `abort_and_exit_on_termination`.
+    with Distributed.context(handle_signals=False):
         yield
 
 
 @pytest.fixture(autouse=True, scope="function")
-def enforce_timeout(skip_slow, very_fast_only, pdb_enabled, no_timeout):
+def enforce_timeout(request, pdb_enabled, no_timeout, _serialize_when_needed):
     if pdb_enabled or no_timeout:
         yield  # Do not enforce timeout if we are debugging
         return
-    if very_fast_only:
+    if request.config.getoption("--very-fast"):
         timeout_seconds = 3
-    elif skip_slow:
+    elif request.config.getoption("--fast"):
         timeout_seconds = 30
     else:
         timeout_seconds = 90
@@ -165,6 +186,18 @@ def reset_global_timer():
     fme.core.timing.singleton = None
     yield
     fme.core.timing.singleton = None
+
+
+@pytest.fixture(autouse=True)
+def reset_post_abort_callbacks():
+    # the registry is process-global and nothing clears it between tests:
+    # without this, every Trainer built by an earlier test would still have
+    # its callback run on a signal raised in a later one
+    from fme.core.distributed.shutdown import clear_post_abort_callbacks
+
+    clear_post_abort_callbacks()
+    yield
+    clear_post_abort_callbacks()
 
 
 @pytest.fixture(autouse=True)

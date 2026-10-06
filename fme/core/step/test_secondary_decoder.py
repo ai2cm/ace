@@ -1,28 +1,52 @@
-import pytest
 import torch
 
+from fme.core.dataset_info import DatasetInfo
 from fme.core.registry import ModuleSelector
 
 from .secondary_decoder import SecondaryDecoder, SecondaryDecoderConfig
 
 
 class TestSecondaryDecoderConfig:
-    def test_valid_mlp_network_type(self):
-        # Should not raise
+    def test_mlp_network_type(self):
         config = SecondaryDecoderConfig(
             secondary_diagnostic_names=["diag1", "diag2"],
             network=ModuleSelector(type="MLP", config={}),
         )
         assert config.secondary_diagnostic_names == ["diag1", "diag2"]
 
-    def test_invalid_network_type_raises_error(self):
-        with pytest.raises(ValueError, match="Invalid network type"):
-            SecondaryDecoderConfig(
-                secondary_diagnostic_names=["diag1"],
-                network=ModuleSelector(
-                    type="SphericalFourierNeuralOperatorNet", config={}
-                ),
-            )
+    def test_non_mlp_network_type_is_accepted(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="SphericalFourierNeuralOperatorNet", config={}),
+        )
+        assert config.network.type == "SphericalFourierNeuralOperatorNet"
+
+    def test_include_input_step_defaults_false(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="MLP", config={}),
+        )
+        assert config.include_input_step is False
+
+    def test_include_input_step_true(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="MLP", config={}),
+            include_input_step=True,
+        )
+        assert config.include_input_step is True
+
+    def test_build_with_include_input_step(self):
+        config = SecondaryDecoderConfig(
+            secondary_diagnostic_names=["diag1"],
+            network=ModuleSelector(type="MLP", config={"hidden_dim": 16, "depth": 2}),
+            include_input_step=True,
+        )
+        decoder = config.build(n_in_channels=7, dataset_info=DatasetInfo())
+        x = torch.randn(2, 7, 8, 8)
+        output = decoder(x)
+        assert set(output.keys()) == {"diag1"}
+        assert output["diag1"].shape == (2, 8, 8)
 
 
 class TestSecondaryDecoder:
@@ -32,6 +56,7 @@ class TestSecondaryDecoder:
             in_dim=4,
             out_names=["diag1", "diag2"],
             network=network,
+            dataset_info=DatasetInfo(),
         )
         # Input: [batch, channels, height, width]
         x = torch.randn(2, 4, 8, 8)
@@ -47,6 +72,7 @@ class TestSecondaryDecoder:
             in_dim=4,
             out_names=["diag1"],
             network=network,
+            dataset_info=DatasetInfo(),
         )
         assert isinstance(decoder.torch_modules, torch.nn.ModuleList)
 
@@ -56,11 +82,13 @@ class TestSecondaryDecoder:
             in_dim=4,
             out_names=["diag1", "diag2"],
             network=network,
+            dataset_info=DatasetInfo(),
         )
         decoder2 = SecondaryDecoder(
             in_dim=4,
             out_names=["diag1", "diag2"],
             network=network,
+            dataset_info=DatasetInfo(),
         )
         # Save state from decoder1, load into decoder2
         state = decoder1.get_module_state()
@@ -75,6 +103,7 @@ class TestSecondaryDecoder:
             in_dim=4,
             out_names=["diag1"],
             network=network,
+            dataset_info=DatasetInfo(),
         )
         # Just test that to() returns self and doesn't error
         result = decoder.to("cpu")

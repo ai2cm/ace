@@ -1,3 +1,4 @@
+<!-- This description becomes the squash-and-merge commit message: keep it self-contained and describe the final state from main. Put PR-process notes (stacking/rebase, review responses, commit-by-commit narratives) in a PR comment, not here. -->
 Short description of why the PR is needed and how it satisfies those requirements, in sentence form.
 
 Changes:

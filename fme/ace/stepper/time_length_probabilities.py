@@ -44,6 +44,10 @@ class TimeLengthProbabilities:
     def max_n_forward_steps(self) -> int:
         return int(max(self._n_times))
 
+    def seed_rng(self, seed: int) -> None:
+        """Reset the RNG to a deterministic state with the given seed."""
+        self._rng = np.random.RandomState(seed)
+
     def sample(self) -> int:
         """
         Update the current number of timesteps to sample based on
@@ -93,6 +97,13 @@ class TimeLengthSchedule:
             A TimeLengthSchedule instance.
         """
         return cls(start_value=value, milestones=[])
+
+    @property
+    def is_constant(self) -> bool:
+        """Whether the schedule yields the same fixed step count at every epoch."""
+        return len(self.milestones) == 0 and (
+            isinstance(self.start_value, int) or len(self.start_value.outcomes) == 1
+        )
 
     def get_value(self, epoch: int) -> TimeLength:
         return self._validated_milestones.get_value(epoch)

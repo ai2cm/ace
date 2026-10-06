@@ -5,7 +5,11 @@ import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.downscaling.data.utils import ClosedInterval
+from fme.downscaling.data.utils import (
+    ClosedInterval,
+    roll_data_along_lon_dim,
+    roll_lon_coords,
+)
 
 
 @dataclasses.dataclass
@@ -41,7 +45,7 @@ class StaticInput:
 
     @classmethod
     def from_state(cls, state: dict) -> "StaticInput":
-        return cls(data=state["data"])
+        return cls(data=state["data"].to(get_device(), copy=True))
 
 
 _LAT_NAMES = ("lat", "latitude", "grid_yt")
@@ -170,6 +174,23 @@ class StaticInputs:
             ),
         )
 
+    def roll(self, roll_amount: int, lon_start: float) -> "StaticInputs":
+        """
+        Roll the data and lon coordinates of the StaticInputs by the specified amount.
+        """
+        if roll_amount == 0:
+            return self
+        rolled_lon = roll_lon_coords(self.coords.lon, roll_amount, lon_start)
+        return StaticInputs(
+            fields=[
+                StaticInput(
+                    data=roll_data_along_lon_dim(f.data, roll_amount, lon_dim=-1)
+                )
+                for f in self.fields
+            ],
+            coords=LatLonCoordinates(lat=self.coords.lat, lon=rolled_lon),
+        )
+
     def to_device(self) -> "StaticInputs":
         return StaticInputs(
             fields=[field.to_device() for field in self.fields],
@@ -196,8 +217,8 @@ class StaticInputs:
                 StaticInput.from_state(field_state) for field_state in state["fields"]
             ],
             coords=LatLonCoordinates(
-                lat=state["coords"]["lat"],
-                lon=state["coords"]["lon"],
+                lat=state["coords"]["lat"].to(get_device(), copy=True),
+                lon=state["coords"]["lon"].to(get_device(), copy=True),
             ),
         )
 

@@ -6,10 +6,11 @@ import torch
 import xarray as xr
 
 import fme
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.aggregator.inference.seasonal import SeasonalAggregator
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 def get_zero_time(shape, dims):
@@ -44,11 +45,15 @@ def test_seasonal_aggregator():
     ]
     time = xr.DataArray([time_1d for _ in range(n_sample)], dims=["sample", "time"])
     for i in range(0, n_time, n_time_step):
-        agg.record_batch(
-            time.isel(time=range(i, i + n_time_step)),
-            time_select(target_data, i, i + n_time_step),
-            time_select(gen_data, i, i + n_time_step),
+        batch = InferenceBatchData(
+            prediction=time_select(gen_data, i, i + n_time_step),
+            prediction_norm={},
+            target=time_select(target_data, i, i + n_time_step),
+            target_norm=None,
+            time=time.isel(time=range(i, i + n_time_step)),
+            i_time_start=i,
         )
+        agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     for name, value in logs.items():
         if isinstance(value, float | np.ndarray):
@@ -65,9 +70,9 @@ def test_seasonal_aggregator_with_nans():
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     mask = torch.ones((n_lat, n_lon))
     mask[1, 1] = 0
-    mask_provider = MaskProvider({"mask_a": mask}).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider({"mask_a": mask}).to(get_device())
     agg = SeasonalAggregator(
-        LatLonOperations(area_weights, mask_provider),
+        LatLonOperations(area_weights, spatial_mask_provider),
     )
     target_data = {
         "a": torch.randn(n_sample, n_time, n_lat, n_lon, device=get_device())
@@ -88,11 +93,15 @@ def test_seasonal_aggregator_with_nans():
     ]
     time = xr.DataArray([time_1d for _ in range(n_sample)], dims=["sample", "time"])
     for i in range(0, n_time, n_time_step):
-        agg.record_batch(
-            time.isel(time=range(i, i + n_time_step)),
-            time_select(target_data, i, i + n_time_step),
-            time_select(gen_data, i, i + n_time_step),
+        batch = InferenceBatchData(
+            prediction=time_select(gen_data, i, i + n_time_step),
+            prediction_norm={},
+            target=time_select(target_data, i, i + n_time_step),
+            target_norm=None,
+            time=time.isel(time=range(i, i + n_time_step)),
+            i_time_start=i,
         )
+        agg.record_batch(batch)
     logs = agg.get_logs(label="test")
     for name, value in logs.items():
         if isinstance(value, float | np.ndarray):

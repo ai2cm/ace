@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import logging
 from math import ceil
@@ -10,6 +11,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
+    local_ic_range,
 )
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.dummy import DummyDataset
@@ -145,14 +147,17 @@ class InferenceDataset(torch.utils.data.Dataset):
     ) -> DatasetProperties:
         if dataset_info is None:
             return ocean_properties
-        ocean_mask_is_empty = not ocean_properties.mask_provider.masks
+        ocean_mask_is_empty = not ocean_properties.spatial_mask_provider.masks
         identical_masks = (
-            len(ocean_properties.mask_provider.masks) > 0
-            and len(dataset_info.ocean.mask_provider.masks) > 0
-            and ocean_properties.mask_provider == dataset_info.ocean.mask_provider
+            len(ocean_properties.spatial_mask_provider.masks) > 0
+            and len(dataset_info.ocean.spatial_mask_provider.masks) > 0
+            and ocean_properties.spatial_mask_provider
+            == dataset_info.ocean.spatial_mask_provider
         )
         if ocean_mask_is_empty or identical_masks:
-            ocean_properties.update_mask_provider(dataset_info.ocean.mask_provider)
+            ocean_properties.update_spatial_mask_provider(
+                dataset_info.ocean.spatial_mask_provider
+            )
         else:
             logging.warning(
                 "Not updating ocean mask provider from dataset info in the checkpoint"
@@ -165,10 +170,10 @@ class InferenceDataset(torch.utils.data.Dataset):
         dist = Distributed.get_instance()
         i_start = index * self._coupled_steps_in_memory
         samples = []
-        for i_member in range(self._n_initial_conditions):
-            # check if sample is one this local rank should process
-            if i_member % dist.world_size != dist.rank:
-                continue
+        local_start, local_end = local_ic_range(
+            self._n_initial_conditions, dist.rank, dist.world_size
+        )
+        for i_member in range(local_start, local_end):
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
         return CoupledBatchData.collate_fn(
@@ -213,18 +218,22 @@ class CoupledForcingDataLoaderConfig:
         self,
         start_indices: ExplicitIndices,
     ):
+        # the built loader takes ownership of its dataset configs and updates
+        # the atmosphere subset in place to align it with the ocean start, so
+        # hand out copies to leave this user-provided config untouched (e.g.
+        # for reuse by the following segments of a segmented run)
         if self.ocean is None:
             return InferenceDataLoaderConfig(
                 dataset=CoupledDatasetWithOptionalOceanConfig(
-                    atmosphere=self.atmosphere.dataset,
+                    atmosphere=copy.deepcopy(self.atmosphere.dataset),
                 ),
                 start_indices=start_indices,
                 num_data_workers=self.num_data_workers,
             )
         return InferenceDataLoaderConfig(
             dataset=CoupledDatasetWithOptionalOceanConfig(
-                atmosphere=self.atmosphere.dataset,
-                ocean=self.ocean.dataset,
+                atmosphere=copy.deepcopy(self.atmosphere.dataset),
+                ocean=copy.deepcopy(self.ocean.dataset),
             ),
             start_indices=start_indices,
             num_data_workers=self.num_data_workers,
@@ -241,7 +250,7 @@ def _make_dummy_ocean_forcing(
         variable_metadata=dict(dataset_info.ocean.variable_metadata),
         vertical_coordinate=dataset_info.ocean.vertical_coordinate,
         horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
-        mask_provider=dataset_info.ocean.mask_provider,
+        spatial_mask_provider=dataset_info.ocean.spatial_mask_provider,
         timestep=dataset_info.ocean.timestep,
         is_remote=False,
         all_labels=set(),

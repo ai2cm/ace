@@ -42,7 +42,15 @@ def test_gridded_operations_from_state(
     assert isinstance(ops, expected_class)
 
     recovered_state = ops.get_state()
-    assert recovered_state == state
+    assert recovered_state["type"] == state["type"]
+    assert recovered_state["state"].keys() == state["state"].keys()
+    for key in state["state"]:
+        original = state["state"][key]
+        recovered = recovered_state["state"][key]
+        if isinstance(original, torch.Tensor):
+            torch.testing.assert_close(recovered, original)
+        else:
+            assert recovered == original
 
     with pytest.raises(RuntimeError):
         expected_class.from_state(state["state"])
@@ -179,3 +187,10 @@ def test_healpix_sht_round_trip_face_ordering():
     torch.testing.assert_close(data_isht, data_isht_reconstructed, atol=0.1, rtol=40)
     rmse = torch.sqrt(torch.mean((data_isht - data_isht_reconstructed) ** 2))
     assert rmse < 0.002
+
+
+def test_latlon_operations_init_decouples_memory():
+    weights = torch.ones(3, 4) / 12.0
+    ops = LatLonOperations(area_weights=weights)
+    weights.fill_(999.0)
+    assert ops._cpu_area_global.max().item() < 1.0

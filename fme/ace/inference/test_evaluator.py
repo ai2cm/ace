@@ -16,8 +16,7 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.aggregator.inference.main import StepMeanEntry
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -50,6 +49,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
@@ -61,7 +61,16 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing import mock_wandb
+from fme.core.testing import (
+    get_dataset_info,
+    mock_wandb,
+    trivial_network_and_loss_normalization,
+)
+from fme.core.testing.ema import (
+    ScaledIdentity,
+    assert_parameters_equal,
+    save_checkpoint_with_ema,
+)
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
@@ -86,6 +95,7 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    corrector: AtmosphereCorrectorConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -95,6 +105,8 @@ def save_plus_one_stepper(
         normalization_names = all_names
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
+    if corrector is None:
+        corrector = AtmosphereCorrectorConfig()
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -130,6 +142,7 @@ def save_plus_one_stepper(
                                         ),
                                     ),
                                     ocean=ocean,
+                                    corrector=corrector,
                                 ),
                             ),
                         ),
@@ -277,6 +290,78 @@ def test_inference_plus_one_model(
     )
 
 
+@pytest.mark.parametrize("n_forward_steps", [2, int(30 / 20 * 36)])
+def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: int):
+    """Validates default aggregator config with default metrics end-to-end."""
+    in_names = ["var"]
+    out_names = ["var"]
+    stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        timestep=datetime.timedelta(days=20),
+    )
+    all_names = list(set(in_names).union(out_names))
+    time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        time_varying_values=time_varying_values,
+        timestep_days=datetime.timedelta(days=20).total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert len(wandb_logs) == n_ic_timesteps + n_forward_steps + summary_log_step
+    for i in range(n_ic_timesteps + n_forward_steps):
+        log = wandb_logs[i]
+        for var in out_names:
+            if i == 0 and var not in in_names:
+                assert f"inference/mean/weighted_rmse/{var}" not in log
+            else:
+                assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
+
+
 def inference_helper(
     tmp_path,
     in_names,
@@ -333,8 +418,6 @@ def inference_helper(
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
             monthly_reference_data=monthly_reference_filename,
-            log_video=True,
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
@@ -521,9 +604,7 @@ def test_inference_writer_boundaries(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -679,9 +760,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -777,13 +856,9 @@ def test_compute_derived_quantities(has_required_fields):
         assert not existence_check
 
 
-def test_derived_metrics_run_without_errors(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
+@pytest.mark.medium_duration
+def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     """Checks that derived metrics are computed during inferece without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     n_forward_steps = 2
 
     in_names = ["var", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
@@ -827,9 +902,7 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -951,9 +1024,7 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -1163,13 +1234,11 @@ def test_resolve_variable_metadata(
         pytest.param(NameConfig("solar_constant"), id="solar-constant-as-name"),
     ],
 )
+@pytest.mark.medium_duration
 def test_evaluator_with_derived_forcings(
     tmp_path: pathlib.Path,
     solar_constant: NameConfig | ValueConfig,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     forward_steps_in_memory = 2
     insolation_name = "DSWRFtoa"
     in_names = ["var", "forcing_var", insolation_name]
@@ -1214,9 +1283,7 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1241,12 +1308,8 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-def test_evaluator_with_non_local_experiment_dir(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
+@pytest.mark.medium_duration
+def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
     # Use an in-memory filesystem for the experiment directory to test using
     # an experiment_dir on a non-local filesystem.
     experiment_dir = "memory://experiment_dir"
@@ -1289,9 +1352,7 @@ def test_evaluator_with_non_local_experiment_dir(
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -1328,6 +1389,156 @@ def test_evaluator_with_non_local_experiment_dir(
         assert fs.isdir(os.path.join(experiment_dir, directory))
 
     fs.rm(experiment_dir, recursive=True)
+
+
+@pytest.mark.parametrize("n_ensemble_per_ic", [2, 3])
+def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
+    """Test that data at initial condition boundaires"""
+    in_names = ["var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
+
+    n_forward_steps = 21
+    forward_steps_in_memory = 2
+
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
+        loader=data.inference_data_loader_config,
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=forward_steps_in_memory,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+        n_ensemble_per_ic=n_ensemble_per_ic,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(
+            yaml_config=str(config_filename),
+        )
+        inference_logs = wandb.get_logs()
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert (
+        len(inference_logs)
+        == n_ic_timesteps + config.n_forward_steps + summary_log_step
+    )
+
+    prediction_ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
+    target_ds = xr.open_dataset(
+        tmp_path / "autoregressive_target.nc", decode_timedelta=False
+    )
+    # data writers do not include initial condition
+    assert len(prediction_ds["time"]) == n_forward_steps
+    assert not np.any(np.isnan(prediction_ds["var"].values))
+
+    gen = prediction_ds["var"]
+    tar = target_ds["var"]
+    gen_time_mean = torch.from_numpy(gen.mean(dim="time").values)
+    tar_time_mean = torch.from_numpy(tar.mean(dim="time").values)
+    area_weights = metrics.spherical_area_weights(
+        tar["lat"].values, num_lon=len(tar["lon"])
+    )
+    # check time mean metrics
+    tol = 1e-2  # relative tolerance
+    assert metrics.root_mean_squared_error(
+        tar_time_mean, gen_time_mean, area_weights
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
+    )
+    assert metrics.weighted_mean_bias(
+        tar_time_mean, gen_time_mean, area_weights
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
+    )
+
+    prediction_ds = prediction_ds.isel(sample=0)
+    target_ds = target_ds.isel(sample=0)
+    ds = xr.open_dataset(data.data_filename, decode_timedelta=False)
+
+    for i in range(0, n_forward_steps):
+        # metrics logs includes IC while saved data does not
+        log = inference_logs[i + n_ic_timesteps]
+        # metric steps should match lead times
+        assert log["inference/mean/forecast_step"] == i + n_ic_timesteps
+        gen_i = torch.from_numpy(gen.isel(time=i).values)
+        tar_i = torch.from_numpy(tar.isel(time=i).values)
+        # check that manually computed metrics match logged metrics
+        assert metrics.root_mean_squared_error(
+            tar_i, gen_i, area_weights, dim=(0, -2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
+        assert metrics.weighted_mean_bias(
+            tar_i, gen_i, area_weights, dim=(0, -2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
+        assert metrics.gradient_magnitude_percent_diff(
+            tar_i, gen_i, area_weights, dim=(0, -2, -1)
+        ).item() == pytest.approx(
+            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
+        )
+        assert metrics.weighted_mean(
+            gen_i, area_weights, dim=(0, -2, -1)
+        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
+
+        # the target obs should be the same as the validation data obs
+        # ds is original data which includes IC, target_ds does not
+        np.testing.assert_allclose(
+            target_ds["var"].isel(time=i).values,
+            ds["var"].isel(time=i + 1).values,
+        )
+
+        # Summary logs comes at the last step
+        if i == n_forward_steps + 1:
+            assert not torch.isnan(log["inference/ensemble_step_20/crps/var"])
+            assert not torch.isnan(log["inference/ensemble_step_20/ssr_bias/var"])
+            assert not torch.isnan(
+                log["inference/ensemble_step_20/ensemble_mean_rmse/var"]
+            )
+
+        if i > 0:
+            lead_da = prediction_ds["var"].isel(time=i)
+            # predictions should be previous condition + 1
+            np.testing.assert_allclose(
+                lead_da.values,
+                prediction_ds["var"].isel(time=i - 1).values + 1,
+            )
+            # prediction and target should not have entirely the same values at
+            # any lead > 0
+            assert not np.allclose(
+                lead_da.values,
+                target_ds["var"].isel(time=i).values,
+            )
 
 
 @pytest.mark.parametrize(
@@ -1402,10 +1613,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
             log_to_wandb=True,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_video=False,
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -1441,3 +1649,64 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
         ), f"Inference metrics should still be present"
 
     assert os.path.isdir(tmp_path / "validation")
+
+
+def save_stepper_with_ema(
+    path: pathlib.Path,
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    """Save a stepper checkpoint with EMA weights, as in a training ckpt.tar.
+
+    Returns:
+        The saved stepper weights and EMA weights.
+    """
+    names = ["a"]
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ScaledIdentity()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=trivial_network_and_loss_normalization(names),
+                )
+            ),
+        ),
+    )
+    stepper = config.get_stepper(dataset_info=get_dataset_info())
+    return save_checkpoint_with_ema(stepper, path)
+
+
+@pytest.mark.parametrize(
+    "use_ema_if_available, expect_ema",
+    [(None, True), (True, True), (False, False)],
+    ids=["default", "enabled", "disabled"],
+)
+def test_inference_evaluator_config_load_stepper_uses_ema_weights(
+    tmp_path: pathlib.Path, use_ema_if_available: bool | None, expect_ema: bool
+):
+    checkpoint_path = tmp_path / "ckpt.tar"
+    stepper_weights, ema_weights = save_stepper_with_ema(checkpoint_path)
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=1,
+        forward_steps_in_memory=1,
+        checkpoint_path=str(checkpoint_path),
+        logging=LoggingConfig(),
+        loader=InferenceDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path="unused"),
+            start_indices=InferenceInitialConditionIndices(
+                n_initial_conditions=1, first=0, interval=1
+            ),
+        ),
+    )
+    if use_ema_if_available is not None:
+        config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
+
+    stepper = config.load_stepper()
+
+    assert_parameters_equal(
+        stepper.modules, ema_weights if expect_ema else stepper_weights
+    )

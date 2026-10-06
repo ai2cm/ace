@@ -18,17 +18,21 @@ def test_rotate_modifier_all_rotation():
     )
     n_lat = 8
     n_lon = 16
+    data_mask = {"PS": torch.tensor([True])}
     batch = BatchData.new_for_testing(
         names=["UGRD", "VGRD", "PS"],
         n_samples=1,
         n_timesteps=2,
         img_shape=(n_lat, n_lon),
+        data_mask=data_mask,
     )
     rotated_batch = rotate_modifier(batch)
     assert rotated_batch.data["UGRD"].shape == (1, 2, n_lat, n_lon)
     assert torch.allclose(rotate(rotated_batch.data["UGRD"]), -1 * batch.data["UGRD"])
     assert torch.allclose(rotate(rotated_batch.data["VGRD"]), -1 * batch.data["VGRD"])
     assert torch.allclose(rotate(rotated_batch.data["PS"]), batch.data["PS"])
+    assert rotated_batch.data_mask is not None
+    torch.testing.assert_close(rotated_batch.data_mask["PS"], data_mask["PS"])
 
 
 def test_rotate_modifier_no_rotation():

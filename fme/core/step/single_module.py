@@ -1,15 +1,16 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
-import dacite
 import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -21,16 +22,64 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import (
+    GlobalMeanRemoval,
+    GlobalMeanRemovalConfigUnion,
+    GlobalMeanRemovalState,
+    NoGlobalMeanRemoval,
+    extra_channel_source_field,
+)
+from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.var_masking import VariableMasking, VariableMaskingConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
+
+
+@dataclasses.dataclass
+class ResidualPredictionConfig:
+    """
+    Configuration for predicting prognostics as tendencies rather than states.
+
+    Parameters:
+        names: Prognostic names to step as residuals, the rest predicted
+            full-field. Each must be in both ``in_names`` and ``out_names``.
+            Default (None) steps every prognostic as a residual. Naming a
+            subset also narrows tendency-std loss scaling to that subset: the
+            remaining prognostics are scored in full-field-std units, where
+            before they would have used the ``normalization.residual`` stats.
+        normalized: Treat the network's residual outputs as tendencies in
+            ``normalization.residual`` units rather than full-field-normalized
+            units, so a unit output is one standard deviation of the per-step
+            tendency. Requires a ``normalization.residual`` block, which
+            cannot be combined with ``normalization.loss``, so enabling this
+            also commits the loss to the tendency convention.
+    """
+
+    names: list[str] | None = None
+    normalized: bool = False
+
+    def validate_names(self, prognostic_names: Collection[str]) -> None:
+        if self.names is not None and len(self.names) == 0:
+            raise ValueError(
+                "residual_prediction.names must not be empty; use names: null "
+                "to step every prognostic as a residual, or residual_prediction:"
+                " null to disable residual prediction"
+            )
+        for name in self.names or []:
+            if name not in prognostic_names:
+                raise ValueError(
+                    f"residual_prediction name '{name}' is not prognostic; "
+                    f"prognostic names are {sorted(prognostic_names)}"
+                )
 
 
 @StepSelector.register("single_module")
@@ -52,7 +101,28 @@ class SingleModuleStepConfig(StepConfigABC):
         next_step_forcing_names: Names of forcing variables for the next timestep.
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
-        residual_prediction: Whether to use residual prediction.
+        residual_prediction: When set, predict prognostics as tendencies
+            added to the input rather than as states. See
+            ``ResidualPredictionConfig`` for the per-variable and normalization
+            options. A bool is also accepted: True steps every prognostic
+            as a residual, False disables residual prediction.
+        include_channel_mask_inputs: Whether to append per-variable mask indicator
+            channels to the network input. When True, the network receives
+            ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
+            masked) after the regular input channels, doubling the total input
+            channel count.
+        global_mean_removal: Optional configuration for removing global means
+            from fields before normalization and restoring them after
+            denormalization. Supports shared (single reference field) or
+            per-channel removal, with optional extra input channels.
+        input_dropout: Optional training-time input channel dropout. When set,
+            a random subset of input channels is zeroed on each optimized
+            training step, with the same mask broadcast across the whole
+            batch. Applied only when gradients are enabled, so non-optimized
+            rollout steps (e.g. all but the last under
+            ``optimize_last_step_only``, or the trailing steps under
+            ``evaluate_all_steps``) run unmasked, as does inference
+            (eval mode).
     """
 
     builder: ModuleSelector
@@ -66,10 +136,44 @@ class SingleModuleStepConfig(StepConfigABC):
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
-    residual_prediction: bool = False
+    residual_prediction: ResidualPredictionConfig | bool | None = None
+    include_channel_mask_inputs: bool = False
+    global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+    input_dropout: VariableMaskingConfig | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        residual_prediction = self.residual_prediction
+        if isinstance(residual_prediction, bool):
+            # bool spelling: True = every prognostic, False = disabled
+            residual_prediction = (
+                ResidualPredictionConfig() if residual_prediction else None
+            )
+        self._residual_prediction_config: ResidualPredictionConfig | None = (
+            residual_prediction
+        )
+        if self._residual_prediction_config is not None:
+            self._residual_prediction_config.validate_names(self.prognostic_names)
+            if self._residual_prediction_config.normalized:
+                # Report the loss conflict directly. Otherwise the user is told
+                # to add a residual block, then told it conflicts with the loss
+                # block, with neither message naming the option behind it.
+                if self.normalization.loss is not None:
+                    raise ValueError(
+                        "residual_prediction.normalized requires a "
+                        "normalization.residual block, which cannot be combined "
+                        "with normalization.loss; remove normalization.loss to "
+                        "use it. The loss then follows the prediction "
+                        "convention, scoring residual names in tendency-std "
+                        "units."
+                    )
+                if self.normalization.residual is None:
+                    raise ValueError(
+                        "residual_prediction.normalized requires a "
+                        "normalization.residual block"
+                    )
+        if self.global_mean_removal is not None:
+            self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -112,65 +216,84 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_names = []
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
+        # Residual names are scored in tendency-std units, the rest in
+        # full-field-std units, matching how each is predicted.
         return self.normalization.get_loss_normalizer(
-            names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            names=sorted(self._normalize_names) + extra_names,
+            residual_scaled_names=sorted(self.residual_names)
+            + extra_residual_scaled_names,
         )
 
     @classmethod
-    def from_state(cls, state) -> "SingleModuleStepConfig":
-        state = cls._remove_deprecated_keys(state)
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        state_copy = dict(state)
+        if "crps_training" in state_copy:
+            del state_copy["crps_training"]
+        return state_copy
 
     @property
-    def _normalize_names(self):
+    def residual_names(self) -> frozenset[str]:
+        """Names carrying the residual convention; the rest are full-field.
+
+        Every prognostic unless a subset is named. Note this is independent of
+        whether residual prediction is enabled: a config may set a
+        normalization.residual block purely to scale the loss, which has
+        always applied to all prognostics.
+        """
+        config = self._residual_prediction_config
+        if config is None or config.names is None:
+            return self.prognostic_names
+        return frozenset(config.names)
+
+    @property
+    def _normalize_names(self) -> frozenset[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.output_names))
+        return frozenset(set(self.in_names).union(self.output_names))
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
         if self.ocean is None:
-            return self.in_names
+            return frozenset(self.in_names)
         else:
-            return list(set(self.in_names).union(self.ocean.forcing_names))
+            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> list[str]:
+    def diagnostic_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
-        return list(set(self.output_names).difference(self.in_names))
+        return frozenset(set(self.output_names).difference(self.in_names))
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         secondary_names = (
             self.secondary_decoder.secondary_diagnostic_names
             if self.secondary_decoder is not None
             else []
         )
-        return list(set(self.out_names).union(secondary_names))
+        return frozenset(set(self.out_names).union(secondary_names))
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        result = set(input_only_names)
+        result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
-        result = result.union(self.prescribed_prognostic_names)
-        return list(result)
+        return frozenset(result.union(self.prescribed_prognostic_names))
 
     @property
     def loss_names(self) -> list[str]:
-        return self.output_names
+        return sorted(self.output_names)
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self.builder.allow_missing_variables
 
     def replace_ocean(self, ocean: OceanConfig | None):
         """
@@ -194,12 +317,11 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
-    @classmethod
-    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
-        state_copy = state.copy()
-        if "crps_training" in state_copy:
-            del state_copy["crps_training"]
-        return state_copy
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
 
     def get_step(
         self,
@@ -208,7 +330,9 @@ class SingleModuleStepConfig(StepConfigABC):
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
-        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        normalizer = self.normalization.get_network_normalizer(
+            sorted(self._normalize_names)
+        )
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
@@ -247,11 +371,54 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
+        if config.global_mean_removal is not None:
+            self._global_mean_removal: GlobalMeanRemoval = (
+                config.global_mean_removal.build(
+                    normalizer=normalizer, in_names=config.in_names
+                )
+            )
+        else:
+            self._global_mean_removal = NoGlobalMeanRemoval()
+        # Synthetic GMR channels are packed alongside real inputs so they
+        # flow through the packer and channel-mask machinery uniformly.
+        packed_in_names = (
+            list(config.in_names) + self._global_mean_removal.extra_channel_names
+        )
+        # Build the runtime masking object once; build raises loud on a typo'd
+        # group variable name (packed_in_names is the full maskable set: inputs
+        # plus GMR extra sentinels).
+        self._input_masking: VariableMasking | None = (
+            config.input_dropout.build(packed_in_names)
+            if config.input_dropout is not None
+            else None
+        )
+        n_in_channels = len(packed_in_names)
+        if config.include_channel_mask_inputs:
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
+        self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
+        residual_prediction = config._residual_prediction_config
+        if residual_prediction is None:
+            self._residual_names: frozenset[str] | None = None
+        else:
+            self._residual_names = config.residual_names
+        if residual_prediction is not None and residual_prediction.normalized:
+            assert config.normalization.residual is not None
+            residual_normalizer = config.normalization.residual.build(
+                names=sorted(config.residual_names)
+            )
+            # Scale residual outputs by residual_std / field_std in normalized
+            # space, so a unit network output is one tendency std. Scale only:
+            # the stats convention pairs full-field centering with tendency
+            # stds, so a mean tendency is learned through the network output.
+            self._residual_transform: TensorDict | None = {
+                name: residual_normalizer.stds[name] / normalizer.stds[name]
+                for name in config.residual_names
+            }
+        else:
+            self._residual_transform = None
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, dataset_info.timestep
@@ -268,9 +435,13 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
 
         if config.secondary_decoder is not None:
+            secondary_decoder_n_in = n_out_channels
+            if config.secondary_decoder.include_input_step:
+                secondary_decoder_n_in += n_in_channels
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
-                    n_in_channels=n_out_channels,
+                    n_in_channels=secondary_decoder_n_in,
+                    dataset_info=dataset_info,
                 ).to(get_device())
             )
         else:
@@ -336,27 +507,46 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
+    ) -> StepOutput:
+        input_dropout_mask = self._draw_input_dropout_mask()
 
         def network_call(input_norm: TensorDict) -> TensorDict:
+            if args.data_mask is not None:
+                input_norm = _apply_input_mask(input_norm, args.data_mask)
+            if input_dropout_mask is not None:
+                input_norm = _apply_input_mask(input_norm, input_dropout_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            # Fail loud if a NaN survives masking/normalization to the network
+            # input (cf. PR #1262). Gated on grad-enabled so the no_grad
+            # inference/eval rollout hot path pays no device-sync cost.
+            if torch.is_grad_enabled() and torch.isnan(input_tensor).any():
+                _raise_input_nan_error(input_norm)
+            if self._config.include_channel_mask_inputs:
+                mask_dict = _build_channel_mask_dict(
+                    self.in_packer.names,
+                    args.data_mask,
+                    input_tensor,
+                    input_dropout_mask,
+                )
+                mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
+                input_tensor = torch.cat(
+                    [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
+                )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_input = output_tensor.detach()
+            if (
+                self._config.secondary_decoder is not None
+                and self._config.secondary_decoder.include_input_step
+            ):
+                secondary_input = torch.cat(
+                    [secondary_input, input_tensor.detach()], dim=self.CHANNEL_DIM
+                )
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                secondary_input
             )
             output_dict.update(secondary_output_dict)
             return output_dict
@@ -368,23 +558,63 @@ class SingleModuleStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            residual_names=self._residual_names,
+            residual_transform=self._residual_transform,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            global_mean_removal=self._global_mean_removal,
+            data_mask=args.data_mask,
+            stepper_state=args.stepper_state,
         )
+
+    def _draw_input_dropout_mask(self) -> TensorMapping | None:
+        """Draw a fresh input-dropout mask for this forward step.
+
+        Each ``step`` samples independently; the mask has no lifetime beyond
+        the call. Returns ``None`` (no dropout) when input dropout is
+        unconfigured or the module is in eval mode, so inference and
+        validation batches stay inert. Also returns ``None`` when gradients
+        are disabled: the training loops run non-optimized rollout steps
+        under ``torch.no_grad()``, and those steps only exist to produce the
+        trajectory fed to the optimized step, so masking them would perturb
+        that trajectory in a way inference never sees.
+        """
+        if self._input_masking is None:
+            return None
+        if not self.module.torch_module.training:
+            return None
+        if not torch.is_grad_enabled():
+            return None
+        names = self.in_packer.names
+        mask = self._input_masking.sample_mask(get_device())
+        # Broadcast so spatial-group tiles agree; no-op for non-distributed
+        mask = Distributed.get_instance().broadcast_spatial(mask)
+        # Emit only dropped channels; absent key means present, skips a no-op where.
+        present = mask[0].tolist()
+        return {name: mask[:, i] for i, name in enumerate(names) if not present[i]}
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
+
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
 
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        state = {
+        state: dict[str, Any] = {
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -401,6 +631,89 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        self._corrector.load_state(state.get("corrector", {}))
+
+
+def _raise_input_nan_error(input_norm: TensorMapping) -> None:
+    """Raise a located error naming the input variable(s) that still hold NaN.
+
+    Called only once the cheap packed-tensor NaN check has fired, so the
+    per-variable scan here is off the hot path.
+    """
+    nan_names = sorted(k for k, v in input_norm.items() if torch.isnan(v).any())
+    raise ValueError(
+        "NaN found in network input for variable(s) "
+        f"{nan_names} after input masking and normalization. An input/forcing "
+        "variable likely contains NaN that is not covered by data_mask; ensure "
+        "the data_mask passed to the stepper includes every input variable that "
+        "may be masked (cf. PR #1262), or enable fill_nans_on_normalize."
+    )
+
+
+def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
+    """Zero out masked input variables in normalized space.
+
+    For each variable in data_mask with False entries, sets those batch
+    members' values to 0 in the normalized input. This is equivalent to
+    replacing with the climatological mean in physical space.
+    """
+    result = dict(input_norm)
+    for name, mask in data_mask.items():
+        if name in result:
+            # mask shape: [batch], data shape: [batch, ...spatial...]
+            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
+            result[name] = torch.where(broadcast_mask, result[name], 0.0)
+    return result
+
+
+def _build_channel_mask_dict(
+    in_names: list[str],
+    data_mask: TensorMapping | None,
+    packed_input: torch.Tensor,
+    input_dropout_mask: TensorMapping | None = None,
+) -> TensorDict:
+    """Build a dict of per-variable spatial mask tensors.
+
+    Returns a ``TensorDict`` keyed by variable name, with each value a
+    ``(batch, *spatial)`` float tensor (1.0 = present, 0.0 = masked).
+    The caller is responsible for packing this dict into the correct
+    channel order.
+
+    The indicator value is the AND-combined presence of the real
+    ``data_mask`` (genuinely-absent variables) and the synthetic
+    ``input_dropout_mask``: a channel is present only if it is both really
+    present and not synthetically dropped.
+
+    Args:
+        in_names: Packed input channel names (incl. GMR extra sentinels).
+        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
+        packed_input: The packed input tensor, used to infer shape and device.
+        input_dropout_mask: Per-channel synthetic dropout presence masks
+            (broadcast over batch) keyed by packed channel name, or None.
+    """
+    batch = packed_input.shape[0]
+    spatial = packed_input.shape[-2:]
+    device = packed_input.device
+    result: TensorDict = {}
+    for name in in_names:
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask channel must agree rather than default to 1.
+        source = extra_channel_source_field(name)
+        lookup_name = source if source is not None else name
+        if data_mask is not None and lookup_name in data_mask:
+            real = data_mask[lookup_name].to(device=device).bool()
+        else:
+            real = torch.ones(batch, device=device, dtype=torch.bool)
+        # Synthetic dropout is keyed by the packed channel name itself
+        if input_dropout_mask is not None and name in input_dropout_mask:
+            synthetic = input_dropout_mask[name].to(device=device).bool()
+            combined = real & synthetic
+        else:
+            combined = real
+        mask_1d = combined.to(dtype=torch.float)
+        result[name] = mask_1d.view(-1, 1, 1).expand(batch, *spatial)
+    return result
 
 
 def step_with_adjustments(
@@ -408,12 +721,15 @@ def step_with_adjustments(
     next_step_input_data: TensorMapping,
     network_calls: Callable[[TensorDict], TensorDict],
     normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
+    corrector: CorrectorABC | None,
     ocean: Ocean | None,
-    residual_prediction: bool,
-    prognostic_names: list[str],
+    residual_names: Collection[str] | None = None,
+    residual_transform: TensorMapping | None = None,
     prescribed_prognostic_names: list[str] | None = None,
-) -> TensorDict:
+    global_mean_removal: GlobalMeanRemoval | None = None,
+    data_mask: TensorMapping | None = None,
+    stepper_state: StepperState | None = None,
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -430,23 +746,101 @@ def step_with_adjustments(
         normalizer: The normalizer to use.
         corrector: The corrector to use at the end of each step.
         ocean: The ocean model to use.
-        residual_prediction: Whether to use residual prediction.
-        prognostic_names: Names of prognostic variables.
+        residual_names: Names stepped as residuals (network output added to the
+            input in normalized space); the rest are full-field. None disables
+            residual prediction.
+        residual_transform: Optional per-name scale applied to residual outputs
+            in normalized space, so a unit network output is one tendency
+            standard deviation. Scale only; means are never applied. Must cover
+            every name in ``residual_names``.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
+        global_mean_removal: Optional transform that removes per-sample
+            global means before normalization and restores them after
+            denormalization. When provided, ``forward_transform`` is called
+            before the normalizer and ``inverse_transform`` after
+            denormalization but before the corrector/ocean/prescribed steps,
+            so those adjustments operate in physical space.
+        data_mask: Per-variable boolean masks passed to
+            ``global_mean_removal.forward_transform``.
+        stepper_state: Per-sample state carried across step calls. The
+            corrector's slice (``stepper_state.corrector_state``) is passed to
+            the corrector and any updates are written back into the returned
+            ``StepperState``; the other fields (e.g. ``random_state``) pass
+            through unchanged. Pass-through unchanged when no corrector is set.
 
     Returns:
-        The denormalized output data at the next time step.
+        A ``StepOutput`` carrying the denormalized data at the next time step,
+        the updated per-sample state, and the corrector's per-variable
+        correction diagnostics.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
-    input_norm = normalizer.normalize(input)
+    gmr_state: GlobalMeanRemovalState | None = None
+    if global_mean_removal is not None:
+        network_input, gmr_state = global_mean_removal.forward_transform(
+            input, data_mask
+        )
+        input_norm = normalizer.normalize(network_input)
+        # Synthetic GMR channels are produced in normalized space; merge
+        # them in after normalization so the network sees a single uniform
+        # input dict.
+        input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
+    else:
+        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
-    if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
+    if residual_names is not None:
+        if residual_transform is not None:
+            output_norm = dict(output_norm)
+            for name in residual_names:
+                # Indexing is deliberately strict on both dicts: a residual
+                # name the network did not produce, or a missing scale, is an
+                # invariant violation better surfaced than silently stepped
+                # full-field under the tendency convention.
+                output_norm[name] = output_norm[name] * residual_transform[name]
+        output_norm = add_names(input_norm, output_norm, residual_names)
     output = normalizer.denormalize(output_norm)
+    if global_mean_removal is not None:
+        assert gmr_state is not None
+        output = global_mean_removal.inverse_transform(output, gmr_state)
+    diagnostics = CorrectorDiagnostics()
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        corrector_state: CorrectorState | None = (
+            stepper_state.corrector_state if stepper_state is not None else None
+        )
+        result = corrector(input, output, next_step_input_data, corrector_state)
+        output = result.corrected
+        # The deltas stay on the autograd graph so a training loss can
+        # differentiate through the correction.
+        diagnostics = result.diagnostics
+        if result.corrector_state is not None:
+            # Preserve the incoming state's other fields (e.g. random_state)
+            # rather than rebuilding from scratch, so StepperState stays
+            # coherent across step calls.
+            stepper_state = (
+                StepperState(corrector_state=result.corrector_state)
+                if stepper_state is None
+                else dataclasses.replace(
+                    stepper_state, corrector_state=result.corrector_state
+                )
+            )
+
+    # The ocean surface temperature prescription runs after the corrector and is
+    # excluded from the diagnostics. Its written name must stay disjoint from the
+    # corrector's modified names, or ``delta = output - input_snapshot`` would no
+    # longer be exact for an overlapping variable. A prescribed prognostic
+    # overwrite is exempt from this guard: it is an intentional "use the given
+    # value regardless of what the network or corrector produced" operation, and
+    # the corrector's delta for the overwritten variable is dropped below so the
+    # reported delta stays exact for every variable it still contains.
+    if ocean is not None:
+        overlap = {ocean.surface_temperature_name} & set(diagnostics.delta)
+        if overlap:
+            raise ValueError(
+                "post-corrector adjustment names overlap the corrector's modified "
+                f"names: {sorted(overlap)}"
+            )
+
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -456,4 +850,20 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    # A prescribed overwrite replaces the output with the prescribed value, so the
+    # corrector's delta for that variable no longer describes the returned output.
+    # Drop prescribed names from the reported delta (a no-op for names the
+    # corrector never modified).
+    if prescribed_prognostic_names:
+        diagnostics = CorrectorDiagnostics(
+            delta={
+                name: value
+                for name, value in diagnostics.delta.items()
+                if name not in prescribed_prognostic_names
+            }
+        )
+    return StepOutput(
+        output=output,
+        stepper_state=stepper_state,
+        corrector_diagnostics=diagnostics,
+    )

@@ -1,0 +1,12 @@
+coupled_config_path: configs/E3SMv3-piControl-100yr-coupled.yaml
+coupled_ocean_zarr: /climate-default/2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+coupled_atmosphere_zarr: /climate-default/2026-06-02-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
+original_ocean_zarr: /climate-default/2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+original_atmosphere_zarr: /climate-default/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+time:
+  timestamp:
+    - "0520-01-03T12:00:00"
+    - "0521-01-03T12:00:00"
+    - "0522-01-03T12:00:00"
+output_directory: /climate-default/home/elynn/fme-dataset/v20260602-E3SMv3-piControl-105yr-coupled-IC
+output_prefix: "0520-0522-01-03"

@@ -5,8 +5,9 @@ from typing import TypeVar
 
 import torch
 
+from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
-from fme.core.generics.aggregator import AggregatorABC
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization
@@ -28,10 +29,11 @@ def run_validation_loop(
     validate_using_ema: bool = False,
     compute_derived_variables: bool = True,
     log_progress: bool = False,
+    evaluate_all_steps: bool = True,
 ) -> None:
     """Run the core validation loop: iterate batches and record to aggregator.
 
-    This is the minimal validation loop. It does NOT call `aggregator.get_logs`,
+    This is the minimal validation loop. It does NOT call `aggregator.get_summary`,
     `aggregator.flush_diagnostics`, or log to WandB — callers are responsible
     for those.
 
@@ -43,9 +45,13 @@ def run_validation_loop(
         validate_using_ema: Whether to use EMA parameters during validation.
         compute_derived_variables: Whether to compute derived variables.
         log_progress: Whether to log per-batch progress messages.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
     """
     timer = GlobalTimer.get_instance()
     stepper.set_eval()
+    stepper.seed_eval(seed=0)
     ema_context: contextlib.AbstractContextManager = (
         ema.applied_params(stepper.modules)
         if validate_using_ema and ema is not None
@@ -53,14 +59,17 @@ def run_validation_loop(
     )
     no_opt = NullOptimization()
     n_batches = len(valid_data.loader)
+    dist = Distributed.get_instance()
     with torch.no_grad(), ema_context:
         for i, batch in enumerate(valid_data.loader):
+            dist.park_if_terminating()
             if log_progress:
                 logging.info(f"Validation: processing batch {i + 1} of {n_batches}.")
             stepped = stepper.train_on_batch(
                 batch,
                 optimization=no_opt,
                 compute_derived_variables=compute_derived_variables,
+                evaluate_all_steps=evaluate_all_steps,
             )
             with timer.context("aggregator"):
                 aggregator.record_batch(batch=stepped)
@@ -88,7 +97,8 @@ def run_validation(
     ema: EMATracker | None = None,
     validate_using_ema: bool = False,
     log_progress: bool = False,
-) -> dict[str, float]:
+    evaluate_all_steps: bool = True,
+) -> AggregatorSummary:
     """Run validation loop for a train stepper and validation dataset.
 
     High-level wrapper around `run_validation_loop` that also flushes
@@ -105,9 +115,12 @@ def run_validation(
         ema: The EMA tracker, or None if EMA is not used.
         validate_using_ema: Whether to use EMA parameters during validation.
         log_progress: Whether to log per-batch progress messages.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
 
     Returns:
-        Dictionary of validation metrics (keys prefixed by the label).
+        Summary containing validation metrics and the loss scalar.
     """
     if record_logs is None:
         record_logs = _get_record_to_wandb()
@@ -124,18 +137,19 @@ def run_validation(
         validate_using_ema=validate_using_ema,
         compute_derived_variables=compute_derived_variables,
         log_progress=log_progress,
+        evaluate_all_steps=evaluate_all_steps,
     )
 
     logging.info("Flushing validation diagnostics")
     with timer.context("flush_diagnostics"):
         aggregator.flush_diagnostics(subdir=diagnostics_subdir)
 
-    logging.info("Getting validation aggregator logs")
+    logging.info("Getting validation aggregator summary")
     with timer.context("aggregator"):
-        val_logs = aggregator.get_logs(label=label)
+        summary = aggregator.get_summary(label=label)
 
     with timer.context("wandb_logging"):
-        record_logs(val_logs)
+        record_logs(summary.logs)
 
     logging.info("Validation complete")
-    return val_logs
+    return summary

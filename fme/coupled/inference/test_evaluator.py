@@ -3,16 +3,30 @@ import inspect
 import os
 import pathlib
 import shutil
+from collections.abc import Callable
+from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import torch
 import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
+from fme.ace.stepper import StepperOverrideConfig
+from fme.ace.stepper import load_stepper as load_single_stepper
+from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.corrector import CorrectorSelector
+from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
+from fme.core.testing.ema import (
+    ScaledIdentity,
+    assert_parameters_equal,
+    save_checkpoint_with_ema,
+)
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -28,16 +42,31 @@ from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
     StandaloneComponentCheckpointsConfig,
     StandaloneComponentConfig,
+    apply_coupled_stepper_config_inference_overrides,
+    load_stepper,
+    load_stepper_config,
     main,
 )
-from fme.coupled.stepper import CoupledStepperConfig
-from fme.coupled.test_stepper import CoupledDatasetInfoBuilder, get_stepper_config
+from fme.coupled.stepper import (
+    CoupledStepper,
+    CoupledStepperConfig,
+    load_coupled_stepper,
+)
+from fme.coupled.test_stepper import (
+    AddOneWithNoise,
+    CoupledDatasetInfoBuilder,
+    get_stepper_config,
+)
 
 DIR = pathlib.Path(__file__).parent
 
 
 def test_standalone_checkpoints_config_init_args():
-    ignore_args = ["parameter_init"]
+    ignore_args = [
+        "parameter_init",
+        "ocean_stepper_override",
+        "atmosphere_stepper_override",
+    ]
     stepper_config_init_args = set(
         inspect.signature(CoupledStepperConfig.__init__).parameters.keys()
     ).difference(ignore_args)
@@ -45,11 +74,53 @@ def test_standalone_checkpoints_config_init_args():
         inspect.signature(
             StandaloneComponentCheckpointsConfig.__init__
         ).parameters.keys()
-    )
+    ).difference(ignore_args)
     assert init_args == stepper_config_init_args, (
         "StandaloneComponentCheckpointsConfig should have the same init args as "
         "CoupledStepperConfig. Were new args added?"
     )
+
+
+def test_load_stepper_config_ocean_prescribed_override_updates_forcing_window(
+    tmp_path: pathlib.Path,
+):
+    """
+    Coupled ckpt without prescribed names + override refreshes ocean forcing window.
+    """
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_fraction", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    stepper_data_dir = tmp_path / "stepper_data"
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=2,
+        n_initial_conditions=1,
+        data_dir=stepper_data_dir,
+    )
+    ckpt = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_fraction",
+    )
+    assert isinstance(ckpt, str)
+
+    cfg_default = load_stepper_config(ckpt)
+    assert "thetao_18" not in cfg_default.ocean_forcing_window_names
+
+    override = StepperOverrideConfig(prescribed_prognostic_names=["thetao_18"])
+    cfg_override = load_stepper_config(ckpt, ocean_stepper_override=override)
+    assert "thetao_18" in cfg_override.ocean_forcing_window_names
+    ocean_reqs = cfg_override.get_forcing_window_data_requirements(1).ocean_requirements
+    assert "thetao_18" in ocean_reqs.names
 
 
 def save_coupled_stepper(
@@ -65,6 +136,8 @@ def save_coupled_stepper(
     save_standalone_component_checkpoints: bool = False,
     ocean_timedelta: str = "2D",
     atmosphere_timedelta: str = "1D",
+    ocean_builder: ModuleSelector | None = None,
+    atmosphere_builder: ModuleSelector | None = None,
 ) -> str | StandaloneComponentCheckpointsConfig:
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
@@ -76,6 +149,8 @@ def save_coupled_stepper(
         ocean_fraction_name=ocean_fraction_name,
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        ocean_builder=ocean_builder,
+        atmosphere_builder=atmosphere_builder,
     )
     if save_standalone_component_checkpoints:
         ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
@@ -290,15 +365,13 @@ def _create_dataset_info_for_stepper(
         hcoord=mock_data.hcoord,
         ocean_timestep=mock_data.ocean.timestep,
         atmos_timestep=mock_data.atmosphere.timestep,
-        ocean_mask_provider=mock_data.ocean.mask_provider,
-        atmos_mask_provider=mock_data.atmosphere.mask_provider,
+        ocean_spatial_mask_provider=mock_data.ocean.spatial_mask_provider,
+        atmos_spatial_mask_provider=mock_data.atmosphere.spatial_mask_provider,
     ).dataset_info
     return dataset_info, mock_data
 
 
 def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
-    from unittest.mock import MagicMock
-
     with pytest.raises(
         ValueError,
         match="n_coupled_steps must be divisible by coupled_steps_in_memory",
@@ -314,6 +387,99 @@ def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
 
 
 @pytest.mark.parametrize(
+    "override",
+    [
+        StepperOverrideConfig(ocean=None),
+        StepperOverrideConfig(derived_forcings=DerivedForcingsConfig()),
+    ],
+)
+def test_apply_coupled_overrides_rejects_non_prescribed_override(override):
+    config = get_stepper_config(
+        ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["exog", "ocean_frac", "sfc_temp"],
+        atmosphere_out_names=["a_diag", "sfc_temp"],
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+    )
+    with pytest.raises(ValueError, match="only support prescribed_prognostic_names"):
+        apply_coupled_stepper_config_inference_overrides(
+            config, ocean_override=override, atmosphere_override=None
+        )
+
+
+def test_apply_coupled_overrides_accepts_corrector():
+    config = get_stepper_config(
+        ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["exog", "ocean_frac", "sfc_temp"],
+        atmosphere_out_names=["a_diag", "sfc_temp"],
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["sfc_temp"]
+        ),
+    )
+    atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
+    assert atmosphere_corrector["force_positive_names"] == ["sfc_temp"]
+    ocean_forcing_names_before = set(config.ocean_forcing_window_names)
+
+    apply_coupled_stepper_config_inference_overrides(
+        config,
+        ocean_override=None,
+        atmosphere_override=StepperOverrideConfig(
+            corrector=CorrectorSelector(type="atmosphere_corrector", config={})
+        ),
+    )
+    atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
+    assert atmosphere_corrector == {
+        "type": "atmosphere_corrector",
+        "config": {},
+        "corrector_disabled_epochs": 0,
+    }
+    assert set(config.ocean_forcing_window_names) == ocean_forcing_names_before
+
+
+def test_apply_coupled_overrides_rejects_ocean_supplied_prescribed_collision():
+    """An override prescribing an atmosphere name the ocean supplies must fail
+    when the override is applied, not at the first coupled step."""
+    config = get_stepper_config(
+        ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["exog", "ocean_frac", "sfc_temp"],
+        atmosphere_out_names=["a_diag", "sfc_temp"],
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+    )
+    override = StepperOverrideConfig(prescribed_prognostic_names=["sfc_temp"])
+    with pytest.raises(ValueError, match="overlap ocean-supplied"):
+        apply_coupled_stepper_config_inference_overrides(
+            config, ocean_override=None, atmosphere_override=override
+        )
+
+
+def test_evaluator_rejects_top_level_override_with_standalone_checkpoint():
+    standalone = StandaloneComponentCheckpointsConfig(
+        ocean=StandaloneComponentConfig(timedelta="2D", path="ocean.pt"),
+        atmosphere=StandaloneComponentConfig(timedelta="1D", path="atmos.pt"),
+    )
+    with pytest.raises(ValueError, match="single coupled checkpoint"):
+        InferenceEvaluatorConfig(
+            experiment_dir="test",
+            n_coupled_steps=2,
+            checkpoint_path=standalone,
+            logging=MagicMock(),
+            loader=MagicMock(),
+            ocean_stepper_override=StepperOverrideConfig(
+                prescribed_prognostic_names=["thetao_18"]
+            ),
+        )
+
+
+@pytest.mark.parametrize(
     "n_coupled_steps,coupled_steps_in_memory,n_initial_conditions,"
     "save_standalone_component_checkpoints,use_prediction_data",
     [
@@ -323,6 +489,7 @@ def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
         (2, 1, 2, False, True),
     ],
 )
+@pytest.mark.medium_duration
 def test_evaluator_inference(
     tmp_path: pathlib.Path,
     n_coupled_steps: int,
@@ -330,11 +497,7 @@ def test_evaluator_inference(
     n_initial_conditions: int,
     save_standalone_component_checkpoints: bool,
     use_prediction_data: bool,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag", "thetao_0"]
     ocean_out_names = ["o_prog", "sst", "o_diag", "thetao_0"]
     atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
@@ -438,3 +601,237 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         mock_data=mock_data,
     )
+
+
+# names shared by the seeded-reproducibility helpers below
+_SEED_OCEAN_IN_NAMES = ["o_prog", "sst", "mask_0", "a_diag"]
+_SEED_OCEAN_OUT_NAMES = ["o_prog", "sst", "o_diag"]
+_SEED_ATMOS_IN_NAMES = ["a_prog", "surface_temperature", "ocean_fraction"]
+_SEED_ATMOS_OUT_NAMES = ["a_prog", "surface_temperature", "a_diag"]
+_SEED_N_COUPLED_STEPS = 2
+
+
+def _save_stochastic_coupled_stepper(
+    tmp_path: pathlib.Path,
+) -> tuple[str, MockCoupledData]:
+    """A coupled checkpoint whose atmosphere draws noise, and its mock data.
+
+    The noise is what makes the seed observable in the output. The ocean stays
+    deterministic, as in the coupled configurations run today.
+    """
+    dataset_info, mock_data = _create_dataset_info_for_stepper(
+        ocean_in_names=_SEED_OCEAN_IN_NAMES,
+        ocean_out_names=_SEED_OCEAN_OUT_NAMES,
+        atmos_in_names=_SEED_ATMOS_IN_NAMES,
+        atmos_out_names=_SEED_ATMOS_OUT_NAMES,
+        n_coupled_steps=_SEED_N_COUPLED_STEPS,
+        n_initial_conditions=1,
+        data_dir=tmp_path / "data",
+    )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=_SEED_OCEAN_IN_NAMES,
+        ocean_out_names=_SEED_OCEAN_OUT_NAMES,
+        atmos_in_names=_SEED_ATMOS_IN_NAMES,
+        atmos_out_names=_SEED_ATMOS_OUT_NAMES,
+        dataset_info=dataset_info,
+        ocean_timedelta=mock_data.ocean.timedelta,
+        atmosphere_timedelta=mock_data.atmosphere.timedelta,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": AddOneWithNoise()}
+        ),
+    )
+    assert isinstance(checkpoint_path, str)
+    return checkpoint_path, mock_data
+
+
+def _run_seeded_evaluator(
+    run_dir: pathlib.Path,
+    checkpoint_path: str,
+    mock_data: MockCoupledData,
+    seed: int | None,
+    coupled_steps_in_memory: int = 1,
+) -> np.ndarray:
+    """Run the coupled evaluator entrypoint, returning the atmosphere prognostic."""
+    run_dir.mkdir()
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(run_dir),
+        n_coupled_steps=_SEED_N_COUPLED_STEPS,
+        coupled_steps_in_memory=coupled_steps_in_memory,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=True
+        ),
+        loader=InferenceDataLoaderConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
+                ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
+                atmosphere=XarrayDataConfig(data_path=mock_data.atmosphere.data_dir),
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=1, interval=1
+            ),
+        ),
+        data_writer=CoupledDataWriterConfig(
+            ocean=DataWriterConfig(
+                save_prediction_files=False, save_monthly_files=False
+            ),
+            atmosphere=DataWriterConfig(
+                save_prediction_files=True, save_monthly_files=False
+            ),
+        ),
+        seed=seed,
+    )
+    config_filename = run_dir / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+    ds = xr.open_dataset(
+        run_dir / "atmosphere" / "autoregressive_predictions.nc",
+        decode_timedelta=False,
+    )
+    return ds["a_prog"].values
+
+
+@pytest.mark.slow
+def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
+    """A seeded run is reproducible end-to-end and independent of
+    ``coupled_steps_in_memory``, and a different seed gives a different answer
+    (confirming the noise is active, so the reproducibility is not vacuous).
+    """
+    checkpoint_path, mock_data = _save_stochastic_coupled_stepper(tmp_path)
+    seed0 = _run_seeded_evaluator(tmp_path / "s0", checkpoint_path, mock_data, 0)
+    seed0_again = _run_seeded_evaluator(
+        tmp_path / "s0_again", checkpoint_path, mock_data, 0
+    )
+    seed0_chunked = _run_seeded_evaluator(
+        tmp_path / "s0_chunked",
+        checkpoint_path,
+        mock_data,
+        0,
+        coupled_steps_in_memory=_SEED_N_COUPLED_STEPS,
+    )
+    seed1 = _run_seeded_evaluator(tmp_path / "s1", checkpoint_path, mock_data, 1)
+
+    np.testing.assert_array_equal(seed0, seed0_again)
+    np.testing.assert_array_equal(seed0, seed0_chunked)
+    assert not np.allclose(seed0, seed1)
+
+
+def save_coupled_stepper_with_ema(
+    tmp_path: pathlib.Path, standalone: bool
+) -> tuple[
+    str | StandaloneComponentCheckpointsConfig, Callable[[CoupledStepper, bool], None]
+]:
+    """Save coupled checkpoint(s) with EMA weights, as in a training ckpt.tar.
+
+    Args:
+        tmp_path: Directory to save to.
+        standalone: Whether to save two standalone component checkpoints
+            instead of one coupled checkpoint.
+
+    Returns:
+        The checkpoint path config, and a function asserting that a loaded
+        stepper holds the EMA weights (if its second argument is True) or the
+        stepper weights.
+    """
+    ocean_in_names = ["o_exog", "sst", "a_diag"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_fraction", "surface_temperature"]
+    atmos_out_names = ["a_diag", "surface_temperature"]
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=1,
+        n_initial_conditions=1,
+        data_dir=tmp_path / "stepper_data",
+    )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        save_standalone_component_checkpoints=standalone,
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": ScaledIdentity()}
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": ScaledIdentity()}
+        ),
+    )
+    if isinstance(checkpoint_path, StandaloneComponentCheckpointsConfig):
+        ocean_weights = save_checkpoint_with_ema(
+            load_single_stepper(checkpoint_path.ocean.path),
+            checkpoint_path.ocean.path,
+        )
+        atmosphere_weights = save_checkpoint_with_ema(
+            load_single_stepper(checkpoint_path.atmosphere.path),
+            checkpoint_path.atmosphere.path,
+        )
+
+        def check(stepper: CoupledStepper, expect_ema: bool):
+            assert_parameters_equal(
+                stepper.ocean.modules, ocean_weights[int(expect_ema)]
+            )
+            assert_parameters_equal(
+                stepper.atmosphere.modules, atmosphere_weights[int(expect_ema)]
+            )
+
+    else:
+        weights = save_checkpoint_with_ema(
+            load_stepper(checkpoint_path), checkpoint_path
+        )
+
+        def check(stepper: CoupledStepper, expect_ema: bool):
+            assert_parameters_equal(stepper.modules, weights[int(expect_ema)])
+
+    return checkpoint_path, check
+
+
+@pytest.mark.parametrize("standalone", [False, True])
+@pytest.mark.parametrize(
+    "use_ema_if_available, expect_ema",
+    [(None, True), (True, True), (False, False)],
+    ids=["default", "enabled", "disabled"],
+)
+def test_inference_evaluator_config_load_stepper_uses_ema_weights(
+    tmp_path: pathlib.Path,
+    standalone: bool,
+    use_ema_if_available: bool | None,
+    expect_ema: bool,
+):
+    checkpoint_path, check = save_coupled_stepper_with_ema(tmp_path, standalone)
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_coupled_steps=1,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(),
+        loader=InferenceDataLoaderConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
+                atmosphere=XarrayDataConfig(data_path="unused")
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                n_initial_conditions=1, first=0, interval=1
+            ),
+        ),
+    )
+    if use_ema_if_available is not None:
+        config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
+
+    check(config.load_stepper(), expect_ema)
+
+
+def test_load_coupled_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Coupled warm starts (CoupledParameterInitConfig) load weights through
+    load_coupled_stepper, and must keep getting the stepper weights of a
+    checkpoint that has EMA weights.
+    """
+    checkpoint_path, check = save_coupled_stepper_with_ema(tmp_path, standalone=False)
+    assert isinstance(checkpoint_path, str)
+
+    check(load_coupled_stepper(checkpoint_path), False)

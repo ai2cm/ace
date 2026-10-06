@@ -26,18 +26,19 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import makedirs
+from fme.core.cloud import is_local, makedirs, open_dataset_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
-from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -67,16 +68,21 @@ class InitialConditionConfig:
     """
 
     path: str
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["netcdf4", "zarr"] = "netcdf4"
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        ds = xr.open_dataset(
-            self.path,
+        open_kwargs = dict(
             engine=self.engine,
             decode_times=CFDatetimeCoder(use_cftime=True),
             decode_timedelta=False,
         )
+        if self.engine == "zarr" or is_local(self.path):
+            ds = xr.open_dataset(self.path, **open_kwargs)
+        else:
+            # netCDF can't be read directly from remote stores (e.g. gs://);
+            # copy to a local temp first (covers cross-segment restart.nc ICs).
+            ds = open_dataset_via_inter_filesystem_copy(self.path, **open_kwargs)
         return self._subselect_initial_conditions(ds)
 
     def _subselect_initial_conditions(self, ds: xr.Dataset) -> xr.Dataset:
@@ -94,33 +100,84 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset,
-    prognostic_names: Sequence[str],
-    labels: list[str] | None = None,
-    n_ensemble: int = 1,
+    requirements: InitialConditionRequirements,
 ) -> PrognosticState:
-    """Given a dataset, extract a mapping of variables to tensors.
-    and the time coordinate corresponding to the initial conditions.
+    """Build the initial-condition ``PrognosticState`` from a dataset.
+
+    Dispatches on whether the dataset carries embedded ``BatchData`` state - a
+    full-state restart written by inference, detected by its schema marker:
+
+    - Embedded state present: the whole ``BatchData`` is rebuilt via
+      ``BatchData.from_xarray_dataset`` (see ``_initial_condition_from_state``).
+      It already had prognostic-name selection, labels, and ensemble broadcast
+      applied before it was saved, so the requirements are *validated* for
+      consistency rather than re-applied - a mismatch raises.
+    - No embedded state (external ICs and legacy plain restarts): the lenient
+      path (``_initial_condition_from_variables``) builds prognostic tensors from
+      the named variables, sets labels from the requirements, and broadcasts the
+      ensemble - unchanged behavior.
+
+    Either way the returned state is on CPU; ``InferenceGriddedData`` moves it
+    to the compute device.
 
     Args:
-        ds: Dataset containing initial condition data. Must include prognostic_names
-            as variables, and they must each have shape (n_samples, n_lat, n_lon).
+        ds: Dataset containing initial condition data. Must include the required
+            prognostic names as variables, and they must each have shape
+            (n_samples, [spatial dims]) - lat/lon or HEALPix face/height/width.
             Dataset must also include a 'time' variable with length n_samples.
-        prognostic_names: Names of prognostic variables to extract from the dataset.
-        labels: Labels for the initial conditions. If provided, these labels will be
-            provided to the stepper for every initial condition.
-        n_ensemble: Number of ensemble members per initial state
+        requirements: What the run requires of the initial condition: the
+            prognostic names to extract, labels to provide to the stepper for
+            every initial condition (for an embedded-state restart they are
+            validated against the saved labels rather than applied), and the
+            number of ensemble members per initial state.
 
     Returns:
         The initial condition and the time coordinate.
     """
+    if BatchData.dataset_has_embedded_state(ds):
+        return _initial_condition_from_state(ds, requirements)
+    return _initial_condition_from_variables(ds, requirements)
+
+
+def _initial_condition_from_state(
+    ds: xr.Dataset,
+    requirements: InitialConditionRequirements,
+) -> PrognosticState:
+    """Build the IC from a full-state restart (embedded ``BatchData`` state).
+
+    Rebuilds the whole ``BatchData`` and validates - does not re-derive - that
+    the requirements agree with what was saved; the prognostic names, labels,
+    and ensemble broadcast were already applied before the restart was written.
+    """
+    batch_data = BatchData.from_xarray_dataset(ds)
+    batch_data.validate_initial_condition(requirements)
+    return batch_data.get_start(requirements.prognostic_names, n_ic_timesteps=1)
+
+
+def _initial_condition_from_variables(
+    ds: xr.Dataset,
+    requirements: InitialConditionRequirements,
+) -> PrognosticState:
+    """Build the IC from a plain netCDF of prognostic variables + time.
+
+    The lenient path for external ICs and legacy restarts: builds prognostic
+    tensors from the named variables, sets labels from the requirements, and
+    broadcasts the ensemble.
+    """
     initial_condition = {}
-    for name in prognostic_names:
-        if len(ds[name].shape) != 3:
+    horizontal_dims: list[str] | None = None
+    for name in requirements.prognostic_names:
+        if len(ds[name].shape) < 2:
             raise ValueError(
-                f"Initial condition variables {name} must have shape "
-                f"(n_samples, n_lat, n_lon). Got shape {ds[name].shape}."
+                f"Initial condition variable {name} must have shape "
+                f"(n_samples, [spatial dims]). Got shape {ds[name].shape}."
             )
         n_samples = ds[name].shape[0]
+        # The horizontal dims are whatever the variable carries after the leading
+        # sample dim, so lat/lon and HEALPix (face/height/width) both flow through
+        # unchanged rather than being assumed to be lat/lon.
+        if horizontal_dims is None:
+            horizontal_dims = [str(d) for d in ds[name].dims[1:]]
         initial_condition[name] = torch.tensor(ds[name].values).unsqueeze(dim=1)
     if "time" not in ds:
         raise ValueError("Initial condition dataset must have a 'time' variable.")
@@ -135,19 +192,22 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
-    if labels is not None:
-        batch_labels = BatchLabels(torch.ones(n_samples, len(labels)), names=labels)
+    if requirements.labels is not None:
+        batch_labels = BatchLabels(
+            torch.ones(n_samples, len(requirements.labels)),
+            names=requirements.labels,
+        )
     else:
         batch_labels = None
 
     batch_data = BatchData.new_on_cpu(
         data=initial_condition,
         time=initial_times,
-        horizontal_dims=["lat", "lon"],
+        horizontal_dims=horizontal_dims,
         labels=batch_labels,
     )
-    batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
-    return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
+    batch_data = batch_data.broadcast_ensemble(n_ensemble=requirements.n_ensemble)
+    return batch_data.get_start(requirements.prognostic_names, n_ic_timesteps=1)
 
 
 @dataclasses.dataclass
@@ -167,10 +227,9 @@ class InferenceConfig:
                 - To write raw or time-coarsened data, the zarr writer must be
                   used. See the ``files`` parameter of the
                   :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Note that monthly coarsened data cannot
-                  currently be written to zarr, and hence a remote directory,
-                  since it uses a different code path than uniformly coarsened
-                  data.
+                  can be configured. Monthly coarsened data configured through
+                  ``files`` can be written to zarr. The legacy
+                  ``save_monthly_files`` option remains netCDF-only.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the
@@ -190,6 +249,10 @@ class InferenceConfig:
         aggregator: Configuration for inference aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights.
         allow_incompatible_dataset: If True, allow the dataset used for inference
             to be incompatible with the dataset used for stepper training. This should
             be used with caution, as it may allow the stepper to make scientifically
@@ -200,6 +263,10 @@ class InferenceConfig:
         n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
             stochastic model weather inference. n_ensemble_per_ic = 1 is default
             inference behavior.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
+            noise sequence, independent of forward_steps_in_memory. Leave unset
+            (None) for the default non-reproducible behavior.
     """
 
     experiment_dir: str
@@ -216,23 +283,17 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
+    seed: int | None = None
 
     def __post_init__(self):
-        if self.data_writer.time_coarsen is not None:
-            self.data_writer.time_coarsen.validate(
-                self.forward_steps_in_memory,
-                self.n_forward_steps,
-            )
-        if self.data_writer.files is not None:
-            for file_config in self.data_writer.files:
-                if file_config.time_coarsen is not None:
-                    file_config.time_coarsen.validate(
-                        self.forward_steps_in_memory,
-                        self.n_forward_steps,
-                    )
+        self.data_writer.validate_time_coarsen(
+            self.forward_steps_in_memory,
+            self.n_forward_steps,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -242,11 +303,17 @@ class InferenceConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper(
+            self.checkpoint_path,
+            self.stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,
@@ -284,7 +351,6 @@ def main(
             with GlobalTimer():
                 return run_inference_from_config(config)
         else:
-            config.configure_logging(log_filename="inference_out.log")
             run_segmented_inference(config, segments)
 
 
@@ -305,9 +371,10 @@ def run_inference_from_config(config: InferenceConfig):
         logging.info("Loading initial condition data")
         initial_condition = get_initial_condition(
             config.initial_condition.get_dataset(),
-            stepper_config.prognostic_names,
-            labels=config.labels,
-            n_ensemble=config.n_ensemble_per_ic,
+            InitialConditionRequirements(
+                prognostic_names=stepper_config.prognostic_names,
+                labels=config.labels,
+            ),
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -321,6 +388,19 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        # Broadcast the initial condition across ensemble members only after the
+        # forcing loader is built, mirroring the evaluator path. The forcing then
+        # has one window per initial condition (n_ensemble=1) and predict_paired
+        # broadcasts it exactly once to match the ensemble-broadcast initial
+        # condition. Broadcasting before get_forcing_data would tile the forcing
+        # start times too, and predict_paired would broadcast the already-tiled
+        # forcing a second time (the standalone double-broadcast bug).
+        if config.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
+        data.apply_config_seed(config.seed)
 
         if not config.allow_incompatible_dataset:
             try:
@@ -342,6 +422,7 @@ def run_inference_from_config(config: InferenceConfig):
             dataset_info=dataset_info,
             n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
             output_dir=config.experiment_dir,
+            normalize=stepper.normalizer.normalize,
         )
 
         writer = config.get_data_writer(
@@ -384,40 +465,56 @@ def run_inference_from_config(config: InferenceConfig):
     logger.log_to_current_step(timer.get_durations(), label="")
 
 
+def _get_initialization_time_and_timestep(
+    config: InferenceConfig,
+) -> tuple[cftime.datetime, datetime.timedelta]:
+    # Loading the stepper is expensive, so this is called once per run; it gives
+    # the timestep and the prognostic names.
+    stepper = config.load_stepper()
+    initial_condition = get_initial_condition(
+        config.initial_condition.get_dataset(),
+        InitialConditionRequirements(
+            prognostic_names=stepper.prognostic_names,
+            labels=config.labels,
+        ),
+    )
+    initialization_time = initial_condition.as_batch_data().time.isel(sample=0).item()
+    return initialization_time, stepper.training_dataset_info.timestep
+
+
 def run_segmented_inference(config: InferenceConfig, segments: int):
-    """Run inference in multiple segments.
+    """Run inference in multiple segments, each resumable after preemption.
 
     Args:
-        config: inference configuration to be used for each individual segment. The
-            provided initial condition configuration will only be used for the first
-            segment.
-        segments: total number of segments desired. Only missing segments will be run.
-
-    Note:
-        This is useful when running very long simulations or when saving a large
-        amount of output data to disk. The simulation outputs will be split across
-        multiple folders, each corresponding to one of the segments and labeled by
-        the segment number.
+        config: Configuration for each segment. Its initial condition is used
+            only for the first segment; later segments start from the previous
+            segment's restart file.
+        segments: Total number of segments; only missing ones are run.
     """
-    logging.info(
-        f"Starting segmented inference with {segments} segments. "
-        f"Saving to {config.experiment_dir}."
-    )
     config_copy = copy.deepcopy(config)
-    original_wandb_name = os.environ.get("WANDB_NAME")
-    for segment in range(segments):
-        segment_label = f"segment_{segment:04d}"
-        segment_dir = os.path.join(config.experiment_dir, segment_label)
-        restart_path = os.path.join(segment_dir, "restart.nc")
-        if os.path.exists(restart_path):
-            logging.info(f"Skipping segment {segment} because it has already been run.")
-        else:
-            logging.info(f"Running segment {segment}.")
-            config_copy.experiment_dir = segment_dir
-            if original_wandb_name is not None:
-                os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
-            with GlobalTimer():
-                run_inference_from_config(config_copy)
+
+    def _get_restart_paths(segment_dir: str) -> Sequence[str]:
+        return [os.path.join(segment_dir, "restart.nc")]
+
+    def _run_segment(segment_dir: str) -> None:
+        config_copy.experiment_dir = segment_dir
+        run_inference_from_config(config_copy)
+
+    def _set_initial_condition(restart_paths: Sequence[str]) -> None:
+        (restart_path,) = restart_paths
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )
+
+    run_segments(
+        segments=segments,
+        experiment_dir=config.experiment_dir,
+        logging_config=config.logging,
+        logging_config_dict=dataclasses.asdict(config),
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
+        n_steps_per_segment=config.n_forward_steps,
+        get_initialization=lambda: _get_initialization_time_and_timestep(config),
+        get_restart_paths=_get_restart_paths,
+        run_segment=_run_segment,
+        set_initial_condition=_set_initial_condition,
+    )

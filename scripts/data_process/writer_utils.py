@@ -1,9 +1,9 @@
 import dataclasses
 import logging
-import os
 import time
 
 import xarray as xr
+from fs_utils import is_dir
 
 
 @dataclasses.dataclass
@@ -46,7 +46,7 @@ class OutputWriterConfig:
 
         ds = ds.chunk(OUTER_CHUNKS)
         if self.starting_split == 0:
-            if os.path.isdir(output_store):
+            if is_dir(output_store):
                 raise ValueError(
                     f"Output store {output_store} already exists. "
                     "Use starting_split > 0 to continue writing or "
@@ -54,7 +54,7 @@ class OutputWriterConfig:
                 )
             ds.partition.initialize_store(output_store, inner_chunks=INNER_CHUNKS)
         else:
-            if not os.path.isdir(output_store):
+            if not is_dir(output_store):
                 raise ValueError(
                     f"starting_split > 0 but output store {output_store} "
                     "hasn't yet been initialized. Use starting_split = 0?"

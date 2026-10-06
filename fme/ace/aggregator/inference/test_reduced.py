@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 import fme
+from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.reduced import (
     AreaWeightedReducedMetric,
     SingleTargetMeanAggregator,
@@ -64,8 +65,19 @@ def test_single_target_mean_aggregator():
     )
     data_a = torch.randn(n_sample, n_time_per_window, nx, ny, device=get_device())
     for i in range(n_window):
-        data = {"a": data_a[:, i * n_time_per_window : (i + 1) * n_time_per_window]}
-        agg.record_batch(data=data, i_time_start=i * n_time_per_window)
+        prediction = {
+            "a": data_a[:, i * n_time_per_window : (i + 1) * n_time_per_window]
+        }
+        n_time_actual = next(iter(prediction.values())).shape[1]
+        batch_data = InferenceBatchData(
+            prediction=prediction,
+            prediction_norm={},
+            target=None,
+            target_norm=None,
+            time=make_dummy_time(n_sample, n_time_actual),
+            i_time_start=i * n_time_per_window,
+        )
+        agg.record_batch(data=batch_data)
 
     logs = agg.get_logs(label="test")
     assert "test/series" in logs

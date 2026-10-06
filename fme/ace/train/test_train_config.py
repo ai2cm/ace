@@ -1,0 +1,623 @@
+import dataclasses
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import dacite
+import pytest
+
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
+from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.inference import (
+    InferenceDataLoaderConfig,
+    InferenceInitialConditionIndices,
+)
+from fme.ace.stepper.single_module import (
+    ModuleSelector,
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+    StepperConfig,
+    TrainStepperConfig,
+)
+from fme.ace.train.train_config import (
+    InlineInferenceConfig,
+    InlineValidationConfig,
+    TrainConfig,
+    _get_inference_callback,
+    _get_validation_callback,
+)
+from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
+from fme.core.logging_utils import LoggingConfig
+from fme.core.optimization import OptimizationConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
+from fme.core.typing_ import Slice
+
+
+def _make_validation_config(
+    name: str | None = None, weight: float = 1.0, evaluate_all_steps: bool = True
+) -> InlineValidationConfig:
+    return InlineValidationConfig(
+        loader=DataLoaderConfig(dataset=XarrayDataConfig(data_path=""), batch_size=1),
+        name=name,
+        weight=weight,
+        evaluate_all_steps=evaluate_all_steps,
+    )
+
+
+def _make_inference_config(
+    name: str | None = None,
+    weight: float = 1.0,
+    epochs: Slice | None = None,
+    aggregator: InferenceEvaluatorAggregatorConfig | None = None,
+) -> InlineInferenceConfig:
+    return InlineInferenceConfig(
+        loader=InferenceDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path=""),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=1, interval=1
+            ),
+        ),
+        n_forward_steps=1,
+        forward_steps_in_memory=1,
+        aggregator=aggregator or InferenceEvaluatorAggregatorConfig(),
+        epochs=epochs if epochs is not None else Slice(),
+        name=name,
+        weight=weight,
+    )
+
+
+def _make_stepper_config() -> StepperConfig:
+    step = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                in_names=[],
+                out_names=[],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(
+                        global_means_path="", global_stds_path=""
+                    ),
+                ),
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet", config={}
+                ),
+            ),
+        ),
+    )
+    return StepperConfig(step=step)
+
+
+def _make_train_config(
+    tmp_path,
+    inference: InlineInferenceConfig | list[InlineInferenceConfig],
+    max_epochs: int = 5,
+    validation: InlineValidationConfig | list[InlineValidationConfig] | None = None,
+    evaluate_before_training: bool | None = None,
+) -> TrainConfig:
+    if validation is None:
+        validation = _make_validation_config()
+    # Only forward evaluate_before_training when explicitly requested, so that
+    # tests which do not care about it keep seeing the class default.
+    extra_kwargs: dict[str, Any] = {}
+    if evaluate_before_training is not None:
+        extra_kwargs["evaluate_before_training"] = evaluate_before_training
+    return TrainConfig(
+        experiment_dir=str(tmp_path),
+        stepper=_make_stepper_config(),
+        stepper_training=TrainStepperConfig(n_forward_steps=1),
+        train_loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(data_path=""), batch_size=1
+        ),
+        validation=validation,
+        optimization=OptimizationConfig(),
+        logging=LoggingConfig(),
+        max_epochs=max_epochs,
+        save_checkpoint=False,
+        inference=inference,
+        **extra_kwargs,
+    )
+
+
+def test_inference_single_config_gives_list(tmp_path):
+    config = _make_train_config(tmp_path, _make_inference_config())
+    assert isinstance(config.inference, InlineInferenceConfig)
+    assert isinstance(config.inference_list, list)
+    assert len(config.inference_list) == 1
+    assert config.inference_names == ["inference"]
+
+
+def test_inference_names_single_unnamed(tmp_path):
+    config = _make_train_config(tmp_path, [_make_inference_config()])
+    assert config.inference_names == ["inference"]
+
+
+def test_inference_names_multiple_unnamed(tmp_path):
+    config = _make_train_config(
+        tmp_path, [_make_inference_config(), _make_inference_config()]
+    )
+    assert config.inference_names == ["inference_0", "inference_1"]
+
+
+def test_inference_names_explicit(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [_make_inference_config(name="weather"), _make_inference_config(name="clim")],
+    )
+    assert config.inference_names == ["weather", "clim"]
+
+
+def test_inference_names_mixed(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [_make_inference_config(name="weather"), _make_inference_config()],
+    )
+    assert config.inference_names == ["weather", "inference_1"]
+
+
+def test_inference_names_empty(tmp_path):
+    config = _make_train_config(tmp_path, [])
+    assert config.inference_names == []
+
+
+def test_duplicate_inference_names_raises(tmp_path):
+    with pytest.raises(ValueError, match="Duplicate inference names"):
+        _make_train_config(
+            tmp_path,
+            [_make_inference_config(name="same"), _make_inference_config(name="same")],
+        )
+
+
+@pytest.mark.parametrize("reserved_name", ["train", "val"])
+def test_reserved_inference_name_raises(tmp_path, reserved_name):
+    with pytest.raises(ValueError, match="collide with reserved names"):
+        _make_train_config(tmp_path, [_make_inference_config(name=reserved_name)])
+
+
+def test_negative_weight_raises():
+    with pytest.raises(ValueError, match="non-negative"):
+        _make_inference_config(weight=-1.0)
+
+
+def test_zero_weight_accepted():
+    config = _make_inference_config(weight=0.0)
+    assert config.weight == 0.0
+
+
+def test_default_weight_is_one():
+    config = _make_inference_config()
+    assert config.weight == 1.0
+
+
+def test_disabled_time_mean_norm_with_positive_weight_raises():
+    agg = InferenceEvaluatorAggregatorConfig(
+        time_mean_norm=TimeMeanMetricConfig(target="norm", enabled=False),
+    )
+    with pytest.raises(ValueError, match="time_mean_norm must be enabled"):
+        _make_inference_config(weight=1.0, aggregator=agg)
+
+
+def test_disabled_time_mean_norm_with_zero_weight_accepted():
+    agg = InferenceEvaluatorAggregatorConfig(
+        time_mean_norm=TimeMeanMetricConfig(target="norm", enabled=False),
+    )
+    config = _make_inference_config(weight=0.0, aggregator=agg)
+    assert config.weight == 0.0
+
+
+def test_get_inference_epoch_sets_empty(tmp_path):
+    config = _make_train_config(tmp_path, [], max_epochs=5)
+    assert config.get_inference_epoch_sets() == []
+    assert config.get_inference_epochs() == []
+
+
+def test_get_inference_epoch_sets_single_default(tmp_path):
+    config = _make_train_config(tmp_path, [_make_inference_config()], max_epochs=3)
+    assert config.get_inference_epoch_sets() == [{1, 2, 3}]
+    assert config.get_inference_epochs() == [1, 2, 3]
+
+
+def test_get_inference_epoch_sets_per_config_zero_weight(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [
+            _make_inference_config(epochs=Slice(step=2), weight=1.0),
+            _make_inference_config(epochs=Slice(step=3), weight=0.0),
+        ],
+        max_epochs=6,
+    )
+    epoch_sets = config.get_inference_epoch_sets()
+    assert epoch_sets[0] == {1, 3, 5}
+    assert epoch_sets[1] == {1, 4}
+    assert config.get_inference_epochs() == [1, 3, 4, 5]
+
+
+def test_get_inference_epoch_sets_same_weighted_epochs(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [
+            _make_inference_config(epochs=Slice(step=2), weight=1.0),
+            _make_inference_config(epochs=Slice(step=2), weight=2.0),
+        ],
+        max_epochs=6,
+    )
+    epoch_sets = config.get_inference_epoch_sets()
+    assert epoch_sets[0] == {1, 3, 5}
+    assert epoch_sets[1] == {1, 3, 5}
+
+
+def test_get_inference_epoch_sets_different_weighted_epochs_raises(tmp_path):
+    with pytest.raises(ValueError, match="weight > 0 must share the same epoch"):
+        _make_train_config(
+            tmp_path,
+            [
+                _make_inference_config(epochs=Slice(step=2), weight=1.0),
+                _make_inference_config(epochs=Slice(step=3), weight=1.0),
+            ],
+            max_epochs=6,
+        )
+
+
+def test_epoch_zero_evaluated_regardless_of_max_epochs_parity(tmp_path):
+    # An end-anchored "every other epoch, counting back from the last" request
+    # must still evaluate before training, whether max_epochs is odd or even.
+    odd = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=15,
+        evaluate_before_training=True,
+    )
+    even = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=20,
+        evaluate_before_training=True,
+    )
+    odd_epochs = odd.get_inference_epoch_sets()[0]
+    even_epochs = even.get_inference_epoch_sets()[0]
+    assert 0 in odd_epochs
+    assert 0 in even_epochs
+    assert odd_epochs == {0, 1, 3, 5, 7, 9, 11, 13, 15}
+    assert even_epochs == {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20}
+
+
+def test_evaluate_before_training_does_not_shift_selected_training_epochs(tmp_path):
+    # Asking for a pre-training evaluation adds epoch 0; it must not change
+    # which training epochs the slice picks out.
+    with_epoch_zero = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=6,
+        evaluate_before_training=True,
+    )
+    without_epoch_zero = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=6,
+        evaluate_before_training=False,
+    )
+    with_zero_epochs = with_epoch_zero.get_inference_epoch_sets()[0]
+    without_zero_epochs = without_epoch_zero.get_inference_epoch_sets()[0]
+    assert with_zero_epochs - {0} == without_zero_epochs
+    assert with_zero_epochs == without_zero_epochs | {0}
+    assert with_zero_epochs == {0, 1, 3, 5}
+    assert without_zero_epochs == {1, 3, 5}
+
+
+def test_epoch_zero_evaluated_even_when_slice_selects_no_training_epochs(tmp_path):
+    # There is no per-entry opt-out of the pre-training evaluation: an entry
+    # whose slice matches no training epoch still runs at epoch 0.
+    config = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=100))],
+        max_epochs=6,
+        evaluate_before_training=True,
+    )
+    assert config.get_inference_epoch_sets() == [{0}]
+
+
+def test_epoch_zero_not_evaluated_without_evaluate_before_training(tmp_path):
+    # Guard on the opposite case: with no pre-training evaluation requested,
+    # epoch 0 must never appear, at either parity of max_epochs.
+    odd = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=15,
+        evaluate_before_training=False,
+    )
+    even = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=20,
+        evaluate_before_training=False,
+    )
+    odd_epochs = odd.get_inference_epoch_sets()[0]
+    even_epochs = even.get_inference_epoch_sets()[0]
+    assert 0 not in odd_epochs
+    assert 0 not in even_epochs
+    assert odd_epochs == {1, 3, 5, 7, 9, 11, 13, 15}
+    assert even_epochs == {2, 4, 6, 8, 10, 12, 14, 16, 18, 20}
+
+
+def test_validation_negative_weight_raises():
+    with pytest.raises(ValueError, match="non-negative"):
+        _make_validation_config(weight=-1.0)
+
+
+def test_validation_zero_weight_accepted():
+    config = _make_validation_config(weight=0.0)
+    assert config.weight == 0.0
+
+
+def test_validation_default_weight_is_one():
+    config = _make_validation_config()
+    assert config.weight == 1.0
+
+
+def test_validation_single_config_gives_list(tmp_path):
+    config = _make_train_config(tmp_path, [], validation=_make_validation_config())
+    assert isinstance(config.validation, InlineValidationConfig)
+    assert isinstance(config.validation_list, list)
+    assert len(config.validation_list) == 1
+    assert config.validation_names == ["val"]
+
+
+def test_validation_names_single_unnamed(tmp_path):
+    config = _make_train_config(tmp_path, [], validation=[_make_validation_config()])
+    assert config.validation_names == ["val"]
+
+
+def test_validation_names_multiple_unnamed(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [],
+        validation=[_make_validation_config(), _make_validation_config()],
+    )
+    assert config.validation_names == ["val_0", "val_1"]
+
+
+def test_validation_names_explicit(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [],
+        validation=[
+            _make_validation_config(name="era5"),
+            _make_validation_config(name="obs"),
+        ],
+    )
+    assert config.validation_names == ["era5", "obs"]
+
+
+def test_validation_names_mixed(tmp_path):
+    config = _make_train_config(
+        tmp_path,
+        [],
+        validation=[_make_validation_config(name="era5"), _make_validation_config()],
+    )
+    assert config.validation_names == ["era5", "val_1"]
+
+
+def test_duplicate_validation_names_raises(tmp_path):
+    with pytest.raises(ValueError, match="Duplicate validation names"):
+        _make_train_config(
+            tmp_path,
+            [],
+            validation=[
+                _make_validation_config(name="same"),
+                _make_validation_config(name="same"),
+            ],
+        )
+
+
+def test_empty_validation_raises(tmp_path):
+    with pytest.raises(ValueError, match="At least one validation entry"):
+        _make_train_config(tmp_path, [], validation=[])
+
+
+def test_inline_validation_config_evaluate_all_steps_default():
+    base = {"loader": {"dataset": {"data_path": ""}, "batch_size": 1}}
+    config = dacite.from_dict(
+        InlineValidationConfig, base, config=dacite.Config(strict=True)
+    )
+    assert config.evaluate_all_steps is True
+    for value in (True, False):
+        config = dacite.from_dict(
+            InlineValidationConfig,
+            {**base, "evaluate_all_steps": value},
+            config=dacite.Config(strict=True),
+        )
+        assert config.evaluate_all_steps is value
+
+
+class TestGetValidationCallback:
+    """Smoke test for `_get_validation_callback` wiring.
+
+    Helper behavior (weighted loss, missing-metric raise, overlap raise, etc.)
+    is covered by `TestBuildValidationCallback` in
+    `fme.core.generics.test_trainer`. This test only verifies that entry name
+    and weight flow correctly through to the shared helper.
+    """
+
+    def test_entries_wired_to_tasks(self):
+        entries = [
+            (_make_validation_config(name="a", weight=2.0), MagicMock(), "a"),
+            (_make_validation_config(name="b", weight=3.0), MagicMock(), "b"),
+        ]
+        stepper = MagicMock()
+        with patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={}, loss=0.1),
+                AggregatorSummary(logs={}, loss=0.2),
+            ],
+        ):
+            callback = _get_validation_callback(
+                validation_entries=entries,
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                loss_names=None,
+                save_per_epoch_diagnostics=False,
+                output_dir="/tmp/out",
+            )
+            _, loss = callback(epoch=1)
+        assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_per_entry_evaluate_all_steps_wired_to_tasks(self):
+        entries = [
+            (_make_validation_config(name="a"), MagicMock(), "a"),
+            (
+                _make_validation_config(name="b", evaluate_all_steps=False),
+                MagicMock(),
+                "b",
+            ),
+        ]
+        stepper = MagicMock()
+        with patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={}, loss=0.1),
+                AggregatorSummary(logs={}, loss=0.2),
+            ],
+        ) as mock_run_validation:
+            callback = _get_validation_callback(
+                validation_entries=entries,
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                loss_names=None,
+                save_per_epoch_diagnostics=False,
+                output_dir="/tmp/out",
+            )
+            callback(epoch=1)
+        flags = [
+            call.kwargs["evaluate_all_steps"]
+            for call in mock_run_validation.call_args_list
+        ]
+        assert flags == [True, False]
+
+
+class TestGetInferenceCallback:
+    @staticmethod
+    def _make_entry(name, weight=1.0):
+        config = MagicMock()
+        config.weight = weight
+        config.n_forward_steps = 1
+        config.n_ensemble_per_ic = 1
+        data = MagicMock()
+        dataset_info = MagicMock()
+        return (config, data, dataset_info, name)
+
+    @staticmethod
+    def _call(
+        entries,
+        inference_one_epoch_side_effect,
+        epoch=1,
+        inference_epochs=(1,),
+        inference_epoch_sets=None,
+    ):
+        if inference_epoch_sets is None:
+            inference_epoch_sets = [{1} for _ in entries]
+        stepper = MagicMock()
+        with patch(
+            "fme.core.generics.trainer.inference_one_epoch",
+            side_effect=inference_one_epoch_side_effect,
+        ):
+            callback = _get_inference_callback(
+                inference_entries=entries,
+                inference_epochs=list(inference_epochs),
+                inference_epoch_sets=list(inference_epoch_sets),
+                stepper=stepper,
+                output_dir="/tmp/out",
+                save_per_epoch_diagnostics=False,
+            )
+            return callback(epoch=epoch)
+
+    def test_epoch_not_in_inference_epochs_returns_empty(self):
+        entries = [self._make_entry("inference")]
+        logs, error = self._call(
+            entries,
+            inference_one_epoch_side_effect=[],
+            epoch=2,
+            inference_epochs=(1,),
+        )
+        assert logs == {}
+        assert error is None
+
+    def test_single_entry_weighted_error(self):
+        entries = [self._make_entry("inference", weight=2.0)]
+        logs, error = self._call(
+            entries,
+            [
+                InferenceSummary(
+                    logs={"inference/time_mean_norm/rmse/channel_mean": 0.4}, loss=0.4
+                )
+            ],
+        )
+        assert error == pytest.approx(2.0 * 0.4)
+        assert "inference/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_zero_weight_excluded_from_error(self):
+        entries = [
+            self._make_entry("a", weight=1.0),
+            self._make_entry("b", weight=0.0),
+        ]
+        logs, error = self._call(
+            entries,
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.3}, loss=0.3
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 999.0}, loss=999.0
+                ),
+            ],
+        )
+        assert error == pytest.approx(0.3)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" in logs
+
+    def test_multiple_weighted_entries(self):
+        entries = [
+            self._make_entry("a", weight=2.0),
+            self._make_entry("b", weight=3.0),
+        ]
+        logs, error = self._call(
+            entries,
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
+            ],
+        )
+        assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_entry_skipped_when_not_in_epoch_set(self):
+        entries = [
+            self._make_entry("a", weight=1.0),
+            self._make_entry("b", weight=1.0),
+        ]
+        logs, error = self._call(
+            entries,
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+            ],
+            epoch=1,
+            inference_epochs=(1,),
+            inference_epoch_sets=[{1}, {2}],
+        )
+        assert error == pytest.approx(0.5)
+        assert "a/time_mean_norm/rmse/channel_mean" in logs
+        assert "b/time_mean_norm/rmse/channel_mean" not in logs
+
+    def test_weighted_entry_missing_metric_raises(self):
+        entries = [self._make_entry("a", weight=1.0)]
+        with pytest.raises(RuntimeError, match="did not produce a loss"):
+            self._call(
+                entries,
+                [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
+            )

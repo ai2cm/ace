@@ -12,6 +12,7 @@ import torch
 import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.timing import GlobalTimer
 from fme.core.writer import (
     DATETIME_ENCODING_UNITS,
     TIMEDELTA_ENCODING_DTYPE,
@@ -27,10 +28,7 @@ def _variable_metadata_to_dict(
 ) -> dict[str, dict[str, str]] | None:
     if variable_metadata is None:
         return None
-    return {
-        var: {"units": metadata.units, "long_name": metadata.long_name}
-        for var, metadata in variable_metadata.items()
-    }
+    return {var: metadata.as_attrs() for var, metadata in variable_metadata.items()}
 
 
 def _get_encoded_lead_times(
@@ -222,19 +220,26 @@ class ZarrWriterAdapter:
         data: Dict mapping variable name to tensor to
         batch_time: Time coordinate for each sample in the batch.
         """
+        numpy_data = self._to_ndarray_mapping(data)
         # Zarr store initialization needs the full time coordinate information,
         # which is not available until the first batch is seen.
         if self._writer is None:
             self._initialize_writer(batch_time)
-        self.writer.record_batch(
-            data=self._to_ndarray_mapping(data),
-            position_slices={
-                "time": slice(
-                    self._current_timestep,
-                    self._current_timestep + batch_time.sizes["time"],
-                )
-            },
-        )
+            self.writer.initialize_store(
+                data_dtype=next(iter(numpy_data.values())).dtype,
+                data_vars=self.data_vars or list(numpy_data),
+            )
+        timer = GlobalTimer.get_instance()
+        with timer.context("data_writer_io"):
+            self.writer.record_batch(
+                data=numpy_data,
+                position_slices={
+                    "time": slice(
+                        self._current_timestep,
+                        self._current_timestep + batch_time.sizes["time"],
+                    )
+                },
+            )
         self._current_timestep += batch_time.sizes["time"]
 
     def flush(self):
@@ -330,6 +335,7 @@ class SeparateICZarrWriterAdapter:
                     array_attributes=self.variable_metadata,
                     group_attributes=self.dataset_metadata,
                     nondim_coords=self._nondim_coords,
+                    time_calendar=first_batch_time.dt.calendar,
                     mode="w",
                     overwrite_check=self.overwrite_check,
                 )
@@ -340,22 +346,29 @@ class SeparateICZarrWriterAdapter:
         data: dict[str, torch.Tensor],
         batch_time: xr.DataArray,
     ) -> None:
+        vars = self.data_vars or list(data.keys())
+        numpy_data = {k: v.cpu().numpy() for k, v in data.items() if k in vars}
         # Zarr store initialization needs the full time coordinate information,
         # which is not available until the first batch is seen.
         if self._writers is None:
             self._initialize_writers(batch_time)
-        vars = self.data_vars or list(data.keys())
+            for writer in self.writers:
+                writer.initialize_store(
+                    data_dtype=next(iter(numpy_data.values())).dtype, data_vars=vars
+                )
         position_slice = {
             "time": slice(
                 self._current_timestep,
                 self._current_timestep + batch_time.sizes["time"],
             )
         }
-        for s in range(self.n_initial_conditions):
-            self.writers[s].record_batch(
-                data={k: v.cpu().numpy()[s] for k, v in data.items() if k in vars},
-                position_slices=position_slice,
-            )
+        timer = GlobalTimer.get_instance()
+        with timer.context("data_writer_io"):
+            for s in range(self.n_initial_conditions):
+                self.writers[s].record_batch(
+                    data={k: v[s] for k, v in numpy_data.items()},
+                    position_slices=position_slice,
+                )
         self._current_timestep += batch_time.sizes["time"]
 
     def flush(self):

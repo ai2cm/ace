@@ -268,6 +268,7 @@ class DownscalingOutputConfig(ABC):
             all_times=xr_dataset.sample_start_times,
             dtype=slice_dataset.dtype,
             max_output_shape=slice_dataset.max_output_shape,
+            coarse_extent_latlon_coords=dataset.latlon_coordinates,
         )
 
     def _build(
@@ -332,8 +333,8 @@ class EventConfig(DownscalingOutputConfig):
     Useful for capturing specific events like hurricane landfall, extreme weather
     events, or any single-timestep high-resolution snapshot of a region.
 
-    If n_ens > max_samples_per_gpu, this event can be run in a distributed manner
-    where each GPU generates a subset of the ensemble members for the event.
+    If n_ens is greater than max_samples_per_gpu, this event can be run in a distributed
+    manner where each GPU generates a subset of the ensemble members for the event.
 
     Parameters:
         name: Unique identifier for this target (used in output filename)
@@ -353,7 +354,7 @@ class EventConfig(DownscalingOutputConfig):
         time_format: strptime format for parsing event_time string.
             Default: "%Y-%m-%dT%H:%M:%S" (ISO 8601)
         lat_extent: Latitude bounds in degrees limited to [-88, 88].
-        Defaults to (-66, 70) which covers continental land masses aside
+            Defaults to (-66, 70) which covers continental land masses aside
             from Antarctica.
         lon_extent: Longitude bounds in degrees [-180, 360]. Default: full extent
             of the underlying data.

@@ -19,7 +19,14 @@ from fme.downscaling.data import (
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
 from fme.downscaling.predict import EventConfig
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
+from fme.downscaling.predictors import (
+    DenoisingMoEBundledConfig,
+    DenoisingMoEConfig,
+    DenoisingMoEPredictor,
+    PatchPredictionConfig,
+    PatchPredictor,
+    check_input_shape_supported,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -28,34 +35,26 @@ class Evaluator:
     def __init__(
         self,
         data: PairedGriddedData,
-        model: DiffusionModel | PatchPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
-        patch_data: bool = False,
     ) -> None:
         self.data = data
         self.model = model
         self.experiment_dir = experiment_dir
         self.n_samples = n_samples
         self.dist = Distributed.get_instance()
-        self.patch_data = patch_data
 
     def run(self):
         aggregator = GenerationAggregator(
             self.data.dims,
             self.model.downscale_factor,
-            include_positional_comparisons=False if self.patch_data else True,
+            include_positional_comparisons=True,
             percentiles=[99.99, 99.9999],
         )
 
-        if self.patch_data:
-            batch_generator = self.data.get_patched_generator(
-                coarse_yx_patch_extent=self.model.coarse_shape,
-            )
-        else:
-            batch_generator = self.data.get_generator()
-
-        for i, batch in enumerate(batch_generator):
+        for i, batch in enumerate(self.data.get_generator()):
+            self.dist.park_if_terminating()
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
@@ -88,7 +87,7 @@ class EventEvaluator:
         self,
         event_name: str,
         data: PairedGriddedData,
-        model: DiffusionModel | PatchPredictor,
+        model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
         save_generated_samples: bool = False,
@@ -117,6 +116,7 @@ class EventEvaluator:
         # since there is no batch parallelism in event evaluation.
         total_samples = self.dist.local_batch_size(self.n_samples)
         for start_idx in range(0, total_samples, self._max_sample_group):
+            self.dist.park_if_terminating()
             end_idx = min(start_idx + self._max_sample_group, total_samples)
             logging.info(
                 f"Generating samples {start_idx} to {end_idx} "
@@ -172,7 +172,7 @@ class PairedEventConfig(EventConfig):
 
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: CheckpointModelConfig
+    model: DenoisingMoEConfig | DenoisingMoEBundledConfig | CheckpointModelConfig
     experiment_dir: str
     data: PairedDataLoaderConfig
     logging: LoggingConfig
@@ -194,29 +194,31 @@ class EvaluatorConfig:
             train=False,
             requirements=self.model.data_requirements,
         )
-        evaluator_model: DiffusionModel | PatchPredictor
-        if self.patch.divide_generation and self.patch.composite_prediction:
+        coarse_lon = dataset.coarse_extent_latlon_coords.lon
+        # No-op when coarse_lon does not cross the prime meridian.
+        model = model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            model.coarse_shape,
+            dataset.coarse_shape,
+            self.patch,
+            name="evaluator",
+        )
+        evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
+        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
+            dataset.coarse_shape[1] > model.coarse_shape[1]
+        ):
             evaluator_model = PatchPredictor(
                 model,
-                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:
             evaluator_model = model
-
-        if self.patch.divide_generation and not self.patch.composite_prediction:
-            # Subdivide evaluation into patches, do not composite them together
-            # No maps will be saved for this configuration.
-            patch_data = True
-        else:
-            patch_data = False
 
         return Evaluator(
             data=dataset,
             model=evaluator_model,
             experiment_dir=self.experiment_dir,
             n_samples=self.n_samples,
-            patch_data=patch_data,
         )
 
     def _build_event_evaluator(
@@ -224,19 +226,26 @@ class EvaluatorConfig:
         event_config: PairedEventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
-        evaluator_model: DiffusionModel | PatchPredictor
+        evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data,
             requirements=self.model.data_requirements,
         )
-
+        coarse_lon = dataset.coarse_extent_latlon_coords.lon
+        # No-op when coarse_lon does not cross the prime meridian.
+        model = model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            model.coarse_shape,
+            dataset.coarse_shape,
+            self.patch,
+            name=f"event {event_config.name}",
+        )
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):
             evaluator_model = PatchPredictor(
                 model=model,
-                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:

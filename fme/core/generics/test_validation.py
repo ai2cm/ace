@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from fme.core.ema import EMATracker
@@ -70,3 +71,24 @@ def test_run_validation_loop_without_ema():
 
     logs = aggregator.get_logs(label="val")
     assert logs["val/mean/loss"] == 0.7
+
+
+@pytest.mark.parametrize("evaluate_all_steps", [False, True, None])
+def test_run_validation_loop_evaluate_all_steps_passthrough(evaluate_all_steps):
+    """The flag reaches stepper.train_on_batch; unset defaults to True."""
+    stepper = TrainStepper()
+    valid_data = TrainData(n_batches=2, shuffle=False)
+    aggregator = ValidationAggregator(validation_loss=0.5)
+
+    kwargs = (
+        {} if evaluate_all_steps is None else {"evaluate_all_steps": evaluate_all_steps}
+    )
+    run_validation_loop(
+        stepper=stepper,
+        valid_data=valid_data,
+        aggregator=aggregator,
+        **kwargs,
+    )
+
+    expected = True if evaluate_all_steps is None else evaluate_all_steps
+    assert stepper.validation_evaluate_all_steps_seen == [expected, expected]

@@ -25,7 +25,8 @@ This is a Python machine learning project for atmospheric modeling (ACE - AI2 Cl
 - Run pre-commit hooks: `pre-commit run --all-files`
 
 When running tests in a conda environment, use `python -m pytest` (not `pytest`) to ensure the correct interpreter is used.
-Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files, re-stage and create a new commit (do not amend).
+Pre-commit hooks run ruff, ruff-format, and mypy.
+Use pre-commit instead of `ruff` or `ruff-format` directly.
 
 ### Parallel / Spatial Parallel Testing
 
@@ -47,15 +48,43 @@ not validate cross-backend correctness.
 
 ## Code Guidelines for Agents
 
+### Committing
+
+When committing changes, do not include Co-Authored-By: Claude in the commit message. This is because Claude bears no accountability or responsibility for the changes, the user is the sole author accountable.
+
+When committing to a branch that has an open PR, check whether the PR description needs to be updated to reflect the changes; update it via the `write-pr-prose` skill (see "PR description template").
+When amending a PR description, make sure it still reflects the change _from the PR's base branch_ (main, unless the PR is stacked on another branch), not the change from a previous, ephemeral state of the PR.
+
+### PR description template
+
+When making PRs, use the template that exists in the repo under .github/pull_request_template.md, if one exists.
+
+The PR description becomes the squash-and-merge commit message, so keep it self-contained and describe the final state of the change from main. PR-process information belongs in PR comments, not the description.
+
+In Claude Code sessions, write or amend PR titles and descriptions only via the `write-pr-prose` skill (`.claude/skills/write-pr-prose/`), never inline: its frontmatter pins PR-prose authoring to the required model.
+
+### Commit/PR process
+
+Changes that will go to main should be made in branches so that PRs can be made for review.
+Before starting, plan out how the changes will be made in one or more atomic commits.
+Commits should leave the codebase in a consistent state, and should not add unused features that can't be reviewed in isolation.
+They should also include tests for any new functionality, and should not break existing tests.
+
+For branch naming conventions, see the "Internal Development" section of CONTRIBUTING.md.
+
 ### Naming
 
 - Config classes loaded from user-specified yaml: append `Config` to the built type (`TrainStepperConfig`).
 - Private functions get a `_` prefix.
 
+### Code style
+
+- isinstance checks and type: ignore statements are a sign that types should be refactored, when adding them you must justify the decision.
+
 ### Config design
 
 - Validate in `__post_init__`, not at runtime.
-- Config loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
+- Trained checkpoint loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
 
 ### Testing
 

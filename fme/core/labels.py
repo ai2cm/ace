@@ -15,6 +15,9 @@ class BatchLabels:
             )
         self._names_set = set(names)
 
+    def pin_memory(self) -> "BatchLabels":
+        return BatchLabels(self.tensor.pin_memory(), self.names)
+
     def to(self, device) -> "BatchLabels":
         """
         Move the BatchLabels tensor to the specified device.
@@ -26,6 +29,10 @@ class BatchLabels:
             A new BatchLabels instance on the specified device.
         """
         return BatchLabels(self.tensor.to(device), self.names)
+
+    def select_sample_slice(self, sample_slice: slice) -> "BatchLabels":
+        """Select a contiguous range of samples."""
+        return BatchLabels(self.tensor[sample_slice], self.names)
 
     def __repr__(self) -> str:
         return f"BatchLabels(names={self.names}, tensor={self.tensor})"

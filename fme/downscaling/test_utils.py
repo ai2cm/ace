@@ -3,14 +3,24 @@ from pathlib import Path
 
 import cftime
 import numpy as np
+import torch
 import xarray as xr
 
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
+def cell_centered_coordinate(start: float, end: float, n: int) -> torch.Tensor:
+    """Centers of ``n`` equal-width cells spanning ``[start, end]``.
+
+    Shared primitive for the downscaling tests' coordinate construction
+    (longitude rolling in particular relies on cell-centered grids).
+    """
+    bounds = torch.linspace(start, end, n + 1)
+    return (bounds[:-1] + bounds[1:]) / 2
+
+
 def _midpoints_from_count(start, end, n_mid):
-    width = (end - start) / n_mid
-    return np.linspace(start + width / 2, end - width / 2, n_mid, dtype=np.float32)
+    return cell_centered_coordinate(start, end, n_mid).numpy()
 
 
 def create_test_data_on_disk(

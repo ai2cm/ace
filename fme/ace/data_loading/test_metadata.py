@@ -39,13 +39,10 @@ def _save_netcdf(
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)
         item_metadata = variable_metadata[name]
-        if item_metadata is None:
-            attrs = {}
+        if item_metadata is not None:
+            attrs = item_metadata.as_attrs()
         else:
-            attrs = {
-                "units": item_metadata.units,
-                "long_name": item_metadata.long_name,
-            }
+            attrs = {}
         data_vars[name] = xr.DataArray(data, dims=list(dim_sizes), attrs=attrs)
     coords = {
         dim_name: xr.DataArray(
@@ -74,6 +71,14 @@ def _save_netcdf(
         pytest.param(
             {"bar": VariableMetadata("km", "bar_long_name")},
             id="one_var_metadata",
+        ),
+        pytest.param(
+            {"bar": VariableMetadata("km", None)},
+            id="one_var_units_only",
+        ),
+        pytest.param(
+            {"bar": VariableMetadata(None, "bar_long_name")},
+            id="one_var_long_name_only",
         ),
         pytest.param(
             {"foo": VariableMetadata("m", "foo_long_name"), "bar": None},
@@ -108,7 +113,8 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
     data = get_gridded_data(config=config, train=True, requirements=requirements)
     target_metadata = {
         name: variable_metadata[name]
-        for name in variable_metadata
         if variable_metadata[name] is not None
+        else VariableMetadata()
+        for name in variable_metadata
     }
     assert data.variable_metadata == target_metadata  # type: ignore

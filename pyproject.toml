@@ -25,8 +25,6 @@ dependencies = [
     "dacite",
     "einops>=0.8.1",
     "gcsfs",
-    "h5netcdf",
-    "h5py",
     "imageio>=2.28.1",
     "matplotlib",
     "moviepy",
@@ -42,7 +40,8 @@ dependencies = [
     "torch>=2.4.0",
     "wandb[media]>=0.19.0",
     "xarray",
-    "zarr>=3",
+    "zarr>=3.1",
+    "zarrs>=0.2.3",
 ]
 
 [project.optional-dependencies]
@@ -77,6 +76,10 @@ version = {attr = "fme.__version__"}
 
 [tool.setuptools.packages]
 find = {}
+
+[tool.setuptools.package-data]
+"fme.core.cuhpx" = ["data/*.npy", "data/*.fits"]
+"fme.core.hpx" = ["data/*.npy"]
 
 [tool.uv]
 cache-keys = [

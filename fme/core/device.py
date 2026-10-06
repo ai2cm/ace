@@ -3,6 +3,7 @@ import os
 from collections.abc import Generator
 
 import torch
+import torch.utils.data
 
 from .typing_ import TensorDict, TensorMapping
 
@@ -36,6 +37,11 @@ def using_srun() -> bool:
     if os.environ.get("FME_USE_SRUN", "0") == "1":
         return True
     return False
+
+
+def in_dataloader_worker() -> bool:
+    """Whether this process is a torch DataLoader worker."""
+    return torch.utils.data.get_worker_info() is not None
 
 
 def get_device() -> torch.device:

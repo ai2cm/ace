@@ -31,14 +31,14 @@ from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
 from .data_typing import VariableMetadata
 from .dataset import DatasetABC, DatasetItem
 from .utils import (
-    as_broadcasted_tensor,
+    as_alignable_tensor,
     get_horizontal_coordinates,
     get_nonspacetime_dimensions,
     load_series_data,
@@ -333,12 +333,14 @@ def get_raw_paths(path, file_pattern):
     return raw_paths
 
 
-def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvider:
+def _get_spatial_mask_provider(
+    ds: xr.Dataset, dtype: torch.dtype | None
+) -> SpatialMaskProvider:
     """Get mask provider from a dataset.
 
     If the dataset contains time-invariant variables that start with the string
-    "mask_" then these variables will be used to instantiate a MaskProvider
-    object. Otherwise, an empty MaskProvider is returned.
+    "mask_" then these variables will be used to instantiate a SpatialMaskProvider
+    object. Otherwise, an empty SpatialMaskProvider is returned.
 
     Args:
         ds: Dataset to get vertical coordinates from.
@@ -354,9 +356,9 @@ def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvide
     for name in masks:
         if "time" in ds[name].dims:
             raise ValueError("Masks must be time-independent.")
-    mask_provider = MaskProvider(masks)
-    logging.info(f"Initialized {mask_provider}.")
-    return mask_provider
+    spatial_mask_provider = SpatialMaskProvider(masks)
+    logging.info(f"Initialized {spatial_mask_provider}.")
+    return spatial_mask_provider
 
 
 @dataclasses.dataclass
@@ -453,7 +455,7 @@ class XarrayDataConfig(DatasetConfigABC):
     data_path: str
     file_pattern: str = "*.nc"
     n_repeats: int = 1
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["netcdf4", "zarr"] = "netcdf4"
     spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
     subset: Slice | TimeSlice | RepeatedInterval = dataclasses.field(
         default_factory=Slice
@@ -519,11 +521,13 @@ class XarrayDataConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple["XarraySubset", DatasetProperties]:
         return get_xarray_dataset(
             self,
             list(names),
             n_timesteps,
+            allow_missing_variables=allow_missing_variables,
         )
 
 
@@ -538,10 +542,15 @@ class XarrayDataset(DatasetABC):
     """
 
     def __init__(
-        self, config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
+        self,
+        config: XarrayDataConfig,
+        names: Sequence[str],
+        n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
+        self._allow_missing_variables = allow_missing_variables
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -568,7 +577,9 @@ class XarrayDataset(DatasetABC):
             engine=self.engine,
             chunks=None,
         )
-        self._mask_provider = _get_mask_provider(first_dataset, self.dtype)
+        self._spatial_mask_provider = _get_spatial_mask_provider(
+            first_dataset, self.dtype
+        )
         (
             self._horizontal_coordinates,
             self._static_derived_data,
@@ -579,6 +590,13 @@ class XarrayDataset(DatasetABC):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
+        self._names = (
+            list(self._time_dependent_names)
+            + list(self._time_invariant_names)
+            + list(self._static_derived_names)
+        )
+        self._missing_names = frozenset(set(names) - set(self._names))
+        self._get_variable_metadata(first_dataset)
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
@@ -598,13 +616,36 @@ class XarrayDataset(DatasetABC):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
+        first_dataset.close()
+        self._time_invariant_tensors = self._load_time_invariant_tensors()
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
         self._local_epoch: int = -1
-        self._global_epoch = torch.tensor(
-            -1
-        ).share_memory_()  # required for multi-worker parallelism
+        self._global_epoch = torch.tensor(-1)
+
+    def _load_time_invariant_tensors(self) -> dict[str, torch.Tensor]:
+        """Load the time-invariant variables into memory.
+
+        These do not vary in time, so they are read once here and broadcast over
+        the time dimension of each sample rather than being re-read per sample.
+        Values are taken from the first file, consistent with how coordinates,
+        vertical coordinate and variable metadata are read in __init__.
+        """
+        if len(self._time_invariant_names) == 0:
+            return {}
+        # opened directly rather than via _open_file so that closing this
+        # handle cannot close one shared through the file handle cache
+        ds = _open_xr_dataset(self.full_paths[0], engine=self.engine)
+        ds = ds.isel(**self.isel)
+        tensors = {}
+        for name in self._time_invariant_names:
+            variable = ds[name].variable
+            if self.fill_nans is not None:
+                variable = variable.fillna(self.fill_nans.value)
+            tensors[name] = as_alignable_tensor(variable, self.dims)
+        ds.close()
+        return tensors
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
@@ -681,7 +722,7 @@ class XarrayDataset(DatasetABC):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
-            self._mask_provider,
+            self._spatial_mask_provider,
             self.timestep,
             self._is_remote,
             self._labels,
@@ -699,11 +740,8 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
-            elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
-                result[name] = VariableMetadata(
-                    units=ds[name].units,
-                    long_name=ds[name].long_name,
-                )
+            else:
+                result[name] = VariableMetadata.from_attrs(ds[name].attrs)
         self._variable_metadata = result
 
     def _get_files_stats(
@@ -734,9 +772,6 @@ class XarrayDataset(DatasetABC):
 
         del cum_num_timesteps
 
-        ds = self._open_file(0)
-        self._get_variable_metadata(ds)
-
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
         variable names, and variables which are only present as an initial
@@ -754,22 +789,21 @@ class XarrayDataset(DatasetABC):
             for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
-                else:
-                    try:
-                        da = ds[name]
-                    except KeyError:
-                        raise ValueError(
-                            f"Required variable not found in dataset: {name}."
-                        )
+                elif name in ds:
+                    dims = ds[name].dims
+                    if "time" in dims:
+                        time_dependent_names.append(name)
                     else:
-                        dims = da.dims
-                        if "time" in dims:
-                            time_dependent_names.append(name)
-                        else:
-                            time_invariant_names.append(name)
-            logging.info(
-                f"The required variables have been found in the dataset: {self._names}."
-            )
+                        time_invariant_names.append(name)
+                elif self._allow_missing_variables:
+                    logging.info(
+                        f"Variable '{name}' not found in dataset, "
+                        "skipping due to allow_missing_variables=True."
+                    )
+                else:
+                    raise ValueError(f"Required variable not found in dataset: {name}.")
+        found = time_dependent_names + time_invariant_names + static_derived_names
+        logging.info(f"The required variables have been found in the dataset: {found}.")
 
         return VariableNames(
             time_dependent_names,
@@ -925,18 +959,10 @@ class XarrayDataset(DatasetABC):
             tensors[n] = torch.cat(tensor_list)
         del arrays
 
-        # load time-invariant variables from first dataset
-        if len(self._time_invariant_names) > 0:
-            ds = self._open_file(idxs[0])
-            ds = ds.isel(**self.isel)
-            shape = [total_steps] + self._shape_excluding_time_after_selection
-            for name in self._time_invariant_names:
-                variable = ds[name].variable
-                if self.fill_nans is not None:
-                    variable = variable.fillna(self.fill_nans.value)
-                tensors[name] = as_broadcasted_tensor(variable, self.dims, shape)
-            ds.close()
-            del ds
+        # broadcast the time-invariant variables loaded at construction
+        shape = [total_steps] + self._shape_excluding_time_after_selection
+        for name, tensor in self._time_invariant_tensors.items():
+            tensors[name] = torch.broadcast_to(tensor, shape)
 
         # load static derived variables
         for name in self._static_derived_names:
@@ -950,11 +976,29 @@ class XarrayDataset(DatasetABC):
         # Apply field overwrites
         tensors = self.overwrite.apply(tensors)
 
+        # Fill NaN for missing variables so all samples share the same keys
+        missing_names: frozenset[str] | None = None
+        if self._allow_missing_variables and self._missing_names:
+            fill_shape = [total_steps] + self._shape_excluding_time_after_selection
+            fill_dtype = self.dtype if self.dtype is not None else torch.float32
+            for name in self._missing_names:
+                tensors[name] = torch.full(fill_shape, float("nan"), dtype=fill_dtype)
+            missing_names = self._missing_names
+
         # Create a DataArray of times to return corresponding to the slice that
         # is valid even when n_repeats > 1.
         time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
-        return tensors, time, self._labels, self._epoch
+        return tensors, time, self._labels, self._epoch, missing_names
+
+    def enable_shared_memory(self):
+        """Move epoch counter to shared memory for multi-worker data loading."""
+        if not self._global_epoch.is_shared():
+            self._global_epoch = self._global_epoch.share_memory_()
+
+    def set_global_epoch_tensor(self, tensor: torch.Tensor):
+        """Share a single epoch tensor across multiple datasets."""
+        self._global_epoch = tensor
 
     def set_epoch(self, epoch: int):
         """
@@ -1071,14 +1115,25 @@ class XarraySubset(DatasetABC):
     def properties(self) -> DatasetProperties:
         return self._wrapped_dataset.properties
 
+    def enable_shared_memory(self):
+        self._wrapped_dataset.enable_shared_memory()
+
+    def set_global_epoch_tensor(self, tensor: torch.Tensor):
+        self._wrapped_dataset.set_global_epoch_tensor(tensor)
+
     def set_epoch(self, epoch: int):
         self._wrapped_dataset.set_epoch(epoch)
 
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, names: Sequence[str], n_timesteps: IntSchedule
+    config: XarrayDataConfig,
+    names: Sequence[str],
+    n_timesteps: IntSchedule,
+    allow_missing_variables: bool = False,
 ) -> tuple["XarraySubset", DatasetProperties]:
-    dataset = XarrayDataset(config, names, n_timesteps)
+    dataset = XarrayDataset(
+        config, names, n_timesteps, allow_missing_variables=allow_missing_variables
+    )
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
     return XarraySubset(dataset, index_slice), properties
@@ -1089,11 +1144,14 @@ def get_xarray_datasets(
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict: bool = True,
+    allow_missing_variables: bool = False,
 ) -> tuple[list[XarraySubset], DatasetProperties]:
     datasets = []
     properties: DatasetProperties | None = None
     for config in dataset_configs:
-        dataset, new_properties = get_xarray_dataset(config, names, n_timesteps)
+        dataset, new_properties = get_xarray_dataset(
+            config, names, n_timesteps, allow_missing_variables=allow_missing_variables
+        )
         datasets.append(dataset)
         if properties is None:
             properties = new_properties

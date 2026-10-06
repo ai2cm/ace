@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import click
 import dacite
+import numpy as np
 import xarray as xr
 import yaml
 from create_coupled_datasets import (
@@ -17,9 +18,9 @@ from create_coupled_datasets import (
 
 @dataclass
 class TimeSelectionConfig:
-    """Time selection: either a single timestamp or a range."""
+    """Time selection: a single timestamp, a list of timestamps, or a range."""
 
-    timestamp: str | None = None
+    timestamp: str | list[str] | None = None
     start_time: str | None = None
     end_time: str | None = None
 
@@ -29,6 +30,8 @@ class TimeSelectionConfig:
                 raise ValueError(
                     "Use either 'timestamp' or 'start_time'/'end_time', not both."
                 )
+            if isinstance(self.timestamp, list) and len(self.timestamp) == 0:
+                raise ValueError("'timestamp' list must not be empty.")
         elif self.start_time is None or self.end_time is None:
             raise ValueError(
                 "Provide either 'timestamp' or both 'start_time' and 'end_time'."
@@ -51,7 +54,8 @@ class CreateCoupledICConfig:
             input_datasets.ocean.zarr_path from the coupled config.
         original_atmosphere_zarr: Optional path to original atmosphere zarr.
             Defaults to input_datasets.atmosphere.zarr_path from the coupled config.
-        time: Time selection (single timestamp or start_time/end_time range).
+        time: Time selection (single timestamp, list of timestamps, or
+            start_time/end_time range).
         output_directory: Directory where NetCDF files will be written.
         output_prefix: Prefix for output files: {prefix}_ocean_ic.nc and
             {prefix}_atmosphere_ic.nc. Defaults to "ic".
@@ -186,13 +190,25 @@ def _select_time(ds: xr.Dataset, time_config: TimeSelectionConfig) -> xr.Dataset
         return ds
     time_coord = ds.time
     if time_config.timestamp is not None:
-        t = _parse_timestamp_to_cftime(time_config.timestamp, time_coord)
-        if t not in time_coord.values:
+        timestamps = (
+            [time_config.timestamp]
+            if isinstance(time_config.timestamp, str)
+            else time_config.timestamp
+        )
+        parsed = [_parse_timestamp_to_cftime(t, time_coord) for t in timestamps]
+        missing = [
+            orig for orig, t in zip(timestamps, parsed) if t not in time_coord.values
+        ]
+        if missing:
             raise ValueError(
-                f"Time {time_config.timestamp!r} not found in dataset. "
-                f"Use an exact timestamp present in the data."
+                f"Time(s) {missing!r} not found in dataset. "
+                f"Use exact timestamps present in the data."
             )
-        return ds.sel(time=t)
+        # A single string selects a scalar time (keeps prior behavior); a list
+        # keeps the time dimension so multiple ICs land in one file.
+        if isinstance(time_config.timestamp, str):
+            return ds.sel(time=parsed[0])
+        return ds.sel(time=parsed)
     assert time_config.start_time is not None and time_config.end_time is not None
     start = _parse_timestamp_to_cftime(time_config.start_time, time_coord)
     end = _parse_timestamp_to_cftime(time_config.end_time, time_coord)
@@ -216,6 +232,20 @@ def _load_and_merge(
             time size {out.sizes.get('time', 1)}"
     )
     return out
+
+
+def _prepare_ic_for_output(ds: xr.Dataset) -> xr.Dataset:
+    """Prepare IC dataset for inference compatibility.
+
+    Ensures 'time' is a dimension (not a scalar coordinate) and casts all
+    float64 data variables to float32 to match model weight dtypes.
+    """
+    if "time" in ds.coords and len(ds.time.dims) == 0:
+        ds = ds.expand_dims("time")
+    for var in ds.data_vars:
+        if ds[var].dtype == np.float64:
+            ds[var] = ds[var].astype(np.float32)
+    return ds
 
 
 def run(config: CreateCoupledICConfig) -> None:
@@ -248,6 +278,7 @@ def run(config: CreateCoupledICConfig) -> None:
             config.time,
             "ocean",
         )
+    ocean_ic = _prepare_ic_for_output(ocean_ic)
     ocean_path = os.path.join(
         config.output_directory, f"{config.output_prefix}_ocean_ic.nc"
     )
@@ -269,6 +300,7 @@ def run(config: CreateCoupledICConfig) -> None:
             config.time,
             "atmosphere",
         )
+    atmosphere_ic = _prepare_ic_for_output(atmosphere_ic)
     atmos_path = os.path.join(
         config.output_directory, f"{config.output_prefix}_atmosphere_ic.nc"
     )

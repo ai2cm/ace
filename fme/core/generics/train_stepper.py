@@ -31,6 +31,7 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
         data: BD,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
     ) -> TO:
         pass
 
@@ -64,6 +65,19 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     def set_train(self) -> None:
         pass
 
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the trainer at the start of each training epoch.
+
+        Default implementation is a no-op. Override to reset per-epoch
+        in-module state (e.g. tracked running statistics that should only
+        reflect the most recent epoch).
+        """
+        pass
+
     @abc.abstractmethod
     def update_training_history(self, training_job: TrainingJob) -> None:
+        pass
+
+    @abc.abstractmethod
+    def seed_eval(self, seed: int) -> None:
         pass

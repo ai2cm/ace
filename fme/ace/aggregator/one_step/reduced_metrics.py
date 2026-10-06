@@ -68,6 +68,10 @@ class AreaWeightedReducedMetric:
         self._channel_mean: torch.Tensor | None = None
         self._device = device
         self._channel_mean_names = channel_mean_names
+        # Variables whose target is entirely NaN (e.g. filled by
+        # allow_missing_variables); detected once on the first batch since
+        # missingness is constant, then excluded from the channel mean.
+        self._all_nan_target_names: set[str] | None = None
 
     def _get_channel_mean_names(self, tensors: TensorDict) -> Sequence[str]:
         if self._channel_mean_names is None:
@@ -88,9 +92,29 @@ class AreaWeightedReducedMetric:
         if self._channel_mean is None:
             self._channel_mean = torch.tensor(0.0, device=self._device)
         channel_mean_names = self._get_channel_mean_names(batch_avgs)
-        for name, tensor in batch_avgs.items():
-            if name in channel_mean_names:
-                self._channel_mean += tensor / len(channel_mean_names)
+        missing = [n for n in channel_mean_names if n not in batch_avgs]
+        if missing:
+            raise KeyError(
+                f"channel_mean_names contains entries not present in the "
+                f"recorded data: {missing}. Available: {sorted(batch_avgs)}."
+            )
+        if self._all_nan_target_names is None:
+            self._all_nan_target_names = {
+                name for name in channel_mean_names if torch.isnan(target[name]).all()
+            }
+        # Targets may be entirely NaN if filled by allow_missing_variables
+        non_nan_targets = [
+            name
+            for name in channel_mean_names
+            if name not in self._all_nan_target_names
+        ]
+        if not non_nan_targets:
+            raise ValueError(
+                "All target variables are NaN; cannot compute channel mean."
+            )
+        for name in non_nan_targets:
+            self._channel_mean += batch_avgs[name] / len(non_nan_targets)
+
         self._accumulator.add(batch_avgs)
 
     def get(self) -> TensorDict:

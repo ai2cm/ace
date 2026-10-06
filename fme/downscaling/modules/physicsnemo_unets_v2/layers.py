@@ -181,6 +181,7 @@ class Conv2d(torch.nn.Module):
         init_bias: float = 0.0,
         fused_conv_bias: bool = False,
         amp_mode: bool = False,
+        periodic: bool = False,
     ):
         if up and down:
             raise ValueError("Both 'up' and 'down' cannot be true at the same time.")
@@ -199,6 +200,10 @@ class Conv2d(torch.nn.Module):
         self.fused_resample = fused_resample
         self.fused_conv_bias = fused_conv_bias
         self.amp_mode = amp_mode
+        # When True, the main 3x3 conv pads circularly in W (longitude) and zero
+        # in H (latitude) instead of symmetric zero padding -- for global lat/lon
+        # fields. Off by default, so the standard (image) path is unchanged.
+        self.periodic = periodic
         init_kwargs = dict(
             mode=init_mode,
             fan_in=in_channels * kernel * kernel,
@@ -240,6 +245,18 @@ class Conv2d(torch.nn.Module):
         f = resample_filter if resample_filter is not None else None
         w_pad = w.shape[-1] // 2 if w is not None else 0
         f_pad = (f.shape[-1] - 1) // 2 if f is not None else 0
+        if self.periodic and f_pad > 0:
+            # Only the main (odd-kernel) weight-conv branch below implements
+            # circular padding in W. The up/down resample-filter convs above
+            # still zero-pad, which is silently fine today only because the
+            # default resample_filter=[1, 1] gives f_pad=0 (no padding at
+            # all). Fail loudly rather than silently reintroducing a
+            # longitude discontinuity if a wider resample_filter is ever used
+            # with periodic=True.
+            raise NotImplementedError(
+                "periodic=True is not implemented for up/down-sampling with "
+                f"a resample_filter wider than 2 taps (got f_pad={f_pad})."
+            )
 
         if self.fused_resample and self.up and w is not None:
             x = torch.nn.functional.conv_transpose2d(
@@ -290,10 +307,17 @@ class Conv2d(torch.nn.Module):
                     padding=f_pad,
                 )
             if w is not None:  # ask in corrdiff channel whether w will ever be none
-                if self.fused_conv_bias:
-                    x = torch.nn.functional.conv2d(x, w, padding=w_pad, bias=b)
+                if self.periodic and w_pad > 0:
+                    # circular in longitude (W), zero in latitude (H)
+                    x = torch.cat([x[..., -w_pad:], x, x[..., :w_pad]], dim=-1)
+                    x = torch.nn.functional.pad(x, (0, 0, w_pad, w_pad))
+                    pad = 0
                 else:
-                    x = torch.nn.functional.conv2d(x, w, padding=w_pad)
+                    pad = w_pad
+                if self.fused_conv_bias:
+                    x = torch.nn.functional.conv2d(x, w, padding=pad, bias=b)
+                else:
+                    x = torch.nn.functional.conv2d(x, w, padding=pad)
         if b is not None and not self.fused_conv_bias:
             x = x.add_(b.reshape(1, -1, 1, 1))
         return x

@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import datetime
 import logging
 import os
 from typing import List, Sequence, Tuple
@@ -35,7 +36,7 @@ class CollateFn:
     horizontal_dims: List[str]
 
     def __call__(self, samples: Sequence[DatasetItem]) -> "BatchData":
-        sample_data, sample_time, _, epoch = zip(*samples)
+        sample_data, sample_time, _, epoch, _ = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_time = xr.concat(sample_time, dim="sample")
         if not all(epoch[0] == e for e in epoch):
@@ -152,7 +153,6 @@ class Config:
         )
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
-        assert data.properties.timestep is not None
         coords = {
             **data.properties.horizontal_coordinates.coords,
             **data.properties.vertical_coordinate.coords,
@@ -163,6 +163,9 @@ class Config:
             label="monthly_mean_data",
             save_names=None,  # save all data given
             initial_condition_times=initial_condition_times,
+            # unlike an inference run, the first time here is itself written,
+            # so it is month 0 rather than the step before it
+            timestep=datetime.timedelta(0),
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
             dataset_metadata=DatasetMetadata.from_env(),

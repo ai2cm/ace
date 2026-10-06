@@ -29,18 +29,26 @@ from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core import metrics
-from fme.core.device import using_gpu, using_srun
+from fme.core.device import in_dataloader_worker, using_gpu, using_srun
 
 from ._gloo_patch import patch_gloo_alltoall
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
-from .torch_distributed import _gather_irregular
+from .torch_distributed import _gather_irregular, _rank_metadata_from_env
 
 logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
+
+
+def _check_world_size_divisible(world_size: int, spatial_size: int) -> None:
+    if world_size % spatial_size != 0:
+        raise ValueError(
+            f"world_size must be divisible by h_size * w_size, "
+            f"got world_size={world_size} and h*w={spatial_size}"
+        )
 
 
 class _AutogradAllReduce(torch.autograd.Function):
@@ -92,18 +100,25 @@ class ModelTorchDistributed(DistributedBackend):
         w_size: int = 1,
         verbose: bool = False,
     ):
+        spatial_size = h_size * w_size
+        if in_dataloader_worker():
+            self._rank, self._world_size = _rank_metadata_from_env()
+            _check_world_size_divisible(self._world_size, spatial_size)
+            self._data_size = self._world_size // spatial_size
+            self._data_rank = self._rank // spatial_size
+            return
+
+        # Keep the NCCL watchdog from std::terminate-ing the rank on a CUDA
+        # error observed off the main thread; see the same setting in
+        # TorchDistributed.__init__ for the full rationale.
+        os.environ.setdefault("TORCH_NCCL_RETHROW_CUDA_ERRORS", "0")
         # Initialize PhysicsNeMo DistributedManager.
         DistributedManager.initialize()
         self._dm = DistributedManager()
 
         # Build a 3-D (data, h, w) DeviceMesh; data=-1 auto-sizes the
         # data-parallel dimension to absorb all remaining ranks.
-        spatial_size = h_size * w_size
-        if self._dm.world_size % spatial_size != 0:
-            raise ValueError(
-                f"world_size must be divisible by h_size * w_size, "
-                f"got world_size={self._dm.world_size} and h*w={spatial_size}"
-            )
+        _check_world_size_divisible(self._dm.world_size, spatial_size)
         mesh = self._dm.initialize_mesh(
             mesh_shape=(-1, h_size, w_size),
             mesh_dim_names=("data", "h", "w"),
@@ -302,7 +317,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def scatter_object(self, obj: T | None) -> T:
         """Scatter a picklable object from the root process to all processes."""
-        if self._data_rank == 0:
+        if self._rank == 0:
             if obj is None:
                 raise ValueError("Root process must provide an object to scatter")
             object_list = [obj for _ in range(self.total_ranks)]
@@ -397,6 +412,22 @@ class ModelTorchDistributed(DistributedBackend):
             return _AutogradAllReduce.apply(tensor, self._spatial_group)
         return tensor
 
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self._h_size > 1 or self._w_size > 1:
+            # Broadcast tensor over spatial group so all tiles get the root's value.
+            src = torch.distributed.get_global_rank(self._spatial_group, 0)
+            # NCCL does not support bool collectives; round-trip through uint8.
+            if tensor.dtype == torch.bool:
+                buffer = tensor.to(torch.uint8)
+                torch.distributed.broadcast(buffer, src, group=self._spatial_group)
+                return buffer.to(torch.bool)
+            # Clone first: broadcast writes in place and would overwrite the
+            # caller's tensor on non-root ranks.
+            buffer = tensor.clone()
+            torch.distributed.broadcast(buffer, src, group=self._spatial_group)
+            return buffer
+        return tensor
+
     def weighted_mean(
         self,
         data: torch.Tensor,
@@ -438,5 +469,17 @@ class ModelTorchDistributed(DistributedBackend):
         return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
-        logger.debug("Shutting down rank %d", self._rank)
+        # only the log line is guarded: `cleanup` already skips the collective
+        # when the manager is not initialized, and resets its shared state either
+        # way, so returning early here would leave that state behind.
+        if torch.distributed.is_initialized():
+            logger.info("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
+
+    def abort(self):
+        if not torch.distributed.is_initialized():
+            return
+        # covers the manager's mesh subgroups too: passing no group aborts
+        # every registered process group. The manager's own state is left
+        # behind, but the process is about to exit.
+        torch.distributed.distributed_c10d._abort_process_group()

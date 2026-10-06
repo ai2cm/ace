@@ -18,7 +18,7 @@ jobs:
           echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
@@ -27,9 +27,9 @@ jobs:
         run: |
           python -m pip install uv
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
-          uv venv --python 3.11
-          uv pip install -c constraints.txt -e .[dev]
-          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
+          uv venv --python 3.12
+          uv pip install -c constraints.txt -e .[dev,graphcast]
+          uv pip install --no-build-isolation -c constraints.txt -r requirements-healpix.txt
       - name: Run unit tests with code coverage
         run: |
           source .venv/bin/activate
@@ -47,7 +47,7 @@ jobs:
           echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
@@ -72,7 +72,7 @@ jobs:
           echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
@@ -87,9 +87,9 @@ jobs:
           sudo apt-get install -y make git build-essential
           python -m pip install uv
           # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
-          if [ ! -d ".venv" ]; then uv venv --python 3.11; fi
-          uv pip install -c constraints.txt -e .[dev]
-          uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix,graphcast]
+          if [ ! -d ".venv" ]; then uv venv --python 3.12; fi
+          uv pip install -c constraints.txt -e .[dev,graphcast]
+          uv pip install --no-build-isolation -c constraints.txt -r requirements-healpix.txt
       - name: Run CUDA check and pytest
         run: |
             source .venv/bin/activate

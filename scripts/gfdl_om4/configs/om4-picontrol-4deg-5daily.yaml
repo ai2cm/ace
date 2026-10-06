@@ -1,0 +1,114 @@
+# 5-daily 4-degree ocean (Samudra) store from the 200-year CM4 piControl
+# simulation.
+target_grid: F22.5
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F22.5
+expected_level_count: 19
+shift_timestamps_to_avg_interval_midpoint: false
+output:
+  path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
+  time_chunk_size: 1
+  time_shard_size: 365
+wetmask:
+  store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_1daily_snap_subset_to_5daily_snap.zarr
+  variable: thetao
+statics:
+  store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_static.zarr
+  variables:
+    - deptho
+    - hfgeou
+streams:
+  - name: snapshot_ocean
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_1daily_snap_subset_to_5daily_snap.zarr
+    variables:
+      - thetao
+      - so
+      - uo
+      - vo
+      - tos
+      - zos
+      - SSH
+      - mlotst
+      - rhoinsitu
+    rotated_pairs:
+      - [uo, vo]
+    # These sources carry coastal staggered velocity faces that are valid
+    # with value exactly 0.0 where the vertical remap unmasked land columns;
+    # the artifact flags them so they are not averaged into coastal centers.
+    face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/om4-picontrol-2026-06-19
+    postprocess:
+      - kelvin_sst
+  # 5-day-mean surface fluxes/forcings, whose end-of-interval time labels
+  # coincide with the snapshot instants (enforced by the time-alignment
+  # assertion).
+  - name: flux
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_1daily_coarsened_to_5daily.zarr
+    variables:
+      - hfds
+      - hflso
+      - hfsso
+      - rlntds
+      - rsntds
+      - hfsifrazil
+      - hfevapds
+      - hfrainds
+      - hfrunoffds
+      - wfo
+      - prlq
+      - prsn
+      - evs
+      - sfdsi
+      - tauuo
+      - tauvo
+      - ustar
+    rotated_pairs:
+      - [tauuo, tauvo]
+    postprocess:
+      - hfds_total_area
+  # Ice-model true snapshots, subsampled from 6-hourly to the 5-daily
+  # snapshot instants (every 20th step). The ice SSH is the sea surface as
+  # seen by the ice model, distinct from the ocean-store SSH and zos.
+  - name: ice_snapshot
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ice_6hourly_snap.zarr
+    variables:
+      - sea_ice_fraction
+      - EXT
+      - HI
+      - HS
+      - UI
+      - VI
+      - TS
+      - TSN
+      - SST
+      - SSS
+      - simass
+      - sisnmass
+      - SSH
+    dim_renaming:
+      xT: xh
+      yT: yh
+      xB: xq
+      yB: yq
+    time_subsample_stride: 20
+    rotated_pairs:
+      - [UI, VI]
+    renaming:
+      SSH: SSH_ice
+      sea_ice_fraction: ocean_sea_ice_fraction
+    full_cell_variables:
+      - sea_ice_fraction
+    postprocess:
+      - sea_ice
+  # Ice-model 6-hourly means at the snapshot instants (each mean covers the
+  # 6 hours ending at the instant), treated as snapshot estimates.
+  - name: ice_mean_as_snapshot
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ice_6hourly.zarr
+    variables:
+      - T1
+      - T2
+      - T3
+      - T4
+      - T_bulkice
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_subsample_stride: 20

@@ -1,12 +1,19 @@
+from datetime import datetime
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from .plotting import (
     _stitch_data_panels,
+    clamp_date_axis,
     fold_healpix_data,
+    format_period_axis,
     get_cmap_limits,
     plot_imshow,
     plot_paneled_data,
+    plot_power_spectrum_by_period,
 )
 
 
@@ -110,3 +117,92 @@ def test_plot_paneled_data(shape, img_shape):
     fig = plot_paneled_data(data, diverging=True)
     assert fig.image is not None
     assert np.array_equal(fig.image.size, img_shape)
+
+
+def test_clamp_date_axis_allows_a_140_year_series_starting_at_year_0001():
+    """Regression: a long rollout starting at year 0001 must still draw.
+
+    Matplotlib rejects dates before year 0001, and autoscale pads the x limits
+    ~5% beyond the data -- 7 years on a 140-year series, which on a series
+    starting in year 0001 lands at year -6 and raises when the figure is drawn.
+    """
+    times = [datetime(year, 1, 15) for year in range(1, 141)]
+    values = np.arange(len(times), dtype=float)
+
+    fig, ax = plt.subplots(1, 1)
+    try:
+        ax.plot(times, values)
+        clamp_date_axis(ax)
+        # the failure is raised when the date locator runs, i.e. at draw time
+        fig.canvas.draw()
+        left, right = ax.get_xlim()
+        assert left == mdates.date2num(times[0])
+        assert right == mdates.date2num(times[-1])
+    finally:
+        plt.close(fig)
+
+
+def test_plot_power_spectrum_by_period_draws_mean_and_samples():
+    """A line per sample plus a heavy sample-mean line, at power per octave."""
+    freqs_per_year = np.array([0.0, 0.25, 0.5, 1.0])
+    power_by_sample = np.array([[10.0, 4.0, 2.0, 1.0], [20.0, 8.0, 6.0, 3.0]])
+
+    fig, ax = plt.subplots(1, 1)
+    try:
+        plot_power_spectrum_by_period(ax, freqs_per_year, power_by_sample, "mean")
+        assert len(ax.lines) == 3  # two samples and their mean
+        mean_line = ax.lines[-1]
+        assert mean_line.get_label() == "mean"
+        # the zero frequency has no finite period and is dropped
+        np.testing.assert_allclose(mean_line.get_xdata(), [4.0, 2.0, 1.0])
+        expected = np.array([6.0, 4.0, 2.0]) * np.array([0.25, 0.5, 1.0]) * np.log(2.0)
+        np.testing.assert_allclose(mean_line.get_ydata(), expected)
+    finally:
+        plt.close(fig)
+
+
+def test_format_period_axis_labels_octaves():
+    fig, ax = plt.subplots(1, 1)
+    try:
+        format_period_axis(ax, max_period_years=16.0)
+        fig.canvas.draw()
+        assert ax.get_xscale() == "log"
+        assert ax.get_xlim() == (0.5, 16.0)
+        labels = [tick.get_text() for tick in ax.get_xticklabels()]
+        assert labels == ["0.5", "1.0", "2.0", "4.0", "8.0", "16.0"]
+    finally:
+        plt.close(fig)
+
+
+def test_format_period_axis_drops_ticks_beyond_a_short_record():
+    fig, ax = plt.subplots(1, 1)
+    try:
+        format_period_axis(ax, max_period_years=3.0)
+        fig.canvas.draw()
+        assert ax.get_xlim() == (0.5, 3.0)
+        labels = [tick.get_text() for tick in ax.get_xticklabels()]
+        assert labels == ["0.5", "1.0", "2.0"]
+    finally:
+        plt.close(fig)
+
+
+def test_format_period_axis_survives_wandb_plotly_conversion():
+    """Regression: the period axis must stay logarithmic in wandb.
+
+    wandb renders a logged matplotlib figure by converting it to plotly, and
+    plotly represents only base-10 log axes -- given any other base it silently
+    falls back to linear, which would stop the power-per-octave curve being
+    variance-preserving. Assert on the converted figure rather than on the base,
+    so the test states the property we actually depend on.
+    """
+    plotly_tools = pytest.importorskip("plotly.tools")
+
+    fig, ax = plt.subplots(1, 1)
+    try:
+        ax.plot([0.5, 1.0, 2.0, 4.0], [1.0, 2.0, 3.0, 4.0])
+        format_period_axis(ax, max_period_years=16.0)
+        converted = plotly_tools.mpl_to_plotly(fig)
+    finally:
+        plt.close(fig)
+
+    assert converted.layout.xaxis.type == "log"

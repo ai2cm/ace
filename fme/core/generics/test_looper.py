@@ -23,10 +23,10 @@ from fme.core.generics.inference import (
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.testing.wandb import mock_wandb
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -49,10 +49,6 @@ def get_data(
     ak, bk = torch.arange(nz), torch.arange(nz)
     vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     return SphericalData(data, area_weights, vertical_coord)
-
-
-def get_scalar_data(names, value):
-    return {n: value for n in names}
 
 
 class MockLoader(torch.utils.data.DataLoader):
@@ -134,12 +130,7 @@ def _get_stepper():
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(all_names, 0.0),
-                            stds=get_scalar_data(all_names, 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(all_names),
                 ),
             ),
         ),

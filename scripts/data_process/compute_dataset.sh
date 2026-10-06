@@ -47,6 +47,7 @@ output=$(argo submit compute_dataset_argo_workflow.yaml \
     -p combine_stats_script="$(< combine_stats.py)" \
     -p upload_stats_script="$(< upload_stats.py)" \
     -p time_coarsen_script="$(< time_coarsen.py)" \
+    -p fs_utils_script="$(< fs_utils.py)" \
     -p config="$(< ${CONFIG})" \
     -p names="${names[*]}" \
     -p run_directories="${run_directories[*]}" \

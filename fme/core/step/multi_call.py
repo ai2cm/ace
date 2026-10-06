@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from copy import copy
 from typing import Any, TypeVar
 
@@ -9,8 +9,10 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -153,7 +155,11 @@ class MultiCallStepConfig(StepConfigABC):
             for output_name in self.config.output_names:
                 for name in self.config.get_multi_called_names(output_name):
                     extra_names.append(name)
-                    if output_name in self.wrapped_step.input_names:
+                    # A variant is scored in the same units as its base
+                    # variable, which follows the wrapped step's residual
+                    # convention (not mere prognostic-ness: a hybrid step
+                    # predicts some prognostics full-field).
+                    if output_name in self.wrapped_step.residual_names:
                         extra_residual_scaled_names.append(name)
         return self.wrapped_step.get_loss_normalizer(
             extra_names=extra_names,
@@ -167,24 +173,26 @@ class MultiCallStepConfig(StepConfigABC):
         return self.config.names
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self.wrapped_step.input_names
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self.wrapped_step.get_next_step_forcing_names()
 
     @property
-    def output_names(self) -> list[str]:
-        return self.wrapped_step.output_names + self._multi_call_outputs
+    def output_names(self) -> frozenset[str]:
+        return frozenset(
+            set(self.wrapped_step.output_names).union(self._multi_call_outputs)
+        )
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         return self.wrapped_step.next_step_input_names
 
     @property
     def loss_names(self) -> list[str]:
         if self.include_multi_call_in_loss:
-            return self.wrapped_step.loss_names + self._multi_call_outputs
+            return sorted(self.output_names)
         else:
             return self.wrapped_step.loss_names
 
@@ -197,6 +205,12 @@ class MultiCallStepConfig(StepConfigABC):
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self.wrapped_step.replace_prescribed_prognostic_names(names)
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self.wrapped_step.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.wrapped_step.replace_corrector(corrector)
+
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call
 
@@ -206,6 +220,14 @@ class MultiCallStepConfig(StepConfigABC):
 
     def load(self):
         self.wrapped_step.load()
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self.wrapped_step.allow_missing_variables
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
 
 def _extend_normalizer_with_multi_call_outputs(
@@ -288,19 +310,31 @@ class MultiCallStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._wrapped_step.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._wrapped_step.set_epoch(epoch)
+
     def step(
         self,
         args: StepArgs,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        state = self._wrapped_step.step(
-            args=args,
-            wrapper=wrapper,
-        )
+    ) -> StepOutput:
+        wrapped = self._wrapped_step.step(args=args, wrapper=wrapper)
+        output = wrapped.output
         if self._multi_call is not None:
-            multi_called_outputs = self._multi_call.step(args=args, wrapper=wrapper)
-            state = {**multi_called_outputs, **state}
-        return state
+            # The multi-call's own state and diagnostics are discarded; only the
+            # wrapped step's are carried.
+            multi_called = self._multi_call.step(args=args, wrapper=wrapper)
+            output = {**multi_called.output, **output}
+        return StepOutput(
+            output=output,
+            stepper_state=wrapped.stepper_state,
+            corrector_diagnostics=wrapped.corrector_diagnostics,
+        )
 
     def get_state(self) -> dict[str, Any]:
         """

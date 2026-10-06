@@ -8,6 +8,7 @@
 
 import abc
 import math
+from typing import final
 
 import torch
 import torch.nn as nn
@@ -239,6 +240,7 @@ class DiscreteContinuousConv(nn.Module, metaclass=abc.ABCMeta):
             self.bias = None
 
     @property
+    @final
     def kernel_size(self):
         return self.filter_basis.kernel_size
 

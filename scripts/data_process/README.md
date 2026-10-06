@@ -11,7 +11,7 @@ The second step, which produces monthly netCDF files locally (e.g. `make fv3gfs_
 To create an interactive session, run the following command from the `scripts/data_process` directory:
 
 ```
-beaker session create --budget ai2/climate --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process --shared-memory 120GiB
+beaker session create --budget ai2/atec-climate --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process --shared-memory 120GiB
 ```
 
 Doing so will require that your current working directory is a mountable path (e.g. something in /data).
@@ -40,4 +40,4 @@ The output will be written to the `/climate-default` file directory on weka.
 
 Example bare usage: `cd full-model/scripts/data_process && make healpix_ace_dataset`. You may also want to run in the background using nohup: `nohup make healpix_ace_dataset > compute_hpx.log 2>&1 &`.
 
-Example bare session creation (use your own ssh secrets): `beaker session create --name annad/dlwp-ace-datapipe --image beaker://annad/dlwp-datapipe --remote --cluster ai2/phobos-cirrascale --bare --mount src=weka,ref=climate-default,dst=/climate-default  --mount src=weka,ref=climate-default,subpath=annad,dst=/root --workdir=/root --mount src=secret,ref=ssh-key,dst=/secret-files/.ssh/id_ed25519     --mount src=secret,ref=git-config,dst=/secret-files/.gitconfig --budget ai2/climate --shared-memory 120GiB`
+Example bare session creation (use your own ssh secrets): `beaker session create --name annad/dlwp-ace-datapipe --image beaker://annad/dlwp-datapipe --remote --cluster ai2/phobos-cirrascale --bare --mount src=weka,ref=climate-default,dst=/climate-default  --mount src=weka,ref=climate-default,subpath=annad,dst=/root --workdir=/root --mount src=secret,ref=ssh-key,dst=/secret-files/.ssh/id_ed25519     --mount src=secret,ref=git-config,dst=/secret-files/.gitconfig --budget ai2/atec-climate --shared-memory 120GiB`

@@ -24,6 +24,25 @@ from fme.core.labels import LabelEncoding
 from fme.core.typing_ import Slice
 
 
+def local_ic_range(
+    n_initial_conditions: int, rank: int, world_size: int
+) -> tuple[int, int]:
+    """Return the [start, end) range of initial conditions for a rank.
+
+    Assigns contiguous blocks of ICs to each rank.  The caller must ensure
+    ``n_initial_conditions`` is divisible by ``world_size``.
+    """
+    if world_size <= 0:
+        raise ValueError(f"world_size must be positive, got {world_size}")
+    if n_initial_conditions % world_size != 0:
+        raise ValueError(
+            f"Number of initial conditions ({n_initial_conditions}) must be "
+            f"divisible by the number of data-parallel ranks ({world_size})."
+        )
+    per_rank = n_initial_conditions // world_size
+    return rank * per_rank, (rank + 1) * per_rank
+
+
 @dataclasses.dataclass
 class TimestampList:
     """
@@ -233,9 +252,13 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         self._label_override = (
             set(label_override) if label_override is not None else None
         )
+        self._allow_missing_variables = requirements.allow_missing_variables
         if isinstance(config.dataset, XarrayDataConfig):
             dataset: XarrayDataset | MergedXarrayDataset = XarrayDataset(
-                config.dataset, requirements.names, requirements.n_timesteps_schedule
+                config.dataset,
+                requirements.names,
+                requirements.n_timesteps_schedule,
+                allow_missing_variables=requirements.allow_missing_variables,
             )
             properties = dataset.properties
         elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
@@ -288,10 +311,12 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
         sample_tuples = []
-        for i_member in range(self._n_initial_conditions):
-            # check if sample is one this local rank should process
-            if i_member % dist.total_data_parallel_ranks != dist.data_parallel_rank:
-                continue
+        local_start, local_end = local_ic_range(
+            self._n_initial_conditions,
+            dist.data_parallel_rank,
+            dist.total_data_parallel_ranks,
+        )
+        for i_member in range(local_start, local_end):
             i_window_start = i_start + self._start_indices[i_member]
             i_window_end = i_window_start + self._forward_steps_in_memory + 1
             if i_window_end > (
@@ -301,8 +326,8 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, time, labels, epoch = self._dataset.get_sample_by_time_slice(
-                window_time_slice
+            tensors, time, labels, epoch, missing_names = (
+                self._dataset.get_sample_by_time_slice(window_time_slice)
             )
             if self._label_override is not None:
                 labels = self._label_override
@@ -323,11 +348,12 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, time, labels, epoch))
+            sample_tuples.append((tensors, time, labels, epoch, missing_names))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
             label_encoding=self._label_encoding,
+            allow_missing_variables=self._allow_missing_variables,
         )
 
     def __getitem__(self, index) -> BatchData:
@@ -336,7 +362,9 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         if self._persistence_data is not None:
             updated_data = {}
             for key, value in self._persistence_data.data.items():
-                updated_data[key] = value.expand_as(result.data[key])
+                # contiguous: the DataLoader pin-memory thread cannot pin the
+                # overlapping-memory view produced by expand_as
+                updated_data[key] = value.expand_as(result.data[key]).contiguous()
             result.data = {**result.data, **updated_data}
         assert result.time.shape[0] == (
             self._n_initial_conditions // dist.total_data_parallel_ranks
@@ -382,6 +410,7 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
                 config,
                 per_dataset_names[config_counter],
                 requirements.n_timesteps_schedule,
+                allow_missing_variables=requirements.allow_missing_variables,
             )
             merged_xarray_datasets.append(current_dataset)
             config_counter += 1

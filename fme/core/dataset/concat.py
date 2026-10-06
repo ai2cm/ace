@@ -71,6 +71,15 @@ class XarrayConcat(DatasetABC):
     def validate_inference_length(self, max_start_index: int, max_window_len: int):
         raise ValueError("Concat datasets do not support inference.")
 
+    def enable_shared_memory(self):
+        shared_epoch = torch.tensor(-1).share_memory_()
+        for dataset in self._wrapped_datasets:
+            dataset.set_global_epoch_tensor(shared_epoch)
+
+    def set_global_epoch_tensor(self, tensor):
+        for dataset in self._wrapped_datasets:
+            dataset.set_global_epoch_tensor(tensor)
+
     def set_epoch(self, epoch: int):
         for dataset in self._wrapped_datasets:
             dataset.set_epoch(epoch)
@@ -81,9 +90,14 @@ def get_dataset(
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict: bool = True,
+    allow_missing_variables: bool = False,
 ) -> tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_xarray_datasets(
-        dataset_configs, names, n_timesteps, strict=strict
+        dataset_configs,
+        names,
+        n_timesteps,
+        strict=strict,
+        allow_missing_variables=allow_missing_variables,
     )
     ensemble = XarrayConcat(datasets, strict=strict)
     return ensemble, properties
@@ -110,12 +124,14 @@ class ConcatDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return get_dataset(
             self.concat,
             names,
             n_timesteps,
             strict=self.strict,
+            allow_missing_variables=allow_missing_variables,
         )
 
     @property
