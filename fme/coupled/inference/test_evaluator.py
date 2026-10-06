@@ -34,7 +34,9 @@ from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
     StandaloneComponentCheckpointsConfig,
     StandaloneComponentConfig,
+    _validate_stepper_overrides,
     apply_coupled_stepper_config_inference_overrides,
+    load_stepper,
     load_stepper_config,
     main,
 )
@@ -108,6 +110,56 @@ def test_load_stepper_config_ocean_prescribed_override_updates_forcing_window(
     assert "thetao_18" in cfg_override.ocean_forcing_window_names
     ocean_reqs = cfg_override.get_forcing_window_data_requirements(1).ocean_requirements
     assert "thetao_18" in ocean_reqs.names
+
+
+def test_load_stepper_config_ocean_forcings_from_data_reads_flux_from_data(
+    tmp_path: pathlib.Path,
+):
+    """
+    ocean_forcings_from_data moves an atmosphere-produced ocean forcing from the
+    coupling to the ocean data requirements, for a checkpoint saved without it.
+    """
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_fraction", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    stepper_data_dir = tmp_path / "stepper_data"
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=2,
+        n_initial_conditions=1,
+        data_dir=stepper_data_dir,
+    )
+    ckpt = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_fraction",
+    )
+    assert isinstance(ckpt, str)
+
+    cfg_default = load_stepper_config(ckpt)
+    assert cfg_default.ocean_forcings_from_data == []
+    assert "a_diag" in cfg_default.atmosphere_to_ocean_forcing_names
+    default_reqs = cfg_default.get_forcing_window_data_requirements(1)
+    assert "a_diag" not in default_reqs.ocean_requirements.names
+
+    cfg = load_stepper_config(ckpt, ocean_forcings_from_data=["a_diag"])
+    assert cfg.ocean_forcings_from_data == ["a_diag"]
+    assert "a_diag" not in cfg.atmosphere_to_ocean_forcing_names
+    reqs = cfg.get_forcing_window_data_requirements(1)
+    assert "a_diag" in reqs.ocean_requirements.names
+
+    stepper = load_stepper(ckpt, ocean_forcings_from_data=["a_diag"])
+    assert stepper.config.ocean_forcings_from_data == ["a_diag"]
+    assert "a_diag" not in stepper.config.atmosphere_to_ocean_forcing_names
 
 
 def save_coupled_stepper(
@@ -703,3 +755,16 @@ def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
     np.testing.assert_array_equal(seed0, seed0_again)
     np.testing.assert_array_equal(seed0, seed0_chunked)
     assert not np.allclose(seed0, seed1)
+
+
+def test_evaluator_rejects_ocean_forcings_from_data_with_standalone_checkpoint():
+    with pytest.raises(ValueError, match="StandaloneComponentCheckpointsConfig"):
+        _validate_stepper_overrides(
+            StandaloneComponentCheckpointsConfig(
+                ocean=StandaloneComponentConfig(timedelta="5D", path="o.tar"),
+                atmosphere=StandaloneComponentConfig(timedelta="6h", path="a.tar"),
+            ),
+            None,
+            None,
+            ocean_forcings_from_data=["a_diag"],
+        )

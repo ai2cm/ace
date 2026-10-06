@@ -130,6 +130,8 @@ class StandaloneComponentCheckpointsConfig:
             Stepper (e.g. prescribed_prognostic_names for inference).
         atmosphere_output_rename: Optional mapping from ocean forcing names to
             atmosphere output names. See ``CoupledStepperConfig``.
+        ocean_forcings_from_data: Ocean forcings the atmosphere produces that are
+            read from the data instead. See ``CoupledStepperConfig``.
 
     """
 
@@ -140,6 +142,7 @@ class StandaloneComponentCheckpointsConfig:
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
     atmosphere_output_rename: dict[str, str] | None = None
+    ocean_forcings_from_data: list[str] = dataclasses.field(default_factory=list)
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -158,6 +161,7 @@ class StandaloneComponentCheckpointsConfig:
             sst_name=self.sst_name,
             ocean_fraction_prediction=self.ocean_fraction_prediction,
             atmosphere_output_rename=self.atmosphere_output_rename,
+            ocean_forcings_from_data=self.ocean_forcings_from_data,
         )
 
     def load_stepper(self) -> CoupledStepper:
@@ -178,10 +182,24 @@ class StandaloneComponentCheckpointsConfig:
         )
 
 
+def _patch_ocean_forcings_from_data(
+    checkpoint: dict, ocean_forcings_from_data: list[str] | None
+) -> None:
+    """Set ``CoupledStepperConfig.ocean_forcings_from_data`` in a serialized
+    coupled checkpoint before the config is rebuilt from it, so the derived
+    name sets (forcing windows, data requirements) are computed with it.
+    """
+    if ocean_forcings_from_data is not None:
+        checkpoint["stepper"]["config"]["ocean_forcings_from_data"] = list(
+            ocean_forcings_from_data
+        )
+
+
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
     ocean_stepper_override: StepperOverrideConfig | None = None,
     atmosphere_stepper_override: StepperOverrideConfig | None = None,
+    ocean_forcings_from_data: list[str] | None = None,
 ) -> CoupledStepperConfig:
     """Load a coupled stepper configuration.
 
@@ -194,6 +212,10 @@ def load_stepper_config(
             for a checkpoint that was saved without them). Ignored for
             ``StandaloneComponentCheckpointsConfig`` (use overrides on that object).
         atmosphere_stepper_override: Same for the atmosphere component.
+        ocean_forcings_from_data: When ``checkpoint_path`` is a single coupled
+            checkpoint, replaces ``CoupledStepperConfig.ocean_forcings_from_data``
+            (ocean forcings read from the data instead of from the atmosphere) for
+            this inference. None keeps the checkpoint's own value.
 
     Returns:
         The CoupledStepperConfig from the serialized checkpoint or constructed from the
@@ -211,6 +233,7 @@ def load_stepper_config(
 
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    _patch_ocean_forcings_from_data(checkpoint, ocean_forcings_from_data)
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
     apply_coupled_stepper_config_inference_overrides(
         config,
@@ -224,6 +247,7 @@ def load_stepper(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
     ocean_stepper_override: StepperOverrideConfig | None = None,
     atmosphere_stepper_override: StepperOverrideConfig | None = None,
+    ocean_forcings_from_data: list[str] | None = None,
 ) -> CoupledStepper:
     """Load a coupled stepper.
 
@@ -236,6 +260,9 @@ def load_stepper(
         atmosphere_stepper_override: When loading a single coupled checkpoint, optional
             overrides for the atmosphere Stepper (ignored for
             StandaloneComponentCheckpointsConfig).
+        ocean_forcings_from_data: When loading a single coupled checkpoint, replaces
+            ``CoupledStepperConfig.ocean_forcings_from_data`` for this inference
+            (see ``load_stepper_config``).
 
     Returns:
         The CoupledStepper serialized in the checkpoint or constructed from the
@@ -251,7 +278,16 @@ def load_stepper(
         )
         return checkpoint_path.load_stepper()
 
-    stepper = load_coupled_stepper(checkpoint_path)
+    if ocean_forcings_from_data is None:
+        stepper = load_coupled_stepper(checkpoint_path)
+    else:
+        logging.info(
+            f"Loading trained coupled model checkpoint from {checkpoint_path} with "
+            f"ocean_forcings_from_data={list(ocean_forcings_from_data)}"
+        )
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        _patch_ocean_forcings_from_data(checkpoint, ocean_forcings_from_data)
+        stepper = CoupledStepper.from_state(checkpoint["stepper"])
     _validate_coupled_component_override(ocean_stepper_override)
     _validate_coupled_component_override(atmosphere_stepper_override)
     # Overrides mutate each component Stepper's config, which the CoupledStepper
@@ -276,6 +312,7 @@ def _validate_stepper_overrides(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
     ocean_stepper_override: StepperOverrideConfig | None,
     atmosphere_stepper_override: StepperOverrideConfig | None,
+    ocean_forcings_from_data: list[str] | None = None,
 ) -> None:
     """Reject top-level stepper overrides for standalone component checkpoints.
 
@@ -285,7 +322,9 @@ def _validate_stepper_overrides(
     so top-level ones would be silently ignored; raise instead.
     """
     if isinstance(checkpoint_path, StandaloneComponentCheckpointsConfig) and (
-        ocean_stepper_override is not None or atmosphere_stepper_override is not None
+        ocean_stepper_override is not None
+        or atmosphere_stepper_override is not None
+        or ocean_forcings_from_data is not None
     ):
         raise ValueError(
             "ocean_stepper_override / atmosphere_stepper_override are only "
@@ -320,6 +359,11 @@ class InferenceEvaluatorConfig:
             (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
+        ocean_forcings_from_data: When loading a single coupled checkpoint, replaces
+            ``CoupledStepperConfig.ocean_forcings_from_data`` for this evaluation:
+            these atmosphere-produced ocean forcings are read from the forcing data
+            instead of taken from the atmosphere model (e.g. to test which coupled
+            fluxes the ocean's sea ice depends on). None keeps the checkpoint's value.
         seed: If set, seeds the random state threaded through the rollout so that
             stochastic modules (e.g. NoiseConditionedSFNO) produce a
             reproducible noise sequence, independent of
@@ -344,6 +388,7 @@ class InferenceEvaluatorConfig:
     prediction_loader: InferenceDataLoaderConfig | None = None
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+    ocean_forcings_from_data: list[str] | None = None
     seed: int | None = None
 
     def __post_init__(self):
@@ -354,6 +399,7 @@ class InferenceEvaluatorConfig:
             self.checkpoint_path,
             self.ocean_stepper_override,
             self.atmosphere_stepper_override,
+            self.ocean_forcings_from_data,
         )
 
     def configure_logging(self, log_filename: str):
@@ -367,6 +413,7 @@ class InferenceEvaluatorConfig:
             self.checkpoint_path,
             ocean_stepper_override=self.ocean_stepper_override,
             atmosphere_stepper_override=self.atmosphere_stepper_override,
+            ocean_forcings_from_data=self.ocean_forcings_from_data,
         )
 
     def load_stepper_config(self) -> CoupledStepperConfig:
@@ -374,6 +421,7 @@ class InferenceEvaluatorConfig:
             self.checkpoint_path,
             ocean_stepper_override=self.ocean_stepper_override,
             atmosphere_stepper_override=self.atmosphere_stepper_override,
+            ocean_forcings_from_data=self.ocean_forcings_from_data,
         )
 
     def get_data_writer(
