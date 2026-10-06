@@ -1,0 +1,16 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# STAGE 2 of the fmma-sozero fork (pilot B), lin8 schedule. Same row as the
+# fmma-sozero-ftlt row in ../ocean_wide_stochastic_es_longtail/finetuning.txt
+# (same stage-1 checkpoint iu095u06 best_ckpt, seed, footprint); only the
+# template's schedule differs. Matched zero-fill control: jamesd's
+# ocean_s2s_lin8-ft rs0 from silm932h (wandb 5rq1g5lt).
+# Results dataset pinned: the stage-1 run took several jobs, so its final
+# dataset does not share the experiment id's prefix.
+#
+# job_runner/uncoupled_finetune.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235 ocean_wide_stochastic_es_lin8_sozero \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+# with WANDB_USERNAME=elynnwu.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|ace-samudra-cm4|iu095u06|best_ckpt|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|01M46FEFDNK9ZWXPB4XJ87HPTK|5h

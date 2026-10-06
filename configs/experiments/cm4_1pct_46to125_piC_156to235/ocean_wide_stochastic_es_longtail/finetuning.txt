@@ -104,5 +104,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-sa
 # why this row runs from exp/stochastic-es-meanfill-sozero). Same template,
 # schedule and seed as rs0 (19yl0189); the generated config differs from rs0's
 # in stepper.input_masking only. normal priority, jupiter (elynn, 2026-10-02/04).
-# STATUS AND RESULTS DATASET are set at launch, once stage 1 finishes.
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|ace-samudra-cm4|iu095u06|best_ckpt|skip|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|RESULTS_DATASET_AT_LAUNCH|5h
+# Stage 1 finished 75/75 2026-10-05; results dataset is its final job's (pinned).
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|ace-samudra-cm4|iu095u06|best_ckpt|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|01M46FEFDNK9ZWXPB4XJ87HPTK|5h
