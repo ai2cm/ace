@@ -1,0 +1,10 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# POO FORK of ../pretraining.txt's coupled-owc_a2s row (crps4). Only the ocean
+# checkpoint differs: owc rs2 trained with prescribed_open_ocean (ace-samudra-cm4
+# ciyqo8j2, beaker 01M1KYGFE8E5T6YB96N7PNK8CW) in place of pjxiw906. Same ACE2S
+# atmosphere (j0ng1tw3), seed, and loss. Resources as the cell-mean fork
+# (../cellmean/pretraining.txt): jupiter+titan, 8 GPUs (batch is global),
+# 1000 GiB, min_runtime 8h.
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|ciyqo8j2|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8|1000GiB|3|ai2/ace|seed=0|8h
