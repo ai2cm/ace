@@ -629,10 +629,14 @@ class BatchData:
 
         Under multi-GPU data parallelism the restart file may hold gathered
         state (written by ``GatheredBatchData``).  When a gathered restart is
-        detected (``dataset_has_gathered_state``), only root reads the file;
-        the data is reconstructed as a ``GatheredBatchData`` and scattered to
-        every rank via ``data_parallel_scatter``, so each rank receives its
-        own shard as a plain ``BatchData``.
+        detected (``dataset_has_gathered_state``), the data is reconstructed
+        as a ``GatheredBatchData`` and, for multi-rank runs, scattered to
+        every rank via ``data_parallel_scatter``.  A single-rank run loading
+        a gathered restart extracts rank 0's shard directly.
+
+        Raises ``ValueError`` if a gathered restart's ``n_ranks`` does not
+        match ``total_data_parallel_ranks`` — restarts must be loaded with
+        the same data-parallelism layout that produced them.
 
         A single-rank restart (embedded state but no ``n_ranks`` marker) is
         read independently by every rank and returned as-is; the caller
@@ -640,12 +644,25 @@ class BatchData:
         ``select_sample_slice``.
         """
         dist = Distributed.get_instance()
-        if dist.total_data_parallel_ranks > 1 and cls.dataset_has_gathered_state(ds):
-            if dist.is_data_parallel_root():
-                gathered = GatheredBatchData.from_xarray_dataset(ds)
+        if cls.dataset_has_gathered_state(ds):
+            if dist.total_data_parallel_ranks > 1:
+                if dist.is_data_parallel_root():
+                    gathered = GatheredBatchData.from_xarray_dataset(ds)
+                else:
+                    gathered = None
+                return data_parallel_scatter(gathered, dist)
             else:
-                gathered = None
-            return data_parallel_scatter(gathered, dist)
+                gathered = GatheredBatchData.from_xarray_dataset(ds)
+                if gathered._stepper_state is not None:
+                    saved_n = gathered._stepper_state.n_ranks
+                    if saved_n != dist.total_data_parallel_ranks:
+                        raise ValueError(
+                            f"Gathered restart was saved with {saved_n} "
+                            f"data-parallel ranks but the current run has "
+                            f"{dist.total_data_parallel_ranks}. Restarts must "
+                            f"be loaded with the same data-parallelism layout."
+                        )
+                return gathered.get_for_rank(0, n_ranks=1)
 
         time = ds[_TIME_DIM]
         squeezed = list(time.dims) == [_SAMPLE_DIM]
