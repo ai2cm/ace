@@ -19,6 +19,7 @@ lives with each training experiment and just names the checkpoint.
 | `evaluator-config-1pct_yearly_4deg_wfo_frc_open.yaml` | `run_1pct_yearly_4deg_wfo_frc_open` | the `prescribed_open_ocean` no-salt runs; water flux salt budget with the target `wfo` and `sfdsi` from the data (`fluxes_from_forcing`) everywhere |
 | `evaluator-config-1pct_yearly_4deg_wfo_pe_frc_open.yaml` | `run_1pct_yearly_4deg_wfo_pe_frc_open` | as `_wfo_pe_open`, with the target `wfo` and `sfdsi` in place of the predicted ones |
 | `evaluator-config-1pct_yearly_4deg_wfo_fullice_frc_open.yaml` | `run_1pct_yearly_4deg_wfo_fullice_frc_open` | as `_wfo_fullice_open`, with the target `wfo` and `sfdsi` in place of the predicted ones |
+| `evaluator-config-1pct_yearly_4deg_ssh_brine_comp_open.yaml` | `run_1pct_yearly_4deg_ssh_brine_comp_open` | `2026-10-01-direct-ssh-no-sal-baseline` only; as `_ssh_brine_open`, with the sea ice salt flux computed from the predicted sea ice volume (S_ice 3.0 psu) wherever there is ice, in place of the predicted `sfdsi`; nothing from the forcing data |
 | `evaluator-config-1pct_yearly_4deg_ssh_brine_frc_open.yaml` | `run_1pct_yearly_4deg_ssh_brine_frc_open` | `2026-10-01-direct-ssh-no-sal-baseline` only; as `_ssh_brine_open`, with the target `sfdsi` in place of the predicted one |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
