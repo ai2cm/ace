@@ -106,4 +106,4 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-ftlt|rs0|ace-sa
 # in stepper.input_masking only. normal priority, jupiter (elynn, 2026-10-02/04).
 # Stage 1 finished 75/75 2026-10-05; results dataset is its final job's (pinned).
 # LAUNCHED 2026-10-05 as 01M47FFHVF22WYSM796JRTM3G7; flipped to skip.
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|ace-samudra-cm4|iu095u06|best_ckpt|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|01M46FEFDNK9ZWXPB4XJ87HPTK|5h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|ace-samudra-cm4|iu095u06|best_ckpt|skip|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|01M46FEFDNK9ZWXPB4XJ87HPTK|5h

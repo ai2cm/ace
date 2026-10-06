@@ -14,4 +14,4 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # with WANDB_USERNAME=elynnwu.
 # LAUNCHED 2026-10-05 as 01M47FFZK89MTXMV6QM28N6AP7; flipped to skip.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|ace-samudra-cm4|iu095u06|best_ckpt|train|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|01M46FEFDNK9ZWXPB4XJ87HPTK|5h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|ace-samudra-cm4|iu095u06|best_ckpt|skip|normal|jupiter|4|500GiB|3|ai2/ace|seed=0|01M46FEFDNK9ZWXPB4XJ87HPTK|5h
