@@ -191,8 +191,12 @@ def check_coarsening_indices(layer_centers, indices, targets=CM4_INTERFACE_DEPTH
         )
 
 
-# MOM6 variable rename map
-OCEAN_RENAME = {"temp": "thetao", "SSH": "zos"}
+# MOM6 variable rename map.  MOM6's ``SSH`` is kept under its own name (the
+# free-surface height, whose global mean is the Boussinesq volume
+# constraint); CM4's ``zos`` (sea surface height above geoid, zero ocean-area
+# mean at every time step, which is how MOM6 itself defines its ``zos``
+# diagnostic) is derived from it in ``_process_ocean_chunk``.
+OCEAN_RENAME = {"temp": "thetao"}
 # MOM6's surface stresses are the OCEAN-side stresses (stress on the sea
 # water, NaN over land, ice-ocean stress under ice): they are CM4's
 # ``tauuo``/``tauvo``.  The atmosphere-side wind stress CM4 calls
@@ -667,6 +671,32 @@ def _finalize_chunk(ds: xr.Dataset) -> xr.Dataset:
 # ---------------------------------------------------------------------------
 
 
+def sea_surface_height_above_geoid(
+    ssh: xr.DataArray, sea_fraction: xr.DataArray
+) -> xr.DataArray:
+    """CM4/CMOR ``zos`` from a free-surface height: SSH minus its ocean-area
+    weighted global mean at each time step.
+
+    Cell areas on the Gaussian output grid are exact latitude-band areas
+    (differences of sin(lat) at the cell bounds) times ``sea_fraction``;
+    cells where ``ssh`` is NaN (land) carry no weight.
+    """
+    lat = ssh["lat"].values
+    lat_b = _cell_bounds(lat, -90.0, 90.0)
+    band = xr.DataArray(np.diff(np.sin(np.deg2rad(lat_b))), dims=["lat"])
+    band = band.assign_coords(lat=ssh["lat"])
+    weights = (band * sea_fraction).where(ssh.notnull(), 0.0)
+    mean = (ssh.fillna(0.0) * weights).sum(("lat", "lon")) / weights.sum(("lat", "lon"))
+    zos = ssh - mean
+    zos.attrs = {
+        "long_name": "Sea surface height above geoid",
+        "standard_name": "sea_surface_height_above_geoid",
+        "units": "m",
+        "comment": "MOM6 SSH minus its ocean-area-weighted global mean at each time",
+    }
+    return zos
+
+
 def _process_ocean_chunk(
     ds_ocean: xr.Dataset,
     output_grid: str,
@@ -725,8 +755,8 @@ def _process_ocean_chunk(
         sst_K = ds["thetao_0"] + 273.15
         sst_K.attrs = {"long_name": "Sea surface temperature", "units": "K"}
         ds["sst"] = sst_K
-    if "zos" in ds:
-        ds["zos"].attrs.setdefault("long_name", "Sea Surface Height")
+    if "SSH" in ds:
+        ds["SSH"].attrs = {"long_name": "Sea Surface Height", "units": "m"}
 
     # Surface velocity aliases
     if "uo_0" in ds:
@@ -777,6 +807,10 @@ def _process_ocean_chunk(
         ds[name] = ds[name].where(invariant_ds[mask_name] > 0)
 
     # Derived post-masking variables
+    if "SSH" in ds:
+        ds["zos"] = sea_surface_height_above_geoid(
+            ds["SSH"], invariant_ds["sea_surface_fraction"]
+        )
     if "hfds" in ds:
         ds["hfds_total_area"] = ds["hfds"] * invariant_ds["sea_surface_fraction"]
         ds["hfds_total_area"].attrs = {

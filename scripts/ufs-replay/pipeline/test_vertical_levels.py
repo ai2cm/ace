@@ -10,6 +10,7 @@ import pathlib
 
 import numpy as np
 import pytest
+import xarray as xr
 
 pytest.importorskip("apache_beam")
 pytest.importorskip("xesmf")
@@ -172,3 +173,30 @@ def test_stress_fields_follow_cm4_conventions():
     assert pipeline.ATMO_FORCING_VARS["uflx_ave"] == "eastward_surface_wind_stress"
     assert pipeline.ATMO_FORCING_VARS["vflx_ave"] == "northward_surface_wind_stress"
     assert pipeline.STRESS_RENAME == {"taux": "tauuo", "tauy": "tauvo"}
+
+
+def test_zos_removes_the_ocean_area_mean_of_ssh():
+    lat = pipeline._gaussian_latitudes(22.5)
+    lon = np.linspace(2, 358, 90)
+    rng = np.random.default_rng(0)
+    ssh = xr.DataArray(
+        rng.normal(size=(2, lat.size, lon.size)) + 0.3,
+        dims=["time", "lat", "lon"],
+        coords={"lat": lat, "lon": lon},
+    )
+    sea = xr.DataArray(
+        rng.uniform(size=(lat.size, lon.size)),
+        dims=["lat", "lon"],
+        coords={"lat": lat, "lon": lon},
+    )
+    ssh = ssh.where(sea > 0.2)  # land cells are NaN
+    sea = sea.where(sea > 0.2, 0.0)
+    zos = pipeline.sea_surface_height_above_geoid(ssh, sea)
+    band = np.diff(np.sin(np.deg2rad(pipeline._cell_bounds(lat, -90.0, 90.0))))
+    w = (band[:, None] * sea.values) * np.isfinite(ssh.values)
+    for k in range(2):
+        mean = np.nansum(zos.values[k] * w[k]) / w[k].sum()
+        assert abs(mean) < 1e-10
+    # a constant offset is removed exactly and the pattern is untouched
+    assert np.allclose((ssh - zos).std(("lat", "lon")).values, 0.0, atol=1e-10)
+    assert np.isnan(zos.values).sum() == np.isnan(ssh.values).sum()

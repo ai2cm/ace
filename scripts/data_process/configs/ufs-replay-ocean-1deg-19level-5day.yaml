@@ -115,6 +115,7 @@ time_coarsen:
     - ssu
     - ssv
     - zos
+    - SSH
     - ocean_sea_ice_fraction
     - HI
     - sea_ice_volume

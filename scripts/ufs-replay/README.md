@@ -54,6 +54,14 @@ Atmosphere stream (3-hourly FV3 chunks):
 3. Regrid to Gaussian grid via xESMF
 4. Mask sea-ice variables to the ocean
 
+## Sea surface height
+
+`SSH` is MOM6's free-surface height as written (its global mean carries the
+Boussinesq volume constraint, about -0.01 m in the replay). `zos` is CM4's
+`sea_surface_height_above_geoid`: `SSH` minus its ocean-area-weighted global
+mean at each time step, which is how MOM6 defines its own `zos` diagnostic.
+Stores produced before 2026-10-06 wrote `SSH` under the name `zos`.
+
 ## Surface stress conventions
 
 `eastward_surface_wind_stress` / `northward_surface_wind_stress` are the
