@@ -44,13 +44,15 @@ from fme.coupled.stepper import (
 def _validate_coupled_component_override(
     override: StepperOverrideConfig | None,
 ) -> None:
-    """Restrict coupled inference overrides to ``prescribed_prognostic_names``.
+    """Restrict coupled inference overrides to those that preserve names.
 
     ``CoupledStepperConfig`` caches cross-component forcing-name sets and
-    validates component compatibility at construction. Only
-    ``prescribed_prognostic_names`` is recomputed on demand; an ``ocean``,
+    validates component compatibility at construction. An ``ocean``,
     ``multi_call`` or ``derived_forcings`` override applied afterward would leave
     those caches stale, so reject them rather than silently use stale values.
+    ``prescribed_prognostic_names`` is recomputed on demand, and a
+    ``corrector`` config feeds no input, output or forcing names, so neither
+    invalidates the caches.
     """
     if override is None:
         return
@@ -65,7 +67,8 @@ def _validate_coupled_component_override(
     ]
     if unsupported:
         raise ValueError(
-            "Coupled inference overrides only support prescribed_prognostic_names, "
+            "Coupled inference overrides only support "
+            "prescribed_prognostic_names and corrector, "
             f"but got unsupported override(s): {sorted(unsupported)}."
         )
 
@@ -150,10 +153,16 @@ class StandaloneComponentCheckpointsConfig:
             ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 
-    def load_stepper(self) -> CoupledStepper:
-        ocean = load_single_stepper(self.ocean.path, self.ocean_stepper_override)
+    def load_stepper(self, use_ema_if_available: bool = False) -> CoupledStepper:
+        ocean = load_single_stepper(
+            self.ocean.path,
+            self.ocean_stepper_override,
+            use_ema_if_available=use_ema_if_available,
+        )
         atmosphere = load_single_stepper(
-            self.atmosphere.path, self.atmosphere_stepper_override
+            self.atmosphere.path,
+            self.atmosphere_stepper_override,
+            use_ema_if_available=use_ema_if_available,
         )
         dataset_info = CoupledDatasetInfo(
             ocean=ocean.training_dataset_info,
@@ -214,6 +223,7 @@ def load_stepper(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
     ocean_stepper_override: StepperOverrideConfig | None = None,
     atmosphere_stepper_override: StepperOverrideConfig | None = None,
+    use_ema_if_available: bool = False,
 ) -> CoupledStepper:
     """Load a coupled stepper.
 
@@ -226,6 +236,8 @@ def load_stepper(
         atmosphere_stepper_override: When loading a single coupled checkpoint, optional
             overrides for the atmosphere Stepper (ignored for
             StandaloneComponentCheckpointsConfig).
+        use_ema_if_available: If True, use the EMA weights of each checkpoint
+            that contains them in place of its stepper weights.
 
     Returns:
         The CoupledStepper serialized in the checkpoint or constructed from the
@@ -239,9 +251,11 @@ def load_stepper(
             "Loading atmosphere model checkpoint from "
             f"{checkpoint_path.atmosphere.path}"
         )
-        return checkpoint_path.load_stepper()
+        return checkpoint_path.load_stepper(use_ema_if_available=use_ema_if_available)
 
-    stepper = load_coupled_stepper(checkpoint_path)
+    stepper = load_coupled_stepper(
+        checkpoint_path, use_ema_if_available=use_ema_if_available
+    )
     _validate_coupled_component_override(ocean_stepper_override)
     _validate_coupled_component_override(atmosphere_stepper_override)
     # Overrides mutate each component Stepper's config, which the CoupledStepper
@@ -310,6 +324,11 @@ class InferenceEvaluatorConfig:
             (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
+        use_ema_if_available: If True and a checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights. Applies to a single coupled checkpoint and to each
+            of two standalone component checkpoints.
         seed: If set, seeds the random state threaded through the rollout so that
             stochastic modules (e.g. NoiseConditionedSFNO) produce a
             reproducible noise sequence, independent of
@@ -334,6 +353,7 @@ class InferenceEvaluatorConfig:
     prediction_loader: InferenceDataLoaderConfig | None = None
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     seed: int | None = None
 
     def __post_init__(self):
@@ -357,6 +377,7 @@ class InferenceEvaluatorConfig:
             self.checkpoint_path,
             ocean_stepper_override=self.ocean_stepper_override,
             atmosphere_stepper_override=self.atmosphere_stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
         )
 
     def load_stepper_config(self) -> CoupledStepperConfig:

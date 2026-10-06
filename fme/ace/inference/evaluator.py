@@ -181,10 +181,9 @@ class InferenceEvaluatorConfig:
                 - To write raw or time-coarsened data, the zarr writer must be
                   used. See the ``files`` parameter of the
                   :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Note that monthly coarsened data cannot
-                  currently be written to zarr, and hence a remote directory,
-                  since it uses a different code path than uniformly coarsened
-                  data.
+                  can be configured. Monthly coarsened data configured through
+                  ``files`` can be written to zarr. The legacy
+                  ``save_monthly_files`` option remains netCDF-only.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the
@@ -207,6 +206,10 @@ class InferenceEvaluatorConfig:
         aggregator: Configuration for inference evaluator aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights.
         allow_incompatible_dataset: If True, allow the forcing dataset used
             for inference to be incompatible with the dataset used for stepper training.
             This should be used with caution, as it may allow the stepper to make
@@ -241,6 +244,7 @@ class InferenceEvaluatorConfig:
         | LegacyFlagInferenceEvaluatorAggregatorConfig
     ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
@@ -260,7 +264,11 @@ class InferenceEvaluatorConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper(
+            self.checkpoint_path,
+            self.stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
