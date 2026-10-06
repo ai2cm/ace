@@ -439,6 +439,9 @@ def test_ocean_forcings_from_data_reads_an_exchanged_flux_from_the_data():
     assert config.atmosphere_to_ocean_forcing_names == []
     assert "eastward_surface_wind_stress" in config.ocean_forcing_exogenous_names
     assert "eastward_surface_wind_stress" in config.ocean_forcing_window_names
+    # the evaluator and trainer load the ocean data through these requirements
+    eval_reqs = config.get_evaluation_window_data_requirements(n_coupled_steps=1)
+    assert "eastward_surface_wind_stress" in eval_reqs.ocean_requirements.names
     with pytest.raises(ValueError, match="not an ocean input-only name"):
         CoupledStepperConfig(
             atmosphere=atmosphere,

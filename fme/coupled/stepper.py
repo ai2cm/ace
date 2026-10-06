@@ -369,9 +369,13 @@ class CoupledStepperConfig:
             )
         else:
             self._all_atmosphere_names = unfiltered_all_atmosphere_names
-        # NOTE: this removes "shared" forcings from the ocean data requirements
+        # NOTE: this removes "shared" forcings from the ocean data requirements;
+        # forcings the ocean reads from its own data although the atmosphere
+        # outputs them (ocean_forcings_from_data) are added back.
         self._all_ocean_names = list(
-            self.ocean.stepper.all_names.difference(self._all_atmosphere_names)
+            self.ocean.stepper.all_names.difference(self._all_atmosphere_names).union(
+                self.ocean_forcings_from_data
+            )
         )
         if self.ocean_fraction_prediction is not None:
             # NOTE: land_fraciton is necessary to derive sea_ice_fraction from
