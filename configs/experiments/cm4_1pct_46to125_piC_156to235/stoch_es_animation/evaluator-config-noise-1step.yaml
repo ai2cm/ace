@@ -1,0 +1,60 @@
+# One-step noise calibration test for stochastic Samudra (research
+# tasks/2026-10-06-gulf-stream-spatial-spectra). The 50-yr rollouts showed
+# grid-scale SSH power 1.3x CM4 from the first step while SST sits at 0.5x;
+# this isolates what one stochastic step injects, per channel and per scale.
+#
+# 8 piControl ICs, 1800 steps apart (index 0 = 0151-01-06; the offset cycles
+# the season), 6 noise draws each, one 5-day step. Read as a per-scale
+# spread-skill test: the spread of the 6 members about their mean against the
+# error of that mean versus CM4. Spread > error at a scale means the noise is
+# too strong there.
+#
+# All output channels are written (names omitted): ~1.5 GB of zarr per model.
+# experiment_dir is set per row by override so each model writes its own
+# directory. The long-window diagnostics are disabled: one step has no
+# annual cycle, ENSO or IPO.
+experiment_dir: gs://vcm-ml-intermediate/elynnwu-research/2026-10-05-stochastic-samudra-animation-m2lines/noise-1step-OVERRIDE-ME
+n_forward_steps: 1
+forward_steps_in_memory: 1
+n_ensemble_per_ic: 6
+seed: 0
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    n_initial_conditions: 8
+    first: 0
+    interval: 1800
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: step1
+    save_reference: true
+    format:
+      name: zarr
+aggregator:
+  histogram:
+    enabled: false
+  annual:
+    enabled: false
+  enso_index:
+    enabled: false
+  enso_coefficient:
+    enabled: false
+  ipo_index:
+    enabled: false

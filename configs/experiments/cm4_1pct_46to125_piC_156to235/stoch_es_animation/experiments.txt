@@ -7,4 +7,14 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04
 # Deterministic baseline panel: ocean_wide_ohc_clip rs2 (pjxiw906), the ocean
 # init of crps4 coupled-owc_a2s, best_inference_ckpt as crps4 used. Results
 # dataset pinned (verified to contain best_inference_ckpt.tar).
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4|run_piC-animation-det|best_inference_ckpt|high|--min-runtime 3h||01M0KJWNJ6VDBN5P2WX8RCQ0DR|ai2/ace|jupiter|||20GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4|done_piC-animation-det|best_inference_ckpt|high|--min-runtime 3h||01M0KJWNJ6VDBN5P2WX8RCQ0DR|ai2/ace|jupiter|||20GiB
+
+# 2026-10-06 follow-ups to the Gulf Stream spatial spectra.
+# (1) The paired patch-ES twin of 19yl0189 (long-tail all_blocks rs0, jshu3e8a;
+# only the loss differs) on the same 50-yr animation rollout, to see whether
+# the grid-scale SSH excess tracks the spectral energy score. Results dataset
+# pinned (the original job hung; verified to hold best_inference_ckpt.tar).
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs0|01M1PSV82ATFVB73JVYDZQYE09|run_piC-animation|best_inference_ckpt|high|--min-runtime 3h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-05-stochastic-samudra-animation-m2lines/piC-ic0151-patch-es|01M1QR55WXH06JT49NBZGN970D|ai2/ace|jupiter|||20GiB
+# (2) One-step noise calibration, both losses.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0|01M38QM5S04WB0S5RRW3QE6EHF|run_noise-1step|best_inference_ckpt|high|--min-runtime 3h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-05-stochastic-samudra-animation-m2lines/noise-1step-spectral-es|01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter|||20GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs0|01M1PSV82ATFVB73JVYDZQYE09|run_noise-1step|best_inference_ckpt|high|--min-runtime 3h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-05-stochastic-samudra-animation-m2lines/noise-1step-patch-es|01M1QR55WXH06JT49NBZGN970D|ai2/ace|jupiter|||20GiB
