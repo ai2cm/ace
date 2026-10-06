@@ -1,0 +1,44 @@
+# Deterministic-baseline panel for the m2lines animation (research
+# tasks/2026-10-05-stochastic-samudra-animation-m2lines): the same rollout as
+# evaluator-config-piC-animation.yaml -- IC, stores, 3680 steps, sst + zos at
+# every step to a GCS zarr -- run with the deterministic MSE Samudra that crps4
+# coupled-owc_a2s was initialized from: ocean_wide_ohc_clip rs2 (wandb
+# pjxiw906), best_inference_ckpt. One member, since a deterministic model's
+# members would be identical. Its frames sit between A - B and CM4 so the
+# stochastic members' texture reads against the model they replace.
+experiment_dir: gs://vcm-ml-intermediate/elynnwu-research/2026-10-05-stochastic-samudra-animation-m2lines/piC-ic0151-deterministic
+n_forward_steps: 3680
+forward_steps_in_memory: 40
+n_ensemble_per_ic: 1
+seed: 0
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: frames
+    names: [sst, zos]
+    save_reference: true
+    format:
+      name: zarr
+aggregator:
+  log_histograms: false
