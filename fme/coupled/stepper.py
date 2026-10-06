@@ -275,6 +275,12 @@ class CoupledStepperConfig:
             ``eastward_surface_wind_stress: eastward_surface_stress`` couples the
             ocean input to the atmosphere checkpoint output name.
 
+        ocean_forcings_from_data: Ocean input-only names that the atmosphere
+            outputs but that should nevertheless be read from the ocean forcing
+            data instead of taken from the atmosphere (e.g. to prescribe one
+            exchanged flux from the reference data in a coupled rollout). Each
+            name must be an ocean input-only name that the atmosphere outputs;
+            default is to take every such name from the atmosphere.
     """
 
     ocean: ComponentConfig
@@ -282,9 +288,11 @@ class CoupledStepperConfig:
     sst_name: str = "sst"
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
     atmosphere_output_rename: dict[str, str] | None = None
+    ocean_forcings_from_data: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self._validate_atmosphere_output_rename()
+        self._validate_ocean_forcings_from_data()
         self._validate_component_configs()
 
         atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
@@ -540,7 +548,24 @@ class CoupledStepperConfig:
             for name in self.ocean.stepper.input_only_names
             if self.atmosphere_output_name_for_ocean_forcing(name)
             in self.atmosphere.stepper.output_names
+            and name not in self.ocean_forcings_from_data
         ]
+
+    def _validate_ocean_forcings_from_data(self) -> None:
+        for name in self.ocean_forcings_from_data:
+            if name not in self.ocean.stepper.input_only_names:
+                raise ValueError(
+                    f"ocean_forcings_from_data entry {name!r} is not an ocean "
+                    "input-only name."
+                )
+            if (
+                self.atmosphere_output_name_for_ocean_forcing(name)
+                not in self.atmosphere.stepper.output_names
+            ):
+                raise ValueError(
+                    f"ocean_forcings_from_data entry {name!r} is not an atmosphere "
+                    "output, so it is read from the data already."
+                )
 
     def _validate_atmosphere_output_rename(self) -> None:
         if self.atmosphere_output_rename is None:
