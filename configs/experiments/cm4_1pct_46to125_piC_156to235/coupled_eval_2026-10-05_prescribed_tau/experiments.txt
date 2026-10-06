@@ -8,4 +8,5 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3Q
 # Launched 2026-10-05 from 0f59e65f3: 01M471FD1CJ8W9Z0YRP96MWTKG
 
 # All CM4 surface fluxes prescribed (CM4-forced ocean); read as gain/coherence against CM4.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3QPMZEBQ8BP8G4901N6ED9Y|run_piC-ic0151-200yr-pflux|best_inference_ckpt|high|--min-runtime 8h||01M41458F0VV2X6NBDH03KCVVE|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_a2s-fto|o2a0rs0|01M3QPMZEBQ8BP8G4901N6ED9Y|launched_piC-ic0151-200yr-pflux|best_inference_ckpt|high|--min-runtime 8h||01M41458F0VV2X6NBDH03KCVVE|ai2/ace|jupiter+titan
+# Launched 2026-10-06 from 0a55add67: 01M47SKWDKYC1RNS2Q56QD60M1 (pflux)
