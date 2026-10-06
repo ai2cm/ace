@@ -4,5 +4,7 @@
 # coupled finetunes mount (coupled/pretraining.txt): a2s = j0ng1tw3 (rs0), a2sLR = wgz8np8z (rs2).
 # Configs: --config-dir configs/experiments/cm4_eval/atmos_tropac.
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GP9GNE4ZMZ5SDN3A2AK24R|run_piC-ic0151-200yr-tropac|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_piC-ic0151-200yr-tropac|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GP9GNE4ZMZ5SDN3A2AK24R|launched_piC-ic0151-200yr-tropac|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|launched_piC-ic0151-200yr-tropac|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace|jupiter+titan
+
+# Launched 2026-10-06 from e8a0fdaba: a2s 01M49DMM2HV50QGV9QT24PMQJG, a2sLR 01M49DMTCKMVDKB2T1829S7956

@@ -3,5 +3,7 @@
 # Checkpoint: best_inference_ckpt from the final (exit-0) job's results dataset, field 9.
 # Configs: --config-dir configs/experiments/cm4_eval/coupled.
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|launched_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|launched_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan
+
+# Launched 2026-10-06 from e8a0fdaba: 1pct 01M49DN1BKD4KWTBJ60W3A8CER, piC 01M49DN7TJVA15GR1YN7RFVTWB
