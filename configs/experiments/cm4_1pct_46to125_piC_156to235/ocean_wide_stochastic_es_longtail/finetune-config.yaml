@@ -273,6 +273,8 @@ stepper:
     exclude_names_and_prefixes:
       - land_fraction
       - sea_surface_fraction
+    fill_value_overrides:
+      so_: 0.0
   step:
     type: single_module
     config:
