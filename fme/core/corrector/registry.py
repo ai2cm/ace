@@ -35,6 +35,15 @@ class CorrectorConfigABC(abc.ABC):
                 f"{self.corrector_disabled_epochs}"
             )
 
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        """Names the corrector reads from the forcing data beyond the step's
+        own forcings, e.g. a target flux used in place of the predicted one.
+        The step loads them from the data at the output time and passes them
+        to the corrector without overwriting the prediction.
+        """
+        return frozenset()
+
     @classmethod
     @final
     def from_state(cls, state: Mapping[str, Any]) -> Self:

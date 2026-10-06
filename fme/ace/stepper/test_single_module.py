@@ -72,6 +72,7 @@ from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     CorrectionSequence,
     CorrectorABC,
+    CorrectorConfigABC,
     EpochScheduledCorrector,
 )
 from fme.core.corrector.state import CorrectorState
@@ -1860,6 +1861,62 @@ def test_predict_with_prescribed_prognostic(
         torch.testing.assert_close(
             output.data[name], forcing_data.data[name][:, 1 : n_steps + 1]
         )
+
+
+@dataclasses.dataclass
+class _CopyForcingCorrection:
+    source: str
+    target: str
+
+    def __call__(self, input_data, gen_data, forcing_data, corrector_state):
+        return {self.target: forcing_data[self.source]}, corrector_state
+
+
+@CorrectorSelector.register("_test_forcing_names_corrector")
+@dataclasses.dataclass
+class _ForcingNamesCorrectorConfig(CorrectorConfigABC):
+    """Writes the forcing value of ``source``, which it requests through
+    ``forcing_names``, into the generated ``target``."""
+
+    source: str
+    target: str
+
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        return frozenset([self.source])
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping) -> dict:
+        return dict(state)
+
+    def _get_corrector(self, dataset_info: DatasetInfo) -> CorrectorABC:
+        return CorrectionSequence([_CopyForcingCorrection(self.source, self.target)])
+
+
+def test_predict_passes_corrector_forcing_names_without_overwriting():
+    # A corrector can read the target of an output variable (c) from the
+    # forcing data at the output time, while the predicted c is kept.
+    n_steps = 3
+    config = _get_stepper_config(
+        ["a"],
+        ["a", "c"],
+        module_name="RepeatChannel",
+        corrector=CorrectorSelector(
+            "_test_forcing_names_corrector", {"source": "c", "target": "a"}
+        ),
+    )
+    assert "c" in config.get_forcing_window_data_requirements(n_steps).names
+    stepper = config.get_stepper(get_dataset_info())
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["c"])
+    output, _ = stepper.predict(input_data, forcing_data)
+    target_c = forcing_data.data["c"]
+    torch.testing.assert_close(output.data["a"], target_c[:, 1:])
+    # RepeatChannel predicts c as the input a, which is the previous step's
+    # target c, so c is one step behind the target rather than overwritten
+    torch.testing.assert_close(
+        output.data["c"][:, 0], input_data.as_batch_data().data["a"][:, 0]
+    )
+    torch.testing.assert_close(output.data["c"][:, 1:], target_c[:, 1:n_steps])
 
 
 def test_prescribed_prognostic_config_validation_raises():

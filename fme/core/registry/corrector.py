@@ -50,6 +50,10 @@ class CorrectorSelector(CorrectorConfigABC):
         """
         return self._corrector_config_instance.corrector_disabled_epochs == 0
 
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        return self._corrector_config_instance.forcing_names
+
     @classmethod
     def register(cls, type_name):
         return cls.registry.register(type_name)

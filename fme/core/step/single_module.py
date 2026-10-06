@@ -293,6 +293,7 @@ class SingleModuleStepConfig(StepConfigABC):
         result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
+        result = result.union(self.corrector.forcing_names)
         return frozenset(result.union(self.prescribed_prognostic_names))
 
     @property

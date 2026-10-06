@@ -190,6 +190,10 @@ class IceVolumeSaltBudgetConfig:
     slope_psu: float
     type: Literal["ice_volume"] = "ice_volume"
 
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        return frozenset()
+
     def validate(self, weight_by_sea_surface_fraction: bool) -> None:
         pass
 
@@ -266,6 +270,20 @@ def _build_sea_ice_salt_flux(
     )
 
 
+def _flux_forcing_names(
+    fluxes_from_forcing: bool, include_brine_rejection: bool, include_wfo: bool
+) -> frozenset[str]:
+    """Data names of the fluxes a salt budget reads from the forcing data."""
+    if not fluxes_from_forcing:
+        return frozenset()
+    standard_names = []
+    if include_wfo:
+        standard_names.append("water_flux_into_sea_water")
+    if include_brine_rejection:
+        standard_names.append("downward_sea_ice_basal_salt_flux")
+    return frozenset(OCEAN_FIELD_NAME_PREFIXES[name][0] for name in standard_names)
+
+
 @dataclasses.dataclass
 class SeaSurfaceHeightSaltBudgetConfig:
     """Salt budget from the change of the sea surface height and the sea ice
@@ -329,6 +347,12 @@ class SeaSurfaceHeightSaltBudgetConfig:
             self.sea_ice_fraction_threshold,
             self.use_computed_brine_under_ice,
             "use_computed_brine_under_ice",
+        )
+
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        return _flux_forcing_names(
+            self.fluxes_from_forcing, self.include_brine_rejection, include_wfo=False
         )
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
@@ -435,6 +459,12 @@ class WaterFluxSaltBudgetConfig:
             self.regimes.sea_ice_fraction_threshold,
             self.use_sea_ice_mass_change_under_ice or self.use_computed_brine_under_ice,
             "use_sea_ice_mass_change_under_ice or use_computed_brine_under_ice",
+        )
+
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        return _flux_forcing_names(
+            self.fluxes_from_forcing, self.include_brine_rejection, include_wfo=True
         )
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
@@ -705,6 +735,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
+
+    @property
+    def forcing_names(self) -> frozenset[str]:
+        salt = self.ocean_salt_content_correction
+        if salt is None or salt.budget_config is None:
+            return frozenset()
+        return salt.budget_config.forcing_names
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:

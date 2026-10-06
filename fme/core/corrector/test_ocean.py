@@ -26,6 +26,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
@@ -1467,6 +1468,50 @@ def test_water_flux_salt_budget_with_terms(
         state.timestep_seconds / 1035.0
     ) * (35.0 * ice_mass_change - ice_salt_change)
     _assert_salt_change(state, corrected, expected)
+
+
+@pytest.mark.parametrize(
+    "budget_config, expected",
+    [
+        pytest.param({"type": "ice_volume", "slope_psu": 40.0}, set(), id="ice_volume"),
+        pytest.param({"type": "water_flux"}, set(), id="water_flux_generated"),
+        pytest.param(
+            {"type": "water_flux", "fluxes_from_forcing": True},
+            {"wfo", "sfdsi"},
+            id="water_flux_forcing",
+        ),
+        pytest.param(
+            {
+                "type": "water_flux",
+                "fluxes_from_forcing": True,
+                "include_brine_rejection": False,
+            },
+            {"wfo"},
+            id="water_flux_forcing_no_brine",
+        ),
+        pytest.param(
+            {"type": "sea_surface_height"}, set(), id="sea_surface_height_generated"
+        ),
+        pytest.param(
+            {"type": "sea_surface_height", "fluxes_from_forcing": True},
+            {"sfdsi"},
+            id="sea_surface_height_forcing",
+        ),
+    ],
+)
+def test_salt_budget_forcing_names(budget_config, expected):
+    # Fluxes read from the forcing data are requested from the step, which
+    # would otherwise not provide output variables such as wfo and sfdsi.
+    corrector = CorrectorSelector(
+        "ocean_corrector",
+        {
+            "ocean_salt_content_correction": {
+                "method": "scaled_salinity",
+                "budget_config": budget_config,
+            }
+        },
+    )
+    assert corrector.forcing_names == expected
 
 
 def test_water_flux_salt_budget_full_ice_cover_threshold():
