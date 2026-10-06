@@ -1855,12 +1855,11 @@ class TestDataParallelGather:
         dist = Distributed.get_instance()
         if dist.total_data_parallel_ranks == 1:
             pytest.skip("needs multiple data-parallel ranks")
-        if dist.has_spatial_parallelism:
-            pytest.skip("gather uses the global communicator, not spatial")
 
     def test_gathers_data_tensors(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.full((1, 1, 2, 3), float(rank))},
             time=xr.DataArray(
@@ -1869,10 +1868,10 @@ class TestDataParallelGather:
             ),
         )
         result = local.data_parallel_gather(dist)
-        if dist.is_root():
+        if dist.is_data_parallel_root():
             assert isinstance(result, GatheredBatchData)
-            assert result._data["x"].shape[0] == dist.world_size
-            for r in range(dist.world_size):
+            assert result._data["x"].shape[0] == n
+            for r in range(n):
                 torch.testing.assert_close(
                     result._data["x"][r], torch.full((1, 2, 3), float(r))
                 )
@@ -1881,7 +1880,8 @@ class TestDataParallelGather:
 
     def test_gathers_time(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.zeros(1, 1, 2, 3)},
             time=xr.DataArray(
@@ -1890,13 +1890,14 @@ class TestDataParallelGather:
             ),
         )
         result = local.data_parallel_gather(dist)
-        if dist.is_root():
+        if dist.is_data_parallel_root():
             assert isinstance(result, GatheredBatchData)
-            assert result._time.sizes["sample"] == dist.world_size
+            assert result._time.sizes["sample"] == n
 
     def test_gathers_labels(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.zeros(1, 1, 2, 3)},
             time=xr.DataArray(
@@ -1906,14 +1907,15 @@ class TestDataParallelGather:
             labels=BatchLabels(torch.tensor([[float(rank)]]), names=["label"]),
         )
         result = local.data_parallel_gather(dist)
-        if dist.is_root():
+        if dist.is_data_parallel_root():
             assert isinstance(result, GatheredBatchData)
             assert result._labels is not None
-            assert result._labels.tensor.shape[0] == dist.world_size
+            assert result._labels.tensor.shape[0] == n
 
     def test_gathers_stepper_state(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.zeros(1, 1, 2, 3)},
             time=xr.DataArray(
@@ -1927,11 +1929,11 @@ class TestDataParallelGather:
             ),
         )
         result = local.data_parallel_gather(dist)
-        if dist.is_root():
+        if dist.is_data_parallel_root():
             assert isinstance(result, GatheredBatchData)
             assert result._stepper_state is not None
-            assert result._stepper_state.n_ranks == dist.world_size
-            for r in range(dist.world_size):
+            assert result._stepper_state.n_ranks == n
+            for r in range(n):
                 rank_state = result._stepper_state.get_for_rank(r)
                 assert rank_state.corrector_state is not None
                 mass = rank_state.corrector_state.global_dry_air_mass
@@ -1948,7 +1950,7 @@ class TestDataParallelGather:
             ),
         )
         result = local.data_parallel_gather(dist)
-        if dist.is_root():
+        if dist.is_data_parallel_root():
             assert isinstance(result, GatheredBatchData)
             assert result._labels is None
             assert result._stepper_state is None
@@ -1956,7 +1958,7 @@ class TestDataParallelGather:
 
     def test_result_is_on_cpu(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
         local = BatchData.new_on_cpu(
             data={"x": torch.full((1, 1, 2, 3), float(rank))},
             time=xr.DataArray(
@@ -1965,7 +1967,7 @@ class TestDataParallelGather:
             ),
         )
         result = local.data_parallel_gather(dist)
-        if dist.is_root():
+        if dist.is_data_parallel_root():
             assert isinstance(result, GatheredBatchData)
             for tensor in result._data.values():
                 assert tensor.device == torch.device("cpu")

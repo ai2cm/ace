@@ -18,11 +18,7 @@ from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
-from fme.core.stepper_state import (
-    GatheredStepperState,
-    StepperState,
-    UngatheredStateDictError,
-)
+from fme.core.stepper_state import GatheredStepperState, StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
@@ -45,6 +41,19 @@ _SCHEMA_ATTR = "_fme_schema_version"
 _SCHEMA_VERSION = 1
 _SAMPLE_DIM = "sample"
 _TIME_DIM = "time"
+
+_STR_TO_DTYPE: dict[str, torch.dtype] = {
+    "torch.float32": torch.float32,
+    "torch.float64": torch.float64,
+    "torch.float16": torch.float16,
+    "torch.bfloat16": torch.bfloat16,
+    "torch.int32": torch.int32,
+    "torch.int64": torch.int64,
+    "torch.int16": torch.int16,
+    "torch.int8": torch.int8,
+    "torch.uint8": torch.uint8,
+    "torch.bool": torch.bool,
+}
 
 _STEPPER_PREFIX = f"{_RESERVED_PREFIX}stepper__"
 _LABELS_VALUES_VAR = f"{_RESERVED_PREFIX}labels_values"
@@ -959,33 +968,37 @@ class BatchData:
     ) -> "GatheredBatchData | BatchData | None":
         """Gather data-parallel shards to root along the sample dimension.
 
-        Returns a CPU ``GatheredBatchData`` on root (preserving per-rank
-        random states), ``None`` on other ranks.  When there is only one
-        data-parallel rank, returns ``self`` unchanged.
+        Returns a CPU ``GatheredBatchData`` on the data-parallel root
+        (preserving per-rank random states), ``None`` on other
+        data-parallel ranks.  When there is only one data-parallel rank,
+        returns ``self`` unchanged.
+
+        Under spatial parallelism each spatial position gathers its
+        data-parallel shards independently.
         """
         self._raise_if_step_diagnostics("data_parallel_gather")
         if dist is None:
             dist = Distributed.get_instance()
         if dist.total_data_parallel_ranks == 1:
             return self
-        if dist.has_spatial_parallelism:
-            raise NotImplementedError(
-                "BatchData.data_parallel_gather with spatial parallelism"
-            )
 
         device = get_device()
         gathered_data: dict[str, torch.Tensor] = {}
-        # Sort keys so every rank calls dist.gather in the same order;
+        # Sort keys so every rank calls the collective in the same order;
         # dict iteration order can differ across processes.
         for name in sorted(self.data):
-            rank_tensors = dist.gather(self.data[name].to(device).contiguous())
-            if dist.is_root():
+            rank_tensors = dist.data_parallel_gather(
+                self.data[name].to(device).contiguous()
+            )
+            if dist.is_data_parallel_root():
                 if rank_tensors is None:
-                    raise RuntimeError("dist.gather returned None on root")
+                    raise RuntimeError(
+                        "data_parallel_gather returned None on data-parallel root"
+                    )
                 gathered_data[name] = torch.cat(rank_tensors, dim=0).cpu()
 
         batch_cpu = self.to_cpu()
-        gathered_parts = dist.gather_object(
+        gathered_parts = dist.data_parallel_gather_object(
             {
                 "time": batch_cpu.time,
                 "labels": batch_cpu.labels,
@@ -994,11 +1007,13 @@ class BatchData:
             }
         )
 
-        if not dist.is_root():
+        if not dist.is_data_parallel_root():
             return None
 
         if gathered_parts is None:
-            raise RuntimeError("dist.gather_object returned None on root")
+            raise RuntimeError(
+                "data_parallel_gather_object returned None on data-parallel root"
+            )
         gathered_time = xr.concat([p["time"] for p in gathered_parts], dim="sample")
 
         first_labels = gathered_parts[0]["labels"]
@@ -1370,9 +1385,7 @@ def data_parallel_scatter(
     # Root prepares per-rank metadata and scatter lists.
     if dist.is_data_parallel_root():
         if gathered is None:
-            raise ValueError(
-                "data-parallel root must provide gathered data"
-            )
+            raise ValueError("data-parallel root must provide gathered data")
         rank_batches = [gathered.get_for_rank(r, n_ranks) for r in range(n_ranks)]
         manifest: dict | None = {
             "var_info": [
@@ -1385,9 +1398,7 @@ def data_parallel_scatter(
                     "labels": b.labels,
                     "stepper_state": b.stepper_state,
                     "data_mask": (
-                        {k: v for k, v in b.data_mask.items()}
-                        if b.data_mask
-                        else None
+                        {k: v for k, v in b.data_mask.items()} if b.data_mask else None
                     ),
                     "horizontal_dims": b.horizontal_dims,
                 }
