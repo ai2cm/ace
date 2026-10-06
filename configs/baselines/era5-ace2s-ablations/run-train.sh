@@ -207,3 +207,9 @@ run_training "ace2s-finetune-6hourly-12step.yaml" "1deg-6h-ace2s-ft12-detached-r
 # Daily pushforward variants of CRPS-only and deterministic (added 2026-10-05)
 run_training "ace2s-finetune-crps-only-pushforward.yaml" "1deg-daily-ace2s-crps-only-pushforward1-ft3-detached-rs0" 8
 run_training "ace2s-finetune-deterministic-pushforward.yaml" "1deg-daily-ace2s-det-pushforward1-ft3-detached-rs0" 8
+
+# 6-hourly X-SHiELD stochastic schedule (added 2026-10-06)
+run_training "ace2s-finetune-6hourly-xshield.yaml" "1deg-6h-ace2s-xshield-ft-rs0" 8
+
+# Paper candidate extended: 10 forward steps, half LR, 1 epoch (added 2026-10-06)
+run_training "ace2s-finetune-10step-halfLR.yaml" "1deg-daily-ace2s-10step-halfLR-ft-rs0" 8
