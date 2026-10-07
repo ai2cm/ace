@@ -8,7 +8,7 @@ weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regrid
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 output:
-  path: gs://vcm-ml-intermediate/2026-10-06-om4-1pctco2-1deg-ocean-5daily-budget.zarr
+  path: gs://vcm-ml-intermediate/2026-10-06-cm4-1pctCO2-1deg-ocean-5daily-ice-budget.zarr
   time_chunk_size: 1
   time_shard_size: 365
 wetmask:
