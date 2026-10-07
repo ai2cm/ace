@@ -125,7 +125,11 @@ def compute_ocean_derived_quantities(
     return data
 
 
-@register(VariableMetadata("J/m**2", "Column-integrated ocean heat content"))
+@register(
+    VariableMetadata(
+        "J/m**2", "Column-integrated ocean heat content per unit ocean area"
+    )
+)
 def ocean_heat_content(
     data: OceanData,
     timestep: datetime.timedelta,
@@ -135,7 +139,10 @@ def ocean_heat_content(
 
 
 @register(
-    VariableMetadata("W/m**2", "Tendency of column-integrated ocean heat content")
+    VariableMetadata(
+        "W/m**2",
+        "Tendency of column-integrated ocean heat content per unit ocean area",
+    )
 )
 def ocean_heat_content_tendency(
     data: OceanData,
@@ -151,7 +158,8 @@ def ocean_heat_content_tendency(
 @register(
     VariableMetadata(
         "W/m**2",
-        "Implied advective tendency of ocean heat content assuming closed budget",
+        "Implied advective tendency of ocean heat content assuming closed budget, "
+        "per unit total cell area",
     )
 )
 def implied_tendency_of_ocean_heat_content_due_to_advection(

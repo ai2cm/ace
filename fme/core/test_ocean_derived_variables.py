@@ -154,7 +154,7 @@ def test_metadata_registry():
     assert metadata["ocean_heat_content"].units == "J/m**2"
     assert (
         metadata["ocean_heat_content"].long_name
-        == "Column-integrated ocean heat content"
+        == "Column-integrated ocean heat content per unit ocean area"
     )
 
 
