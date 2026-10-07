@@ -14,5 +14,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # the pooling grid, so untrained B/D would measure a global perturbation, not
 # the edge. C = 01M4C59D91A7B01HR8RCN0XCHY (pole/off rewrite of epoch 74).
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsA-constant|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||01M3V12K0XZXTJNX2WTH5100Y9|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsC-pole|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||01M4C59D91A7B01HR8RCN0XCHY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsA-constant|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|ran_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||01M3V12K0XZXTJNX2WTH5100Y9|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsC-pole|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|ran_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||01M4C59D91A7B01HR8RCN0XCHY|ai2/ace|jupiter
