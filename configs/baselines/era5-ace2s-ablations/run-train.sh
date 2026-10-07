@@ -218,3 +218,7 @@ run_training "ace2s-pretrain-vs-w3.yaml" "1deg-daily-ace2s-vs-w3-pretrain-rs0" 8
 # without and with the pushforward trick
 run_training "ace2s-finetune-vs-w3-pretrain.yaml" "1deg-daily-ace2s-vs-w3-pretrain-ft3-detached-rs0" 8
 run_training "ace2s-finetune-vs-w3-pretrain-pushforward1.yaml" "1deg-daily-ace2s-vs-w3-pretrain-pushforward1-ft3-detached-rs0" 8
+
+# Variogram-score 10-step optimize-last-step-only fine-tune of the paper model,
+# 3 epochs, half LR (5e-5), measured weight 0.30
+run_training "ace2s-finetune-variogram-10step.yaml" "1deg-daily-ace2s-variogram-10step-ft-rs0" 8
