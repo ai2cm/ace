@@ -399,6 +399,42 @@ def test_apply_config_seed_defers_to_a_restored_random_state():
     assert result.as_batch_data().stepper_state.random_state is restored
 
 
+def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
+    """Different data-parallel ranks must get different generator seeds."""
+    from unittest.mock import PropertyMock
+
+    from fme.ace.data_loading.batch_data import _RANK_SEED_STRIDE
+
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    states = []
+    for rank in range(3):
+        monkeypatch.setattr(
+            type(Distributed.get_instance()),
+            "data_parallel_rank",
+            PropertyMock(return_value=rank),
+        )
+        ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
+        seeded = ic.apply_config_seed(42)
+        stepper = seeded.as_batch_data().stepper_state
+        gen_state = stepper.random_state.generator.get_state()
+        states.append(gen_state)
+
+    # Each rank should produce a different generator state.
+    assert not torch.equal(states[0], states[1])
+    assert not torch.equal(states[0], states[2])
+    assert not torch.equal(states[1], states[2])
+
+    # Rank 0 should match seeding with the bare seed.
+    reference = RandomState.from_seed(42).generator.get_state()
+    assert torch.equal(states[0], reference)
+
+    # Rank 1 should match seeding with seed + _RANK_SEED_STRIDE.
+    reference_r1 = RandomState.from_seed(42 + _RANK_SEED_STRIDE).generator.get_state()
+    assert torch.equal(states[1], reference_r1)
+
+
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
 def test_remove_initial_condition(n_ic_timesteps: int):
     names = ["foo", "bar"]
