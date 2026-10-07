@@ -1,0 +1,14 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Stage 2: four arms fine-tuned from ocean_frozen_mass_floor rs0's
+# best_inference_ckpt (epoch 74; results dataset 01M3V12K0XZXTJNX2WTH5100Y9,
+# pinned) for max_epochs in finetune-config-template.yaml. Same seed and data
+# order in every arm; only the two padding options differ.
+# (lat_pad, pad_to_pool_multiple): A constant/off (control, = pretraining
+# geometry), B pole/on, C pole/off, D constant/on.
+# min_runtime 8h covers the whole ~6 h job, so it is never preempted.
+
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftA-constant|rs0|ace-samudra-cm4|zleoae77|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_to_pool_multiple=false|01M3V12K0XZXTJNX2WTH5100Y9|8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftB-pole-pool|rs0|ace-samudra-cm4|zleoae77|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_to_pool_multiple=true|01M3V12K0XZXTJNX2WTH5100Y9|8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftC-pole|rs0|ace-samudra-cm4|zleoae77|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_to_pool_multiple=false|01M3V12K0XZXTJNX2WTH5100Y9|8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftD-constant-pool|rs0|ace-samudra-cm4|zleoae77|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_to_pool_multiple=true|01M3V12K0XZXTJNX2WTH5100Y9|8h

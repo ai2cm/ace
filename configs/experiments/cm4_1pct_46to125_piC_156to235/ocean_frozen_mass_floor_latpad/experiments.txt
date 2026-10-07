@@ -1,0 +1,7 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# Stage 2 fine-tunes: uncoupled_finetune.sh appends one row per arm here
+# (status "training", priority normal). Once an arm finishes, set its status
+# to run_piC-ic0151-5yr and priority to high, and append the empty override
+# and results_dataset fields plus workspace ai2/ace and cluster jupiter (a
+# blank cluster falls back to ceres+jupiter), then run evaluate.sh on this dir.
