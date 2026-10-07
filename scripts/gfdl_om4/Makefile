@@ -1,7 +1,7 @@
 LOCAL_ENVIRONMENT ?= gfdl-om4-ingestion
 
 # One worker image for both pipelines (om4.mk, randco2.mk).
-VERSION ?= 2026-09-29-gfdl-om4-xrbeam-pipeline
+VERSION ?= 2026-10-06-om4-1deg-pentad-budget-store
 IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/gfdl-om4-ingest-dataflow:$(VERSION)
 
 # Durable pipeline inputs (static grid files, regridding weights, face masks)

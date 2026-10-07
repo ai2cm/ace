@@ -39,6 +39,9 @@ Masking conventions of the output store:
   is per total cell area, land counted as zero — with land-NaN applied
   after; their wetmask-normalized (per-ocean-area) twins are written under
   renamed outputs (e.g. ``ocean_sea_ice_fraction``).
+- Streams with ``full_cell_only`` write only the full-cell outputs.
+- Streams with ``time_block_mean: N`` write the mean of each N-step block of
+  the source, labeled by the block's last instant.
 - Masks, ``idepth_*``, ``areacello``, and ``sea_surface_fraction`` are
   exempt from land-NaN by explicit list (see land_nan_exempt_names).
 """
@@ -131,14 +134,18 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
                 # point to match the right/north-edge convention of the
                 # shared interpolation and rotation machinery.
                 ds = ds.isel({staggered: slice(1, None)})
-    if stream.time_subsample_stride is not None:
+    if stream.time_block_mean is not None:
+        ds = _select_whole_blocks(ds, stream.time_block_mean, config)
+    elif stream.time_subsample_stride is not None:
         # Keep the last instant of each stride-length block, anchored to the
         # source store's raw time grid (hence before any time-range subset),
         # so block ends land on the shared snapshot instants; the
         # cross-stream time-alignment assertion enforces the coincidence.
         stride = stream.time_subsample_stride
         ds = ds.isel({TIME_DIM: slice(stride - 1, None, stride)})
-    if config.start_time is not None or config.end_time is not None:
+    if stream.time_block_mean is None and (
+        config.start_time is not None or config.end_time is not None
+    ):
         ds = ds.sel({TIME_DIM: slice(config.start_time, config.end_time)})
     if ds.sizes[TIME_DIM] == 0:
         raise AssertionError(
@@ -152,6 +159,41 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
                 f"levels; expected {config.expected_level_count}"
             )
     return ds
+
+
+def _select_whole_blocks(
+    ds: xr.Dataset, block: int, config: PipelineConfig
+) -> xr.Dataset:
+    """The raw-time span of the whole ``block``-step blocks (anchored at the
+    source's first step) whose last instant lies in the config time range.
+
+    Stays at raw resolution; process_chunk averages each block.
+    """
+    labels = ds[TIME_DIM].isel({TIME_DIM: slice(block - 1, None, block)})
+    selected = labels.sel({TIME_DIM: slice(config.start_time, config.end_time)})
+    if selected.sizes[TIME_DIM] == 0:
+        raise AssertionError(
+            f"no {block}-step block ends in [{config.start_time}, {config.end_time}]"
+        )
+    first_block = int(np.searchsorted(labels.values, selected.values[0]))
+    n_blocks = selected.sizes[TIME_DIM]
+    return ds.isel(
+        {TIME_DIM: slice(first_block * block, (first_block + n_blocks) * block)}
+    )
+
+
+def stream_output_time(stream: StreamConfig, ds: xr.Dataset) -> xr.DataArray:
+    """The output time coordinate a stream's opened dataset produces."""
+    if stream.time_block_mean is None:
+        return ds[TIME_DIM]
+    return ds[TIME_DIM].isel(
+        {TIME_DIM: slice(stream.time_block_mean - 1, None, stream.time_block_mean)}
+    )
+
+
+def first_output_steps(stream: StreamConfig, n: int) -> dict[str, slice]:
+    """Raw-time selection of a stream's first ``n`` output timesteps."""
+    return {TIME_DIM: slice(0, n * (stream.time_block_mean or 1))}
 
 
 def load_wetmask(config: PipelineConfig) -> xr.DataArray:
@@ -180,12 +222,12 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     return wetmask
 
 
-def _assert_time_alignment(datasets: dict[str, xr.Dataset]) -> xr.DataArray:
-    """Assert all streams share an identical time coordinate; return it."""
-    names = list(datasets)
-    reference = datasets[names[0]][TIME_DIM]
+def _assert_time_alignment(times: dict[str, xr.DataArray]) -> xr.DataArray:
+    """Assert all streams share an identical output time coordinate; return it."""
+    names = list(times)
+    reference = times[names[0]]
     for name in names[1:]:
-        other = datasets[name][TIME_DIM]
+        other = times[name]
         if (
             reference.sizes[TIME_DIM] != other.sizes[TIME_DIM]
             or not (reference.values == other.values).all()
@@ -220,6 +262,35 @@ def _get_areacello(target_grid_name: str) -> xr.DataArray:
             "areacello"
         ]
     return _AREACELLO_CACHE[target_grid_name]
+
+
+def block_mean(ds: xr.Dataset, block: int) -> xr.Dataset:
+    """Mean of each ``block``-step time block, labeled by its last instant.
+
+    NaN propagates (no skipna), so a footprint that varies within a block
+    fails the footprint assertion downstream.
+    """
+    if ds.sizes[TIME_DIM] % block:
+        raise AssertionError(
+            f"chunk of {ds.sizes[TIME_DIM]} timesteps is not whole "
+            f"{block}-step blocks"
+        )
+    labels = ds[TIME_DIM].values[block - 1 :: block]
+    # float64 accumulation; output is cast to OUTPUT_DTYPE after regrid.
+    out = (
+        ds.drop_vars(TIME_DIM)
+        .astype("float64")
+        .coarsen({TIME_DIM: block})
+        .mean(skipna=False, keep_attrs=True)
+        .assign_coords({TIME_DIM: labels})
+    )
+    note = (
+        f"mean of {block} consecutive source timesteps, labeled by the last "
+        "(block anchored at the source's first timestep)"
+    )
+    for name in out.data_vars:
+        out[name].attrs[DERIVATION_ATTR] = note
+    return out
 
 
 def _conform_to_wetmask(
@@ -363,7 +434,8 @@ def _process_chunk(
         assert_footprint(ds[name], wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
-    regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
+    normalized = ds.drop_vars(list(ds.data_vars)) if stream.full_cell_only else ds
+    regridded, ocean_fraction = regrid_normalized(normalized, regridder, wetmask)
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
@@ -384,14 +456,18 @@ def _process_chunk(
             continue
         full = regridder(ds[name].fillna(0.0), keep_attrs=True)
         full = full.where(ocean_fraction > OCEAN_FRACTION_THRESHOLD)
+        full_cell_note = (
+            "NaN filled with 0 over the full grid (land included) and "
+            "conservatively regridded without ocean-fraction "
+            "normalization, giving the per-total-cell-area quantity; "
+            "NaN over land applied after"
+        )
+        upstream = ds[name].attrs.get(DERIVATION_ATTR)
         output[name] = full.assign_attrs(
             provenance_attrs(
                 stream.store,
                 name,
-                "NaN filled with 0 over the full grid (land included) and "
-                "conservatively regridded without ocean-fraction "
-                "normalization, giving the per-total-cell-area quantity; "
-                "NaN over land applied after",
+                f"{upstream}; {full_cell_note}" if upstream else full_cell_note,
             )
         )
 
@@ -424,6 +500,15 @@ def process_chunk(
     assert wetmask is not None
     assert weights_url is not None
     assert target_grid_name is not None
+    time_offset = key.offsets[TIME_DIM]
+    if stream.time_block_mean is not None:
+        if time_offset % stream.time_block_mean:
+            raise AssertionError(
+                f"stream {stream.name!r}: chunk offset {time_offset} is not "
+                f"at a {stream.time_block_mean}-step block boundary"
+            )
+        ds = block_mean(ds, stream.time_block_mean)
+        time_offset //= stream.time_block_mean
     level_index = key.offsets.get(LEVEL_DIM)
     if level_index is not None:
         wetmask = wetmask.isel({LEVEL_DIM: level_index}, drop=True)
@@ -440,7 +525,7 @@ def process_chunk(
         level_index,
     )
     new_key = xbeam.Key(
-        {TIME_DIM: key.offsets[TIME_DIM], "lat": 0, "lon": 0},
+        {TIME_DIM: time_offset, "lat": 0, "lon": 0},
         vars=frozenset(output.data_vars),
     )
     return new_key, output
@@ -550,13 +635,14 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         raise AssertionError(
             f"static variables missing from {config.statics.store}: {sorted(missing)}"
         )
-    fields = source[config.statics.variables].load()
-    surface_wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)
-    regridded, _ = regrid_normalized(fields, regridder, surface_wetmask)
-    for name, da in regridded.data_vars.items():
-        statics[name] = da.astype(OUTPUT_DTYPE).assign_attrs(
-            provenance_attrs(config.statics.store, name)
-        )
+    if config.statics.variables:
+        fields = source[config.statics.variables].load()
+        surface_wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)
+        regridded, _ = regrid_normalized(fields, regridder, surface_wetmask)
+        for name, da in regridded.data_vars.items():
+            statics[name] = da.astype(OUTPUT_DTYPE).assign_attrs(
+                provenance_attrs(config.statics.store, name)
+            )
 
     # Enforce the land-NaN convention on everything not explicitly exempt.
     exempt = set(land_nan_exempt_names(level_count))
@@ -595,7 +681,7 @@ def build_template(
     for name, ds in stream_datasets.items():
         stream = streams_by_name[name]
         ds_3d, ds_2d = _split_stream(ds)
-        first = {TIME_DIM: slice(0, 1)}
+        first = first_output_steps(stream, 1)
         if ds_2d.data_vars:
             key = xbeam.Key({TIME_DIM: 0})
             _, out = process_chunk(
@@ -641,16 +727,10 @@ def _expected_output_names(
     names: set[str] = set()
     for stream in config.streams:
         ds = stream_datasets[stream.name]
-        stream_names: set[str] = set()
-        for name in ds.data_vars:
-            out_name = stream.renaming.get(name, name)
-            if LEVEL_DIM in ds[name].dims:
-                stream_names.update(
-                    f"{out_name}_{k}" for k in range(ds.sizes[LEVEL_DIM])
-                )
-            else:
-                stream_names.add(out_name)
-        stream_names.update(stream.full_cell_variables)
+        ds_3d, ds_2d = _split_stream(ds)
+        stream_names = stream.output_names(
+            ds_2d.data_vars, ds_3d.data_vars, ds.sizes.get(LEVEL_DIM, 0)
+        )
         specs = stream.postprocess_specs()
         assert_postprocess_inputs(specs, stream_names, f"stream {stream.name!r}")
         for spec in specs:
@@ -739,11 +819,17 @@ def main():
     stream_datasets = {
         stream.name: open_stream(stream, config) for stream in config.streams
     }
-    output_time = _assert_time_alignment(stream_datasets)
+    streams_by_name = {stream.name: stream for stream in config.streams}
+    output_time = _assert_time_alignment(
+        {
+            name: stream_output_time(streams_by_name[name], ds)
+            for name, ds in stream_datasets.items()
+        }
+    )
     if args.num_timesteps is not None:
         output_time = output_time.isel({TIME_DIM: slice(0, args.num_timesteps)})
         stream_datasets = {
-            name: ds.isel({TIME_DIM: slice(0, args.num_timesteps)})
+            name: ds.isel(first_output_steps(streams_by_name[name], args.num_timesteps))
             for name, ds in stream_datasets.items()
         }
     if config.shift_timestamps_to_avg_interval_midpoint:
@@ -789,7 +875,6 @@ def main():
 
     output_store = make_zarr_store(config.output.path, read_only=False)
 
-    streams_by_name = {stream.name: stream for stream in config.streams}
     logger.info("[pipeline] starting; writing to %s", config.output.path)
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
         for name, ds in stream_datasets.items():
@@ -798,11 +883,14 @@ def main():
             ds_3d, ds_2d = _split_stream(ds)
             # Read at the source's own time-chunk width so each source chunk
             # is fetched once, not once per timestep it holds.
+            # A block-mean read spans whole blocks; its output width is
+            # width // block.
+            block = stream.time_block_mean or 1
             if ds_3d.data_vars:
-                width = source_time_chunk_size(ds_3d)
+                width = math.lcm(source_time_chunk_size(ds_3d), block)
                 branches.append((f"{name}_3d", ds_3d, {TIME_DIM: width, LEVEL_DIM: 1}))
             if ds_2d.data_vars:
-                width = source_time_chunk_size(ds_2d)
+                width = math.lcm(source_time_chunk_size(ds_2d), block)
                 branches.append((f"{name}_2d", ds_2d, {TIME_DIM: width}))
             for label, branch_ds, chunks in branches:
                 n_chunks = int(
@@ -820,12 +908,13 @@ def main():
                     n_chunks,
                     chunks[TIME_DIM],
                 )
+                output_width = chunks[TIME_DIM] // block
                 split_chunks = {
                     TIME_DIM: shard_aligned_chunk_size(
-                        chunks[TIME_DIM], config.output.time_shard_size
+                        output_width, config.output.time_shard_size
                     )
                 }
-                if split_chunks[TIME_DIM] != chunks[TIME_DIM]:
+                if split_chunks[TIME_DIM] != output_width:
                     logger.info(
                         "[stream:%s] splitting to %d before consolidating into "
                         "%d-wide shards; the %d-wide read does not align with "
@@ -833,7 +922,7 @@ def main():
                         label,
                         split_chunks[TIME_DIM],
                         config.output.time_shard_size,
-                        chunks[TIME_DIM],
+                        output_width,
                     )
                 (
                     p
