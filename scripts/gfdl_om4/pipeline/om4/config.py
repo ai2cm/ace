@@ -49,12 +49,21 @@ class StreamConfig:
             (e.g. 20 subsamples 6-hourly data to 5-daily block ends). The
             cross-stream time-alignment assertion then guarantees the
             subsample lands exactly on the shared time coordinate.
+        time_block_mean: if set, average each N-step block of the source
+            store's raw time grid (blocks anchored at its first step, a
+            trailing partial block dropped), labeled by the block's last
+            instant — the same instants ``time_subsample_stride: N`` keeps.
+            Excludes ``time_subsample_stride``.
         full_cell_variables: variables additionally regridded with full-cell
             semantics — NaN filled with 0 over the whole grid (land
             included) and conservatively regridded without ocean-fraction
             normalization — written under their source name, with NaN over
             land applied after. Each must also have a ``renaming`` entry so
             its wetmask-normalized twin doesn't collide.
+        full_cell_only: if True, every variable is written only with
+            full-cell semantics, under its ``renaming`` entry if any, else its
+            source name; no wetmask-normalized twin. ``full_cell_variables``
+            must then list every variable.
         postprocess: post-regrid transforms to apply per chunk, in order
             (see pipeline/om4/postprocess.py): a registry name, or a
             :class:`~pipeline.postprocess.PostprocessConfig` naming the
@@ -74,7 +83,9 @@ class StreamConfig:
     renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     time_subsample_stride: int | None = None
+    time_block_mean: int | None = None
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
+    full_cell_only: bool = False
     postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
     face_mask_url: str | None = None
 
@@ -93,13 +104,29 @@ class StreamConfig:
                 f"time_subsample_stride must be >= 1; got "
                 f"{self.time_subsample_stride}"
             )
+        if self.time_block_mean is not None:
+            if self.time_block_mean < 1:
+                raise ValueError(
+                    f"time_block_mean must be >= 1; got {self.time_block_mean}"
+                )
+            if self.time_subsample_stride is not None:
+                raise ValueError(
+                    f"stream {self.name!r} sets both time_subsample_stride and "
+                    "time_block_mean; choose one"
+                )
+        if self.full_cell_only and set(self.full_cell_variables) != set(self.variables):
+            raise ValueError(
+                f"stream {self.name!r} is full_cell_only, so full_cell_variables "
+                f"must list every variable; missing "
+                f"{sorted(set(self.variables) - set(self.full_cell_variables))}"
+            )
         for name in self.full_cell_variables:
             if name not in self.variables:
                 raise ValueError(
                     f"full-cell variable {name!r} not in stream {self.name!r} "
                     "variables"
                 )
-            if name not in self.renaming:
+            if name not in self.renaming and not self.full_cell_only:
                 raise ValueError(
                     f"full-cell variable {name!r} needs a renaming entry in "
                     f"stream {self.name!r}: its full-cell output keeps the "
@@ -107,8 +134,7 @@ class StreamConfig:
                     "renamed to avoid a collision"
                 )
         context = f"stream {self.name!r}"
-        output_names = {self.renaming.get(name, name) for name in self.variables}
-        output_names.update(self.full_cell_variables)
+        output_names = self.output_names(self.variables)
         assert_postprocess_inputs(
             self.postprocess_specs(),
             output_names,
@@ -120,6 +146,23 @@ class StreamConfig:
                 f"stream {self.name!r} sets face_mask_url but has no "
                 "rotated_pairs for it to apply to"
             )
+
+    def full_cell_output_name(self, name: str) -> str:
+        """Output name of ``name``'s full-cell regrid."""
+        return self.renaming.get(name, name) if self.full_cell_only else name
+
+    def output_names(self, names_2d, names_3d=(), level_count: int = 0) -> set[str]:
+        """Regridded output names before postprocess additions."""
+        names = {self.full_cell_output_name(name) for name in self.full_cell_variables}
+        if self.full_cell_only:
+            return names
+        names.update(self.renaming.get(name, name) for name in names_2d)
+        names.update(
+            f"{self.renaming.get(name, name)}_{k}"
+            for name in names_3d
+            for k in range(level_count)
+        )
+        return names
 
     def postprocess_specs(self) -> list[Postprocess]:
         """The configured transforms, with their source names bound."""
@@ -181,6 +224,13 @@ class PipelineConfig:
         names = [stream.name for stream in self.streams]
         if len(set(names)) != len(names):
             raise ValueError(f"stream names must be unique; got {names}")
+        if self.shift_timestamps_to_avg_interval_midpoint and any(
+            stream.time_block_mean is not None for stream in self.streams
+        ):
+            raise ValueError(
+                "shift_timestamps_to_avg_interval_midpoint is unsupported with "
+                "time_block_mean streams, whose labels are block-end instants"
+            )
 
 
 def load_config(path: str) -> PipelineConfig:
