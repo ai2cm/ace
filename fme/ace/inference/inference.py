@@ -23,6 +23,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
+    local_ic_range,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
@@ -38,6 +39,7 @@ from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import is_local, makedirs, open_dataset_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
@@ -68,7 +70,7 @@ class InitialConditionConfig:
     """
 
     path: str
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["netcdf4", "zarr"] = "netcdf4"
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
@@ -227,10 +229,9 @@ class InferenceConfig:
                 - To write raw or time-coarsened data, the zarr writer must be
                   used. See the ``files`` parameter of the
                   :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Note that monthly coarsened data cannot
-                  currently be written to zarr, and hence a remote directory,
-                  since it uses a different code path than uniformly coarsened
-                  data.
+                  can be configured. Monthly coarsened data configured through
+                  ``files`` can be written to zarr. The legacy
+                  ``save_monthly_files`` option remains netCDF-only.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the
@@ -250,6 +251,10 @@ class InferenceConfig:
         aggregator: Configuration for inference aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights.
         allow_incompatible_dataset: If True, allow the dataset used for inference
             to be incompatible with the dataset used for stepper training. This should
             be used with caution, as it may allow the stepper to make scientifically
@@ -280,6 +285,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
@@ -299,7 +305,11 @@ class InferenceConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper(
+            self.checkpoint_path,
+            self.stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
@@ -361,8 +371,9 @@ def run_inference_from_config(config: InferenceConfig):
             n_forward_steps=config.forward_steps_in_memory
         )
         logging.info("Loading initial condition data")
+        ic_ds = config.initial_condition.get_dataset()
         initial_condition = get_initial_condition(
-            config.initial_condition.get_dataset(),
+            ic_ds,
             InitialConditionRequirements(
                 prognostic_names=stepper_config.prognostic_names,
                 labels=config.labels,
@@ -370,6 +381,18 @@ def run_inference_from_config(config: InferenceConfig):
         )
         stepper = config.load_stepper()
         stepper.set_eval()
+        dist = Distributed.get_instance()
+        n_ic = initial_condition.as_batch_data().time.sizes["sample"]
+        ic_already_sharded = (
+            dist.total_data_parallel_ranks > 1
+            and BatchData.dataset_has_gathered_state(ic_ds)
+        )
+        if not ic_already_sharded:
+            # Validate divisibility (raises ValueError if not divisible).
+            local_ic_range(
+                n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
+            )
+
         logging.info("Initializing forcing data loader")
         data = get_forcing_data(
             config=config.forcing_loader,
@@ -381,6 +404,16 @@ def run_inference_from_config(config: InferenceConfig):
             label_override=config.labels,
         )
         stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
+        # Must happen before the ensemble broadcast.  Gathered restarts
+        # are already per-rank (scattered inside from_xarray_dataset).
+        if dist.total_data_parallel_ranks > 1 and not ic_already_sharded:
+            ic_batch = data.initial_condition.as_batch_data()
+            start, end = local_ic_range(
+                n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
+            )
+            data._initial_condition = PrognosticState(
+                ic_batch.select_sample_slice(slice(start, end))
+            )
 
         # Broadcast the initial condition across ensemble members only after the
         # forcing loader is built, mirroring the evaluator path. The forcing then

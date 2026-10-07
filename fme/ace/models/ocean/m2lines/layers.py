@@ -9,6 +9,66 @@ from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
 from .activations import CappedGELU
 
+LatPad = Literal["constant", "reflect", "pole"]
+
+
+def pad_latitude(
+    x: torch.Tensor, pad_start: int, pad_end: int, mode: LatPad
+) -> torch.Tensor:
+    """Pad the latitude (second-to-last) axis of ``x``.
+
+    ``pad_start`` rows are added before index 0 and ``pad_end`` rows after the
+    last index; with latitude stored south-to-north these are the south and
+    north edges.
+
+    Modes:
+        constant: zeros.
+        reflect: mirror about the edge row, excluding it (``torch``'s
+            ``"reflect"``); each pad must be smaller than the height.
+        pole: pole-crossing padding for a grid whose edge cells touch the
+            pole. The k rows beyond a pole are the k edge rows flipped in
+            latitude and rotated half way round in longitude, which is the
+            true cross-pole neighbor of a scalar field (a vector component
+            changes sign across the pole, so this is not exact for velocities).
+            It is exact only when the edge rows of ``x`` touch the pole; on a
+            tensor whose edge stops short of the pole (a level that dropped
+            its last row in pooling) or extends past it (a pole-padded input),
+            it is an approximation. Each pad must be at most the height. The
+            rotation is exact for an even number of longitudes; for an odd
+            number the antipodal longitude falls between two columns, which
+            are averaged.
+    """
+    if mode == "constant":
+        return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
+    if mode == "reflect":
+        return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="reflect")
+    if mode == "pole":
+        height = x.shape[-2]
+        if pad_start > height or pad_end > height:
+            raise ValueError(
+                f"pole padding of ({pad_start}, {pad_end}) rows exceeds the "
+                f"height {height}"
+            )
+        parts = []
+        if pad_start > 0:
+            parts.append(_rotate_half_longitude(x[..., :pad_start, :].flip(-2)))
+        parts.append(x)
+        if pad_end > 0:
+            parts.append(_rotate_half_longitude(x[..., height - pad_end :, :].flip(-2)))
+        return torch.cat(parts, dim=-2)
+    raise ValueError(f"unknown latitude padding mode {mode!r}")
+
+
+def _rotate_half_longitude(x: torch.Tensor) -> torch.Tensor:
+    """Each column replaced by its antipodal column (longitude + 180)."""
+    width = x.shape[-1]
+    half = width // 2
+    if width % 2 == 0:
+        return torch.roll(x, shifts=half, dims=-1)
+    return 0.5 * (
+        torch.roll(x, shifts=half, dims=-1) + torch.roll(x, shifts=half + 1, dims=-1)
+    )
+
 
 class BilinearUpsample(torch.nn.Module):
     def __init__(self, upsampling: int = 2, **kwargs):
@@ -29,17 +89,23 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
     seam. Here we pad one column on each longitude edge with the wrapped
     (circular) neighbor before interpolating, then crop the upsampled padding
     back off, so the seam is interpolated against its true periodic neighbor.
-    The latitude (height) axis is left unpadded, consistent with the constant
-    padding used for the latitude axis elsewhere in Samudra. The output shape
+    With ``lat_pad="constant"`` (the default) the latitude (height) axis is
+    left unpadded, so the latitude edges interpolate against a replicated edge
+    row. Any other ``lat_pad`` mode (see ``pad_latitude``) pads one latitude
+    row on each edge the same way and crops it back off. The output shape
     matches ``BilinearUpsample``.
     """
 
-    def __init__(self, upsampling: int = 2, **kwargs):
+    def __init__(self, upsampling: int = 2, lat_pad: LatPad = "constant", **kwargs):
         super().__init__()
         self.upsampling = upsampling
+        self.lat_pad = lat_pad
 
     def forward(self, x):
-        width = x.shape[-1]
+        height, width = x.shape[-2:]
+        pad_lat = self.lat_pad != "constant"
+        if pad_lat:
+            x = pad_latitude(x, 1, 1, self.lat_pad)
         padded = torch.nn.functional.pad(x, (1, 1, 0, 0), mode="circular")
         upsampled = torch.nn.functional.interpolate(
             padded,
@@ -49,7 +115,10 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
         )
         start = self.upsampling
         end = start + width * self.upsampling
-        return upsampled[..., start:end]
+        upsampled = upsampled[..., start:end]
+        if pad_lat:
+            upsampled = upsampled[..., start : start + height * self.upsampling, :]
+        return upsampled
 
 
 class AvgPool(torch.nn.Module):
@@ -154,6 +223,11 @@ class ConvNeXtBlock(torch.nn.Module):
     read off the ``Context`` passed to ``forward``, making the block's norms
     conditional, so it requires a normalization layer to condition (``norm`` not
     None).
+
+    ``pad`` is the padding mode of the longitude (width) axis, given to
+    ``torch.nn.functional.pad``, and ``lat_pad`` that of the latitude (height)
+    axis, given to ``pad_latitude``. Latitude is padded first, so the corners
+    are filled by the longitude padding of the latitude-padded rows.
     """
 
     def __init__(
@@ -170,6 +244,7 @@ class ConvNeXtBlock(torch.nn.Module):
         upscale_factor: int = 4,
         checkpoint_strategy: Literal["all", "simple"] | None = None,
         context_config: ContextConfig | None = None,
+        lat_pad: LatPad = "constant",
     ):
         super().__init__()
         assert kernel_size % 2 != 0, "Cannot use even kernel sizes!"
@@ -177,6 +252,7 @@ class ConvNeXtBlock(torch.nn.Module):
         self.N_in = in_channels
         self.N_pad = int((kernel_size + (kernel_size - 1) * (dilation - 1) - 1) / 2)
         self.pad = pad
+        self.lat_pad = lat_pad
         self.norm = norm
         self.norm_kwargs: Mapping[str, Any] = {} if norm_kwargs is None else norm_kwargs
         self.checkpoint_strategy = checkpoint_strategy
@@ -286,11 +362,9 @@ class ConvNeXtBlock(torch.nn.Module):
         skip = self.skip_module(x)
         for i, layer in enumerate(self.convblock):
             if isinstance(layer, nn.Conv2d) and layer.kernel_size[0] != 1:
+                x = pad_latitude(x, self.N_pad, self.N_pad, self.lat_pad)
                 x = torch.nn.functional.pad(
                     x, (self.N_pad, self.N_pad, 0, 0), mode=self.pad
-                )
-                x = torch.nn.functional.pad(
-                    x, (0, 0, self.N_pad, self.N_pad), mode="constant"
                 )
             if isinstance(layer, torch.nn.LayerNorm):
                 x = x.permute(0, 2, 3, 1).contiguous()

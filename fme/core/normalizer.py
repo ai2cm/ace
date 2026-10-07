@@ -4,11 +4,10 @@ from collections.abc import Iterable, Mapping
 from copy import copy
 from typing import Protocol
 
-import fsspec
 import numpy as np
 import torch
-import xarray as xr
 
+from fme.core.cloud import open_dataset_via_inter_filesystem_copy
 from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -308,8 +307,7 @@ def load_dict_from_netcdf(
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
     """
-    with fsspec.open(path, "rb") as f:
-        ds = xr.load_dataset(f, mask_and_scale=False)
+    ds = open_dataset_via_inter_filesystem_copy(path, mask_and_scale=False)
 
     result = {}
     if names is None:

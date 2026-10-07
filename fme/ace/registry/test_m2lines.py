@@ -26,6 +26,33 @@ def test_samudra_builder():
         _ = SamudraBuilder(norm_kwargs={"normalized_shape": (3, 3)})
 
 
+def test_samudra_builder_lat_pad_options():
+    selector = ModuleSelector(
+        type="Samudra",
+        config={
+            "ch_width": [4, 4],
+            "dilation": [1, 2],
+            "n_layers": [1, 1],
+            "zonally_periodic_upsample": True,
+            "lat_pad": "pole",
+            "pad_to_pool_multiple": True,
+        },
+    )
+    img_shape = (18, 32)
+    module = selector.build(5, 3, DatasetInfo(img_shape=img_shape))
+    model = module.torch_module
+    assert isinstance(model, Samudra)
+    assert model.lat_pad == "pole"
+    assert model.pad_to_pool_multiple
+    assert all(
+        block.lat_pad == "pole"
+        for block in model.layers
+        if isinstance(block, ConvNeXtBlock)
+    )
+    output = model(torch.randn(2, 5, *img_shape))
+    assert output.shape == (2, 3, *img_shape)
+
+
 @pytest.mark.parametrize("conditioned_blocks", ["bottleneck", "all_blocks"])
 def test_noise_conditioned_samudra_builder(conditioned_blocks):
     builder = SamudraBuilder(
