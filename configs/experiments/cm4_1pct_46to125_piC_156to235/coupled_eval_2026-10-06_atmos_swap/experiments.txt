@@ -1,0 +1,14 @@
+# 2x2 atmosphere swap at inference between two coupled finetunes with identical training configs:
+#   ocean "oA" = ocean of crps4 (coupled-trained against a2s), from 01M14TKQZ145YDRAM79R59BGS7 best_inference_ckpt
+#   ocean "oL" = ocean of owc_a2sLR fixed-4 (coupled-trained against a2sLR), from 01M3HC59F9ABDEZXC3HK9FT7N0 best_inference_ckpt
+#   atmosphere "aA" = a2s, "aL" = a2sLR, extracted from the same two coupled checkpoints.
+# Components extracted with scripts/coupled/create_decoupled_checkpoint.py into beaker datasets
+#   oA 01M4AD4RD0MC28W15FTBPTZVFJ, aA 01M4AD4RCS27XDQRG6Z9ZB56F5, oL 01M4AD4RCY1849NPZ2Y22JARWP, aL 01M4AD4RD9TWNKV5M6SJC5H8Q1
+# Field 12 = ocean dataset (-> /ocean_ckpt.tar), field 13 = atmosphere dataset (-> /atmos_ckpt.tar); field 9 (-> /ckpt.tar)
+# is the ocean's source coupled dataset and is unused by the standalone-checkpoint config.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled_swap.
+
+cm4_piC-coupled_swap|oA-aA|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-swap|best_inference_ckpt|high|--min-runtime 8h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_swap|oA-aL|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-swap|best_inference_ckpt|high|--min-runtime 8h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RD9TWNKV5M6SJC5H8Q1
+cm4_piC-coupled_swap|oL-aA|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr-swap|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan|01M4AD4RCY1849NPZ2Y22JARWP|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_swap|oL-aL|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr-swap|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan|01M4AD4RCY1849NPZ2Y22JARWP|01M4AD4RD9TWNKV5M6SJC5H8Q1
