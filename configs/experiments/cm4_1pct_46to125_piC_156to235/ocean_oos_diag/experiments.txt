@@ -1,0 +1,14 @@
+# Out-of-sample diagnostics for stochastic Samudra (research task
+# tasks/2026-10-06-stochastic-samudra-oos-diagnostics). Inference only, from
+# existing best_inference_ckpt checkpoints; result datasets pinned per row
+# (verified to contain training_checkpoints/best_inference_ckpt.tar).
+#   *-ens4 tags: 4 members per IC (n_ensemble_per_ic=4) of the standing
+#     1pct-ic0001-130yr / piC-ic0151-200yr rollouts: does the ensemble mean
+#     close the single-member gap to production?
+#   1pct-ic0046-85yr: same rollout started inside the training window: is the
+#     years-1-40 cold surface offset a spin-up shock or a low-CO2 effect?
+# Configs here are copies of cm4_eval/ocean (save_monthly_files forced off per row).
+# 19yl0189 (spectral ES, long tail, rs0). Lives on this branch (exp/stochastic-samudra-es lineage) because it trained here.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0-ens4|01M38QM5S04WB0S5RRW3QE6EHF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|n_ensemble_per_ic=4 forward_steps_in_memory=20 data_writer.save_monthly_files=false|01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0-ens4|01M38QM5S04WB0S5RRW3QE6EHF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|n_ensemble_per_ic=4 forward_steps_in_memory=20 data_writer.save_monthly_files=false|01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-ftlt|rs0-ens4|01M38QM5S04WB0S5RRW3QE6EHF|run_1pct-ic0046-85yr|best_inference_ckpt|high|--min-runtime 8h|n_ensemble_per_ic=4 forward_steps_in_memory=20 data_writer.save_monthly_files=false|01M38QM5S9M9FW3ATRGGP6W0Q6|ai2/ace|jupiter+titan|||64GiB

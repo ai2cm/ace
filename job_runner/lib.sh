@@ -64,6 +64,15 @@ build_cluster_args() {
             --cluster jupiter
             --cluster saturn
         )
+    elif [[ "$CLUSTER" == "jupiter+titan" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster jupiter
+            --cluster titan
+        )
     elif [[ "$CLUSTER" == "a100" ]]; then
         if [[ -z "$WORKSPACE" ]]; then
             WORKSPACE=ai2/ace
