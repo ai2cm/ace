@@ -1,0 +1,16 @@
+# Century evals of coupled_tail-lt0lt_a2s (patch-ES stage-2 ocean, long-tail cap 16) at epoch 12, from the
+# 16-epoch extension (epoch-8 evals: coupled_eval_2026-09-25). "ep12" in the group labels the checkpoint epoch.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled. The 1pct config here carries the six regional
+# monthly-SST writers the epoch-8 1pct eval lacked; the writers add output only.
+# Checkpoint: best_inference_ckpt (epoch 12, best_inference_error 0.0744; saved 2026-10-03 21:51Z, epochs 13-15
+# did not replace it) from the finalized result dataset of training job 01M49EX4CX76TK6A35CSG33YYG, pinned in
+# field 9; job 01M4BZH50SEGQ3NNQXDXT8G03W is resuming to finish epoch 16.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto-ep12|o0a0rs0|01M3MYF9S5FXCXVVN108864A6D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto-ep12|o0a0rs0|01M3MYF9S5FXCXVVN108864A6D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan
