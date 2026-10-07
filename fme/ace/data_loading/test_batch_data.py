@@ -586,9 +586,9 @@ def test_from_xarray_single_rank_loads_gathered_restart():
         result.stepper_state.corrector_state.global_dry_air_mass,
         torch.tensor([[[1.0]], [[2.0]]]),
     )
-    # Data tensors should match the originals.
+    # Data tensors should match the originals (result is CPU after xarray).
     for name in batch.data:
-        torch.testing.assert_close(result.data[name], batch.data[name])
+        torch.testing.assert_close(result.data[name], batch.data[name].cpu())
 
 
 def test_from_xarray_raises_on_n_ranks_mismatch():
