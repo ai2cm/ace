@@ -9,3 +9,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftA-constant|rs0|01M4C5DX673S1PBXZ883YQK4T2|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftB-pole-pool|rs0|01M4C5E80DRYGW926K6YMXY744|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftC-pole|rs0|01M4C5EJG8T1E4ZJ6FN3BY1KTD|training|best_inference_ckpt|normal|--min-runtime 8h
