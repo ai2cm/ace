@@ -245,7 +245,7 @@ def test_time_stride_composes_with_timestamp_range(tmp_path):
     assert ds.time.values[0] == first
 
 
-def test_time_stride_none_is_todays_behavior(tmp_path):
+def test_time_stride_none_keeps_every_timestep(tmp_path):
     times = _times(STRIDE_START, N_STRIDE_TIMES, "6h")
     path = _write_zarr(tmp_path / "input.zarr", times)
     ds = CoupledInputDatasetConfig(zarr_path=path, time_chunk_size=10).get_dataset()
