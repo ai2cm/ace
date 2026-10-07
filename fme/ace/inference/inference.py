@@ -371,8 +371,9 @@ def run_inference_from_config(config: InferenceConfig):
             n_forward_steps=config.forward_steps_in_memory
         )
         logging.info("Loading initial condition data")
+        ic_ds = config.initial_condition.get_dataset()
         initial_condition = get_initial_condition(
-            config.initial_condition.get_dataset(),
+            ic_ds,
             InitialConditionRequirements(
                 prognostic_names=stepper_config.prognostic_names,
                 labels=config.labels,
@@ -382,8 +383,15 @@ def run_inference_from_config(config: InferenceConfig):
         stepper.set_eval()
         dist = Distributed.get_instance()
         n_ic = initial_condition.as_batch_data().time.sizes["sample"]
-        # Validate divisibility (raises ValueError if not divisible).
-        local_ic_range(n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks)
+        ic_already_sharded = (
+            dist.total_data_parallel_ranks > 1
+            and BatchData.dataset_has_gathered_state(ic_ds)
+        )
+        if not ic_already_sharded:
+            # Validate divisibility (raises ValueError if not divisible).
+            local_ic_range(
+                n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
+            )
 
         logging.info("Initializing forcing data loader")
         data = get_forcing_data(
@@ -395,8 +403,9 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
-        # Must happen before the ensemble broadcast.
-        if dist.total_data_parallel_ranks > 1:
+        # Must happen before the ensemble broadcast.  Gathered restarts
+        # are already per-rank (scattered inside from_xarray_dataset).
+        if dist.total_data_parallel_ranks > 1 and not ic_already_sharded:
             ic_batch = data.initial_condition.as_batch_data()
             start, end = local_ic_range(
                 n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
