@@ -14,13 +14,15 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
+from fme.core.corrector.ocean import _compute_ocean_net_surface_energy_flux
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
-from fme.core.registry import ModuleSelector
+from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
@@ -2510,3 +2512,123 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     # each variant matches its base variable's convention
     assert stds["a_double"] == pytest.approx(res_stds["a"])
     assert stds["b_double"] == pytest.approx(field_stds["b"])
+
+
+_CORRECTOR_FORCING_VALUES = {
+    "DSWRFsfc": 200.0,
+    "USWRFsfc": 50.0,
+    "DLWRFsfc": 300.0,
+    "ULWRFsfc": 350.0,
+    "LHTFLsfc": 100.0,
+    "SHTFLsfc": 20.0,
+    "PRATEsfc": 1e-4,
+    "total_frozen_precipitation_rate": 1e-5,
+}
+
+
+def _corrector_forcing_step_config(
+    corrector_forcing_names: list[str],
+    next_step_forcing_names: list[str] | None = None,
+) -> SingleModuleStepConfig:
+    in_names = ["sst", "land_fraction", "sea_ice_fraction", "wind_stress"]
+    out_names = ["sst", "hfds"]
+    return SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=get_network_and_loss_normalization_config(
+            names=sorted(set(in_names + out_names))
+        ),
+        corrector=CorrectorSelector(
+            type="ocean_corrector",
+            config={
+                "surface_energy_flux_correction": {"method": "prescribed_open_ocean"}
+            },
+        ),
+        corrector_forcing_names=corrector_forcing_names,
+        next_step_forcing_names=next_step_forcing_names or [],
+    )
+
+
+def _get_corrector_forcing_step(config: SingleModuleStepConfig) -> StepABC:
+    dataset_info = get_dataset_info(
+        img_shape=DEFAULT_IMG_SHAPE,
+        vertical_coordinate=NullVerticalCoordinate(),
+        device=fme.get_device(),
+    )
+    selector = StepSelector(type="single_module", config=dataclasses.asdict(config))
+    return selector.get_step(dataset_info, lambda _: None)
+
+
+def test_corrector_forcing_names_loaded_but_not_network_inputs():
+    names = list(_CORRECTOR_FORCING_VALUES)
+    config = _corrector_forcing_step_config(names, next_step_forcing_names=names)
+    assert set(names) <= config.input_names
+    assert set(names) <= config.next_step_input_names
+    assert set(names).isdisjoint(config._normalize_names)
+    assert set(names).isdisjoint(config.prognostic_names)
+    step = _get_corrector_forcing_step(config)
+    assert isinstance(step, SingleModuleStep)
+    assert step.in_packer.names == config.in_names
+
+
+def test_corrector_forcing_names_reach_corrector_from_next_step():
+    names = list(_CORRECTOR_FORCING_VALUES)
+    config = _corrector_forcing_step_config(names, next_step_forcing_names=names)
+    step = _get_corrector_forcing_step(config)
+    n_samples = 2
+    shape = (n_samples, *DEFAULT_IMG_SHAPE)
+    device = fme.get_device()
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    input_data["sst"] = torch.full(shape, 300.0, device=device)
+    input_data["land_fraction"] = torch.zeros(shape, device=device)
+    input_data["sea_ice_fraction"] = torch.zeros(shape, device=device)
+    next_step_input_data = {
+        name: torch.full(shape, value, device=device)
+        for name, value in _CORRECTOR_FORCING_VALUES.items()
+    }
+    next_step_input_data.update(
+        get_tensor_dict(
+            step.next_step_input_names - set(next_step_input_data),
+            DEFAULT_IMG_SHAPE,
+            n_samples,
+        )
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    ).output
+    expected = _compute_ocean_net_surface_energy_flux(
+        next_step_input_data, input_data["sst"]
+    )
+    torch.testing.assert_close(output["hfds"], expected)
+
+
+@pytest.mark.parametrize("overlap", ["in", "out"])
+def test_corrector_forcing_names_overlap_raises(overlap: str):
+    name = "wind_stress" if overlap == "in" else "hfds"
+    with pytest.raises(ValueError, match="corrector_forcing_name"):
+        _corrector_forcing_step_config([name])
+
+
+def test_next_step_forcing_name_unknown_raises():
+    with pytest.raises(ValueError, match="next_step_forcing_name"):
+        _corrector_forcing_step_config(["DSWRFsfc"], next_step_forcing_names=["foo"])
+
+
+def test_config_without_corrector_forcing_names_unchanged():
+    config = _corrector_forcing_step_config([])
+    state = config.get_state()
+    del state["corrector_forcing_names"]
+    loaded = dacite.from_dict(
+        SingleModuleStepConfig, state, config=dacite.Config(strict=True)
+    )
+    assert loaded.corrector_forcing_names == []
+    assert loaded.input_names == frozenset(config.in_names)
+    assert loaded._normalize_names == frozenset(config.in_names + config.out_names)

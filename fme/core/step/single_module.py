@@ -99,6 +99,10 @@ class SingleModuleStepConfig(StepConfigABC):
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
+        corrector_forcing_names: Names of forcing variables loaded and passed to
+            the corrector (in ``input`` and ``next_step_input_data``) but not
+            used as network input channels nor normalized. Must not overlap
+            ``in_names`` or ``out_names``.
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: When set, predict prognostics as tendencies
@@ -135,6 +139,7 @@ class SingleModuleStepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    corrector_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: ResidualPredictionConfig | bool | None = None
     include_channel_mask_inputs: bool = False
@@ -180,10 +185,21 @@ class SingleModuleStepConfig(StepConfigABC):
                     f"prescribed_prognostic_name '{name}' must be in out_names: "
                     f"{self.out_names}"
                 )
-        for name in self.next_step_forcing_names:
-            if name not in self.in_names:
+        for name in self.corrector_forcing_names:
+            if name in self.in_names:
                 raise ValueError(
-                    f"next_step_forcing_name '{name}' not in in_names: {self.in_names}"
+                    f"corrector_forcing_name is an input variable: '{name}'"
+                )
+            if name in self.out_names:
+                raise ValueError(
+                    f"corrector_forcing_name is an output variable: '{name}'"
+                )
+        for name in self.next_step_forcing_names:
+            if name not in self.in_names and name not in self.corrector_forcing_names:
+                raise ValueError(
+                    f"next_step_forcing_name '{name}' not in in_names: "
+                    f"{self.in_names} or corrector_forcing_names: "
+                    f"{self.corrector_forcing_names}"
                 )
             if name in self.out_names:
                 raise ValueError(
@@ -256,10 +272,10 @@ class SingleModuleStepConfig(StepConfigABC):
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
-        if self.ocean is None:
-            return frozenset(self.in_names)
-        else:
-            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
+        names = set(self.in_names).union(self.corrector_forcing_names)
+        if self.ocean is not None:
+            names = names.union(self.ocean.forcing_names)
+        return frozenset(names)
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
