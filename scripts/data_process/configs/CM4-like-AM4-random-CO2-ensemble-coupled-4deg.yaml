@@ -10,6 +10,7 @@ coupled_datasets:
 
 stats:
   start_date: "0153-01-01T06:00:00"
+  beaker_dataset: 2026-09-29-cm4-like-am4-random-co2-4deg-coupled-stats
 
 input_datasets:
   runs:
