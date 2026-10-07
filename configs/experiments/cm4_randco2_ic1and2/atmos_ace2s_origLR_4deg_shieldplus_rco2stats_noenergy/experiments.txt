@@ -1,0 +1,2 @@
+
+cm4_randco2_ic1and2-atmos_ace2s_origLR_4deg_shieldplus_rco2stats_noenergy|rs0|01M4C86Y1P07GG1RHF17PGECEM|training|best_inference_ckpt|normal|--min-runtime 8h
