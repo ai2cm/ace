@@ -72,11 +72,14 @@ class Postprocess:
             transform to apply; chunks lacking any of them are passed through
             unchanged.
         adds: output variables the transform adds.
+        removes: output variables the transform drops (e.g. the components
+            of a derived variable that should not be written).
     """
 
     fn: Callable[[xr.Dataset, ChunkContext], xr.Dataset]
     requires: tuple[str, ...]
     adds: tuple[str, ...]
+    removes: tuple[str, ...] = ()
 
 
 PostprocessFactory = Callable[..., Postprocess]
@@ -153,6 +156,18 @@ def assert_postprocess_inputs(
                     f"produce; produced: {sorted(available)}"
                 )
         available.update(spec.adds)
+        available.difference_update(spec.removes)
+
+
+def postprocess_output_names(
+    specs: Sequence[Postprocess], produced: set[str]
+) -> set[str]:
+    """Output names after applying ``specs`` in order to ``produced``."""
+    names = set(produced)
+    for spec in specs:
+        names.update(spec.adds)
+        names.difference_update(spec.removes)
+    return names
 
 
 def kelvin_sst(

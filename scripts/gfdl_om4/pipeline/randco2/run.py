@@ -46,6 +46,7 @@ from ..postprocess import (
     DERIVATION_ATTR,
     ChunkContext,
     assert_postprocess_inputs,
+    postprocess_output_names,
     provenance_attrs,
 )
 from ..weights import get_regridder
@@ -282,9 +283,7 @@ def _expected_output_names(
     names.update(stream.full_cell_variables)
     specs = stream.postprocess_specs()
     assert_postprocess_inputs(specs, names, f"stream {stream.name!r}")
-    for spec in specs:
-        names.update(spec.adds)
-    return names
+    return postprocess_output_names(specs, names)
 
 
 def _get_parser() -> argparse.ArgumentParser:

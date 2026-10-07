@@ -68,6 +68,7 @@ from ..postprocess import (
     DERIVATION_ATTR,
     ChunkContext,
     assert_postprocess_inputs,
+    postprocess_output_names,
     provenance_attrs,
 )
 from ..weights import get_regridder, open_source_grid
@@ -734,9 +735,7 @@ def _expected_output_names(
         )
         specs = stream.postprocess_specs()
         assert_postprocess_inputs(specs, stream_names, f"stream {stream.name!r}")
-        for spec in specs:
-            stream_names.update(spec.adds)
-        names.update(stream_names)
+        names.update(postprocess_output_names(specs, stream_names))
     return names
 
 

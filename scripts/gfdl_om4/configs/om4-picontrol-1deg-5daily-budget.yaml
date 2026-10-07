@@ -1,7 +1,8 @@
 # 5-daily 1-degree sea-ice budget companion to the 2026-07-15 CM4 piControl
 # ocean store: only the SIS2 surface fluxes and ice/snow transport the
-# extensive sea-ice heat budget needs and that store lacks. Same wetmask,
-# weights, and time axis, so the two stores merge by time.
+# extensive sea-ice heat budget needs and that store lacks, plus the
+# calving residue and frozen mass as single per-total-area fields. Same
+# wetmask, weights, and time axis, so the two stores merge by time.
 target_grid: F90
 weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F90
 expected_level_count: 19
@@ -37,3 +38,18 @@ streams:
       SH: SH_total_area
       XPRTi: XPRTi_total_area
       XPRTs: XPRTs_total_area
+  # Components are dropped after combining; the 2026-07-15 store holds them.
+  - name: flux
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_1daily_coarsened_to_5daily.zarr
+    variables: [hflso, evs, prsn]
+    postprocess:
+      - calving_residue_total_area
+  - name: ice_snapshot
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ice_6hourly_snap.zarr
+    variables: [simass, sisnmass]
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_subsample_stride: 20
+    postprocess:
+      - frozen_mass_total_area

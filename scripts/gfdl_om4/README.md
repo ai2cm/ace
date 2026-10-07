@@ -144,8 +144,9 @@ One config per output store, under `configs/`: {piControl, 1pctCO2} ×
 {1° `F90`, 4° `F22.5`}, plus the 1° sea-ice budget companions
 `om4-{picontrol,1pctco2}-1deg-5daily-budget.yaml`: 5-daily block means
 (`time_block_mean: 20`) of the SIS2 surface fluxes and ice/snow transport,
-full-cell only, on the 5-daily stores' time axis, to merge with them at
-training time. All input artifacts (weights, face masks) come from
+plus `calving_residue_total_area` and `frozen_mass_total_area`, all per
+total cell area (`<name>_total_area`), on the 5-daily stores' time axis,
+to merge with them at training time. All input artifacts (weights, face masks) come from
 the permanent inputs prefix, sources are read from
 `vcm-ml-raw-flexible-retention`, and outputs are flat dated zarrs in
 `gs://vcm-ml-intermediate/`; nothing consumed by a production run lives

@@ -6,7 +6,8 @@ import xarray as xr
 import xarray_beam as xbeam
 
 from ..config_io import OutputConfig, WetmaskConfig
-from . import run
+from ..postprocess import ChunkContext
+from . import postprocess, run
 from .config import PipelineConfig, StaticsConfig, StreamConfig
 
 BLOCK = 4
@@ -203,3 +204,31 @@ def test_block_mean_excludes_subsample_stride():
 def test_block_mean_excludes_midpoint_shift():
     with pytest.raises(ValueError, match="block-end"):
         _config([_stream()], shift_timestamps_to_avg_interval_midpoint=True)
+
+
+def test_calving_residue_total_area_values_and_drops_components():
+    ones = xr.DataArray(np.ones((NY, NX)), dims=("lat", "lon"))
+    ds = xr.Dataset({"hflso": 3.0 * ones, "evs": 2e-6 * ones, "prsn": 1e-6 * ones})
+    context = ChunkContext(ocean_fraction=0.5 * ones, store="local")
+    spec = postprocess.POSTPROCESS["calving_residue_total_area"]()
+    out = spec.fn(ds, context)
+    expected = 0.5 * (
+        -3.0
+        + postprocess.LATENT_HEAT_VAPORIZATION * 2e-6
+        - postprocess.LATENT_HEAT_FUSION * 1e-6
+    )
+    assert set(out.data_vars) == {"calving_residue_total_area"}
+    np.testing.assert_allclose(out["calving_residue_total_area"].values, expected)
+    assert out["calving_residue_total_area"].attrs["units"] == "W/m2"
+
+
+def test_expected_output_names_drops_combined_components():
+    stream = StreamConfig(
+        name="ice_snapshot",
+        store="local",
+        variables=["simass", "sisnmass"],
+        postprocess=["frozen_mass_total_area"],
+    )
+    source = xr.Dataset({v: _source(1)["SW"] for v in stream.variables})
+    names = run._expected_output_names(_config([stream]), {stream.name: source})
+    assert names == {"frozen_mass_total_area"}
