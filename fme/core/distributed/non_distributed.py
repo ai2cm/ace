@@ -80,6 +80,30 @@ class NonDistributed(DistributedBackend):
             return gather_list
         return [tensor]
 
+    def data_parallel_gather(
+        self,
+        tensor: torch.Tensor,
+        gather_list: list[torch.Tensor] | None = None,
+    ) -> list[torch.Tensor] | None:
+        return self.gather(tensor, gather_list)
+
+    def data_parallel_scatter(
+        self,
+        tensor: torch.Tensor,
+        scatter_list: list[torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        if scatter_list is not None:
+            tensor.copy_(scatter_list[0])
+        return tensor
+
+    def data_parallel_gather_object(self, obj: T) -> list[T] | None:
+        return [obj]
+
+    def data_parallel_broadcast_object(self, obj: T | None) -> T:
+        if obj is None:
+            raise ValueError("Root must provide an object to broadcast")
+        return obj
+
     def gather_object(self, obj: T) -> list[T] | None:
         return [obj]
 

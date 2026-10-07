@@ -12,6 +12,7 @@ from fme.ace.data_loading.inference import InferenceInitialConditionIndices
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.inference import ForcingDataLoaderConfig
 from fme.ace.stepper import StepperOverrideConfig
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
@@ -32,6 +33,7 @@ from fme.coupled.inference.inference import (
 from fme.coupled.inference.test_evaluator import (
     _create_dataset_info_for_stepper,
     save_coupled_stepper,
+    save_coupled_stepper_with_ema,
 )
 from fme.coupled.test_stepper import AddOneWithNoise, CoupledDatasetInfoBuilder
 
@@ -391,3 +393,37 @@ def test_inference_seed_reproducible(tmp_path: pathlib.Path):
 
     np.testing.assert_array_equal(seed0, seed0_again)
     assert not np.allclose(seed0, seed1)
+
+
+@pytest.mark.parametrize("standalone", [False, True])
+@pytest.mark.parametrize(
+    "use_ema_if_available, expect_ema",
+    [(None, True), (False, False)],
+    ids=["default", "disabled"],
+)
+def test_inference_config_load_stepper_uses_ema_weights(
+    tmp_path: pathlib.Path,
+    standalone: bool,
+    use_ema_if_available: bool | None,
+    expect_ema: bool,
+):
+    checkpoint_path, check = save_coupled_stepper_with_ema(tmp_path, standalone)
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_coupled_steps=1,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(),
+        initial_condition=CoupledInitialConditionConfig(
+            ocean=ComponentInitialConditionConfig(path="unused"),
+            atmosphere=ComponentInitialConditionConfig(path="unused"),
+        ),
+        forcing_loader=CoupledForcingDataLoaderConfig(
+            atmosphere=ForcingDataLoaderConfig(
+                dataset=XarrayDataConfig(data_path="unused")
+            )
+        ),
+    )
+    if use_ema_if_available is not None:
+        config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
+
+    check(config.load_stepper(), expect_ema)
