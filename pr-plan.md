@@ -1,9 +1,9 @@
-# Add mld_wright97, rho_wright97 and pbo_wright97 ocean derived variables
+# Add mld_wright97 and pbo_wright97 ocean derived variables
 
-Three ocean derived variables built on the Wright (1997) equation of state: a
-density-threshold mixed layer depth, the per-level in-situ density anomaly, and
-the globally demeaned bottom pressure anomaly. `register_multi` lets one
-registered function emit one output per depth level. Every output carries units.
+Two ocean derived variables built on the Wright (1997) equation of state: a
+density-threshold mixed layer depth and the globally demeaned bottom pressure
+anomaly. The per-level in-situ density anomaly they rest on is an `OceanData`
+property, `rho_wright97`, not a registered derived variable.
 
 Symbols (units):
 
@@ -42,7 +42,8 @@ and the global mean.
 ```python
 RHO_0 = DENSITY_OF_SEA_WATER_CM4  # [kg m-3]
 G_EARTH = GRAVITY  # [m s-2]
-DELTA_RHO_THRESHOLD = 0.03  # [kg m-3]
+DELTA_RHO_THRESHOLD = 0.03  # [kg m-3], as MOM6's mlotst diagnostic:
+# https://github.com/NOAA-GFDL/MOM6/blob/89921f1c0a6486f4bd7f6d5428fd101e2610a05f/src/parameterizations/vertical/MOM_diabatic_driver.F90#L3499-L3502
 MLD_REF_LAYER = 1
 
 def wright97_anomaly(S, theta, p, rho_ref: float = RHO_0) -> torch.Tensor:
@@ -86,20 +87,17 @@ class HasOceanLayerGeometry(Protocol):  # NEW — what DepthCoordinate offers th
     @property
     def deptho(self) -> torch.Tensor | None: ...
 
-RHO_WRIGHT97_MAX_LEVELS = 100  # NEW — rho_wright97_{k} metadata is registered for k < this
-
 class OceanData:
     @property
     def mld_wright97(self) -> torch.Tensor: ...  # NEW
 
     @property
-    def rho_wright97(self) -> TensorDict: ...  # NEW — {"rho_wright97_{k}": ...}, k < nz
+    def rho_wright97(self) -> torch.Tensor: ...  # NEW — (..., nz), rho_wright97_k on the last dim [kg/m**3]; not registered
 
     @property
     def pbo_wright97(self) -> torch.Tensor: ...  # NEW
 
     def _layer_geometry(self, label: str) -> HasOceanLayerGeometry: ...  # NEW
-    def _rho_wright97_stacked(self) -> torch.Tensor: ...  # NEW — shared by rho and pbo
 ```
 
 ### Critical detail — errors and skips
@@ -112,7 +110,6 @@ anything else, as for `ocean_heat_content`.
 | depth coordinate is not `HasOceanLayerGeometry` | `ValueError` | `ValueError` | `ValueError` |
 | `thetao_k` or `so_k` missing, `k < nz` | `KeyError` | `KeyError` | `KeyError` |
 | fewer than `MLD_REF_LAYER + 2` levels | `KeyError` | — | — |
-| `nz > RHO_WRIGHT97_MAX_LEVELS` | — | `ValueError` | — |
 | `zos` or cell area provider missing | — | — | `KeyError` |
 
 The global mean `<P>` goes through `Distributed.weighted_mean` over the
@@ -124,35 +121,8 @@ in `rho_wright97_k` and contribute 0 to `C` through `torch.where`.
 ## `fme/core/ocean_derived_variables.py` (modified)
 
 ```python
-OceanMultiDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], TensorDict]  # NEW
-
-_OCEAN_MULTI_DERIVED_VARIABLE_REGISTRY: MutableMapping[  # NEW
-    str, tuple[OceanMultiDerivedVariableFunc, dict[str, VariableMetadata]]
-] = {}
-
-def get_ocean_derived_variable_metadata() -> dict[str, VariableMetadata]: ...  # CHANGED — adds every multi-registry output name
-
-def register_multi(metadata: dict[str, VariableMetadata]): ...  # NEW — label collides with neither registry
-
-def _compute_ocean_multi_derived_variable(
-    data, depth_coordinate, timestep, label, func, cell_area_provider=None
-) -> TensorDict: ...  # NEW — skip on KeyError; ValueError if an output name exists in data
-
-def compute_ocean_derived_quantities(...) -> TensorDict: ...  # CHANGED — runs the multi registry after the single one
-
 @register(VariableMetadata("m", "Mixed layer depth, Wright (1997) density threshold"))
 def mld_wright97(data, timestep) -> torch.Tensor: ...  # NEW
-
-@register_multi(
-    {
-        f"rho_wright97_{k}": VariableMetadata(
-            "kg/m**3",
-            f"In-situ density anomaly from {RHO_0:g} kg/m**3, Wright (1997), level {k}",
-        )
-        for k in range(RHO_WRIGHT97_MAX_LEVELS)
-    }
-)
-def rho_wright97(data, timestep) -> TensorDict: ...  # NEW
 
 @register(
     VariableMetadata("Pa", "Globally demeaned bottom pressure anomaly, Wright (1997)")
@@ -201,11 +171,9 @@ def test_mld_wright97_missing_salinity_raises_key_error(): ...
 def test_mld_wright97_too_few_levels_raises_key_error(): ...
 
 def test_rho_wright97_values_and_mask():
-    # GOAL: one rho_wright97_k per level, equal to a hand computation from
+    # GOAL: shape (..., nz); level k equals a hand computation from
     # wright97_anomaly; NaN on land, below the sea floor and at a NaN input.
     ...
-
-def test_rho_wright97_too_many_levels_raises_value_error(): ...
 
 def test_pbo_wright97_values_and_mask():
     # GOAL: equals a hand computation of P - <P> with partial bottom cells
@@ -234,24 +202,18 @@ def test_mld_wright97_derived_variable(): ...
 def test_mld_wright97_skipped_without_salinity(): ...
 
 def test_wright97_metadata_has_units():
-    # GOAL: every name compute_ocean_derived_quantities emits for the three
-    # variables is in get_derived_variable_metadata() with units; rho_wright97_k
-    # is kg/m**3.
+    # GOAL: mld_wright97 and pbo_wright97 are in get_derived_variable_metadata()
+    # with units.
     ...
 
 def test_pbo_wright97_skipped_without_cell_area_or_zos():
-    # GOAL: rho_wright97_k still computed; pbo_wright97 absent.
+    # GOAL: mld_wright97 still computed; pbo_wright97 absent.
     # PARAMETERIZE: missing in {cell area provider, zos}.
     ...
-
-def test_register_multi_rejects_duplicate_label(): ...
-
-def test_multi_derived_output_name_collision_raises(): ...
 ```
 
 ---
 
 ## Open Questions
 
-- `RHO_WRIGHT97_MAX_LEVELS`: is a fixed metadata range acceptable, and is its
-  value large enough for the vertical grids in use?
+None.
