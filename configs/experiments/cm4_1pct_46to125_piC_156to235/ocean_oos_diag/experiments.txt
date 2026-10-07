@@ -1,0 +1,16 @@
+# Out-of-sample diagnostics for stochastic Samudra (research task
+# tasks/2026-10-06-stochastic-samudra-oos-diagnostics). Inference only, from
+# existing best_inference_ckpt checkpoints; result datasets pinned per row
+# (verified to contain training_checkpoints/best_inference_ckpt.tar).
+#   *-ens4 tags: 4 members per IC (n_ensemble_per_ic=4) of the standing
+#     1pct-ic0001-130yr / piC-ic0151-200yr rollouts: does the ensemble mean
+#     close the single-member gap to production?
+#   1pct-ic0046-85yr: same rollout started inside the training window: is the
+#     years-1-40 cold surface offset a spin-up shock or a low-CO2 effect?
+# Configs here are copies of cm4_eval/ocean (save_monthly_files forced off per row).
+# lin8 (5rq1g5lt) and production (ocean_wide_ohc_clip-ft) live on this branch (exper/2026-07-16-jamesd lineage) because they trained here.
+cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs0-ens4|01M3B5K08B4PF3H9XZEAVDP10Y|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|n_ensemble_per_ic=4 forward_steps_in_memory=20 data_writer.save_monthly_files=false|01M3CN5JYZCSNZ01YBM25KA8AG|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-ocean_s2s_lin8-ft|rs0-ens4|01M3B5K08B4PF3H9XZEAVDP10Y|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|n_ensemble_per_ic=4 forward_steps_in_memory=20 data_writer.save_monthly_files=false|01M3CN5JYZCSNZ01YBM25KA8AG|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|run_1pct-ic0046-85yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false|01M0VW3QXGPTM6D166YAS4JMFM|ai2/ace|jupiter+titan|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|run_1pct-ic0046-85yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false|01M0W65NB7G42SY84CKJCPHCY6|ai2/ace|jupiter+titan|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|run_1pct-ic0046-85yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false|01M0WRMWP63YT6K5YCJBC5CRJK|ai2/ace|jupiter+titan|||30GiB

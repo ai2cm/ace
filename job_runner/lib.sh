@@ -64,6 +64,15 @@ build_cluster_args() {
             --cluster jupiter
             --cluster saturn
         )
+    elif [[ "$CLUSTER" == "jupiter+titan" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
+        CLUSTER_ARGS=(
+            --workspace "$WORKSPACE"
+            --cluster jupiter
+            --cluster titan
+        )
     elif [[ "$CLUSTER" == "a100" ]]; then
         if [[ -z "$WORKSPACE" ]]; then
             WORKSPACE=ai2/ace
@@ -127,6 +136,7 @@ default_shared_mem() {
         a100)      MEMBERS="saturn" ;;
         b200)      MEMBERS="titan" ;;
         a100+h100) MEMBERS="saturn ceres jupiter" ;;
+        jupiter+titan) MEMBERS="jupiter titan" ;;
         *)         MEMBERS="${CLUSTER#ai2/}" ;;
     esac
 
