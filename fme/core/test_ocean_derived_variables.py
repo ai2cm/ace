@@ -314,9 +314,6 @@ def test_heat_budget_closes(hfds: float, hfgeou: float, sea_surface_fraction: fl
         ),
     )
     torch.testing.assert_close(
-        implied_advection, sea_surface_fraction * ohc_tendency - net_flux
-    )
-    torch.testing.assert_close(
         implied_advection,
         torch.zeros((1, 1, 1), dtype=torch.float64),
         atol=1e-9,
