@@ -1,0 +1,7 @@
+# Evals of the fmma-sozero long-tail finetune (fa8r1nz5, 24/24; training row in
+# ../ocean_wide_stochastic_es_longtail/experiments.txt). Kept in their own file so
+# evaluate.sh does not resubmit that dir's 19yl0189 eval rows. Run with
+# --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_es_longtail, the configs 19yl0189's
+# evals used. Results dataset pinned to the final (third) job's.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|01M47FFHVF22WYSM796JRTM3G7|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 8h||01M4ACY535BCSW36GM3JWV4SPG|ai2/ace|jupiter|||20GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlt|rs0|01M47FFHVF22WYSM796JRTM3G7|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false|01M4ACY535BCSW36GM3JWV4SPG|ai2/ace|jupiter|||30GiB
