@@ -8,11 +8,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # The evaluator cannot override builder options, so B-D read a copy of the
 # checkpoint with its stored builder config rewritten by
 # zeroshot/rewrite_ckpt_builder.py and uploaded as a beaker dataset. Their
-# results_dataset is a placeholder and their status is not run_* until that
-# dataset exists: a blank results_dataset would fall back to the unchanged
-# checkpoint and silently rerun arm A.
+# results_dataset must point at that copy: a blank one would fall back to the
+# unchanged checkpoint and silently rerun arm A.
+# Only A and C run zero-shot (decided 2026-10-07): pad_to_pool_multiple shifts
+# the pooling grid, so untrained B/D would measure a global perturbation, not
+# the edge. C = 01M4C59D91A7B01HR8RCN0XCHY (pole/off rewrite of epoch 74).
 
 cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsA-constant|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||01M3V12K0XZXTJNX2WTH5100Y9|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsB-pole-pool|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|needs_ckpt_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||REWRITTEN_CKPT_DATASET_B|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsC-pole|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|needs_ckpt_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||REWRITTEN_CKPT_DATASET_C|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsD-constant-pool|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|needs_ckpt_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||REWRITTEN_CKPT_DATASET_D|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-zsC-pole|rs0|01M3QFAMKGY5RG0K6B8ZKJ1VXB|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h||01M4C59D91A7B01HR8RCN0XCHY|ai2/ace|jupiter
