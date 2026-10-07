@@ -3,7 +3,7 @@
 #   ARMS="scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc" ./launch-ufs4deg-scratch.sh
 set -euo pipefail
 ARMS="${ARMS:-scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc}"
-DATA_DS="${DATA_DS:-01M49E2H4XGPKPHQ16RQQ0MCSN}"     # ...-cm4vars-v3: stress in CM4's atmosphere-side sign convention (extra vars unused)
+DATA_DS="${DATA_DS:-01M4BV9103G4C330XQM7R17RPT}"     # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars (regenerated store: FV3 stress, zos = SSH minus ocean mean)
 STATS_DS="${STATS_DS:-01M4925NAS522JSB9QNTDKZM0C}"   # ufs-replay-ocean-4deg-19level-5day-stats-2026-10-02 (files at the root)
 PRIORITY="${PRIORITY:-high}"
 N_GPUS="${N_GPUS:-1}"
@@ -27,7 +27,7 @@ for A in $ARMS; do
     --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=samudra-ufs4deg-scratch \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset "${STATS_DS}:/ocean_stats" \
-    --dataset "${DATA_DS}:/ufs4deg/2026-10-02-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
+    --dataset "${DATA_DS}:/ufs4deg/2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
     --gpus "$N_GPUS" --shared-memory 200GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "${SCRIPT_PATH}/${A}.yaml" 2>&1)

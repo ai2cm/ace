@@ -6,7 +6,7 @@
 #   ARMS="resid-ohc resid-ohc-cap0005 resid-noohc" ./launch-ufs4deg-ftcm4.sh
 set -euo pipefail
 ARMS="${ARMS:-resid-ohc resid-ohc-cap0005 resid-noohc}"
-DATA_DS="${DATA_DS:?set DATA_DS to the Beaker dataset id of ufs-replay-ocean-4deg-19level-5day-2026-10-02-cm4vars}"
+DATA_DS="${DATA_DS:-01M4BV9103G4C330XQM7R17RPT}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars (regenerated store)
 STATS_DS="${STATS_DS:-01KY8D816E67NXHP2EB29FHBJM}"   # CM4 4deg stats: the checkpoints' own normalization
 PRIORITY="${PRIORITY:-high}"
 N_GPUS="${N_GPUS:-1}"
@@ -36,7 +36,7 @@ for A in $ARMS; do
     --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=samudra-ufs4deg-ftcm4 \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset "${STATS_DS}:ocean:/ocean_stats" \
-    --dataset "${DATA_DS}:/ufs4deg/2026-10-02-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
+    --dataset "${DATA_DS}:/ufs4deg/2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
     --dataset "${CKPT_DS}:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
     --gpus "$N_GPUS" --shared-memory 200GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
