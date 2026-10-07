@@ -82,6 +82,77 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
+    def data_parallel_gather(
+        self,
+        tensor: torch.Tensor,
+        gather_list: list[torch.Tensor] | None = None,
+    ) -> list[torch.Tensor] | None:
+        """Gather a tensor from all data-parallel ranks to the data-parallel root.
+
+        Unlike ``gather``, which operates on the world group, this gathers
+        within the data-parallel process group only: under spatial parallelism
+        each spatial position gathers independently across its data-parallel
+        co-ranks.
+
+        Args:
+            tensor: The tensor to gather.
+            gather_list: A list of tensor buffers to gather into (one per
+                data-parallel rank). Required on the data-parallel root when
+                there is more than one data-parallel rank.
+
+        Returns:
+            A list of tensors on the data-parallel root, ``None`` on other
+            data-parallel ranks.
+        """
+        ...
+
+    @abstractmethod
+    def data_parallel_scatter(
+        self,
+        tensor: torch.Tensor,
+        scatter_list: list[torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Scatter tensors from the data-parallel root to all data-parallel ranks.
+
+        Inverse of ``data_parallel_gather``.
+
+        Args:
+            tensor: Receive buffer (pre-allocated on all ranks).
+            scatter_list: List of tensors to scatter (one per data-parallel
+                rank, required on the data-parallel root). ``None`` on other
+                ranks.
+
+        Returns:
+            ``tensor``, populated with this rank's shard.
+        """
+        ...
+
+    @abstractmethod
+    def data_parallel_gather_object(self, obj: T) -> list[T] | None:
+        """Gather a picklable object from all data-parallel ranks to the
+        data-parallel root.
+
+        Returns:
+            A list of objects on the data-parallel root, ``None`` on other
+            data-parallel ranks.
+        """
+        ...
+
+    @abstractmethod
+    def data_parallel_broadcast_object(self, obj: T | None) -> T:
+        """Broadcast a picklable object from the data-parallel root to all
+        data-parallel ranks.
+
+        Args:
+            obj: The object to broadcast (required on the data-parallel
+                root, ignored on other ranks).
+
+        Returns:
+            The broadcast object on all ranks.
+        """
+        ...
+
+    @abstractmethod
     def gather_object(self, obj: T) -> list[T] | None: ...
 
     @abstractmethod
