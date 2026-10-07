@@ -539,6 +539,93 @@ def test_gathered_batch_data_get_for_rank(rank: int):
     assert next(iter(rank_batch.data.values())).shape[0] == 1
 
 
+def test_from_xarray_single_rank_loads_gathered_restart():
+    """BatchData.from_xarray_dataset loads a gathered restart in a
+    single-rank run (Path B), returning a plain BatchData with the
+    correct data and stepper state."""
+    rs0 = RandomState.from_seed(10)
+    torch.randn(5, generator=rs0.generator)
+    expected_gen_state = rs0.generator.get_state().clone()
+
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]], [[2.0]]])
+                ),
+                random_state=rs0,
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    ds = gathered.to_xarray_dataset()
+    # The default test env uses NonDistributed (total_data_parallel_ranks=1),
+    # so from_xarray_dataset should take the single-rank gathered path.
+    result = BatchData.from_xarray_dataset(ds)
+
+    assert isinstance(result, BatchData)
+    assert not isinstance(result, GatheredBatchData)
+    # Stepper state should round-trip.
+    assert result.stepper_state is not None
+    assert result.stepper_state.random_state is not None
+    assert torch.equal(
+        result.stepper_state.random_state.generator.get_state(),
+        expected_gen_state,
+    )
+    assert result.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        result.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[1.0]], [[2.0]]]),
+    )
+    # Data tensors should match the originals.
+    for name in batch.data:
+        torch.testing.assert_close(result.data[name], batch.data[name])
+
+
+def test_from_xarray_raises_on_n_ranks_mismatch():
+    """BatchData.from_xarray_dataset raises ValueError when a gathered
+    restart's n_ranks does not match the current run's rank count."""
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]]])
+                ),
+                random_state=RandomState.from_seed(10),
+            ),
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[2.0]]])
+                ),
+                random_state=RandomState.from_seed(20),
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    ds = gathered.to_xarray_dataset()
+    # The dataset has n_ranks=2 but we're in a single-rank env.
+    with pytest.raises(ValueError, match="2 data-parallel ranks"):
+        BatchData.from_xarray_dataset(ds)
+
+
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
 def test_remove_initial_condition(n_ic_timesteps: int):
     names = ["foo", "bar"]
