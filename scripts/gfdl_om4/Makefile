@@ -49,8 +49,10 @@ enter:
 IMAGE_REPO = $(firstword $(subst :, ,$(IMAGE_NAME)))
 IMAGE_TAG = $(lastword $(subst :, ,$(IMAGE_NAME)))
 check_dataflow_image:
-	@gcloud artifacts docker tags list $(IMAGE_REPO) --format="value(tag)" \
-		2> /dev/null | grep -qx "$(IMAGE_TAG)" || { \
+	@tags=$$(gcloud artifacts docker tags list $(IMAGE_REPO) --format="value(tag)") || { \
+		echo "ERROR: could not list tags of $(IMAGE_REPO) (see gcloud error above)."; \
+		exit 1; }; \
+	echo "$$tags" | grep -qx "$(IMAGE_TAG)" || { \
 		echo "ERROR: $(IMAGE_NAME) is absent from Artifact Registry."; \
 		echo "Run 'make push_dataflow' before launching."; \
 		exit 1; }
