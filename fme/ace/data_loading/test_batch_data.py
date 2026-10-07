@@ -10,6 +10,7 @@ from xarray.coding.times import CFDatetimeCoder
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
     BatchData,
+    GatheredBatchData,
     PairedData,
     PrognosticState,
     _collate_with_masking,
@@ -21,7 +22,7 @@ from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
-from fme.core.stepper_state import StepperState
+from fme.core.stepper_state import GatheredStepperState, StepperState
 from fme.core.typing_ import TensorDict
 
 _METADATA_FIELDS = {
@@ -397,6 +398,232 @@ def test_apply_config_seed_defers_to_a_restored_random_state():
     # The restored generator wins over the config seed.
     assert result is ic
     assert result.as_batch_data().stepper_state.random_state is restored
+
+
+def test_apply_config_seed_offsets_by_data_parallel_rank(monkeypatch):
+    """Different data-parallel ranks must get different generator seeds."""
+    from unittest.mock import PropertyMock
+
+    from fme.ace.data_loading.batch_data import _RANK_SEED_STRIDE
+
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    states = []
+    for rank in range(3):
+        monkeypatch.setattr(
+            type(Distributed.get_instance()),
+            "data_parallel_rank",
+            PropertyMock(return_value=rank),
+        )
+        ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
+        seeded = ic.apply_config_seed(42)
+        stepper = seeded.as_batch_data().stepper_state
+        gen_state = stepper.random_state.generator.get_state()
+        states.append(gen_state)
+
+    # Each rank should produce a different generator state.
+    assert not torch.equal(states[0], states[1])
+    assert not torch.equal(states[0], states[2])
+    assert not torch.equal(states[1], states[2])
+
+    # Rank 0 should match seeding with the bare seed.
+    reference = RandomState.from_seed(42).generator.get_state()
+    assert torch.equal(states[0], reference)
+
+    # Rank 1 should match seeding with seed + _RANK_SEED_STRIDE.
+    reference_r1 = RandomState.from_seed(42 + _RANK_SEED_STRIDE).generator.get_state()
+    assert torch.equal(states[1], reference_r1)
+
+
+def test_gathered_batch_data_from_xarray_round_trip():
+    """GatheredBatchData.to_xarray_dataset → GatheredBatchData.from_xarray_dataset
+    round-trips the gathered state."""
+    rs0 = RandomState.from_seed(10)
+    torch.randn(5, generator=rs0.generator)
+    expected_gen_state = rs0.generator.get_state().clone()
+
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]], [[2.0]]])
+                ),
+                random_state=rs0,
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    ds = gathered.to_xarray_dataset()
+    restored = GatheredBatchData.from_xarray_dataset(ds)
+    rank0 = restored.get_for_rank(0, n_ranks=1)
+
+    assert isinstance(rank0.stepper_state, StepperState)
+    assert rank0.stepper_state.random_state is not None
+    assert torch.equal(
+        rank0.stepper_state.random_state.generator.get_state(),
+        expected_gen_state,
+    )
+    assert rank0.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        rank0.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[1.0]], [[2.0]]]),
+    )
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+def test_gathered_batch_data_get_for_rank(rank: int):
+    """GatheredBatchData.get_for_rank slices data and picks per-rank
+    stepper state."""
+    rs0 = RandomState.from_seed(10)
+    rs1 = RandomState.from_seed(20)
+    torch.randn(5, generator=rs0.generator)
+    expected_states = [
+        rs0.generator.get_state().clone(),
+        rs1.generator.get_state().clone(),
+    ]
+
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]]])
+                ),
+                random_state=rs0,
+            ),
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[2.0]]])
+                ),
+                random_state=rs1,
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    # Round-trip through xarray to exercise the serialization format.
+    ds = gathered.to_xarray_dataset()
+    restored_gathered = GatheredBatchData.from_xarray_dataset(ds)
+
+    rank_batch = restored_gathered.get_for_rank(rank, n_ranks=2)
+    assert isinstance(rank_batch, BatchData)
+    assert rank_batch.stepper_state is not None
+    assert rank_batch.stepper_state.random_state is not None
+    assert torch.equal(
+        rank_batch.stepper_state.random_state.generator.get_state(),
+        expected_states[rank],
+    )
+    assert rank_batch.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        rank_batch.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[float(rank + 1)]]]),
+    )
+    # Data is sliced to 1 sample per rank (2 total, 2 ranks).
+    assert next(iter(rank_batch.data.values())).shape[0] == 1
+
+
+def test_from_xarray_single_rank_loads_gathered_restart():
+    """BatchData.from_xarray_dataset loads a gathered restart in a
+    single-rank run (Path B), returning a plain BatchData with the
+    correct data and stepper state."""
+    rs0 = RandomState.from_seed(10)
+    torch.randn(5, generator=rs0.generator)
+    expected_gen_state = rs0.generator.get_state().clone()
+
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]], [[2.0]]])
+                ),
+                random_state=rs0,
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    ds = gathered.to_xarray_dataset()
+    # The default test env uses NonDistributed (total_data_parallel_ranks=1),
+    # so from_xarray_dataset should take the single-rank gathered path.
+    result = BatchData.from_xarray_dataset(ds)
+
+    assert isinstance(result, BatchData)
+    assert not isinstance(result, GatheredBatchData)
+    # Stepper state should round-trip.
+    assert result.stepper_state is not None
+    assert result.stepper_state.random_state is not None
+    assert torch.equal(
+        result.stepper_state.random_state.generator.get_state(),
+        expected_gen_state,
+    )
+    assert result.stepper_state.corrector_state is not None
+    torch.testing.assert_close(
+        result.stepper_state.corrector_state.global_dry_air_mass,
+        torch.tensor([[[1.0]], [[2.0]]]),
+    )
+    # Data tensors should match the originals (result is CPU after xarray).
+    for name in batch.data:
+        torch.testing.assert_close(result.data[name], batch.data[name].cpu())
+
+
+def test_from_xarray_raises_on_n_ranks_mismatch():
+    """BatchData.from_xarray_dataset raises ValueError when a gathered
+    restart's n_ranks does not match the current run's rank count."""
+    gathered_stepper = GatheredStepperState(
+        states=[
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[1.0]]])
+                ),
+                random_state=RandomState.from_seed(10),
+            ),
+            StepperState(
+                corrector_state=CorrectorState(
+                    global_dry_air_mass=torch.tensor([[[2.0]]])
+                ),
+                random_state=RandomState.from_seed(20),
+            ),
+        ],
+    )
+    batch = get_batch_data(
+        names=["foo"], n_samples=2, n_times=1, horizontal_dims=["lat", "lon"]
+    )
+    gathered = GatheredBatchData(
+        data=batch.data,
+        time=batch.time,
+        horizontal_dims=batch.horizontal_dims,
+        stepper_state=gathered_stepper,
+    )
+
+    ds = gathered.to_xarray_dataset()
+    # The dataset has n_ranks=2 but we're in a single-rank env.
+    with pytest.raises(ValueError, match="2 data-parallel ranks"):
+        BatchData.from_xarray_dataset(ds)
 
 
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
@@ -1710,15 +1937,16 @@ class TestSelectSampleSlice:
 
 
 @pytest.mark.parallel
-class TestGather:
+class TestDataParallelGather:
     def setup_method(self):
         dist = Distributed.get_instance()
-        if dist.has_spatial_parallelism:
-            pytest.skip("gather uses the global communicator, not spatial")
+        if dist.total_data_parallel_ranks == 1:
+            pytest.skip("needs multiple data-parallel ranks")
 
     def test_gathers_data_tensors(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.full((1, 1, 2, 3), float(rank))},
             time=xr.DataArray(
@@ -1726,20 +1954,21 @@ class TestGather:
                 dims=["sample", "time"],
             ),
         )
-        result = local.gather(dist)
-        if dist.is_root():
-            assert result is not None
-            assert result.data["x"].shape[0] == dist.world_size
-            for r in range(dist.world_size):
+        result = local.data_parallel_gather(dist)
+        if dist.is_data_parallel_root():
+            assert isinstance(result, GatheredBatchData)
+            assert result._data["x"].shape[0] == n
+            for r in range(n):
                 torch.testing.assert_close(
-                    result.data["x"][r], torch.full((1, 2, 3), float(r))
+                    result._data["x"][r], torch.full((1, 2, 3), float(r))
                 )
         else:
             assert result is None
 
     def test_gathers_time(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.zeros(1, 1, 2, 3)},
             time=xr.DataArray(
@@ -1747,14 +1976,15 @@ class TestGather:
                 dims=["sample", "time"],
             ),
         )
-        result = local.gather(dist)
-        if dist.is_root():
-            assert result is not None
-            assert result.time.sizes["sample"] == dist.world_size
+        result = local.data_parallel_gather(dist)
+        if dist.is_data_parallel_root():
+            assert isinstance(result, GatheredBatchData)
+            assert result._time.sizes["sample"] == n
 
     def test_gathers_labels(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.zeros(1, 1, 2, 3)},
             time=xr.DataArray(
@@ -1763,15 +1993,16 @@ class TestGather:
             ),
             labels=BatchLabels(torch.tensor([[float(rank)]]), names=["label"]),
         )
-        result = local.gather(dist)
-        if dist.is_root():
-            assert result is not None
-            assert result.labels is not None
-            assert result.labels.tensor.shape[0] == dist.world_size
+        result = local.data_parallel_gather(dist)
+        if dist.is_data_parallel_root():
+            assert isinstance(result, GatheredBatchData)
+            assert result._labels is not None
+            assert result._labels.tensor.shape[0] == n
 
     def test_gathers_stepper_state(self):
         dist = Distributed.get_instance()
-        rank = dist.rank
+        rank = dist.data_parallel_rank
+        n = dist.total_data_parallel_ranks
         local = BatchData.new_on_cpu(
             data={"x": torch.zeros(1, 1, 2, 3)},
             time=xr.DataArray(
@@ -1784,14 +2015,17 @@ class TestGather:
                 )
             ),
         )
-        result = local.gather(dist)
-        if dist.is_root():
-            assert result is not None
-            assert result.stepper_state is not None
-            assert result.stepper_state.corrector_state is not None
-            mass = result.stepper_state.corrector_state.global_dry_air_mass
-            assert mass is not None
-            assert mass.shape[0] == dist.world_size
+        result = local.data_parallel_gather(dist)
+        if dist.is_data_parallel_root():
+            assert isinstance(result, GatheredBatchData)
+            assert result._stepper_state is not None
+            assert result._stepper_state.n_ranks == n
+            for r in range(n):
+                rank_state = result._stepper_state.get_for_rank(r)
+                assert rank_state.corrector_state is not None
+                mass = rank_state.corrector_state.global_dry_air_mass
+                assert mass is not None
+                torch.testing.assert_close(mass, torch.full((1, 1, 1), float(r)))
 
     def test_none_extras_stay_none(self):
         dist = Distributed.get_instance()
@@ -1802,20 +2036,38 @@ class TestGather:
                 dims=["sample", "time"],
             ),
         )
-        result = local.gather(dist)
-        if dist.is_root():
-            assert result is not None
-            assert result.labels is None
-            assert result.stepper_state is None
-            assert result.data_mask is None
+        result = local.data_parallel_gather(dist)
+        if dist.is_data_parallel_root():
+            assert isinstance(result, GatheredBatchData)
+            assert result._labels is None
+            assert result._stepper_state is None
+            assert result._data_mask is None
+
+    def test_result_is_on_cpu(self):
+        dist = Distributed.get_instance()
+        rank = dist.data_parallel_rank
+        local = BatchData.new_on_cpu(
+            data={"x": torch.full((1, 1, 2, 3), float(rank))},
+            time=xr.DataArray(
+                np.array([[cftime.DatetimeProlepticGregorian(2000, 1, 1 + rank)]]),
+                dims=["sample", "time"],
+            ),
+        )
+        result = local.data_parallel_gather(dist)
+        if dist.is_data_parallel_root():
+            assert isinstance(result, GatheredBatchData)
+            for tensor in result._data.values():
+                assert tensor.device == torch.device("cpu")
 
 
-def test_gather_covers_all_fields():
-    """Fail if a new field is added to BatchData but not handled by gather."""
+def test_data_parallel_gather_covers_all_fields():
+    """Fail if a new field is added to BatchData but not handled by
+    data_parallel_gather."""
     actual_fields = {f.name for f in dataclasses.fields(BatchData)}
     covered = _METADATA_FIELDS | _NON_METADATA_FIELDS
     unknown = actual_fields - covered
     assert not unknown, (
         f"BatchData has new fields {unknown} not covered by "
-        f"TestGather. Update gather and add a test for each new field."
+        f"TestDataParallelGather. Update data_parallel_gather and add a "
+        f"test for each new field."
     )
