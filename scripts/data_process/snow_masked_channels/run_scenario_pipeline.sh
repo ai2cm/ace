@@ -20,7 +20,7 @@
 # Weka copies (scripts/data_process/gcs_to_weka.sh) and training launches are
 # done interactively after checking the outputs.
 
-set -e
+set -eo pipefail
 cd "$(dirname "$0")"
 PY=${PY:-python}
 STAGE=${1:-all}
@@ -64,8 +64,19 @@ if [[ "$STAGE" != stats ]]; then
   done
 fi
 
+dataset_exists() {
+  beaker dataset get "${BEAKER_USER}/$1" > /dev/null 2>&1
+}
+
 if [[ "$STAGE" != stores ]]; then
+  BEAKER_USER=$(beaker account whoami --format json | python3 -c \
+    "import json, sys; d = json.load(sys.stdin); print((d[0] if isinstance(d, list) else d)['name'])")
   for set in pic-1pct pic-1pct-randco2; do
+    if dataset_exists "${DATE}-cm4-${set}-daily-stats" && \
+       dataset_exists "${DATE}-cm4-${set}-daily-${SUFFIX}-stats"; then
+      echo "=== $(date) stats datasets for $set already on Beaker; skipping ==="
+      continue
+    fi
     echo "=== $(date) pooled stats $set ==="
     pooled=$($PY pool_daily_stats.py "$set" --date "$DATE" | tail -1)
     echo "=== $(date) masked-snow stats $set from $pooled ==="
