@@ -1,2 +1,6 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|01M47FFZK89MTXMV6QM28N6AP7|training|best_inference_ckpt|normal|--min-runtime 8h
+# Evals of srra5wm4 (24/24): run with --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_es_longtail,
+# the configs 19yl0189's evals used. Results dataset pinned to the final (retry) job's.
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|01M47FFZK89MTXMV6QM28N6AP7|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 8h||01M49K1XP469K9X01WCCW8J5P0|ai2/ace|jupiter|||20GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-fmma-sozero-ftlin8|rs0|01M47FFZK89MTXMV6QM28N6AP7|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false|01M49K1XP469K9X01WCCW8J5P0|ai2/ace|jupiter|||30GiB
