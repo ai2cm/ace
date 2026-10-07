@@ -251,6 +251,10 @@ class InferenceConfig:
         aggregator: Configuration for inference aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights.
         allow_incompatible_dataset: If True, allow the dataset used for inference
             to be incompatible with the dataset used for stepper training. This should
             be used with caution, as it may allow the stepper to make scientifically
@@ -281,6 +285,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
@@ -300,7 +305,11 @@ class InferenceConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper(
+            self.checkpoint_path,
+            self.stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
