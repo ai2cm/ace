@@ -6,8 +6,10 @@ from typing import Any, Literal, Protocol
 import torch
 
 from fme.core.atmosphere_data import AtmosphereData
+from fme.core.cloud import open_dataset_via_inter_filesystem_copy
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
+    LATENT_HEAT_OF_FREEZING,
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
@@ -111,6 +113,208 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+SurfaceEnergyFluxMethod = Literal[
+    "residual_prediction",
+    "prescribed",
+    "prescribed_open_ocean",
+    "prescribed_cell_mean",
+]
+
+
+@dataclasses.dataclass
+class RunoffHeatFluxConfig:
+    """A static map of the heat carried into the ocean by river and iceberg
+    runoff.
+
+    The atmosphere's surface fluxes do not carry this term (runoff comes from
+    the land model), but an ocean heat budget that books the heat content of
+    every water stream crossing the surface (e.g. MOM6's ``hfds``) includes
+    it, almost entirely in coastal cells. A time mean of the ocean model's
+    own diagnostic (``hfrunoffds`` in a stats ``time-mean.nc``) is the
+    intended source.
+
+    Give either ``path`` or ``values``. A training config gives ``path``;
+    ``load`` reads the map once into ``values`` and clears ``path``, so a
+    checkpoint holds the map itself and inference from it reads no file.
+
+    Parameters:
+        path: Path to a netCDF file (any fsspec filesystem) holding the map on
+            the model's ``(lat, lon)`` grid. NaN cells (land in the ocean
+            model's diagnostic) are read as zero.
+        name: Variable name within the file.
+        per_unit_sea_area: If True (the MOM6 convention), the map is per unit
+            sea area and is multiplied by ``sea_surface_fraction`` to give a
+            flux per unit cell area. If False it is used as is.
+        values: The map itself, as rows of latitude. Set by ``load``; not
+            meant to be written in a config by hand.
+    """
+
+    path: str | None = None
+    name: str = "hfrunoffds"
+    per_unit_sea_area: bool = True
+    values: list[list[float]] | None = None
+
+    def __post_init__(self):
+        if (self.path is None) == (self.values is None):
+            raise ValueError(
+                "runoff_heat_flux needs exactly one of path or values, got "
+                f"path={self.path!r} and "
+                f"{'no values' if self.values is None else 'values'}."
+            )
+
+    def load(self):
+        """Read the map from ``path`` into ``values``, so the configuration no
+        longer depends on the file.
+        """
+        if self.path is not None:
+            self.values = _read_runoff_heat_map(self.path, self.name).tolist()
+            self.path = None
+
+    def build(self, img_shape: tuple[int, int] | None = None) -> "StaticRunoffHeatFlux":
+        """Build the runoff heat flux, reading the map from ``path`` if it has
+        not been loaded.
+
+        Args:
+            img_shape: Horizontal shape of the ocean grid, to validate the map
+                against. Not validated if None.
+        """
+        if self.values is not None:
+            runoff_map = torch.tensor(self.values, dtype=torch.float32)
+        else:
+            assert self.path is not None  # guaranteed by __post_init__
+            runoff_map = _read_runoff_heat_map(self.path, self.name)
+        if img_shape is not None and tuple(runoff_map.shape) != tuple(img_shape):
+            raise ValueError(
+                f"Runoff heat map has shape {tuple(runoff_map.shape)} but the "
+                f"ocean grid has horizontal shape {tuple(img_shape)}."
+            )
+        return StaticRunoffHeatFlux(runoff_map, self.per_unit_sea_area)
+
+
+def _read_runoff_heat_map(path: str, name: str) -> torch.Tensor:
+    """Read a ``(lat, lon)`` map from netCDF as float32, NaN read as zero."""
+    ds = open_dataset_via_inter_filesystem_copy(path)
+    da = ds[name]
+    if set(da.dims) != {"lat", "lon"}:
+        raise ValueError(
+            f"Runoff heat map {name!r} in {path!r} must have dims (lat, lon), "
+            f"got {da.dims}."
+        )
+    values = da.transpose("lat", "lon").values
+    return torch.nan_to_num(torch.as_tensor(values, dtype=torch.float32), nan=0.0)
+
+
+class StaticRunoffHeatFlux:
+    """A static runoff heat map, cached per device."""
+
+    def __init__(self, runoff_map: torch.Tensor, per_unit_sea_area: bool):
+        self._map = runoff_map
+        self._per_unit_sea_area = per_unit_sea_area
+        self._by_device: dict[torch.device, torch.Tensor] = {}
+
+    def __call__(self, sea_surface_fraction: torch.Tensor) -> torch.Tensor:
+        """Return the runoff heat flux per unit cell area, on the device and
+        with the trailing ``(lat, lon)`` shape of ``sea_surface_fraction``.
+        """
+        device = sea_surface_fraction.device
+        if device not in self._by_device:
+            self._by_device[device] = self._map.to(device)
+        runoff = self._by_device[device]
+        if runoff.shape != sea_surface_fraction.shape[-2:]:
+            raise ValueError(
+                f"Runoff heat map has shape {tuple(runoff.shape)} but the "
+                f"ocean fields have horizontal shape "
+                f"{tuple(sea_surface_fraction.shape[-2:])}."
+            )
+        if self._per_unit_sea_area:
+            return runoff * sea_surface_fraction
+        return runoff.expand_as(sea_surface_fraction)
+
+
+@dataclasses.dataclass
+class UnderIceHeatFluxConfig:
+    """Energy-conserving heat flux into the ocean under sea ice.
+
+    Used by the "prescribed_cell_mean" surface energy flux correction in place
+    of the network's own prediction under ice. The ice-covered part of each
+    cell receives the atmosphere's net flux into the surface minus the heat the
+    ice stores over the step. Only latent storage is counted: ice growth
+    releases ``ice_density * latent_heat_of_fusion`` per unit volume, so the
+    ocean loses less heat than the atmosphere took, and melting takes that
+    heat before it reaches the water. The ice's sensible heat and the snow on
+    the ice are not included.
+
+    Parameters:
+        sea_ice_volume_name: Name of the predicted sea-ice volume, the total ice
+            volume in each grid cell in m**3. Must be an ocean prognostic
+            variable, present in both the step's input and its output.
+        ice_density: Sea-ice density in kg/m**3.
+        latent_heat_of_fusion: Latent heat of fusion of ice in J/kg.
+        gradient_through_ice_volume: If True, the storage term passes gradients
+            to the predicted ice volume, so a loss on the heat flux also trains
+            the ice. If False, the predicted volume is detached in this term.
+    """
+
+    sea_ice_volume_name: str = "sea_ice_volume"
+    ice_density: float = 905.0
+    latent_heat_of_fusion: float = LATENT_HEAT_OF_FREEZING
+    gradient_through_ice_volume: bool = True
+
+    def __post_init__(self):
+        if self.ice_density <= 0 or self.latent_heat_of_fusion <= 0:
+            raise ValueError(
+                "under_ice ice_density and latent_heat_of_fusion must be positive."
+            )
+
+    def build(
+        self, cell_area_m2: torch.Tensor | None, timestep_seconds: float
+    ) -> "UnderIceHeatFlux":
+        if cell_area_m2 is None:
+            raise ValueError(
+                "surface_energy_flux_correction.under_ice needs cell areas in m**2, "
+                "which this grid does not provide."
+            )
+        return UnderIceHeatFlux(self, cell_area_m2, timestep_seconds)
+
+
+class UnderIceHeatFlux:
+    """Latent heat stored by the ice over one step, per unit cell area."""
+
+    def __init__(
+        self,
+        config: UnderIceHeatFluxConfig,
+        cell_area_m2: torch.Tensor,
+        timestep_seconds: float,
+    ):
+        self._config = config
+        self._cell_area_m2 = cell_area_m2
+        self._timestep_seconds = timestep_seconds
+
+    def storage_release(
+        self, input_data: TensorMapping, gen_data: TensorMapping
+    ) -> torch.Tensor:
+        """Heat released into the ocean by ice growth over the step, W/m**2 of
+        cell area (negative where the ice melted).
+        """
+        name = self._config.sea_ice_volume_name
+        if name not in input_data or name not in gen_data:
+            raise KeyError(
+                f"surface_energy_flux_correction.under_ice needs {name!r} in both "
+                "the step's input and its output."
+            )
+        volume_out = gen_data[name]
+        if not self._config.gradient_through_ice_volume:
+            volume_out = volume_out.detach()
+        area = self._cell_area_m2.to(device=volume_out.device, dtype=volume_out.dtype)
+        dvolume = torch.nan_to_num(volume_out - input_data[name])
+        return (
+            self._config.ice_density
+            * self._config.latent_heat_of_fusion
+            * dvolume
+            / (area * self._timestep_seconds)
+        )
+
+
 @dataclasses.dataclass
 class SurfaceEnergyFluxCorrectionConfig:
     """Configuration for correcting the generated hfds using
@@ -130,13 +334,89 @@ class SurfaceEnergyFluxCorrectionConfig:
         == 1, and gen_hfds elsewhere. hfds is prescribed from forcings only on
         cells that are entirely ice-free ocean, and the network prediction
         passes through unweighted everywhere else.
+      - "prescribed_cell_mean": corrected_hfds_total_area = (net_flux *
+        (1 - sea_ice_fraction) + runoff_heat) * (sea_surface_fraction > 0) +
+        gen_hfds_total_area * sea_ice_fraction. The atmosphere's cell-mean net
+        flux, per unit cell area and not scaled by any sea fraction, is
+        prescribed over the ice-free part of every sea-containing cell, land
+        part included; the network prediction is retained under sea ice only.
+        ``runoff_heat_flux`` adds the river-runoff heat the atmosphere does not
+        carry. With ``under_ice`` set, the network's prediction is not used at
+        all: the ice part also receives the atmosphere's flux, plus the heat
+        released by ice growth over the step, so corrected_hfds_total_area =
+        (net_flux + runoff_heat + storage_release) * (sea_surface_fraction >
+        0). Only the ``hfds_total_area`` (per unit cell area) target is
+        supported.
 
     Parameters:
         method: Method to use for the correction.
+        runoff_heat_flux: Optional static river-runoff heat map, used by
+            "prescribed_cell_mean" only.
+        under_ice: Optional energy-conserving flux under sea ice, used by
+            "prescribed_cell_mean" only. If None, the network's prediction is
+            kept under ice.
 
     """
 
-    method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    method: SurfaceEnergyFluxMethod
+    runoff_heat_flux: RunoffHeatFluxConfig | None = None
+    under_ice: UnderIceHeatFluxConfig | None = None
+
+    def __post_init__(self):
+        for name in ("runoff_heat_flux", "under_ice"):
+            if (
+                getattr(self, name) is not None
+                and self.method != "prescribed_cell_mean"
+            ):
+                raise ValueError(
+                    f"surface_energy_flux_correction.{name} is only used by the "
+                    f"'prescribed_cell_mean' method, got method={self.method!r}."
+                )
+
+    @property
+    def requires_cell_area(self) -> bool:
+        """Whether ``build`` needs the grid's cell areas."""
+        return self.under_ice is not None
+
+    @property
+    def requires_img_shape(self) -> bool:
+        """Whether ``build`` validates against the grid's horizontal shape."""
+        return self.runoff_heat_flux is not None
+
+    def load(self):
+        """Update the configuration in place so it does not depend on external
+        files.
+        """
+        if self.runoff_heat_flux is not None:
+            self.runoff_heat_flux.load()
+
+    def build(
+        self,
+        timestep_seconds: float,
+        cell_area_m2: torch.Tensor | None = None,
+        img_shape: tuple[int, int] | None = None,
+    ) -> "SurfaceEnergyFluxCorrection":
+        """Build the correction.
+
+        Args:
+            timestep_seconds: Model timestep in seconds.
+            cell_area_m2: Cell areas in m**2, required if ``requires_cell_area``.
+            img_shape: Horizontal shape of the ocean grid, to validate the
+                runoff heat map against. Not validated if None.
+        """
+        return SurfaceEnergyFluxCorrection(
+            self.method,
+            runoff_heat_flux=(
+                None
+                if self.runoff_heat_flux is None
+                else self.runoff_heat_flux.build(img_shape)
+            ),
+            under_ice=(
+                None
+                if self.under_ice is None
+                else self.under_ice.build(cell_area_m2, timestep_seconds)
+            ),
+        )
 
 
 @dataclasses.dataclass
@@ -177,7 +457,9 @@ class SeaIceFractionCorrection:
 class SurfaceEnergyFluxCorrection:
     """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
 
-    method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    method: SurfaceEnergyFluxMethod
+    runoff_heat_flux: StaticRunoffHeatFlux | None = None
+    under_ice: UnderIceHeatFlux | None = None
 
     def __call__(
         self,
@@ -196,6 +478,8 @@ class SurfaceEnergyFluxCorrection:
             gen_data,
             forcing_data,
             method=self.method,
+            runoff_heat_flux=self.runoff_heat_flux,
+            under_ice=self.under_ice,
         )
         return corrected, corrector_state
 
@@ -294,14 +578,27 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
+    def load(self) -> None:
+        if self.surface_energy_flux_correction is not None:
+            self.surface_energy_flux_correction.load()
+
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
+        cell_area_m2 = None
+        img_shape = None
+        flux_correction = self.surface_energy_flux_correction
+        if flux_correction is not None and flux_correction.requires_cell_area:
+            cell_area_m2 = dataset_info.horizontal_coordinates.area_weights_m2
+        if flux_correction is not None and flux_correction.requires_img_shape:
+            img_shape = dataset_info.img_shape
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
+            cell_area_m2=cell_area_m2,
+            img_shape=img_shape,
         )
 
     def _build(
@@ -309,6 +606,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
+        cell_area_m2: torch.Tensor | None = None,
+        img_shape: tuple[int, int] | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -329,7 +628,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             )
         if self.surface_energy_flux_correction is not None:
             corrections.append(
-                SurfaceEnergyFluxCorrection(self.surface_energy_flux_correction.method)
+                self.surface_energy_flux_correction.build(
+                    timestep_seconds, cell_area_m2=cell_area_m2, img_shape=img_shape
+                )
             )
         if self.ocean_heat_content_correction is not None:
             corrections.append(
@@ -378,7 +679,9 @@ def _correct_hfds(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
-    method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"],
+    method: SurfaceEnergyFluxMethod,
+    runoff_heat_flux: StaticRunoffHeatFlux | None = None,
+    under_ice: UnderIceHeatFlux | None = None,
 ) -> TensorDict:
     """Apply surface energy flux correction to the generated hfds.
 
@@ -389,6 +692,11 @@ def _correct_hfds(
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
         prescribed_open_ocean: net_flux where ocean_fraction == 1, else gen_hfds
+        prescribed_cell_mean: (net_flux * (1 - sea_ice_fraction) + runoff_heat)
+            where sea_surface_fraction > 0, plus gen_hfds * sea_ice_fraction;
+            net_flux here is the unscaled cell mean (hfds_total_area only).
+            With under_ice: (net_flux + runoff_heat + storage_release) where
+            sea_surface_fraction > 0, and no network term.
     """
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
@@ -401,8 +709,29 @@ def _correct_hfds(
         hfds_name = "hfds"
     else:
         hfds_name = "hfds_total_area"
-        net_flux = net_flux * forcing.sea_surface_fraction
     gen_hfds = gen_data[hfds_name]
+    if method == "prescribed_cell_mean":
+        if hfds_name != "hfds_total_area":
+            raise NotImplementedError(
+                "The 'prescribed_cell_mean' surface energy flux correction "
+                "requires the ocean to predict hfds_total_area (per unit cell "
+                "area), not hfds."
+            )
+        sea_surface_fraction = forcing.sea_surface_fraction
+        runoff = (
+            0.0 if runoff_heat_flux is None else runoff_heat_flux(sea_surface_fraction)
+        )
+        has_sea = (sea_surface_fraction > 0).to(net_flux.dtype)
+        if under_ice is not None:
+            storage_release = under_ice.storage_release(input_data, gen_data)
+            out[hfds_name] = (net_flux + runoff + storage_release) * has_sea
+            return out
+        sea_ice_fraction = input.sea_ice_fraction
+        prescribed = net_flux * (1 - sea_ice_fraction) + runoff
+        out[hfds_name] = prescribed * has_sea + gen_hfds * sea_ice_fraction
+        return out
+    if hfds_name == "hfds_total_area":
+        net_flux = net_flux * forcing.sea_surface_fraction
     if method == "residual_prediction":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds
     elif method == "prescribed":

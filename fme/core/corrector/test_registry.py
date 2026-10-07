@@ -224,6 +224,9 @@ class _DeprecatedKeyCorrectorConfig(CorrectorConfigABC):
         state.pop("old_key", None)
         return state
 
+    def load(self) -> None:
+        pass
+
     def _get_corrector(self, dataset_info: DatasetInfo) -> CorrectorABC:
         return CorrectionSequence([])
 
@@ -244,3 +247,25 @@ def test_corrector_selector_unknown_key_raises():
             type="_test_deprecated_key_corrector",
             config={"value": 1, "totally_unknown_key": "bad"},
         )
+
+
+@pytest.mark.parametrize(
+    "corrector_type, config",
+    [
+        ("atmosphere_corrector", {"conserve_dry_air": True}),
+        (
+            "ocean_corrector",
+            {"surface_energy_flux_correction": {"method": "prescribed"}},
+        ),
+        ("ice_corrector", {}),
+    ],
+)
+def test_corrector_selector_load_keeps_config_without_external_files(
+    corrector_type: str, config: dict[str, Any]
+):
+    """A corrector config that depends on no files is stored as given, without
+    defaults filled in, so its checkpoint stays loadable by code predating a
+    newer field of the config."""
+    selector = CorrectorSelector(type=corrector_type, config=dict(config))
+    selector.load()
+    assert selector.config == config
