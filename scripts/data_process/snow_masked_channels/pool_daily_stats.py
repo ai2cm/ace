@@ -22,7 +22,8 @@ import datetime
 import os
 import sys
 
-from masked_snow import PARENTS, SOURCE_SETS
+import fsspec
+from masked_snow import PARENTS, SOURCE_SETS, gcs_credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from combine_stats import combine_stats  # noqa: E402
@@ -41,6 +42,12 @@ def main():
         "--date", default=datetime.date.today().isoformat(), help="output name prefix"
     )
     args = parser.parse_args()
+    # combine_stats opens GCS through fsspec's defaults; give them the same
+    # fresh gcloud token the store builder uses, since application-default
+    # credentials may be stale.
+    token = {"token": gcs_credentials()}
+    fsspec.config.conf["gs"] = token
+    fsspec.config.conf["gcs"] = token
     roots = [PARENTS[key].stats_url + "/" for key in SOURCE_SETS[args.source_set]]
     out = output_directory(args.source_set, args.date)
     combine_stats(

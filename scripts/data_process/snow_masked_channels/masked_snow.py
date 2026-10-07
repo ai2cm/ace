@@ -152,8 +152,10 @@ RANDCO2_STATS = (
 for _level in RANDCO2_LEVELS:
     for _ic in (1, 2, 3):
         _member = f"random-CO2-{_level}-ic_{_ic:04d}"
-        # Members are 5.25 years, so pairs are sampled every other day; ic_0003 is
-        # validation and evaluation only (no stats are pooled from it).
+        # Pairs are sampled every 8 days, as for the piControl and 1pctCO2
+        # parents, so a pooled fit weights each parent by its years of data, as
+        # combine_stats does. ic_0003 is validation and evaluation only (no
+        # stats are pooled from it).
         PARENTS[f"cm4-randco2-{_level}-ic{_ic}"] = Parent(
             name=_member,
             directory=RANDCO2_DIRECTORY,
@@ -162,7 +164,7 @@ for _level in RANDCO2_LEVELS:
             divide_by_land_fraction=False,
             stats_start="0153-01-01",
             stats_stop=None,
-            stats_pair_stride_days=2,
+            stats_pair_stride_days=8,
         )
 
 # The parents of each scenario-training source set, in the training config's order.
