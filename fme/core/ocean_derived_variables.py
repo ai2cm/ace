@@ -158,10 +158,15 @@ def implied_tendency_of_ocean_heat_content_due_to_advection(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Implied tendency of ocean heat content due to advection.
-    This is computed as a residual from the column total energy budget.
+    """Implied tendency of ocean heat content due to advection, in W/m2 per
+    unit total cell area. This is computed as a residual from the column total
+    energy budget: the heat content tendency (per unit ocean area) weighted by
+    the sea surface fraction, minus the net energy flux into the ocean (per
+    unit total cell area).
     """
-    column_energy_tendency = ocean_heat_content_tendency(data, timestep)
+    column_energy_tendency = data.sea_surface_fraction * ocean_heat_content_tendency(
+        data, timestep
+    )
     flux_through_vertical_boundaries = data.net_energy_flux_into_ocean
     implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
     return implied_column_heating

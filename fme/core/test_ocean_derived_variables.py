@@ -228,6 +228,85 @@ def test_salt_budget_closes(wfo: float, sfdsi: float, sea_surface_fraction: floa
     )
 
 
+@pytest.mark.parametrize("sea_surface_fraction", [1.0, 0.5])
+def test_heat_budget_closes(sea_surface_fraction: float):
+    """ace#1557: a temperature change set by hfds alone leaves no implied
+    advection, including in a cell that is partly land.
+    """
+    dz = 10.0
+    hfds = 100.0
+    temperature_change = (
+        hfds
+        * TIMESTEP.total_seconds()
+        / (DENSITY_OF_SEA_WATER_CM4 * SPECIFIC_HEAT_OF_SEA_WATER_CM4 * dz)
+    )
+    shape = (1, 2, 1, 1)
+    data = {
+        "thetao_0": torch.tensor(
+            [10.0, 10.0 + temperature_change], dtype=torch.float64
+        ).reshape(shape),
+        "hfds": torch.full(shape, hfds, dtype=torch.float64),
+        "sea_surface_fraction": torch.full(
+            shape, sea_surface_fraction, dtype=torch.float64
+        ),
+    }
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, dz], dtype=torch.float64),
+        mask=torch.ones(*shape, 1, dtype=torch.float64),
+    )
+    out = compute_ocean_derived_quantities(
+        data, depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    torch.testing.assert_close(
+        out["ocean_heat_content_tendency"][:, 1],
+        torch.full((1, 1, 1), hfds, dtype=torch.float64),
+    )
+    torch.testing.assert_close(
+        out["implied_tendency_of_ocean_heat_content_due_to_advection"][:, 1],
+        torch.zeros((1, 1, 1), dtype=torch.float64),
+        atol=1e-9,
+        rtol=0.0,
+    )
+
+
+def test_implied_heat_advection_partial_cells():
+    """ace#1557: implied advection = s dH/dt - F, H per ocean area and
+    F = (hfds + hfgeou) s per total cell area, for 0 < s < 1.
+    """
+    torch.manual_seed(0)
+    n_time, nlat, nlon = 3, 2, 4
+    shape = (1, n_time, nlat, nlon)
+    dz = torch.tensor([10.0, 90.0], dtype=torch.float64)
+    s = torch.tensor([0.05, 0.35, 0.8, 1.0], dtype=torch.float64).expand(shape)
+    thetao = 10.0 + torch.randn(*shape, 2, dtype=torch.float64)
+    hfds = 50.0 * torch.randn(shape, dtype=torch.float64)
+    hfgeou = torch.full(shape, 0.08, dtype=torch.float64)
+    data = {
+        "thetao_0": thetao[..., 0],
+        "thetao_1": thetao[..., 1],
+        "hfds": hfds,
+        "hfgeou": hfgeou,
+        "sea_surface_fraction": s,
+    }
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 100.0], dtype=torch.float64),
+        mask=torch.ones(*shape, 2, dtype=torch.float64),
+    )
+    out = compute_ocean_derived_quantities(
+        data, depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    H = (thetao * DENSITY_OF_SEA_WATER_CM4 * SPECIFIC_HEAT_OF_SEA_WATER_CM4 * dz).sum(
+        -1
+    )
+    dH_dt = H.diff(dim=1) / TIMESTEP.total_seconds()
+    F = (hfds + hfgeou) * s
+    torch.testing.assert_close(
+        out["implied_tendency_of_ocean_heat_content_due_to_advection"][:, 1:],
+        s[:, 1:] * dH_dt - F[:, 1:],
+    )
+    torch.testing.assert_close(out["ocean_heat_content"], H)
+
+
 def test_salt_budget_without_sfdsi():
     """Without sfdsi, the net salt flux is not computed, and the implied
     advection closes with the virtual salt flux alone.

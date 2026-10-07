@@ -104,11 +104,17 @@ class OceanHeatContentBudgetConfig:
             into the ocean when conserving the heat content. This can be useful
             for correcting errors in heat budget in target data. The same
             additional heating is imposed at all time steps and grid cells.
+        weight_by_sea_surface_fraction: If True, weight the column heat content
+            by the sea surface fraction before taking its global mean, matching
+            the convention of the energy flux into the ocean. False keeps the
+            legacy behavior (content per unit ocean area against fluxes per
+            unit total cell area) that existing checkpoints were trained with.
 
     """
 
     method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
+    weight_by_sea_surface_fraction: bool = False
 
 
 @dataclasses.dataclass
@@ -209,6 +215,7 @@ class OceanHeatContentCorrection:
     timestep_seconds: float
     method: Literal["scaled_temperature"]
     unaccounted_heating: float
+    weight_by_sea_surface_fraction: bool = False
 
     def __call__(
         self,
@@ -237,6 +244,7 @@ class OceanHeatContentCorrection:
             self.timestep_seconds,
             self.method,
             self.unaccounted_heating,
+            self.weight_by_sea_surface_fraction,
         )
         return corrected, corrector_state
 
@@ -347,6 +355,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                    self.ocean_heat_content_correction.weight_by_sea_surface_fraction,
                 )
             )
         return OceanCorrector(corrections)
@@ -433,6 +442,7 @@ def _force_conserve_ocean_heat_content(
     timestep_seconds: float,
     method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
+    weight_by_sea_surface_fraction: bool = False,
 ) -> TensorDict:
     if method != "scaled_temperature":
         raise NotImplementedError(
@@ -450,13 +460,20 @@ def _force_conserve_ocean_heat_content(
         )
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
+    gen_ocean_heat_content = gen.ocean_heat_content
+    input_ocean_heat_content = input.ocean_heat_content
+    if weight_by_sea_surface_fraction:
+        gen_ocean_heat_content = gen_ocean_heat_content * forcing.sea_surface_fraction
+        input_ocean_heat_content = (
+            input_ocean_heat_content * forcing.sea_surface_fraction
+        )
     global_gen_ocean_heat_content = area_weighted_mean(
-        gen.ocean_heat_content,
+        gen_ocean_heat_content,
         keepdim=True,
         name="ocean_heat_content",
     )
     global_input_ocean_heat_content = area_weighted_mean(
-        input.ocean_heat_content,
+        input_ocean_heat_content,
         keepdim=True,
         name="ocean_heat_content",
     )

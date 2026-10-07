@@ -3187,15 +3187,19 @@ def test_ocean_derived_variables_integration(
         expected_ref_tendency_step1,
         msg="Unexpected reference OHC tendency at step 1",
     )
-    # check imbalance for forward steps
+    # check imbalance for forward steps: s dH/dt - F (ace#1557), s static here
+    if "sea_surface_fraction" in data.data:
+        s = data.data["sea_surface_fraction"][:, 0]
+    else:
+        s = 1 - data.data["land_fraction"][:, 0]
     for i in range(n_steps):
-        expected_pred_imbalance = pred_tendency[:, i] - pred_flux[:, i]
+        expected_pred_imbalance = s * pred_tendency[:, i] - pred_flux[:, i]
         torch.testing.assert_close(
             pred_imbalance[:, i],
             expected_pred_imbalance,
             msg=f"Unexpected pred OHC imbalance at step {i + 1}",
         )
-        expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
+        expected_ref_imbalance = s * ref_tendency[:, i] - ref_flux[:, i]
         torch.testing.assert_close(
             ref_imbalance[:, i],
             expected_ref_imbalance,
