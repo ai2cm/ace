@@ -1,0 +1,10 @@
+# The four ocean x atmosphere pairings of the 2026-10-06 atmosphere swap, rerun with a monthly tropical
+# Pacific writer on the atmosphere side, to measure each atmosphere's response to its own coupled SST.
+# Same component checkpoints as coupled_eval_2026-10-06_atmos_swap:
+#   oA 01M4AD4RD0MC28W15FTBPTZVFJ, aA 01M4AD4RCS27XDQRG6Z9ZB56F5, oL 01M4AD4RCY1849NPZ2Y22JARWP, aL 01M4AD4RD9TWNKV5M6SJC5H8Q1
+# Configs: --config-dir configs/experiments/cm4_eval/coupled_swap (evaluator-config-piC-ic0151-200yr-atmresp.yaml).
+
+cm4_piC-coupled_atmresp|oA-aA|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-atmresp|best_inference_ckpt|high|--min-runtime 8h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_atmresp|oA-aL|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-atmresp|best_inference_ckpt|high|--min-runtime 8h||01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RD9TWNKV5M6SJC5H8Q1
+cm4_piC-coupled_atmresp|oL-aA|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr-atmresp|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan|01M4AD4RCY1849NPZ2Y22JARWP|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_atmresp|oL-aL|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr-atmresp|best_inference_ckpt|high|--min-runtime 8h||01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan|01M4AD4RCY1849NPZ2Y22JARWP|01M4AD4RD9TWNKV5M6SJC5H8Q1
