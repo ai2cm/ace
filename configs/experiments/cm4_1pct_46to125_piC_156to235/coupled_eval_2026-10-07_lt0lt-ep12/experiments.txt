@@ -9,8 +9,11 @@
 
 # 1pct-ic0001-130yr
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto-ep12|o0a0rs0|01M3MYF9S5FXCXVVN108864A6D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto-ep12|o0a0rs0|01M3MYF9S5FXCXVVN108864A6D|launched_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan
 
 # piC-ic0151-200yr
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto-ep12|o0a0rs0|01M3MYF9S5FXCXVVN108864A6D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-lt0lt_a2s-fto-ep12|o0a0rs0|01M3MYF9S5FXCXVVN108864A6D|launched_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan
+
+# Launched 2026-10-07 from 3675a7ce1 (rows retired to launched_* so a rerun does not relaunch):
+#   1pct 01M4C02WNQ430ARQ641653JZQH, piC 01M4C033DKRCP39NV55ZVGBD4T
