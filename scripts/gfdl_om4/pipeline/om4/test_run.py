@@ -161,6 +161,26 @@ def test_expected_output_names_full_cell_only():
     }
 
 
+def test_full_cell_only_writes_renamed_outputs(monkeypatch):
+    def identity_regridder(da, keep_attrs=False):
+        return da.rename({"yh": "lat", "xh": "lon"})
+
+    monkeypatch.setattr(run, "get_regridder", lambda *args: identity_regridder)
+    stream = _stream(renaming={"SW": "SW_total_area"})
+    _, out = run.process_chunk(
+        xbeam.Key({"time": 0}),
+        _source(BLOCK),
+        stream=stream,
+        wetmask=_wetmask(),
+        weights_url="local",
+        target_grid_name="F90",
+    )
+    expected = {"SW_total_area", "LW"}
+    assert set(out.data_vars) == expected
+    config = _config([stream])
+    assert run._expected_output_names(config, {stream.name: _source(BLOCK)}) == expected
+
+
 def test_full_cell_only_needs_no_renaming():
     assert _stream().renaming == {}
 

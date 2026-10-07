@@ -61,8 +61,8 @@ class StreamConfig:
             land applied after. Each must also have a ``renaming`` entry so
             its wetmask-normalized twin doesn't collide.
         full_cell_only: if True, every variable is written only with
-            full-cell semantics, under its source name; no wetmask-normalized
-            twin, so no ``renaming`` entry is needed. ``full_cell_variables``
+            full-cell semantics, under its ``renaming`` entry if any, else its
+            source name; no wetmask-normalized twin. ``full_cell_variables``
             must then list every variable.
         postprocess: post-regrid transforms to apply per chunk, in order
             (see pipeline/om4/postprocess.py): a registry name, or a
@@ -147,9 +147,13 @@ class StreamConfig:
                 "rotated_pairs for it to apply to"
             )
 
+    def full_cell_output_name(self, name: str) -> str:
+        """Output name of ``name``'s full-cell regrid."""
+        return self.renaming.get(name, name) if self.full_cell_only else name
+
     def output_names(self, names_2d, names_3d=(), level_count: int = 0) -> set[str]:
         """Regridded output names before postprocess additions."""
-        names = set(self.full_cell_variables)
+        names = {self.full_cell_output_name(name) for name in self.full_cell_variables}
         if self.full_cell_only:
             return names
         names.update(self.renaming.get(name, name) for name in names_2d)

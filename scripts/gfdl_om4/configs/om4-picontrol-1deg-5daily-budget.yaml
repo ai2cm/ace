@@ -29,3 +29,11 @@ streams:
     time_block_mean: 20
     full_cell_variables: [SNOWFL, SW, LW, LH, SH, XPRTi, XPRTs]
     full_cell_only: true
+    renaming:
+      SNOWFL: SNOWFL_total_area
+      SW: SW_total_area
+      LW: LW_total_area
+      LH: LH_total_area
+      SH: SH_total_area
+      XPRTi: XPRTi_total_area
+      XPRTs: XPRTs_total_area

@@ -28,6 +28,12 @@ streams:
     time_block_mean: 20
     full_cell_variables: [SNOWFL, SW, LW, LH, SH]
     full_cell_only: true
+    renaming:
+      SNOWFL: SNOWFL_total_area
+      SW: SW_total_area
+      LW: LW_total_area
+      LH: LH_total_area
+      SH: SH_total_area
   - name: ice_transport_mean
     store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_tendencies_and_TSN_6hourly.zarr
     variables: [XPRTi, XPRTs]
@@ -37,3 +43,6 @@ streams:
     time_block_mean: 20
     full_cell_variables: [XPRTi, XPRTs]
     full_cell_only: true
+    renaming:
+      XPRTi: XPRTi_total_area
+      XPRTs: XPRTs_total_area

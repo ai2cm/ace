@@ -39,7 +39,8 @@ Masking conventions of the output store:
   is per total cell area, land counted as zero — with land-NaN applied
   after; their wetmask-normalized (per-ocean-area) twins are written under
   renamed outputs (e.g. ``ocean_sea_ice_fraction``).
-- Streams with ``full_cell_only`` write only the full-cell outputs.
+- Streams with ``full_cell_only`` write only the full-cell outputs, under
+  their ``renaming`` entries (e.g. ``SW_total_area``).
 - Streams with ``time_block_mean: N`` write the mean of each N-step block of
   the source, labeled by the block's last instant.
 - Masks, ``idepth_*``, ``areacello``, and ``sea_surface_fraction`` are
@@ -463,7 +464,7 @@ def _process_chunk(
             "NaN over land applied after"
         )
         upstream = ds[name].attrs.get(DERIVATION_ATTR)
-        output[name] = full.assign_attrs(
+        output[stream.full_cell_output_name(name)] = full.assign_attrs(
             provenance_attrs(
                 stream.store,
                 name,
