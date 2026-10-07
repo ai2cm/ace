@@ -274,6 +274,80 @@ def test_scatter_object():
     assert scattered == {"key": "value"}
 
 
+@pytest.mark.parallel
+def test_data_parallel_gather():
+    dist = Distributed()
+    rank = dist.data_parallel_rank
+    n = dist.total_data_parallel_ranks
+    tensor = torch.full((2, 3), float(rank), device=get_device())
+    gathered = dist.data_parallel_gather(tensor)
+    if dist.is_data_parallel_root():
+        assert gathered is not None
+        assert len(gathered) == n
+        for r in range(n):
+            torch.testing.assert_close(gathered[r].cpu(), torch.full((2, 3), float(r)))
+    else:
+        assert gathered is None
+
+
+@pytest.mark.parallel
+def test_data_parallel_scatter():
+    dist = Distributed()
+    rank = dist.data_parallel_rank
+    n = dist.total_data_parallel_ranks
+    recv = torch.empty(2, 3, device=get_device())
+    if dist.is_data_parallel_root():
+        scatter_list = [
+            torch.full((2, 3), float(r), device=get_device()) for r in range(n)
+        ]
+    else:
+        scatter_list = None
+    result = dist.data_parallel_scatter(recv, scatter_list)
+    torch.testing.assert_close(result.cpu(), torch.full((2, 3), float(rank)))
+
+
+@pytest.mark.parallel
+def test_data_parallel_gather_object():
+    dist = Distributed()
+    rank = dist.data_parallel_rank
+    n = dist.total_data_parallel_ranks
+    gathered = dist.data_parallel_gather_object({"rank": rank})
+    if dist.is_data_parallel_root():
+        assert gathered is not None
+        assert len(gathered) == n
+        for r in range(n):
+            assert gathered[r] == {"rank": r}
+    else:
+        assert gathered is None
+
+
+@pytest.mark.parallel
+def test_data_parallel_broadcast_object():
+    dist = Distributed()
+    if dist.is_data_parallel_root():
+        obj = {"data": [1, 2, 3]}
+    else:
+        obj = None
+    result = dist.data_parallel_broadcast_object(obj)
+    assert result == {"data": [1, 2, 3]}
+
+
+@pytest.mark.parallel
+def test_data_parallel_gather_scatter_round_trip():
+    """Scatter the result of a gather and verify each rank recovers its data."""
+    dist = Distributed()
+    rank = dist.data_parallel_rank
+    original = torch.full((4, 5), float(rank), device=get_device())
+    gathered = dist.data_parallel_gather(original)
+    recv = torch.empty_like(original)
+    if dist.is_data_parallel_root():
+        assert gathered is not None
+        dist.data_parallel_scatter(recv, gathered)
+    else:
+        dist.data_parallel_scatter(recv)
+    torch.testing.assert_close(recv.cpu(), original.cpu())
+
+
 def test_non_distributed_gather():
     dist = Distributed()
     assert not dist.is_distributed()
@@ -282,6 +356,40 @@ def test_non_distributed_gather():
     assert gathered is not None, "Gathered tensor are none instead of List"
     assert len(gathered) == 1
     assert torch.allclose(gathered[0], tensor)
+
+
+def test_non_distributed_data_parallel_gather():
+    dist = Distributed()
+    tensor = torch.ones(2, 5, device=get_device()) * 3
+    gathered = dist.data_parallel_gather(tensor)
+    assert gathered is not None
+    assert len(gathered) == 1
+    assert torch.allclose(gathered[0], tensor)
+
+
+def test_non_distributed_data_parallel_scatter():
+    dist = Distributed()
+    recv = torch.empty(2, 5, device=get_device())
+    src = torch.ones(2, 5, device=get_device()) * 7
+    result = dist.data_parallel_scatter(recv, scatter_list=[src])
+    assert torch.allclose(result, src)
+
+
+def test_non_distributed_data_parallel_gather_object():
+    dist = Distributed()
+    result = dist.data_parallel_gather_object({"a": 1})
+    assert result == [{"a": 1}]
+
+
+def test_non_distributed_data_parallel_broadcast_object():
+    dist = Distributed()
+    result = dist.data_parallel_broadcast_object({"key": "val"})
+    assert result == {"key": "val"}
+
+
+def test_non_distributed_is_data_parallel_root():
+    dist = Distributed()
+    assert dist.is_data_parallel_root()
 
 
 def test_gather_irregular():
