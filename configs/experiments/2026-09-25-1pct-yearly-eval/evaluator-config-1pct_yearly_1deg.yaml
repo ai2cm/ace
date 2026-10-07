@@ -1,0 +1,32 @@
+# 1deg twin of evaluator-config-1pct_yearly_4deg.yaml: the 1deg 1pctCO2 stores,
+# which have the same time axis; everything else is the same. Keep the two
+# in sync.
+experiment_dir: /results
+n_forward_steps: 10147
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0002-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  save_step_diagnostics: true
+  time_coarsen:
+    coarsen_factor: 73

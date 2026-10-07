@@ -1,0 +1,81 @@
+# 1deg twin of evaluator-config-1pct_yearly_4deg_wfo_frc_open.yaml (see it for the salt
+# budget) for the 1deg checkpoints trained with
+# surface_energy_flux_correction prescribed (../2026-10-05-ocean-wide-ssh):
+# the 1deg 1pctCO2 stores, which have the same time axis, and the
+# prescribed surface energy flux correction in the repeated corrector.
+# Everything else is the same; keep the two in sync.
+experiment_dir: /results
+n_forward_steps: 10147
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0002-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  save_step_diagnostics: true
+  time_coarsen:
+    coarsen_factor: 73
+stepper_override:
+  corrector:
+    type: ocean_corrector
+    config:
+      surface_energy_flux_correction:
+        method: prescribed
+      ocean_heat_content_correction:
+        method: scaled_temperature
+      ocean_salt_content_correction:
+        method: scaled_salinity
+        budget_config:
+          type: water_flux
+          include_brine_rejection: true
+          fluxes_from_forcing: true
+        weight_by_sea_surface_fraction: true
+        use_float64: true
+      force_positive_names:
+      - so_0
+      - so_1
+      - so_2
+      - so_3
+      - so_4
+      - so_5
+      - so_6
+      - so_7
+      - so_8
+      - so_9
+      - so_10
+      - so_11
+      - so_12
+      - so_13
+      - so_14
+      - so_15
+      - so_16
+      - so_17
+      - so_18
+      - sea_ice_volume
+      sea_ice_fraction_correction:
+        sea_ice_fraction_name: ocean_sea_ice_fraction
+        land_fraction_name: land_fraction
+        remove_negative_ocean_fraction: false
+        zero_where_ice_free_names:
+        - sea_ice_volume
+        - sfdsi
+        - UI
+        - VI
