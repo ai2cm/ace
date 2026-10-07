@@ -55,8 +55,11 @@ class Samudra(torch.nn.Module):
         pad back onto the skip connection, and (with
         ``zonally_periodic_upsample``) the upsampling. "constant" pads zeros,
         "reflect" mirrors about the edge row, and "pole" pads across the pole
-        (see ``pad_latitude``). By default "constant", the original behavior.
-        Adds no parameters, so a checkpoint trained with any mode loads into
+        (see ``pad_latitude``). Without ``pad_to_pool_multiple``, the
+        decoder's refill of a row dropped by pooling uses the same mode, so
+        "pole" fills the dropped polar row with the antipodal copy of the row
+        next to it, an approximation. By default "constant", the original
+        behavior. Adds no parameters, so a checkpoint trained with any mode loads into
         any other.
     pad_to_pool_multiple : bool, optional
         If True, pad the input's latitude axis with ``lat_pad`` up to a
@@ -266,9 +269,9 @@ class Samudra(torch.nn.Module):
         pad_end = total - pad_start
         fts = pad_latitude(fts, pad_start, pad_end, self.lat_pad)
         if context is not None and context.noise is not None:
-            # the noise field must cover the padded grid; it is padded like
-            # the features, so the padded rows carry copies of the noise of
-            # the rows they copy
+            # the noise field must cover the padded grid, so it is padded like
+            # the features: zeros under "constant", copies of the rows the
+            # features copy otherwise
             context = dataclasses.replace(
                 context,
                 noise=pad_latitude(context.noise, pad_start, pad_end, self.lat_pad),

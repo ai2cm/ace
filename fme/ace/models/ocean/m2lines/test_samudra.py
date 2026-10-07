@@ -541,7 +541,7 @@ def _old_samudra_forward(model: Samudra, fts: torch.Tensor) -> torch.Tensor:
 def _small_samudra(**kwargs) -> Samudra:
     """Three levels; on a (22, 36) grid the heights run 22 -> 11 -> 5 -> 2
     and the widths 36 -> 18 -> 9 -> 4, so two levels pool an odd height and
-    one an odd width, as the 4-degree-like 180x360 grid does at its coarse
+    one an odd width, as the 1-degree 180x360 grid does at its coarse
     levels."""
     torch.manual_seed(0)
     return Samudra(

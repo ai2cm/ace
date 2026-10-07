@@ -30,9 +30,13 @@ def pad_latitude(
             latitude and rotated half way round in longitude, which is the
             true cross-pole neighbor of a scalar field (a vector component
             changes sign across the pole, so this is not exact for velocities).
-            Each pad must be at most the height. The rotation is exact for an
-            even number of longitudes; for an odd number the antipodal
-            longitude falls between two columns, which are averaged.
+            It is exact only when the edge rows of ``x`` touch the pole; on a
+            tensor whose edge stops short of the pole (a level that dropped
+            its last row in pooling) or extends past it (a pole-padded input),
+            it is an approximation. Each pad must be at most the height. The
+            rotation is exact for an even number of longitudes; for an odd
+            number the antipodal longitude falls between two columns, which
+            are averaged.
     """
     if mode == "constant":
         return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
