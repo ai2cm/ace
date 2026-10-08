@@ -10,6 +10,7 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
     _compute_ocean_derived_variable,
@@ -299,3 +300,93 @@ def test_sea_ice_thickness_derived_variable(case):
         equal_nan=True,
         msg="Recovered sea ice thickness should match original",
     )
+
+
+def test_mld_wright97_derived_variable():
+    torch.manual_seed(0)
+    shape = (2, 3, 4, 8)
+    nz = 4
+    data = {f"thetao_{k}": 20.0 - 3.0 * k * torch.rand(*shape) for k in range(nz)}
+    data.update({f"so_{k}": 34.0 + torch.rand(*shape) for k in range(nz)})
+    mask = torch.ones(4, 8, nz)
+    mask[0, 0, :] = 0.0
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 30.0, 60.0, 100.0]), mask=mask
+    )
+    out = compute_ocean_derived_quantities(
+        dict(data), depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    assert "mld_wright97" in out
+    expected = OceanData(data, depth_coordinate).mld_wright97
+    torch.testing.assert_close(out["mld_wright97"], expected, equal_nan=True)
+    assert torch.isnan(out["mld_wright97"][..., 0, 0]).all()
+    assert torch.isfinite(out["mld_wright97"][..., 1:, :]).all()
+    metadata = get_ocean_derived_variable_metadata()["mld_wright97"]
+    assert metadata.units == "m"
+    assert metadata.long_name == ("Mixed layer depth, Wright (1997) density threshold")
+
+
+def test_mld_wright97_skipped_without_salinity():
+    data = {f"thetao_{k}": torch.rand(1, 1, 2, 2) for k in range(3)}
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 30.0, 60.0]), mask=torch.ones(2, 2, 3)
+    )
+    out = compute_ocean_derived_quantities(
+        dict(data), depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    assert "mld_wright97" not in out
+    assert "ocean_heat_content" in out
+
+
+def test_wright97_metadata_has_units():
+    metadata = get_derived_variable_metadata()
+    assert metadata["mld_wright97"].units == "m"
+    assert metadata["pbo_wright97"].units == "Pa"
+
+
+def _wright97_inputs():
+    n_lat, n_lon, nz = 4, 8, 3
+    horizontal_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-60, 60, n_lat),
+        lon=torch.linspace(0, 360, n_lon + 1)[:-1],
+    )
+    data = {
+        f"thetao_{k}": 20.0 - 3.0 * k * torch.rand(1, 1, n_lat, n_lon)
+        for k in range(nz)
+    }
+    data.update({f"so_{k}": 34.0 + torch.rand(1, 1, n_lat, n_lon) for k in range(nz)})
+    data["zos"] = 0.1 * torch.randn(1, 1, n_lat, n_lon)
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 30.0, 60.0]),
+        mask=torch.ones(n_lat, n_lon, nz),
+    )
+    return data, depth_coordinate, horizontal_coordinates
+
+
+def test_pbo_wright97_derived_variable():
+    data, depth_coordinate, horizontal_coordinates = _wright97_inputs()
+    out = compute_ocean_derived_quantities(
+        dict(data),
+        depth_coordinate=depth_coordinate,
+        timestep=TIMESTEP,
+        cell_area_provider=horizontal_coordinates,
+    )
+    expected = OceanData(
+        data, depth_coordinate, cell_area_provider=horizontal_coordinates
+    ).pbo_wright97
+    torch.testing.assert_close(out["pbo_wright97"], expected)
+
+
+@pytest.mark.parametrize("missing", ["cell_area", "zos"])
+def test_pbo_wright97_skipped_without_cell_area_or_zos(missing):
+    data, depth_coordinate, horizontal_coordinates = _wright97_inputs()
+    if missing == "zos":
+        del data["zos"]
+    out = compute_ocean_derived_quantities(
+        dict(data),
+        depth_coordinate=depth_coordinate,
+        timestep=TIMESTEP,
+        cell_area_provider=None if missing == "cell_area" else horizontal_coordinates,
+    )
+    assert "mld_wright97" in out
+    assert "pbo_wright97" not in out

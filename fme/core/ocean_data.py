@@ -9,6 +9,17 @@ from fme.core.constants import (
     REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
+from fme.core.distributed import Distributed
+from fme.core.ocean_eos import (
+    DELTA_RHO_THRESHOLD,
+    G_EARTH,
+    MLD_REF_LAYER,
+    RHO_0,
+    _column_density_integral,
+    _density_anomaly,
+    _mixed_layer_depth,
+    _sea_floor_depth,
+)
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -41,6 +52,25 @@ class HasOceanDepthIntegral(Protocol):
         self,
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
+
+
+@runtime_checkable
+class HasOceanLayerGeometry(Protocol):
+    """Layer geometry of a depth coordinate, as needed by the wright97
+    variables.
+    """
+
+    @property
+    def idepth(self) -> torch.Tensor: ...
+
+    @property
+    def mask(self) -> torch.Tensor: ...
+
+    @property
+    def dz(self) -> torch.Tensor: ...
+
+    @property
+    def deptho(self) -> torch.Tensor | None: ...
 
 
 class HasCellAreaInMetersSquared(Protocol):
@@ -170,6 +200,117 @@ class OceanData:
             )
             * self.sea_surface_fraction
         )
+
+    def _layer_geometry(self, label: str) -> HasOceanLayerGeometry:
+        coord = self._depth_coordinate
+        # the depth coordinate is typed by depth_integral alone; the wright97
+        # variables also need its layer geometry
+        if not isinstance(coord, HasOceanLayerGeometry):
+            raise ValueError(
+                "A depth coordinate with idepth, mask, dz and deptho must be "
+                f"provided to compute {label}, got {type(coord).__name__}."
+            )
+        return coord
+
+    def _wright97_profiles(
+        self, geometry: HasOceanLayerGeometry
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """``(thetao, so)`` with the depth coordinate's ``nz`` levels.
+
+        Raises:
+            KeyError: If a level ``k < nz`` of either is missing.
+        """
+        thetao = self.sea_water_potential_temperature
+        so = self.sea_water_salinity
+        nz = geometry.mask.shape[-1]
+        for name, x in (("thetao", thetao), ("so", so)):
+            if x.shape[-1] < nz:
+                raise KeyError(f"{name}_{x.shape[-1]}")
+        return thetao[..., :nz], so[..., :nz]
+
+    @property
+    def mld_wright97(self) -> torch.Tensor:
+        """Density-threshold mixed layer depth [m], positive down.
+
+        ``_mixed_layer_depth`` of ``fme.core.ocean_eos`` with
+        ``DELTA_RHO_THRESHOLD`` and ``MLD_REF_LAYER``: the depth where the
+        Wright (1997) zero-pressure density first exceeds that of the reference
+        layer by the threshold, else the sea floor depth (the depth
+        coordinate's ``deptho``, or the deepest unmasked interface). NaN where
+        ``mask_0 == 0``, as ``DepthCoordinate.depth_integral``.
+
+        Raises:
+            ValueError: If the depth coordinate is not a
+                ``HasOceanLayerGeometry``.
+            KeyError: If potential temperature or salinity is missing from the
+                data, or it has fewer than ``MLD_REF_LAYER + 2`` levels (no
+                level below the reference layer), so
+                ``compute_ocean_derived_quantities`` skips it.
+        """
+        geometry = self._layer_geometry("mld_wright97")
+        thetao, so = self._wright97_profiles(geometry)
+        if thetao.shape[-1] < MLD_REF_LAYER + 2:
+            # a level below the reference layer is missing, as a Stacker miss
+            raise KeyError(
+                f"mld_wright97 needs at least {MLD_REF_LAYER + 2} levels, "
+                f"got {thetao.shape[-1]}."
+            )
+        idepth = geometry.idepth.to(thetao.dtype)
+        mask = geometry.mask
+        deptho = _sea_floor_depth(idepth, mask, geometry.deptho)
+        mld = _mixed_layer_depth(
+            thetao, so, idepth, mask, deptho, DELTA_RHO_THRESHOLD, MLD_REF_LAYER
+        )
+        mask_0 = mask.select(dim=-1, index=0).expand(mld.shape)
+        return mld.where(mask_0 > 0, float("nan"))
+
+    @property
+    def rho_wright97(self) -> torch.Tensor:
+        """Wright (1997) in-situ density anomaly ``rho_k - RHO_0`` [kg m-3] at
+        the Boussinesq pressure of each level centre, ``(..., nz)`` with level
+        ``k`` on the last dim. NaN where ``mask_k == 0`` or an input is NaN.
+
+        Raises:
+            ValueError: If the depth coordinate is not a
+                ``HasOceanLayerGeometry``.
+            KeyError: If a level of potential temperature or salinity is
+                missing.
+        """
+        geometry = self._layer_geometry("rho_wright97")
+        thetao, so = self._wright97_profiles(geometry)
+        return _density_anomaly(thetao, so, geometry.idepth, geometry.mask)
+
+    @property
+    def pbo_wright97(self) -> torch.Tensor:
+        """Globally demeaned bottom pressure anomaly [Pa], Wright (1997).
+
+        ``P = RHO_0 * G_EARTH * zos + G_EARTH * sum_k rho_wright97_k * dz_k``
+        minus its mean weighted by ``area_weights_m2`` over the cells where
+        ``mask_0 > 0`` and ``zos`` is finite; NaN elsewhere. Bottom pressure
+        up to the static ``RHO_0 * G_EARTH * deptho`` and the global mean.
+
+        Raises:
+            ValueError: If the depth coordinate is not a
+                ``HasOceanLayerGeometry``.
+            KeyError: If a level of potential temperature or salinity, ``zos``
+                or the cell area provider is missing.
+        """
+        geometry = self._layer_geometry("pbo_wright97")
+        if self._cell_area_provider is None:
+            raise KeyError("cell area provider, needed for the mean of pbo_wright97")
+        zos = self.sea_surface_height_above_geoid
+        C = _column_density_integral(self.rho_wright97, geometry.dz)
+        mask_0 = geometry.mask.select(dim=-1, index=0).to(C.device)
+        wet = (mask_0 > 0) & zos.isfinite()
+        P = RHO_0 * G_EARTH * torch.where(wet, zos, 0.0) + G_EARTH * C
+        wet = wet.expand(P.shape)
+        area = self._cell_area_provider.area_weights_m2.to(
+            device=P.device, dtype=P.dtype
+        )
+        mean = Distributed.get_instance().weighted_mean(
+            P, wet.to(P.dtype) * area, dim=(-2, -1), keepdim=True
+        )
+        return torch.where(wet, P - mean, torch.nan)
 
     @property
     def water_flux_into_sea_water(self) -> torch.Tensor:
