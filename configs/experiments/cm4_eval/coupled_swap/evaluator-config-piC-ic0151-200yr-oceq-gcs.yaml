@@ -2,7 +2,8 @@
 #   --config-dir configs/experiments/cm4_eval/coupled_swap
 #
 # Variant -oceq-gcs: the -oceq config below with every file writer in zarr
-# format (yearly time chunks) and no log file, so that the whole run can be
+# format (default chunks: the monthly zarr writer requires one month per
+# chunk) and no log file, so that the whole run can be
 # written to a gs:// experiment_dir (set per row via the override field).
 #
 # Variant -oceq: the -atmresp config below plus a monthly equatorial Pacific
@@ -51,7 +52,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
       - label: gulf_stream_monthly
         names: [sst]
         lat_extent: [35.0, 45.0]
@@ -61,7 +61,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
       - label: n_atlantic_subpolar_monthly
         names: [sst]
         lat_extent: [50.0, 65.0]
@@ -71,7 +70,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
       - label: acc_monthly
         names: [sst]
         lat_extent: [-60.0, -45.0]
@@ -81,7 +79,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
       - label: n_pacific_gyre_monthly
         names: [sst]
         lat_extent: [25.0, 40.0]
@@ -91,7 +88,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
       - label: nino3_nino34_monthly
         names: [sst]
         lat_extent: [-5.0, 5.0]
@@ -101,7 +97,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
       - label: equatorial_pacific_ocean_monthly
         names:
           - sst
@@ -135,7 +130,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
   atmosphere:
     save_prediction_files: false
     save_monthly_files: false
@@ -159,7 +153,6 @@ data_writer:
         save_reference: true
         format:
           name: zarr
-          chunks: {time: 12, sample: 1}
 logging:
   log_to_screen: true
   log_to_wandb: true
