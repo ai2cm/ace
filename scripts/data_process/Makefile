@@ -356,6 +356,14 @@ cm4_piControl_ocean_stats:
 cm4_1pctCO2_ocean_stats:
 	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-$(RESOLUTION)-140yr.yaml
 
+.PHONY: cm4_piControl_ocean_ice_budget_stats
+cm4_piControl_ocean_ice_budget_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-ice-budget-$(RESOLUTION)-200yr.yaml
+
+.PHONY: cm4_1pctCO2_ocean_ice_budget_stats
+cm4_1pctCO2_ocean_ice_budget_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-ice-budget-$(RESOLUTION)-140yr.yaml
+
 .PHONY: cm4_piControl_ocean_1daily_stats
 cm4_piControl_ocean_1daily_stats:
 	./compute_stats.sh --config configs/CM4-piControl-ocean-$(RESOLUTION)-1daily-200yr.yaml
