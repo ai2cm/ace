@@ -737,13 +737,7 @@ def test_resume_after_interrupted_training_during_epoch(
 def test_resume_at_epoch_boundary_does_not_re_enter_the_trained_epoch(
     tmp_path: str,
 ):
-    """A checkpoint written at an epoch boundary must skip straight to validation.
-
-    The restart checkpoint is saved before ``_epochs_trained`` is incremented,
-    so that a resume re-runs the validation and inference the interrupted job
-    never got to. That leaves ``current_epoch_num_batches_seen`` at a full
-    epoch, and re-entering the epoch yields an empty batch subset.
-    """
+    """Resuming from an epoch-boundary checkpoint goes straight to validation."""
     n_train_batches = 10
     stepper_state = {"foo": "bar"}
     config, trainer = get_trainer(
@@ -753,8 +747,7 @@ def test_resume_at_epoch_boundary_does_not_re_enter_the_trained_epoch(
         max_epochs=2,
         n_train_batches=n_train_batches,
     )
-    # Interrupt during the first epoch's validation: by then the boundary
-    # checkpoint is on disk, written before the epoch counter moved.
+    # Fail in the first epoch's validation, after the boundary checkpoint is saved.
     with unittest.mock.patch.object(
         trainer, "_log_first_batch_metrics", return_value=None
     ):
@@ -783,10 +776,8 @@ def test_resume_at_epoch_boundary_does_not_re_enter_the_trained_epoch(
         resumed.train()
 
     stepper = cast(TrainStepper, resumed.stepper)
-    assert stepper.train_batches_seen == []  # the epoch was not re-trained
-    # the post-epoch train-evaluation pass is the only thing that would step
-    # under NullOptimization here (_validation_callback is mocked out), so an
-    # empty list is what says the epoch was not re-entered at all
+    assert stepper.train_batches_seen == []
+    # validation is mocked, so only the train-evaluation pass would add batches here
     assert stepper.validation_batches_seen == []
     validation_callback.assert_called_once_with(1)
     assert resumed._epochs_trained == 1
