@@ -194,7 +194,7 @@ class OceanSaltContentBudgetConfig:
         budget_config: Budget for the expected change of the salt content
             over a step. None holds the salt content fixed, up to the constant
             term.
-        constant_unaccounted_salting: Area-weighted global mean rate of column
+        constant_unaccounted_salting: Ocean area-weighted global mean rate of column
             salt content change added at every step, in psu m / s.
         use_float64: Compute the global sums, budget and correction ratio in
             float64 instead of the data's dtype.
