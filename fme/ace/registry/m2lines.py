@@ -37,8 +37,8 @@ class SamudraBuilder(ModuleConfig):
             that strength is a learned constant, identical for every sample on
             every step. "layer" is the principled choice for a conditioned
             network.
-        lat_pad: Latitude padding mode: "constant" (default, zeros),
-            "reflect", or "pole" (continues across the pole). See ``Samudra``.
+        lat_pad: Latitude padding mode: "constant" (default, zeros) or
+            "pole" (continues across the pole). See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(

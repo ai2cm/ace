@@ -9,6 +9,7 @@ import torch
 from fme.ace.models.ocean.m2lines.layers import (
     BilinearUpsample,
     ConvNeXtBlock,
+    LatPad,
     MultiResolutionFiLM,
     ZonallyPeriodicBilinearUpsample,
     pad_latitude,
@@ -485,37 +486,57 @@ def test_conditioning_rejects_noise_coarser_than_the_block():
         conditioning(torch.zeros(1, 3, 16, 32), torch.randn(1, 2, 4, 8))
 
 
-def _old_convnext_forward(block: ConvNeXtBlock, x: torch.Tensor) -> torch.Tensor:
-    """ConvNeXtBlock.forward as it was before ``lat_pad`` existed (no
-    conditioning, no LayerNorm): longitude pad, then zero latitude pad."""
+def _reference_convnext_forward(
+    block: ConvNeXtBlock, x: torch.Tensor, lat_pad: LatPad
+) -> torch.Tensor:
+    """ConvNeXtBlock.forward (no conditioning, no LayerNorm) with ``lat_pad``
+    written out at each conv."""
     skip = block.skip_module(x)
     for layer in block.convblock:
         if isinstance(layer, torch.nn.Conv2d) and layer.kernel_size[0] != 1:
+            x = pad_latitude(x, block.N_pad, block.N_pad, lat_pad)
             x = torch.nn.functional.pad(
                 x, (block.N_pad, block.N_pad, 0, 0), mode=block.pad
-            )
-            x = torch.nn.functional.pad(
-                x, (0, 0, block.N_pad, block.N_pad), mode="constant"
             )
         x = layer(x)
     return skip + x
 
 
-def _old_samudra_forward(model: Samudra, fts: torch.Tensor) -> torch.Tensor:
-    """Samudra.forward as it was before ``lat_pad`` existed, with zero
-    latitude padding at every site."""
+def _reference_upsample(
+    x: torch.Tensor, zonally_periodic: bool, lat_pad: LatPad
+) -> torch.Tensor:
+    """Samudra's 2x upsampler, with ``lat_pad`` written out when periodic."""
+    if not zonally_periodic:
+        return torch.nn.functional.interpolate(x, scale_factor=2, mode="bilinear")
+    height, width = x.shape[-2:]
+    n_lat = 0 if lat_pad == "constant" else 1
+    x = pad_latitude(x, n_lat, n_lat, lat_pad)
+    x = torch.nn.functional.pad(x, (1, 1, 0, 0), mode="circular")
+    x = torch.nn.functional.interpolate(
+        x, scale_factor=2, mode="bilinear", align_corners=False
+    )
+    return x[..., 2 * n_lat : 2 * (n_lat + height), 2 : 2 * (1 + width)]
+
+
+def _reference_samudra_forward(
+    model: Samudra, fts: torch.Tensor, lat_pad: LatPad
+) -> torch.Tensor:
+    """Samudra.forward with ``lat_pad`` written out at every site: block convs,
+    the final conv, the upsampler, and the decoder refill. Under "constant" it
+    is the original forward, since zero rows pad the same before or after
+    the longitude padding."""
     temp: list[torch.Tensor] = []
     count = 0
     for layer in model.layers:
         if isinstance(layer, torch.nn.Conv2d):
+            fts = pad_latitude(fts, model.N_pad, model.N_pad, lat_pad)
             fts = torch.nn.functional.pad(
                 fts, (model.N_pad, model.N_pad, 0, 0), mode=model.pad
             )
-            fts = torch.nn.functional.pad(
-                fts, (0, 0, model.N_pad, model.N_pad), mode="constant"
-            )
         if isinstance(layer, ConvNeXtBlock):
-            fts = _old_convnext_forward(layer, fts)
+            fts = _reference_convnext_forward(layer, fts, lat_pad)
+        elif isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample):
+            fts = _reference_upsample(fts, model.zonally_periodic_upsample, lat_pad)
         else:
             fts = layer(fts)
         if count < model.num_steps:
@@ -526,11 +547,9 @@ def _old_samudra_forward(model: Samudra, fts: torch.Tensor) -> torch.Tensor:
             skip = temp[2 * model.num_steps - count - 1]
             pad_h = skip.shape[2] - fts.shape[2]
             pad_w = skip.shape[3] - fts.shape[3]
+            fts = pad_latitude(fts, pad_h // 2, pad_h - pad_h // 2, lat_pad)
             fts = torch.nn.functional.pad(
                 fts, (pad_w // 2, pad_w - pad_w // 2, 0, 0), mode=model.pad
-            )
-            fts = torch.nn.functional.pad(
-                fts, (0, 0, pad_h // 2, pad_h - pad_h // 2), mode="constant"
             )
             fts = fts + skip
             count += 1
@@ -569,9 +588,24 @@ def test_samudra_default_lat_pad_matches_original_forward_bitwise(
     torch.manual_seed(1)
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
-        reference = _old_samudra_forward(model, x)
+        reference = _reference_samudra_forward(model, x, "constant")
         assert torch.equal(model(x), reference)
         assert torch.equal(explicit(x), reference)
+
+
+@pytest.mark.parametrize("zonally_periodic_upsample", [False, True])
+def test_samudra_pole_lat_pad_matches_reference_forward_bitwise(
+    zonally_periodic_upsample: bool,
+):
+    """Pole padding reaches every site: block convs, the final conv, the
+    decoder refill, and the periodic upsampler."""
+    model = _small_samudra(
+        zonally_periodic_upsample=zonally_periodic_upsample, lat_pad="pole"
+    )
+    torch.manual_seed(1)
+    x = torch.randn(2, 2, *_SMALL_SHAPE)
+    with torch.no_grad():
+        assert torch.equal(model(x), _reference_samudra_forward(model, x, "pole"))
 
 
 def test_pad_latitude_pole_rows():
@@ -624,10 +658,8 @@ def test_pad_latitude_pole_odd_width_averages_the_two_antipodal_columns():
     torch.testing.assert_close(padded[0], expected)
 
 
-def test_pad_latitude_reflect_and_constant():
+def test_pad_latitude_constant():
     x = torch.randn(1, 1, 5, 4)
-    torch.testing.assert_close(pad_latitude(x, 2, 1, "reflect")[0, 0, 0], x[0, 0, 2])
-    torch.testing.assert_close(pad_latitude(x, 2, 1, "reflect")[0, 0, -1], x[0, 0, 3])
     constant = pad_latitude(x, 2, 1, "constant")
     assert torch.equal(constant[..., [0, 1, -1], :], torch.zeros(1, 1, 3, 4))
 
@@ -637,9 +669,7 @@ def test_pad_latitude_pole_rejects_padding_beyond_the_height():
         pad_latitude(torch.zeros(1, 1, 2, 4), 3, 0, "pole")
 
 
-_LAT_PAD_COMBINATIONS = list(
-    itertools.product(["constant", "reflect", "pole"], [False, True])
-)
+_LAT_PAD_COMBINATIONS = list(itertools.product(["constant", "pole"], [False, True]))
 
 
 @pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
@@ -677,12 +707,11 @@ def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
     assert out.shape == (1, 1, 180, 360)
 
 
-@pytest.mark.parametrize("lat_pad", ["reflect", "pole"])
-def test_samudra_lat_pad_options_change_the_output(lat_pad):
+def test_samudra_pole_lat_pad_changes_the_output():
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
         default = _small_samudra()(x)
-        changed = _small_samudra(lat_pad=lat_pad)(x)
+        changed = _small_samudra(lat_pad="pole")(x)
     assert not torch.allclose(default, changed)
 
 
@@ -700,11 +729,10 @@ def test_samudra_lat_pad_options_keep_state_dict(lat_pad, zonally_periodic_upsam
     model.load_state_dict(default.state_dict(), strict=True)
 
 
-@pytest.mark.parametrize("lat_pad", ["reflect", "pole"])
-def test_zonally_periodic_upsample_lat_pad(lat_pad):
+def test_zonally_periodic_upsample_pole_lat_pad():
     x = torch.randn(2, 3, 9, 18)
     default = ZonallyPeriodicBilinearUpsample()(x)
-    padded = ZonallyPeriodicBilinearUpsample(lat_pad=lat_pad)(x)
+    padded = ZonallyPeriodicBilinearUpsample(lat_pad="pole")(x)
     assert padded.shape == default.shape
     # only the outermost upsampled row at each latitude edge reads the padding
     torch.testing.assert_close(padded[..., 1:-1, :], default[..., 1:-1, :])
@@ -713,13 +741,12 @@ def test_zonally_periodic_upsample_lat_pad(lat_pad):
     assert torch.equal(ZonallyPeriodicBilinearUpsample(lat_pad="constant")(x), default)
 
 
-@pytest.mark.parametrize("lat_pad", ["reflect", "pole"])
-def test_samudra_lat_pad_with_noise_conditioning(lat_pad):
+def test_samudra_pole_lat_pad_with_noise_conditioning():
     n_noise = 4
     model = _samudra(
         context_config=_noise_context_config(n_noise),
         conditioned_blocks="all_blocks",
-        lat_pad=lat_pad,
+        lat_pad="pole",
     )
     img_shape = (18, 32)
     out = model(torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape))

@@ -9,7 +9,7 @@ from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
 from .activations import CappedGELU
 
-LatPad = Literal["constant", "reflect", "pole"]
+LatPad = Literal["constant", "pole"]
 
 
 def pad_latitude(
@@ -18,15 +18,15 @@ def pad_latitude(
     """Pad the latitude (second-to-last) axis of ``x`` by ``pad_start`` rows
     before index 0 and ``pad_end`` rows after the last.
 
-    Modes: "constant" pads zeros, "reflect" mirrors about the edge row, and
-    "pole" continues across the pole using the edge rows flipped and rotated
-    180 degrees in longitude (for an odd width, the two columns nearest the
-    antipode are averaged).
+    Modes: "constant" pads zeros, and "pole" continues across the pole using
+    the edge rows flipped and rotated 180 degrees in longitude (for an odd
+    width, the two columns nearest the antipode are averaged). "pole" is exact
+    only for scalar fields (vector components change sign across the pole) and
+    only where the edge rows touch the pole, so levels that dropped a row in
+    pooling are approximate.
     """
     if mode == "constant":
         return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
-    if mode == "reflect":
-        return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="reflect")
     if mode == "pole":
         height = x.shape[-2]
         if pad_start > height or pad_end > height:
@@ -208,7 +208,8 @@ class ConvNeXtBlock(torch.nn.Module):
     None).
 
     ``pad`` is the longitude padding mode and ``lat_pad`` the latitude one
-    (see ``pad_latitude``).
+    (see ``pad_latitude``). Latitude is padded before longitude, which "pole"
+    relies on for the corners.
     """
 
     def __init__(

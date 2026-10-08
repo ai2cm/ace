@@ -1,7 +1,7 @@
 import dataclasses
 import functools
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import numpy as np
 import torch
@@ -49,10 +49,12 @@ class Samudra(torch.nn.Module):
         longitude axis in the decoder, removing the lon=0 seam introduced by the
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
-    lat_pad : {"constant", "reflect", "pole"}, optional
+    lat_pad : {"constant", "pole"}, optional
         Latitude padding used wherever the network pads latitude (see
-        ``pad_latitude``). By default "constant", the original behavior. Adds
-        no parameters, so checkpoints load across modes.
+        ``pad_latitude``), except that the upsampler ignores it when
+        ``zonally_periodic_upsample`` is False and, under "constant", the
+        periodic upsampler does not pad latitude. By default "constant", the
+        original behavior. Adds no parameters, so checkpoints load across modes.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -113,7 +115,7 @@ class Samudra(torch.nn.Module):
         self.upscale_factor = upscale_factor
         self.checkpoint_strategy = checkpoint_strategy
         self.zonally_periodic_upsample = zonally_periodic_upsample
-        if lat_pad not in ("constant", "reflect", "pole"):
+        if lat_pad not in get_args(LatPad):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
         self.lat_pad = lat_pad
         upsample_cls = (
