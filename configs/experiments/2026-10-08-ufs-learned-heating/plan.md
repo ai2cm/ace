@@ -87,8 +87,9 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
       `ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh` = `01M4E83P5GMXQEN2JN8SZFB5BN`.
 - [x] Corrector option + tests (ace 719be7d38).
 - [x] Configs and launcher (ace ff18a0fd9).
-- [x] Launched 2026-10-08 `samudra-ufs4deg-{resid-cap0005,ff-ohc}-learnedheat` (200 epochs,
-      as the from-scratch arms; wandb group samudra-ufs4deg-learnedheat).
+- [ ] Launch `samudra-ufs4deg-{resid-cap0005,ff-ohc}-learnedheat` (200 epochs, as the
+      from-scratch arms; wandb group samudra-ufs4deg-learnedheat) once the training-dataset
+      upload commits (11.5k files; first launch attempt was refused as "uncommitted dataset").
 - [ ] Watch the first epochs for config failures (new output channel, stats entries,
       corrector source).
 - [ ] Evaluate: inline drift vs the constant-0 twins; the learned field's ocean mean vs the
