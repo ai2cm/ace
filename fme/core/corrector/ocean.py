@@ -131,8 +131,20 @@ class SurfaceEnergyFluxCorrectionConfig:
         cells that are entirely ice-free ocean, and the network prediction
         passes through unweighted everywhere else.
 
+    With ``flux_source`` "sis2", net_flux (per total cell area) is the SIS2/OM4
+    open-ocean flux instead of the AM4 one::
+
+        Q        = SW + LW - LH - SH - L_f SNOWFL + P_h
+        net_flux = Q - calving_residue + s hfrunoffds
+        P_h      = s (hfrainds + hfevapds), else the AM4 precipitation heat
+
+    with terms from ``surface_flux_term`` and s = sea_surface_fraction; it
+    needs ``hfds_total_area`` in gen_data.
+
     Parameters:
         method: Method to use for the correction.
+        flux_source: "am4" (AM4 forcing) or "sis2" (SIS2/OM4 fluxes); also the
+            anchor flux F of ``open_ocean``.
         sea_ice: Optional extensive correction of the generated
             ``hfds_total_area`` over the sea-ice support; ``method`` then
             applies only off that support.
@@ -142,9 +154,12 @@ class SurfaceEnergyFluxCorrectionConfig:
     """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    flux_source: "FluxSource" = "am4"
     sea_ice: "SeaIceHfdsCorrectionConfig | None" = None
     open_ocean: "OpenOceanAnchorConfig | None" = None
 
+
+FluxSource = Literal["am4", "sis2"]
 
 SIS2_LATENT_HEAT_OF_FUSION = 3.34e5  # J/kg, ecand3_transform.LF
 SIS2_CP_ICE = 2100.0  # J/kg/K
@@ -220,7 +235,7 @@ class OpenOceanAnchorConfig:
     On M = (input ocean_fraction == 1 and ssf > 0) minus the sea-ice support::
 
         Q_hat  = sum of ``q_terms``                   generated SIS2-side flux
-        F      = AM4 net surface energy flux x ssf    (``prescribed_open_ocean``'s)
+        F      = net surface flux x ssf     (AM4, or Q of ``flux_source`` "sis2")
         Q      = Q_hat + <F>_B - <Q_hat>_B            <x>_B: A-weighted mean on B ∩ M
         hfds   = Q - calving_residue - minus_hfrunoffds
 
@@ -306,6 +321,7 @@ class SurfaceEnergyFluxCorrection:
     """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    flux_source: FluxSource = "am4"
     sea_ice: "SeaIceHfdsCorrection | None" = None
     open_ocean: "OpenOceanAnchor | None" = None
 
@@ -326,6 +342,7 @@ class SurfaceEnergyFluxCorrection:
             gen_data,
             forcing_data,
             method=self.method,
+            flux_source=self.flux_source,
         )
         if self.sea_ice is None and self.open_ocean is None:
             return corrected, corrector_state
@@ -431,6 +448,7 @@ class OpenOceanAnchor:
 
     config: OpenOceanAnchorConfig
     area_weight: AreaWeight
+    flux_source: FluxSource = "am4"
 
     def __call__(
         self,
@@ -464,7 +482,7 @@ class OpenOceanAnchor:
                 raise
 
         q_hat = sum((term(n) for n in cfg.q_terms), torch.zeros_like(hfds))
-        am4 = _compute_ocean_net_surface_energy_flux(forcing_data, sst) * ssf
+        F = _open_ocean_q(self.flux_source, gen_data, forcing_data, ssf, sst)
         anchored = (inp.ocean_fraction == 1) & (ssf > 0) & ~on_ice
         w = torch.where(
             anchored,
@@ -473,7 +491,7 @@ class OpenOceanAnchor:
         )
         q = (
             q_hat
-            + block_mean(am4, w, cfg.block_size)
+            + block_mean(F, w, cfg.block_size)
             - block_mean(q_hat, w, cfg.block_size)
         )
         return anchored, q - term("calving_residue") - term("minus_hfrunoffds")
@@ -607,6 +625,10 @@ _SIS2_FLUX_SOURCES["precipitation_heat"] = [
         ("precipitation_heat_total_area",),
         lambda d, ssf: d["precipitation_heat_total_area"],
     ),
+    (
+        ("hfrainds", "hfevapds"),
+        lambda d, ssf: (d["hfrainds"] + d["hfevapds"]) * ssf,
+    ),
 ]
 
 OPEN_OCEAN_Q_SOURCE = {
@@ -652,6 +674,29 @@ def surface_flux_term(
             if all(n in data for n in names):
                 return combine(data, sea_surface_fraction)
     raise KeyError(f"no source for sea-ice flux term {term!r}")
+
+
+def _open_ocean_q(
+    flux_source: FluxSource,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    sea_surface_fraction: torch.Tensor,
+    sst: torch.Tensor,
+) -> torch.Tensor:
+    """Open-ocean net surface energy flux Q before calving and runoff heat,
+    W/m**2 per total cell area.
+    """
+    if flux_source == "am4":
+        return (
+            _compute_ocean_net_surface_energy_flux(forcing_data, sst)
+            * sea_surface_fraction
+        )
+    args = (gen_data, forcing_data, sea_surface_fraction)
+    return (
+        -surface_flux_term("minus_f_top", *args)
+        - surface_flux_term("lf_snowfl", *args)
+        + surface_flux_term("precipitation_heat", *args, sst=sst)
+    )
 
 
 @dataclasses.dataclass
@@ -852,9 +897,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                         timestep_seconds,
                     )
                 if sefc.open_ocean is not None:
-                    open_ocean = OpenOceanAnchor(sefc.open_ocean, area_weight)
+                    open_ocean = OpenOceanAnchor(
+                        sefc.open_ocean, area_weight, sefc.flux_source
+                    )
             corrections.append(
-                SurfaceEnergyFluxCorrection(sefc.method, sea_ice, open_ocean)
+                SurfaceEnergyFluxCorrection(
+                    sefc.method, sefc.flux_source, sea_ice, open_ocean
+                )
             )
         if self.ocean_heat_content_correction is not None:
             corrections.append(
@@ -920,6 +969,7 @@ def _correct_hfds(
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"],
+    flux_source: FluxSource = "am4",
 ) -> TensorDict:
     """Apply surface energy flux correction to the generated hfds.
 
@@ -934,15 +984,22 @@ def _correct_hfds(
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction
-    net_flux = _compute_ocean_net_surface_energy_flux(
-        forcing_data, input.sea_surface_temperature
-    )
+    sst = input.sea_surface_temperature
     out: TensorDict = {}
-    if "hfds" in gen_data:
-        hfds_name = "hfds"
+    hfds_name = "hfds" if "hfds" in gen_data else "hfds_total_area"
+    if flux_source == "sis2":
+        if hfds_name == "hfds":
+            raise ValueError("flux_source 'sis2' needs hfds_total_area in gen_data")
+        ssf = forcing.sea_surface_fraction
+        net_flux = (
+            _open_ocean_q("sis2", gen_data, forcing_data, ssf, sst)
+            - surface_flux_term("calving_residue", gen_data, forcing_data, ssf)
+            - surface_flux_term("minus_hfrunoffds", gen_data, forcing_data, ssf)
+        )
     else:
-        hfds_name = "hfds_total_area"
-        net_flux = net_flux * forcing.sea_surface_fraction
+        net_flux = _compute_ocean_net_surface_energy_flux(forcing_data, sst)
+        if hfds_name == "hfds_total_area":
+            net_flux = net_flux * forcing.sea_surface_fraction
     gen_hfds = gen_data[hfds_name]
     if method == "residual_prediction":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds

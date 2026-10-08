@@ -1333,3 +1333,154 @@ def test_open_ocean_config_from_state():
     assert sef is not None and sef.open_ocean is not None
     oo = sef.open_ocean
     assert (oo.q_terms, oo.block_size, oo.coastal) == (_Q_A, 5, "method")
+
+
+# --- SIS2 flux source for the method and the open-ocean anchor -------------
+
+_SIS2_GEN = [
+    "SNOWFL_total_area",
+    "SW_total_area",
+    "LW_total_area",
+    "LH_total_area",
+    "SH_total_area",
+    "calving_residue_total_area",
+]
+
+
+def _sis2_forcing_case(seed=1):
+    """_oo_case with SIS2/OM4 fluxes as forcing and no AM4 fields."""
+    input_data, gen_data, forcing_data = _oo_case(seed)
+    g = torch.Generator().manual_seed(seed + 100)
+    for n in _make_atmos_forcing_data((1,), device="cpu"):
+        del forcing_data[n]
+    for n in _SIS2_GEN:
+        forcing_data[n] = gen_data.pop(n)
+    forcing_data["hfrainds"] = torch.rand(_OO_SHAPE, generator=g) * 20.0
+    forcing_data["hfevapds"] = -torch.rand(_OO_SHAPE, generator=g) * 30.0
+    return input_data, gen_data, forcing_data
+
+
+def _sis2_q(forcing_data):
+    """Q = SW + LW - LH - SH - L_f SNOWFL + s (hfrainds + hfevapds)."""
+    f = forcing_data
+    return (
+        f["SW_total_area"]
+        + f["LW_total_area"]
+        - f["LH_total_area"]
+        - f["SH_total_area"]
+        - _LF * f["SNOWFL_total_area"]
+        + (f["hfrainds"] + f["hfevapds"]) * f["sea_surface_fraction"]
+    )
+
+
+def _sis2_hfds(forcing_data):
+    """hfds = Q - calving_residue + s hfrunoffds."""
+    return (
+        _sis2_q(forcing_data)
+        - forcing_data["calving_residue_total_area"]
+        + forcing_data["hfrunoffds"] * forcing_data["sea_surface_fraction"]
+    )
+
+
+def test_surface_flux_term_om4_precipitation_heat():
+    ssf = torch.full((2, 2), 0.5)
+    om4 = {"hfrainds": torch.full((2, 2), 4.0), "hfevapds": torch.full((2, 2), -6.0)}
+    am4 = _make_atmos_forcing_data((2, 2), device="cpu")
+    sst = torch.full((2, 2), 300.0)
+    # OM4 heat content in forcing wins over the AM4 form
+    torch.testing.assert_close(
+        surface_flux_term("precipitation_heat", {}, {**am4, **om4}, ssf, sst=sst),
+        (om4["hfrainds"] + om4["hfevapds"]) * ssf,
+    )
+
+
+def test_prescribed_open_ocean_sis2_flux_source():
+    data = _sis2_forcing_case()
+    input_data, gen_data, forcing_data = data
+    hfds = _run(
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean", flux_source="sis2"
+            )
+        ),
+        data,
+    ).cpu()
+    open_ = (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
+    expected = torch.where(open_, _sis2_hfds(forcing_data), gen_data["hfds_total_area"])
+    torch.testing.assert_close(hfds, expected)
+
+
+def test_sis2_flux_source_needs_hfds_total_area():
+    input_data, gen_data, forcing_data = _sis2_forcing_case()
+    gen_data["hfds"] = gen_data.pop("hfds_total_area")
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean", flux_source="sis2"
+        )
+    )
+    with pytest.raises(ValueError, match="hfds_total_area"):
+        _run(config, (input_data, gen_data, forcing_data))
+
+
+def test_open_ocean_anchor_sis2_flux_source_block_integrals():
+    data = _sis2_forcing_case()
+    input_data, gen_data, forcing_data = data
+    n = 3
+    config = _oo_config(_Q_O, n)
+    assert config.surface_energy_flux_correction is not None
+    config.surface_energy_flux_correction.flux_source = "sis2"
+    hfds = _run(config, data).cpu().double()
+    f = {k: v.double() for k, v in forcing_data.items()}
+    q = (
+        hfds
+        + f["calving_residue_total_area"]
+        - f["hfrunoffds"] * f["sea_surface_fraction"]
+    )
+    F = _sis2_q(f)
+    M = _anchored_mask(input_data)
+    w = torch.where(M, _OO_AREA.double() * f["sea_surface_fraction"], 0.0)
+    shape = (_OO_SHAPE[0], 6 // n, n, 6 // n, n)
+    scale = (w * F.abs()).sum()
+    torch.testing.assert_close(
+        (w * q).reshape(shape).sum(dim=(-3, -1)),
+        (w * F).reshape(shape).sum(dim=(-3, -1)),
+        atol=1e-5 * scale,
+        rtol=0,
+    )
+    assert not torch.allclose(q[M], F[M])
+
+
+def test_flux_source_config_from_state():
+    config = OceanCorrectorConfig.from_state(
+        {"surface_energy_flux_correction": {"method": "prescribed_open_ocean"}}
+    )
+    sef = config.surface_energy_flux_correction
+    assert sef is not None and sef.flux_source == "am4"
+
+
+def test_prescribed_open_ocean_sis2_with_am4_precipitation_heat():
+    input_data, gen_data, forcing_data = _sis2_forcing_case()
+    del forcing_data["hfrainds"], forcing_data["hfevapds"]
+    am4 = _make_atmos_forcing_data(_OO_SHAPE, device="cpu")
+    forcing_data["PRATEsfc"] = am4["PRATEsfc"]
+    forcing_data["LHTFLsfc"] = am4["LHTFLsfc"]
+    hfds = _run(
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean", flux_source="sis2"
+            )
+        ),
+        (input_data, gen_data, forcing_data),
+    ).cpu()
+    ssf = forcing_data["sea_surface_fraction"]
+    p_h = (
+        3992.0
+        * (am4["PRATEsfc"] - am4["LHTFLsfc"] / _LV)
+        * (input_data["sst"] - 273.15)
+        * ssf
+    )
+    no_om4 = {**forcing_data, "hfrainds": torch.zeros(_OO_SHAPE)}
+    no_om4["hfevapds"] = torch.zeros(_OO_SHAPE)
+    open_ = (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
+    expected = torch.where(open_, _sis2_hfds(no_om4) + p_h, gen_data["hfds_total_area"])
+    torch.testing.assert_close(hfds, expected)
