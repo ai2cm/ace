@@ -15,6 +15,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_water_x_velocity": ["uo_"],
         "sea_water_y_velocity": ["vo_"],
         "sea_surface_height_above_geoid": ["zos"],
+        "sea_surface_height": ["SSH"],
         "sea_surface_temperature": ["sst"],
         "sea_ice_fraction": ["sea_ice_fraction"],
         "sea_ice_thickness": ["HI"],
@@ -133,6 +134,11 @@ class OceanData:
     def sea_surface_height_above_geoid(self) -> torch.Tensor:
         """Returns sea surface height above geoid."""
         return self._get("sea_surface_height_above_geoid")
+
+    @property
+    def sea_surface_height(self) -> torch.Tensor:
+        """Returns the sea surface height (SSH), including its global mean."""
+        return self._get("sea_surface_height")
 
     @property
     def ocean_heat_content(self) -> torch.Tensor:

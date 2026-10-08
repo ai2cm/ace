@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-import warnings
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
@@ -10,6 +9,7 @@ from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
+    REFERENCE_SALINITY_PSU,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
     SPHERE_AREA_M2,
 )
@@ -21,8 +21,6 @@ from fme.core.corrector.registry import (
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.device import get_device
-from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
@@ -146,43 +144,41 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
-def _sea_ice_volume_output_mask(
-    spatial_mask_provider: SpatialMaskProviderABC,
-) -> torch.Tensor | None:
-    """Cells where the stepper keeps the sea_ice_volume prediction, or None for
-    every cell.
-    """
-    mask = spatial_mask_provider.get_mask_tensor_for("sea_ice_volume")
-    if mask is None:
-        return None
-    # rounded as the stepper's output masking does, so the two agree
-    return torch.round(mask.to(get_device())) != 0
+def _require_sea_surface_fraction_weighting(
+    budget_type: str, weight_by_sea_surface_fraction: bool
+) -> None:
+    if not weight_by_sea_surface_fraction:
+        raise ValueError(
+            f"The {budget_type!r} salt budget requires "
+            "weight_by_sea_surface_fraction=True."
+        )
 
 
 @dataclasses.dataclass
-class IceVolumeSaltBudgetConfig:
-    """Salt budget from the change of the total sea ice volume.
+class SeaSurfaceHeightSaltBudgetConfig:
+    """Salt budget from the change of the sea surface height,
+    -S_ref * sum((SSH_gen - SSH_input) * ssf * A). Requires ``SSH``, the height
+    including its global mean, in the inputs and outputs.
 
     Parameters:
-        slope_psu: Change in total salt content (psu m**3) per change in total
-            sea ice volume (m**3).
+        reference_salinity_psu: Salinity at which the added water dilutes the
+            salt, in psu.
         type: Selects this budget.
     """
 
-    slope_psu: float
-    type: Literal["ice_volume"] = "ice_volume"
+    reference_salinity_psu: float = REFERENCE_SALINITY_PSU
+    type: Literal["sea_surface_height"] = "sea_surface_height"
+
+    def validate(self, weight_by_sea_surface_fraction: bool) -> None:
+        _require_sea_surface_fraction_weighting(
+            self.type, weight_by_sea_surface_fraction
+        )
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
-        Distributed.get_instance().require_no_spatial_parallelism(
-            "The ice volume salt budget sums sea_ice_volume over the local "
-            "spatial chunk only."
-        )
-        return IceVolumeSaltBudget(
-            self.slope_psu, _sea_ice_volume_output_mask(spatial_mask_provider)
-        )
+        return SeaSurfaceHeightSaltBudget(self.reference_salinity_psu)
 
 
-SaltBudgetConfig = IceVolumeSaltBudgetConfig
+SaltBudgetConfig = SeaSurfaceHeightSaltBudgetConfig
 
 
 @dataclasses.dataclass
@@ -202,12 +198,22 @@ class OceanSaltContentBudgetConfig:
             salt content change added at every step, in psu m / s.
         use_float64: Compute the global sums, budget and correction ratio in
             float64 instead of the data's dtype.
+        weight_by_sea_surface_fraction: Weight the column salt content, and
+            the area the constant term applies over, by the sea surface
+            fraction.
     """
 
     method: Literal["scaled_salinity"]
     budget_config: SaltBudgetConfig | None = None
     constant_unaccounted_salting: float = 0.0
     use_float64: bool = True
+    weight_by_sea_surface_fraction: bool = True
+
+    def __post_init__(self):
+        # validated here rather than in each budget config's __post_init__,
+        # since dacite discards errors raised while matching a union member
+        if self.budget_config is not None:
+            self.budget_config.validate(self.weight_by_sea_surface_fraction)
 
 
 @dataclasses.dataclass
@@ -350,6 +356,7 @@ class OceanSaltContentCorrection:
     method: Literal["scaled_salinity"]
     budget: SaltBudget | None
     unaccounted_salting: float
+    weight_by_sea_surface_fraction: bool
     use_float64: bool
 
     def __call__(
@@ -379,6 +386,7 @@ class OceanSaltContentCorrection:
             self.method,
             self.budget,
             self.unaccounted_salting,
+            self.weight_by_sea_surface_fraction,
             self.use_float64,
         )
         return corrected, corrector_state
@@ -438,18 +446,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     sif.setdefault("zero_where_ice_free_names", []).append(
                         thickness_name
                     )
-        salt = state_copy.get("ocean_salt_content_correction")
-        if isinstance(salt, dict) and "ice_volume_salt_slope_psu" in salt:
-            warnings.warn(
-                "ocean_salt_content_correction.ice_volume_salt_slope_psu is "
-                "deprecated; use budget_config with type 'ice_volume'.",
-                DeprecationWarning,
-            )
-            salt = dict(salt)
-            slope = salt.pop("ice_volume_salt_slope_psu")
-            if slope != 0.0:
-                salt["budget_config"] = {"type": "ice_volume", "slope_psu": slope}
-            state_copy["ocean_salt_content_correction"] = salt
         return state_copy
 
     def _get_corrector(
@@ -520,6 +516,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                         else salt_config.budget_config.build(spatial_mask_provider)
                     ),
                     salt_config.constant_unaccounted_salting,
+                    salt_config.weight_by_sea_surface_fraction,
                     salt_config.use_float64,
                 )
             )
@@ -676,18 +673,16 @@ def _force_conserve_ocean_heat_content(
 
 
 @dataclasses.dataclass
-class IceVolumeSaltBudget:
-    """Salt budget from the change of the total sea ice volume.
+class SeaSurfaceHeightSaltBudget:
+    """Salt budget from the change of the sea surface height,
+    -S_ref * sum((SSH_gen - SSH_input) * ssf * A).
 
     Parameters:
-        slope_psu: Change in total salt content (psu m**3) per change in total
-            sea ice volume (m**3).
-        ice_volume_mask: Cells whose sea_ice_volume prediction the stepper
-            keeps; None counts every cell.
+        reference_salinity_psu: Salinity at which the added water dilutes the
+            salt, in psu.
     """
 
-    slope_psu: float
-    ice_volume_mask: torch.Tensor | None
+    reference_salinity_psu: float
 
     def __call__(
         self,
@@ -699,23 +694,18 @@ class IceVolumeSaltBudget:
         dtype: torch.dtype,
     ) -> torch.Tensor:
         try:
-            gen_ice_volume = gen.sea_ice_volume.to(dtype)
-            input_ice_volume = input.sea_ice_volume.to(dtype)
+            gen_height = gen.sea_surface_height.to(dtype)
+            input_height = input.sea_surface_height.to(dtype)
         except KeyError as err:
             raise ValueError(
-                "sea_ice_volume is required by the ice volume salt budget."
+                "The sea surface height salt budget requires SSH (not zos) in the "
+                "input and generated data."
             ) from err
-        ice_volume_change = gen_ice_volume - input_ice_volume
-        if self.ice_volume_mask is not None:
-            ice_volume_change = torch.where(
-                self.ice_volume_mask,
-                ice_volume_change,
-                torch.zeros_like(ice_volume_change),
-            )
-        # sea_ice_volume is per cell (m**3), so its total is a plain sum over
-        # the local grid; IceVolumeSaltBudgetConfig rejects spatial parallelism.
-        total_ice_volume_change = ice_volume_change.sum(dim=(-2, -1), keepdim=True)
-        return self.slope_psu * total_ice_volume_change
+        # NaN over land
+        height_change = torch.nan_to_num(gen_height - input_height)  # m
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+        added_water_volume = global_total(height_change * sea_surface_fraction)  # m**3
+        return -self.reference_salinity_psu * added_water_volume
 
 
 def _force_conserve_ocean_salt_content(
@@ -728,6 +718,7 @@ def _force_conserve_ocean_salt_content(
     method: Literal["scaled_salinity"],
     budget: SaltBudget | None,
     unaccounted_salting: float,
+    weight_by_sea_surface_fraction: bool,
     use_float64: bool,
 ) -> TensorDict:
     if method != "scaled_salinity":
@@ -745,13 +736,22 @@ def _force_conserve_ocean_salt_content(
         weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
         return weighted_sum * SPHERE_AREA_M2
 
+    if weight_by_sea_surface_fraction:
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+    else:
+        sea_surface_fraction = torch.ones(
+            (), dtype=dtype, device=gen.data["so_0"].device
+        )
+
     def global_salt_content(data: OceanData) -> torch.Tensor:
         column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
-        return global_total(column)  # psu m**3
+        return global_total(column * sea_surface_fraction)  # psu m**3
 
     global_gen_salt_content = global_salt_content(gen)
     global_input_salt_content = global_salt_content(input)
-    ocean_area = global_total(torch.ones_like(gen.data["so_0"], dtype=dtype))  # m**2
+    ocean_area = global_total(
+        torch.ones_like(gen.data["so_0"], dtype=dtype) * sea_surface_fraction
+    )  # m**2
     expected_change = unaccounted_salting * timestep_seconds * ocean_area
     if budget is not None:
         expected_change = expected_change + budget(
