@@ -18,3 +18,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs0|01M4EC
 cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs1|01M4EC5GKG4Z3TBJF2WHAFPWTE|cancelled|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs0|01M4EPQN3PZKBK7SSS2QX1KT3B|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs1|01M4EPQZ6NJH6JNZ1GGGEYGYYF|training|best_inference_ckpt|normal|--min-runtime 8h
