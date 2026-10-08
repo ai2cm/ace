@@ -217,7 +217,7 @@ OpenOceanQTerm = Literal[
 class OpenOceanAnchorConfig:
     """AM4-anchored generated flux on open cells (issue 25 ``gen_shift_block{n}``).
 
-    On M = (input ocean_fraction == 1) minus the sea-ice support::
+    On M = (input ocean_fraction == 1 and ssf > 0) minus the sea-ice support::
 
         Q_hat  = sum of ``q_terms``                   generated SIS2-side flux
         F      = AM4 net surface energy flux x ssf    (``prescribed_open_ocean``'s)
@@ -465,7 +465,7 @@ class OpenOceanAnchor:
 
         q_hat = sum((term(n) for n in cfg.q_terms), torch.zeros_like(hfds))
         am4 = _compute_ocean_net_surface_energy_flux(forcing_data, sst) * ssf
-        anchored = (inp.ocean_fraction == 1) & ~on_ice
+        anchored = (inp.ocean_fraction == 1) & (ssf > 0) & ~on_ice
         w = torch.where(
             anchored,
             self.area_weight.local(self.area_weight.field(input_data, forcing_data)),

@@ -1195,7 +1195,8 @@ def _method_only(data):
 
 
 def _anchored_mask(input_data):
-    return (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
+    open_ = (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
+    return open_ & (input_data["sea_surface_fraction"] > 0)
 
 
 @pytest.mark.parametrize("q_terms", [_Q_O, _Q_A], ids=["Q_o", "Q_a"])
@@ -1246,6 +1247,18 @@ def test_open_ocean_anchor_off_mask_cells(coastal):
         else _method_only(data).cpu()
     )
     torch.testing.assert_close(hfds[off], expected[off])
+
+
+def test_open_ocean_anchor_excludes_zero_sea_surface_fraction():
+    data = _oo_case()
+    input_data, _, forcing_data = data
+    no_land = torch.zeros(_OO_SHAPE)
+    input_data["land_fraction"] = no_land
+    forcing_data["land_fraction"] = no_land
+    zero_ssf = forcing_data["sea_surface_fraction"] == 0
+    assert zero_ssf.any()
+    hfds = _run(_oo_config(_Q_O), data).cpu()
+    torch.testing.assert_close(hfds[zero_ssf], _method_only(data).cpu()[zero_ssf])
 
 
 def test_open_ocean_anchor_with_sea_ice_keeps_sea_ice_arm():
