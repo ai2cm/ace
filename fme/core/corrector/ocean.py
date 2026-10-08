@@ -133,10 +133,129 @@ class SurfaceEnergyFluxCorrectionConfig:
 
     Parameters:
         method: Method to use for the correction.
+        sea_ice: Optional extensive correction of the generated
+            ``hfds_total_area`` over the sea-ice support; ``method`` then
+            applies only off that support.
+        open_ocean: Optional AM4-anchored correction of the generated
+            ``hfds_total_area`` on open, non-coastal cells off the sea-ice
+            support, in place of ``method`` there.
+        area_weight_name: Forcing variable A weighting the ``sea_ice`` and
+            ``open_ocean`` area means, as in the zos global-mean correction:
+            <X> = area_weighted_mean(A X) / area_weighted_mean(A).
 
     """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    sea_ice: "SeaIceHfdsCorrectionConfig | None" = None
+    open_ocean: "OpenOceanAnchorConfig | None" = None
+    area_weight_name: Literal["sea_surface_fraction", "areacello"] = (
+        "sea_surface_fraction"
+    )
+
+
+SIS2_LATENT_HEAT_OF_FUSION = 3.34e5  # J/kg, ecand3_transform.LF
+SIS2_CP_ICE = 2100.0  # J/kg/K
+SIS2_CP_WATER = 4200.0  # J/kg/K
+SIS2_DTFREEZE_DS = -0.054  # degC/(g/kg)
+SIS2_ICE_LAYER_SALINITY = (0.65, 2.35, 3.03, 3.19)  # g/kg
+
+SeaIceFluxTerm = Literal[
+    "lf_snowfl", "minus_f_top", "calving_residue", "minus_hfrunoffds"
+]
+SEA_ICE_FLUX_TERMS: tuple[SeaIceFluxTerm, ...] = (
+    "lf_snowfl",
+    "minus_f_top",
+    "calving_residue",
+    "minus_hfrunoffds",
+)
+
+
+@dataclasses.dataclass
+class SeaIceHfdsCorrectionConfig:
+    """Extensive ``form_A_sis2`` correction of ``hfds_total_area`` over sea ice.
+
+    Per hemisphere h, on the support S_h (frozen mass > 0 at both step
+    endpoints, ocean cells)::
+
+        r_c     = S_c - (m(k) D(k) - m(k-1) D(k-1)) / dt
+        S       = lf_snowfl + minus_f_top + hfds + calving_residue + minus_hfrunoffds
+        delta_c = -w_c sum_{S_h} a A r / sum_{S_h} a A w
+
+    with a the grid area weight and A the ``area_weight_name`` forcing.
+
+    so the corrected hfds closes the sea-ice energy budget integrated over S_h.
+    Flux terms are read by ``surface_flux_term`` (gen_data, then forcing, then
+    the AM4 equivalent where one exists).
+
+    Parameters:
+        method: Budget form; only "form_A_sis2".
+        weight: Spatial weight w: "uniform" (w = 1) or "sea_ice_fraction".
+        frozen_mass_name: Frozen (ice + snow) mass per total cell area, kg/m**2;
+            gen_data at k, input_data at k-1.
+        ice_layer_temperature_names: SIS2 ice layer temperatures, degC.
+        omit_terms: Flux terms to treat as zero when no source is found.
+    """
+
+    method: Literal["form_A_sis2"] = "form_A_sis2"
+    weight: Literal["uniform", "sea_ice_fraction"] = "uniform"
+    frozen_mass_name: str = "frozen_mass_total_area"
+    ice_layer_temperature_names: list[str] = dataclasses.field(
+        default_factory=lambda: ["T1", "T2", "T3", "T4"]
+    )
+    omit_terms: list[SeaIceFluxTerm] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        n = len(SIS2_ICE_LAYER_SALINITY)
+        if len(self.ice_layer_temperature_names) != n:
+            raise ValueError(f"ice_layer_temperature_names must have {n} entries")
+
+
+OpenOceanQTerm = Literal[
+    "hfds",
+    "calving_residue",
+    "minus_hfrunoffds",
+    "f_top",
+    "minus_lf_snowfl",
+    "precipitation_heat",
+]
+
+
+@dataclasses.dataclass
+class OpenOceanAnchorConfig:
+    """AM4-anchored generated flux on open cells (issue 25 ``gen_shift_block{n}``).
+
+    On M = (input ocean_fraction == 1) minus the sea-ice support::
+
+        Q_hat  = sum of ``q_terms``                   generated SIS2-side flux
+        F      = AM4 net surface energy flux x ssf    (``prescribed_open_ocean``'s)
+        Q      = Q_hat + <F>_B - <Q_hat>_B            <x>_B: A-weighted mean on B ∩ M
+        hfds   = Q - calving_residue - minus_hfrunoffds
+
+    B are ``block_size`` x ``block_size`` lat-lon blocks of the local grid, so
+    sum_{B ∩ M} a A Q = sum_{B ∩ M} a A F per block. Terms come from
+    ``surface_flux_term`` (gen_data, forcing, AM4); "hfds" is the generated
+    ``hfds_total_area``.
+
+    Parameters:
+        q_terms: Terms summed into Q_hat; e.g. ["hfds", "calving_residue",
+            "minus_hfrunoffds"] (Q_o) or ["f_top", "minus_lf_snowfl",
+            "precipitation_heat"] (Q_a plus precipitation heat).
+        block_size: Block edge n in grid cells; must divide the local grid.
+        coastal: Cells off M and off the sea-ice support: "method" keeps the
+            ``method`` result, "generated" keeps the generated hfds.
+        omit_terms: Terms treated as zero when no source is found.
+    """
+
+    q_terms: list[OpenOceanQTerm]
+    block_size: int = 5
+    coastal: Literal["method", "generated"] = "method"
+    omit_terms: list[OpenOceanQTerm] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        if self.block_size < 1:
+            raise ValueError("block_size must be positive")
+        if len(self.q_terms) == 0:
+            raise ValueError("q_terms must not be empty")
 
 
 @dataclasses.dataclass
@@ -194,6 +313,8 @@ class SurfaceEnergyFluxCorrection:
     """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    sea_ice: "SeaIceHfdsCorrection | None" = None
+    open_ocean: "OpenOceanAnchor | None" = None
 
     def __call__(
         self,
@@ -213,7 +334,334 @@ class SurfaceEnergyFluxCorrection:
             forcing_data,
             method=self.method,
         )
+        if self.sea_ice is None and self.open_ocean is None:
+            return corrected, corrector_state
+        hfds = corrected["hfds_total_area"]
+        on_ice = torch.zeros_like(hfds, dtype=torch.bool)
+        if self.sea_ice is not None:
+            on_ice, hfds_on_ice = self.sea_ice(input_data, gen_data, forcing_data)
+            hfds = torch.where(on_ice, hfds_on_ice, hfds)
+        if self.open_ocean is not None:
+            anchored, hfds_anchored = self.open_ocean(
+                input_data, gen_data, forcing_data, on_ice
+            )
+            hfds = torch.where(anchored, hfds_anchored, hfds)
+            if self.open_ocean.config.coastal == "generated":
+                hfds = torch.where(
+                    ~anchored & ~on_ice, gen_data["hfds_total_area"], hfds
+                )
+        corrected["hfds_total_area"] = hfds
         return corrected, corrector_state
+
+
+@dataclasses.dataclass
+class AreaWeight:
+    """<X> = area_weighted_mean(A X) / area_weighted_mean(A), A a forcing field;
+    ``local`` gives the per-cell weight a A for block means (a = cos(lat),
+    proportional to the lat-lon grid's area weight).
+    """
+
+    name: str
+    area_weighted_mean: AreaWeightedMean
+    cos_lat: torch.Tensor  # (lat, 1), local latitude rows
+
+    def field(self, input_data: TensorMapping, forcing_data: TensorMapping):
+        if self.name == "sea_surface_fraction":
+            return OceanData({**input_data, **forcing_data}).sea_surface_fraction
+        return forcing_data[self.name]
+
+    def total(self, A: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Proportional to sum a A x; same constant for every x."""
+        return self.area_weighted_mean(A * x, keepdim=True)
+
+    def local(self, A: torch.Tensor) -> torch.Tensor:
+        return self.cos_lat.to(A.device, A.dtype) * A
+
+
+@dataclasses.dataclass
+class SeaIceHfdsCorrection:
+    """Applies ``SeaIceHfdsCorrectionConfig``; see its docstring for the math."""
+
+    config: SeaIceHfdsCorrectionConfig
+    area_weight: AreaWeight
+    north: torch.Tensor  # (lat, 1) bool, local latitude rows
+    timestep_seconds: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns:
+            The support S (bool) and the corrected ``hfds_total_area`` on it.
+        """
+        cfg = self.config
+        if "hfds_total_area" not in gen_data:
+            raise KeyError("sea_ice hfds correction needs hfds_total_area in gen_data")
+        hfds = gen_data["hfds_total_area"]
+        ssf = OceanData({**input_data, **forcing_data}).sea_surface_fraction
+        m0 = input_data[cfg.frozen_mass_name]
+        m1 = gen_data[cfg.frozen_mass_name]
+        source = hfds
+        for term in SEA_ICE_FLUX_TERMS:
+            try:
+                source = source + surface_flux_term(term, gen_data, forcing_data, ssf)
+            except KeyError:
+                if term not in cfg.omit_terms:
+                    raise
+        storage = (
+            m1 * _frozen_deficit(gen_data, m1, cfg.ice_layer_temperature_names)
+            - m0 * _frozen_deficit(input_data, m0, cfg.ice_layer_temperature_names)
+        ) / self.timestep_seconds
+        residual = source - storage
+        support = (m0 > 0) & (m1 > 0) & (ssf > 0)
+        if cfg.weight == "uniform":
+            weight = torch.ones_like(hfds)
+        else:
+            weight = OceanData(
+                {**input_data, **forcing_data, **gen_data}
+            ).sea_ice_fraction
+        north = self.north.to(hfds.device)
+        A = self.area_weight.field(input_data, forcing_data)
+        delta = torch.zeros_like(hfds)
+        for hemi in (north, ~north):
+            on = support & hemi
+            X = self.area_weight.total(A, torch.where(on, residual, 0.0))
+            aw = self.area_weight.total(A, torch.where(on, weight, 0.0))
+            scale = torch.where(aw > 0, -X / torch.where(aw > 0, aw, 1.0), 0.0)
+            delta = torch.where(on, weight * scale, delta)
+        return support, hfds + delta
+
+
+@dataclasses.dataclass
+class OpenOceanAnchor:
+    """Applies ``OpenOceanAnchorConfig``; see its docstring for the math."""
+
+    config: OpenOceanAnchorConfig
+    area_weight: AreaWeight
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        on_ice: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns:
+            The anchored cells M (bool) and the corrected ``hfds_total_area``.
+        """
+        cfg = self.config
+        if "hfds_total_area" not in gen_data:
+            raise KeyError("open_ocean hfds correction needs hfds_total_area")
+        hfds = gen_data["hfds_total_area"]
+        inp = OceanData({**input_data, **forcing_data})
+        ssf = inp.sea_surface_fraction
+        sst = inp.sea_surface_temperature
+
+        def term(name: str) -> torch.Tensor:
+            if name == "hfds":
+                return hfds
+            try:
+                return OPEN_OCEAN_Q_SIGN[name] * surface_flux_term(
+                    OPEN_OCEAN_Q_SOURCE[name], gen_data, forcing_data, ssf, sst=sst
+                )
+            except KeyError:
+                if name in cfg.omit_terms:
+                    return torch.zeros_like(hfds)
+                raise
+
+        q_hat = sum((term(n) for n in cfg.q_terms), torch.zeros_like(hfds))
+        am4 = _compute_ocean_net_surface_energy_flux(forcing_data, sst) * ssf
+        anchored = (inp.ocean_fraction == 1) & ~on_ice
+        w = torch.where(
+            anchored,
+            self.area_weight.local(self.area_weight.field(input_data, forcing_data)),
+            0.0,
+        )
+        q = (
+            q_hat
+            + block_mean(am4, w, cfg.block_size)
+            - block_mean(q_hat, w, cfg.block_size)
+        )
+        return anchored, q - term("calving_residue") - term("minus_hfrunoffds")
+
+
+def block_mean(x: torch.Tensor, w: torch.Tensor, n: int) -> torch.Tensor:
+    """Per-cell mean of x weighted by w over its n x n lat-lon block; 0 where
+    the block weight is 0.
+    """
+    ny, nx = x.shape[-2:]
+    if ny % n or nx % n:
+        raise ValueError(f"block_size {n} does not divide the local grid {(ny, nx)}")
+    lead = x.shape[:-2]
+    shape = (*lead, ny // n, n, nx // n, n)
+    w = w.expand_as(x)
+    num = (x * w).reshape(shape).sum(dim=(-3, -1))
+    den = w.reshape(shape).sum(dim=(-3, -1))
+    mean = torch.where(den > 0, num / torch.where(den > 0, den, 1.0), 0.0)
+    return mean.repeat_interleave(n, dim=-2).repeat_interleave(n, dim=-1)
+
+
+def sis2_ice_deficit(layer_temperatures: list[torch.Tensor]) -> torch.Tensor:
+    """SIS2 ice enthalpy deficit D_ice, J/kg: the layer mean of
+    h_liq_fr(S) - enth_from_TS(T, S) with the hard-coded layer salinities
+    (``ecand3_transform.ice_deficit``). Temperatures in degC.
+    """
+    total = torch.zeros_like(layer_temperatures[0])
+    for T, salinity in zip(layer_temperatures, SIS2_ICE_LAYER_SALINITY):
+        t_fr = SIS2_DTFREEZE_DS * salinity
+        a = -t_fr
+        t = torch.clamp(-T, min=a)  # brine branch only where T < t_fr; keeps log finite
+        brine = (
+            SIS2_LATENT_HEAT_OF_FUSION * (1.0 - a / t)
+            + SIS2_CP_ICE * (t - a)
+            + (SIS2_CP_WATER - SIS2_CP_ICE) * a * torch.log(t / a)
+        )
+        liquid = SIS2_CP_WATER * (t_fr - T)
+        total = total + torch.where(T >= t_fr, liquid, brine)
+    return total / len(SIS2_ICE_LAYER_SALINITY)
+
+
+def _frozen_deficit(
+    data: TensorMapping, frozen_mass: torch.Tensor, temperature_names: list[str]
+) -> torch.Tensor:
+    """D: D_ice where frozen mass > 0, L_f elsewhere."""
+    d_ice = sis2_ice_deficit([data[n] for n in temperature_names])
+    return torch.where(
+        frozen_mass > 0, d_ice, torch.full_like(d_ice, SIS2_LATENT_HEAT_OF_FUSION)
+    )
+
+
+_SIS2_FLUX_SOURCES: dict[str, list[tuple[tuple[str, ...], Any]]] = {
+    "lf_snowfl": [
+        (
+            ("SNOWFL_total_area",),
+            lambda d, ssf: SIS2_LATENT_HEAT_OF_FUSION * d["SNOWFL_total_area"],
+        ),
+    ],
+    "minus_f_top": [
+        (
+            ("SW_total_area", "LW_total_area", "LH_total_area", "SH_total_area"),
+            lambda d, ssf: -(
+                d["SW_total_area"]
+                + d["LW_total_area"]
+                - d["LH_total_area"]
+                - d["SH_total_area"]
+            ),
+        ),
+    ],
+    "calving_residue": [
+        (
+            ("calving_residue_total_area",),
+            lambda d, ssf: d["calving_residue_total_area"],
+        ),
+        (
+            ("hflso", "evs", "prsn"),
+            lambda d, ssf: (
+                -d["hflso"]
+                + LATENT_HEAT_OF_VAPORIZATION * d["evs"]
+                - SIS2_LATENT_HEAT_OF_FUSION * d["prsn"]
+            )
+            * ssf,
+        ),
+    ],
+    "minus_hfrunoffds": [
+        (("hfrunoffds",), lambda d, ssf: -d["hfrunoffds"] * ssf),
+    ],
+}
+
+_AM4_FLUX_SOURCES: dict[str, list[tuple[tuple[str, ...], Any]]] = {
+    "lf_snowfl": [
+        (
+            ("total_frozen_precipitation_rate",),
+            lambda d, ssf: SIS2_LATENT_HEAT_OF_FUSION
+            * d["total_frozen_precipitation_rate"]
+            * ssf,
+        ),
+    ],
+    "minus_f_top": [
+        (
+            (
+                "DSWRFsfc",
+                "USWRFsfc",
+                "DLWRFsfc",
+                "ULWRFsfc",
+                "LHTFLsfc",
+                "SHTFLsfc",
+            ),
+            lambda d, ssf: -(
+                d["DSWRFsfc"]
+                - d["USWRFsfc"]
+                + d["DLWRFsfc"]
+                - d["ULWRFsfc"]
+                - d["LHTFLsfc"]
+                - d["SHTFLsfc"]
+            )
+            * ssf,
+        ),
+    ],
+}
+
+
+_AM4_FLUX_SOURCES["precipitation_heat"] = [
+    (
+        ("sst",),
+        lambda d, ssf: _precipitation_heat_flux(d, d["sst"]) * ssf,
+    ),
+]
+_SIS2_FLUX_SOURCES["precipitation_heat"] = [
+    (
+        ("precipitation_heat_total_area",),
+        lambda d, ssf: d["precipitation_heat_total_area"],
+    ),
+]
+
+OPEN_OCEAN_Q_SOURCE = {
+    "calving_residue": "calving_residue",
+    "minus_hfrunoffds": "minus_hfrunoffds",
+    "f_top": "minus_f_top",
+    "minus_lf_snowfl": "lf_snowfl",
+    "precipitation_heat": "precipitation_heat",
+}
+OPEN_OCEAN_Q_SIGN = {
+    "calving_residue": 1.0,
+    "minus_hfrunoffds": 1.0,
+    "f_top": -1.0,
+    "minus_lf_snowfl": -1.0,
+    "precipitation_heat": 1.0,
+}
+
+
+def surface_flux_term(
+    term: str,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    sea_surface_fraction: torch.Tensor,
+    sst: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """One sea-ice budget flux term, W/m**2 per total cell area.
+
+    Lookup order, first hit wins: SIS2 fields in gen_data, SIS2 fields in
+    forcing_data, AM4 equivalent in forcing_data (with ``sst``, K, where the
+    AM4 form needs it). Per-ocean-area fields are scaled by
+    ``sea_surface_fraction``.
+
+    Raises:
+        KeyError: if no source provides the term.
+    """
+    am4_data = forcing_data if sst is None else {**forcing_data, "sst": sst}
+    for data, sources in (
+        (gen_data, _SIS2_FLUX_SOURCES),
+        (forcing_data, _SIS2_FLUX_SOURCES),
+        (am4_data, _AM4_FLUX_SOURCES),
+    ):
+        for names, combine in sources.get(term, []):
+            if all(n in data for n in names):
+                return combine(data, sea_surface_fraction)
+    raise KeyError(f"no source for sea-ice flux term {term!r}")
 
 
 @dataclasses.dataclass
@@ -359,10 +807,17 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
+        lat = None
+        sefc = self.surface_energy_flux_correction
+        if sefc is not None and (
+            sefc.sea_ice is not None or sefc.open_ocean is not None
+        ):
+            lat = dataset_info.horizontal_coordinates.localize().lat_1d
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
+            lat=lat,
         )
 
     def _build(
@@ -370,6 +825,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
+        lat: torch.Tensor | None = None,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -388,9 +844,28 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
-        if self.surface_energy_flux_correction is not None:
+        sefc = self.surface_energy_flux_correction
+        if sefc is not None:
+            sea_ice, open_ocean = None, None
+            if sefc.sea_ice is not None or sefc.open_ocean is not None:
+                if lat is None:
+                    raise ValueError("sea_ice/open_ocean corrections need latitudes")
+                area_weight = AreaWeight(
+                    sefc.area_weight_name,
+                    area_weighted_mean,
+                    torch.cos(torch.deg2rad(lat)).unsqueeze(-1),
+                )
+                if sefc.sea_ice is not None:
+                    sea_ice = SeaIceHfdsCorrection(
+                        sefc.sea_ice,
+                        area_weight,
+                        (lat > 0).unsqueeze(-1),
+                        timestep_seconds,
+                    )
+                if sefc.open_ocean is not None:
+                    open_ocean = OpenOceanAnchor(sefc.open_ocean, area_weight)
             corrections.append(
-                SurfaceEnergyFluxCorrection(self.surface_energy_flux_correction.method)
+                SurfaceEnergyFluxCorrection(sefc.method, sea_ice, open_ocean)
             )
         if self.ocean_heat_content_correction is not None:
             corrections.append(
@@ -430,7 +905,15 @@ def _compute_ocean_net_surface_energy_flux(
     base_flux = (
         atmos.net_surface_energy_flux
     )  # missing: - calving * LATENT_HEAT_OF_FREEZING
-    mass_heat_flux = (
+    return base_flux + _precipitation_heat_flux(forcing_data, sst)
+
+
+def _precipitation_heat_flux(
+    forcing_data: TensorMapping, sst: torch.Tensor
+) -> torch.Tensor:
+    """Heat carried by precipitation and evaporation at the SST, W/m**2."""
+    atmos = AtmosphereData(forcing_data)
+    return (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (
             atmos.precipitation_rate
@@ -439,7 +922,6 @@ def _compute_ocean_net_surface_energy_flux(
         )  # missing: + river runoff + calving
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
-    return base_flux + mass_heat_flux
 
 
 def _correct_hfds(

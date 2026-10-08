@@ -9,10 +9,15 @@ from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
+    OpenOceanAnchorConfig,
     SeaIceFractionConfig,
+    SeaIceHfdsCorrectionConfig,
     SurfaceEnergyFluxCorrectionConfig,
     ZosGlobalMeanCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
+    block_mean,
+    sis2_ice_deficit,
+    surface_flux_term,
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
@@ -778,3 +783,526 @@ def test_zos_global_mean_correction_config_round_trip():
         reference_global_mean=0.0
     )
     assert OceanCorrectorConfig.from_state({}).zos_global_mean_correction is None
+
+
+# --- form_A_sis2 hfds correction over sea ice ------------------------------
+
+_LF = 3.34e5
+_LV = 2.5e6
+_ICE_SHAPE = (2, 4, 3)  # (batch, lat, lon)
+_ICE_LAT = torch.tensor([-60.0, -30.0, 30.0, 60.0])
+_ICE_AREA = torch.cos(torch.deg2rad(_ICE_LAT)).unsqueeze(-1).expand(4, 3)
+_DT = datetime.timedelta(days=5)
+_TEMPS = ["T1", "T2", "T3", "T4"]
+
+
+def _reference_deficit(T: float, S: float) -> float:
+    """ecand3_transform.deficit for S > 0 (branches B2, B4)."""
+    import math
+
+    t_fr = -0.054 * S
+    if T >= t_fr:
+        return 4200.0 * (t_fr - T)
+    t, a = -T, -t_fr
+    return (
+        _LF * (1 - a / t) + 2100.0 * (t - a) + (4200.0 - 2100.0) * a * math.log(t / a)
+    )
+
+
+@pytest.mark.parametrize("T", [-20.0, -5.0, -0.1, 0.0, 0.5])
+def test_sis2_ice_deficit_matches_reference(T):
+    salinity = [0.65, 2.35, 3.03, 3.19]
+    expected = sum(_reference_deficit(T, s) for s in salinity) / 4
+    layers = [torch.tensor([T], dtype=torch.float64) for _ in salinity]
+    torch.testing.assert_close(
+        sis2_ice_deficit(layers), torch.tensor([expected], dtype=torch.float64)
+    )
+
+
+def _ice_case(seed=0):
+    g = torch.Generator().manual_seed(seed)
+
+    def r(lo, hi):
+        return lo + (hi - lo) * torch.rand(_ICE_SHAPE, generator=g)
+
+    ssf = torch.ones(_ICE_SHAPE)
+    ssf[:, :, 2] = 0.0  # land column
+    ssf[:, 0, 1] = 0.6  # coastal cell on the support
+    m_in = r(100.0, 900.0)
+    m_gen = r(100.0, 900.0)
+    m_in[:, 1, :] = 0.0  # ice-free row at -30
+    m_gen[:, 2, 0] = 0.0  # ice at k-1 only: off the support
+    m_in = m_in * ssf
+    m_gen = m_gen * ssf
+    land = 1 - ssf
+    sif_in = torch.where(m_in > 0, r(0.3, 1.0), torch.zeros(_ICE_SHAPE))
+    sif_gen = torch.where(m_gen > 0, r(0.3, 1.0), torch.zeros(_ICE_SHAPE))
+    input_data = {
+        "sst": r(271.0, 275.0),
+        "land_fraction": land,
+        "sea_surface_fraction": ssf,
+        "sea_ice_fraction": sif_in,
+        "frozen_mass_total_area": m_in,
+        **{n: r(-15.0, -1.0) for n in _TEMPS},
+    }
+    gen_data = {
+        "sst": r(271.0, 275.0),
+        "hfds_total_area": r(-50.0, 50.0),
+        "sea_ice_fraction": sif_gen,
+        "frozen_mass_total_area": m_gen,
+        **{n: r(-15.0, -1.0) for n in _TEMPS},
+        "SNOWFL_total_area": r(0.0, 1e-5),
+        "SW_total_area": r(0.0, 100.0),
+        "LW_total_area": r(-80.0, -20.0),
+        "LH_total_area": r(-5.0, 5.0),
+        "SH_total_area": r(-20.0, 20.0),
+        "calving_residue_total_area": r(-5.0, 5.0),
+    }
+    forcing_data = {
+        "land_fraction": land,
+        "sea_surface_fraction": ssf,
+        "hfrunoffds": r(0.0, 1.0),
+        "areacello": r(0.5, 2.0) * ssf,
+        **_make_atmos_forcing_data(_ICE_SHAPE, device="cpu"),
+    }
+    return input_data, gen_data, forcing_data
+
+
+def _to_device(d):
+    return {k: v.to(DEVICE) for k, v in d.items()}
+
+
+def _ice_corrector(weight="uniform", omit_terms=(), area_weight_name=None):
+    kwargs = {} if area_weight_name is None else {"area_weight_name": area_weight_name}
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean",
+            sea_ice=SeaIceHfdsCorrectionConfig(
+                weight=weight, omit_terms=list(omit_terms)
+            ),
+            **kwargs,
+        ),
+    )
+    ops = LatLonOperations(_ICE_AREA)
+    return config._build(ops, None, _DT, lat=_ICE_LAT)
+
+
+def _residual(input_data, gen_data, forcing_data, hfds):
+    """Independent restatement of r_c(form_A_sis2), W m-2 per total cell area."""
+    ssf = forcing_data["sea_surface_fraction"]
+
+    def D(d):
+        Dice = sis2_ice_deficit([d[n] for n in _TEMPS])
+        return torch.where(
+            d["frozen_mass_total_area"] > 0, Dice, torch.full_like(Dice, _LF)
+        )
+
+    g = gen_data
+    S = (
+        _LF * g["SNOWFL_total_area"]
+        - (
+            g["SW_total_area"]
+            + g["LW_total_area"]
+            - g["LH_total_area"]
+            - g["SH_total_area"]
+        )
+        + hfds
+        + g["calving_residue_total_area"]
+        - forcing_data["hfrunoffds"] * ssf
+    )
+    storage = (
+        g["frozen_mass_total_area"] * D(g)
+        - input_data["frozen_mass_total_area"] * D(input_data)
+    ) / _DT.total_seconds()
+    return S - storage
+
+
+def _support(input_data, gen_data, forcing_data):
+    return (
+        (input_data["frozen_mass_total_area"] > 0)
+        & (gen_data["frozen_mass_total_area"] > 0)
+        & (forcing_data["sea_surface_fraction"] > 0)
+    )
+
+
+@pytest.mark.parametrize("area_weight_name", ["sea_surface_fraction", "areacello"])
+@pytest.mark.parametrize("weight", ["uniform", "sea_ice_fraction"])
+def test_form_a_sis2_closes_hemispheric_budget(weight, area_weight_name):
+    input_data, gen_data, forcing_data = _ice_case()
+    out = _ice_corrector(weight, area_weight_name=area_weight_name)(
+        _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+    ).corrected
+    hfds = out["hfds_total_area"].cpu().double()
+    r = _residual(
+        {k: v.double() for k, v in input_data.items()},
+        {k: v.double() for k, v in gen_data.items()},
+        {k: v.double() for k, v in forcing_data.items()},
+        hfds,
+    )
+    S = _support(input_data, gen_data, forcing_data)
+    area = _ICE_AREA.double() * forcing_data[area_weight_name].double()
+    scale = (area * r.abs()).sum()
+    for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
+        on = S & hemi[:, None]
+        X = (torch.where(on, r, 0.0) * area).sum(dim=(-2, -1))
+        assert torch.all(X.abs() < 1e-5 * scale), X
+
+
+def test_form_a_sis2_delta_shape_on_support():
+    input_data, gen_data, forcing_data = _ice_case()
+    out = _ice_corrector("sea_ice_fraction")(
+        _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+    ).corrected
+    delta = out["hfds_total_area"].cpu() - gen_data["hfds_total_area"]
+    S = _support(input_data, gen_data, forcing_data)
+    sif = gen_data["sea_ice_fraction"]
+    for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
+        on = S & hemi[:, None]
+        ratio = torch.where(on, delta / sif, torch.nan)
+        for b in range(_ICE_SHAPE[0]):
+            vals = ratio[b][on[b]]
+            torch.testing.assert_close(vals, vals[:1].expand_as(vals))
+
+
+def test_form_a_sis2_off_support_matches_method():
+    input_data, gen_data, forcing_data = _ice_case()
+    ice = _ice_corrector()(
+        _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+    ).corrected
+    method_only = (
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean"
+            ),
+        )
+        ._build(LatLonOperations(_ICE_AREA), None, _DT)(
+            _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+        )
+        .corrected
+    )
+    S = _support(input_data, gen_data, forcing_data).to(DEVICE)
+    torch.testing.assert_close(
+        ice["hfds_total_area"][~S], method_only["hfds_total_area"][~S]
+    )
+    assert not torch.allclose(
+        ice["hfds_total_area"][S], gen_data["hfds_total_area"].to(DEVICE)[S]
+    )
+
+
+def test_form_a_sis2_empty_support_leaves_hfds():
+    input_data, gen_data, forcing_data = _ice_case()
+    input_data["frozen_mass_total_area"] = torch.zeros(_ICE_SHAPE)
+    ice = _ice_corrector()(
+        _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+    ).corrected
+    method_only = (
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean"
+            ),
+        )
+        ._build(LatLonOperations(_ICE_AREA), None, _DT)(
+            _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+        )
+        .corrected
+    )
+    torch.testing.assert_close(ice["hfds_total_area"], method_only["hfds_total_area"])
+
+
+def test_surface_flux_term_source_priority():
+    ssf = torch.full((2, 2), 0.5)
+    am4 = _make_atmos_forcing_data((2, 2), device="cpu")
+    gen = {"SNOWFL_total_area": torch.full((2, 2), 1e-5)}
+    forcing = {"SNOWFL_total_area": torch.full((2, 2), 2e-5), **am4}
+    # gen_data first
+    torch.testing.assert_close(
+        surface_flux_term("lf_snowfl", gen, forcing, ssf),
+        _LF * gen["SNOWFL_total_area"],
+    )
+    # forcing second
+    torch.testing.assert_close(
+        surface_flux_term("lf_snowfl", {}, forcing, ssf),
+        _LF * forcing["SNOWFL_total_area"],
+    )
+    # AM4 last, per ocean area -> per total cell area
+    torch.testing.assert_close(
+        surface_flux_term("lf_snowfl", {}, am4, ssf),
+        _LF * am4["total_frozen_precipitation_rate"] * ssf,
+    )
+    f_top_am4 = (
+        am4["DSWRFsfc"]
+        - am4["USWRFsfc"]
+        + am4["DLWRFsfc"]
+        - am4["ULWRFsfc"]
+        - am4["LHTFLsfc"]
+        - am4["SHTFLsfc"]
+    )
+    torch.testing.assert_close(
+        surface_flux_term("minus_f_top", {}, am4, ssf), -f_top_am4 * ssf
+    )
+    # calving residue from its ocean-flux components
+    comps = {
+        k: torch.full((2, 2), v)
+        for k, v in [("hflso", 3.0), ("evs", 1e-6), ("prsn", 2e-6)]
+    }
+    torch.testing.assert_close(
+        surface_flux_term("calving_residue", {}, comps, ssf),
+        (-3.0 + _LV * 1e-6 - _LF * 2e-6) * ssf,
+    )
+    with pytest.raises(KeyError, match="minus_hfrunoffds"):
+        surface_flux_term("minus_hfrunoffds", {}, am4, ssf)
+
+
+def test_form_a_sis2_am4_fallback_and_omit_terms():
+    input_data, gen_data, forcing_data = _ice_case()
+    for n in [
+        "SNOWFL_total_area",
+        "SW_total_area",
+        "LW_total_area",
+        "LH_total_area",
+        "SH_total_area",
+    ]:
+        del gen_data[n]
+    del forcing_data["hfrunoffds"]
+    args = (
+        _to_device(input_data),
+        _to_device(gen_data),
+        _to_device(forcing_data),
+        None,
+    )
+    with pytest.raises(KeyError, match="minus_hfrunoffds"):
+        _ice_corrector()(*args)
+    out = _ice_corrector(omit_terms=["minus_hfrunoffds"])(*args).corrected
+    assert torch.isfinite(out["hfds_total_area"]).all()
+
+
+def test_sea_ice_hfds_config_from_state():
+    state = {
+        "surface_energy_flux_correction": {
+            "method": "prescribed_open_ocean",
+            "sea_ice": {"method": "form_A_sis2", "weight": "uniform"},
+        }
+    }
+    config = OceanCorrectorConfig.from_state(state)
+    sef = config.surface_energy_flux_correction
+    assert sef is not None and sef.sea_ice is not None
+    assert sef.sea_ice.ice_layer_temperature_names == _TEMPS
+
+
+# --- AM4-anchored open-ocean arm (issue 25 gen_shift_block{n}) --------------
+
+_OO_SHAPE = (2, 6, 6)
+_OO_LAT = torch.linspace(-75.0, 75.0, 6)
+_OO_AREA = torch.cos(torch.deg2rad(_OO_LAT)).unsqueeze(-1).expand(6, 6)
+_Q_O = ["hfds", "calving_residue", "minus_hfrunoffds"]
+_Q_A = ["f_top", "minus_lf_snowfl", "precipitation_heat"]
+
+
+def _oo_case(seed=1):
+    g = torch.Generator().manual_seed(seed)
+
+    def r(lo, hi):
+        return lo + (hi - lo) * torch.rand(_OO_SHAPE, generator=g)
+
+    ssf = torch.ones(_OO_SHAPE)
+    ssf[:, :, 5] = 0.0  # land column
+    ssf[:, 2, 4] = 0.5  # coastal cell
+    land = 1 - ssf
+    sif = torch.zeros(_OO_SHAPE)
+    sif[:, 0, :5] = 0.4  # sea ice row
+    sif = sif * ssf
+    m = torch.where(sif > 0, r(100.0, 900.0), torch.zeros(_OO_SHAPE))
+    input_data = {
+        "sst": r(271.0, 300.0),
+        "land_fraction": land,
+        "sea_surface_fraction": ssf,
+        "sea_ice_fraction": sif,
+        "frozen_mass_total_area": m,
+        **{n: r(-15.0, -1.0) for n in _TEMPS},
+    }
+    gen_data = {
+        "sst": r(271.0, 300.0),
+        "hfds_total_area": r(-100.0, 100.0) * ssf,
+        "sea_ice_fraction": sif,
+        "frozen_mass_total_area": m * 1.1,
+        **{n: r(-15.0, -1.0) for n in _TEMPS},
+        "SNOWFL_total_area": r(0.0, 1e-5) * ssf,
+        "SW_total_area": r(0.0, 200.0) * ssf,
+        "LW_total_area": r(-80.0, -20.0) * ssf,
+        "LH_total_area": r(0.0, 100.0) * ssf,
+        "SH_total_area": r(-20.0, 20.0) * ssf,
+        "calving_residue_total_area": r(-5.0, 5.0) * ssf,
+    }
+    forcing_data = {
+        "land_fraction": land,
+        "sea_surface_fraction": ssf,
+        "hfrunoffds": r(0.0, 1.0),
+        "areacello": r(0.5, 2.0) * ssf,
+        **{
+            k: v * r(0.5, 1.5)
+            for k, v in _make_atmos_forcing_data(_OO_SHAPE, device="cpu").items()
+        },
+    }
+    return input_data, gen_data, forcing_data
+
+
+def _oo_config(
+    q_terms, block_size=3, coastal="method", sea_ice=False, area="sea_surface_fraction"
+):
+    return OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean",
+            sea_ice=SeaIceHfdsCorrectionConfig() if sea_ice else None,
+            open_ocean=OpenOceanAnchorConfig(
+                q_terms=q_terms, block_size=block_size, coastal=coastal
+            ),
+            area_weight_name=area,
+        ),
+    )
+
+
+def _run(config, data, lat=_OO_LAT, area=_OO_AREA):
+    return config._build(LatLonOperations(area), None, _DT, lat=lat)(
+        *[_to_device(d) for d in data], None
+    ).corrected["hfds_total_area"]
+
+
+def _method_only(data):
+    return _run(
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean"
+            )
+        ),
+        data,
+    )
+
+
+def _anchored_mask(input_data):
+    return (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
+
+
+@pytest.mark.parametrize("area", ["sea_surface_fraction", "areacello"])
+@pytest.mark.parametrize("q_terms", [_Q_O, _Q_A], ids=["Q_o", "Q_a"])
+def test_open_ocean_anchor_block_integrals_equal_am4(q_terms, area):
+    input_data, gen_data, forcing_data = _oo_case()
+    n = 3
+    hfds = _run(_oo_config(q_terms, n, area=area), (input_data, gen_data, forcing_data))
+    hfds = hfds.cpu().double()
+    ssf = forcing_data["sea_surface_fraction"].double()
+    q = (
+        hfds
+        + gen_data["calving_residue_total_area"].double()
+        - forcing_data["hfrunoffds"].double() * ssf
+    )
+    am4 = (
+        _compute_ocean_net_surface_energy_flux(
+            {k: v.double() for k, v in forcing_data.items()},
+            input_data["sst"].double(),
+        )
+        * ssf
+    )
+    M = _anchored_mask(input_data)
+    w = torch.where(M, _OO_AREA.double() * forcing_data[area].double(), 0.0)
+    shape = (_OO_SHAPE[0], 6 // n, n, 6 // n, n)
+    blocks_q = (w * q).reshape(shape).sum(dim=(-3, -1))
+    blocks_f = (w * am4).reshape(shape).sum(dim=(-3, -1))
+    scale = (w * am4.abs()).sum()
+    torch.testing.assert_close(blocks_q, blocks_f, atol=1e-5 * scale, rtol=0)
+    torch.testing.assert_close(
+        (w * q).sum(dim=(-2, -1)),
+        (w * am4).sum(dim=(-2, -1)),
+        atol=1e-5 * scale,
+        rtol=0,
+    )
+    # not simply prescribed: the generated pattern survives inside each block
+    assert not torch.allclose(q[M], am4[M])
+
+
+@pytest.mark.parametrize("coastal", ["method", "generated"])
+def test_open_ocean_anchor_off_mask_cells(coastal):
+    data = _oo_case()
+    input_data, gen_data, _ = data
+    hfds = _run(_oo_config(_Q_O, coastal=coastal), data).cpu()
+    off = ~_anchored_mask(input_data)
+    expected = (
+        gen_data["hfds_total_area"]
+        if coastal == "generated"
+        else _method_only(data).cpu()
+    )
+    torch.testing.assert_close(hfds[off], expected[off])
+
+
+def test_open_ocean_anchor_with_sea_ice_keeps_sea_ice_arm():
+    data = _oo_case()
+    input_data, gen_data, _ = data
+    both = _run(_oo_config(_Q_O, sea_ice=True), data).cpu()
+    ice_only = _run(
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean", sea_ice=SeaIceHfdsCorrectionConfig()
+            )
+        ),
+        data,
+    ).cpu()
+    S = (input_data["frozen_mass_total_area"] > 0) & (
+        gen_data["frozen_mass_total_area"] > 0
+    )
+    assert S.any()
+    torch.testing.assert_close(both[S], ice_only[S])
+
+
+@pytest.mark.parametrize("q_terms", [_Q_O, _Q_A], ids=["Q_o", "Q_a"])
+def test_open_ocean_anchor_gradients_finite(q_terms):
+    input_data, gen_data, forcing_data = _oo_case()
+    grads = ["hfds_total_area", "SW_total_area", "calving_residue_total_area"]
+    for n in grads:
+        gen_data[n] = gen_data[n].clone().requires_grad_(True)
+    out = (
+        _oo_config(q_terms)
+        ._build(LatLonOperations(_OO_AREA), None, _DT, lat=_OO_LAT)(
+            input_data, gen_data, forcing_data, None
+        )
+        .corrected["hfds_total_area"]
+    )
+    out.pow(2).sum().backward()
+    for n in grads:
+        g = gen_data[n].grad
+        if g is not None:
+            assert torch.isfinite(g).all(), n
+    assert gen_data["hfds_total_area"].grad is not None
+
+
+def test_block_mean_rejects_non_dividing_block():
+    with pytest.raises(ValueError, match="block_size"):
+        block_mean(torch.ones(4, 6), torch.ones(4, 6), 4)
+
+
+def test_open_ocean_off_leaves_existing_behavior():
+    data = _oo_case()
+    plain = _method_only(data)
+    explicit = _run(
+        OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed_open_ocean", open_ocean=None, sea_ice=None
+            )
+        ),
+        data,
+    )
+    torch.testing.assert_close(plain, explicit)
+
+
+def test_open_ocean_config_from_state():
+    config = OceanCorrectorConfig.from_state(
+        {
+            "surface_energy_flux_correction": {
+                "method": "prescribed_open_ocean",
+                "area_weight_name": "areacello",
+                "open_ocean": {"q_terms": _Q_A, "block_size": 5},
+            }
+        }
+    )
+    sef = config.surface_energy_flux_correction
+    assert sef is not None and sef.open_ocean is not None
+    oo = sef.open_ocean
+    assert (oo.q_terms, oo.block_size, oo.coastal) == (_Q_A, 5, "method")
