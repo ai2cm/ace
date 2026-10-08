@@ -1,6 +1,7 @@
 LOCAL_ENVIRONMENT ?= gfdl-om4-ingestion
 
-VERSION ?= 2026-07-09-gfdl-om4-xrbeam-pipeline
+# One worker image for both pipelines (om4.mk, randco2.mk).
+VERSION ?= 2026-09-29-gfdl-om4-xrbeam-pipeline
 IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/gfdl-om4-ingest-dataflow:$(VERSION)
 
 # Durable pipeline inputs (static grid files, regridding weights, face masks)
@@ -28,117 +29,11 @@ generate_weights_four_degree:
 		--target-grid F22.5 \
 		--output-url $(WEIGHTS_URL_ROOT)/om4-tripolar-0.25deg-to-F22.5
 
-# Face-mask artifacts are per-simulation. Each scans that source's first
-# year (the masks are static, and the run-time staleness assertion guards
-# the rest of the series) with expected flagged surface-face counts from an
-# independent census of the source's remap-born zero faces; generation
-# fails if they don't reconcile. Both simulations census identically.
-generate_face_masks: generate_face_masks_picontrol generate_face_masks_1pctco2
-
-generate_face_masks_picontrol:
-	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.face_masks \
-		--config configs/om4-picontrol-1deg-5daily.yaml \
-		--stream snapshot_ocean \
-		--output-url $(FACE_MASKS_URL_ROOT)/om4-picontrol-2026-06-19 \
-		--start-time 0151-01-06 \
-		--end-time 0152-01-01 \
-		--expected-surface-count-u 16960 \
-		--expected-surface-count-v 16694
-
-generate_face_masks_1pctco2:
-	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.face_masks \
-		--config configs/om4-1pctco2-1deg-5daily.yaml \
-		--stream snapshot_ocean \
-		--output-url $(FACE_MASKS_URL_ROOT)/om4-1pctco2-2026-06-19 \
-		--start-time 0001-01-06 \
-		--end-time 0002-01-01 \
-		--expected-surface-count-u 16960 \
-		--expected-surface-count-v 16694
-
-CONFIG ?= configs/om4-picontrol-1deg-5daily.yaml
-
 SMOKE_NUM_TIMESTEPS ?= 6
-SMOKE_OUTPUT_ROOT ?= gs://vcm-ml-scratch/jamesd/gfdl-om4-test
-SMOKE_OUTPUT_PATH = $(SMOKE_OUTPUT_ROOT)/smoke-$(notdir $(basename $(CONFIG))).zarr
-
-# A few timesteps of $(CONFIG) through the DirectRunner into a throwaway
-# store: every chunk's footprint must equal the wetmask (the run fails
-# otherwise) and the output must open with the config's expected variable
-# set.
-smoke_test:
-	-gsutil -m -q rm -r $(SMOKE_OUTPUT_PATH) 2> /dev/null
-	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.run \
-		--config $(CONFIG) \
-		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
-		--output-path $(SMOKE_OUTPUT_PATH) \
-		--runner DirectRunner \
-		--job_server_timeout 3600
-	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_output \
-		--config $(CONFIG) \
-		--output-path $(SMOKE_OUTPUT_PATH) \
-		--expected-timesteps $(SMOKE_NUM_TIMESTEPS)
-
-smoke_test_picontrol_1deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-1deg-5daily.yaml
-
-smoke_test_picontrol_4deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-4deg-5daily.yaml
-
-smoke_test_1pctco2_1deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-1deg-5daily.yaml
-
-smoke_test_1pctco2_4deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-4deg-5daily.yaml
-
-smoke_test_picontrol_1deg_1daily:
-	$(MAKE) smoke_test CONFIG=configs/cm4-piControl-1deg-1daily.yaml
-
-smoke_test_picontrol_4deg_1daily:
-	$(MAKE) smoke_test CONFIG=configs/cm4-piControl-4deg-1daily.yaml
-
-smoke_test_1pctco2_1deg_1daily:
-	$(MAKE) smoke_test CONFIG=configs/cm4-1pctCO2-1deg-1daily.yaml
-
-smoke_test_1pctco2_4deg_1daily:
-	$(MAKE) smoke_test CONFIG=configs/cm4-1pctCO2-4deg-1daily.yaml
-
-# A repeat run against an already-written output store must refuse to
-# initialize into it (runs a smoke test first if its store is absent).
-smoke_test_repeat_fails:
-	gsutil -q ls $(SMOKE_OUTPUT_PATH)/zarr.json > /dev/null 2>&1 || $(MAKE) smoke_test
-	! conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.run \
-		--config $(CONFIG) \
-		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
-		--output-path $(SMOKE_OUTPUT_PATH) \
-		--runner DirectRunner \
-		--job_server_timeout 3600
-
-# The configs derive each simulation's wetmask from its own snapshot store;
-# downstream training/analysis assumes the output stores share one mask.
-check_wetmask_equivalence:
-	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_wetmask_equivalence \
-		configs/om4-picontrol-1deg-5daily.yaml \
-		configs/om4-1pctco2-1deg-5daily.yaml
-
-smoke_tests: check_wetmask_equivalence smoke_test_picontrol_1deg \
-	smoke_test_picontrol_4deg smoke_test_1pctco2_1deg \
-	smoke_test_1pctco2_4deg smoke_test_repeat_fails
-
-# The 1-daily configs carry the 5-daily wetmask sources verbatim, so this
-# guards that pinning rather than the 1-daily streams themselves.
-check_wetmask_equivalence_1daily:
-	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_wetmask_equivalence \
-		configs/cm4-piControl-1deg-1daily.yaml \
-		configs/cm4-1pctCO2-1deg-1daily.yaml
-
-smoke_tests_1daily: check_wetmask_equivalence_1daily \
-	smoke_test_picontrol_1deg_1daily smoke_test_picontrol_4deg_1daily \
-	smoke_test_1pctco2_1deg_1daily smoke_test_1pctco2_4deg_1daily
-	$(MAKE) smoke_test_repeat_fails CONFIG=configs/cm4-piControl-1deg-1daily.yaml
 
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
-	docker run --rm --entrypoint python $(IMAGE_NAME) -c "import pipeline.run, xesmf"
+	docker run --rm --entrypoint python $(IMAGE_NAME) -c "import pipeline.om4.run, pipeline.randco2.run, xesmf"
 
 push_dataflow: build_dataflow
 	docker push $(IMAGE_NAME)
@@ -146,45 +41,24 @@ push_dataflow: build_dataflow
 enter:
 	docker run --rm -v $$(pwd):/gfdl_om4 -w /gfdl_om4 --entrypoint "/bin/bash" -it $(IMAGE_NAME)
 
-dataflow:
-	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
-		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		./run-dataflow.sh DataflowRunner $(CONFIG)
-
-dataflow_picontrol_1deg:
-	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg-5daily.yaml
-
-dataflow_picontrol_4deg:
-	$(MAKE) dataflow CONFIG=configs/om4-picontrol-4deg-5daily.yaml
-
-dataflow_1pctco2_1deg:
-	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-1deg-5daily.yaml
-
-dataflow_1pctco2_4deg:
-	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-4deg-5daily.yaml
-
-dataflow_picontrol_1deg_1daily:
-	$(MAKE) dataflow CONFIG=configs/cm4-piControl-1deg-1daily.yaml
-
-dataflow_picontrol_4deg_1daily:
-	$(MAKE) dataflow CONFIG=configs/cm4-piControl-4deg-1daily.yaml
-
-dataflow_1pctco2_1deg_1daily:
-	$(MAKE) dataflow CONFIG=configs/cm4-1pctCO2-1deg-1daily.yaml
-
-dataflow_1pctco2_4deg_1daily:
-	$(MAKE) dataflow CONFIG=configs/cm4-1pctCO2-4deg-1daily.yaml
+# The worker image must exist in Artifact Registry before a launch. A missing
+# tag otherwise surfaces only as ImagePullBackOff on the workers: each job
+# boots a VM, never starts its SDK harness, and so never completes a bundle —
+# and throughput-based autoscaling holds the job at one idle worker rather
+# than failing it. dataflow and randco2_dataflow depend on it.
+IMAGE_REPO = $(firstword $(subst :, ,$(IMAGE_NAME)))
+IMAGE_TAG = $(lastword $(subst :, ,$(IMAGE_NAME)))
+check_dataflow_image:
+	@tags=$$(gcloud artifacts docker tags list $(IMAGE_REPO) --format="value(tag)") || { \
+		echo "ERROR: could not list tags of $(IMAGE_REPO) (see gcloud error above)."; \
+		exit 1; }; \
+	echo "$$tags" | grep -qx "$(IMAGE_TAG)" || { \
+		echo "ERROR: $(IMAGE_NAME) is absent from Artifact Registry."; \
+		echo "Run 'make push_dataflow' before launching."; \
+		exit 1; }
 
 .PHONY: create_environment generate_weights generate_weights_one_degree \
-	generate_weights_four_degree generate_face_masks \
-	generate_face_masks_picontrol generate_face_masks_1pctco2 smoke_test \
-	smoke_test_picontrol_1deg smoke_test_picontrol_4deg \
-	smoke_test_1pctco2_1deg smoke_test_1pctco2_4deg \
-	smoke_test_repeat_fails check_wetmask_equivalence smoke_tests \
-	smoke_test_picontrol_1deg_1daily smoke_test_picontrol_4deg_1daily \
-	smoke_test_1pctco2_1deg_1daily smoke_test_1pctco2_4deg_1daily \
-	check_wetmask_equivalence_1daily smoke_tests_1daily \
-	build_dataflow push_dataflow enter dataflow dataflow_picontrol_1deg \
-	dataflow_picontrol_4deg dataflow_1pctco2_1deg dataflow_1pctco2_4deg \
-	dataflow_picontrol_1deg_1daily dataflow_picontrol_4deg_1daily \
-	dataflow_1pctco2_1deg_1daily dataflow_1pctco2_4deg_1daily
+	generate_weights_four_degree build_dataflow push_dataflow enter \
+	check_dataflow_image
+
+include om4.mk randco2.mk

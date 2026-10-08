@@ -3,6 +3,7 @@ cftime
 click
 dacite
 dask[distributed]
+flox
 fsspec
 gcsfs
 h5netcdf

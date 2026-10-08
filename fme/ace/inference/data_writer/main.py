@@ -12,11 +12,13 @@ import numpy.typing as npt
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
     BatchData,
+    GatheredBatchData,
     PairedData,
     PrognosticState,
 )
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.distributed import Distributed
 from fme.core.generics.writer import WriterABC
 
 from .dataset_metadata import DatasetMetadata
@@ -86,6 +88,28 @@ class DataWriterConfig:
                 f"Filenames: {all_filenames}"
             )
 
+    @property
+    def has_subwriters_enabled(self) -> bool:
+        """True when any per-timestep output writer is enabled."""
+        return (
+            self.save_prediction_files
+            or self.save_monthly_files
+            or self.save_step_diagnostics
+            or bool(self.files)
+        )
+
+    def _raise_if_unsupported_under_multi_gpu(self, n_ranks: int) -> None:
+        """Raise if per-timestep writers are enabled under multi-GPU."""
+        if n_ranks > 1 and self.has_subwriters_enabled:
+            raise ValueError(
+                "Multi-GPU inference does not yet support per-timestep data "
+                "writers (prediction files, monthly files, step diagnostics, "
+                "or custom file writers). Set save_prediction_files, "
+                "save_monthly_files, and save_step_diagnostics to false and "
+                "files to null in the data_writer config, or run with a "
+                "single GPU."
+            )
+
     def _get_all_filenames(self) -> list[str]:
         filenames = []
         for file in self.files or []:
@@ -109,6 +133,8 @@ class DataWriterConfig:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
+        dist = Distributed.get_instance()
+        self._raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
         writers: list[PairedSubwriter] = []
         if self.save_prediction_files:
             raw_writer: PairedSubwriter = PairedRawDataWriter(
@@ -201,6 +227,8 @@ class DataWriterConfig:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
+        dist = Distributed.get_instance()
+        self._raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
         writers: list[Subwriter] = []
         # TODO: handle writing HEALPix data
         # https://github.com/ai2cm/full-model/issues/1089
@@ -296,8 +324,8 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             data: the data to be written.
             filename: the filename to use for the netCDF file.
         """
-        _write(
-            data=data.as_batch_data(),
+        _gather_and_write(
+            batch=data.as_batch_data(),
             path=self.path,
             filename=filename,
             variable_metadata=self.variable_metadata,
@@ -346,7 +374,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
 
 
 def _write(
-    data: BatchData,
+    data: BatchData | GatheredBatchData,
     path: str,
     filename: str,
     variable_metadata: Mapping[str, VariableMetadata],
@@ -382,6 +410,45 @@ def _write(
     ds = ds.assign_coords(coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
     to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
+
+
+def _gather_and_write(
+    batch: BatchData,
+    path: str,
+    filename: str,
+    variable_metadata: Mapping[str, VariableMetadata],
+    coords: Mapping[str, np.ndarray],
+    dataset_metadata: DatasetMetadata,
+    dist: Distributed | None = None,
+) -> None:
+    """Gather data-parallel BatchData shards to root and write once.
+
+    Each data-parallel rank holds a contiguous block of samples.  The gather
+    concatenates them along the sample dimension in rank order so the written
+    file has the same layout as a serial run.  Non-root ranks skip the write.
+    A barrier at the end ensures all ranks see the file before continuing
+    (required for segmented inference, where the next segment reads the
+    restart).  With a single data-parallel rank the gather is a no-op.
+    """
+    if dist is None:
+        dist = Distributed.get_instance()
+
+    gathered_batch = batch.data_parallel_gather(dist)
+
+    try:
+        if dist.is_root():
+            if gathered_batch is None:
+                raise RuntimeError("batch.gather returned None on root")
+            _write(
+                data=gathered_batch,
+                path=path,
+                filename=filename,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
+    finally:
+        dist.barrier()
 
 
 class DataWriter(WriterABC[PrognosticState, PairedData]):
@@ -462,8 +529,14 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             self._step_diagnostics_writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
-        _write(
-            data=data.as_batch_data(),
+        """Eagerly write data to a single netCDF file.
+
+        Args:
+            data: the data to be written.
+            filename: the filename to use for the netCDF file.
+        """
+        _gather_and_write(
+            batch=data.as_batch_data(),
             path=self.path,
             filename=filename,
             variable_metadata=self.variable_metadata,
