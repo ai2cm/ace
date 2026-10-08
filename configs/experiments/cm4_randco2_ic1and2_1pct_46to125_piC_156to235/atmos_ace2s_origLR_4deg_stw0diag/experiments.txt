@@ -10,3 +10,38 @@ cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-f
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs1|01M48KM85SAYH1ZZB03BFXHQJS|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_randco2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs2|01M48KMQGT3ZDRDHR2ER13RTG2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs0|01M48KKPVPKZQEW2BTJGWCM026|run_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs1|01M48KM85SAYH1ZZB03BFXHQJS|run_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs2|01M48KMQGT3ZDRDHR2ER13RTG2|run_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs0|01M48KKPVPKZQEW2BTJGWCM026|run_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs1|01M48KM85SAYH1ZZB03BFXHQJS|run_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs2|01M48KMQGT3ZDRDHR2ER13RTG2|run_randco2-2xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs0|01M48KKPVPKZQEW2BTJGWCM026|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs1|01M48KM85SAYH1ZZB03BFXHQJS|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs2|01M48KMQGT3ZDRDHR2ER13RTG2|run_randco2-4xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
+
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs0|01M48KKPVPKZQEW2BTJGWCM026|run_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs1|01M48KM85SAYH1ZZB03BFXHQJS|run_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs2|01M48KMQGT3ZDRDHR2ER13RTG2|run_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs0|01M48KKPVPKZQEW2BTJGWCM026|run_1xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs1|01M48KM85SAYH1ZZB03BFXHQJS|run_1xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_rco2_ic12_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg_stw0diag-ft|rs2|01M48KMQGT3ZDRDHR2ER13RTG2|run_1xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
