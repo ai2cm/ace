@@ -1,0 +1,20 @@
+# Century evals of coupled_tail-es0lt_a2s (spectral-ES ocean, long-tail cap 16) after the 8 -> 16 epoch
+# extension (training resume 01M4ES00F4NF6C4NHCGGKSC45J on exp/cpl-es-lt-16ep; epoch-5 evals: coupled_eval_2026-10-05_es0lt).
+# The matched twin of lt0lt's 16-epoch extension (coupled_eval_2026-10-07_lt0lt-ep12). "16ep" in the group labels
+# the 16-epoch run, not the checkpoint epoch, and keeps the job names distinct from the epoch-5 evals.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled; both carry the six regional monthly-SST writers.
+# Checkpoint: best_inference_ckpt from the resume's final job's result dataset (field 9 blank: evaluate.sh
+# resolves jobs[-1] of field 3 at launch). CAVEAT: validate_using_ema with no ema_checkpoint_save_epochs, so
+# best_inference_ckpt moves past epoch 5 only if an epoch 9-16 beats best_inference_error 0.07415; if not, these
+# rows re-evaluate the epoch-5 weights already evaluated in coupled_eval_2026-10-05_es0lt.
+# Staged as pending_<tag> for the research-repo job watcher (task 2026-09-26-es-vs-patch-pretrain-loss-coupled,
+# auto_launch), which flips them to run_ when the resume succeeds.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es0lt_a2s-fto-16ep|o0a0rs0|01M4ES00F4NF6C4NHCGGKSC45J|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es0lt_a2s-fto-16ep|o0a0rs0|01M4ES00F4NF6C4NHCGGKSC45J|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
