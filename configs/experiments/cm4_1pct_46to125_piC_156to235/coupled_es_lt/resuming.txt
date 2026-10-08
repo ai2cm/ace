@@ -1,0 +1,25 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|extra_env
+
+# --- es0lt: extend the finished 8-epoch run to 16 epochs ---
+#
+# The matched twin of the lt0lt 8 -> 16 extension (coupled_tail_lt0/resuming.txt
+# on exp/cpl-tail-stochastic). 01M3GR06BZNXA18Q4WH543QPR1 finished 8 epochs exit 0
+# (final job 01M459HZMNB6D2M4DWED13J4RC).
+#
+# max_epochs=16 is the only config change: the resume reads
+# /existing-results/config.yaml, whose max_epochs is 8. The LR schedule is a
+# LinearLR warmup over 1460 iterations then constant, so epochs 9-16 run at the
+# same LR as 2-8, as for lt0lt.
+#
+# results_dataset is the final job's (01M459HZHDVGJVN5FJDCTBSXCV); verified to
+# hold training_checkpoints/ckpt.tar (7.032 GiB, written after epoch 8) and
+# wandb_run_id (dc8hkv6r). This branch is exp/cpl-es-coupled + the jupiter+titan
+# alias and its shared-memory fix; fme/ is identical to f5a7cd494 (the run's
+# SHA, which carries the epoch-boundary resume fix 0766ab4f6). resume_wandb=true
+# keeps run dc8hkv6r; the job name resume.sh builds equals the run's wandb name,
+# so WANDB_NAME does not rename it. retries 0 and MALLOC_ARENA_MAX=4 as for
+# lt0lt: a resume carries the ~260 GB host-RAM cost. jupiter+titan, 8 GPUs = a
+# whole node on either; shared_mem blank derives 1494GiB from both node caps.
+# The ocean/atmos datasets are the arm's original inits (19yl0189, j0ng1tw3);
+# inert on resume but build_trainer needs the mounts.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-es0lt_a2s-fto|o0a0rs0|ace-samudra-coupled-cm4|dc8hkv6r|train|high|jupiter+titan|8||0|ai2/ace|resume_results.resume_wandb=true max_epochs=16|01M459HZHDVGJVN5FJDCTBSXCV|01M38QM5S9M9FW3ATRGGP6W0Q6|01M0VTG1SJQK69WWN5A651RXZY|8h|MALLOC_ARENA_MAX=4
