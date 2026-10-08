@@ -1,0 +1,14 @@
+# Century evals of coupled_lin8-es0lin8_a2s (spectral-ES ocean, lin8 coupled unroll); the lin8 rung for the
+# spectral-ES ocean, read against es0lt (coupled_eval_2026-10-05_es0lt) and lin8mae2ftn.
+# Configs: --config-dir configs/experiments/cm4_eval/coupled; both carry the six regional monthly-SST writers.
+# Checkpoint: best_inference_ckpt (epoch 1, best_inference_error 0.0910; epochs 2-8 did not replace it) from the
+# finalized result dataset of training job 01M46YNKA9E7KEWVAXP1P61CWC (8/8 epochs, exit 0), pinned in field 9.
+# min_runtime 8h: coupled rollouts over 100 yr; evaluate.sh runs --no-auto-resume, so a preempted eval is lost.
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-es0lin8_a2s-fto|o0a0rs0|01M46YNK662CJS5J806YT6C9VC|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M46YNK6HXHBEANF92M69FA4Z|ai2/ace|jupiter+titan
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-es0lin8_a2s-fto|o0a0rs0|01M46YNK662CJS5J806YT6C9VC|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M46YNK6HXHBEANF92M69FA4Z|ai2/ace|jupiter+titan
