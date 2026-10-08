@@ -1,6 +1,6 @@
 # UFS replay 4deg (CM4 level interfaces, rebuilt 2026-10-02), full-field ocean trained FROM SCRATCH on UFS only:
 # the control for the CM4-fine-tuned arms in this directory. UFS-native variable set (no hfgeou/sfdsi/UI/VI),
-# UFS 5-day normalization stats (Beaker ufs-replay-ocean-4deg-19level-5day-stats-2026-10-02 at /ocean_stats).
+# UFS 5-day normalization stats (Beaker ufs-replay-ocean-4deg-19level-5day-stats-2026-10-06 at /ocean_stats).
 # Same time partition as the fine-tunes: train 1994-2001 + 2012-2021, 2002-2011 untouched, validation
 # 2022-2023, inline 10-yr rollouts from 2012-01-01 and 2013-01-05. 200 epochs x ~91 iterations (20 training
 # years) ~ 18k iterations, a third of the CM4 pretrain's 55k. Corrector: scaled heat-content correction.

@@ -4,7 +4,7 @@
 set -euo pipefail
 ARMS="${ARMS:-scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc}"
 DATA_DS="${DATA_DS:-01M4BV9103G4C330XQM7R17RPT}"     # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars (regenerated store: FV3 stress, zos = SSH minus ocean mean)
-STATS_DS="${STATS_DS:-01M4925NAS522JSB9QNTDKZM0C}"   # ufs-replay-ocean-4deg-19level-5day-stats-2026-10-02 (files at the root)
+STATS_DS="${STATS_DS:-01M4C171K2J619BXZH9CSVM43N}"   # ufs-replay-ocean-4deg-19level-5day-stats-2026-10-06 (regenerated store; files at the root)
 PRIORITY="${PRIORITY:-high}"
 N_GPUS="${N_GPUS:-1}"
 REPO_ROOT=$(git rev-parse --show-toplevel)
