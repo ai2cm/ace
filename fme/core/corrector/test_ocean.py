@@ -862,7 +862,6 @@ def _ice_case(seed=0):
         "land_fraction": land,
         "sea_surface_fraction": ssf,
         "hfrunoffds": r(0.0, 1.0),
-        "areacello": r(0.5, 2.0) * ssf,
         **_make_atmos_forcing_data(_ICE_SHAPE, device="cpu"),
     }
     return input_data, gen_data, forcing_data
@@ -872,15 +871,13 @@ def _to_device(d):
     return {k: v.to(DEVICE) for k, v in d.items()}
 
 
-def _ice_corrector(weight="uniform", omit_terms=(), area_weight_name=None):
-    kwargs = {} if area_weight_name is None else {"area_weight_name": area_weight_name}
+def _ice_corrector(weight="uniform", omit_terms=()):
     config = OceanCorrectorConfig(
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
             method="prescribed_open_ocean",
             sea_ice=SeaIceHfdsCorrectionConfig(
                 weight=weight, omit_terms=list(omit_terms)
             ),
-            **kwargs,
         ),
     )
     ops = LatLonOperations(_ICE_AREA)
@@ -925,11 +922,10 @@ def _support(input_data, gen_data, forcing_data):
     )
 
 
-@pytest.mark.parametrize("area_weight_name", ["sea_surface_fraction", "areacello"])
 @pytest.mark.parametrize("weight", ["uniform", "sea_ice_fraction"])
-def test_form_a_sis2_closes_hemispheric_budget(weight, area_weight_name):
+def test_form_a_sis2_closes_hemispheric_budget(weight):
     input_data, gen_data, forcing_data = _ice_case()
-    out = _ice_corrector(weight, area_weight_name=area_weight_name)(
+    out = _ice_corrector(weight)(
         _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
     ).corrected
     hfds = out["hfds_total_area"].cpu().double()
@@ -940,7 +936,7 @@ def test_form_a_sis2_closes_hemispheric_budget(weight, area_weight_name):
         hfds,
     )
     S = _support(input_data, gen_data, forcing_data)
-    area = _ICE_AREA.double() * forcing_data[area_weight_name].double()
+    area = _ICE_AREA.double() * forcing_data["sea_surface_fraction"].double()
     scale = (area * r.abs()).sum()
     for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
         on = S & hemi[:, None]
@@ -1053,6 +1049,30 @@ def test_surface_flux_term_source_priority():
         surface_flux_term("minus_hfrunoffds", {}, am4, ssf)
 
 
+def test_am4_precipitation_heat_counts_snow_once():
+    """PRATEsfc is total (liquid + frozen) precipitation."""
+    cp, t_f = 3992.0, 273.15
+    ssf = torch.full((2, 2), 0.5)
+    am4 = _make_atmos_forcing_data((2, 2), device="cpu")
+    sst = torch.full((2, 2), 300.0)
+    p_h = cp * (am4["PRATEsfc"] - am4["LHTFLsfc"] / _LV) * (sst - t_f)
+    torch.testing.assert_close(
+        surface_flux_term("precipitation_heat", {}, am4, ssf, sst=sst), p_h * ssf
+    )
+    f_top = (
+        am4["DSWRFsfc"]
+        - am4["USWRFsfc"]
+        + am4["DLWRFsfc"]
+        - am4["ULWRFsfc"]
+        - am4["LHTFLsfc"]
+        - am4["SHTFLsfc"]
+    )
+    torch.testing.assert_close(
+        _compute_ocean_net_surface_energy_flux(am4, sst),
+        f_top - _LF * am4["total_frozen_precipitation_rate"] + p_h,
+    )
+
+
 def test_form_a_sis2_am4_fallback_and_omit_terms():
     input_data, gen_data, forcing_data = _ice_case()
     for n in [
@@ -1137,7 +1157,6 @@ def _oo_case(seed=1):
         "land_fraction": land,
         "sea_surface_fraction": ssf,
         "hfrunoffds": r(0.0, 1.0),
-        "areacello": r(0.5, 2.0) * ssf,
         **{
             k: v * r(0.5, 1.5)
             for k, v in _make_atmos_forcing_data(_OO_SHAPE, device="cpu").items()
@@ -1146,9 +1165,7 @@ def _oo_case(seed=1):
     return input_data, gen_data, forcing_data
 
 
-def _oo_config(
-    q_terms, block_size=3, coastal="method", sea_ice=False, area="sea_surface_fraction"
-):
+def _oo_config(q_terms, block_size=3, coastal="method", sea_ice=False):
     return OceanCorrectorConfig(
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
             method="prescribed_open_ocean",
@@ -1156,7 +1173,6 @@ def _oo_config(
             open_ocean=OpenOceanAnchorConfig(
                 q_terms=q_terms, block_size=block_size, coastal=coastal
             ),
-            area_weight_name=area,
         ),
     )
 
@@ -1182,12 +1198,11 @@ def _anchored_mask(input_data):
     return (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
 
 
-@pytest.mark.parametrize("area", ["sea_surface_fraction", "areacello"])
 @pytest.mark.parametrize("q_terms", [_Q_O, _Q_A], ids=["Q_o", "Q_a"])
-def test_open_ocean_anchor_block_integrals_equal_am4(q_terms, area):
+def test_open_ocean_anchor_block_integrals_equal_am4(q_terms):
     input_data, gen_data, forcing_data = _oo_case()
     n = 3
-    hfds = _run(_oo_config(q_terms, n, area=area), (input_data, gen_data, forcing_data))
+    hfds = _run(_oo_config(q_terms, n), (input_data, gen_data, forcing_data))
     hfds = hfds.cpu().double()
     ssf = forcing_data["sea_surface_fraction"].double()
     q = (
@@ -1203,7 +1218,7 @@ def test_open_ocean_anchor_block_integrals_equal_am4(q_terms, area):
         * ssf
     )
     M = _anchored_mask(input_data)
-    w = torch.where(M, _OO_AREA.double() * forcing_data[area].double(), 0.0)
+    w = torch.where(M, _OO_AREA.double() * ssf, 0.0)
     shape = (_OO_SHAPE[0], 6 // n, n, 6 // n, n)
     blocks_q = (w * q).reshape(shape).sum(dim=(-3, -1))
     blocks_f = (w * am4).reshape(shape).sum(dim=(-3, -1))
@@ -1297,7 +1312,6 @@ def test_open_ocean_config_from_state():
         {
             "surface_energy_flux_correction": {
                 "method": "prescribed_open_ocean",
-                "area_weight_name": "areacello",
                 "open_ocean": {"q_terms": _Q_A, "block_size": 5},
             }
         }

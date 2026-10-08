@@ -139,18 +139,11 @@ class SurfaceEnergyFluxCorrectionConfig:
         open_ocean: Optional AM4-anchored correction of the generated
             ``hfds_total_area`` on open, non-coastal cells off the sea-ice
             support, in place of ``method`` there.
-        area_weight_name: Forcing variable A weighting the ``sea_ice`` and
-            ``open_ocean`` area means, as in the zos global-mean correction:
-            <X> = area_weighted_mean(A X) / area_weighted_mean(A).
-
     """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
     sea_ice: "SeaIceHfdsCorrectionConfig | None" = None
     open_ocean: "OpenOceanAnchorConfig | None" = None
-    area_weight_name: Literal["sea_surface_fraction", "areacello"] = (
-        "sea_surface_fraction"
-    )
 
 
 SIS2_LATENT_HEAT_OF_FUSION = 3.34e5  # J/kg, ecand3_transform.LF
@@ -181,7 +174,7 @@ class SeaIceHfdsCorrectionConfig:
         S       = lf_snowfl + minus_f_top + hfds + calving_residue + minus_hfrunoffds
         delta_c = -w_c sum_{S_h} a A r / sum_{S_h} a A w
 
-    with a the grid area weight and A the ``area_weight_name`` forcing.
+    with a the grid area weight and A = sea_surface_fraction.
 
     so the corrected hfds closes the sea-ice energy budget integrated over S_h.
     Flux terms are read by ``surface_flux_term`` (gen_data, then forcing, then
@@ -356,19 +349,16 @@ class SurfaceEnergyFluxCorrection:
 
 @dataclasses.dataclass
 class AreaWeight:
-    """<X> = area_weighted_mean(A X) / area_weighted_mean(A), A a forcing field;
-    ``local`` gives the per-cell weight a A for block means (a = cos(lat),
-    proportional to the lat-lon grid's area weight).
+    """<X> = area_weighted_mean(A X) / area_weighted_mean(A), A =
+    sea_surface_fraction; ``local`` gives the per-cell weight a A for block
+    means (a = cos(lat), proportional to the lat-lon grid's area weight).
     """
 
-    name: str
     area_weighted_mean: AreaWeightedMean
     cos_lat: torch.Tensor  # (lat, 1), local latitude rows
 
     def field(self, input_data: TensorMapping, forcing_data: TensorMapping):
-        if self.name == "sea_surface_fraction":
-            return OceanData({**input_data, **forcing_data}).sea_surface_fraction
-        return forcing_data[self.name]
+        return OceanData({**input_data, **forcing_data}).sea_surface_fraction
 
     def total(self, A: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         """Proportional to sum a A x; same constant for every x."""
@@ -851,7 +841,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                 if lat is None:
                     raise ValueError("sea_ice/open_ocean corrections need latitudes")
                 area_weight = AreaWeight(
-                    sefc.area_weight_name,
                     area_weighted_mean,
                     torch.cos(torch.deg2rad(lat)).unsqueeze(-1),
                 )
@@ -911,13 +900,15 @@ def _compute_ocean_net_surface_energy_flux(
 def _precipitation_heat_flux(
     forcing_data: TensorMapping, sst: torch.Tensor
 ) -> torch.Tensor:
-    """Heat carried by precipitation and evaporation at the SST, W/m**2."""
+    """Heat carried by precipitation and evaporation at the SST, W/m**2.
+
+    precipitation_rate is total (liquid + frozen) precipitation.
+    """
     atmos = AtmosphereData(forcing_data)
     return (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (
             atmos.precipitation_rate
-            + atmos.frozen_precipitation_rate
             - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
         )  # missing: + river runoff + calving
         * (sst - FREEZING_TEMPERATURE_KELVIN)
