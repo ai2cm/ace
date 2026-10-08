@@ -154,7 +154,7 @@ def test_metadata_registry():
     assert metadata["ocean_heat_content"].units == "J/m**2"
     assert (
         metadata["ocean_heat_content"].long_name
-        == "Column-integrated ocean heat content"
+        == "Column-integrated ocean heat content per unit ocean area"
     )
 
 
@@ -248,6 +248,76 @@ def test_salt_budget_without_sfdsi():
             -REFERENCE_SALINITY * wfo * sea_surface_fraction,
             dtype=torch.float64,
         ),
+    )
+
+
+def _compute_heat_budget(
+    hfds: float, hfgeou: float, sea_surface_fraction: float
+) -> TensorDict:
+    """Computes the ocean derived quantities for a single-level column whose
+    temperature changes only through the surface and geothermal heat fluxes,
+    given in W/m2 per unit ocean area.
+    """
+    dz = 10.0
+    initial_temperature = 10.0
+    temperature_change = (
+        (hfds + hfgeou)
+        * TIMESTEP.total_seconds()
+        / (DENSITY_OF_SEA_WATER_CM4 * SPECIFIC_HEAT_OF_SEA_WATER_CM4 * dz)
+    )
+    shape = (1, 2, 1, 1)
+    data = {
+        "thetao_0": torch.tensor(
+            [initial_temperature, initial_temperature + temperature_change],
+            dtype=torch.float64,
+        ).reshape(shape),
+        "hfds": torch.full(shape, hfds, dtype=torch.float64),
+        "hfgeou": torch.full(shape, hfgeou, dtype=torch.float64),
+        "sea_surface_fraction": torch.full(
+            shape, sea_surface_fraction, dtype=torch.float64
+        ),
+    }
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, dz], dtype=torch.float64),
+        mask=torch.ones(*shape, 1, dtype=torch.float64),
+    )
+    return compute_ocean_derived_quantities(
+        data, depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+
+
+@pytest.mark.parametrize(
+    "hfds, hfgeou, sea_surface_fraction",
+    [
+        pytest.param(100.0, 0.0, 1.0, id="hfds"),
+        pytest.param(100.0, 0.0, 0.5, id="hfds-partial-ocean"),
+        pytest.param(100.0, 0.05, 0.5, id="hfds-and-hfgeou-partial-ocean"),
+    ],
+)
+def test_heat_budget_closes(hfds: float, hfgeou: float, sea_surface_fraction: float):
+    """A temperature change set by the heat fluxes leaves no implied
+    advection, including in a cell that is partly land.
+    """
+    out = _compute_heat_budget(hfds, hfgeou, sea_surface_fraction)
+    ohc_tendency = out["ocean_heat_content_tendency"][:, 1]
+    net_flux = out["net_energy_flux_into_ocean_column"][:, 1]
+    implied_advection = out["implied_tendency_of_ocean_heat_content_due_to_advection"][
+        :, 1
+    ]
+    torch.testing.assert_close(
+        ohc_tendency, torch.full((1, 1, 1), hfds + hfgeou, dtype=torch.float64)
+    )
+    torch.testing.assert_close(
+        net_flux,
+        torch.full(
+            (1, 1, 1), (hfds + hfgeou) * sea_surface_fraction, dtype=torch.float64
+        ),
+    )
+    torch.testing.assert_close(
+        implied_advection,
+        torch.zeros((1, 1, 1), dtype=torch.float64),
+        atol=1e-9,
+        rtol=0.0,
     )
 
 
