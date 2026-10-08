@@ -197,3 +197,15 @@ run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
 
 # 1-GPU pretrain v2 fine-tune: standard ACE2S detached 3-step, batch_size=1
 run_training "ace2s-finetune-1gpu.yaml" "1deg-daily-ace2s-1gpu-ft3-detached-rs0" 1
+
+# 1-GPU pretrain seed replicates, 15 epochs (loss-matched to 8-GPU 40-epoch)
+run_training "ace2s-pretrain-1gpu-15ep-rs0.yaml" "1deg-daily-ace2s-1gpu-15ep-pretrain-rs0" 1
+run_training "ace2s-pretrain-1gpu-15ep-rs1.yaml" "1deg-daily-ace2s-1gpu-15ep-pretrain-rs1" 1
+run_training "ace2s-pretrain-1gpu-15ep-rs2.yaml" "1deg-daily-ace2s-1gpu-15ep-pretrain-rs2" 1
+run_training "ace2s-pretrain-1gpu-15ep-rs3.yaml" "1deg-daily-ace2s-1gpu-15ep-pretrain-rs3" 1
+
+# Staged fine-tunes (replace PRETRAIN_RESULT_DATASET placeholders before launch)
+run_training "ace2s-finetune-1gpu-4ep-rs0.yaml" "1deg-daily-ace2s-1gpu-4ep-ft3-detached-rs0" 1
+run_training "ace2s-finetune-1gpu-4ep-rs1.yaml" "1deg-daily-ace2s-1gpu-4ep-ft3-detached-rs1" 1
+run_training "ace2s-finetune-1gpu-4ep-rs2.yaml" "1deg-daily-ace2s-1gpu-4ep-ft3-detached-rs2" 1
+run_training "ace2s-finetune-1gpu-4ep-rs3.yaml" "1deg-daily-ace2s-1gpu-4ep-ft3-detached-rs3" 1
