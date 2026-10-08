@@ -6,5 +6,7 @@
 #   gs://vcm-ml-intermediate/elynnwu-research/2026-10-08-lt0lt-a2slr-swap-evals/<tag>/
 # Configs: --config-dir configs/experiments/cm4_eval/coupled_swap.
 
-cm4_piC-coupled_lt0lt_a2slr|ep8-a2slr|01M339VK884YE3B2M5YM1RQ966|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-08-lt0lt-a2slr-swap-evals/ep8-a2slr|01M3DN0NDP94TNHZ4M3VWVSAM4|ai2/ace|jupiter+titan|01M4EVE6KDZBZ2KG2ZCDCSZ4CW|01M4AD4RD9TWNKV5M6SJC5H8Q1|64GiB
-cm4_piC-coupled_lt0lt_a2slr|ep12-a2slr|01M3MYF9S5FXCXVVN108864A6D|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-08-lt0lt-a2slr-swap-evals/ep12-a2slr|01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan|01M4EVHZCQRY44QZ8Y86SXDMZD|01M4AD4RD9TWNKV5M6SJC5H8Q1|64GiB
+cm4_piC-coupled_lt0lt_a2slr|ep8-a2slr|01M339VK884YE3B2M5YM1RQ966|launched_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-08-lt0lt-a2slr-swap-evals/ep8-a2slr|01M3DN0NDP94TNHZ4M3VWVSAM4|ai2/ace|jupiter+titan|01M4EVE6KDZBZ2KG2ZCDCSZ4CW|01M4AD4RD9TWNKV5M6SJC5H8Q1|64GiB
+cm4_piC-coupled_lt0lt_a2slr|ep12-a2slr|01M3MYF9S5FXCXVVN108864A6D|launched_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-08-lt0lt-a2slr-swap-evals/ep12-a2slr|01M49EX49QD91XPXRVXY9C94FF|ai2/ace|jupiter+titan|01M4EVHZCQRY44QZ8Y86SXDMZD|01M4AD4RD9TWNKV5M6SJC5H8Q1|64GiB
+
+# Launched 2026-10-08 from 082742149: ep8-a2slr 01M4EVVA80VN7WTGPF2BEKKZB5, ep12-a2slr 01M4EVVJX23ZX43MEQTHN64HAB
