@@ -15,28 +15,13 @@ LatPad = Literal["constant", "reflect", "pole"]
 def pad_latitude(
     x: torch.Tensor, pad_start: int, pad_end: int, mode: LatPad
 ) -> torch.Tensor:
-    """Pad the latitude (second-to-last) axis of ``x``.
+    """Pad the latitude (second-to-last) axis of ``x`` by ``pad_start`` rows
+    before index 0 and ``pad_end`` rows after the last.
 
-    ``pad_start`` rows are added before index 0 and ``pad_end`` rows after the
-    last index; with latitude stored south-to-north these are the south and
-    north edges.
-
-    Modes:
-        constant: zeros.
-        reflect: mirror about the edge row, excluding it (``torch``'s
-            ``"reflect"``); each pad must be smaller than the height.
-        pole: pole-crossing padding for a grid whose edge cells touch the
-            pole. The k rows beyond a pole are the k edge rows flipped in
-            latitude and rotated half way round in longitude, which is the
-            true cross-pole neighbor of a scalar field (a vector component
-            changes sign across the pole, so this is not exact for velocities).
-            It is exact only when the edge rows of ``x`` touch the pole; on a
-            tensor whose edge stops short of the pole (a level that dropped
-            its last row in pooling) or extends past it (a pole-padded input),
-            it is an approximation. Each pad must be at most the height. The
-            rotation is exact for an even number of longitudes; for an odd
-            number the antipodal longitude falls between two columns, which
-            are averaged.
+    Modes: "constant" pads zeros, "reflect" mirrors about the edge row, and
+    "pole" continues across the pole using the edge rows flipped and rotated
+    180 degrees in longitude (for an odd width, the two columns nearest the
+    antipode are averaged).
     """
     if mode == "constant":
         return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
@@ -89,11 +74,9 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
     seam. Here we pad one column on each longitude edge with the wrapped
     (circular) neighbor before interpolating, then crop the upsampled padding
     back off, so the seam is interpolated against its true periodic neighbor.
-    With ``lat_pad="constant"`` (the default) the latitude (height) axis is
-    left unpadded, so the latitude edges interpolate against a replicated edge
-    row. Any other ``lat_pad`` mode (see ``pad_latitude``) pads one latitude
-    row on each edge the same way and crops it back off. The output shape
-    matches ``BilinearUpsample``.
+    Latitude is left unpadded unless ``lat_pad`` is not "constant", in which
+    case it is padded (see ``pad_latitude``) and cropped the same way. The
+    output shape matches ``BilinearUpsample``.
     """
 
     def __init__(self, upsampling: int = 2, lat_pad: LatPad = "constant", **kwargs):
@@ -224,10 +207,8 @@ class ConvNeXtBlock(torch.nn.Module):
     conditional, so it requires a normalization layer to condition (``norm`` not
     None).
 
-    ``pad`` is the padding mode of the longitude (width) axis, given to
-    ``torch.nn.functional.pad``, and ``lat_pad`` that of the latitude (height)
-    axis, given to ``pad_latitude``. Latitude is padded first, so the corners
-    are filled by the longitude padding of the latitude-padded rows.
+    ``pad`` is the longitude padding mode and ``lat_pad`` the latitude one
+    (see ``pad_latitude``).
     """
 
     def __init__(

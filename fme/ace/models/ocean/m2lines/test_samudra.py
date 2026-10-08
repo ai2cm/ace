@@ -538,10 +538,8 @@ def _old_samudra_forward(model: Samudra, fts: torch.Tensor) -> torch.Tensor:
 
 
 def _small_samudra(**kwargs) -> Samudra:
-    """Three levels; on a (22, 36) grid the heights run 22 -> 11 -> 5 -> 2
-    and the widths 36 -> 18 -> 9 -> 4, so two levels pool an odd height and
-    one an odd width, as the 1-degree 180x360 grid does at its coarse
-    levels."""
+    """Three levels on a (22, 36) grid, so some levels pool an odd height
+    or width, as the 180x360 grid does."""
     torch.manual_seed(0)
     return Samudra(
         input_channels=2,
@@ -562,8 +560,7 @@ _SMALL_SHAPE = (22, 36)
 def test_samudra_default_lat_pad_matches_original_forward_bitwise(
     zonally_periodic_upsample: bool,
 ):
-    """The defaults must reproduce the original zero-latitude-padding forward
-    exactly, so existing checkpoints produce the same outputs."""
+    """The default reproduces the original forward exactly."""
     model = _small_samudra(zonally_periodic_upsample=zonally_periodic_upsample)
     explicit = _small_samudra(
         zonally_periodic_upsample=zonally_periodic_upsample,
@@ -593,11 +590,9 @@ def test_pad_latitude_pole_rows():
 
 
 def test_pad_latitude_pole_is_the_continuation_across_the_pole():
-    """The Cartesian coordinates of the cell centers are smooth scalar fields
-    on the sphere, and the latitude/longitude formula for them continues
-    across a pole: the point at latitude -90 - d, longitude L is the point at
-    -90 + d, L + 180. So pole padding must reproduce the formula evaluated at
-    the padded rows' latitudes."""
+    """Pole padding of the cell centers' Cartesian coordinates matches the
+    coordinates evaluated past the pole (latitude -90 - d, longitude L is
+    the point -90 + d, L + 180)."""
     n_lat, n_lon, n_pad = 6, 8, 2
 
     def cartesian(lat_deg: torch.Tensor, lon_deg: torch.Tensor) -> torch.Tensor:
@@ -664,8 +659,7 @@ def test_samudra_lat_pad_options_keep_output_shape(lat_pad, zonally_periodic_ups
 def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
     lat_pad, zonally_periodic_upsample
 ):
-    """The default four levels and dilations on the 180x360 grid, where the
-    coarsest levels are the smallest heights the latitude padding sees."""
+    """The default four levels on the 180x360 grid."""
     torch.manual_seed(0)
     model = Samudra(
         input_channels=1,
@@ -694,8 +688,7 @@ def test_samudra_lat_pad_options_change_the_output(lat_pad):
 
 @pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
 def test_samudra_lat_pad_options_keep_state_dict(lat_pad, zonally_periodic_upsample):
-    """``lat_pad`` adds no parameters, so a checkpoint trained with the
-    defaults loads (strictly) into a model with any mode, for fine-tuning."""
+    """A default checkpoint loads strictly into a model with any mode."""
     default = _small_samudra()
     model = _small_samudra(
         lat_pad=lat_pad,

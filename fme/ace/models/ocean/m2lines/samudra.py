@@ -50,17 +50,9 @@ class Samudra(torch.nn.Module):
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
     lat_pad : {"constant", "reflect", "pole"}, optional
-        Padding of the latitude (height) axis at every latitude-padding site:
-        the ConvNeXt block convolutions, the final convolution, the decoder's
-        pad back onto the skip connection, and (with
-        ``zonally_periodic_upsample``) the upsampling. "constant" pads zeros,
-        "reflect" mirrors about the edge row, and "pole" pads across the pole
-        (see ``pad_latitude``). Pooling an odd height drops its last row,
-        and the decoder's 1-row refill of it uses the same mode, so "pole"
-        fills the dropped polar row with the antipodal copy of the row next
-        to it, an approximation. By default "constant", the original
-        behavior. Adds no parameters, so a checkpoint trained with any mode
-        loads into any other.
+        Latitude padding used wherever the network pads latitude (see
+        ``pad_latitude``). By default "constant", the original behavior. Adds
+        no parameters, so checkpoints load across modes.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise

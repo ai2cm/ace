@@ -37,18 +37,8 @@ class SamudraBuilder(ModuleConfig):
             that strength is a learned constant, identical for every sample on
             every step. "layer" is the principled choice for a conditioned
             network.
-        lat_pad: Padding of the latitude axis wherever the network pads it
-            (block convolutions, final convolution, decoder skip alignment,
-            and the upsampling when ``zonally_periodic_upsample`` is set).
-            "constant" (the default, the original behavior) pads zeros,
-            "reflect" mirrors about the edge row, and "pole" pads across the
-            pole: the rows beyond a pole are the edge rows flipped in latitude
-            and rotated by half the longitudes, the true neighbors of a scalar
-            field on a grid whose edge cells touch the poles. The decoder's
-            1-row refill of a row dropped by pooling an odd height also uses
-            it, which for "pole" is an approximation. Adds no parameters, so
-            a checkpoint trained with the default can be fine-tuned with
-            another mode.
+        lat_pad: Latitude padding mode: "constant" (default, zeros),
+            "reflect", or "pole" (continues across the pole). See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
