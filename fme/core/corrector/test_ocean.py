@@ -1350,3 +1350,128 @@ def test_ocean_heat_content_correction_capped_contraction():
     torch.testing.assert_close(
         (corrected["thetao_1"] - 2 * (1.0 - cap))[valid1], increment[valid1]
     )
+
+
+def test_variable_bounds_clamps_generated_fields():
+    """ForceBounded via OceanCorrectorConfig: out-of-range generated values are
+    clamped to the configured (lower, upper); in-range values and unlisted
+    fields pass through untouched."""
+    torch.manual_seed(0)
+    config = OceanCorrectorConfig(
+        variable_bounds={"so_0": (0.0, 45.0), "thetao_0": (-4.0, None)}
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = config._build(ops, _VERTICAL_COORD, timestep)
+    input_data = {
+        name: torch.randn(IMG_SHAPE, device=DEVICE)
+        for name in ("so_0", "thetao_0", "zos")
+    }
+    gen_data = {
+        "so_0": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
+        "thetao_0": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
+        "zos": 100.0 * torch.randn(IMG_SHAPE, device=DEVICE),
+    }
+    zos_before = gen_data["zos"].clone()
+    corrected_gen = corrector(input_data, gen_data, {}, None).corrected
+    assert torch.all(corrected_gen["so_0"] >= 0.0)
+    assert torch.all(corrected_gen["so_0"] <= 45.0)
+    assert torch.all(corrected_gen["thetao_0"] >= -4.0)
+    assert torch.any(corrected_gen["thetao_0"] > 45.0)  # upper side open
+    torch.testing.assert_close(corrected_gen["zos"], zos_before)
+
+
+def _heat_content_setup():
+    """Shared small grid for the unaccounted-heating tests: 3x3 cells, two levels,
+    one land cell, hfds and hfgeou of 1 W/m2 everywhere."""
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 2, 3, 3, 2
+    mask = torch.ones(nsamples, nlat, nlon, nlevels)
+    mask[:, 0, 0, :] = 0.0
+    masks = {
+        "mask_0": mask[:, :, :, 0],
+        "mask_1": mask[:, :, :, 1],
+        "mask_2d": mask[:, :, :, 0],
+        "mask_ocean_heat_content": mask[:, :, :, 0],
+    }
+    ops = LatLonOperations(torch.ones(size=[3, 3]), SpatialMaskProvider(masks))
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10, 20]), mask)
+    input_data = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon),
+        "thetao_1": torch.ones(nsamples, nlat, nlon),
+        "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
+    }
+    gen_data = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
+        "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
+        "hfds": torch.ones(nsamples, nlat, nlon),
+    }
+    forcing_data = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": mask[:, :, :, 0],
+    }
+    return (
+        timestep,
+        ops,
+        depth_coordinate,
+        mask[:, :, :, 0],
+        input_data,
+        gen_data,
+        forcing_data,
+    )
+
+
+def test_generated_unaccounted_heating_matches_the_constant_with_its_ocean_mean():
+    """A learned unaccounted-heating field enters the budget through its masked
+    ocean-area mean: a spatially varying field with ocean mean c gives the same
+    correction as constant_unaccounted_heating=c, and the constant adds on top."""
+    timestep, ops, depth, ocean, input_data, gen_data, forcing_data = (
+        _heat_content_setup()
+    )
+    # field varying over the grid; its masked ocean-area mean is what matters
+    field = torch.arange(9, dtype=torch.float32).reshape(1, 3, 3).repeat(2, 1, 1) * 0.05
+    field = field.where(ocean > 0, torch.zeros_like(field))
+    ocean_mean = float((field[0] * ocean[0]).sum() / ocean[0].sum())
+    gen_with_field = {**gen_data, "unaccounted_heating": field}
+
+    constant = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature", constant_unaccounted_heating=ocean_mean + 0.2
+        )
+    )._build(ops, depth, timestep)
+    generated = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.2,
+            unaccounted_heating_source="generated",
+        )
+    )._build(ops, depth, timestep)
+    a = constant(input_data, gen_data, forcing_data, None).corrected
+    b = generated(input_data, gen_with_field, forcing_data, None).corrected
+    for name in ("thetao_0", "thetao_1", "sst"):
+        torch.testing.assert_close(a[name], b[name], equal_nan=True)
+    # and it is not the same as ignoring the field
+    ignored = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature", constant_unaccounted_heating=0.2
+        )
+    )._build(ops, depth, timestep)
+    c = ignored(input_data, gen_with_field, forcing_data, None).corrected
+    assert not torch.allclose(c["thetao_0"][ocean > 0], b["thetao_0"][ocean > 0])
+    # the learned field itself is read, not written
+    assert (
+        "unaccounted_heating"
+        not in generated(input_data, gen_with_field, forcing_data, None).modified_names
+    )
+
+
+def test_generated_unaccounted_heating_requires_the_field():
+    timestep, ops, depth, _, input_data, gen_data, forcing_data = _heat_content_setup()
+    corrector = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature", unaccounted_heating_source="generated"
+        )
+    )._build(ops, depth, timestep)
+    with pytest.raises(ValueError, match="unaccounted_heating"):
+        corrector(input_data, gen_data, forcing_data, None)
