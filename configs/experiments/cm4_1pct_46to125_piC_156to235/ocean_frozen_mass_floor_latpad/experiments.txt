@@ -7,10 +7,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # watcher flips these to run_ once the task's fine-tunes all succeed (task
 # 2026-10-07-samudra-north-edge-padding, auto_launch).
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftA-constant|rs0|01M4C5DX673S1PBXZ883YQK4T2|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftA-constant|rs0|01M4C5DX673S1PBXZ883YQK4T2|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftB-pole-pool|rs0|01M4C5E80DRYGW926K6YMXY744|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftB-pole-pool|rs0|01M4C5E80DRYGW926K6YMXY744|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftC-pole|rs0|01M4C5EJG8T1E4ZJ6FN3BY1KTD|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftC-pole|rs0|01M4C5EJG8T1E4ZJ6FN3BY1KTD|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftD-constant-pool|rs0|01M4C5EWE30Z2PAV21RN4G12TG|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftD-constant-pool|rs0|01M4C5EWE30Z2PAV21RN4G12TG|run_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
