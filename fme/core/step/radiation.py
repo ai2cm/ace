@@ -167,6 +167,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
+
     @property
     def allow_missing_variables(self) -> bool:
         return False
@@ -394,8 +397,9 @@ class SeparateRadiationStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            residual_names=(
+                self.prognostic_names if self._config.residual_prediction else None
+            ),
             stepper_state=args.stepper_state,
         )
 

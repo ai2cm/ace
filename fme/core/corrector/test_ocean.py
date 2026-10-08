@@ -11,6 +11,7 @@ from fme.core.corrector.ocean import (
     OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
     SurfaceEnergyFluxCorrectionConfig,
+    ZosGlobalMeanCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
 )
 from fme.core.gridded_ops import LatLonOperations
@@ -369,6 +370,61 @@ def test_surface_energy_flux_correction_prescribed():
 
 
 @pytest.mark.parametrize(
+    "hfds_name",
+    [
+        pytest.param("hfds", id="hfds_in_gen"),
+        pytest.param("hfds_total_area", id="hfds_total_area_in_gen"),
+    ],
+)
+def test_surface_energy_flux_correction_prescribed_open_ocean(hfds_name):
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = config._build(ops, None, timestep)
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+
+    gen_data = {
+        "sst": sst,
+        hfds_name: gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    ocean_fraction = 1 - land_fraction - sea_ice_fraction
+    net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    if hfds_name == "hfds_total_area":
+        net_flux = net_flux * (1 - land_fraction)
+    expected_hfds = torch.where(ocean_fraction == 1, net_flux, gen_hfds)
+
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    torch.testing.assert_close(corrected[hfds_name], expected_hfds)
+    # open ocean (ocean_fraction exactly 1): hfds is the prescribed net flux
+    open_ocean_row = 1
+    torch.testing.assert_close(
+        corrected[hfds_name][open_ocean_row, :], net_flux[open_ocean_row, :]
+    )
+    # partial ocean under sea ice: gen_hfds passes through unweighted, unlike
+    # the "prescribed" method which would blend it with the net flux
+    torch.testing.assert_close(corrected[hfds_name][0, :], gen_hfds[0, :])
+    # land: gen_hfds passes through
+    torch.testing.assert_close(corrected[hfds_name][-1, :], gen_hfds[-1, :])
+
+
+@pytest.mark.parametrize(
     "hfds_type",
     [
         pytest.param("input", id="hfds_in_input"),
@@ -487,6 +543,7 @@ def test_ocean_corrector_config_fields_are_known():
         "surface_energy_flux_correction",
         "ocean_heat_content_correction",
         "keep_gradient_through_clamps",
+        "zos_global_mean_correction",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(OceanCorrectorConfig)}
@@ -561,6 +618,9 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
             method="scaled_temperature",
             constant_unaccounted_heating=0.1,
         ),
+        zos_global_mean_correction=ZosGlobalMeanCorrectionConfig(
+            reference_global_mean=0.01
+        ),
     )
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     mask = torch.ones(nlat, nlon, nlevels)
@@ -597,6 +657,7 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
         "sea_ice_fraction": randoms((n_members, nlat, nlon)) * 0.8 + 0.5,
         "sea_ice_thickness": randoms((n_members, nlat, nlon)),
         "hfds": randoms((n_members, nlat, nlon)),
+        "zos": randoms((n_members, nlat, nlon)),
     }
     forcing_data = {
         "hfgeou": randoms((n_members, nlat, nlon)),
@@ -604,7 +665,7 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
     }
 
     folded = corrector(input_data, gen_data, forcing_data, None).corrected
-    assert set(folded) >= {"so_0", "sea_ice_fraction", "thetao_0", "sst"}
+    assert set(folded) >= {"so_0", "sea_ice_fraction", "thetao_0", "sst", "zos"}
 
     for member in range(n_members):
 
@@ -630,3 +691,90 @@ def test_ocean_corrector_is_per_member_under_ensemble_folding():
     # above is not vacuous
     for name in folded:
         assert not torch.allclose(folded[name][0], folded[name][1])
+
+
+def _zos_setup(reference_global_mean: float):
+    nsamples, nlat, nlon = 3, 4, 5
+    mask = torch.ones(nlat, nlon, device=DEVICE)
+    mask[0, :2] = 0.0
+    mask[3, 4] = 0.0
+    # fractional at masked-in coastal cells, zero off the mask
+    sea_surface_fraction = mask.clone()
+    sea_surface_fraction[0, 2] = 0.3
+    sea_surface_fraction[1, 0] = 0.6
+    sea_surface_fraction[2, 4] = 0.1
+    area = torch.tensor([0.5, 1.0, 1.5, 0.7], device=DEVICE).unsqueeze(-1)
+    area = area.expand(nlat, nlon)
+    ops = LatLonOperations(area, SpatialMaskProvider({"mask_2d": mask}))
+    config = OceanCorrectorConfig(
+        zos_global_mean_correction=ZosGlobalMeanCorrectionConfig(
+            reference_global_mean=reference_global_mean
+        )
+    )
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+    torch.manual_seed(0)
+    gen_data = {
+        "zos": torch.randn(nsamples, nlat, nlon, device=DEVICE) + 0.5,
+        "so_0": torch.randn(nsamples, nlat, nlon, device=DEVICE),
+    }
+    forcing_data = {
+        "sea_surface_fraction": sea_surface_fraction.expand(nsamples, nlat, nlon)
+    }
+    return corrector, gen_data, forcing_data, area, sea_surface_fraction
+
+
+@pytest.mark.parametrize("reference_global_mean", [0.0, -0.0123])
+def test_zos_global_mean_correction(reference_global_mean):
+    corrector, gen_data, forcing_data, area, s = _zos_setup(reference_global_mean)
+    result = corrector({}, gen_data, forcing_data, None)
+    zos = result.corrected["zos"]
+    # <z>_f = sum A s z / sum A s, independent of fme's area_weighted_mean
+    w = area * s
+    mean_f = (w * zos).sum(dim=(-2, -1)) / w.sum()
+    torch.testing.assert_close(
+        mean_f, torch.full_like(mean_f, reference_global_mean), atol=1e-6, rtol=0
+    )
+    # a uniform shift per sample
+    shift = zos - gen_data["zos"]
+    torch.testing.assert_close(
+        shift, shift[:, :1, :1].expand_as(shift), atol=1e-6, rtol=0
+    )
+    assert set(result.modified_names) == {"zos"}
+    torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_zos_global_mean_correction_differs_from_mask_weighting():
+    # guards the weighting: with fractional s, the mask-weighted mean of the
+    # corrected zos is not the reference, so <z>_mask would be the wrong choice
+    corrector, gen_data, forcing_data, area, s = _zos_setup(0.0)
+    zos = corrector({}, gen_data, forcing_data, None).corrected["zos"]
+    mask = (s > 0).to(area.dtype)
+    mean_mask = (area * mask * zos).sum(dim=(-2, -1)) / (area * mask).sum()
+    assert mean_mask.abs().min() > 1e-4
+
+
+def test_zos_global_mean_correction_absent_zos():
+    corrector, gen_data, forcing_data, _, _ = _zos_setup(0.0)
+    del gen_data["zos"]
+    result = corrector({}, gen_data, forcing_data, None)
+    assert set(result.modified_names) == set()
+    assert set(result.corrected) == {"so_0"}
+    torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_zos_global_mean_correction_config_round_trip():
+    config = OceanCorrectorConfig(
+        zos_global_mean_correction=ZosGlobalMeanCorrectionConfig(
+            reference_global_mean=-0.0123
+        )
+    )
+    # None-valued keys dropped: remove_deprecated_keys does not accept an
+    # explicit ocean_heat_content_correction=None
+    state = {k: v for k, v in dataclasses.asdict(config).items() if v is not None}
+    assert state["zos_global_mean_correction"] == {"reference_global_mean": -0.0123}
+    assert OceanCorrectorConfig.from_state(state) == config
+    default = OceanCorrectorConfig.from_state({"zos_global_mean_correction": {}})
+    assert default.zos_global_mean_correction == ZosGlobalMeanCorrectionConfig(
+        reference_global_mean=0.0
+    )
+    assert OceanCorrectorConfig.from_state({}).zos_global_mean_correction is None

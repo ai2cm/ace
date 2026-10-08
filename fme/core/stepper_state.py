@@ -10,12 +10,18 @@ The Stepper does not inspect the contents of sub-states; they are opaque
 payloads owned by their respective components.
 """
 
+from __future__ import annotations
+
 import dataclasses
 
 import torch
 
 from fme.core.corrector.state import CorrectorState
 from fme.core.random_state import RandomState
+
+
+class UngatheredStateDictError(Exception):
+    """The state dict does not contain gathered per-rank random state."""
 
 
 @dataclasses.dataclass
@@ -33,7 +39,7 @@ class StepperState:
     corrector_state: CorrectorState | None = None
     random_state: RandomState | None = None
 
-    def to_device(self) -> "StepperState":
+    def to_device(self) -> StepperState:
         return StepperState(
             corrector_state=(
                 None
@@ -45,7 +51,7 @@ class StepperState:
             ),
         )
 
-    def to_cpu(self) -> "StepperState":
+    def to_cpu(self) -> StepperState:
         return StepperState(
             corrector_state=(
                 None if self.corrector_state is None else self.corrector_state.to_cpu()
@@ -55,14 +61,25 @@ class StepperState:
             ),
         )
 
-    def pin_memory(self) -> "StepperState":
+    def pin_memory(self) -> StepperState:
         if self.corrector_state is not None:
             self.corrector_state.pin_memory()
         if self.random_state is not None:
             self.random_state.pin_memory()
         return self
 
-    def broadcast_ensemble(self, n_ensemble: int) -> "StepperState":
+    def select_sample_slice(self, sample_slice: slice) -> StepperState:
+        """Select a contiguous range of samples."""
+        return StepperState(
+            corrector_state=(
+                None
+                if self.corrector_state is None
+                else self.corrector_state.select_sample_slice(sample_slice)
+            ),
+            random_state=self.random_state,
+        )
+
+    def broadcast_ensemble(self, n_ensemble: int) -> StepperState:
         return StepperState(
             corrector_state=(
                 None
@@ -107,7 +124,7 @@ class StepperState:
         return result
 
     @classmethod
-    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> "StepperState":
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> StepperState:
         """Rebuild from ``to_state_dict``; a sub-state absent from the serialized
         state (no ``<name>.present`` marker) is restored as ``None``.
         """
@@ -144,10 +161,79 @@ class StepperState:
         return keys
 
 
+class GatheredStepperState:
+    """Stepper state after a data-parallel gather.
+
+    Stores the per-rank ``StepperState`` objects directly. Serialization
+    is fully per-rank: each rank's ``StepperState`` is delegated to
+    ``StepperState.to_state_dict``/``from_state_dict`` under a
+    ``rank_<i>.`` namespace, so new sub-states added to ``StepperState``
+    are automatically included without changes here.
+    """
+
+    def __init__(self, *, states: list[StepperState]):
+        self._states = list(states)
+
+    @property
+    def n_ranks(self) -> int:
+        return len(self._states)
+
+    def to_cpu(self) -> GatheredStepperState:
+        return GatheredStepperState(states=[s.to_cpu() for s in self._states])
+
+    def get_for_rank(self, rank: int) -> StepperState:
+        """Return the ``StepperState`` for a single data-parallel rank."""
+        return self._states[rank]
+
+    def to_state_dict(self) -> dict[str, torch.Tensor]:
+        """Serialize for a restart file.
+
+        Each rank's ``StepperState`` is serialized under a
+        ``rank_<i>.`` namespace, with an ``n_ranks`` marker so the
+        reader knows how many to expect.
+        """
+        result: dict[str, torch.Tensor] = {"n_ranks": torch.tensor(len(self._states))}
+        for i, state in enumerate(self._states):
+            for key, value in state.to_state_dict().items():
+                result[f"rank_{i}.{key}"] = value
+        return result
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> GatheredStepperState:
+        """Rebuild from ``to_state_dict``.
+
+        Raises:
+            UngatheredStateDictError: If the state dict does not contain
+                an ``n_ranks`` marker, indicating it is a plain
+                ``StepperState`` dict rather than a gathered one.
+        """
+        if "n_ranks" not in state:
+            raise UngatheredStateDictError(
+                "State dict has no n_ranks marker; "
+                "this is a plain StepperState dict, not a gathered one."
+            )
+        n_ranks = int(state["n_ranks"].item())
+        states = [
+            StepperState.from_state_dict(_sub_state_dict(state, f"rank_{i}"))
+            for i in range(n_ranks)
+        ]
+        return cls(states=states)
+
+    def per_sample_state_keys(self) -> set[str]:
+        """Keys whose tensors carry a leading per-sample dimension.
+
+        Per-rank state variables are NOT per-sample in the gathered
+        sense: each rank's corrector carries that rank's sample shard,
+        not the full gathered sample count, so none of them should share
+        the ``sample`` dim with the prognostic data.
+        """
+        return set()
+
+
 def _sub_state_dict(
     state: dict[str, torch.Tensor], name: str
 ) -> dict[str, torch.Tensor]:
-    """Extract a sub-state's fields from a namespaced ``StepperState`` state dict,
+    """Extract a sub-state's fields from a namespaced state dict,
     stripping the ``<name>.`` prefix and dropping the ``<name>.present`` marker.
     """
     prefix = f"{name}."

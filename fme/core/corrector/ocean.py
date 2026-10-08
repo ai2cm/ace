@@ -126,13 +126,33 @@ class SurfaceEnergyFluxCorrectionConfig:
       - "prescribed": corrected_hfds = net_flux * ocean_fraction + gen_hfds *
         (1 - ocean_fraction). Open-ocean hfds is prescribed from forcings; the
         network prediction is retained under sea ice and on land.
+      - "prescribed_open_ocean": corrected_hfds = net_flux where ocean_fraction
+        == 1, and gen_hfds elsewhere. hfds is prescribed from forcings only on
+        cells that are entirely ice-free ocean, and the network prediction
+        passes through unweighted everywhere else.
 
     Parameters:
         method: Method to use for the correction.
 
     """
 
-    method: Literal["residual_prediction", "prescribed"]
+    method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+
+
+@dataclasses.dataclass
+class ZosGlobalMeanCorrectionConfig:
+    """Configuration for setting the global mean of generated sea surface
+    height (``zos``) to a reference value each step.
+
+    The global mean is weighted by cell area times ``sea_surface_fraction``
+    (taken from forcing data) over the ``zos`` mask, so fractional coastal
+    cells count by their ocean fraction.
+
+    Parameters:
+        reference_global_mean: Target global mean of ``zos`` in m.
+    """
+
+    reference_global_mean: float = 0.0
 
 
 @dataclasses.dataclass
@@ -173,7 +193,7 @@ class SeaIceFractionCorrection:
 class SurfaceEnergyFluxCorrection:
     """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
 
-    method: Literal["residual_prediction", "prescribed"]
+    method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
 
     def __call__(
         self,
@@ -237,6 +257,39 @@ class OceanHeatContentCorrection:
         return corrected, corrector_state
 
 
+@dataclasses.dataclass
+class ZosGlobalMeanCorrection:
+    """Correction that shifts ``zos`` uniformly so its
+    sea-surface-fraction-weighted global mean equals ``reference_global_mean``.
+
+    A no-op when ``zos`` is not in ``gen_data``.
+    """
+
+    area_weighted_mean: AreaWeightedMean
+    reference_global_mean: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only ``zos``, or is empty when
+            ``zos`` is absent from ``gen_data``.
+        """
+        if "zos" not in gen_data:
+            return {}, corrector_state
+        zos = gen_data["zos"]
+        s = OceanData(forcing_data).sea_surface_fraction
+        global_mean = self.area_weighted_mean(
+            s * zos, keepdim=True, name="zos"
+        ) / self.area_weighted_mean(s, keepdim=True, name="zos")
+        return {"zos": zos - global_mean + self.reference_global_mean}, corrector_state
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -258,6 +311,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             estimator: the forward value is still clamped, but gradient flows as if
             the clamp had not happened, so out-of-range cells still get a learning
             signal.
+        zos_global_mean_correction: Optional configuration for setting the
+            sea-surface-fraction-weighted global mean of the generated ``zos``
+            to a reference value.
     """
 
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
@@ -265,6 +321,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
+    zos_global_mean_correction: ZosGlobalMeanCorrectionConfig | None = None
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -337,6 +394,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
                 )
             )
+        if self.zos_global_mean_correction is not None:
+            corrections.append(
+                ZosGlobalMeanCorrection(
+                    area_weighted_mean,
+                    self.zos_global_mean_correction.reference_global_mean,
+                )
+            )
         return OceanCorrector(corrections)
 
 
@@ -374,7 +438,7 @@ def _correct_hfds(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
-    method: Literal["residual_prediction", "prescribed"],
+    method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"],
 ) -> TensorDict:
     """Apply surface energy flux correction to the generated hfds.
 
@@ -384,6 +448,7 @@ def _correct_hfds(
     Methods:
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
+        prescribed_open_ocean: net_flux where ocean_fraction == 1, else gen_hfds
     """
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
@@ -402,6 +467,8 @@ def _correct_hfds(
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds
     elif method == "prescribed":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
+    elif method == "prescribed_open_ocean":
+        out[hfds_name] = torch.where(ocean_fraction == 1, net_flux, gen_hfds)
     else:
         raise NotImplementedError(
             f"Method {method!r} not implemented for surface energy flux correction"

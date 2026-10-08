@@ -10,6 +10,7 @@ from torch import nn
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
 from fme.core.step.output import StepOutput
@@ -71,6 +72,15 @@ class StepConfigABC(abc.ABC):
         return frozenset(set(self.input_names).intersection(self.output_names))
 
     @property
+    def residual_names(self) -> frozenset[str]:
+        """
+        Names whose loss errors are scored in residual (tendency) units when a
+        residual loss normalization is configured. Every prognostic, unless a
+        step type narrows the set.
+        """
+        return self.prognostic_names
+
+    @property
     @abc.abstractmethod
     def loss_names(self) -> list[str]:
         """
@@ -118,6 +128,10 @@ class StepConfigABC(abc.ABC):
         The getter half of ``replace_prescribed_prognostic_names``. Wrapping
         step configs (e.g. multi-call) delegate to the wrapped config.
         """
+
+    @abc.abstractmethod
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """Replace this step's corrector configuration wholesale, in place."""
 
     @property
     @abc.abstractmethod
@@ -197,6 +211,10 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.input_names
 
     @property
+    def residual_names(self) -> frozenset[str]:
+        return self._step_config_instance.residual_names
+
+    @property
     def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
@@ -240,6 +258,10 @@ class StepSelector(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._step_config_instance.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self._step_config_instance.replace_corrector(corrector)
+        self.config = dataclasses.asdict(self._step_config_instance)
 
     @property
     def allow_missing_variables(self) -> bool:

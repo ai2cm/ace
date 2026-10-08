@@ -5,6 +5,7 @@ from coupled_dataset_utils import (
     CoupledSeaIceConfig,
     CoupledSeaSurfaceConfig,
     CoupledSurfaceTemperatureConfig,
+    PrecomputedSeaIceMaskConfig,
     compute_coupled_atmosphere,
     compute_coupled_ocean,
     compute_coupled_sea_ice,
@@ -363,3 +364,33 @@ def test_hfds_total_area_passthrough(native_present):
         assert coupled_ocean["hfds_total_area"].attrs["long_name"] == "native"
     else:
         np.testing.assert_allclose(coupled_ocean["hfds_total_area"].values, 2.0 * 0.5)
+
+
+def _write_mask(path, values) -> str:
+    store = str(path / "coupled-ocean.zarr")
+    xr.Dataset(
+        {"mask_sea_ice_fraction": (("lat", "lon"), np.array(values, dtype=float))},
+        coords={"lat": LAT, "lon": LON},
+    ).to_zarr(store)
+    return store
+
+
+def test_precomputed_sea_ice_mask_loads_binary_mask(tmp_path):
+    store = _write_mask(tmp_path, [[0.0, 1.0], [1.0, 0.0]])
+    mask = PrecomputedSeaIceMaskConfig(zarr_path=store).get_sea_ice_mask()
+    np.testing.assert_array_equal(mask.values, [[0.0, 1.0], [1.0, 0.0]])
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [[np.nan, np.nan], [np.nan, np.nan]],
+        [[0.0, 1.0], [np.nan, 0.0]],
+        [[0.5, 1.0], [1.0, 0.0]],
+    ],
+    ids=["unwritten", "partly-nan", "non-binary"],
+)
+def test_precomputed_sea_ice_mask_rejects_non_binary(tmp_path, values):
+    store = _write_mask(tmp_path, values)
+    with pytest.raises(ValueError, match="fully written"):
+        PrecomputedSeaIceMaskConfig(zarr_path=store).get_sea_ice_mask()
