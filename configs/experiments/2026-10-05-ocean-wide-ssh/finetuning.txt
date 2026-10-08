@@ -8,7 +8,10 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # pretraining checkpoint; their tags and seeds are the fine-tune's own, to
 # measure the spread of the fine-tune itself.
 #
+# First submitted on jupiter, where both sat queued on the ai2/ace slot limit
+# and were cancelled before starting; resubmitted on titan (b200).
+#
 # uncoupled_finetune.sh acts only on rows whose status is exactly "train".
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs0|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M4AHJTGDTRR823SF6Q7PKA80|8h
-cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs1|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1|01M4AHJTGDTRR823SF6Q7PKA80|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs0|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|01M4AHJTGDTRR823SF6Q7PKA80|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_sshsalt|rs1|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=1|01M4AHJTGDTRR823SF6Q7PKA80|8h
