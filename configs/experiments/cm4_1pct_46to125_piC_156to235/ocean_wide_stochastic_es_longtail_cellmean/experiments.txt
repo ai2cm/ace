@@ -1,2 +1,4 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|01M46YMF1GQ07DH3DWAEC7WN5W|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|01M46YMF1GQ07DH3DWAEC7WN5W|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 8h||01M46YMF1W8QNJKA2CBCPSV7B0|ai2/ace|jupiter|||20GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2es-allblocks-cellmean-ftlt|rs0|01M46YMF1GQ07DH3DWAEC7WN5W|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|data_writer.save_monthly_files=false|01M46YMF1W8QNJKA2CBCPSV7B0|ai2/ace|jupiter|||30GiB
