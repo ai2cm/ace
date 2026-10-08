@@ -2,6 +2,7 @@
 # end-of-run diagnostics and the zarr file writers, to a gs:// experiment_dir. Config -oceq-gcs.
 # Configs: --config-dir configs/experiments/cm4_eval/coupled_swap.
 
-cm4_piC-coupled_oceq_gcstest|oA-aA|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/gcs-test2-oA-aA n_coupled_steps=144|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_oceq_gcstest|oA-aA|01M14TKQYN1AM940G7XWMTFMXH|launched_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/gcs-test2-oA-aA n_coupled_steps=144|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RCS27XDQRG6Z9ZB56F5
 
 # Test 1 (01M4CQQF4AN1XFD7Z2FWX68NZQ) failed at writer construction: the monthly zarr writer requires time chunks of 1. Test 2 uses default chunks.
+# Test 2 01M4CRBXF89QN01MVN4HP545NE passed 2026-10-07: all output on GCS (enso/annual diagnostics absent only because the run is under 2 yr).

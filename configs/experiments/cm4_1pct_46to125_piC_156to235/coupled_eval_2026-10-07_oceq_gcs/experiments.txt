@@ -1,0 +1,10 @@
+# The four ocean x atmosphere pairings with the ocean equatorial and atmosphere tropical writers, written as
+# zarr straight to GCS (config -oceq-gcs; experiment_dir per row via the override field). Replaces the
+# beaker-output wave in coupled_eval_2026-10-07_oceq (cancelled 2026-10-07). Output:
+#   gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/<cell>/
+# Configs: --config-dir configs/experiments/cm4_eval/coupled_swap.
+
+cm4_piC-coupled_oceq_gcs|oA-aA|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/oA-aA|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_oceq_gcs|oA-aL|01M14TKQYN1AM940G7XWMTFMXH|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/oA-aL|01M14TKQZ145YDRAM79R59BGS7|ai2/ace|jupiter+titan|01M4AD4RD0MC28W15FTBPTZVFJ|01M4AD4RD9TWNKV5M6SJC5H8Q1
+cm4_piC-coupled_oceq_gcs|oL-aA|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/oL-aA|01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan|01M4AD4RCY1849NPZ2Y22JARWP|01M4AD4RCS27XDQRG6Z9ZB56F5
+cm4_piC-coupled_oceq_gcs|oL-aL|01M3345B0QJHGC7HSQND2QGEXT|run_piC-ic0151-200yr-oceq-gcs|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-07-coupled-ocean-feedbacks/oL-aL|01M3HC59F9ABDEZXC3HK9FT7N0|ai2/ace|jupiter+titan|01M4AD4RCY1849NPZ2Y22JARWP|01M4AD4RD9TWNKV5M6SJC5H8Q1
