@@ -5,8 +5,10 @@
 # --dependent-config names a config that reads the --config outputs (e.g.
 # 1pctCO2's precomputed_sea_ice_mask reads the piControl coupled ocean store);
 # the same workflow runs it once the --config datasets are written. Every
-# module in the two entry points' transitive sibling-import closures is passed
-# as a workflow parameter.
+# module in the two entry points' transitive sibling-import closures goes to
+# the workflow in one compressed code_bundle parameter: argo hands each
+# resolved template to argoexec as one env string, which the kernel caps at
+# MAX_ARG_STRLEN, and the modules as plain text overflow it.
 
 set -e
 
@@ -48,18 +50,20 @@ then
     exit 1;
 fi
 
+MODULES=(create_coupled_datasets.py
+    coupled_dataset_utils.py
+    create_window_avg_dataset.py
+    time_utils.py
+    get_stats.py
+    merge_stats.py
+    combine_stats.py
+    writer_utils.py
+    fs_utils.py
+    upload_coupled_stats.py
+    upload_stats.py)
+
 args=(create_coupled_datasets_argo_workflow.yaml
-    -p create_coupled_datasets_script="$(< create_coupled_datasets.py)"
-    -p coupled_dataset_utils_script="$(< coupled_dataset_utils.py)"
-    -p create_window_avg_dataset_script="$(< create_window_avg_dataset.py)"
-    -p time_utils_script="$(< time_utils.py)"
-    -p get_stats_script="$(< get_stats.py)"
-    -p merge_stats_script="$(< merge_stats.py)"
-    -p combine_stats_script="$(< combine_stats.py)"
-    -p writer_utils_script="$(< writer_utils.py)"
-    -p fs_utils_script="$(< fs_utils.py)"
-    -p upload_coupled_stats_script="$(< upload_coupled_stats.py)"
-    -p upload_stats_script="$(< upload_stats.py)"
+    -p code_bundle="$(tar -cf - "${MODULES[@]}" | gzip -9 | base64 | tr -d '\n')"
     -p config="$(< "${CONFIG}")"
     -p debug="${DEBUG}"
     -p subsample="${SUBSAMPLE}")
