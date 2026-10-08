@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
@@ -531,6 +532,146 @@ def test_ocean_heat_content_correction(hfds_type):
         gen_data_corrected.ocean_heat_content,
         equal_nan=True,
     )
+
+
+def _partial_land_ohc_budget_case(hfds_type: str):
+    """Grid with land, partial-land and open-ocean columns.
+
+    Returns (ops, depth_coordinate, input_data, gen_data, forcing_data,
+    area, sea_surface_fraction, net_energy_flux_total_area).
+    """
+    torch.manual_seed(0)
+    nlat, nlon, nlev = 4, 8, 3
+    s = torch.ones(nlat, nlon, dtype=torch.float64)
+    s[:, 0] = 0.0
+    s[:, 1] = 0.35
+    s[:, 2] = 0.8
+    mask_2d = (s > 0).to(s.dtype)
+    area = torch.cos(torch.linspace(-1.0, 1.0, nlat, dtype=torch.float64))
+    area = area.unsqueeze(-1).expand(nlat, nlon).contiguous()
+    ops = LatLonOperations(area, SpatialMaskProvider({"mask_2d": mask_2d}))
+    depth_coordinate = DepthCoordinate(
+        torch.tensor([0.0, 10.0, 100.0, 1000.0], dtype=torch.float64),
+        mask_2d.unsqueeze(-1).expand(nlat, nlon, nlev).contiguous(),
+    )
+    base = torch.tensor([18.0, 12.0, 4.0], dtype=torch.float64)
+    thetao_in = base + 0.5 * torch.randn(nlat, nlon, nlev, dtype=torch.float64)
+    thetao_gen = thetao_in + 0.05 * torch.randn(nlat, nlon, nlev, dtype=torch.float64)
+    hfds = 40.0 * torch.randn(nlat, nlon, dtype=torch.float64) * mask_2d
+    hfgeou = 0.08 * mask_2d
+    input_data = {f"thetao_{k}": thetao_in[..., k] for k in range(nlev)}
+    gen_data = {f"thetao_{k}": thetao_gen[..., k] for k in range(nlev)}
+    if hfds_type == "total_area":
+        gen_data["hfds_total_area"] = hfds * s
+    elif hfds_type == "gen":
+        gen_data["hfds"] = hfds
+    else:
+        input_data["hfds"] = hfds
+    forcing_data = {"hfgeou": hfgeou, "sea_surface_fraction": s}
+    flux = (hfds + hfgeou) * s
+    return ops, depth_coordinate, input_data, gen_data, forcing_data, area, s, flux
+
+
+@pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
+def test_ocean_heat_content_correction_partial_land_budget(hfds_type: str):
+    """The corrected state closes sum(a s H_out) = sum(a s H_in) + sum(a F) dt,
+    H per unit ocean area and F per unit total cell area.
+    """
+    ops, depth, input_data, gen_data, forcing_data, area, s, flux = (
+        _partial_land_ohc_budget_case(hfds_type)
+    )
+    dt = 5 * 86400.0
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+        )
+    )
+    corrector = config._build(ops, depth, datetime.timedelta(seconds=dt))
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+
+    def integral(field: torch.Tensor) -> torch.Tensor:
+        return torch.nansum(area * field)
+
+    h_in = OceanData(input_data, depth).ocean_heat_content
+    h_out = OceanData(corrected, depth).ocean_heat_content
+    torch.testing.assert_close(
+        integral(s * h_out),
+        integral(s * h_in) + integral(flux) * dt,
+        rtol=1e-10,
+        atol=0.0,
+    )
+
+    # closed-form ratio, independent of OceanData
+    cprho = SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
+    dz = torch.tensor([10.0, 90.0, 900.0], dtype=torch.float64)
+    thetao_in = torch.stack([input_data[f"thetao_{k}"] for k in range(3)], -1)
+    thetao_gen = torch.stack([gen_data[f"thetao_{k}"] for k in range(3)], -1)
+    w = area * (s > 0)
+    H_in = (thetao_in * cprho * dz).sum(-1)
+    H_gen = (thetao_gen * cprho * dz).sum(-1)
+    r_expected = ((w * s * H_in).sum() + (w * flux).sum() * dt) / (w * s * H_gen).sum()
+    wet = s > 0
+    torch.testing.assert_close(
+        corrected["thetao_0"][wet] / gen_data["thetao_0"][wet],
+        r_expected.expand(int(wet.sum())),
+        rtol=1e-12,
+        atol=0.0,
+    )
+
+
+@pytest.mark.parametrize("hfds_name", ["hfds", "hfds_total_area"])
+def test_correct_hfds_unchanged_by_ocean_heat_content_correction(hfds_name: str):
+    """The corrected hfds is the same with or without the OHC correction and
+    equals f_o * F_net + (1 - f_o) * gen_hfds, F_net per the hfds_name
+    convention.
+    """
+    ops, depth, input_data, gen_data, forcing_data, area, s, _ = (
+        _partial_land_ohc_budget_case("total_area")
+    )
+    shape = s.shape
+    land_fraction = 1 - s
+    sea_ice_fraction = torch.zeros_like(s)
+    sea_ice_fraction[0, :] = 0.6 * s[0, :]
+    sst = input_data["thetao_0"] + 273.15
+    gen_hfds = 30.0 * torch.randn(shape, dtype=torch.float64)
+    del gen_data["hfds_total_area"]
+    gen_data[hfds_name] = gen_hfds
+    gen_data["sst"] = gen_data["thetao_0"] + 273.15
+    atmos = {
+        k: v.to(torch.float64)
+        for k, v in _make_atmos_forcing_data(shape, device="cpu").items()
+    }
+    forcing_data = {**forcing_data, "land_fraction": land_fraction, **atmos}
+    input_data = {
+        **input_data,
+        **forcing_data,
+        "sst": sst,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+
+    def corrected_hfds(correct_ocean_heat_content: bool) -> torch.Tensor:
+        config = OceanCorrectorConfig(
+            surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                method="prescribed"
+            ),
+            ocean_heat_content_correction=(
+                OceanHeatContentBudgetConfig(method="scaled_temperature")
+                if correct_ocean_heat_content
+                else None
+            ),
+        )
+        corrector = config._build(ops, depth, datetime.timedelta(days=5))
+        return corrector(input_data, gen_data, forcing_data, None).corrected[hfds_name]
+
+    f_o = 1 - land_fraction - sea_ice_fraction
+    net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    if hfds_name == "hfds_total_area":
+        net_flux = net_flux * s
+    expected = f_o * net_flux + (1 - f_o) * gen_hfds
+    hfds_with_ohc = corrected_hfds(True)
+    hfds_without_ohc = corrected_hfds(False)
+    torch.testing.assert_close(hfds_with_ohc, hfds_without_ohc, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(hfds_with_ohc, expected)
 
 
 def test_ocean_corrector_config_fields_are_known():

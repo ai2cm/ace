@@ -486,6 +486,16 @@ def _force_conserve_ocean_heat_content(
     method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
 ) -> TensorDict:
+    """Scale the generated temperature to conserve global ocean heat content.
+
+    The scaling closes
+
+        sum(a s H_corrected) = sum(a s H_in) + sum(a F) dt,
+
+    with a the cell area, s the sea surface fraction, H the column heat
+    content per unit ocean area and F the net energy flux into the ocean
+    (including unaccounted heating) per unit total cell area.
+    """
     if method != "scaled_temperature":
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
@@ -503,12 +513,12 @@ def _force_conserve_ocean_heat_content(
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
     global_gen_ocean_heat_content = area_weighted_mean(
-        gen.ocean_heat_content,
+        gen.ocean_heat_content * forcing.sea_surface_fraction,
         keepdim=True,
         name="ocean_heat_content",
     )
     global_input_ocean_heat_content = area_weighted_mean(
-        input.ocean_heat_content,
+        input.ocean_heat_content * forcing.sea_surface_fraction,
         keepdim=True,
         name="ocean_heat_content",
     )
