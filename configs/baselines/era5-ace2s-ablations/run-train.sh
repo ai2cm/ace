@@ -209,3 +209,7 @@ run_training "ace2s-finetune-rs3-resume40.yaml" "1deg-daily-ace2s-ft3-detached-r
 run_training "ace2s-finetune-120ep-rs1.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs1" 8
 run_training "ace2s-finetune-120ep-rs2.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs2" 8
 run_training "ace2s-finetune-120ep-rs3.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs3" 8
+
+# 4-degree 6-hourly arm (one GPU; added 2026-10-08)
+run_training "ace2s-pretrain-4deg-6hourly.yaml" "4deg-6h-ace2s-pretrain-rs0" 1
+run_training "ace2s-finetune-4deg-6hourly.yaml" "4deg-6h-ace2s-ft-detached-rs0" 1
