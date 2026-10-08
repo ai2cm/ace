@@ -79,13 +79,16 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
       `01M4BV9103G4C330XQM7R17RPT`, stats `01M4C171K2J619BXZH9CSVM43N` (2026-10-07).
 - [x] Rerun the six existing UFS arms on the clean store (launched 2026-10-08; old runs
       renamed `*-dsv3`).
-- [ ] Dataset step: compute `unaccounted_heating{,_5day}` into a copy of the training zarr,
-      append their stats, upload both as new Beaker datasets (`...-cm4vars-uh`,
-      `...-stats-2026-10-06-uh`). Script: scratchpad `ufs_budget/make_uh_dataset.py`.
-- [ ] Corrector: `unaccounted_heating_source` option + unit test in
-      `fme/core/corrector/ocean.py` / `test_ocean.py`.
-- [ ] Configs `resid-cap0005-learnedheat.yaml`, `ff-ohc-learnedheat.yaml` and launcher in
-      this directory; 1-step local CPU smoke test; launch.
+- [x] Dataset step (2026-10-08): `unaccounted_heating{,_5day}` written into a copy of the
+      training zarr (148 variables) and their stats appended (`make_uh_dataset.py` in this
+      directory). Ocean-area mean of the trailing-year field 1994-2023: −0.06 W/m², annual
+      values −6.9 (1994) to +2.8; grid-point stats mean 3.96, std 51.6 (5-day field std 506).
+      Stats dataset `01M4E83B1B83CB8DV9YEQTGA4G`; training dataset
+      `ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh` (ID filled in at launch).
+- [x] Corrector option + tests (ace 719be7d38).
+- [x] Configs and launcher (ace ff18a0fd9).
+- [ ] Launch `samudra-ufs4deg-{resid-cap0005,ff-ohc}-learnedheat` (200 epochs, as the
+      from-scratch arms) and watch the first epochs for config failures.
 - [ ] Evaluate: inline drift vs the constant-0 twins; the learned field's ocean mean vs the
       data's annual series; 2002-2006 window rollouts.
 - [ ] Write up (reports repo).
