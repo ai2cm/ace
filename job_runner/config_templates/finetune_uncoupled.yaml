@@ -1,0 +1,71 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 20
+n_forward_steps: <N_FORWARD_STEPS>
+inference:
+  n_forward_steps: <INF_N_FORWARD_STEPS>
+  forward_steps_in_memory: <FORWARD_STEPS_IN_MEMORY>
+  loader:
+    start_indices:
+      times: <INFERENCE_TIMES>
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: <COUPLED_ZARR>
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: <ZARR>
+          engine: zarr
+    num_data_workers: 4
+  aggregator:
+    log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: <WANDB_PROJECT>
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 2
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: <COUPLED_ZARR>
+        engine: zarr
+        subset: <TRAIN_SUBSET>
+      - data_path: /climate-default
+        file_pattern: <ZARR>
+        engine: zarr
+        subset: <TRAIN_SUBSET>
+validation_loader:
+  batch_size: 64
+  num_data_workers: 4
+  prefetch_factor: 2
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: <COUPLED_ZARR>
+        engine: zarr
+        subset: <VALIDATION_SUBSET>
+      - data_path: /climate-default
+        file_pattern: <ZARR>
+        engine: zarr
+        subset: <VALIDATION_SUBSET>
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper:
+  parameter_init:
+    weights_path: /ckpt.tar
