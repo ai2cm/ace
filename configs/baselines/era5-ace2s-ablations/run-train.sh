@@ -194,3 +194,18 @@ run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck
 
 # 6-hourly arm, stage 2: 3-step (18 h) detached fine-tune, horizon decided 2026-09-28
 run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
+
+# Seed replicate pretrain resumes (40 → 120 epochs, added 2026-10-08)
+run_training "ace2s-pretrain-rs1-resume120.yaml" "1deg-daily-ace2s-pretrain-rs1" 8
+run_training "ace2s-pretrain-rs2-resume120.yaml" "1deg-daily-ace2s-pretrain-rs2" 8
+run_training "ace2s-pretrain-rs3-resume120.yaml" "1deg-daily-ace2s-pretrain-rs3" 8
+
+# Seed replicate fine-tune resumes (10 → 40 epochs, added 2026-10-08)
+run_training "ace2s-finetune-rs1-resume40.yaml" "1deg-daily-ace2s-ft3-detached-rs1" 8
+run_training "ace2s-finetune-rs2-resume40.yaml" "1deg-daily-ace2s-ft3-detached-rs2" 8
+run_training "ace2s-finetune-rs3-resume40.yaml" "1deg-daily-ace2s-ft3-detached-rs3" 8
+
+# Staged fine-tunes of 120-epoch pretrains (seeds 1-3; fill in result datasets)
+run_training "ace2s-finetune-120ep-rs1.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs1" 8
+run_training "ace2s-finetune-120ep-rs2.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs2" 8
+run_training "ace2s-finetune-120ep-rs3.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs3" 8
