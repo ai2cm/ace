@@ -125,7 +125,11 @@ def compute_ocean_derived_quantities(
     return data
 
 
-@register(VariableMetadata("J/m**2", "Column-integrated ocean heat content"))
+@register(
+    VariableMetadata(
+        "J/m**2", "Column-integrated ocean heat content per unit ocean area"
+    )
+)
 def ocean_heat_content(
     data: OceanData,
     timestep: datetime.timedelta,
@@ -135,7 +139,10 @@ def ocean_heat_content(
 
 
 @register(
-    VariableMetadata("W/m**2", "Tendency of column-integrated ocean heat content")
+    VariableMetadata(
+        "W/m**2",
+        "Tendency of column-integrated ocean heat content per unit ocean area",
+    )
 )
 def ocean_heat_content_tendency(
     data: OceanData,
@@ -151,7 +158,8 @@ def ocean_heat_content_tendency(
 @register(
     VariableMetadata(
         "W/m**2",
-        "Implied advective tendency of ocean heat content assuming closed budget",
+        "Implied advective tendency of ocean heat content assuming closed budget, "
+        "per unit total cell area",
     )
 )
 def implied_tendency_of_ocean_heat_content_due_to_advection(
@@ -159,9 +167,14 @@ def implied_tendency_of_ocean_heat_content_due_to_advection(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     """Implied tendency of ocean heat content due to advection.
-    This is computed as a residual from the column total energy budget.
+    This is computed as a residual from the column total energy budget, per
+    unit total cell area: the ocean heat content tendency, which is per unit
+    ocean area, is weighted by the sea surface fraction to match the net
+    energy flux into the ocean.
     """
-    column_energy_tendency = ocean_heat_content_tendency(data, timestep)
+    column_energy_tendency = (
+        ocean_heat_content_tendency(data, timestep) * data.sea_surface_fraction
+    )
     flux_through_vertical_boundaries = data.net_energy_flux_into_ocean
     implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
     return implied_column_heating
