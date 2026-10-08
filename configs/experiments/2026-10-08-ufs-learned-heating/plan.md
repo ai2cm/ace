@@ -84,11 +84,13 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
       directory). Ocean-area mean of the trailing-year field 1994-2023: −0.06 W/m², annual
       values −6.9 (1994) to +2.8; grid-point stats mean 3.96, std 51.6 (5-day field std 506).
       Stats dataset `01M4E83B1B83CB8DV9YEQTGA4G`; training dataset
-      `ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh` (ID filled in at launch).
+      `ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh` = `01M4E83P5GMXQEN2JN8SZFB5BN`.
 - [x] Corrector option + tests (ace 719be7d38).
 - [x] Configs and launcher (ace ff18a0fd9).
-- [ ] Launch `samudra-ufs4deg-{resid-cap0005,ff-ohc}-learnedheat` (200 epochs, as the
-      from-scratch arms) and watch the first epochs for config failures.
+- [x] Launched 2026-10-08 `samudra-ufs4deg-{resid-cap0005,ff-ohc}-learnedheat` (200 epochs,
+      as the from-scratch arms; wandb group samudra-ufs4deg-learnedheat).
+- [ ] Watch the first epochs for config failures (new output channel, stats entries,
+      corrector source).
 - [ ] Evaluate: inline drift vs the constant-0 twins; the learned field's ocean mean vs the
       data's annual series; 2002-2006 window rollouts.
 - [ ] Write up (reports repo).
