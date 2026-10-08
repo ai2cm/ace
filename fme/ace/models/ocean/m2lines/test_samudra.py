@@ -7,7 +7,6 @@ import pytest
 import torch
 
 from fme.ace.models.ocean.m2lines.layers import (
-    AvgPool,
     BilinearUpsample,
     ConvNeXtBlock,
     MultiResolutionFiLM,
@@ -569,7 +568,6 @@ def test_samudra_default_lat_pad_matches_original_forward_bitwise(
     explicit = _small_samudra(
         zonally_periodic_upsample=zonally_periodic_upsample,
         lat_pad="constant",
-        pad_to_pool_multiple=False,
     )
     torch.manual_seed(1)
     x = torch.randn(2, 2, *_SMALL_SHAPE)
@@ -645,19 +643,14 @@ def test_pad_latitude_pole_rejects_padding_beyond_the_height():
 
 
 _LAT_PAD_COMBINATIONS = list(
-    itertools.product(["constant", "reflect", "pole"], [False, True], [False, True])
+    itertools.product(["constant", "reflect", "pole"], [False, True])
 )
 
 
-@pytest.mark.parametrize(
-    "lat_pad, pad_to_pool_multiple, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS
-)
-def test_samudra_lat_pad_options_keep_output_shape(
-    lat_pad, pad_to_pool_multiple, zonally_periodic_upsample
-):
+@pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
+def test_samudra_lat_pad_options_keep_output_shape(lat_pad, zonally_periodic_upsample):
     model = _small_samudra(
         lat_pad=lat_pad,
-        pad_to_pool_multiple=pad_to_pool_multiple,
         zonally_periodic_upsample=zonally_periodic_upsample,
     )
     x = torch.randn(2, 2, *_SMALL_SHAPE)
@@ -667,11 +660,9 @@ def test_samudra_lat_pad_options_keep_output_shape(
     assert torch.isfinite(out).all()
 
 
-@pytest.mark.parametrize(
-    "lat_pad, pad_to_pool_multiple, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS
-)
+@pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
 def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
-    lat_pad, pad_to_pool_multiple, zonally_periodic_upsample
+    lat_pad, zonally_periodic_upsample
 ):
     """The default four levels and dilations on the 180x360 grid, where the
     coarsest levels are the smallest heights the latitude padding sees."""
@@ -685,7 +676,6 @@ def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
         norm="batch",
         upscale_factor=1,
         lat_pad=lat_pad,
-        pad_to_pool_multiple=pad_to_pool_multiple,
         zonally_periodic_upsample=zonally_periodic_upsample,
     )
     with torch.no_grad():
@@ -693,58 +683,22 @@ def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
     assert out.shape == (1, 1, 180, 360)
 
 
-@pytest.mark.parametrize("lat_pad", ["constant", "reflect", "pole"])
-def test_samudra_pad_to_pool_multiple_pools_only_even_heights(lat_pad):
-    heights: dict[bool, list[int]] = {}
-    for pad_to_pool_multiple in [False, True]:
-        model = _small_samudra(
-            lat_pad=lat_pad, pad_to_pool_multiple=pad_to_pool_multiple
-        )
-        seen: list[int] = []
-        for module in model.modules():
-            if isinstance(module, AvgPool):
-                module.register_forward_pre_hook(
-                    lambda _, args, seen=seen: seen.append(args[0].shape[-2])
-                )
-        with torch.no_grad():
-            model(torch.randn(1, 2, *_SMALL_SHAPE))
-        heights[pad_to_pool_multiple] = seen
-    assert heights[False] == [22, 11, 5]
-    assert heights[True] == [24, 12, 6]
-
-
-def test_samudra_pad_to_pool_multiple_is_a_no_op_on_a_multiple():
-    x = torch.randn(2, 2, 24, 36)
-    with torch.no_grad():
-        assert torch.equal(
-            _small_samudra()(x), _small_samudra(pad_to_pool_multiple=True)(x)
-        )
-
-
 @pytest.mark.parametrize("lat_pad", ["reflect", "pole"])
-@pytest.mark.parametrize("pad_to_pool_multiple", [False, True])
-def test_samudra_lat_pad_options_change_the_output(lat_pad, pad_to_pool_multiple):
+def test_samudra_lat_pad_options_change_the_output(lat_pad):
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
         default = _small_samudra()(x)
-        changed = _small_samudra(
-            lat_pad=lat_pad, pad_to_pool_multiple=pad_to_pool_multiple
-        )(x)
+        changed = _small_samudra(lat_pad=lat_pad)(x)
     assert not torch.allclose(default, changed)
 
 
-@pytest.mark.parametrize(
-    "lat_pad, pad_to_pool_multiple, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS
-)
-def test_samudra_lat_pad_options_keep_state_dict(
-    lat_pad, pad_to_pool_multiple, zonally_periodic_upsample
-):
-    """The options add no parameters, so a checkpoint trained with the
-    defaults loads (strictly) into a model with them on, for fine-tuning."""
+@pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
+def test_samudra_lat_pad_options_keep_state_dict(lat_pad, zonally_periodic_upsample):
+    """``lat_pad`` adds no parameters, so a checkpoint trained with the
+    defaults loads (strictly) into a model with any mode, for fine-tuning."""
     default = _small_samudra()
     model = _small_samudra(
         lat_pad=lat_pad,
-        pad_to_pool_multiple=pad_to_pool_multiple,
         zonally_periodic_upsample=zonally_periodic_upsample,
     )
     assert {k: v.shape for k, v in default.state_dict().items()} == {
@@ -766,14 +720,13 @@ def test_zonally_periodic_upsample_lat_pad(lat_pad):
     assert torch.equal(ZonallyPeriodicBilinearUpsample(lat_pad="constant")(x), default)
 
 
-@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
-def test_samudra_pad_to_pool_multiple_with_noise_conditioning(lat_pad):
+@pytest.mark.parametrize("lat_pad", ["reflect", "pole"])
+def test_samudra_lat_pad_with_noise_conditioning(lat_pad):
     n_noise = 4
     model = _samudra(
         context_config=_noise_context_config(n_noise),
         conditioned_blocks="all_blocks",
         lat_pad=lat_pad,
-        pad_to_pool_multiple=True,
     )
     img_shape = (18, 32)
     out = model(torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape))

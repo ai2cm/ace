@@ -35,7 +35,6 @@ def test_samudra_builder_lat_pad_options():
             "n_layers": [1, 1],
             "zonally_periodic_upsample": True,
             "lat_pad": "pole",
-            "pad_to_pool_multiple": True,
         },
     )
     img_shape = (18, 32)
@@ -43,7 +42,6 @@ def test_samudra_builder_lat_pad_options():
     model = module.torch_module
     assert isinstance(model, Samudra)
     assert model.lat_pad == "pole"
-    assert model.pad_to_pool_multiple
     assert all(
         block.lat_pad == "pole"
         for block in model.layers

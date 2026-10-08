@@ -55,20 +55,12 @@ class Samudra(torch.nn.Module):
         pad back onto the skip connection, and (with
         ``zonally_periodic_upsample``) the upsampling. "constant" pads zeros,
         "reflect" mirrors about the edge row, and "pole" pads across the pole
-        (see ``pad_latitude``). Without ``pad_to_pool_multiple``, the
-        decoder's refill of a row dropped by pooling uses the same mode, so
-        "pole" fills the dropped polar row with the antipodal copy of the row
-        next to it, an approximation. By default "constant", the original
-        behavior. Adds no parameters, so a checkpoint trained with any mode loads into
-        any other.
-    pad_to_pool_multiple : bool, optional
-        If True, pad the input's latitude axis with ``lat_pad`` up to a
-        multiple of ``2 ** len(ch_width)`` before the U-Net and crop the
-        output back afterwards, so no pooling level has an odd height (an odd
-        height drops its last row in pooling and refills it in the decoder).
-        The padding is split evenly between the edges, with any odd extra row
-        at the end of the axis (the north edge for south-to-north latitude).
-        By default False. Adds no parameters.
+        (see ``pad_latitude``). Pooling an odd height drops its last row,
+        and the decoder's 1-row refill of it uses the same mode, so "pole"
+        fills the dropped polar row with the antipodal copy of the row next
+        to it, an approximation. By default "constant", the original
+        behavior. Adds no parameters, so a checkpoint trained with any mode
+        loads into any other.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -112,7 +104,6 @@ class Samudra(torch.nn.Module):
         context_config: ContextConfig | None = None,
         conditioned_blocks: ConditionedBlocks | None = None,
         lat_pad: LatPad = "constant",
-        pad_to_pool_multiple: bool = False,
     ):
         super().__init__()
 
@@ -133,7 +124,6 @@ class Samudra(torch.nn.Module):
         if lat_pad not in ("constant", "reflect", "pole"):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
         self.lat_pad = lat_pad
-        self.pad_to_pool_multiple = pad_to_pool_multiple
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
@@ -259,27 +249,6 @@ class Samudra(torch.nn.Module):
         self.num_steps = int(len(ch_width_with_input) - 1)
 
     def forward(self, fts, context: Context | None = None):
-        if not self.pad_to_pool_multiple:
-            return self._forward_unet(fts, context)
-        height = fts.shape[-2]
-        total = -height % (2**self.num_steps)
-        if total == 0:
-            return self._forward_unet(fts, context)
-        pad_start = total // 2
-        pad_end = total - pad_start
-        fts = pad_latitude(fts, pad_start, pad_end, self.lat_pad)
-        if context is not None and context.noise is not None:
-            # the noise field must cover the padded grid, so it is padded like
-            # the features: zeros under "constant", copies of the rows the
-            # features copy otherwise
-            context = dataclasses.replace(
-                context,
-                noise=pad_latitude(context.noise, pad_start, pad_end, self.lat_pad),
-            )
-        fts = self._forward_unet(fts, context)
-        return fts[..., pad_start : pad_start + height, :]
-
-    def _forward_unet(self, fts, context: Context | None = None):
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:

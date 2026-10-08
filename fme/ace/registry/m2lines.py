@@ -44,16 +44,11 @@ class SamudraBuilder(ModuleConfig):
             "reflect" mirrors about the edge row, and "pole" pads across the
             pole: the rows beyond a pole are the edge rows flipped in latitude
             and rotated by half the longitudes, the true neighbors of a scalar
-            field on a grid whose edge cells touch the poles.
-        pad_to_pool_multiple: Pad the latitude axis (with ``lat_pad``) up to a
-            multiple of ``2 ** len(ch_width)`` before the U-Net and crop the
-            output back, so pooling never drops a row at an odd height (180
-            rows pad to 192 with the default four levels). The padding is
-            split evenly between the edges, any odd extra row going at the end
-            of the axis (the north edge for south-to-north latitude).
-
-        Neither ``lat_pad`` nor ``pad_to_pool_multiple`` adds parameters, so a
-        checkpoint trained without them can be fine-tuned with them on.
+            field on a grid whose edge cells touch the poles. The decoder's
+            1-row refill of a row dropped by pooling an odd height also uses
+            it, which for "pole" is an approximation. Adds no parameters, so
+            a checkpoint trained with the default can be fine-tuned with
+            another mode.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -68,7 +63,6 @@ class SamudraBuilder(ModuleConfig):
     checkpoint_strategy: Literal["all", "simple"] | None = None
     zonally_periodic_upsample: bool = False
     lat_pad: LatPad = "constant"
-    pad_to_pool_multiple: bool = False
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
@@ -124,7 +118,6 @@ class SamudraBuilder(ModuleConfig):
             checkpoint_strategy=self.checkpoint_strategy,
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             lat_pad=self.lat_pad,
-            pad_to_pool_multiple=self.pad_to_pool_multiple,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )
