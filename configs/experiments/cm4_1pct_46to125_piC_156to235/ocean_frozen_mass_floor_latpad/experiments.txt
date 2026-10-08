@@ -1,15 +1,16 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-# Stage 2 fine-tunes: uncoupled_finetune.sh appends one row per arm here
-# (status "training", priority normal). Once an arm finishes, set its status
-# to run_piC-ic0151-5yr and priority to high, and append the empty override
-# and results_dataset fields plus workspace ai2/ace and cluster jupiter (a
-# blank cluster falls back to ceres+jupiter), then run evaluate.sh on this dir.
+# Stage 2: one row per fine-tune arm (appended by uncoupled_finetune.sh), turned
+# into its 5-yr piC eval row: status pending_piC-ic0151-5yr, priority high,
+# blank override and results_dataset (evaluate.sh then mounts the fine-tune's
+# own last-job result), workspace ai2/ace, cluster jupiter. The research job
+# watcher flips these to run_ once the task's fine-tunes all succeed (task
+# 2026-10-07-samudra-north-edge-padding, auto_launch).
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftA-constant|rs0|01M4C5DX673S1PBXZ883YQK4T2|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftA-constant|rs0|01M4C5DX673S1PBXZ883YQK4T2|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftB-pole-pool|rs0|01M4C5E80DRYGW926K6YMXY744|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftB-pole-pool|rs0|01M4C5E80DRYGW926K6YMXY744|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftC-pole|rs0|01M4C5EJG8T1E4ZJ6FN3BY1KTD|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftC-pole|rs0|01M4C5EJG8T1E4ZJ6FN3BY1KTD|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftD-constant-pool|rs0|01M4C5EWE30Z2PAV21RN4G12TG|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_frozen_mass_floor_latpad-ftD-constant-pool|rs0|01M4C5EWE30Z2PAV21RN4G12TG|pending_piC-ic0151-5yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter
