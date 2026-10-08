@@ -1,0 +1,5 @@
+group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235-ocean_enthice_sis2pred_am4anchor|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.q_terms='[hfds,calving_residue,minus_hfrunoffds]' stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=3 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.coastal=method stepper.step.config.corrector.config.corrector_disabled_epochs=1|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_enthice_sis2pred|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=1|8h
