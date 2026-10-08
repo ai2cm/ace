@@ -605,7 +605,6 @@ def _compute_ocean_net_surface_energy_flux(
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (
             atmos.precipitation_rate
-            + atmos.frozen_precipitation_rate
             - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
         )  # missing: + river runoff + calving
         * (sst - FREEZING_TEMPERATURE_KELVIN)

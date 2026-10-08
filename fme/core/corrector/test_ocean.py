@@ -290,6 +290,26 @@ def _make_atmos_forcing_data(shape, device=DEVICE):
     }
 
 
+def test_ocean_net_surface_energy_flux_counts_snow_once():
+    """PRATEsfc is total (liquid + frozen) precipitation."""
+    cp, t_f, l_v, l_f = 3992.0, 273.15, 2.5e6, 334000.0
+    am4 = _make_atmos_forcing_data((2, 2), device="cpu")
+    sst = torch.full((2, 2), 300.0)
+    f_top = (
+        am4["DSWRFsfc"]
+        - am4["USWRFsfc"]
+        + am4["DLWRFsfc"]
+        - am4["ULWRFsfc"]
+        - am4["LHTFLsfc"]
+        - am4["SHTFLsfc"]
+    )
+    p_h = cp * (am4["PRATEsfc"] - am4["LHTFLsfc"] / l_v) * (sst - t_f)
+    torch.testing.assert_close(
+        _compute_ocean_net_surface_energy_flux(am4, sst),
+        f_top - l_f * am4["total_frozen_precipitation_rate"] + p_h,
+    )
+
+
 def test_surface_energy_flux_correction_resid():
     config = OceanCorrectorConfig(
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(

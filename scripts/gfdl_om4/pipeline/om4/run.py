@@ -4,9 +4,9 @@ Reads native-grid 0.25 degree tripolar OM4/CM4 output stores, applies
 per-chunk transforms (C-grid to tracer-center interpolation, vector rotation,
 wetmask-normalized conservative regridding to a Gaussian grid, level
 splitting), and writes one templated, sharded zarr v3 store per invocation,
-driven by a YAML config (see pipeline/config.py and configs/).
+driven by a YAML config (see pipeline/om4/config.py and configs/).
 
-Run locally on a subset with the DirectRunner (see the Makefile smoke_test
+Run locally on a subset with the DirectRunner (see the om4.mk smoke_test
 target), or on Google Cloud Dataflow by passing the corresponding beam
 pipeline options after the script's own arguments.
 
@@ -29,7 +29,7 @@ Masking conventions of the output store:
   all land gets the no-normal-flow wall value 0.0 for that grid-relative
   component, filled before rotation. Streams with a ``face_mask_url``
   first invalidate faces the source carries as fake zeros over land (see
-  pipeline/face_masks.py). Either way the pair's footprint is the tracer
+  pipeline/om4/face_masks.py). Either way the pair's footprint is the tracer
   wetmask, so NaN-equals-``mask_k`` holds for every output; details and
   rationale in _rotate_pairs.
 - ``sea_surface_fraction`` is the regridded surface ocean fraction (0 over
@@ -45,33 +45,44 @@ Masking conventions of the output store:
 
 import argparse
 import logging
+import math
 
 import apache_beam as beam
-import fsspec
 import numpy as np
 import xarray as xr
 import xarray_beam as xbeam
 from apache_beam.options.pipeline_options import PipelineOptions
-from obstore.store import from_url
-from zarr.storage import ObjectStore
 
-from .config import PipelineConfig, StreamConfig, load_config
-from .face_masks import count_masked_candidate_faces, get_face_masks
-from .grids import make_target_grid
-from .ocean_emulators_port import (
+from ..grids import make_target_grid
+from ..ocean_emulators_port import (
     OCEAN_FRACTION_THRESHOLD,
     interpolate_to_cell_centers,
     regrid_normalized,
     rotate_vectors,
 )
-from .postprocess import DERIVATION_ATTR, POSTPROCESS, ChunkContext, provenance_attrs
-from .weights import get_regridder, open_source_grid
+from ..postprocess import (
+    DERIVATION_ATTR,
+    ChunkContext,
+    assert_postprocess_inputs,
+    provenance_attrs,
+)
+from ..weights import get_regridder, open_source_grid
+from ..zarr_io import (
+    OUTPUT_DTYPE,
+    TIME_DIM,
+    WriteShardedZarr,
+    assert_footprint,
+    assert_output_store_absent,
+    make_zarr_store,
+    shard_aligned_chunk_size,
+    source_time_chunk_size,
+)
+from .config import PipelineConfig, StreamConfig, load_config
+from .face_masks import count_masked_candidate_faces, get_face_masks
 
 logger = logging.getLogger(__name__)
 
-TIME_DIM = "time"
 LEVEL_DIM = "z_l"
-OUTPUT_DTYPE = np.float32
 
 # Tracer-center dimension for each staggered (right/north-edge) dimension.
 STAGGERED_TO_TRACER_DIM = {"xq": "xh", "yq": "yh"}
@@ -91,29 +102,6 @@ def land_nan_exempt_names(level_count: int) -> list[str]:
     )
 
 
-def _make_zarr_store(url: str, read_only: bool = True):
-    """Create a zarr store from a URL using obstore. If local, return the path."""
-    if url.startswith("gs://"):
-        return ObjectStore(from_url(url), read_only=read_only)
-    else:
-        return url
-
-
-def _assert_output_store_absent(path: str) -> None:
-    """Refuse to initialize into a pre-existing output store.
-
-    Output stores are written once and treated as immutable; initializing
-    the template into an existing store would corrupt or silently overwrite
-    it.
-    """
-    fs, root = fsspec.url_to_fs(path)
-    if fs.exists(root):
-        raise FileExistsError(
-            f"output store already exists at {path}; refusing to initialize "
-            "into it. Delete it explicitly or choose a new output path."
-        )
-
-
 # ---------------------------------------------------------------------------
 # Source opening and load-bearing assertions
 # ---------------------------------------------------------------------------
@@ -122,7 +110,7 @@ def _assert_output_store_absent(path: str) -> None:
 def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
     """Open a stream's variables lazily, time-subset, with fail-fast checks."""
     ds = xr.open_zarr(
-        _make_zarr_store(stream.store), chunks=None, decode_timedelta=False
+        make_zarr_store(stream.store), chunks=None, decode_timedelta=False
     )
     missing = set(stream.variables) - set(ds.data_vars)
     if missing:
@@ -170,7 +158,7 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     """The 3D ocean wetmask: the NaN pattern of the reference variable's
     first timestep (True over ocean)."""
     ds = xr.open_zarr(
-        _make_zarr_store(config.wetmask.store), chunks=None, decode_timedelta=False
+        make_zarr_store(config.wetmask.store), chunks=None, decode_timedelta=False
     )
     if config.wetmask.variable not in ds.data_vars:
         raise AssertionError(
@@ -190,23 +178,6 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     wetmask = da.notnull().reset_coords(drop=True)
     wetmask.attrs = {}
     return wetmask
-
-
-def _assert_footprint(da: xr.DataArray, wetmask: xr.DataArray, context: str) -> None:
-    """Assert a variable's valid-data footprint exactly equals the wetmask.
-
-    Guards against a source variable whose land pattern disagrees with the
-    wetmask's, which the normalized regrid would otherwise silently average
-    as zeros — and, downstream, guarantees the output NaN pattern equals
-    the ``mask_k`` statics at every timestep.
-    """
-    valid, expected = xr.broadcast(da.notnull(), wetmask)
-    mismatches = int((valid != expected).sum())
-    if mismatches:
-        raise AssertionError(
-            f"{context}: valid-data footprint of {da.name!r} differs from the "
-            f"wetmask at {mismatches} cells"
-        )
 
 
 def _assert_time_alignment(datasets: dict[str, xr.Dataset]) -> xr.DataArray:
@@ -270,7 +241,7 @@ def _conform_to_wetmask(
         da = ds[name]
         if not set(wetmask.dims).issubset(set(da.dims)):
             continue
-        _assert_footprint(da, wetmask, context)
+        assert_footprint(da, wetmask, context)
         conformed[name] = da.where(wetmask).assign_attrs(da.attrs)
     return conformed
 
@@ -389,7 +360,7 @@ def _process_chunk(
     ds = _conform_to_wetmask(ds, wetmask, context)
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
     for name in ds.data_vars:
-        _assert_footprint(ds[name], wetmask, context)
+        assert_footprint(ds[name], wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
     regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
@@ -430,8 +401,7 @@ def _process_chunk(
             areacello=_get_areacello(target_grid_name),
             store=stream.store,
         )
-        for postprocess_name in stream.postprocess:
-            spec = POSTPROCESS[postprocess_name]
+        for spec in stream.postprocess_specs():
             if all(v in output.data_vars for v in spec.requires):
                 output = spec.fn(output, chunk_context)
 
@@ -573,7 +543,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
 
     # Regriddable static source fields, wetmask-normalized like the streams.
     source = xr.open_zarr(
-        _make_zarr_store(config.statics.store), chunks=None, decode_timedelta=False
+        make_zarr_store(config.statics.store), chunks=None, decode_timedelta=False
     )
     missing = set(config.statics.variables) - set(source.data_vars)
     if missing:
@@ -671,15 +641,21 @@ def _expected_output_names(
     names: set[str] = set()
     for stream in config.streams:
         ds = stream_datasets[stream.name]
+        stream_names: set[str] = set()
         for name in ds.data_vars:
             out_name = stream.renaming.get(name, name)
             if LEVEL_DIM in ds[name].dims:
-                names.update(f"{out_name}_{k}" for k in range(ds.sizes[LEVEL_DIM]))
+                stream_names.update(
+                    f"{out_name}_{k}" for k in range(ds.sizes[LEVEL_DIM])
+                )
             else:
-                names.add(out_name)
-        names.update(stream.full_cell_variables)
-        for postprocess_name in stream.postprocess:
-            names.update(POSTPROCESS[postprocess_name].adds)
+                stream_names.add(out_name)
+        stream_names.update(stream.full_cell_variables)
+        specs = stream.postprocess_specs()
+        assert_postprocess_inputs(specs, stream_names, f"stream {stream.name!r}")
+        for spec in specs:
+            stream_names.update(spec.adds)
+        names.update(stream_names)
     return names
 
 
@@ -712,6 +688,14 @@ def _get_parser() -> argparse.ArgumentParser:
         help="Process only the first N timesteps (for subset test runs)",
     )
     parser.add_argument("--output-path", help="Override the config's output path")
+    parser.add_argument(
+        "--time-shard-size",
+        type=int,
+        help=(
+            "Override the config's output time shard size. Exists so a subset "
+            "test run can cross a shard boundary within a few source chunks"
+        ),
+    )
     return parser
 
 
@@ -726,7 +710,10 @@ def main():
         config.end_time = args.end_time
     if args.output_path is not None:
         config.output.path = args.output_path
-    _assert_output_store_absent(config.output.path)
+    if args.time_shard_size is not None:
+        config.output.time_shard_size = args.time_shard_size
+        config.output.__post_init__()
+    assert_output_store_absent(config.output.path)
 
     logger.info(
         "[config] streams=%s target_grid=%s output=%s time_chunk=%d time_shard=%d",
@@ -800,9 +787,7 @@ def main():
         )
     logger.info("[template] %d output variables", len(template.data_vars))
 
-    output_chunks = {TIME_DIM: config.output.time_chunk_size}
-    output_shards = {TIME_DIM: config.output.time_shard_size}
-    output_store = _make_zarr_store(config.output.path, read_only=False)
+    output_store = make_zarr_store(config.output.path, read_only=False)
 
     streams_by_name = {stream.name: stream for stream in config.streams}
     logger.info("[pipeline] starting; writing to %s", config.output.path)
@@ -811,22 +796,45 @@ def main():
             stream = streams_by_name[name]
             branches = []
             ds_3d, ds_2d = _split_stream(ds)
+            # Read at the source's own time-chunk width so each source chunk
+            # is fetched once, not once per timestep it holds.
             if ds_3d.data_vars:
-                branches.append((f"{name}_3d", ds_3d, {TIME_DIM: 1, LEVEL_DIM: 1}))
+                width = source_time_chunk_size(ds_3d)
+                branches.append((f"{name}_3d", ds_3d, {TIME_DIM: width, LEVEL_DIM: 1}))
             if ds_2d.data_vars:
-                branches.append((f"{name}_2d", ds_2d, {TIME_DIM: 1}))
+                width = source_time_chunk_size(ds_2d)
+                branches.append((f"{name}_2d", ds_2d, {TIME_DIM: width}))
             for label, branch_ds, chunks in branches:
                 n_chunks = int(
                     np.prod(
-                        [branch_ds.sizes[dim] // size for dim, size in chunks.items()]
+                        [
+                            math.ceil(branch_ds.sizes[dim] / size)
+                            for dim, size in chunks.items()
+                        ]
                     )
                 )
                 logger.info(
-                    "[stream:%s] %d variables in %d chunks",
+                    "[stream:%s] %d variables in %d chunks of %d timesteps",
                     label,
                     len(branch_ds.data_vars),
                     n_chunks,
+                    chunks[TIME_DIM],
                 )
+                split_chunks = {
+                    TIME_DIM: shard_aligned_chunk_size(
+                        chunks[TIME_DIM], config.output.time_shard_size
+                    )
+                }
+                if split_chunks[TIME_DIM] != chunks[TIME_DIM]:
+                    logger.info(
+                        "[stream:%s] splitting to %d before consolidating into "
+                        "%d-wide shards; the %d-wide read does not align with "
+                        "the shard boundary",
+                        label,
+                        split_chunks[TIME_DIM],
+                        config.output.time_shard_size,
+                        chunks[TIME_DIM],
+                    )
                 (
                     p
                     | f"{label}_to_chunks"
@@ -839,14 +847,13 @@ def main():
                         weights_url=config.weights_url,
                         target_grid_name=config.target_grid,
                     )
-                    | f"{label}_consolidate" >> xbeam.ConsolidateChunks(output_shards)
-                    | f"{label}_to_zarr"
-                    >> xbeam.ChunksToZarr(
+                    | f"{label}_write"
+                    >> WriteShardedZarr(
                         output_store,
                         template,
-                        zarr_chunks=output_chunks,
-                        zarr_shards=output_shards,
-                        zarr_format=3,
+                        time_chunk_size=config.output.time_chunk_size,
+                        time_shard_size=config.output.time_shard_size,
+                        split_chunks=split_chunks,
                     )
                 )
     logger.info("[write] pipeline complete: %s", config.output.path)
