@@ -6,9 +6,14 @@ runs only with --dry-run.
 """
 
 import ast
+import base64
+import glob
+import io
+import json
 import os
 import re
 import subprocess
+import tarfile
 
 import pytest
 import yaml
@@ -31,7 +36,15 @@ PARAMETER_REFERENCE = re.compile(r"\{\{workflow\.parameters\.([A-Za-z0-9_]+)\}\}
 HEREDOC_OPENER = re.compile(
     r"cat\s*<<\s*(?P<quote>'?)(?P<delim>[A-Za-z0-9_]+)(?P=quote)\s*>\s*(?P<file>\S+)"
 )
-SCRIPT_PARAMETER_FLAG = re.compile(r"-p\s+([A-Za-z0-9_]+_script)=")
+CODE_BUNDLE_FLAG = re.compile(r"-p code_bundle=(\S+)")
+CODE_BUNDLE_UNPACK = (
+    "echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -"
+)
+
+# argo hands each resolved template to argoexec as the env string
+# ARGO_TEMPLATE, and the kernel's MAX_ARG_STRLEN (131072) caps any one argv/env
+# string; the budget leaves margin for the fields argo adds at submit time
+ARGO_TEMPLATE_BUDGET = 96 * 1024
 
 
 def _read(path: str) -> str:
@@ -93,33 +106,88 @@ def test_workflow_parameters_are_declared(path):
     assert referenced - declared == set()
 
 
+def _submitted_code_bundle() -> str:
+    result = _submit(*PAIR_FLAGS[:2])
+    assert result.returncode == 0
+    (bundle,) = CODE_BUNDLE_FLAG.findall(result.stdout)
+    return bundle
+
+
+def _unpack(bundle: str) -> dict[str, str]:
+    archive = io.BytesIO(base64.b64decode(bundle))
+    with tarfile.open(fileobj=archive, mode="r:gz") as tar:
+        files = {}
+        for member in tar.getmembers():
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            files[member.name] = extracted.read().decode()
+        return files
+
+
 @pytest.mark.parametrize("entry_point", COUPLED_ENTRY_POINTS, ids=os.path.basename)
-def test_coupled_submit_script_passes_every_local_import(entry_point):
-    closure = _sibling_import_closure(entry_point)
-    passed = set(SCRIPT_PARAMETER_FLAG.findall(_read(COUPLED_SUBMIT_SCRIPT)))
-    declared = set(_declared_parameters(COUPLED_WORKFLOW))
-    expected = {module + "_script" for module in closure}
-    assert expected - passed == set()
-    assert expected - declared == set()
+def test_coupled_code_bundle_holds_every_local_import(entry_point):
+    files = _unpack(_submitted_code_bundle())
+    for module in _sibling_import_closure(entry_point):
+        filename = module + ".py"
+        assert files.get(filename) == _read(os.path.join(DIRNAME, filename))
 
 
-def test_coupled_workflow_writes_each_script_to_its_module_name():
-    args = _container_args(COUPLED_WORKFLOW)
-    script_parameters = [
+def test_coupled_templates_unpack_the_code_bundle():
+    manifest = yaml.safe_load(_read(COUPLED_WORKFLOW))
+    for template in manifest["spec"]["templates"]:
+        if "container" in template:
+            assert CODE_BUNDLE_UNPACK in "\n".join(template["container"]["args"])
+    assert [
         name
         for name in _declared_parameters(COUPLED_WORKFLOW)
         if name.endswith("_script")
-    ]
-    written = {}
-    for opener in HEREDOC_OPENER.finditer(args):
-        body_start = opener.end()
-        body_end = args.index("\n" + opener.group("delim"), body_start)
-        body = args[body_start:body_end]
-        for name in PARAMETER_REFERENCE.findall(body):
-            written[name] = opener.group("file")
-    assert {name: written.get(name) for name in script_parameters} == {
-        name: name[: -len("_script")] + ".py" for name in script_parameters
+    ] == []
+
+
+def _largest_coupled_config() -> str:
+    configs = []
+    for path in glob.glob(os.path.join(DIRNAME, "configs", "*.yaml")):
+        text = _read(path)
+        loaded = yaml.safe_load(text)
+        if isinstance(loaded, dict) and "coupled_datasets" in loaded:
+            configs.append(text)
+    return max(configs, key=len)
+
+
+def _resolved_template(template: dict, parameters: dict[str, str]) -> str:
+    """The template as argo serializes it into ARGO_TEMPLATE, approximately.
+
+    Go's json.Marshal escapes <, > and & as \\u00XX, which json.dumps does not.
+    """
+
+    def escape(value: str) -> str:
+        return json.dumps(value)[1:-1]
+
+    text = json.dumps(template, separators=(",", ":"))
+    text = PARAMETER_REFERENCE.sub(
+        lambda m: escape(parameters[m.group(1)]), text
+    ).replace("{{inputs.parameters.config}}", escape(parameters["config"]))
+    for char in "<>&":
+        text = text.replace(char, "\\u%04x" % ord(char))
+    return text
+
+
+def test_coupled_templates_fit_the_argo_template_budget():
+    manifest = yaml.safe_load(_read(COUPLED_WORKFLOW))
+    parameters = {
+        p["name"]: p.get("value", "")
+        for p in manifest["spec"]["arguments"]["parameters"]
     }
+    config = _largest_coupled_config()
+    parameters.update(
+        code_bundle=_submitted_code_bundle(), config=config, dependent_config=config
+    )
+    sizes = {
+        template["name"]: len(_resolved_template(template, parameters))
+        for template in manifest["spec"]["templates"]
+        if "container" in template
+    }
+    assert sizes and all(size < ARGO_TEMPLATE_BUDGET for size in sizes.values()), sizes
 
 
 def test_coupled_workflow_heredocs_quote_the_delimiter():
