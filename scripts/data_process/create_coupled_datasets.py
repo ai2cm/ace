@@ -38,6 +38,9 @@ Each stage can either compute from scratch or read from existing zarr outputs:
   rerunning the script with partial outputs already present
 """
 
+# merged stats subdirectories written under each coupled stats directory
+STATS_CATEGORIES = ("uncoupled_atmosphere", "coupled_atmosphere", "ocean")
+
 
 def _get_stats(
     input_zarr_path: str,
@@ -205,10 +208,9 @@ def _combine_ensemble_stats(
         logging.info("Skipping ensemble stats combining in debug mode")
         return
 
-    categories = ["uncoupled_atmosphere", "coupled_atmosphere", "ocean"]
     output_directory = os.path.join(ensemble_stats_dir, "combined")
 
-    for category in categories:
+    for category in STATS_CATEGORIES:
         # Build stats_roots for this category, checking which runs have it
         stats_roots = []
         for run_name in run_names:
@@ -369,8 +371,18 @@ class InputEnsembleConfig:
 
 @dataclasses.dataclass
 class CoupledStatsConfig:
+    """Configuration of output dataset stats.
+
+    Parameters:
+        start_date: Start of the stats window.
+        end_date: End of the stats window.
+        beaker_dataset: Name of the Beaker dataset upload_coupled_stats.py
+            creates from the merged stats. Not uploaded if None.
+    """
+
     start_date: str | None = None
     end_date: str | None = None
+    beaker_dataset: str | None = None
 
 
 @dataclasses.dataclass
@@ -726,6 +738,18 @@ class CreateCoupledDatasetsConfig:
             self.output_directory,
             f"{self.version}-{self.family_name}-stats",
         )
+
+    @property
+    def merged_stats_directory(self) -> str:
+        """Get the directory holding one merged stats subdirectory per category.
+
+        Returns:
+            coupled_stats_directory for a single dataset, or its "combined"
+            subdirectory for an ensemble.
+        """
+        if isinstance(self.input_datasets, InputEnsembleConfig):
+            return os.path.join(self.coupled_stats_directory, "combined")
+        return self.coupled_stats_directory
 
     def __post_init__(self):
         """Initialize and print dataset information after dataclass construction."""
