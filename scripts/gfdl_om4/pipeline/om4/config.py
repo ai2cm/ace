@@ -1,4 +1,4 @@
-"""YAML-driven configuration for the ocean dataset pipeline.
+"""YAML-driven configuration for the OM4 ocean dataset pipeline.
 
 Each YAML file describes one output store: the source zarr stores and the
 streams of variables to read from them, the transforms to apply (vector
@@ -11,8 +11,14 @@ code change.
 import dataclasses
 
 import dacite
-import yaml
 
+from ..config_io import OutputConfig, WetmaskConfig, load_yaml
+from ..postprocess import (
+    Postprocess,
+    PostprocessConfig,
+    assert_postprocess_inputs,
+    resolve_postprocess,
+)
 from .postprocess import POSTPROCESS
 
 
@@ -49,10 +55,13 @@ class StreamConfig:
             normalization — written under their source name, with NaN over
             land applied after. Each must also have a ``renaming`` entry so
             its wetmask-normalized twin doesn't collide.
-        postprocess: named post-regrid transforms to apply per chunk, in
-            order (see pipeline/postprocess.py).
+        postprocess: post-regrid transforms to apply per chunk, in order
+            (see pipeline/om4/postprocess.py): a registry name, or a
+            :class:`~pipeline.postprocess.PostprocessConfig` naming the
+            variables the transform reads (``kelvin_sst`` needs
+            ``sources: {celsius_sst: <name>}``).
         face_mask_url: URL prefix of a precomputed face-mask artifact (see
-            pipeline/face_masks.py) for sources whose staggered velocities
+            pipeline/om4/face_masks.py) for sources whose staggered velocities
             carry remap-born zeros over land. When set, the flagged faces
             of the stream's rotated pairs are treated as invalid before
             center interpolation (see run._rotate_pairs).
@@ -66,7 +75,7 @@ class StreamConfig:
     dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     time_subsample_stride: int | None = None
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
-    postprocess: list[str] = dataclasses.field(default_factory=list)
+    postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
     face_mask_url: str | None = None
 
     def __post_init__(self):
@@ -97,37 +106,26 @@ class StreamConfig:
                     "source name, so the wetmask-normalized output must be "
                     "renamed to avoid a collision"
                 )
-        for name in self.postprocess:
-            if name not in POSTPROCESS:
-                raise ValueError(
-                    f"unknown postprocess {name!r} in stream {self.name!r}; "
-                    f"available: {sorted(POSTPROCESS)}"
-                )
+        context = f"stream {self.name!r}"
+        output_names = {self.renaming.get(name, name) for name in self.variables}
+        output_names.update(self.full_cell_variables)
+        assert_postprocess_inputs(
+            self.postprocess_specs(),
+            output_names,
+            context,
+            allow_level_suffix=True,
+        )
         if self.face_mask_url is not None and not self.rotated_pairs:
             raise ValueError(
                 f"stream {self.name!r} sets face_mask_url but has no "
                 "rotated_pairs for it to apply to"
             )
 
-
-@dataclasses.dataclass
-class WetmaskConfig:
-    """Where the 3D ocean wetmask comes from.
-
-    The wetmask is the NaN pattern of the reference variable's first
-    timestep. Every processed variable's footprint must equal it exactly
-    (see run._conform_to_wetmask, which raises otherwise, with no repair),
-    so the output NaN pattern equals the ``mask_k`` statics at every
-    timestep.
-
-    Attributes:
-        store: URL of the zarr store holding the reference variable.
-        variable: name of a 3D (level, y, x) variable whose NaN pattern
-            defines the wetmask.
-    """
-
-    store: str
-    variable: str
+    def postprocess_specs(self) -> list[Postprocess]:
+        """The configured transforms, with their source names bound."""
+        return resolve_postprocess(
+            POSTPROCESS, self.postprocess, f"stream {self.name!r}"
+        )
 
 
 @dataclasses.dataclass
@@ -144,29 +142,6 @@ class StaticsConfig:
 
 
 @dataclasses.dataclass
-class OutputConfig:
-    """Output store layout.
-
-    Attributes:
-        path: URL of the output zarr store.
-        time_chunk_size: zarr chunk size along time.
-        time_shard_size: zarr shard size along time; must be a multiple of
-            ``time_chunk_size``.
-    """
-
-    path: str
-    time_chunk_size: int = 1
-    time_shard_size: int = 365
-
-    def __post_init__(self):
-        if self.time_shard_size % self.time_chunk_size != 0:
-            raise ValueError(
-                "time_shard_size must be a multiple of time_chunk_size; got "
-                f"{self.time_shard_size} and {self.time_chunk_size}"
-            )
-
-
-@dataclasses.dataclass
 class PipelineConfig:
     """Top-level configuration for one pipeline invocation (one output store).
 
@@ -174,7 +149,8 @@ class PipelineConfig:
         streams: time-varying variable streams; all must share the same time
             coordinate.
         statics: static fields configuration.
-        wetmask: source of the 3D ocean wetmask.
+        wetmask: source of the 3D ocean wetmask: a (level, y, x) reference
+            variable (see run.load_wetmask).
         target_grid: Gaussian target grid name (e.g. "F90").
         weights_url: URL prefix of the precomputed regridding weight artifact
             for the source grid x ``target_grid`` pair.
@@ -208,10 +184,8 @@ class PipelineConfig:
 
 
 def load_config(path: str) -> PipelineConfig:
-    with open(path) as f:
-        data = yaml.safe_load(f)
     return dacite.from_dict(
         data_class=PipelineConfig,
-        data=data,
+        data=load_yaml(path),
         config=dacite.Config(strict=True),
     )
