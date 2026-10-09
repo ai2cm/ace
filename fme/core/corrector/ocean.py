@@ -7,6 +7,7 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     REFERENCE_SALINITY,
@@ -137,11 +138,30 @@ class OceanHeatContentBudgetConfig:
             into the ocean when conserving the heat content. This can be useful
             for correcting errors in heat budget in target data. The same
             additional heating is imposed at all time steps and grid cells.
+        max_scaled_contraction: If set, the global ratio of "scaled_temperature"
+            is clamped to ``1 +/- max_scaled_contraction`` and the heat the clamp
+            leaves unclosed is added as a uniform temperature increment over
+            the wet cells (deposited in proportion to ``dz_k``), so the budget
+            still closes exactly. This separates the multiplicative contraction
+            that anchors a residual-prediction stepper (now a chosen constant at
+            most) from the placement of the budget residual (now the whole
+            column rather than the warm upper ocean). Default None keeps the
+            unclamped ratio.
 
     """
 
     method: Literal["scaled_temperature"]
     constant_unaccounted_heating: float = 0.0
+    max_scaled_contraction: float | None = None
+
+    def __post_init__(self):
+        if self.max_scaled_contraction is not None and not (
+            0.0 < self.max_scaled_contraction <= 1.0
+        ):
+            raise ValueError(
+                "max_scaled_contraction must be in (0, 1], got "
+                f"{self.max_scaled_contraction}."
+            )
 
 
 def _require_sea_surface_fraction_weighting(
@@ -330,6 +350,7 @@ class OceanHeatContentCorrection:
     timestep_seconds: float
     method: Literal["scaled_temperature"]
     unaccounted_heating: float
+    max_scaled_contraction: float | None = None
 
     def __call__(
         self,
@@ -358,6 +379,7 @@ class OceanHeatContentCorrection:
             self.timestep_seconds,
             self.method,
             self.unaccounted_heating,
+            self.max_scaled_contraction,
         )
         return corrected, corrector_state
 
@@ -553,6 +575,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     timestep_seconds,
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
+                    self.ocean_heat_content_correction.max_scaled_contraction,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -663,6 +686,7 @@ def _force_conserve_ocean_heat_content(
     timestep_seconds: float,
     method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
+    max_scaled_contraction: float | None = None,
 ) -> TensorDict:
     """Scale the generated temperature to conserve global ocean heat content.
 
@@ -725,9 +749,18 @@ def _force_conserve_ocean_heat_content(
     expected_change_ocean_heat_content = (
         energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
-    heat_content_correction_ratio = (
+    target_ocean_heat_content = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
-    ) / global_gen_ocean_heat_content
+    )
+    heat_content_correction_ratio = (
+        target_ocean_heat_content / global_gen_ocean_heat_content
+    )
+    if max_scaled_contraction is not None:
+        # Capped: the contraction is a chosen constant at most, and the heat it
+        # leaves unclosed is placed by the uniform increment below.
+        heat_content_correction_ratio = heat_content_correction_ratio.clamp(
+            1.0 - max_scaled_contraction, 1.0 + max_scaled_contraction
+        )
     # apply same temperature correction to all vertical layers
     out: TensorDict = {}
     n_levels = gen.sea_water_potential_temperature.shape[-1]
@@ -738,6 +771,41 @@ def _force_conserve_ocean_heat_content(
         out["sst"] = (  # assuming sst in Kelvin
             gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
         ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    if max_scaled_contraction is None:
+        return out
+    # Close what the clamp left with a uniform increment over the wet cells,
+    # weighted like the heat content itself (cell area times sea surface
+    # fraction), so the budget still closes exactly.
+    contracted_ocean_heat_content = (
+        heat_content_correction_ratio * global_gen_ocean_heat_content
+    )
+    gen_potential_temperature = gen.sea_water_potential_temperature
+    heat_capacity_per_area = area_weighted_mean(
+        vertical_coordinate.depth_integral(
+            torch.ones_like(gen_potential_temperature)
+            * SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4
+        )
+        * forcing.sea_surface_fraction,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    mask = getattr(vertical_coordinate, "mask", None)
+    if mask is None:
+        raise ValueError(
+            "max_scaled_contraction needs the vertical coordinate's wet-cell "
+            "mask to place the increment, but this vertical coordinate has none."
+        )
+    is_masked_valid = (mask > 0.0).to(dtype=gen_potential_temperature.dtype)
+    temperature_increment = (
+        target_ocean_heat_content - contracted_ocean_heat_content
+    ) / heat_capacity_per_area
+    for k in range(n_levels):
+        name = f"thetao_{k}"
+        out[name] = out[name] + temperature_increment * is_masked_valid.select(-1, k)
+    if "sst" in gen.data:
+        # An increment needs no Kelvin offset, unlike the multiplicative path.
+        out["sst"] = out["sst"] + temperature_increment * is_masked_valid.select(-1, 0)
     return out
 
 
