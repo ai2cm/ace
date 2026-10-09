@@ -180,3 +180,63 @@ in physical units; `resid-cap0005-learnedheat-sstfill273.yaml` fills `sst` over 
   mean. Not in the first pass; the pattern is scored and inspected first.
 - The target uses the plain rebuild everywhere; the coastal/ice term the network supplies in
   the `prescribed` correction is a separate, known bias (surface-flux-budget report).
+
+
+## SST-noise fix matrix, first read (2026-10-09, epochs 14-31 of 200; all arms from scratch, same seed)
+
+| arm | ep | inline 10-yr channel_mean | val one-step SST rmse (K) | val thetao_0 (K) | step-20 SST rmse (K) | ice time-mean norm rmse |
+|---|---|---|---|---|---|---|
+| learnedheat (zero fill, SST full-field) | 30 / 200 | 0.077 / 0.041 | 1.81 / 0.98 | 0.218 / 0.173 | 1.20 / 0.80 | 0.39 / 0.014 |
+| + sstfill273 | 30 | 0.077 | 1.83 | 0.222 | 1.48 | 0.36 |
+| + sstres (SST residual) | 20 | 0.095 | 0.229 | 0.228 | 0.96 | 0.40 |
+| + meanfill | 30 | 0.042 | 0.77 | 0.175 | 0.69 | 0.011 |
+| + sstres + meanfill | 25 | 0.047 | 0.171 | 0.171 | 0.24 | 0.012 |
+
+- Mean fill is the big lever: at epoch 10 the mean-fill arms already sit where the zero-fill arms
+  are at epoch 100-200 (inline 0.071, ice 0.018 vs 0.54). Zero fill in physical units puts land
+  at -24.5 sigma for SST (and far off for every field with a large mean); with Samudra's instance
+  norm that dominates the per-sample statistics and the ocean signal is squashed for the first
+  ~50 epochs. The 273.15 K SST fill alone does nothing (one-step SST unchanged), so it is the
+  whole set of fields, not SST.
+- SST as a residual removes the one-step SST noise outright (0.17 K = thetao_0) and, with mean
+  fill, cuts the 20-step SST rmse from 0.69-0.80 K to 0.24 K.
+- Decision pending the runs finishing: `sstres-meanfill` is the recipe for the next learned-heating
+  generation and for coupling. Check mean fill on the CM4 anchor arms too (the "ice learned last"
+  observation may be the same mechanism).
+
+## ERA5 4deg atmosphere for coupling the UFS ocean (surveyed 2026-10-09)
+
+Candidate: Jeremy's `4deg-daily-ace2s-ft3-detached-rs0` (wandb ai2cm/ace/1r7oyu58, beaker
+01M39XBD8AAB27EPHQKM9JQ9TQ, results 01M39XBD8K0KB3GAQ79ETVN470 with best_inference_ckpt.tar and
+ema_ckpt_0010.tar). ACE2S paper recipe at 4deg, daily step, store
+`2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr` (weka), trained 1940-1995 + 2011-2019 + 2021-,
+val 1996-1997. 5-yr inline channel_mean 0.040 (81-yr 0.023); the 1deg daily ACE2S twin scores
+0.038, the CM4 4deg atmosphere we couple with 0.0235 on CM4. Outputs every flux the ocean needs
+and takes surface_temperature, sea_ice_fraction, ocean_fraction as inputs.
+
+What must change before it can drive the UFS 4deg ocean:
+1. Grid: identical to the UFS 4deg store (45x90, same lat/lon values).
+2. Stress: name differs (`eastward_surface_stress` vs `eastward_surface_wind_stress`; the coupler's
+   `atmosphere_output_rename` covers that) and the SIGN is opposite (year-2000 maps, corr -0.99:
+   ERA5 +0.010 vs UFS -0.010 ocean mean). Needs a sign/scale option next to the rename, or an
+   ocean trained on ERA5-sign stress.
+3. Time labels: ERA5 daily samples sit at 00Z and are the mean of the preceding day (corr 0.987
+   with the UFS 6-hourly window ending 00Z); UFS 5-day samples sit at 18Z. The coupled loader
+   requires identical first times, so build a coupled-atmosphere ERA5 store relabelled -6 h (or
+   re-coarsened to windows ending 18Z from `2026-08-13-era5-4deg-8layer-1940-2025`).
+4. Fractions: 288 of 4050 cells differ by >0.1 between the ERA5 land mask and the UFS/MOM6 mask.
+   The CM4 coupling had a coupled-atmosphere store with ocean-consistent fractions; ERA5 needs the
+   same (sea_surface_fraction / land_fraction from the UFS store).
+5. Fluxes: ERA5 vs the FV3-replay fluxes the ocean was trained with (year 2000, ocean mean):
+   DSWRF 189 vs 199, USWRF 13.9 vs 17.2, LHTFL 101.5 vs 109.3 W/m2; net surface heat +6.5 vs
+   +3.0 W/m2. The 3.5 W/m2 difference is the size of the unaccounted heating itself, so the
+   OHC budget target (constant or learned) has to be re-derived against ERA5 fluxes.
+6. Daily atmosphere under a 5-day ocean = 5 inner steps; supported by the coupled stepper.
+
+Baseline for the comparison Troy asked for: `ufs-5d-samudra-fted-from-cm4-1pct-new-dataset`
+(wandb ai2cm/ace-samudra-ufs/inko9d1z, results 01KX6MCJ53X0VCK5T880P6TEG1): 1deg full-field
+Samudra fine-tuned from the CM4 1pct checkpoint on the old 2026-06-29 1deg store (pre levels/stress
+fix), MSE 4-step, 120 epochs, no OHC correction, trained 1994-2015 (includes the 2002-2011 holdout),
+val 2016, inline 20-yr from 1994-1997 ICs: channel_mean 0.0436, SST 0.0089, ice 0.0067. Not
+comparable to the 4deg 10-yr-window numbers; a matched full-record rollout on its own store is
+running (`launch-ufs1deg-baseline-eval-30yr.sh`, job samudra-ufs1deg-baseline-jul2026-eval-30yr-1994).
