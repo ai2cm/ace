@@ -247,10 +247,10 @@ def test_masking_per_variable_fill_values_override_the_default():
         mask_value=0, fill_value=0.0, fill_values={"sst": 273.15}
     )
     masker = config.build(_Mask(mask_2d=mask_2d))
-    data = {"sst": torch.tensor([[290.0, 291.0]]), "so_0": torch.tensor([[35.0, 36.0]])}
+    data = {"sst": torch.tensor([[290.0, 291.0]]), "zos": torch.tensor([[35.0, 36.0]])}
     out = masker(data)
     torch.testing.assert_close(out["sst"], torch.tensor([[290.0, 273.15]]))
-    torch.testing.assert_close(out["so_0"], torch.tensor([[35.0, 0.0]]))
+    torch.testing.assert_close(out["zos"], torch.tensor([[35.0, 0.0]]))
 
 
 def test_masking_per_variable_fill_values_override_the_means():
@@ -260,10 +260,10 @@ def test_masking_per_variable_fill_values_override_the_means():
     )
     masker = config.build(
         _Mask(mask_2d=mask_2d),
-        means={"sst": torch.tensor(287.0), "so_0": torch.tensor(34.0)},
+        means={"sst": torch.tensor(287.0), "zos": torch.tensor(34.0)},
     )
     out = masker(
-        {"sst": torch.tensor([[290.0, 291.0]]), "so_0": torch.tensor([[35.0, 36.0]])}
+        {"sst": torch.tensor([[290.0, 291.0]]), "zos": torch.tensor([[35.0, 36.0]])}
     )
     torch.testing.assert_close(out["sst"], torch.tensor([[290.0, 273.15]]))
-    torch.testing.assert_close(out["so_0"], torch.tensor([[35.0, 34.0]]))
+    torch.testing.assert_close(out["zos"], torch.tensor([[35.0, 34.0]]))
