@@ -137,7 +137,11 @@ climatological std, so a 1 K per-step error costs 0.007 in normalized MSE, while
 error in the residual thetao_0 channel (std 0.41 K) costs 6. Test launched 2026-10-09:
 `resid-cap0005-learnedheat-meanfill.yaml` (`fill_value: mean`, SST still full-field) next to
 the sst-residual variant and the baseline; compare one-step validation SST RMSE at matched
-epochs.
+epochs. Troy's preferred form (2026-10-09, "mimic the K to C change, keep the zero fill"):
+`StaticSpatialMaskingConfig.fill_values` (ace 333e8cfe2) lets one variable take its own fill
+in physical units; `resid-cap0005-learnedheat-sstfill273.yaml` fills `sst` over land with
+273.15 K (0 C, −1.2 sigma) and everything else with 0.0, launched 2026-10-09. The proper fix
+(SST in Celsius through loader and corrector) is deferred.
 
 ## Open questions
 
