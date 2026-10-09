@@ -240,3 +240,26 @@ fix), MSE 4-step, 120 epochs, no OHC correction, trained 1994-2015 (includes the
 val 2016, inline 20-yr from 1994-1997 ICs: channel_mean 0.0436, SST 0.0089, ice 0.0067. Not
 comparable to the 4deg 10-yr-window numbers; a matched full-record rollout on its own store is
 running (`launch-ufs1deg-baseline-eval-30yr.sh`, job samudra-ufs1deg-baseline-jul2026-eval-30yr-1994).
+
+### Residual SST re-checked against the September CM4 verdict (2026-10-09)
+
+Troy: residual SST is what led to the ENSO-amplitude instability on CM4 (hybridsstres / hybridswap,
+band power 3.3-3.9x early then decaying through 1.0, never settling; recipe rule became "sst
+full-field + thetao residual"). The UFS arms reproduce it. Nino3.4 2-5 yr band power / truth
+(inference_10yr):
+
+| arm | ep 10 | 15 | 20 | 25 | 30 | 60 | 100 | 200 |
+|---|---|---|---|---|---|---|---|---|
+| base (zero fill, sst ff) | 0.12 | 0.12 | 0.13 | 0.16 | 0.13 | 0.57 | 1.29 | 0.89 |
+| sstres | 1.40 | 1.19 | 1.00 | 0.65 | 0.42 | | | |
+| scratch sstres (constant 0) | 1.20 | 0.94 | 0.84 | 0.59 | | | | |
+| sstres + sstfill273 | 0.47 | 0.42 | 0.43 | | | | | |
+| sstres + meanfill | 1.09 | 1.04 | 1.18 | 1.12 | 1.13 | | | |
+
+The plain SST-residual arms show the same early overshoot-and-decay; only the mean-fill variant holds
+near 1.0 so far, and mean fill carries its own history (instabilities, ocean-only gains not carrying
+to coupled mode). So SST-residual is not the fix. New arm keeping the validated recipe (sst full-field,
+zero fill) and attacking the mechanism directly: `resid-cap0005-learnedheat-sstw30.yaml`, MSE loss
+weight 30 on sst (a 1 K one-step SST error is 0.085 sigma full-field, a 0.17 K thetao_0 error is 0.44
+sigma residual; x30 equalizes their loss shares). Judge on one-step SST, band power and inline
+channel_mean against the base at matched epochs.
