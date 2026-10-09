@@ -53,8 +53,10 @@ class Samudra(torch.nn.Module):
         Latitude padding used wherever the network pads latitude (see
         ``pad_latitude``), except that the upsampler ignores it when
         ``zonally_periodic_upsample`` is False and, under "constant", the
-        periodic upsampler does not pad latitude. By default "constant", the
-        original behavior. Adds no parameters, so checkpoints load across modes.
+        periodic upsampler does not pad latitude. A "pole" pad longer than a
+        level's height (the 4 degree bottleneck's 3 rows under a dilation of
+        4) continues past the far pole. By default "constant", the original
+        behavior. Adds no parameters, so checkpoints load across modes.
     pad_pool : bool, optional
         If True, each pool pads an odd height or width by one row (with
         ``lat_pad``) or column (with ``pad``) at the end of the axis instead

@@ -38,7 +38,8 @@ class SamudraBuilder(ModuleConfig):
             every step. "layer" is the principled choice for a conditioned
             network.
         lat_pad: Latitude padding mode: "constant" (default, zeros) or
-            "pole" (continues across the pole). See ``Samudra``.
+            "pole" (continues across the pole, and on past the far pole where
+            a pad is longer than a level's height). See ``Samudra``.
         pad_pool: Pad an odd height or width by one row or column at the end
             of the axis in each pool instead of dropping the last one, and crop
             it off the decoder's upsample instead of refilling a dropped one,
