@@ -102,6 +102,12 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
       when it finishes.
 - [ ] Evaluate: inline drift vs the constant-0 twins; the learned field's ocean mean vs the
       data's annual series; 2002-2006 window rollouts.
+- [ ] Full-record rollouts 1994-2023 (Troy, 2026-10-09: "see how the model deals with
+      unaccounted heating in a period it did not see"): `evaluator-config-ufs4deg-30yr-1994.yaml`,
+      launched for the finished learned-heating residual arm and its constant-0 twin (v3
+      checkpoint); the clean-store twin and the full-field learned arm follow when they
+      finish. Note: this crosses the 2002-2011 holdout; drift and behaviour only, no skill
+      claims from it.
 - [ ] Write up (reports repo).
 
 ## Open questions
