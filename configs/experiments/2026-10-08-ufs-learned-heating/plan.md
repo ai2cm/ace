@@ -90,8 +90,16 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
 - [x] Launched 2026-10-08 `samudra-ufs4deg-{resid-cap0005,ff-ohc}-learnedheat` (200 epochs,
       as the from-scratch arms; wandb group samudra-ufs4deg-learnedheat) after the
       training-dataset upload committed.
-- [ ] Watch the first epochs for config failures (new output channel, stats entries,
-      corrector source).
+- [x] Both arms train and log the new channel; `resid-cap0005-learnedheat` finished 200
+      epochs on 2026-10-09 (inline channel mean 0.041, learned-channel normalized RMSE 0.087).
+      Its learned term's ocean mean drifts with training epoch (−1.9 W/m² at epoch 75,
+      ~0 at 125, +1.3 at 200 against a data mean of +0.45 over the inline windows) and the
+      inline SST bias follows it (−0.08, +0.04, +0.10 K). Checkpoint selection on the
+      inline channel mean picks epoch 200.
+- [ ] 10-yr ocean-only rollouts with monthly `unaccounted_heating` output
+      (`launch-ufs4deg-eval-10yr.sh`; launched 2026-10-09 for the finished residual arm) to
+      compare the learned ocean-mean series with the data's; same for the constant-0 twin
+      when it finishes.
 - [ ] Evaluate: inline drift vs the constant-0 twins; the learned field's ocean mean vs the
       data's annual series; 2002-2006 window rollouts.
 - [ ] Write up (reports repo).
