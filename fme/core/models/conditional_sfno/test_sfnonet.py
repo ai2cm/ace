@@ -802,3 +802,67 @@ def test_checkpointing_gradients_match_uncheckpointed(checkpointing):
     assert set(actual) == set(reference)
     for name, grad in reference.items():
         torch.testing.assert_close(actual[name], grad, msg=f"gradient for {name}")
+
+
+def _latent_before_blocks(model, x: torch.Tensor, ctx: Context) -> torch.Tensor:
+    """The latent entering the first block, i.e. after any envelope clipping."""
+    latents: list[torch.Tensor] = []
+    handle = model.blocks[0].register_forward_pre_hook(
+        lambda _module, args: latents.append(args[0].detach().clone())
+    )
+    with torch.no_grad():
+        model(x, ctx)
+    handle.remove()
+    (latent,) = latents
+    return latent
+
+
+def _reference_clip(
+    latent: torch.Tensor, gm_min: torch.Tensor, gm_max: torch.Tensor
+) -> torch.Tensor:
+    """The previous branchy implementation of eval-mode envelope clipping."""
+    global_means = latent.mean(dim=(-2, -1), keepdim=True)
+    if torch.isfinite(gm_max).all():
+        clipped = torch.clamp(global_means, min=gm_min, max=gm_max)
+        return latent + (clipped - global_means)
+    return latent
+
+
+@pytest.mark.parametrize("envelope_set", [False, True])
+def test_clip_latent_global_means_eval_matches_branchy_reference(envelope_set: bool):
+    """Eval clipping is bit-identical to the previous `if`-based version, both
+    before any training forward (sentinel envelope, no-op) and after one
+    (finite envelope, clamp-and-shift)."""
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    x = 10.0 * torch.randn(4, 2, 9, 18, device=device)
+    model.eval()
+    raw_latent = _latent_before_blocks(model, x, ctx)  # sentinels: unclipped
+    if envelope_set:
+        model._gm_min.fill_(-0.01)
+        model._gm_max.fill_(0.01)
+        assert (raw_latent.mean(dim=(-2, -1)).abs() > 0.01).any()
+    actual = _latent_before_blocks(model, x, ctx)
+    expected = _reference_clip(raw_latent, model._gm_min, model._gm_max)
+    assert torch.equal(actual, expected)
+    assert torch.isfinite(actual).all()
+
+
+@pytest.mark.parametrize("envelope_set", [False, True])
+def test_clip_latent_global_means_eval_has_no_graph_breaks(envelope_set: bool):
+    """The sentinel check must not branch on a tensor value in Python, which
+    would split the compiled forward into three graphs."""
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    if envelope_set:
+        model._gm_min.fill_(-0.01)
+        model._gm_max.fill_(0.01)
+    model.eval()
+    x = torch.randn(4, 2, 9, 18, device=device)
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(model)(x, ctx)
+    finally:
+        torch._dynamo.reset()
+    assert explanation.graph_break_count == 0, explanation.break_reasons
+    assert explanation.graph_count == 1

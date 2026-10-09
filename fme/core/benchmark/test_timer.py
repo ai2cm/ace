@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from fme.core.benchmark.timer import CUDATimer, TimerResult
+from fme.core.benchmark.timer import CUDATimer, NullTimer, TimerResult
 
 
 @pytest.mark.parametrize("is_available", [True, False])
@@ -114,3 +114,34 @@ def test_assert_close_children_rtol_raises():
     )
     with pytest.raises(AssertionError):
         result2.assert_close(result1, rtol=0.05, children_rtol=0.2)
+
+
+def test_null_timer_nested_children():
+    """Nested `with timer.child(...)` must keep yielding usable NullTimers."""
+    timer = NullTimer()
+    with timer as entered:
+        assert isinstance(entered, NullTimer)
+        with timer.child("a") as child:
+            assert isinstance(child, NullTimer)
+            with child.child("b") as grandchild:
+                assert isinstance(grandchild, NullTimer)
+
+
+def test_null_timer_child_does_not_graph_break():
+    """torch.compile must trace through `with timer.child(...)` in a forward."""
+
+    class _TimedModule(torch.nn.Module):
+        def forward(self, x, timer=NullTimer()):
+            with timer.child("outer") as outer:
+                x = x + 1
+                with outer.child("inner"):
+                    x = x * 2
+            return x
+
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(_TimedModule())(torch.ones(3), NullTimer())
+    finally:
+        torch._dynamo.reset()
+    assert explanation.graph_count == 1
+    assert explanation.graph_break_count == 0
