@@ -1,0 +1,184 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+#
+# 20-yr piControl rollouts for back-testing training-time coupling metrics
+# (interface budget closure by cell class, early heat uptake, tropical Pacific
+# SST and Nino 4 stress bias, thermocline response, Nino band power).
+# The shared evaluator-config-piC-ic0151-200yr.yaml (same loader, IC
+# 0151-01-06, single coupled checkpoint at /ckpt.tar) truncated to 20 yr:
+# 1460 coupled (5-day) steps, 146 x 10 in memory (n_coupled_steps must be a
+# multiple of coupled_steps_in_memory, and 18 does not divide 1460).
+# seed: 0 as in the 50-yr surface-budget runs.
+# Writers: all of coupled_swap/evaluator-config-piC-ic0151-200yr-oceq-gcs.yaml
+# (six regional monthly-SST boxes, equatorial Pacific ocean, atmosphere
+# tropical Pacific) plus the global monthly sfc_budget_monthly writer of
+# coupled/evaluator-config-piC-50yr-sfc-trained.yaml in both realms (names a
+# realm does not carry are skipped). Every writer is zarr with default chunks
+# and log_to_file is false, so the whole run can be written to a gs://
+# experiment_dir set per row via the override field.
+experiment_dir: /results
+n_coupled_steps: 1460
+coupled_steps_in_memory: 10
+checkpoint_path: /ckpt.tar
+seed: 0
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: kuroshio_extension_monthly
+        names: [sst]
+        lat_extent: [30.0, 40.0]
+        lon_extent: [140.0, 180.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: gulf_stream_monthly
+        names: [sst]
+        lat_extent: [35.0, 45.0]
+        lon_extent: [285.0, 315.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: n_atlantic_subpolar_monthly
+        names: [sst]
+        lat_extent: [50.0, 65.0]
+        lon_extent: [300.0, 340.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: acc_monthly
+        names: [sst]
+        lat_extent: [-60.0, -45.0]
+        lon_extent: [0.0, 360.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: n_pacific_gyre_monthly
+        names: [sst]
+        lat_extent: [25.0, 40.0]
+        lon_extent: [180.0, 220.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: nino3_nino34_monthly
+        names: [sst]
+        lat_extent: [-5.0, 5.0]
+        lon_extent: [190.0, 270.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: equatorial_pacific_ocean_monthly
+        names:
+          - sst
+          - zos
+          - thetao_0
+          - thetao_1
+          - thetao_2
+          - thetao_3
+          - thetao_4
+          - thetao_5
+          - thetao_6
+          - thetao_7
+          - thetao_8
+          - thetao_9
+          - uo_0
+          - uo_1
+          - uo_2
+          - uo_3
+          - uo_4
+          - uo_5
+          - vo_0
+          - vo_1
+          - vo_2
+          - vo_3
+          - vo_4
+          - vo_5
+        lat_extent: [-10.0, 10.0]
+        lon_extent: [120.0, 280.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: sfc_budget_monthly
+        names: [hfds, hfds_total_area, sea_ice_fraction, ocean_sea_ice_fraction,
+                sst, ocean_heat_content, sea_surface_fraction, land_fraction,
+                sea_ice_volume]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: tropical_pacific_monthly
+        names:
+          - surface_temperature
+          - eastward_surface_wind_stress
+          - northward_surface_wind_stress
+          - DSWRFsfc
+          - USWRFsfc
+          - DLWRFsfc
+          - ULWRFsfc
+          - LHTFLsfc
+          - SHTFLsfc
+          - PRATEsfc
+        lat_extent: [-20.0, 20.0]
+        lon_extent: [120.0, 290.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+      - label: sfc_budget_monthly
+        names: [DSWRFsfc, USWRFsfc, DLWRFsfc, ULWRFsfc, LHTFLsfc, SHTFLsfc,
+                total_frozen_precipitation_rate, PRATEsfc, ocean_fraction,
+                land_fraction, sea_ice_fraction]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+        format:
+          name: zarr
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
