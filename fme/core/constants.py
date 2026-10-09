@@ -19,3 +19,4 @@ FREEZING_TEMPERATURE_KELVIN = 273.15  # K
 REFERENCE_SALINITY = 35.0  # g/kg, practical salinity (psu) taken as g/kg
 
 EARTH_RADIUS = 6371000.0  # m
+SPHERE_AREA_M2 = 5.1006447e14  # m^2

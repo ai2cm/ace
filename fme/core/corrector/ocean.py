@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
@@ -9,7 +9,9 @@ from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
+    REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+    SPHERE_AREA_M2,
 )
 from fme.core.corrector.registry import (
     Correction,
@@ -18,16 +20,47 @@ from fme.core.corrector.registry import (
 )
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
+from fme.core.spatial_mask_provider import (
+    NullSpatialMaskProvider,
+    SpatialMaskProviderABC,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class AreaWeightedMean(Protocol):
     def __call__(
         self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
+    ) -> torch.Tensor: ...
+
+
+class AreaWeightedSum(Protocol):
+    def __call__(
+        self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
+    ) -> torch.Tensor: ...
+
+
+GlobalTotal = Callable[[torch.Tensor], torch.Tensor]
+"""Sum of a per-cell field times the cell area over the ocean, keeping the
+horizontal dimensions."""
+
+
+class SaltBudget(Protocol):
+    """Expected change of the total ocean salt content over one step, in
+    psu m**3, keeping the horizontal dimensions.
+    """
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
     ) -> torch.Tensor: ...
 
 
@@ -111,6 +144,78 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+def _require_sea_surface_fraction_weighting(
+    budget_type: str, weight_by_sea_surface_fraction: bool
+) -> None:
+    if not weight_by_sea_surface_fraction:
+        raise ValueError(
+            f"The {budget_type!r} salt budget requires "
+            "weight_by_sea_surface_fraction=True."
+        )
+
+
+@dataclasses.dataclass
+class SeaSurfaceHeightSaltBudgetConfig:
+    """Salt budget from the change of the sea surface height,
+    -S_ref * sum((SSH_gen - SSH_input) * ssf * A). Requires ``SSH``, the height
+    including its global mean, in the inputs and outputs.
+
+    Parameters:
+        reference_salinity_psu: Salinity at which the added water dilutes the
+            salt, in psu.
+        type: Selects this budget.
+    """
+
+    reference_salinity_psu: float = REFERENCE_SALINITY
+    type: Literal["sea_surface_height"] = "sea_surface_height"
+
+    def validate(self, weight_by_sea_surface_fraction: bool) -> None:
+        _require_sea_surface_fraction_weighting(
+            self.type, weight_by_sea_surface_fraction
+        )
+
+    def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
+        return SeaSurfaceHeightSaltBudget(self.reference_salinity_psu)
+
+
+SaltBudgetConfig = SeaSurfaceHeightSaltBudgetConfig
+
+
+@dataclasses.dataclass
+class OceanSaltContentBudgetConfig:
+    """Configuration for ocean salt content budget correction.
+
+    Assumes area weights normalized over the whole sphere.
+
+    Parameters:
+        method: Method to use when applying the salt budget correction
+            computed from the budget. "scaled_salinity". scales the predicted
+            salinity by a vertically and horizontally uniform factor.
+        budget_config: Budget for the expected change of the salt content
+            over a step. None holds the salt content fixed, up to the constant
+            term.
+        constant_unaccounted_salting: Ocean area-weighted global mean rate of column
+            salt content change added at every step, in psu m / s.
+        use_float64: Compute the global sums, budget and correction ratio in
+            float64 instead of the data's dtype.
+        weight_by_sea_surface_fraction: Weight the column salt content, and
+            the area the constant term applies over, by the sea surface
+            fraction.
+    """
+
+    method: Literal["scaled_salinity"]
+    budget_config: SaltBudgetConfig | None = None
+    constant_unaccounted_salting: float = 0.0
+    use_float64: bool = True
+    weight_by_sea_surface_fraction: bool = True
+
+    def __post_init__(self):
+        # validated here rather than in each budget config's __post_init__,
+        # since dacite discards errors raised while matching a union member
+        if self.budget_config is not None:
+            self.budget_config.validate(self.weight_by_sea_surface_fraction)
+
+
 @dataclasses.dataclass
 class SurfaceEnergyFluxCorrectionConfig:
     """Configuration for correcting the generated hfds using
@@ -137,6 +242,22 @@ class SurfaceEnergyFluxCorrectionConfig:
     """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+
+
+@dataclasses.dataclass
+class ZosGlobalMeanCorrectionConfig:
+    """Configuration for setting the global mean of generated sea surface
+    height (``zos``) to a reference value each step.
+
+    The global mean is weighted by cell area times ``sea_surface_fraction``
+    (taken from forcing data) over the ``zos`` mask, so fractional coastal
+    cells count by their ocean fraction.
+
+    Parameters:
+        reference_global_mean: Target global mean of ``zos`` in m.
+    """
+
+    reference_global_mean: float = 0.0
 
 
 @dataclasses.dataclass
@@ -241,6 +362,85 @@ class OceanHeatContentCorrection:
         return corrected, corrector_state
 
 
+@dataclasses.dataclass
+class OceanSaltContentCorrection:
+    """Correction that conserves ocean salt content."""
+
+    area_weighted_sum: AreaWeightedSum
+    vertical_coordinate: HasOceanDepthIntegral | None
+    timestep_seconds: float
+    method: Literal["scaled_salinity"]
+    budget: SaltBudget | None
+    unaccounted_salting: float
+    weight_by_sea_surface_fraction: bool
+    use_float64: bool
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the salinity at every depth level).
+        """
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "Ocean salt content correction is turned on, but no vertical "
+                "coordinate is available."
+            )
+        corrected = _force_conserve_ocean_salt_content(
+            input_data,
+            gen_data,
+            forcing_data,
+            self.area_weighted_sum,
+            self.vertical_coordinate,
+            self.timestep_seconds,
+            self.method,
+            self.budget,
+            self.unaccounted_salting,
+            self.weight_by_sea_surface_fraction,
+            self.use_float64,
+        )
+        return corrected, corrector_state
+
+
+@dataclasses.dataclass
+class ZosGlobalMeanCorrection:
+    """Correction that shifts ``zos`` uniformly so its
+    sea-surface-fraction-weighted global mean equals ``reference_global_mean``.
+
+    A no-op when ``zos`` is not in ``gen_data``.
+    """
+
+    area_weighted_mean: AreaWeightedMean
+    reference_global_mean: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only ``zos``, or is empty when
+            ``zos`` is absent from ``gen_data``.
+        """
+        if "zos" not in gen_data:
+            return {}, corrector_state
+        zos = gen_data["zos"]
+        s = OceanData(forcing_data).sea_surface_fraction
+        global_mean = self.area_weighted_mean(
+            s * zos, keepdim=True, name="zos"
+        ) / self.area_weighted_mean(s, keepdim=True, name="zos")
+        return {"zos": zos - global_mean + self.reference_global_mean}, corrector_state
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -256,19 +456,26 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             flux correction to the generated hfds.
         ocean_heat_content_correction: Optional configuration for an ocean heat
             content correction.
+        ocean_salt_content_correction: Optional configuration for an ocean salt
+            content correction.
         keep_gradient_through_clamps: If True, apply the corrector's hard clamps
             (the ``force_positive_names`` clamp and the
             ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
             estimator: the forward value is still clamped, but gradient flows as if
             the clamp had not happened, so out-of-range cells still get a learning
             signal.
+        zos_global_mean_correction: Optional configuration for setting the
+            sea-surface-fraction-weighted global mean of the generated ``zos``
+            to a reference value.
     """
 
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
+    zos_global_mean_correction: ZosGlobalMeanCorrectionConfig | None = None
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -306,10 +513,16 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
+        spatial_mask_provider: SpatialMaskProviderABC
+        try:
+            spatial_mask_provider = dataset_info.spatial_mask_provider
+        except MissingDatasetInfo:
+            spatial_mask_provider = NullSpatialMaskProvider
         return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
+            spatial_mask_provider=spatial_mask_provider,
         )
 
     def _build(
@@ -317,6 +530,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
     ) -> "OceanCorrector":
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
@@ -349,6 +563,31 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
                 )
             )
+        if self.ocean_salt_content_correction is not None:
+            salt_config = self.ocean_salt_content_correction
+            corrections.append(
+                OceanSaltContentCorrection(
+                    gridded_operations.area_weighted_sum,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    salt_config.method,
+                    (
+                        None
+                        if salt_config.budget_config is None
+                        else salt_config.budget_config.build(spatial_mask_provider)
+                    ),
+                    salt_config.constant_unaccounted_salting,
+                    salt_config.weight_by_sea_surface_fraction,
+                    salt_config.use_float64,
+                )
+            )
+        if self.zos_global_mean_correction is not None:
+            corrections.append(
+                ZosGlobalMeanCorrection(
+                    area_weighted_mean,
+                    self.zos_global_mean_correction.reference_global_mean,
+                )
+            )
         return OceanCorrector(corrections)
 
 
@@ -374,7 +613,6 @@ def _compute_ocean_net_surface_energy_flux(
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (
             atmos.precipitation_rate
-            + atmos.frozen_precipitation_rate
             - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
         )  # missing: + river runoff + calving
         * (sst - FREEZING_TEMPERATURE_KELVIN)
@@ -434,6 +672,16 @@ def _force_conserve_ocean_heat_content(
     method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
 ) -> TensorDict:
+    """Scale the generated temperature to conserve global ocean heat content.
+
+    The scaling closes
+
+        sum(a s H_corrected) = sum(a s H_in) + sum(a F) dt,
+
+    with a the cell area, s the sea surface fraction, H the column heat
+    content per unit ocean area and F the net energy flux into the ocean
+    (including unaccounted heating) per unit total cell area.
+    """
     if method != "scaled_temperature":
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
@@ -451,12 +699,12 @@ def _force_conserve_ocean_heat_content(
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
     global_gen_ocean_heat_content = area_weighted_mean(
-        gen.ocean_heat_content,
+        gen.ocean_heat_content * forcing.sea_surface_fraction,
         keepdim=True,
         name="ocean_heat_content",
     )
     global_input_ocean_heat_content = area_weighted_mean(
-        input.ocean_heat_content,
+        input.ocean_heat_content * forcing.sea_surface_fraction,
         keepdim=True,
         name="ocean_heat_content",
     )
@@ -498,4 +746,104 @@ def _force_conserve_ocean_heat_content(
         out["sst"] = (  # assuming sst in Kelvin
             gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
         ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    return out
+
+
+@dataclasses.dataclass
+class SeaSurfaceHeightSaltBudget:
+    """Salt budget from the change of the sea surface height,
+    -S_ref * sum((SSH_gen - SSH_input) * ssf * A).
+
+    Parameters:
+        reference_salinity_psu: Salinity at which the added water dilutes the
+            salt, in psu.
+    """
+
+    reference_salinity_psu: float
+
+    def __call__(
+        self,
+        input: OceanData,
+        gen: OceanData,
+        forcing: OceanData,
+        global_total: GlobalTotal,
+        timestep_seconds: float,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        try:
+            gen_height = gen.sea_surface_height.to(dtype)
+            input_height = input.sea_surface_height.to(dtype)
+        except KeyError as err:
+            raise ValueError(
+                "The sea surface height salt budget requires SSH (not zos) in the "
+                "input and generated data."
+            ) from err
+        # NaN over land
+        height_change = torch.nan_to_num(gen_height - input_height)  # m
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+        added_water_volume = global_total(height_change * sea_surface_fraction)  # m**3
+        return -self.reference_salinity_psu * added_water_volume
+
+
+def _force_conserve_ocean_salt_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    area_weighted_sum: AreaWeightedSum,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    method: Literal["scaled_salinity"],
+    budget: SaltBudget | None,
+    unaccounted_salting: float,
+    weight_by_sea_surface_fraction: bool,
+    use_float64: bool,
+) -> TensorDict:
+    if method != "scaled_salinity":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean salt content conservation"
+        )
+    input = OceanData(input_data, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
+    forcing = OceanData(forcing_data)
+    dtype = torch.float64 if use_float64 else gen.data["so_0"].dtype
+
+    def global_total(data: torch.Tensor) -> torch.Tensor:
+        # area weights are cell areas as a fraction of the sphere, so scaling
+        # the weighted sum by 4 pi R**2 gives the total over the ocean
+        weighted_sum = area_weighted_sum(data, keepdim=True, name="ocean_salt_content")
+        return weighted_sum * SPHERE_AREA_M2
+
+    if weight_by_sea_surface_fraction:
+        sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
+    else:
+        sea_surface_fraction = torch.ones(
+            (), dtype=dtype, device=gen.data["so_0"].device
+        )
+
+    def global_salt_content(data: OceanData) -> torch.Tensor:
+        column = vertical_coordinate.depth_integral(data.sea_water_salinity.to(dtype))
+        return global_total(column * sea_surface_fraction)  # psu m**3
+
+    global_gen_salt_content = global_salt_content(gen)
+    global_input_salt_content = global_salt_content(input)
+    ocean_area = global_total(
+        torch.ones_like(gen.data["so_0"], dtype=dtype) * sea_surface_fraction
+    )  # m**2
+    expected_change = unaccounted_salting * timestep_seconds * ocean_area
+    if budget is not None:
+        expected_change = expected_change + budget(
+            input, gen, forcing, global_total, timestep_seconds, dtype
+        )
+    salt_content_correction_ratio = (
+        global_input_salt_content + expected_change
+    ) / global_gen_salt_content
+    # apply same salinity correction to all vertical layers
+    out: TensorDict = {}
+    n_levels = gen.sea_water_salinity.shape[-1]
+    for k in range(n_levels):
+        name = f"so_{k}"
+        salinity = gen.data[name]
+        out[name] = (salinity.to(dtype) * salt_content_correction_ratio).to(
+            salinity.dtype
+        )
     return out

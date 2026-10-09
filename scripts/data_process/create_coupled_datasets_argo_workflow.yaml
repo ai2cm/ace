@@ -1,0 +1,157 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: create-coupled-datasets-
+spec:
+  entrypoint: create-coupled-datasets-and-upload-stats
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    # tar | gzip | base64 of every module in the transitive sibling-import
+    # closures of create_coupled_datasets.py and upload_coupled_stats.py,
+    # unpacked into each container; compressed because argo passes each
+    # resolved template to argoexec as one env string, capped by the kernel
+    # at MAX_ARG_STRLEN
+    - name: code_bundle
+    - name: config
+    # a config that reads the config's outputs (e.g. the 1pctCO2 coupled
+    # config's precomputed_sea_ice_mask names the piControl coupled ocean
+    # store); run_dependent is "true" exactly when one is passed
+    - name: dependent_config
+      value: ""
+    - name: run_dependent
+      value: "false"
+    - name: image
+      value: "us-central1-docker.pkg.dev/vcm-ml/full-model/coupled-processing:v2026.09.1"
+    # the upload step needs beaker-py, which the atmosphere image has and the
+    # coupled image does not; the upload closure imports nothing else it lacks
+    - name: upload_image
+      value: "us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0"
+    - name: debug
+      value: "false"  # default value, can be overridden
+    - name: subsample
+      value: "false"  # default value, can be overridden
+  templates:
+    # create -> upload, and create -> create-dependent -> upload-dependent: the
+    # dependent config starts only after the config's datasets are written
+    - name: create-coupled-datasets-and-upload-stats
+      dag:
+        tasks:
+        - name: create
+          template: create-coupled-datasets
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.config}}"
+        # debug and subsample runs write no stats to upload
+        - name: upload
+          depends: create
+          when: "{{workflow.parameters.debug}} == false && {{workflow.parameters.subsample}} == false"
+          template: upload-coupled-stats
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.config}}"
+        - name: create-dependent
+          depends: create
+          when: "{{workflow.parameters.run_dependent}} == true"
+          template: create-coupled-datasets
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.dependent_config}}"
+        - name: upload-dependent
+          depends: create-dependent
+          when: "{{workflow.parameters.run_dependent}} == true && {{workflow.parameters.debug}} == false && {{workflow.parameters.subsample}} == false"
+          template: upload-coupled-stats
+          arguments:
+            parameters:
+            - name: config
+              value: "{{workflow.parameters.dependent_config}}"
+    - name: create-coupled-datasets
+      inputs:
+        parameters:
+        - name: config
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      container:
+        image: "{{workflow.parameters.image}}"
+        resources:
+          limits:
+            cpu: "30000m"
+            memory: "230Gi"
+          requests:
+            cpu: "30000m"
+            memory: "230Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
+
+            cat << 'EOF' > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            flags=()
+            if [ "{{workflow.parameters.debug}}" = "true" ]; then
+              flags+=(--debug)
+            fi
+            if [ "{{workflow.parameters.subsample}}" = "true" ]; then
+              flags+=(--subsample)
+            fi
+
+            python -u create_coupled_datasets.py --yaml config.yaml "${flags[@]}"
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+    - name: upload-coupled-stats
+      inputs:
+        parameters:
+        - name: config
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: "{{workflow.parameters.upload_image}}"
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
+
+            cat << 'EOF' > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            python -u upload_coupled_stats.py config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+          - name: BEAKER_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: beaker-key-andrep
+                key: BEAKER_USER_KEY
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret

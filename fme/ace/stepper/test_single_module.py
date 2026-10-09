@@ -2999,6 +2999,7 @@ def _get_ocean_data_for_predict_paired(
     n_steps: int,
     in_names: list[str],
     out_names: list[str],
+    sea_surface_fraction: float,
     n_samples: int = 2,
     img_shape: tuple[int, int] = (5, 5),
 ) -> tuple[PrognosticState, BatchData]:
@@ -3008,6 +3009,8 @@ def _get_ocean_data_for_predict_paired(
         n_steps: Number of forward steps.
         in_names: Input variable names.
         out_names: Output variable names.
+        sea_surface_fraction: Value of sea_surface_fraction, or of
+            1 - land_fraction, everywhere.
         n_samples: Number of samples in batch.
         img_shape: Shape of spatial dimensions.
 
@@ -3055,12 +3058,16 @@ def _get_ocean_data_for_predict_paired(
             (n_samples, total_timesteps, *img_shape), 0.05, device=DEVICE
         )
     if "sea_surface_fraction" in data_dict:
-        data_dict["sea_surface_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["sea_surface_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            sea_surface_fraction,
+            device=DEVICE,
         )
     if "land_fraction" in data_dict:
-        data_dict["land_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["land_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            1 - sea_surface_fraction,
+            device=DEVICE,
         )
 
     time = xr.DataArray(
@@ -3081,24 +3088,27 @@ def _get_ocean_data_for_predict_paired(
 
 
 @pytest.mark.parametrize(
-    "in_names,out_names,hfds_role",
+    "in_names,out_names,hfds_role,sea_surface_fraction",
     [
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "hfgeou", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing_no_hfgeou",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "land_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.0,
             id="hfds_next_step_forcing_land_fraction",
         ),
         pytest.param(
@@ -3111,6 +3121,7 @@ def _get_ocean_data_for_predict_paired(
             ],
             ["thetao_0", "thetao_1", "hfds"],
             "diagnostic",
+            0.5,
             id="hfds_diagnostic",
         ),
     ],
@@ -3119,6 +3130,7 @@ def test_ocean_derived_variables_integration(
     in_names,
     out_names,
     hfds_role,
+    sea_surface_fraction,
 ):
     next_step_forcing_names = []
     if hfds_role == "next_step_forcing":
@@ -3134,6 +3146,7 @@ def test_ocean_derived_variables_integration(
         n_steps=n_steps,
         in_names=in_names,
         out_names=out_names,
+        sea_surface_fraction=sea_surface_fraction,
     )
     derived_data = data.compute_derived_variables(
         derive_func=stepper.derive_func, forcing_data=data
@@ -3189,13 +3202,17 @@ def test_ocean_derived_variables_integration(
     )
     # check imbalance for forward steps
     for i in range(n_steps):
-        expected_pred_imbalance = pred_tendency[:, i] - pred_flux[:, i]
+        expected_pred_imbalance = (
+            sea_surface_fraction * pred_tendency[:, i] - pred_flux[:, i]
+        )
         torch.testing.assert_close(
             pred_imbalance[:, i],
             expected_pred_imbalance,
             msg=f"Unexpected pred OHC imbalance at step {i + 1}",
         )
-        expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
+        expected_ref_imbalance = (
+            sea_surface_fraction * ref_tendency[:, i] - ref_flux[:, i]
+        )
         torch.testing.assert_close(
             ref_imbalance[:, i],
             expected_ref_imbalance,
