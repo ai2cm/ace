@@ -22,6 +22,7 @@ lives with each training experiment and just names the checkpoint.
 | `evaluator-config-1pct_yearly_4deg_ssh_brine_comp_open.yaml` | `run_1pct_yearly_4deg_ssh_brine_comp_open` | `2026-10-01-direct-ssh-no-sal-baseline` only; as `_ssh_brine_open`, with the sea ice salt flux computed from the predicted sea ice volume (S_ice 3.0 psu) wherever there is ice, in place of the predicted `sfdsi`; nothing from the forcing data |
 | `evaluator-config-1pct_yearly_4deg_ssh_brine_frc_open.yaml` | `run_1pct_yearly_4deg_ssh_brine_frc_open` | `2026-10-01-direct-ssh-no-sal-baseline` only; as `_ssh_brine_open`, with the target `sfdsi` in place of the predicted one |
 | `evaluator-config-1pct_yearly_1deg*.yaml` | `run_1pct_yearly_1deg*` | 1deg checkpoints trained with surface energy flux `prescribed` (`2026-10-05-ocean-wide-ssh`); twins of the plain 4deg config and of its ten `_open` salt-budget configs other than `_ssh_brine_comp_open`, named without `_open` (`_icevol_ssf_open` becomes `_icevol_ssf`, and so on), with the 1deg stores and the repeated corrector's surface energy flux `prescribed` |
+| `evaluator-config-1pct_yearly_1deg_nosalt.yaml` | `run_1pct_yearly_1deg_nosalt` | the 1deg checkpoints trained with surface energy flux `prescribed`, in particular those fine-tuned with a salt correction; repeats their corrector without any salt correction, so the salt correction is off at inference |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
 (`2026-07-15-om4-1pctco2-1deg-coupled-ocean`,
