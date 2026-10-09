@@ -20,8 +20,9 @@ Usage:
   python build_masked_snow_channels.py era5 [--dev]
   python build_masked_snow_channels.py cm4  [--dev]
 
-Writes ./store-out/<parent-name>-land-snow-masked.zarr, resuming a partial
-store if present. run_data_pipeline.sh uploads it next to the parent.
+Writes <masked_snow.WORK_DIR>/store-out/<parent-name>-land-snow-masked.zarr,
+resuming a partial store if present. The pipeline scripts upload it next to the
+parent and then delete it.
 """
 
 import argparse
@@ -34,6 +35,7 @@ from masked_snow import (
     PARENTS,
     SCF,
     SHARD_STEPS,
+    STORE_DIR,
     SWE,
     land_fraction,
     land_snow_fields,
@@ -51,8 +53,7 @@ def main():
 
     mask = load_mask()
     valid = mask > 0.5
-    here = os.path.dirname(os.path.abspath(__file__))
-    out = os.path.join(here, "store-out", f"{parent.output_name}.zarr")
+    out = os.path.join(STORE_DIR, f"{parent.output_name}.zarr")
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ds = open_parent(parent)

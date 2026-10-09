@@ -38,6 +38,11 @@ MASKED = {SWE: f"{SWE}_masked", SCF: f"{SCF}_masked"}
 OUTPUT_SUFFIX = "land-snow-masked"
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASK_FILE = os.path.join(HERE, "snow_mask.nc")
+WORK_DIR = os.environ.get(
+    "SNOW_MASKED_WORK_DIR", os.path.expanduser("~/.cache/snow-masked-channels")
+)
+STORE_DIR = os.path.join(WORK_DIR, "store-out")
+STATS_DIR = os.path.join(WORK_DIR, "stats-out")
 SHARD_STEPS = 360
 STATS_FILENAMES = (
     "centering.nc",

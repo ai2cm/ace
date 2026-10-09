@@ -41,7 +41,7 @@ and the stats script.
 | file | role |
 |---|---|
 | `masked_snow.py` | parent definitions (`era5`, `cm4`, `cm4-1pctco2`, `cm4-picontrol-2026`, the nine `cm4-randco2-*` members), the scenario-training `SOURCE_SETS`, mask loading, the shared transform |
-| `build_masked_snow_channels.py` | writes `store-out/<parent>-land-snow-masked.zarr` (4 variables, parent time coordinate, chunk 1 / shard 360) |
+| `build_masked_snow_channels.py` | writes `$SNOW_MASKED_WORK_DIR/store-out/<parent>-land-snow-masked.zarr` (default `~/.cache/snow-masked-channels`) (4 variables, parent time coordinate, chunk 1 / shard 360) |
 | `fit_masked_snow_stats.py` | copies the parent's (or pooled) stats files and adds `_masked` entries (mean, std, one-day residual std over valid cells) and valid-domain time-mean maps; `--pool <source set>` fits over several parents with running moments |
 | `pool_daily_stats.py` | pools the per-store daily stats of a source set with `combine_stats.combine_stats` (the control arms' stats and the base of the treatment arms') |
 | `run_data_pipeline.sh` | both original stores, both stats, GCS uploads, Beaker stats datasets |

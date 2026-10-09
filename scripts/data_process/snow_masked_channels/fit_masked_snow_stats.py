@@ -24,9 +24,9 @@ fits over the parents of a source set from ``masked_snow.SOURCE_SETS`` and
 copies the pooled per-store stats given by ``--parent-stats`` (the
 ``combined/`` directory written by ``pool_daily_stats.py``).
 
-Writes ./stats-out/<parent-name>-land-snow-masked-stats/ (single parent) or
-./stats-out/cm4-<source-set>-daily-land-snow-masked-stats/ (pooled) for
-``beaker dataset create``.
+Writes <masked_snow.WORK_DIR>/stats-out/<parent-name>-land-snow-masked-stats/
+(single parent) or .../stats-out/cm4-<source-set>-daily-land-snow-masked-stats/
+(pooled) for ``beaker dataset create``.
 """
 
 import argparse
@@ -42,6 +42,7 @@ from masked_snow import (
     PARENTS,
     SCF,
     SOURCE_SETS,
+    STATS_DIR,
     STATS_FILENAMES,
     SWE,
     Parent,
@@ -204,17 +205,14 @@ def main():
     if args.pool is not None and args.parent_stats is None:
         parser.error("--pool needs --parent-stats")
 
-    here = os.path.dirname(os.path.abspath(__file__))
     if args.pool is None:
         parents = [PARENTS[args.dataset]]
         source = parents[0].stats_url
-        out = os.path.join(here, "stats-out", f"{parents[0].output_name}-stats")
+        out = os.path.join(STATS_DIR, f"{parents[0].output_name}-stats")
     else:
         parents = [PARENTS[key] for key in SOURCE_SETS[args.pool]]
         source = args.parent_stats
-        out = os.path.join(
-            here, "stats-out", f"cm4-{args.pool}-daily-land-snow-masked-stats"
-        )
+        out = os.path.join(STATS_DIR, f"cm4-{args.pool}-daily-land-snow-masked-stats")
     entries, time_means = fit(parents, args.dev)
     print({k: {s: round(x, 4) for s, x in e.items()} for k, e in entries.items()})
     _patch_stats(source, out, entries, time_means)

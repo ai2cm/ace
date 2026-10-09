@@ -16,7 +16,8 @@
 #
 # A store that is already complete is skipped by the builder and re-synced as a
 # no-op. Designed to run detached so it survives the interactive session:
-#   nohup caffeinate -i bash run_scenario_pipeline.sh > <log> 2>&1 &
+#   nohup caffeinate -i bash run_scenario_pipeline.sh > ~/.cache/<log> 2>&1 &
+# Outputs are built under $WORK, outside the repository, and deleted once uploaded.
 # Weka copies (scripts/data_process/gcs_to_weka.sh) and training launches are
 # done interactively after checking the outputs.
 
@@ -24,6 +25,7 @@ set -eo pipefail
 cd "$(dirname "$0")"
 PY=${PY:-python}
 STAGE=${1:-all}
+WORK=${SNOW_MASKED_WORK_DIR:-$HOME/.cache/snow-masked-channels}
 # The training configs mount these stats datasets by name, so the date is fixed.
 DATE=${DATE:-2026-10-07}
 SUFFIX=land-snow-masked
@@ -53,15 +55,16 @@ if [[ "$STAGE" != stats ]]; then
   done
 
   echo "=== $(date) uploading stores to GCS ==="
-  gsutil -m rsync -r "store-out/${PIC}-${SUFFIX}.zarr" \
+  gsutil -m rsync -r "$WORK/store-out/${PIC}-${SUFFIX}.zarr" \
     "${BUCKET}/${PIC}/${PIC}-${SUFFIX}.zarr"
   for level in 1xCO2 2xCO2 4xCO2; do
     for ic in 0001 0002 0003; do
       member="random-CO2-${level}-ic_${ic}"
-      gsutil -m rsync -r "store-out/${member}-${SUFFIX}.zarr" \
+      gsutil -m rsync -r "$WORK/store-out/${member}-${SUFFIX}.zarr" \
         "${RANDCO2_DIR}/${member}-${SUFFIX}.zarr"
     done
   done
+  rm -rf "$WORK/store-out/${PIC}-${SUFFIX}.zarr" "$WORK"/store-out/random-CO2-*-"${SUFFIX}".zarr
 fi
 
 dataset_exists() {
@@ -81,8 +84,8 @@ if [[ "$STAGE" != stores ]]; then
     pooled=$($PY pool_daily_stats.py "$set" --date "$DATE" | tail -1)
     echo "=== $(date) masked-snow stats $set from $pooled ==="
     $PY fit_masked_snow_stats.py --pool "$set" --parent-stats "$pooled"
-    control="stats-out/cm4-${set}-daily-stats"
-    treatment="stats-out/cm4-${set}-daily-${SUFFIX}-stats"
+    control="$WORK/stats-out/cm4-${set}-daily-stats"
+    treatment="$WORK/stats-out/cm4-${set}-daily-${SUFFIX}-stats"
     mkdir -p "$control"
     gsutil -m -q cp "${pooled}/*.nc" "$control/"
     for dir in "$control" "$treatment"; do
@@ -98,6 +101,7 @@ if [[ "$STAGE" != stores ]]; then
       --name "${DATE}-cm4-${set}-daily-${SUFFIX}-stats" \
       --workspace ai2/ace \
       --desc "CM4 daily stats pooled over the ${set} scenario-training windows plus masked snow entries under the _masked names (treatment arms), plus per-scenario time means"
+    rm -rf "$control" "$treatment"
   done
 fi
 
