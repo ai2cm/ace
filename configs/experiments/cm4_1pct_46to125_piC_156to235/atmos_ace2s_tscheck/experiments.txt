@@ -1,0 +1,12 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# ACE2S rs0 (wandb j0ng1tw3, training beaker 01M0GP9GNE4ZMZ5SDN3A2AK24R,
+# best_inference_ckpt in result dataset 01M0VTG1SJQK69WWN5A651RXZY), the
+# atmosphere the coupled SamudrACE runs freeze. Two standalone piC evals that
+# differ only in which store supplies surface_temperature.
+#
+# job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235 atmos_ace2s_tscheck
+# with WANDB_USERNAME=elynnwu.
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0-tscheck-seaice|01M0GP9GNE4ZMZ5SDN3A2AK24R|run_piC-8ic-5yr-seaice|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0-tscheck-cplatm|01M0GP9GNE4ZMZ5SDN3A2AK24R|run_piC-8ic-5yr-cplatm|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan|||64GiB

@@ -1,0 +1,49 @@
+# Surface-temperature training-target check, treatment arm. Identical to
+# evaluator-config-piC-8ic-5yr-seaice.yaml except coupled-atmosphere.zarr comes
+# first in the merge: its surface_temperature carries the ocean SST in the
+# ocean-weighted part, as coupling supplies. Fractions are identical between
+# the two stores; ocean_sea_ice_fraction (absent here) is not an atmosphere input.
+experiment_dir: /results
+n_forward_steps: 7300
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '0151-01-06T00:00:00'
+      - '0161-01-01T00:00:00'
+      - '0171-01-01T00:00:00'
+      - '0181-01-01T00:00:00'
+      - '0191-01-01T00:00:00'
+      - '0201-01-01T00:00:00'
+      - '0211-01-01T00:00:00'
+      - '0221-01-01T00:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  zonal_mean:
+    enabled: false
+  power_spectrum:
+     enabled: false
+  enso_coefficient:
+    enabled: false
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
