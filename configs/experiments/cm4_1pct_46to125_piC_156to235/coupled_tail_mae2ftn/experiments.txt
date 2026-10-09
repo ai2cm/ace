@@ -11,4 +11,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-mae2ftn_a2s-fto|o2a0rs0|01M3Q
 # Rerun of the piC eval with ace#1525's regional monthly-SST writers (the shared
 # piC config above has none), so the Gulf Stream / regional boxes can be scored.
 # The -regional config is exper/2026-07-16-jamesd@3d6ad114d's piC config verbatim.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-mae2ftn_a2s-fto|o2a0rs0|01M3QPNN7V7G46WW44BYX3HNZW|run_piC-ic0151-200yr-regional|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_tail-mae2ftn_a2s-fto|o2a0rs0|01M3QPNN7V7G46WW44BYX3HNZW|ran_piC-ic0151-200yr-regional|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
