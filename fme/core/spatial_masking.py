@@ -53,12 +53,17 @@ class StaticSpatialMaskingConfig:
             fill values.
         exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
             to exclude when applying the mask.
+        fill_values: Optional per-variable fill values (physical units) that
+            override ``fill_value`` for the named variables only, e.g.
+            ``{"sst": 273.15}`` so a kelvin field is filled where a Celsius field
+            would be filled with 0.0. Variables not listed use ``fill_value``.
 
     """
 
     mask_value: int
     fill_value: Literal["mean"] | float = 0.0
     exclude_names_and_prefixes: list[str] | None = None
+    fill_values: dict[str, float] | None = None
 
     def __post_init__(self):
         if self.mask_value not in [0, 1]:
@@ -72,23 +77,25 @@ class StaticSpatialMaskingConfig:
 
         """
         exclude = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
+        overrides = {
+            name: torch.as_tensor(float(value))
+            for name, value in (self.fill_values or {}).items()
+        }
         if isinstance(self.fill_value, float):
-            return StaticSpatialMasking(
-                mask_value=self.mask_value,
-                fill_value=collections.defaultdict(
-                    lambda: torch.as_tensor(self.fill_value)
-                ),
-                mask=mask,
-                exclude=exclude,
+            default = self.fill_value
+            fill_mapping: TensorMapping = collections.defaultdict(
+                lambda: torch.as_tensor(default), overrides
             )
-        if means is None:
-            raise ValueError(
-                "fill_values mapping required by build unless configured "
-                "fill_value is a float."
-            )
+        else:
+            if means is None:
+                raise ValueError(
+                    "fill_values mapping required by build unless configured "
+                    "fill_value is a float."
+                )
+            fill_mapping = {**means, **overrides}
         return StaticSpatialMasking(
             mask_value=self.mask_value,
-            fill_value=means,
+            fill_value=fill_mapping,
             mask=mask,
             exclude=exclude,
         )

@@ -239,3 +239,31 @@ def test_static_masking_mask_ignored_name():
     assert masked["masked"][1, 1].isnan()
     # no change to "mask_ignored" because _Mask gives it special treatment
     torch.testing.assert_close(masked["mask_ignored"], data["mask_ignored"])
+
+
+def test_masking_per_variable_fill_values_override_the_default():
+    mask_2d = torch.tensor([[1.0, 0.0]])  # second cell masked (mask_value 0)
+    config = StaticSpatialMaskingConfig(
+        mask_value=0, fill_value=0.0, fill_values={"sst": 273.15}
+    )
+    masker = config.build(_Mask(mask_2d=mask_2d))
+    data = {"sst": torch.tensor([[290.0, 291.0]]), "so_0": torch.tensor([[35.0, 36.0]])}
+    out = masker(data)
+    torch.testing.assert_close(out["sst"], torch.tensor([[290.0, 273.15]]))
+    torch.testing.assert_close(out["so_0"], torch.tensor([[35.0, 0.0]]))
+
+
+def test_masking_per_variable_fill_values_override_the_means():
+    mask_2d = torch.tensor([[1.0, 0.0]])
+    config = StaticSpatialMaskingConfig(
+        mask_value=0, fill_value="mean", fill_values={"sst": 273.15}
+    )
+    masker = config.build(
+        _Mask(mask_2d=mask_2d),
+        means={"sst": torch.tensor(287.0), "so_0": torch.tensor(34.0)},
+    )
+    out = masker(
+        {"sst": torch.tensor([[290.0, 291.0]]), "so_0": torch.tensor([[35.0, 36.0]])}
+    )
+    torch.testing.assert_close(out["sst"], torch.tensor([[290.0, 273.15]]))
+    torch.testing.assert_close(out["so_0"], torch.tensor([[35.0, 34.0]]))
