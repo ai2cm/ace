@@ -1,0 +1,29 @@
+# Full-record ocean-only rollout of the July 2026 1deg UFS baseline (ufs-5d-samudra-fted-from-cm4-1pct-new-dataset,
+# wandb inko9d1z, results 01KX6MCJ53X0VCK5T880P6TEG1) on the store it was trained on (2026-06-29 1deg 5-day, old
+# pipeline time labels at 09Z), matched to evaluator-config-ufs4deg-30yr-1994.yaml: 2170 five-day steps from the first
+# sample, monthly surface, upper-ocean and sea-ice fields. Touches the 2002-2011 holdout (that run trained on it anyway).
+experiment_dir: /results
+n_forward_steps: 2170
+forward_steps_in_memory: 35
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '1994-01-03T09:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names: [sst, thetao_0, thetao_5, thetao_10, ocean_sea_ice_fraction, hfds_total_area]
+aggregator:
+  log_histograms: false
