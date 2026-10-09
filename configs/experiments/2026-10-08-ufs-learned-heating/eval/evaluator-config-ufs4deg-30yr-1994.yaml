@@ -1,0 +1,28 @@
+# Full-record ocean-only rollout of a UFS 4deg checkpoint: 1994-01-05T18 to 2023-09, 2170 five-day steps, through the
+# training years (1994-2001, 2012-2021), the untouched 2002-2011 decade and the 2022-2023 validation years, with monthly
+# surface, upper-ocean, sea-ice and learned-heating fields written. Touches the 2002-2011 holdout: drift/behaviour only, not skill.
+experiment_dir: /results
+n_forward_steps: 2170
+forward_steps_in_memory: 35  # divides 2170
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '1994-01-05T18:00:00'
+  dataset:
+    data_path: /ufs4deg
+    file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names: [sst, thetao_0, thetao_5, thetao_10, ocean_sea_ice_fraction, hfds_total_area, unaccounted_heating]
+aggregator:
+  log_histograms: false

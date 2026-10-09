@@ -1,5 +1,6 @@
 #!/bin/bash
-# 10-yr ocean-only rollouts (2012 and 2013 starts) of a UFS 4deg checkpoint with monthly outputs.
+# Ocean-only rollouts of a UFS 4deg checkpoint with monthly outputs: 10-yr from 2012/2013 (default) or the
+# full record from 1994 (CFG=evaluator-config-ufs4deg-30yr-1994.yaml TAG=30yr-1994).
 #   CKPT_DS=<results dataset> NAME=resid-cap0005-learnedheat [DATA_DS=<training dataset>] ./launch-ufs4deg-eval-10yr.sh
 set -euo pipefail
 CKPT_DS="${CKPT_DS:?results dataset holding training_checkpoints/best_inference_ckpt.tar}"
@@ -7,13 +8,14 @@ CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 NAME="${NAME:?arm name}"
 DATA_DS="${DATA_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # …-cm4vars-uh (has unaccounted_heating for scoring; a superset of the clean store)
 PRIORITY="${PRIORITY:-high}"
-CFG=evaluator-config-ufs4deg-10yr-2012-2013.yaml
+CFG="${CFG:-evaluator-config-ufs4deg-10yr-2012-2013.yaml}"
+TAG="${TAG:-10yr-2012-2013}"
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
-JOB="samudra-ufs4deg-${NAME}-eval-10yr-2012-2013"
+JOB="samudra-ufs4deg-${NAME}-eval-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "UFS 4deg ${NAME}: 10-yr ocean-only rollouts from 2012 and 2013 with monthly outputs" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
