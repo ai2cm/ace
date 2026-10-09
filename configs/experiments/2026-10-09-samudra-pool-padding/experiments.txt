@@ -1,0 +1,10 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# uncoupled_finetune.sh appends one "training" row per fine-tune arm of
+# finetuning.txt. To evaluate an arm once it has finished, set its status to
+# run_piC-ic0151-5yr (evaluator-config-piC-ic0151-5yr.yaml) and leave
+# results_dataset blank, so evaluate.sh mounts the fine-tune's own result.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_poolpad_B_pole|rs0|01M4HES0TCKVG1P61XJCS64XZ5|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_poolpad_C_pole_pool|rs0|01M4HESA10P91P2W2ES15BEWPT|training|best_inference_ckpt|normal|--min-runtime 8h

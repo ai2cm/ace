@@ -50,11 +50,35 @@ class Samudra(torch.nn.Module):
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
     lat_pad : {"constant", "pole"}, optional
-        Latitude padding used wherever the network pads latitude (see
-        ``pad_latitude``), except that the upsampler ignores it when
-        ``zonally_periodic_upsample`` is False and, under "constant", the
-        periodic upsampler does not pad latitude. By default "constant", the
-        original behavior. Adds no parameters, so checkpoints load across modes.
+        Padding of the latitude axis (see ``pad_latitude``). What each mode
+        puts beyond the latitude edges at each site:
+
+        ======================================  ========  ========
+        site                                    constant  pole
+        ======================================  ========  ========
+        block and final convolutions            zeros     antipode
+        decoder refill (``pad_pool`` off)       zeros     antipode
+        row before an odd pool (``pad_pool``)   zeros     antipode
+        upsampler, zonally periodic             edge row  antipode
+        upsampler, default                      edge row  raises
+        ======================================  ========  ========
+
+        The upsampler replicates the edge under "constant" because it always
+        has. "pole" is exact for scalar fields only and requires
+        ``zonally_periodic_upsample``; a pad longer than a level's height (the
+        4 degree bottleneck's 3 rows under a dilation of 4) continues past the
+        far pole. By default "constant", the original behavior. Adds no
+        parameters, so checkpoints load across modes.
+    pad_pool : bool, optional
+        If True, each pool pads an odd height or width by one row (with
+        ``lat_pad``) or column (with ``pad``) at the end of the axis instead
+        of dropping the last one (see ``AvgPool``), and the decoder crops that
+        row or column off the upsample instead of refilling a dropped one. No
+        row or column is then lost (180x360 reaches a 12x23 bottleneck rather
+        than 11x22), every block runs on its level's unpadded grid, and the
+        original cells keep the floor pooling's windows, so a checkpoint
+        trained without it fine-tunes with it on. By default False. Adds no
+        parameters.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -98,6 +122,7 @@ class Samudra(torch.nn.Module):
         context_config: ContextConfig | None = None,
         conditioned_blocks: ConditionedBlocks | None = None,
         lat_pad: LatPad = "constant",
+        pad_pool: bool = False,
     ):
         super().__init__()
 
@@ -117,7 +142,14 @@ class Samudra(torch.nn.Module):
         self.zonally_periodic_upsample = zonally_periodic_upsample
         if lat_pad not in get_args(LatPad):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
+        if lat_pad == "pole" and not zonally_periodic_upsample:
+            raise ValueError(
+                "lat_pad 'pole' requires zonally_periodic_upsample: the default "
+                "upsampler always replicates the latitude edge, so the pole rule "
+                "would reach every site but the upsampler"
+            )
         self.lat_pad = lat_pad
+        self.pad_pool = pad_pool
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
@@ -180,7 +212,9 @@ class Samudra(torch.nn.Module):
                     lat_pad=self.lat_pad,
                 )
             )
-            layers.append(AvgPool())
+            layers.append(
+                AvgPool(pad_pool=self.pad_pool, pad=self.pad, lat_pad=self.lat_pad)
+            )
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -272,16 +306,19 @@ class Samudra(torch.nn.Module):
                 if isinstance(
                     layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
                 ):
+                    skip = temp[int(2 * self.num_steps - count - 1)]
+                    # fit the upsample to its skip: after a padded pool it is a
+                    # row or column long, cropped off the end here; after a
+                    # floor pool it is a row or column short, refilled below
+                    fts = fts[..., : skip.shape[-2], : skip.shape[-1]]
                     crop = np.array(fts.shape[2:])
-                    shape = np.array(
-                        temp[int(2 * self.num_steps - count - 1)].shape[2:]
-                    )
+                    shape = np.array(skip.shape[2:])
                     pads = shape - crop
                     pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
                     fts = pad_latitude(
                         fts, pads[0] // 2, pads[0] - pads[0] // 2, self.lat_pad
                     )
                     fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
-                    fts += temp[int(2 * self.num_steps - count - 1)]
+                    fts += skip
                     count += 1
         return fts

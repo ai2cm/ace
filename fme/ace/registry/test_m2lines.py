@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from fme.ace.models.ocean.m2lines.layers import ConvNeXtBlock, MultiResolutionFiLM
+from fme.ace.models.ocean.m2lines.layers import (
+    AvgPool,
+    ConvNeXtBlock,
+    MultiResolutionFiLM,
+)
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.m2lines import SamudraBuilder
 from fme.ace.registry.registry import ModuleSelector
@@ -49,6 +53,37 @@ def test_samudra_builder_lat_pad_options():
     )
     output = model(torch.randn(2, 5, *img_shape))
     assert output.shape == (2, 3, *img_shape)
+
+
+def test_samudra_builder_pad_pool():
+    selector = ModuleSelector(
+        type="Samudra",
+        config={
+            "ch_width": [4, 4],
+            "dilation": [1, 2],
+            "n_layers": [1, 1],
+            "zonally_periodic_upsample": True,
+            "lat_pad": "pole",
+            "pad_pool": True,
+        },
+    )
+    img_shape = (18, 30)
+    module = selector.build(5, 3, DatasetInfo(img_shape=img_shape))
+    model = module.torch_module
+    assert isinstance(model, Samudra)
+    assert model.pad_pool
+    assert all(
+        pool.pad_pool and pool.lat_pad == "pole"
+        for pool in model.layers
+        if isinstance(pool, AvgPool)
+    )
+    output = model(torch.randn(2, 5, *img_shape))
+    assert output.shape == (2, 3, *img_shape)
+
+
+def test_samudra_builder_rejects_pole_lat_pad_with_the_default_upsampler():
+    with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
+        SamudraBuilder(lat_pad="pole")
 
 
 @pytest.mark.parametrize("conditioned_blocks", ["bottleneck", "all_blocks"])
