@@ -55,6 +55,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthSchedule,
 )
 from fme.ace.testing import DimSizes, get_batch_data, save_stepper_checkpoint
+from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core import AtmosphereData
 from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
@@ -83,8 +84,13 @@ from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.validation import run_validation_loop
+from fme.core.labels import BatchLabels
 from fme.core.loss import StepLossConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    GroupedNormalizationConfig,
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
     CheckpointConfig,
@@ -106,6 +112,7 @@ from fme.core.testing import (
     get_dataset_info,
     trivial_network_and_loss_normalization,
     trivial_normalization,
+    uniform_grouped_normalization,
 )
 from fme.core.testing.ema import assert_parameters_equal
 from fme.core.testing.regression import validate_tensor_dict
@@ -1619,6 +1626,7 @@ def get_data_for_predict(
     n_steps,
     forcing_names: list[str],
     n_ensemble: int = 1,
+    labels: BatchLabels | None = None,
 ) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
     index = xr.date_range("2000", freq="6h", periods=n_steps + 1, use_cftime=True)
@@ -1629,7 +1637,7 @@ def get_data_for_predict(
         BatchData.new_on_device(
             data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
             time=input_time,
-            labels=None,
+            labels=labels,
         )
         .broadcast_ensemble(n_ensemble)
         .get_start(
@@ -1643,7 +1651,7 @@ def get_data_for_predict(
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
         time=forcing_time,
-        labels=None,
+        labels=labels,
     ).broadcast_ensemble(n_ensemble)
     return input_data, forcing_data
 
@@ -1668,6 +1676,55 @@ def test_predict():
         new_input_state.data[variable][:, 0], output.data[variable][:, -1]
     )
     assert new_input_state.time.equals(output.time[:, -1:])
+
+
+def test_reloaded_grouped_stepper_keeps_per_group_constants(tmp_path: pathlib.Path):
+    """A checkpoint carries its per-group constants, not paths to them.
+
+    The group constants are read from netCDF files which are deleted before
+    the checkpoint is reloaded, as when a checkpoint is moved off the machine
+    that trained it. The add-one network advances each sample by its own
+    group's std, so a reload which lost the group constants (or fell back to
+    the pooled ones) would step both samples by the pooled std instead.
+    """
+    group_stds = {"c96": 2.0, "era5": 5.0}
+    groups = {}
+    for group in ["c96", "era5"]:
+        means_path = tmp_path / f"{group}_means.nc"
+        stds_path = tmp_path / f"{group}_stds.nc"
+        get_scalar_dataset(["a"], fill_value=0.0).to_netcdf(means_path)
+        get_scalar_dataset(["a"], fill_value=group_stds[group]).to_netcdf(stds_path)
+        groups[group] = NormalizationConfig(
+            global_means_path=str(means_path), global_stds_path=str(stds_path)
+        )
+    config = _get_stepper_config(["a"], ["a"])
+    step_config = config.step.config
+    step_config["normalization"]["grouped"] = dataclasses.asdict(
+        GroupedNormalizationConfig(groups=groups, default_label="c96")
+    )
+    stepper = dataclasses.replace(
+        config, step=StepSelector(type="single_module", config=step_config)
+    ).get_stepper(get_dataset_info(all_labels={"c96", "era5"}))
+    state = stepper.get_state()
+    for path in tmp_path.glob("*.nc"):
+        path.unlink()
+    reloaded = Stepper.from_state(state)
+
+    # Samples 0 and 2 are c96, sample 1 is era5.
+    labels = BatchLabels(
+        tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]]).to(DEVICE),
+        names=["c96", "era5"],
+    )
+    input_data, forcing_data = get_data_for_predict(
+        n_steps=1, forcing_names=[], labels=labels
+    )
+    forcing_data.data = {}
+    output, _ = reloaded.predict(input_data, forcing_data)
+    expected_step = torch.tensor([2.0, 5.0, 2.0], device=DEVICE)
+    torch.testing.assert_close(
+        output.data["a"][:, 0] - input_data.as_batch_data().data["a"][:, 0],
+        expected_step.reshape(-1, 1, 1).expand(-1, 5, 5),
+    )
 
 
 class _RecordingCorrector(CorrectorABC):
@@ -2769,6 +2826,107 @@ def _get_stepper_with_input_masking(
     return config.get_stepper(
         get_dataset_info(spatial_mask_provider=spatial_mask_provider)
     )
+
+
+def _get_grouped_stepper_config() -> StepperConfig:
+    """Add-one stepper config for "a" under grouped normalization with groups
+    c96 (mean 10, std 2) and era5 (mean 20, std 4) and pooled
+    constants (mean 0, std 1).
+    """
+    config = _get_stepper_config(["a"], ["a"])
+    step_config = config.step.config
+    step_config["normalization"]["grouped"] = dataclasses.asdict(
+        uniform_grouped_normalization(
+            ["a"],
+            groups={"c96": (10.0, 2.0), "era5": (20.0, 4.0)},
+            default_label="c96",
+        )
+    )
+    return dataclasses.replace(
+        config, step=StepSelector(type="single_module", config=step_config)
+    )
+
+
+def _get_grouped_stepper_with_mean_input_masking() -> Stepper:
+    """Grouped stepper whose input masking fills cell (0, 0) with "mean"."""
+    mask = torch.ones(5, 5, device=DEVICE)
+    mask[0, 0] = 0.0
+    return dataclasses.replace(
+        _get_grouped_stepper_config(),
+        input_masking=StaticSpatialMaskingConfig(mask_value=0, fill_value="mean"),
+    ).get_stepper(
+        get_dataset_info(
+            spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+            all_labels={"c96", "era5"},
+        )
+    )
+
+
+def test_grouped_normalization_trains_with_ensemble_members():
+    """Per-sample group constants line up with the ensemble-broadcast batch.
+
+    Training repeats each sample once per ensemble member, so each member
+    must be normalized with its sample's group constants. The add-one
+    network advances each sample by its group's std: 2 for the c96 sample,
+    4 for the era5 one, in every ensemble member.
+    """
+    n_ensemble = 3
+    stepper = _get_train_stepper(
+        _get_grouped_stepper_config(),
+        dataset_info=get_dataset_info(all_labels={"c96", "era5"}),
+        n_ensemble=n_ensemble,
+        loss=StepLossConfig(type="MSE"),
+    )
+    data = get_batch_data(["a"], n_samples=2, n_time=2)
+    data = BatchData.new_on_device(
+        data=data.data,
+        time=data.time,
+        labels=BatchLabels(
+            tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]), names=["c96", "era5"]
+        ),
+    )
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    # gen_data starts with the initial condition.
+    step = stepped.gen_data["a"][:, :, 1] - stepped.gen_data["a"][:, :, 0]
+    expected = torch.tensor([2.0, 4.0], device=DEVICE).reshape(2, 1, 1, 1)
+    torch.testing.assert_close(step, expected.expand(2, n_ensemble, 5, 5))
+
+
+@pytest.mark.parametrize(
+    "labels, expected_fill",
+    [
+        pytest.param(
+            BatchLabels(
+                tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]).to(DEVICE),
+                names=["c96", "era5"],
+            ),
+            [10.0, 20.0],
+            id="labeled",
+        ),
+        pytest.param(None, [10.0, 10.0], id="unlabeled_uses_default_label"),
+    ],
+)
+def test_grouped_mean_input_masking_fills_with_group_means(
+    labels: BatchLabels | None, expected_fill: list[float]
+):
+    """A "mean" input fill uses each sample's group mean under grouped
+    normalization, so masked cells still normalize to zero. The pooled mean
+    (0) would normalize to -5 in both the c96 and era5 samples.
+    """
+    stepper = _get_grouped_stepper_with_mean_input_masking()
+    step_obj = stepper._step_obj
+    data = {"a": torch.full((2, 5, 5), 3.0, device=DEVICE)}
+    with patch.object(step_obj, "step", wraps=step_obj.step) as step:
+        stepper.step(StepArgs(input=data, next_step_input_data=data, labels=labels))
+    args = step.call_args.kwargs["args"]
+    expected = torch.tensor(expected_fill, device=DEVICE)
+    for masked in (args.input, args.next_step_input_data):
+        torch.testing.assert_close(masked["a"][:, 0, 0], expected)
+        torch.testing.assert_close(
+            masked["a"][:, 1, 1], torch.full((2,), 3.0).to(DEVICE)
+        )
+        normalized = step_obj.network_normalizer(labels).normalize(masked)
+        torch.testing.assert_close(normalized["a"][:, 0, 0], torch.zeros(2).to(DEVICE))
 
 
 def test_get_stepper_with_input_masking():

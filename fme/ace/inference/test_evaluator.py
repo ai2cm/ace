@@ -56,7 +56,11 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device, using_gpu
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    GroupedNormalizationConfig,
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+)
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
@@ -65,6 +69,7 @@ from fme.core.testing import (
     get_dataset_info,
     mock_wandb,
     trivial_network_and_loss_normalization,
+    uniform_grouped_normalization,
 )
 from fme.core.testing.ema import (
     ScaledIdentity,
@@ -96,6 +101,7 @@ def save_plus_one_stepper(
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
     corrector: AtmosphereCorrectorConfig | None = None,
+    grouped_normalization: GroupedNormalizationConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -140,6 +146,7 @@ def save_plus_one_stepper(
                                             means={name: mean for name in all_names},
                                             stds={name: std for name in all_names},
                                         ),
+                                        grouped=grouped_normalization,
                                     ),
                                     ocean=ocean,
                                     corrector=corrector,
@@ -170,6 +177,11 @@ def save_plus_one_stepper(
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
             variable_metadata=variable_metadata,
+            all_labels=(
+                set(grouped_normalization.groups)
+                if grouped_normalization is not None
+                else None
+            ),
         )
         stepper = config.get_stepper(
             dataset_info=dataset_info,
@@ -1389,6 +1401,81 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         assert fs.isdir(os.path.join(experiment_dir, directory))
 
     fs.rm(experiment_dir, recursive=True)
+
+
+@pytest.mark.parametrize(
+    "labels, expected_std",
+    [
+        pytest.param(None, 1.0, id="unlabeled_uses_default_label"),
+        pytest.param(["era5"], 3.0, id="labels_select_group"),
+    ],
+)
+def test_evaluator_labels_select_normalization_group(
+    tmp_path: pathlib.Path, labels: list[str] | None, expected_std: float
+):
+    """Evaluating a grouped checkpoint against an unlabeled dataset.
+
+    The plus-one network adds one in normalized space, so each step advances
+    the prediction by the std of whichever group normalized it. Setting
+    ``labels`` on the evaluator selects that group; without them the
+    checkpoint's default group is used.
+    """
+    in_names = ["var"]
+    out_names = ["var"]
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=3, horizontal=[DimSize("lat", 16), DimSize("lon", 32)], nz_interface=4
+    )
+    grouped = uniform_grouped_normalization(
+        in_names,
+        groups={"c96": (0.0, 1.0), "era5": (0.0, 3.0)},
+        default_label="c96",
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=10.0,  # pooled constants, distinct from both groups
+        data_shape=dim_sizes.shape_nd,
+        grouped_normalization=grouped,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=in_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=2,
+        forward_steps_in_memory=2,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=False
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+        labels=labels,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    main(yaml_config=str(config_filename))
+    prediction = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )["var"]
+    np.testing.assert_allclose(
+        prediction.isel(time=1).values - prediction.isel(time=0).values,
+        expected_std,
+        rtol=1e-5,
+    )
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [2, 3])

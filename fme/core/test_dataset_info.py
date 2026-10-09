@@ -7,6 +7,7 @@ import torch
 
 from fme.core.coordinates import (
     DepthCoordinate,
+    HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
     NullVerticalCoordinate,
@@ -471,6 +472,35 @@ class TestOceanVerticalCoordinate:
         info = DatasetInfo(vertical_coordinate=_make_hybrid_sigma_pressure_coordinate())
         with pytest.raises(RuntimeError, match="ocean vertical coordinate"):
             info.ocean_vertical_coordinate
+
+
+@pytest.mark.parametrize(
+    "dataset_info, expected",
+    [
+        pytest.param(DatasetInfo(img_shape=(4, 8)), 2, id="img_shape_only"),
+        pytest.param(
+            DatasetInfo(
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(4), lon=torch.arange(8)
+                )
+            ),
+            2,
+            id="latlon",
+        ),
+        pytest.param(
+            DatasetInfo(
+                horizontal_coordinates=HEALPixCoordinates(
+                    face=torch.arange(12), height=torch.arange(4), width=torch.arange(4)
+                )
+            ),
+            3,
+            id="healpix",
+        ),
+    ],
+)
+def test_n_spatial_dims(dataset_info: DatasetInfo, expected: int):
+    """HEALPix carries a leading face dimension beyond the trailing two."""
+    assert dataset_info.n_spatial_dims == expected
 
 
 def test_without_labels_keeps_everything_but_labels():

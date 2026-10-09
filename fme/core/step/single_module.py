@@ -16,7 +16,12 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
+from fme.core.labels import BatchLabels
+from fme.core.normalizer import (
+    GroupedNormalizer,
+    NetworkAndLossNormalizationConfig,
+    StandardNormalizer,
+)
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
@@ -172,8 +177,19 @@ class SingleModuleStepConfig(StepConfigABC):
                         "residual_prediction.normalized requires a "
                         "normalization.residual block"
                     )
+                if self.normalization.is_grouped:
+                    # Residual uses pooled stds; grouped denormalization doesn't.
+                    raise ValueError(
+                        "residual_prediction.normalized cannot be combined with "
+                        "normalization.grouped"
+                    )
+        self.normalization.validate_pinned_variables(self._normalize_names)
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
+            self.global_mean_removal.validate_pinned_variables(
+                self.normalization.pinned_variables,
+                set(self.in_names) | set(self.out_names),
+            )
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -330,14 +346,20 @@ class SingleModuleStepConfig(StepConfigABC):
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
-        normalizer = self.normalization.get_network_normalizer(
-            sorted(self._normalize_names)
+        normalize_names = sorted(self._normalize_names)
+        normalizer = self.normalization.get_network_normalizer(normalize_names)
+        grouped_normalizer = self.normalization.get_grouped_network_normalizer(
+            pooled=normalizer,
+            names=normalize_names,
+            n_spatial_dims=dataset_info.n_spatial_dims,
+            dataset_labels=dataset_info.all_labels,
         )
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
+            grouped_normalizer=grouped_normalizer,
             init_weights=init_weights,
         )
 
@@ -360,22 +382,23 @@ class SingleModuleStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         init_weights: Callable[[list[nn.Module]], None],
+        grouped_normalizer: GroupedNormalizer | None = None,
     ):
         """
         Args:
             config: The configuration.
             dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
-            normalizer: The normalizer to use.
+            normalizer: The pooled normalizer.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
+            grouped_normalizer: If given, replaces ``normalizer`` for the
+                network's inputs and outputs and for global mean removal.
         """
         super().__init__()
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
-                config.global_mean_removal.build(
-                    normalizer=normalizer, in_names=config.in_names
-                )
+                config.global_mean_removal.build(in_names=config.in_names)
             )
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
@@ -399,6 +422,7 @@ class SingleModuleStep(StepABC):
         self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
+        self._grouped_normalizer = grouped_normalizer
         residual_prediction = config._residual_prediction_config
         if residual_prediction is None:
             self._residual_names: frozenset[str] | None = None
@@ -466,7 +490,25 @@ class SingleModuleStep(StepABC):
 
     @property
     def normalizer(self) -> StandardNormalizer:
+        """The pooled normalizer, even under grouped normalization."""
         return self._normalizer
+
+    def network_normalizer(self, labels: BatchLabels | None) -> StandardNormalizer:
+        """Normalizer for the network's inputs and outputs for one batch."""
+        if self._grouped_normalizer is None:
+            return self._normalizer
+        return self._grouped_normalizer.bind(labels)
+
+    def _module_labels(self, labels: BatchLabels | None) -> BatchLabels | None:
+        """Labels to pass to the module.
+
+        Withheld from an unconditional module only under grouped
+        normalization, where labels exist to select groups. Otherwise an
+        unconditional module given labels still fails loudly.
+        """
+        if self._grouped_normalizer is not None and not self.module.is_conditional:
+            return None
+        return labels
 
     @property
     def surface_temperature_name(self) -> str | None:
@@ -534,7 +576,7 @@ class SingleModuleStep(StepABC):
                 )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
-                labels=args.labels,
+                labels=self._module_labels(args.labels),
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
             secondary_input = output_tensor.detach()
@@ -555,7 +597,7 @@ class SingleModuleStep(StepABC):
             input=args.input,
             next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
-            normalizer=self.normalizer,
+            normalizer=self.network_normalizer(args.labels),
             corrector=self._corrector,
             ocean=self.ocean,
             residual_names=self._residual_names,
@@ -743,7 +785,7 @@ def step_with_adjustments(
             at the output timestep for the ocean model and corrector.
         network_calls: Callable[[TensorMapping], TensorDict] that takes a
             normalized input and returns a normalized output.
-        normalizer: The normalizer to use.
+        normalizer: The normalizer to use, also by ``global_mean_removal``.
         corrector: The corrector to use at the end of each step.
         ocean: The ocean model to use.
         residual_names: Names stepped as residuals (network output added to the
@@ -779,7 +821,7 @@ def step_with_adjustments(
     gmr_state: GlobalMeanRemovalState | None = None
     if global_mean_removal is not None:
         network_input, gmr_state = global_mean_removal.forward_transform(
-            input, data_mask
+            input, data_mask, normalizer
         )
         input_norm = normalizer.normalize(network_input)
         # Synthetic GMR channels are produced in normalized space; merge
