@@ -11,4 +11,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0-tscheck-seaice|01M0GP9GNE4ZMZ5SDN3A2AK24R|ran_piC-8ic-5yr-seaice|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan|||64GiB
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0-tscheck-cplatm|01M0GP9GNE4ZMZ5SDN3A2AK24R|ran_piC-8ic-5yr-cplatm|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan|||64GiB
 # launched at c318666df: seaice 01M4FJ81Y340EN25WEV962TKK5, cplatm 01M4FJ88S5T122AXJJGG37B510
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0-tscheck-cplatm-fill|01M0GP9GNE4ZMZ5SDN3A2AK24R|run_piC-8ic-5yr-cplatm-fill|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan|||64GiB
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0-tscheck-cplatm-fill|01M0GP9GNE4ZMZ5SDN3A2AK24R|ran_piC-8ic-5yr-cplatm-fill|best_inference_ckpt|high|--min-runtime 8h||01M0VTG1SJQK69WWN5A651RXZY|ai2/ace|jupiter+titan|||64GiB
+# launched at b169f0e30: cplatm-fill 01M4GRP512XBZNFWHRAKYVS16X (cplatm 01M4FJ88S5T122AXJJGG37B510 went NaN: unfilled sea_ice_fraction)
