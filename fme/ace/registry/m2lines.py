@@ -37,8 +37,21 @@ class SamudraBuilder(ModuleConfig):
             that strength is a learned constant, identical for every sample on
             every step. "layer" is the principled choice for a conditioned
             network.
-        lat_pad: Latitude padding mode: "constant" (default, zeros) or
-            "pole" (continues across the pole). See ``Samudra``.
+        lat_pad: Padding of the latitude axis. What each mode puts beyond the
+            latitude edges at each site:
+
+            ======================================  ========  ========
+            site                                    constant  pole
+            ======================================  ========  ========
+            block and final convolutions            zeros     antipode
+            decoder refill of a dropped row         zeros     antipode
+            upsampler, zonally periodic             edge row  antipode
+            upsampler, default                      edge row  raises
+            ======================================  ========  ========
+
+            "constant" (the default) is the original network. "pole" is exact
+            for scalar fields only and requires ``zonally_periodic_upsample``.
+            See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -65,6 +78,11 @@ class SamudraBuilder(ModuleConfig):
             raise ValueError("norm_kwargs should not have num_features")
         if "normalized_shape" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have normalized_shape")
+        if self.lat_pad == "pole" and not self.zonally_periodic_upsample:
+            raise ValueError(
+                "lat_pad 'pole' requires zonally_periodic_upsample: the default "
+                "upsampler always replicates the latitude edge"
+            )
         if self.noise_embed_dim < 0:
             raise ValueError("noise_embed_dim must not be negative")
         if self.noise_embed_dim > 0 and self.conditioned_blocks is None:

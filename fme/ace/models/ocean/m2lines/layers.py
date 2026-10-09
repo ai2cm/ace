@@ -74,19 +74,26 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
     seam. Here we pad one column on each longitude edge with the wrapped
     (circular) neighbor before interpolating, then crop the upsampled padding
     back off, so the seam is interpolated against its true periodic neighbor.
-    Latitude is left unpadded unless ``lat_pad`` is not "constant", in which
-    case it is padded (see ``pad_latitude``) and cropped the same way. The
-    output shape matches ``BilinearUpsample``.
+    Latitude is padded with ``lat_pad`` (see ``pad_latitude``) and cropped the
+    same way, except that "constant" replicates the edge row here rather than
+    padding zeros. The output shape matches ``BilinearUpsample``.
     """
 
     def __init__(self, upsampling: int = 2, lat_pad: LatPad = "constant", **kwargs):
         super().__init__()
         self.upsampling = upsampling
         self.lat_pad = lat_pad
+        # Under "constant" this upsampler has always replicated the latitude
+        # edge instead of padding zeros, and trained checkpoints rely on it;
+        # zeros would blend a quarter of zero into the outermost output row.
+        self.replicate_lat_edge = lat_pad == "constant"
 
     def forward(self, x):
         height, width = x.shape[-2:]
-        pad_lat = self.lat_pad != "constant"
+        # bilinear interpolation without align_corners clamps its source
+        # coordinates to the edge row, which replicates it, so that edge needs
+        # no padding
+        pad_lat = not self.replicate_lat_edge
         if pad_lat:
             x = pad_latitude(x, 1, 1, self.lat_pad)
         padded = torch.nn.functional.pad(x, (1, 1, 0, 0), mode="circular")

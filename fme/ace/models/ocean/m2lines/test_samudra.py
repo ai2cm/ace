@@ -1,4 +1,3 @@
-import itertools
 import json
 import math
 import os
@@ -593,15 +592,10 @@ def test_samudra_default_lat_pad_matches_original_forward_bitwise(
         assert torch.equal(explicit(x), reference)
 
 
-@pytest.mark.parametrize("zonally_periodic_upsample", [False, True])
-def test_samudra_pole_lat_pad_matches_reference_forward_bitwise(
-    zonally_periodic_upsample: bool,
-):
+def test_samudra_pole_lat_pad_matches_reference_forward_bitwise():
     """Pole padding reaches every site: block convs, the final conv, the
     decoder refill, and the periodic upsampler."""
-    model = _small_samudra(
-        zonally_periodic_upsample=zonally_periodic_upsample, lat_pad="pole"
-    )
+    model = _small_samudra(zonally_periodic_upsample=True, lat_pad="pole")
     torch.manual_seed(1)
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
@@ -669,7 +663,8 @@ def test_pad_latitude_pole_rejects_padding_beyond_the_height():
         pad_latitude(torch.zeros(1, 1, 2, 4), 3, 0, "pole")
 
 
-_LAT_PAD_COMBINATIONS = list(itertools.product(["constant", "pole"], [False, True]))
+# "pole" requires the zonally periodic upsampler
+_LAT_PAD_COMBINATIONS = [("constant", False), ("constant", True), ("pole", True)]
 
 
 @pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
@@ -710,8 +705,8 @@ def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
 def test_samudra_pole_lat_pad_changes_the_output():
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
-        default = _small_samudra()(x)
-        changed = _small_samudra(lat_pad="pole")(x)
+        default = _small_samudra(zonally_periodic_upsample=True)(x)
+        changed = _small_samudra(zonally_periodic_upsample=True, lat_pad="pole")(x)
     assert not torch.allclose(default, changed)
 
 
@@ -741,11 +736,29 @@ def test_zonally_periodic_upsample_pole_lat_pad():
     assert torch.equal(ZonallyPeriodicBilinearUpsample(lat_pad="constant")(x), default)
 
 
+def test_zonally_periodic_upsample_constant_replicates_the_latitude_edge():
+    """Under "constant" the upsampler pads no zeros: it is the same as one
+    replicated row each side, cropped after the interpolation."""
+    x = torch.randn(2, 3, 9, 18)
+    by_hand = torch.nn.functional.pad(
+        torch.nn.functional.pad(x, (0, 0, 1, 1), mode="replicate"),
+        (1, 1, 0, 0),
+        mode="circular",
+    )
+    by_hand = torch.nn.functional.interpolate(
+        by_hand, scale_factor=2, mode="bilinear", align_corners=False
+    )[..., 2:20, 2:38]
+    torch.testing.assert_close(
+        ZonallyPeriodicBilinearUpsample(lat_pad="constant")(x), by_hand
+    )
+
+
 def test_samudra_pole_lat_pad_with_noise_conditioning():
     n_noise = 4
     model = _samudra(
         context_config=_noise_context_config(n_noise),
         conditioned_blocks="all_blocks",
+        zonally_periodic_upsample=True,
         lat_pad="pole",
     )
     img_shape = (18, 32)
@@ -756,3 +769,10 @@ def test_samudra_pole_lat_pad_with_noise_conditioning():
 def test_samudra_rejects_unknown_lat_pad():
     with pytest.raises(ValueError, match="unknown lat_pad"):
         _samudra(lat_pad="circular")
+
+
+def test_samudra_rejects_pole_lat_pad_with_the_default_upsampler():
+    """The default upsampler cannot pad latitude, so the pole rule would be
+    silently partial."""
+    with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
+        _samudra(lat_pad="pole")

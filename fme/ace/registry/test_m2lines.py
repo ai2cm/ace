@@ -51,6 +51,11 @@ def test_samudra_builder_lat_pad_options():
     assert output.shape == (2, 3, *img_shape)
 
 
+def test_samudra_builder_rejects_pole_lat_pad_with_the_default_upsampler():
+    with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
+        SamudraBuilder(lat_pad="pole")
+
+
 @pytest.mark.parametrize("conditioned_blocks", ["bottleneck", "all_blocks"])
 def test_noise_conditioned_samudra_builder(conditioned_blocks):
     builder = SamudraBuilder(

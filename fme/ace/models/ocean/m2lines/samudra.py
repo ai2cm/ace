@@ -50,11 +50,22 @@ class Samudra(torch.nn.Module):
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
     lat_pad : {"constant", "pole"}, optional
-        Latitude padding used wherever the network pads latitude (see
-        ``pad_latitude``), except that the upsampler ignores it when
-        ``zonally_periodic_upsample`` is False and, under "constant", the
-        periodic upsampler does not pad latitude. By default "constant", the
-        original behavior. Adds no parameters, so checkpoints load across modes.
+        Padding of the latitude axis (see ``pad_latitude``). What each mode
+        puts beyond the latitude edges at each site:
+
+        ======================================  ========  ========
+        site                                    constant  pole
+        ======================================  ========  ========
+        block and final convolutions            zeros     antipode
+        decoder refill of a dropped row         zeros     antipode
+        upsampler, zonally periodic             edge row  antipode
+        upsampler, default                      edge row  raises
+        ======================================  ========  ========
+
+        The upsampler replicates the edge under "constant" because it always
+        has. "pole" is exact for scalar fields only and requires
+        ``zonally_periodic_upsample``. By default "constant", the original
+        behavior. Adds no parameters, so checkpoints load across modes.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -117,6 +128,12 @@ class Samudra(torch.nn.Module):
         self.zonally_periodic_upsample = zonally_periodic_upsample
         if lat_pad not in get_args(LatPad):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
+        if lat_pad == "pole" and not zonally_periodic_upsample:
+            raise ValueError(
+                "lat_pad 'pole' requires zonally_periodic_upsample: the default "
+                "upsampler always replicates the latitude edge, so the pole rule "
+                "would reach every site but the upsampler"
+            )
         self.lat_pad = lat_pad
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
