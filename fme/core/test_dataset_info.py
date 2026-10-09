@@ -471,3 +471,24 @@ class TestOceanVerticalCoordinate:
         info = DatasetInfo(vertical_coordinate=_make_hybrid_sigma_pressure_coordinate())
         with pytest.raises(RuntimeError, match="ocean vertical coordinate"):
             info.ocean_vertical_coordinate
+
+
+def test_without_labels_keeps_everything_but_labels():
+    info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.arange(-4, 4, device=get_device()),
+            lon=torch.arange(16, device=get_device()),
+        ),
+        vertical_coordinate=_make_hybrid_sigma_pressure_coordinate(),
+        spatial_mask_provider=SpatialMaskProvider(
+            masks={"mask_0": torch.ones(8, 16, device=get_device())}
+        ),
+        timestep=datetime.timedelta(hours=6),
+        variable_metadata={"var_0": VariableMetadata("m", "Variable 0")},
+        all_labels={"a", "b"},
+    )
+    stripped = info.without_labels()
+    assert stripped.all_labels == set()
+    assert info.all_labels == {"a", "b"}  # the original is unchanged
+    # DatasetInfo equality compares every field except the labels.
+    assert stripped == info

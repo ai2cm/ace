@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import pathlib
+import unittest.mock
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -162,8 +163,69 @@ def test_build_conditional():
         assert isinstance(module, Module)
         assert isinstance(module.torch_module, MockModule)
         assert isinstance(module._label_encoding, LabelEncoding)
+        assert module.is_conditional
     finally:
         CONDITIONAL_BUILDERS.remove("mock")
+
+
+def test_build_unconditional_hides_labels_from_builder():
+    """An unconditional module is built as if the dataset carried no labels.
+
+    Labels may be present for reasons unrelated to conditioning, such as
+    selecting per-group normalization constants. A builder that sizes weights
+    from ``all_labels`` must not see them, or it allocates label weights the
+    module is never given labels to use.
+    """
+    selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
+    seen: list[set[str]] = []
+    original_build = selector.module_config.build
+
+    def _record(n_in_channels, n_out_channels, dataset_info):
+        seen.append(set(dataset_info.all_labels))
+        return original_build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+        )
+
+    with unittest.mock.patch.object(selector.module_config, "build", _record):
+        module = selector.build(
+            n_in_channels=1,
+            n_out_channels=1,
+            dataset_info=DatasetInfo(all_labels={"a", "b"}, img_shape=(16, 32)),
+        )
+    assert seen == [set()]
+    assert module._label_encoding is None
+
+
+def test_unconditional_build_is_unaffected_by_dataset_labels():
+    """Labeling a dataset does not change an unconditional module.
+
+    Per-group normalization requires labels on the data, so this is what makes
+    a labeled control comparable to an unlabeled one: only a conditional module
+    should see any difference.
+    """
+    selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
+
+    def _build_label_sized(n_in_channels, n_out_channels, dataset_info):
+        # Size a weight from the labels, as the conditional builders do; the
+        # plain mock builder ignores dataset_info and so could not tell.
+        return MockModule([(1, 2, 3), (len(dataset_info.all_labels),)])
+
+    shapes = []
+    with unittest.mock.patch.object(
+        selector.module_config, "build", _build_label_sized
+    ):
+        for all_labels in (set(), {"a", "b"}):
+            module = selector.build(
+                n_in_channels=1,
+                n_out_channels=1,
+                dataset_info=DatasetInfo(all_labels=all_labels, img_shape=(16, 32)),
+            )
+            shapes.append(
+                {k: v.shape for k, v in module.torch_module.state_dict().items()}
+            )
+    assert shapes[0] == shapes[1]
 
 
 def test_module_selector_raises_with_bad_config():
@@ -171,7 +233,9 @@ def test_module_selector_raises_with_bad_config():
         ModuleSelector(type="mock", config={"non_existent_key": 1})
 
 
-def get_dbc2925_ncsfno_module() -> tuple[ModuleSelector, Module]:
+def get_dbc2925_ncsfno_module(
+    conditional: bool = True,
+) -> tuple[ModuleSelector, Module]:
     img_shape = (9, 18)
     n_in_channels = 5
     n_out_channels = 6
@@ -193,6 +257,14 @@ def get_dbc2925_ncsfno_module() -> tuple[ModuleSelector, Module]:
     )
     selector = ModuleSelector(
         type="NoiseConditionedSFNO",
+        # The frozen .pt was saved by an unconditional build (its
+        # label_encoding is None) from before unconditional builds hid the
+        # dataset labels, so it holds label weights sized from all_labels.
+        # Building conditional=True allocates those weights so the strict load
+        # still succeeds. Pass conditional=False to build the same
+        # architecture the way an unconditional config does today; see
+        # test_unconditional_build_drops_only_the_label_weights.
+        conditional=conditional,
         config={
             "embed_dim": 8,
             "noise_embed_dim": 4,
@@ -235,6 +307,8 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
     )
     selector = ModuleSelector(
         type="NoiseConditionedSFNO",
+        # label_embed_dim > 0 requires labels, so this module is conditional.
+        conditional=True,
         config={
             "embed_dim": 8,
             "noise_embed_dim": 4,
@@ -316,6 +390,28 @@ def test_frozen_module_backwards_compatibility(selector_name: str):
     _, module = FROZEN_BUILDERS[selector_name]()
     loaded_state_dict = load_state(selector_name)
     module.load_state(loaded_state_dict)
+
+
+def test_unconditional_build_drops_only_the_label_weights():
+    """An unconditional build of a labeled dataset omits the label weights.
+
+    ``ModuleSelector.build`` hides labels from an unconditional builder, so a
+    module that used to allocate label weights it was never given now does
+    not. This pins down that the change removes exactly those parameters and
+    leaves the rest of the architecture untouched -- the frozen fixtures are
+    built ``conditional=True`` to match what their .pt files hold, so they
+    cannot show it.
+    """
+    set_seed(0)
+    _, conditional = get_dbc2925_ncsfno_module(conditional=True)
+    set_seed(0)
+    _, unconditional = get_dbc2925_ncsfno_module(conditional=False)
+
+    conditional_keys = set(conditional.torch_module.state_dict())
+    unconditional_keys = set(unconditional.torch_module.state_dict())
+    label_keys = {k for k in conditional_keys if "_labels." in k}
+    assert label_keys, "expected the conditional build to allocate label weights"
+    assert unconditional_keys == conditional_keys - label_keys
 
 
 LATEST_BUILDERS = {
