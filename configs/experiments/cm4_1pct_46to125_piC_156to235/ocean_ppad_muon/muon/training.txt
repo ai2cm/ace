@@ -1,0 +1,5 @@
+group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu1e-3|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.lr=0.001|4h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu3e-3|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.lr=0.003|4h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu1e-2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.lr=0.01|4h
