@@ -1,2 +1,4 @@
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke|01M4H41ZJZ02AN82PQK020R1TB|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke81|01M4H42CCVVQB5Y7JW9HPXJYCJ|training|best_inference_ckpt|normal|--min-runtime 8h
