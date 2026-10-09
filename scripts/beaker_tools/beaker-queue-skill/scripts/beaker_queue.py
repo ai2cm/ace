@@ -278,9 +278,81 @@ def job_gpus(job, spec):
     return resources.get("gpuCount") or (job.get("requests") or {}).get("gpuCount") or 0
 
 
-def active_jobs(cluster, budget_id, now, node_ids):
+def authors_cache_path(budget_id):
+    return os.path.join(CACHE_DIR, f"authors_{budget_id}.json")
+
+
+def known_authors(budget_id):
+    try:
+        with open(authors_cache_path(budget_id)) as f:
+            return set(json.load(f))
+    except (OSError, ValueError):
+        return set()
+
+
+def remember_authors(budget_id, authors):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(authors_cache_path(budget_id), "w") as f:
+        json.dump(sorted(authors), f)
+
+
+def jobs_by_node_and_author(cluster, budget_id, node_ids, authors):
+    """Running and scheduled jobs from each node's job list, queued jobs from one
+    `--cluster --author` list per author. The authors are the given ones, everyone
+    seen in this budget by earlier runs, and everyone with a job of the budget on a
+    node of the cluster now."""
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        per_node = pool.map(
+            lambda n: beaker("job", "list", "--node", n, "--kind", "execution"),
+            sorted(node_ids),
+        )
+        placed = [j for jobs in per_node for j in jobs]
+        authors = set(authors) | known_authors(budget_id)
+        authors |= {
+            (j.get("author") or {}).get("name")
+            for j in placed
+            if j.get("budget") == budget_id
+        }
+        authors.discard(None)
+        per_author = pool.map(
+            lambda a: beaker(
+                "job",
+                "list",
+                "--cluster",
+                cluster,
+                "--kind",
+                "execution",
+                "--author",
+                a,
+            ),
+            sorted(authors),
+        )
+        jobs = {j["id"]: j for j in placed}
+        for listed in per_author:
+            jobs.update((j["id"], j) for j in listed)
+    remember_authors(budget_id, authors)
+    return list(jobs.values()), sorted(authors)
+
+
+def cluster_jobs(cluster, budget_id, node_ids, authors):
+    """All execution jobs that requested or run on the cluster, and the authors whose
+    queued jobs were looked up (None when the plain cluster listing worked).
+
+    `beaker job list --cluster X` alone fails with PermissionDenied for some users
+    (organization "ai1"); adding `--author` or listing by node works, so that error
+    falls back to `jobs_by_node_and_author`."""
+    try:
+        return beaker("job", "list", "--cluster", cluster, "--kind", "execution"), None
+    except BeakerError as error:
+        if "PermissionDenied" not in str(error):
+            raise
+    return jobs_by_node_and_author(cluster, budget_id, node_ids, authors)
+
+
+def active_jobs(cluster, budget_id, now, node_ids, authors):
     rows, workspace_names = [], {}
-    for j in beaker("job", "list", "--cluster", cluster, "--kind", "execution"):
+    listed, queried_authors = cluster_jobs(cluster, budget_id, node_ids, authors)
+    for j in listed:
         st = j.get("status") or {}
         if j.get("kind") != "execution" or j.get("budget") != budget_id:
             continue
@@ -323,7 +395,7 @@ def active_jobs(cluster, budget_id, now, node_ids):
                 other_clusters=[c for c in clusters if c != cluster],
             )
         )
-    return rows
+    return rows, queried_authors
 
 
 def mark(r, me):
@@ -415,7 +487,7 @@ def waiting_header(allocated):
     ]
 
 
-def print_header(bname, cluster, now, clause, allocated_gpus, usage, me):
+def print_header(bname, cluster, now, clause, allocated_gpus, usage, me, authors):
     when = now.astimezone().strftime("%b %d %H:%M %Z")
     line = (
         f"**{bname} on {cluster}** at {when}: {allocated_gpus} slots held by "
@@ -426,6 +498,13 @@ def print_header(bname, cluster, now, clause, allocated_gpus, usage, me):
         line += (
             f" (`beaker cluster usage` reports {usage['allocated']} allocated slots; "
             "the difference is jobs assigned but not yet started or just finished.)"
+        )
+    if authors is not None:
+        line += (
+            f" `beaker job list --cluster {cluster}` is failing, so running and "
+            "scheduled jobs come from each node's job list and queued jobs from the "
+            f"lists of {', '.join(authors)}; a queued job of anyone else is missing "
+            "(add them with --authors)."
         )
     print(line)
 
@@ -500,6 +579,12 @@ def main():
         help="add the same two tables for the budget's unallocated (backfill) jobs",
     )
     p.add_argument("--json", action="store_true", help="emit the job rows as JSON")
+    p.add_argument(
+        "--authors",
+        nargs="*",
+        default=[],
+        help="users whose queued jobs to look up when the cluster job listing fails",
+    )
     a = p.parse_args()
 
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -509,7 +594,14 @@ def main():
         nodes_f = pool.submit(cluster_node_ids, a.cluster)
         record_f = pool.submit(cluster_record, a.cluster)
         bid, bname = budget_f.result()
-        jobs_f = pool.submit(active_jobs, a.cluster, bid, now, nodes_f.result())
+        jobs_f = pool.submit(
+            active_jobs,
+            a.cluster,
+            bid,
+            now,
+            nodes_f.result(),
+            [me_f.result(), *a.authors],
+        )
         limit_f = pool.submit(slot_limit, a.cluster, bname)
         usage_f = pool.submit(usage_slots, a.cluster, bname)
         record = record_f.result()
@@ -517,16 +609,17 @@ def main():
         clause_f = pool.submit(
             target_clause, a.cluster, bname, record, limit, pct, now, pool
         )
-        me, jobs, usage = me_f.result(), jobs_f.result(), usage_f.result()
+        me, usage = me_f.result(), usage_f.result()
+        jobs, authors = jobs_f.result()
         clause, over = clause_f.result()
     if a.json:
-        print(json.dumps(dict(user=me, jobs=jobs), indent=1))
+        print(json.dumps(dict(user=me, jobs=jobs, queued_authors=authors), indent=1))
         return
     sort_keys, interruptible = scheduler_policy(record)
     allocated_gpus = gpu_total(
         [r for r in jobs if r["allocated"] and r["state"] != "queued"]
     )
-    print_header(bname, a.cluster, now, clause, allocated_gpus, usage, me)
+    print_header(bname, a.cluster, now, clause, allocated_gpus, usage, me, authors)
     print_allocated(jobs, me, interruptible, sort_keys, over)
     if a.include_unallocated:
         print_unallocated(jobs, me)

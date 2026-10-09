@@ -9,7 +9,7 @@ Run the bundled script and relay its output. Do not reconstruct the queue by han
 `beaker job list`. The script is `scripts/beaker_queue.py` under this skill's base directory.
 
 ```
-python3 <skill base directory>/scripts/beaker_queue.py <cluster> [--budget ai2/<name>] [--include-unallocated] [--json]
+python3 <skill base directory>/scripts/beaker_queue.py <cluster> [--budget ai2/<name>] [--include-unallocated] [--authors USER ...] [--json]
 ```
 
 Examples: `ai2/jupiter` (default budget `ai2/atec-climate`); `ai2/titan --budget ai2/atec-olmoearth`;
@@ -60,5 +60,8 @@ jobs scheduled or queued in scheduling order. With `--include-unallocated` the s
 follow for the budget's backfill jobs. The logged-in user's jobs are marked `*`. Relay all the
 tables as they are. Add at most a short paragraph answering the user's actual
 question (is the budget at quota, what is ahead of their job, can their running job be preempted);
-do not restate the tables in prose. Times are already local. If the script fails because `beaker`
+do not restate the tables in prose. Times are already local. When the header says
+`beaker job list --cluster` is failing, queued jobs come only from the users it names;
+say so if the answer depends on the queue being complete, and rerun with `--authors`
+for anyone missing (the script remembers every user it has seen). If the script fails because `beaker`
 is not logged in or the cluster name is wrong, say so and stop.
