@@ -5,7 +5,7 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 45  # ~8,668 iterations per epoch at batch 8
-save_per_epoch_diagnostics: true
+save_per_epoch_diagnostics: false
 ema:
   decay: 0.999
 inference:
