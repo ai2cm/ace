@@ -110,6 +110,23 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
       claims from it.
 - [ ] Write up (reports repo).
 
+## One-step SST noise in the from-scratch residual arms (found 2026-10-09)
+
+Troy spotted it in the validation snapshot of the learned-heating residual arm: the
+generated one-step SST residual is noise of ±1 to ±4 K while the target's is small, and
+thetao_0 is fine. It is not specific to the learned heating: every residual ocean trained
+from scratch on UFS has a one-step validation SST RMSE of 1.0 K against 0.17 K for
+thetao_0 (learned heating 0.98, clean scratch capped 1.01, v3 scratch 1.01, no corrector
+1.02), the CM4-fine-tuned residual 0.50, the full-field scratch arm 0.61, and the CM4
+pretrains 0.42 to 0.44 at step 20. The rollout time-mean SST error (0.019 normalized) hides
+it because the noise averages out. On UFS `sst` is thetao_0 + 273.15 by construction, so
+the full-field SST channel is a noisy copy of a field the network already predicts well as
+a tendency. Fix under test: `sst` added to the residual set (`*-sstres.yaml`, ace
+9fdec57fb) for the learned-heating arm and its constant-0 twin, both launched 2026-10-09
+(`samudra-ufs4deg-resid-cap0005-learnedheat-sstres`,
+`samudra-ufs4deg-scratch-resid-ohc-cap0005-sstres`). The CM4 1-degree precedent
+(hybridsstres, 2026-09) was healthy on the channel mean with a transient band-power wobble.
+
 ## Open questions
 
 - Whether the network should also receive the previous step's unaccounted heating as an
