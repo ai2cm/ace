@@ -44,7 +44,8 @@ class SamudraBuilder(ModuleConfig):
             site                                    constant  pole
             ======================================  ========  ========
             block and final convolutions            zeros     antipode
-            decoder refill of a dropped row         zeros     antipode
+            decoder refill (``pad_pool`` off)       zeros     antipode
+            row before an odd pool (``pad_pool``)   zeros     antipode
             upsampler, zonally periodic             edge row  antipode
             upsampler, default                      edge row  raises
             ======================================  ========  ========
@@ -52,6 +53,13 @@ class SamudraBuilder(ModuleConfig):
             "constant" (the default) is the original network. "pole" is exact
             for scalar fields only and requires ``zonally_periodic_upsample``.
             See ``Samudra``.
+        pad_pool: Pad an odd height or width by one row or column at the end
+            of the axis in each pool instead of dropping the last one, and crop
+            it off the decoder's upsample instead of refilling a dropped one,
+            so that no row or column is lost (180x360 reaches a 12x23
+            bottleneck rather than 11x22). The original cells keep their
+            pooling windows, so a checkpoint trained without it fine-tunes with
+            it on. Adds no parameters. See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -66,6 +74,7 @@ class SamudraBuilder(ModuleConfig):
     checkpoint_strategy: Literal["all", "simple"] | None = None
     zonally_periodic_upsample: bool = False
     lat_pad: LatPad = "constant"
+    pad_pool: bool = False
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
@@ -126,6 +135,7 @@ class SamudraBuilder(ModuleConfig):
             checkpoint_strategy=self.checkpoint_strategy,
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             lat_pad=self.lat_pad,
+            pad_pool=self.pad_pool,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )

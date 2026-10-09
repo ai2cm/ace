@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from fme.ace.models.ocean.m2lines.layers import (
+    AvgPool,
     BilinearUpsample,
     ConvNeXtBlock,
     LatPad,
@@ -521,9 +522,9 @@ def _reference_samudra_forward(
     model: Samudra, fts: torch.Tensor, lat_pad: LatPad
 ) -> torch.Tensor:
     """Samudra.forward with ``lat_pad`` written out at every site: block convs,
-    the final conv, the upsampler, and the decoder refill. Under "constant" it
-    is the original forward, since zero rows pad the same before or after
-    the longitude padding."""
+    the final conv, the upsampler, the decoder refill and, under ``pad_pool``,
+    the row before an odd pool. Under "constant" it is the original forward,
+    since zero rows pad the same before or after the longitude padding."""
     temp: list[torch.Tensor] = []
     count = 0
     for layer in model.layers:
@@ -536,6 +537,13 @@ def _reference_samudra_forward(
             fts = _reference_convnext_forward(layer, fts, lat_pad)
         elif isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample):
             fts = _reference_upsample(fts, model.zonally_periodic_upsample, lat_pad)
+        elif isinstance(layer, AvgPool):
+            if model.pad_pool:
+                fts = pad_latitude(fts, 0, fts.shape[2] % 2, lat_pad)
+                fts = torch.nn.functional.pad(
+                    fts, (0, fts.shape[3] % 2, 0, 0), mode=model.pad
+                )
+            fts = torch.nn.functional.avg_pool2d(fts, 2)
         else:
             fts = layer(fts)
         if count < model.num_steps:
@@ -544,6 +552,7 @@ def _reference_samudra_forward(
                 count += 1
         elif isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample):
             skip = temp[2 * model.num_steps - count - 1]
+            fts = fts[..., : skip.shape[2], : skip.shape[3]]
             pad_h = skip.shape[2] - fts.shape[2]
             pad_w = skip.shape[3] - fts.shape[3]
             fts = pad_latitude(fts, pad_h // 2, pad_h - pad_h // 2, lat_pad)
@@ -710,13 +719,17 @@ def test_samudra_pole_lat_pad_changes_the_output():
     assert not torch.allclose(default, changed)
 
 
+@pytest.mark.parametrize("pad_pool", [False, True])
 @pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
-def test_samudra_lat_pad_options_keep_state_dict(lat_pad, zonally_periodic_upsample):
+def test_samudra_lat_pad_options_keep_state_dict(
+    lat_pad, zonally_periodic_upsample, pad_pool
+):
     """A default checkpoint loads strictly into a model with any mode."""
     default = _small_samudra()
     model = _small_samudra(
         lat_pad=lat_pad,
         zonally_periodic_upsample=zonally_periodic_upsample,
+        pad_pool=pad_pool,
     )
     assert {k: v.shape for k, v in default.state_dict().items()} == {
         k: v.shape for k, v in model.state_dict().items()
@@ -776,3 +789,83 @@ def test_samudra_rejects_pole_lat_pad_with_the_default_upsampler():
     silently partial."""
     with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
         _samudra(lat_pad="pole")
+
+
+@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
+def test_avg_pool_pad_pool_pools_every_row_and_column(lat_pad: LatPad):
+    """The floor pool drops the last row and column of a 5x7 tensor; with
+    pad_pool the pool pads them to 6x8 and keeps them."""
+    x = torch.randn(2, 3, 5, 7)
+    assert AvgPool()(x).shape == (2, 3, 2, 3)
+    by_hand = torch.nn.functional.pad(
+        pad_latitude(x, 0, 1, lat_pad), (0, 1, 0, 0), mode="circular"
+    )
+    torch.testing.assert_close(
+        AvgPool(pad_pool=True, lat_pad=lat_pad)(x),
+        torch.nn.functional.avg_pool2d(by_hand, 2),
+    )
+
+
+@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
+def test_samudra_pad_pool_matches_reference_forward_bitwise(lat_pad: LatPad):
+    """On (22, 36) with three levels the 11-row level's pool pads a row and the
+    9-column level's pool a column, and the decoder crops them again."""
+    model = _small_samudra(
+        zonally_periodic_upsample=True, lat_pad=lat_pad, pad_pool=True
+    )
+    torch.manual_seed(1)
+    x = torch.randn(2, 2, *_SMALL_SHAPE)
+    with torch.no_grad():
+        assert torch.equal(model(x), _reference_samudra_forward(model, x, lat_pad))
+
+
+@pytest.mark.parametrize(
+    "img_shape, dilation, bottleneck",
+    [((180, 360), [1, 2, 4, 8], (12, 23)), ((45, 90), [1, 2, 4, 4], (3, 6))],
+)
+def test_samudra_pad_pool_loses_no_row_or_column(img_shape, dilation, bottleneck):
+    """On the 1 and 4 degree grids with their production dilations every pool
+    rounds up rather than down, and the bottleneck covers the whole grid."""
+    torch.manual_seed(0)
+    model = Samudra(
+        input_channels=1,
+        output_channels=1,
+        ch_width=[2, 2, 2, 2],
+        dilation=dilation,
+        n_layers=[1, 1, 1, 1],
+        norm="batch",
+        upscale_factor=1,
+        zonally_periodic_upsample=True,
+        pad_pool=True,
+    )
+    pool_shapes = []
+    for layer in model.layers:
+        if isinstance(layer, AvgPool):
+            layer.register_forward_hook(
+                lambda module, args, out: pool_shapes.append(
+                    (tuple(args[0].shape[-2:]), tuple(out.shape[-2:]))
+                )
+            )
+    with torch.no_grad():
+        out = model(torch.randn(1, 1, *img_shape))
+    assert out.shape == (1, 1, *img_shape)
+    assert [pooled for _, pooled in pool_shapes] == [
+        (-(-h // 2), -(-w // 2)) for (h, w), _ in pool_shapes
+    ]
+    assert pool_shapes[-1][1] == bottleneck
+
+
+def test_samudra_pad_pool_with_noise_conditioning():
+    """The noise is not padded: each block area-averages it onto its own grid,
+    which pad_pool makes 9x15 and 5x8 here rather than 8x15 and 4x7."""
+    n_noise = 4
+    model = _samudra(
+        context_config=_noise_context_config(n_noise),
+        conditioned_blocks="all_blocks",
+        zonally_periodic_upsample=True,
+        lat_pad="pole",
+        pad_pool=True,
+    )
+    img_shape = (17, 30)
+    out = model(torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape))
+    assert out.shape == (2, 3, *img_shape)

@@ -112,14 +112,36 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
 
 
 class AvgPool(torch.nn.Module):
+    """Average pooling by ``pooling`` in both axes.
+
+    Like ``torch.nn.AvgPool2d``, by default it drops the last rows or columns
+    of an axis whose size is not a multiple of ``pooling``. With ``pad_pool``
+    it instead pads that axis at its end up to the next multiple, latitude
+    with ``lat_pad`` (see ``pad_latitude``) and longitude with ``pad``, so
+    every row and column is pooled.
+    """
+
     def __init__(
         self,
         pooling: int = 2,
+        pad_pool: bool = False,
+        pad: str = "circular",
+        lat_pad: LatPad = "constant",
     ):
         super().__init__()
         self.avgpool = torch.nn.AvgPool2d(pooling)
+        self.pooling = pooling
+        self.pad_pool = pad_pool
+        self.pad = pad
+        self.lat_pad = lat_pad
 
     def forward(self, x):
+        if self.pad_pool:
+            height, width = x.shape[-2:]
+            x = pad_latitude(x, 0, -height % self.pooling, self.lat_pad)
+            x = torch.nn.functional.pad(
+                x, (0, -width % self.pooling, 0, 0), mode=self.pad
+            )
         return self.avgpool(x)
 
 
