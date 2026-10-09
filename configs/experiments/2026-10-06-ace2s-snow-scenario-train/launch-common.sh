@@ -1,8 +1,9 @@
 #!/bin/bash
 # Shared launcher for the stage scripts in this directory. Source it, then call
 #   run_training CONFIG_FILENAME JOB_NAME [--ckpt BEAKER_DATASET] [--group WANDB_GROUP] [OVERRIDE ...]
-# --ckpt mounts the given Beaker dataset at /weights, where the fine-tuning configs
-# expect training_checkpoints/best_ckpt.tar. Set DRY_RUN=1 to print the gantry
+# --ckpt mounts training_checkpoints/best_ckpt.tar of the given Beaker dataset at
+# /weights/training_checkpoints/best_ckpt.tar, where the fine-tuning configs read it
+# (the file alone, not the whole result dataset). Set DRY_RUN=1 to print the gantry
 # command instead of submitting it.
 
 set -e
@@ -44,7 +45,7 @@ run_training() {
 
   local ckpt_arg=()
   if [[ -n "$ckpt_dataset" ]]; then
-    ckpt_arg=(--dataset "$ckpt_dataset:/weights")
+    ckpt_arg=(--dataset "$ckpt_dataset:training_checkpoints/best_ckpt.tar:/weights/training_checkpoints/best_ckpt.tar")
   fi
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
