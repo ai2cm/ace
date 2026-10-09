@@ -1,0 +1,49 @@
+datasets:
+  train: cm4_1pctCO2 # these values are keys in datasets.yaml
+  validation: cm4_1pctCO2
+  inference: cm4_1pctCO2
+  eval: cm4_1pctCO2
+  # TODO: eval_piControl: cm4_piControl # default eval override
+
+train:
+  subset: null
+
+validation: # same validation as train_0211to0305 exper
+  subset: # atmos, ocean, and coupled use same subset
+    start_time: '0306-01-03T12:00:00'
+    stop_time: '0310-12-29T12:00:00'
+
+inference:
+  coupled:
+    n_coupled_steps: 2916 # ~40 years
+  atmos:
+    n_forward_steps: 58328 # ~40 years
+  ocean:
+    n_forward_steps: 2916 # ~40 years
+  times: # atmos, ocean, and coupled use same times
+    # 4 evenly spaced, spanning full dataset
+    - '0211-01-03T12:00:00'
+    - '0231-01-08T12:00:00'
+    - '0251-01-13T12:00:00'
+    - '0271-01-18T12:00:00'
+
+eval_ICx1: # same as train_0211to0305 exper
+  coupled:
+    n_coupled_steps: 2916 # ~40 years
+  atmos:
+    n_forward_steps: 58328 # ~40 years
+  ocean:
+    n_forward_steps: 2916 # ~40 years
+  times: # atmos, ocean, and coupled use same times
+    - '0311-01-03T12:00:00'
+
+
+eval_200yrs: # full 140yr rollout
+  coupled:
+    n_coupled_steps: 10218
+  atmos:
+    n_forward_steps: 204388
+  ocean:
+    n_forward_steps: 10218
+  times: # atmos, ocean, and coupled use same times
+    - '0211-01-03T12:00:00'
