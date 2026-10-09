@@ -1,0 +1,12 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# 10-epoch fine-tune of the SSH ocean_wide pretraining on the ft_sshsalt
+# recipe, with lat_pad pole and pad_pool in place of the salt correction; see
+# finetune-config-template.yaml. Starts from the pretraining's best_ckpt
+# (wandb ace-samudra-cm4/k8bhakrc, beaker 01M46XR34EXKDMT3ARSDVJAJ5P, results
+# dataset pinned), the epoch-75 model, as the ft_sshsalt rows do; same seed
+# and tag as ft_sshsalt rs0.
+#
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train".
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_polepool|rs0|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0|01M4AHJTGDTRR823SF6Q7PKA80|8h
