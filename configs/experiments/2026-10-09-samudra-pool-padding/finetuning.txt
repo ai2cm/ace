@@ -1,0 +1,23 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Three arms fine-tuned from the 1deg SSH ocean_wide pretraining's best_ckpt
+# (ocean_wide_ssh_ohc_clip_cde1 rs0: wandb ace-samudra-cm4/k8bhakrc, beaker
+# 01M46XR34EXKDMT3ARSDVJAJ5P, results dataset pinned; epoch 75, as is its
+# best_inference_ckpt) for max_epochs in finetune-config-template.yaml. Same
+# seed and data order in every arm; only the Samudra padding options differ.
+# (lat_pad, pad_pool):
+#   A constant/off      control, the pretraining's geometry
+#   B pole/off          the pole rule alone (#1566), floor pooling kept
+#   C pole/on           the pole rule, and no pool drops a row or column
+# pad_pool adds a row before the 45x90 level's pool and a row and a column
+# before the 23x45 level's, so the bottleneck is 12x23 rather than 11x22.
+# Every block runs on its level's unpadded grid and the original cells keep
+# their pooling windows, so each arm's epoch-0 inline inference
+# (evaluate_before_training) is a zero-shot score comparable to A's.
+# min_runtime 8h covers the whole job, so it is never preempted.
+#
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train".
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_poolpad_A_constant|rs0|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|01M4AHJTGDTRR823SF6Q7PKA80|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_poolpad_B_pole|rs0|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|01M4AHJTGDTRR823SF6Q7PKA80|8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ssh_ohc_clip_cde1-ft_poolpad_C_pole_pool|rs0|ace-samudra-cm4|k8bhakrc|best_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=true|01M4AHJTGDTRR823SF6Q7PKA80|8h
