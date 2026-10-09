@@ -1267,3 +1267,86 @@ def test_zos_global_mean_correction_config_round_trip():
         reference_global_mean=0.0
     )
     assert OceanCorrectorConfig.from_state({}).zos_global_mean_correction is None
+
+
+def test_ocean_heat_content_correction_capped_contraction():
+    """With max_scaled_contraction the ratio is clamped and the remainder is a
+    uniform increment over wet cells, so the ssf-weighted budget still closes."""
+    cap = 0.005
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.1,
+            max_scaled_contraction=cap,
+        )
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
+    mask = torch.ones(nsamples, nlat, nlon, nlevels)
+    mask[:, 0, 0, 0] = 0.0
+    mask[:, 0, 0, 1] = 0.0
+    mask[:, 0, 1, 1] = 0.0
+    masks = {
+        "mask_0": mask[:, :, :, 0],
+        "mask_1": mask[:, :, :, 1],
+        "mask_2d": mask[:, :, :, 0],
+    }
+    ops = LatLonOperations(torch.ones(size=[3, 3]), SpatialMaskProvider(masks))
+    idepth = torch.tensor([2.5, 10, 20])
+    depth_coordinate = DepthCoordinate(idepth, mask)
+    sea_surface_fraction = mask[:, :, :, 0] * 0.5 + 0.5 * (mask[:, :, :, 0] > 0)
+    sea_surface_fraction[:, 1, 1] = 0.5  # a fractional coastal cell
+    input_data_dict = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon),
+        "thetao_1": torch.ones(nsamples, nlat, nlon),
+        "sst": torch.ones(nsamples, nlat, nlon) + 273.15,
+        "hfds": torch.ones(nsamples, nlat, nlon),
+    }
+    gen_data_dict = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon) * 2,
+        "thetao_1": torch.ones(nsamples, nlat, nlon) * 2,
+        "sst": torch.ones(nsamples, nlat, nlon) * 2 + 273.15,
+    }
+    forcing_data_dict = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": sea_surface_fraction,
+    }
+    corrector = config._build(ops, depth_coordinate, timestep)
+    corrected = corrector(
+        input_data_dict, gen_data_dict, forcing_data_dict, None
+    ).corrected
+
+    def weighted_ohc(d):
+        ohc = OceanData(d, depth_coordinate).ocean_heat_content * sea_surface_fraction
+        return ohc.nanmean(dim=(-1, -2), keepdim=True)
+
+    # the corrector's global means run over the wet (mask_2d) cells only
+    wet = mask[:, :, :, 0] > 0
+    flux_term = (
+        ((1.0 + 1.0) * sea_surface_fraction)
+        .where(wet, torch.nan)
+        .nanmean(dim=(-1, -2), keepdim=True)
+    )
+    target = (
+        weighted_ohc(input_data_dict) + (flux_term + 0.1) * timestep.total_seconds()
+    )
+    # the budget closes exactly despite the clamp
+    torch.testing.assert_close(weighted_ohc(corrected), target)
+    # the uncapped ratio is ~0.5 here, so the clamp binds at 1 - cap and the rest
+    # is one uniform increment over every wet cell (masked cells untouched)
+    increment = corrected["thetao_0"] - 2 * (1.0 - cap)
+    valid0 = mask[:, :, :, 0] > 0
+    assert torch.all(increment[~valid0] == 0)
+    torch.testing.assert_close(
+        increment[valid0].reshape(nsamples, -1),
+        increment[valid0].reshape(nsamples, -1)[:, :1].expand(-1, int(valid0[0].sum())),
+    )
+    assert torch.all(increment[valid0] < 0)  # heat is being removed
+    torch.testing.assert_close(
+        corrected["sst"] - 273.15, corrected["thetao_0"], atol=1e-4, rtol=0
+    )  # float32 at 273 K
+    # the second level sees the same increment where it is wet
+    valid1 = mask[:, :, :, 1] > 0
+    torch.testing.assert_close(
+        (corrected["thetao_1"] - 2 * (1.0 - cap))[valid1], increment[valid1]
+    )
