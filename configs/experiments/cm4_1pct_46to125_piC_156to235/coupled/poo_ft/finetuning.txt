@@ -9,5 +9,10 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|trained|high|titan|8||0|ai2/ace|seed=0 evaluate_before_training=false|01M49PMA47F833YBJNZM5960W8|1h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke81|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|trained|high|titan|8||0|ai2/ace|seed=0 evaluate_before_training=false stepper_training.atmosphere.n_steps=81|01M49PMA47F833YBJNZM5960W8|1h
 
+# Rerun of the real-sampling smoke: 01M4H41ZJZ02AN82PQK020R1TB died with exit
+# 255 ~14 min into training, no traceback; the forced-81 smoke ran 700+ steps
+# at ~10 s/step with no memory error and was stopped.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke2|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|train|high|titan|8||0|ai2/ace|seed=0 evaluate_before_training=false|01M49PMA47F833YBJNZM5960W8|1h
+
 # Full run, held until the smoke tests pass.
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|skip|high|titan|8||3|ai2/ace|seed=0|01M49PMA47F833YBJNZM5960W8|8h
