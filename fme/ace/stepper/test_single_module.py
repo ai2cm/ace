@@ -607,6 +607,100 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
         assert all(forward_calls_grad_enabled)
 
 
+@pytest.mark.parametrize("pushforward_steps", [0, 1, 3])
+def test_train_on_batch_pushforward_steps(pushforward_steps: int):
+    torch.manual_seed(0)
+
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        pushforward_steps=pushforward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    n_optimized = n_steps - pushforward_steps
+    assert len(optimization.accumulate_loss.call_args_list) == n_optimized
+    assert not any(forward_calls_grad_enabled[:pushforward_steps])
+    assert all(forward_calls_grad_enabled[pushforward_steps:])
+    # every step's loss is reported, but only optimized steps are accumulated
+    expected_loss = sum(
+        stepped.metrics[f"loss_step_{i}"] for i in range(pushforward_steps, n_steps)
+    )
+    torch.testing.assert_close(stepped.metrics["loss"], expected_loss)
+    for i in range(n_steps):
+        assert f"loss_step_{i}" in stepped.metrics
+
+
+def test_train_on_batch_pushforward_steps_must_leave_a_loss_step():
+    n_steps = 2
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    stepper = _get_train_stepper(
+        _get_stepper_config(["a", "b"], ["a", "b"]),
+        pushforward_steps=n_steps,
+    )
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"pushforward_steps": -1},
+        {"pushforward_steps": 1, "optimize_last_step_only": True},
+        {"pushforward_steps": 2, "n_forward_steps": 2},
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthSchedule(
+                start_value=3,
+                milestones=[
+                    TimeLengthMilestone(
+                        epoch=2,
+                        value=TimeLengthProbabilities(
+                            outcomes=[
+                                TimeLengthProbability(steps=1, probability=0.5),
+                                TimeLengthProbability(steps=3, probability=0.5),
+                            ]
+                        ),
+                    )
+                ],
+            ),
+        },
+    ],
+)
+def test_train_stepper_config_invalid_pushforward_steps(kwargs):
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        TrainStepperConfig(**kwargs)
+
+
+def test_train_stepper_config_valid_pushforward_steps():
+    TrainStepperConfig(pushforward_steps=1, n_forward_steps=2)
+
+
 def test_per_channel_losses_bounded_by_accumulated_loss():
     """Per-channel loss total must not exceed optimization accumulated loss."""
     torch.manual_seed(0)

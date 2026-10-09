@@ -1499,6 +1499,14 @@ class TrainStepperConfig:
     Parameters:
         loss: The loss configuration.
         optimize_last_step_only: Whether to optimize only the last step.
+        pushforward_steps: The number of initial forward steps that are not
+            optimized (the "pushforward trick"). These steps are run without
+            gradients and do not contribute to the optimized loss, so the model
+            is trained on inputs it produced itself without being asked to
+            improve the steps that produced them. Must be less than the number
+            of loss steps. Cannot be combined with optimize_last_step_only.
+            The aggregate ``loss`` metric, including the validation loss used
+            to select the best checkpoint, sums only the optimized steps.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
@@ -1514,6 +1522,7 @@ class TrainStepperConfig:
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
+    pushforward_steps: int = 0
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     n_forward_steps: TimeLength | TimeLengthSchedule | None = None
     parameter_init: ParameterInitializationConfig = dataclasses.field(
@@ -1522,6 +1531,25 @@ class TrainStepperConfig:
     corrector_loss: CorrectorLossConfig | None = None
 
     def __post_init__(self):
+        if self.pushforward_steps < 0:
+            raise ValueError(
+                f"pushforward_steps must be non-negative, got {self.pushforward_steps}"
+            )
+        if self.pushforward_steps > 0 and self.optimize_last_step_only:
+            raise ValueError(
+                "pushforward_steps cannot be combined with optimize_last_step_only"
+            )
+        schedule = self.n_forward_steps_schedule
+        if (
+            self.pushforward_steps > 0
+            and schedule is not None
+            and self.pushforward_steps >= schedule.min_n_forward_steps
+        ):
+            raise ValueError(
+                f"pushforward_steps ({self.pushforward_steps}) must be less than "
+                "the fewest forward steps n_forward_steps can sample "
+                f"({schedule.min_n_forward_steps})"
+            )
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
                 self.n_ensemble = 2
@@ -1680,6 +1708,11 @@ class TrainStepper(
         self._loss_schedule.init_for_epoch(data.epoch)
         n_data_steps = data.time.shape[1] - self.n_ic_timesteps
         n_loss_steps = self._loss_schedule.sample(n_data_steps)
+        if self._config.pushforward_steps >= n_loss_steps:
+            raise ValueError(
+                f"pushforward_steps ({self._config.pushforward_steps}) must be "
+                f"less than the number of loss steps ({n_loss_steps})"
+            )
         metrics: dict[str, float] = {}
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
@@ -1758,7 +1791,7 @@ class TrainStepper(
             if self._config.optimize_last_step_only:
                 optimize_step = step == n_loss_steps - 1
             else:
-                optimize_step = step < n_loss_steps
+                optimize_step = self._config.pushforward_steps <= step < n_loss_steps
             grad_context = (
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
