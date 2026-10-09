@@ -51,8 +51,10 @@ class SamudraBuilder(ModuleConfig):
             ======================================  ========  ========
 
             "constant" (the default) is the original network. "pole" is exact
-            for scalar fields only and requires ``zonally_periodic_upsample``.
-            See ``Samudra``.
+            for scalar fields only and requires ``zonally_periodic_upsample``;
+            a pad longer than a level's height (the 4 degree bottleneck's 3
+            rows under a dilation of 4) continues past the far pole. See
+            ``Samudra``.
         pad_pool: Pad an odd height or width by one row or column at the end
             of the axis in each pool instead of dropping the last one, and crop
             it off the decoder's upsample instead of refilling a dropped one,

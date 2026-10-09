@@ -65,8 +65,10 @@ class Samudra(torch.nn.Module):
 
         The upsampler replicates the edge under "constant" because it always
         has. "pole" is exact for scalar fields only and requires
-        ``zonally_periodic_upsample``. By default "constant", the original
-        behavior. Adds no parameters, so checkpoints load across modes.
+        ``zonally_periodic_upsample``; a pad longer than a level's height (the
+        4 degree bottleneck's 3 rows under a dilation of 4) continues past the
+        far pole. By default "constant", the original behavior. Adds no
+        parameters, so checkpoints load across modes.
     pad_pool : bool, optional
         If True, each pool pads an odd height or width by one row (with
         ``lat_pad``) or column (with ``pad``) at the end of the axis instead

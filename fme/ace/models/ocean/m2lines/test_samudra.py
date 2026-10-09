@@ -626,11 +626,13 @@ def test_pad_latitude_pole_rows():
     assert padded[6, 0].item() == 33.0
 
 
-def test_pad_latitude_pole_is_the_continuation_across_the_pole():
+@pytest.mark.parametrize("n_pad", [2, 9])
+def test_pad_latitude_pole_is_the_continuation_across_the_pole(n_pad: int):
     """Pole padding of the cell centers' Cartesian coordinates matches the
     coordinates evaluated past the pole (latitude -90 - d, longitude L is
-    the point -90 + d, L + 180)."""
-    n_lat, n_lon, n_pad = 6, 8, 2
+    the point -90 + d, L + 180). 9 rows on a 6-row grid run past the far pole
+    and back onto the original meridian."""
+    n_lat, n_lon = 6, 8
 
     def cartesian(lat_deg: torch.Tensor, lon_deg: torch.Tensor) -> torch.Tensor:
         lat = torch.deg2rad(lat_deg)[:, None]
@@ -665,11 +667,6 @@ def test_pad_latitude_constant():
     x = torch.randn(1, 1, 5, 4)
     constant = pad_latitude(x, 2, 1, "constant")
     assert torch.equal(constant[..., [0, 1, -1], :], torch.zeros(1, 1, 3, 4))
-
-
-def test_pad_latitude_pole_rejects_padding_beyond_the_height():
-    with pytest.raises(ValueError, match="exceeds the height"):
-        pad_latitude(torch.zeros(1, 1, 2, 4), 3, 0, "pole")
 
 
 # "pole" requires the zonally periodic upsampler
@@ -869,3 +866,25 @@ def test_samudra_pad_pool_with_noise_conditioning():
     img_shape = (17, 30)
     out = model(torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape))
     assert out.shape == (2, 3, *img_shape)
+
+
+@pytest.mark.parametrize("pad_pool", [False, True])
+def test_samudra_pole_lat_pad_runs_the_4deg_production_dilations(pad_pool):
+    """The 4 degree bottleneck has 2 rows (3 under pad_pool) and its dilation
+    of 4 pads 4 rows, which continue past the far pole."""
+    model = Samudra(
+        input_channels=1,
+        output_channels=1,
+        ch_width=[2, 2, 2, 2],
+        dilation=[1, 2, 4, 4],
+        n_layers=[1, 1, 1, 1],
+        norm="batch",
+        upscale_factor=1,
+        zonally_periodic_upsample=True,
+        lat_pad="pole",
+        pad_pool=pad_pool,
+    )
+    with torch.no_grad():
+        out = model(torch.randn(1, 1, 45, 90))
+    assert out.shape == (1, 1, 45, 90)
+    assert torch.isfinite(out).all()
