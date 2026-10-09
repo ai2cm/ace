@@ -68,6 +68,7 @@ from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
 from fme.core.ema import EMA_CHECKPOINT_KEY, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
+    AggregatorSummary,
     InferenceAggregatorABC,
     InferenceSummary,
 )
@@ -574,6 +575,18 @@ class Trainer:
             logging.info(
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
             )
+            if len(epoch_data) == 0:
+                # The restart checkpoint is saved before _epochs_trained is
+                # incremented, so a resume from an epoch boundary lands here
+                # with nothing left to train. Finish the epoch and go straight
+                # to validation; this epoch logs no train/* metrics.
+                logging.info(
+                    "Resumed epoch has no batches left to train; "
+                    "proceeding to validation."
+                )
+                self._epochs_trained += 1
+                self._current_epoch_num_batches_seen = 0
+                return AggregatorSummary(logs={}, loss=None)
         self._last_saved_num_batches_seen = self.num_batches_seen
         self._started_training = True
         current_time = time.time()

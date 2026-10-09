@@ -735,6 +735,55 @@ def test_resume_after_interrupted_training_during_epoch(
     )
 
 
+def test_resume_at_epoch_boundary_does_not_re_enter_the_trained_epoch(
+    tmp_path: str,
+):
+    """Resuming from an epoch-boundary checkpoint goes straight to validation."""
+    n_train_batches = 10
+    stepper_state = {"foo": "bar"}
+    config, trainer = get_trainer(
+        tmp_path,
+        stepper_state=stepper_state,
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=2,
+        n_train_batches=n_train_batches,
+    )
+    # Fail in the first epoch's validation, after the boundary checkpoint is saved.
+    with unittest.mock.patch.object(
+        trainer, "_log_first_batch_metrics", return_value=None
+    ):
+        with fail_after_calls_patch(trainer, "_validation_callback", 1):
+            trainer.train()
+
+    paths = CheckpointPaths(config.checkpoint_dir)
+    checkpoint = torch.load(
+        paths.latest_checkpoint_path, map_location="cpu", weights_only=False
+    )
+    assert checkpoint["epoch"] == 0
+    assert checkpoint["current_epoch_num_batches_seen"] == n_train_batches
+
+    _, resumed = get_trainer(
+        tmp_path,
+        stepper_state=stepper_state,
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=1,
+        n_train_batches=n_train_batches,
+    )
+    with unittest.mock.patch.object(
+        resumed,
+        "_validation_callback",
+        return_value=({"val/mean/loss": 0.0}, 0.0),
+    ) as validation_callback:
+        resumed.train()
+
+    stepper = cast(TrainStepper, resumed.stepper)
+    assert stepper.train_batches_seen == []
+    # validation is mocked, so only the train-evaluation pass would add batches here
+    assert stepper.validation_batches_seen == []
+    validation_callback.assert_called_once_with(1)
+    assert resumed._epochs_trained == 1
+
+
 @pytest.mark.parametrize("ema_decay", [0.05, 0.99])
 @pytest.mark.parametrize("validate_using_ema", [True, False])
 def test_saves_correct_ema_checkpoints(
