@@ -48,14 +48,13 @@ The coupled targets (e.g. `make cm4_piControl_coupled_1daily`) run
 `create_coupled_datasets.py` locally in the `create_coupled_datasets` conda
 environment, created by `make create_coupled_datasets_env`.
 
-The four CM4 config families also have an `_argo` sibling (e.g. `make
-cm4_piControl_coupled_1daily_argo`) that submits the same config to argo through
-`create_coupled_datasets.sh`, and can be run on your Google VM. Push the image
-first with `make build_coupled_processing_image push_coupled_processing_image`.
+The CM4 and CM4-like-AM4 random-CO2 configs also have an `_argo` sibling (e.g.
+`make cm4_piControl_coupled_1daily_argo`) that submits the same config to argo
+through `create_coupled_datasets.sh`, and can be run on your Google VM. Push the
+image first with `make build_coupled_processing_image push_coupled_processing_image`.
 The argo flavour is offered only where the config's input and output stores are
-on GCS: `E3SMv3-piControl-100yr-coupled.yaml` writes to NERSC scratch and
-`CM4-like-AM4-random-CO2-ensemble-coupled.yaml` to weka, neither of which the
-workflow mounts, so those two are local-only.
+on GCS: `E3SMv3-piControl-100yr-coupled.yaml` writes to NERSC scratch, which the
+workflow does not mount, so it is local-only.
 
 The CM4 1pctCO2 coupled configs read their sea ice mask
 (`precomputed_sea_ice_mask`) from the piControl coupled ocean store, so submit
@@ -71,6 +70,7 @@ When the config sets `stats.beaker_dataset`, the argo workflow's upload step,
 the `ai2/ace` workspace, one subdirectory per category
 (`uncoupled_atmosphere`, `coupled_atmosphere`, `ocean`); an ensemble config
 uploads its `combined` stats. The step is skipped for `--debug` and
-`--subsample` runs, and when the dataset already exists. It runs on the
+`--subsample` runs, and when the dataset already exists under the account of
+the workflow's Beaker token (the `beaker-key-andrep` secret). It runs on the
 atmosphere processing image, which has `beaker-py`; override with
 `-p upload_image=...`.
