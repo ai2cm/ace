@@ -1,2 +1,4 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|aw3e-4|01M4HH3XD6Q4N0EKBPEH69H5HJ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|aw1e-3|01M4HH4797HCWNXMMS0Q3QHK5G|training|best_inference_ckpt|normal|--min-runtime 8h
