@@ -1,5 +1,5 @@
 runs:
-  ufs-replay-ocean-1deg-19level-1994-2023: ""
+  2026-10-06-ufs-replay-ocean-1deg-19level-1994-2023: ""
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-stats
