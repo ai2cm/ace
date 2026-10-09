@@ -127,6 +127,18 @@ a tendency. Fix under test: `sst` added to the residual set (`*-sstres.yaml`, ac
 `samudra-ufs4deg-scratch-resid-ohc-cap0005-sstres`). The CM4 1-degree precedent
 (hybridsstres, 2026-09) was healthy on the channel mean with a transient band-power wobble.
 
+Troy's second hypothesis (2026-10-09): the input land fill. `input_masking.fill_value: 0.0` is
+applied to the physical-unit inputs before normalization (`apply_input_process_func` runs
+ahead of the step's normalizer), so over land the SST input is 0 K, which normalizes to
+−24.5 sigma (mean 287.3 K, std 11.7 K), while thetao_0 in degrees C is 0 = −1.2 sigma. The
+SST input channel therefore carries a cliff at every coastline that no other channel has.
+A second contributor is the loss weighting: full-field SST is normalized by the 11.7 K
+climatological std, so a 1 K per-step error costs 0.007 in normalized MSE, while the same
+error in the residual thetao_0 channel (std 0.41 K) costs 6. Test launched 2026-10-09:
+`resid-cap0005-learnedheat-meanfill.yaml` (`fill_value: mean`, SST still full-field) next to
+the sst-residual variant and the baseline; compare one-step validation SST RMSE at matched
+epochs.
+
 ## Open questions
 
 - Whether the network should also receive the previous step's unaccounted heating as an
