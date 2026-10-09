@@ -110,6 +110,35 @@ time-varying, state-dependent field, and only its ocean-area mean enters the bud
       claims from it.
 - [ ] Write up (reports repo).
 
+## Full-record rollouts, first result (2026-10-09)
+
+Ocean-only, 1994-01-05 to 2023-09, learned-heating residual arm versus its constant-0 twin
+(v3 checkpoint). Figure: `fig_30yr_learned_vs_constant.png`.
+
+| global bias by period | train 1994-2001 | untouched 2002-2011 | train 2012-2021 | val 2022-2023 |
+|---|---|---|---|---|
+| constant 0: SST (K) | +0.23 | +0.24 | +0.25 | +0.20 |
+| constant 0: thetao_5 (K) | +0.25 | +0.29 | +0.33 | +0.42 |
+| learned: SST (K) | +0.01 | −0.04 | −0.04 | −0.06 |
+| learned: thetao_5 (K) | −0.03 | −0.09 | −0.10 | +0.03 |
+| learned term, model vs data (W/m², ocean mean) | −3.6 vs −3.3 | −2.0 vs +1.8 | −0.7 vs +0.4 | +1.6 vs +1.3 |
+
+- With the constant the column warms steadily for 30 years (+0.23 K surface from the first
+  decade, +0.42 K at 100 m by the end): the corrector imposes a closed budget on data that
+  lose heat to the nudging.
+- With the learned term the surface stays within ±0.06 K of the data over the whole record,
+  including the decade never seen in training, and the 100 m level within 0.1 K.
+- The learned term itself is right where the signal is large and in sample (1994-2001:
+  −11.4 vs −11.8 W/m² in 1994, −5.6 vs −5.4 in 1995, ... −0.5 vs +0.6 in 2001) and wrong
+  out of sample: −2.0 vs +1.8 through 2002-2011 (wrong sign), −0.7 vs +0.4 in 2012-2021
+  after 18 years of free running (the inline 10-yr rollouts from 2012 give +1.3 at this
+  checkpoint, so the term depends on the drifted state). The 30-year drift is removed
+  because the early years carry most of the integrated nudging; a 3.8 W/m² miss over a
+  decade is 1.2e9 J/m², 0.07 K over the column, deposited mostly in the upper ocean, which
+  is the −0.09 K at thetao_5 in the holdout.
+- Caveat: the surface channel of this arm has the one-step SST noise described below;
+  monthly means are unaffected.
+
 ## One-step SST noise in the from-scratch residual arms (found 2026-10-09)
 
 Troy spotted it in the validation snapshot of the learned-heating residual arm: the
