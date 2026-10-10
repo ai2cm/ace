@@ -15,4 +15,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke81|ace
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke2|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|trained|high|titan|8||0|ai2/ace|seed=0 evaluate_before_training=false|01M49PMA47F833YBJNZM5960W8|1h
 
 # Full run, held until the smoke tests pass.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|train|high|titan|8||3|ai2/ace|seed=0|01M49PMA47F833YBJNZM5960W8|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|ace-samudra-coupled-cm4|ook5crci|best_inference_ckpt|trained|high|titan|8||3|ai2/ace|seed=0|01M49PMA47F833YBJNZM5960W8|8h
