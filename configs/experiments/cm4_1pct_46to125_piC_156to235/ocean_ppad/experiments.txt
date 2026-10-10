@@ -1,0 +1,13 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs1|01M4HEEYG66J2DBGVSVVPKN27S|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs2|01M4HEF9B2ZD39D5YFRK9A080C|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs1|01M4HEG18G10GVQB6ZAMZ10PH0|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs2|01M4HEGC3YTYN1JTB5YCZEYB8C|training|best_inference_ckpt|normal|--min-runtime 8h
