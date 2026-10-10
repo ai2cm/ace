@@ -206,7 +206,7 @@ stepper:
           - 1
           - 2
           - 4
-          - 4  # capped at 4 (was 8 at 1deg): the 4deg bottleneck is 5 cells wide in longitude
+          - 2  # 8 at 1deg, 4 on the earlier 4deg arms; pole padding needs pad <= height and the 4deg bottleneck is 2 rows high (45 -> 22 -> 11 -> 5 -> 2)
           n_layers:
           - 1
           - 1

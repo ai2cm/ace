@@ -1,7 +1,7 @@
 # ff-ohc-ppad: 4deg port of James's new ocean baseline (ace 3cc39915, configs/experiments/cm4_1pct_46to125_piC_156to235/
 # ocean_ppad/train-config.yaml): lat_pad pole, diagnostic SSH, zos global-mean correction, hfds prescribed_open_ocean,
 # corrector_disabled_epochs 1, max_grad_norm 1.0, AM4 forcings masked over land. Only the 4deg zarr paths, the deepest
-# dilation (8 -> 4) and the zos reference change. Full-field control for the hybrid-residual arms in this directory.
+# dilation (8 -> 2, see the dilation comment) and the zos reference change. Full-field control for the hybrid-residual arms in this directory.
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -205,7 +205,7 @@ stepper:
           - 1
           - 2
           - 4
-          - 4  # capped at 4 (was 8 at 1deg): the 4deg bottleneck is 5 cells wide in longitude
+          - 2  # 8 at 1deg, 4 on the earlier 4deg arms; pole padding needs pad <= height and the 4deg bottleneck is 2 rows high (45 -> 22 -> 11 -> 5 -> 2)
           n_layers:
           - 1
           - 1
