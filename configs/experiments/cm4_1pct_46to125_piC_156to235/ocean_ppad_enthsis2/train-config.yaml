@@ -229,6 +229,14 @@ stepper:
     exclude_names_and_prefixes:
       - land_fraction
       - sea_surface_fraction
+      - DLWRFsfc
+      - DSWRFsfc
+      - ULWRFsfc
+      - USWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - total_frozen_precipitation_rate
   step:
     type: single_module
     config:
