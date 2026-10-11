@@ -19,6 +19,7 @@ from fme.ace.aggregator.inference.main import (
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
     RegionalMeanMetricConfig,
+    RegionalTimeMeanMetricConfig,
     SeasonalMetricConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
@@ -247,6 +248,8 @@ class InferenceEvaluatorAggregatorConfig:
         regional_means: Per-step regional (e.g. hemispheric) mean or integral
             series, applied to both components; each component reduces only
             the listed variables it has.
+        regional_time_means: Hemispheric time-mean maps and scalars, applied
+            to both components like regional_means.
     """
 
     log_histograms: bool = False
@@ -259,6 +262,9 @@ class InferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     regional_means: list[RegionalMeanMetricConfig] = dataclasses.field(
+        default_factory=list
+    )
+    regional_time_means: list[RegionalTimeMeanMetricConfig] = dataclasses.field(
         default_factory=list
     )
 
@@ -306,6 +312,7 @@ class InferenceEvaluatorAggregatorConfig:
         if include_nino34 and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS:
             metrics.append(IpoIndexMetricConfig())
         metrics.extend(m for m in self.regional_means if m.enabled)
+        metrics.extend(m for m in self.regional_time_means if m.enabled)
         return metrics
 
     def build(

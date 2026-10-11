@@ -16,7 +16,7 @@ from .main import (
     build_inference_evaluator_aggregator,
 )
 from .reduced import MeanMetricConfig
-from .regional import RegionalMeanMetricConfig
+from .regional import RegionalMeanMetricConfig, RegionalTimeMeanMetricConfig
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig
 from .time_mean import TimeMeanMetricConfig

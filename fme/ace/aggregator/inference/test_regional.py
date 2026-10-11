@@ -15,6 +15,7 @@ from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
+from fme.core.wandb import Image
 
 from .build_context import MetricBuildContext, MetricNotSupportedError
 from .data import InferenceBatchData
@@ -22,7 +23,7 @@ from .main import (
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
 )
-from .regional import RegionalMeanMetricConfig
+from .regional import RegionalMeanMetricConfig, RegionalTimeMeanMetricConfig
 from .utils import hemisphere_weights
 
 
@@ -347,3 +348,167 @@ def test_regional_mean_aggregator_matches_global_reference(reduction):
         logged = torch.tensor([row[column] for row in table.data])
         expected = _hemisphere_reference(global_data, coords, region, reduction)
         torch.testing.assert_close(logged, expected, rtol=1e-4, atol=0)
+
+
+def _record_time_mean_batch(config: RegionalTimeMeanMetricConfig, data: PairedData):
+    ds_info = _latlon_ds_info()
+    agg = config.build(_build_context(ds_info, n_timesteps=data.time.shape[1]))
+    assert agg.aggregator is not None
+    agg.aggregator.record_batch(
+        InferenceBatchData(
+            prediction=data.prediction,
+            prediction_norm=data.prediction,
+            target=data.reference,
+            target_norm=data.reference,
+            time=data.time,
+            i_time_start=0,
+        )
+    )
+    return agg.aggregator, ds_info.horizontal_coordinates
+
+
+def _time_mean_scalars_reference(
+    bias: torch.Tensor, coords: LatLonCoordinates, region: str
+) -> tuple[float, float]:
+    """Hemispheric area-weighted mean and RMS of a (lat, lon) bias map."""
+    mask = coords.lat > 0 if region == "north" else coords.lat <= 0
+    weights = (mask.float().unsqueeze(-1) * coords.area_weights).expand(bias.shape)
+    mean = (weights * bias).sum() / weights.sum()
+    rms = torch.sqrt((weights * bias**2).sum() / weights.sum())
+    return float(mean), float(rms)
+
+
+def test_regional_time_mean_matches_reference():
+    data = _paired_data(["m", "other"])
+    config = RegionalTimeMeanMetricConfig(variables=["m"], lat_min=40.0)
+    agg, coords = _record_time_mean_batch(config, data)
+    logs = agg.get_logs(label="regional_time_mean")
+
+    # initial condition step is excluded from the time mean
+    gen = data.prediction["m"][:, 1:].mean(dim=(0, 1)).cpu()
+    target = data.reference["m"][:, 1:].mean(dim=(0, 1)).cpu()
+    bias = gen - target
+    for region, crop in [
+        ("north", coords.lat > 40.0),
+        ("south", coords.lat < -40.0),
+    ]:
+        expected_bias, expected_rmse = _time_mean_scalars_reference(
+            bias, coords, region
+        )
+        prefix = "regional_time_mean"
+        assert logs[f"{prefix}/bias/{region}/m"] == pytest.approx(
+            float(expected_bias), rel=1e-5
+        )
+        assert logs[f"{prefix}/rmse/{region}/m"] == pytest.approx(
+            float(expected_rmse), rel=1e-5
+        )
+        assert isinstance(logs[f"{prefix}/gen_map/{region}/m"], Image)
+        assert isinstance(logs[f"{prefix}/bias_map/{region}/m"], Image)
+        assert int(crop.sum()) == 2
+    assert not any("other" in key for key in logs)
+
+    ds = agg.get_dataset()
+    torch.testing.assert_close(
+        torch.as_tensor(ds["bias_map-north-m"].values),
+        bias[coords.lat > 40.0],
+    )
+    np.testing.assert_allclose(ds["lat_south"].values, [-75.0, -45.0])
+    assert ds["rmse-south-m"].values == pytest.approx(
+        logs["regional_time_mean/rmse/south/m"]
+    )
+
+
+def test_regional_time_mean_no_listed_variables_logs_nothing():
+    config = RegionalTimeMeanMetricConfig(variables=["absent"])
+    agg, _ = _record_time_mean_batch(config, _paired_data(["m"]))
+    assert agg.get_logs(label="regional_time_mean") == {}
+    assert len(agg.get_dataset().data_vars) == 0
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"variables": []}, "non-empty"),
+        ({"variables": ["a"], "regions": ["global"]}, "Unknown regions"),
+        ({"variables": ["a"], "regions": ["north", "north"]}, "unique"),
+        ({"variables": ["a"], "lat_min": 90.0}, "lat_min"),
+    ],
+)
+def test_regional_time_mean_config_validation(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        RegionalTimeMeanMetricConfig(**kwargs)
+
+
+def test_regional_time_mean_healpix_not_supported():
+    ds_info = DatasetInfo(
+        horizontal_coordinates=HEALPixCoordinates(
+            face=torch.arange(12), height=torch.arange(4), width=torch.arange(4)
+        ),
+        timestep=TIMESTEP,
+    )
+    with pytest.raises(MetricNotSupportedError):
+        RegionalTimeMeanMetricConfig(variables=["a"]).build(
+            _build_context(ds_info, n_timesteps=2)
+        )
+
+
+HEMISPHERIC_MAPS_YAML = """
+regional_time_means:
+  - variables: [sea_ice_fraction]
+    lat_min: 40
+"""
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+@pytest.mark.parametrize(
+    "data_class",
+    [InferenceEvaluatorAggregatorConfig, LegacyFlagInferenceEvaluatorAggregatorConfig],
+)
+def test_hemispheric_maps_from_config(tmp_path, data_class):
+    data = yaml.safe_load(HEMISPHERIC_MAPS_YAML)
+    if data_class is LegacyFlagInferenceEvaluatorAggregatorConfig:
+        data["log_step_means"] = []  # default step 20 exceeds the test run
+    config = dacite.from_dict(data_class, data, config=dacite.Config(strict=True))
+    n_time = 3
+    agg = _build_evaluator(config, n_time, output_dir=str(tmp_path))
+    agg.record_batch(_paired_data(["sea_ice_fraction", "other"], n_time=n_time))
+    logs = agg.get_summary_logs()
+    for region in ["north", "south"]:
+        for key in ["gen_map", "bias_map", "bias", "rmse"]:
+            assert f"regional_time_mean/{key}/{region}/sea_ice_fraction" in logs
+    assert not any(k.startswith("regional_time_mean/") and "other" in k for k in logs)
+    agg.flush_diagnostics()
+    ds = xr.open_dataset(tmp_path / "regional_time_mean_diagnostics.nc")
+    assert ds["gen_map-north-sea_ice_fraction"].dims == ("lat_north", "lon")
+    np.testing.assert_allclose(ds["lon"].values, _latlon_coords().lon.numpy())
+
+
+@pytest.mark.parallel
+def test_regional_time_mean_scalars_match_global_reference():
+    dist = Distributed.get_instance()
+    n_sample, n_time, nlat, nlon = 2, 3, 8, 16
+    coords = _latlon_coords(nlat, nlon)
+    ds_info = DatasetInfo(horizontal_coordinates=coords, timestep=TIMESTEP)
+    gen = torch.Generator(device="cpu").manual_seed(0)
+    global_data = torch.randn(n_sample, n_time, nlat, nlon, generator=gen)
+    h_slice, w_slice = dist.get_local_slices((nlat, nlon))
+    local = global_data[..., h_slice, w_slice].to(get_device())
+    config = RegionalTimeMeanMetricConfig(variables=["m"])
+    agg = config.build(_build_context(ds_info, n_timesteps=n_time)).aggregator
+    assert agg is not None
+    agg.record_batch(
+        InferenceBatchData(
+            prediction={"m": local},
+            target={"m": torch.zeros_like(local)},
+            time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="r")
+    bias = global_data[:, 1:].mean(dim=(0, 1))
+    for region in ["north", "south"]:
+        expected_bias, expected_rmse = _time_mean_scalars_reference(
+            bias, coords, region
+        )
+        assert logs[f"r/bias/{region}/m"] == pytest.approx(expected_bias, rel=1e-4)
+        assert logs[f"r/rmse/{region}/m"] == pytest.approx(expected_rmse, rel=1e-4)

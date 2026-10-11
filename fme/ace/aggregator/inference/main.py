@@ -37,7 +37,7 @@ from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .near_zero_fraction import NearZeroFractionMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
-from .regional import RegionalMeanMetricConfig
+from .regional import RegionalMeanMetricConfig, RegionalTimeMeanMetricConfig
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .step_diagnostics import StepDiagnosticsAggregator, StepDiagnosticsMetricConfig
@@ -71,6 +71,7 @@ MetricConfig = (
     | TrendMetricConfig
     | NearZeroFractionMetricConfig
     | RegionalMeanMetricConfig
+    | RegionalTimeMeanMetricConfig
 )
 
 
@@ -234,6 +235,8 @@ class InferenceEvaluatorAggregatorConfig:
             default.
         regional_means: Per-step regional (e.g. hemispheric) mean or integral
             series of selected variables. Empty by default.
+        regional_time_means: Hemispheric time-mean maps (polar-cap crops) and
+            bias/RMSE scalars of selected variables. Empty by default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
         step_diagnostics: Granularity of metrics computed from the step
@@ -293,6 +296,9 @@ class InferenceEvaluatorAggregatorConfig:
     regional_means: list[RegionalMeanMetricConfig] = dataclasses.field(
         default_factory=list
     )
+    regional_time_means: list[RegionalTimeMeanMetricConfig] = dataclasses.field(
+        default_factory=list
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
@@ -339,6 +345,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.trend,
             self.near_zero_fraction,
             *self.regional_means,
+            *self.regional_time_means,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -438,6 +445,9 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     regional_means: list[RegionalMeanMetricConfig] = dataclasses.field(
         default_factory=list
     )
+    regional_time_means: list[RegionalTimeMeanMetricConfig] = dataclasses.field(
+        default_factory=list
+    )
     step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
         default_factory=StepDiagnosticsMetricConfig
     )
@@ -499,6 +509,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         ):
             metrics.append(IpoIndexMetricConfig())
         metrics.extend(m for m in self.regional_means if m.enabled)
+        metrics.extend(m for m in self.regional_time_means if m.enabled)
         return metrics
 
     def build(

@@ -7,7 +7,10 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference import RegionalMeanMetricConfig
+from fme.ace.aggregator.inference import (
+    RegionalMeanMetricConfig,
+    RegionalTimeMeanMetricConfig,
+)
 from fme.ace.aggregator.inference.test_evaluator import get_zero_time
 from fme.ace.aggregator.one_step.main import (
     OneStepAggregatorConfig,
@@ -433,3 +436,43 @@ def test_inference_regional_means_reduce_each_component_variable(tmpdir):
     for component_dir, name in [("ocean", "ocean_var"), ("atmosphere", "atmos_var")]:
         ds = xr.open_dataset(output_dir / component_dir / "regional_sum_diagnostics.nc")
         assert f"weighted_sum_bias-south-{name}" in ds.data_vars
+
+
+def test_inference_regional_time_means_map_each_component_variable(tmpdir):
+    n_sample, n_time, nx, ny = 2, 3, 4, 4
+    config = InferenceEvaluatorAggregatorConfig(
+        regional_time_means=[
+            RegionalTimeMeanMetricConfig(
+                variables=["ocean_var", "atmos_var"], lat_min=1.0
+            )
+        ],
+    )
+    agg = config.build(
+        dataset_info=_coupled_ds_info(nx, ny),
+        n_timesteps_ocean=n_time,
+        n_timesteps_atmosphere=n_time,
+        initial_time=get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),
+        ocean_normalize=lambda x, apply_mean=True: dict(x),
+        atmosphere_normalize=lambda x, apply_mean=True: dict(x),
+        output_dir=str(tmpdir),
+    )
+    time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
+
+    def component(name: str) -> PairedData:
+        return PairedData.new_on_device(
+            prediction={name: torch.randn(n_sample, n_time, ny, nx)},
+            reference={name: torch.randn(n_sample, n_time, ny, nx)},
+            time=time,
+            labels=None,
+        )
+
+    agg.record_batch(
+        CoupledPairedData(
+            ocean_data=component("ocean_var"),
+            atmosphere_data=component("atmos_var"),
+        )
+    )
+    logs = agg.get_summary_logs()
+    for name in ["ocean_var", "atmos_var"]:
+        assert f"regional_time_mean/gen_map/north/{name}" in logs
+        assert f"regional_time_mean/rmse/south/{name}" in logs
