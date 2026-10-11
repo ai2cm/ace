@@ -14,6 +14,7 @@ from fme.ace.aggregator.inference.main import (
 )
 from fme.ace.aggregator.inference.near_zero_fraction import NearZeroFractionMetricConfig
 from fme.ace.aggregator.inference.reduced import MeanMetricConfig
+from fme.ace.aggregator.inference.regional import RegionalMeanMetricConfig
 from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
 from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
 from fme.ace.aggregator.inference.step_diagnostics import StepDiagnosticsMetricConfig

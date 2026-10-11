@@ -37,6 +37,7 @@ from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .near_zero_fraction import NearZeroFractionMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
+from .regional import RegionalMeanMetricConfig
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .step_diagnostics import StepDiagnosticsAggregator, StepDiagnosticsMetricConfig
@@ -69,6 +70,7 @@ MetricConfig = (
     | IpoIndexMetricConfig
     | TrendMetricConfig
     | NearZeroFractionMetricConfig
+    | RegionalMeanMetricConfig
 )
 
 
@@ -134,7 +136,11 @@ def build_inference_evaluator_aggregator(
 
     metrics = list(metrics)
     if not enable_time_series:
-        metrics = [m for m in metrics if not isinstance(m, MeanMetricConfig)]
+        metrics = [
+            m
+            for m in metrics
+            if not isinstance(m, MeanMetricConfig | RegionalMeanMetricConfig)
+        ]
 
     aggregators: dict[str, SubAggregator] = {}
     time_series_aggregators: dict[str, TimeSeriesLogs] = {}
@@ -225,6 +231,8 @@ class InferenceEvaluatorAggregatorConfig:
             logs side-by-side generated/target maps of the per-cell
             at-or-below-``eps`` fraction and the error map. Disabled by
             default.
+        regional_means: Per-step regional (e.g. hemispheric) mean or integral
+            series of selected variables. Empty by default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
         step_diagnostics: Granularity of metrics computed from the step
@@ -281,6 +289,9 @@ class InferenceEvaluatorAggregatorConfig:
     near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
         default_factory=NearZeroFractionMetricConfig
     )
+    regional_means: list[RegionalMeanMetricConfig] = dataclasses.field(
+        default_factory=list
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
@@ -326,6 +337,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.ipo_index,
             self.trend,
             self.near_zero_fraction,
+            *self.regional_means,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -422,6 +434,9 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     log_step_means: list[StepMeanEntry] = dataclasses.field(
         default_factory=lambda: [StepMeanEntry(step=20)]
     )
+    regional_means: list[RegionalMeanMetricConfig] = dataclasses.field(
+        default_factory=list
+    )
     step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
         default_factory=StepDiagnosticsMetricConfig
     )
@@ -482,6 +497,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             and isinstance(horizontal_coordinates, LatLonCoordinates)
         ):
             metrics.append(IpoIndexMetricConfig())
+        metrics.extend(m for m in self.regional_means if m.enabled)
         return metrics
 
     def build(

@@ -7,6 +7,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.aggregator.inference import RegionalMeanMetricConfig
 from fme.ace.aggregator.inference.test_evaluator import get_zero_time
 from fme.ace.aggregator.one_step.main import (
     OneStepAggregatorConfig,
@@ -389,3 +390,46 @@ def test_one_step_aggregator_config_reaches_both_sub_aggregators():
     # sanity check: the disabled keys are exactly the ones present by default
     default_logs = _one_step_summary_logs(config=None)
     assert any(key.startswith("val/snapshot/") for key in default_logs)
+
+
+def test_inference_regional_means_reduce_each_component_variable(tmpdir):
+    n_sample, n_time, nx, ny = 2, 3, 4, 4
+    config = InferenceEvaluatorAggregatorConfig(
+        regional_means=[
+            RegionalMeanMetricConfig(
+                variables=["ocean_var", "atmos_var"], reduction="sum"
+            )
+        ],
+    )
+    output_dir = pathlib.Path(tmpdir)
+    agg = config.build(
+        dataset_info=_coupled_ds_info(nx, ny),
+        n_timesteps_ocean=n_time,
+        n_timesteps_atmosphere=n_time,
+        initial_time=get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),
+        ocean_normalize=lambda x, apply_mean=True: dict(x),
+        atmosphere_normalize=lambda x, apply_mean=True: dict(x),
+        output_dir=str(output_dir),
+    )
+    time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
+
+    def component(name: str) -> PairedData:
+        return PairedData.new_on_device(
+            prediction={name: torch.randn(n_sample, n_time, ny, nx)},
+            reference={name: torch.randn(n_sample, n_time, ny, nx)},
+            time=time,
+            labels=None,
+        )
+
+    logs = agg.record_batch(
+        CoupledPairedData(
+            ocean_data=component("ocean_var"),
+            atmosphere_data=component("atmos_var"),
+        )
+    )
+    for name in ["ocean_var", "atmos_var"]:
+        assert f"regional_sum/north/weighted_sum_gen/{name}" in logs[0]
+    agg.flush_diagnostics()
+    for component_dir, name in [("ocean", "ocean_var"), ("atmosphere", "atmos_var")]:
+        ds = xr.open_dataset(output_dir / component_dir / "regional_sum_diagnostics.nc")
+        assert f"weighted_sum_bias-south-{name}" in ds.data_vars

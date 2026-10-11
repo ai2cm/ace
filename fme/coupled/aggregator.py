@@ -18,6 +18,7 @@ from fme.ace.aggregator.inference.main import (
     IpoIndexMetricConfig,
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
+    RegionalMeanMetricConfig,
     SeasonalMetricConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
@@ -243,6 +244,9 @@ class InferenceEvaluatorAggregatorConfig:
             This should include both ocean and atmosphere variables.
         time_mean_reference_data: Path to reference time means to compare against.
             This should include both ocean and atmosphere variables.
+        regional_means: Per-step regional (e.g. hemispheric) mean or integral
+            series, applied to both components; each component reduces only
+            the listed variables it has.
     """
 
     log_histograms: bool = False
@@ -254,6 +258,9 @@ class InferenceEvaluatorAggregatorConfig:
     log_global_mean_norm_time_series: bool = True
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    regional_means: list[RegionalMeanMetricConfig] = dataclasses.field(
+        default_factory=list
+    )
 
     def _build_metrics(
         self,
@@ -298,6 +305,7 @@ class InferenceEvaluatorAggregatorConfig:
             metrics.append(EnsoCoefficientMetricConfig())
         if include_nino34 and n_timesteps * timestep > APPROXIMATELY_EIGHTY_YEARS:
             metrics.append(IpoIndexMetricConfig())
+        metrics.extend(m for m in self.regional_means if m.enabled)
         return metrics
 
     def build(
