@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b1|rs0|01M4NW7P8EWF2Q5VGS5ZWMMP1X|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b2|rs0|01M4NW81NE0ENMA11WDWJ19ZXD|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b3|rs0|01M4NW8D5Q1Y0X4KNZQCJY01TZ|training|best_inference_ckpt|normal|--min-runtime 8h
