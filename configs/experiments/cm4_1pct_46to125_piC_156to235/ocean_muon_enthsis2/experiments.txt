@@ -5,3 +5,5 @@ cm4_1pct_46to125_piC_156to235-ocean_muon_enthsis2_am4b2|rs0|01M4MEY6F5YMR0YB8PZR
 cm4_1pct_46to125_piC_156to235-ocean_muon_enthsis2_am4b3|rs0|01M4MEYHZ49EX1V5Z9A09BXFP8|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_muon_enthsis2|rs0|01M4MEYX82JZW42PAQTPT5QFWZ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_muon_enthsis2_am4b1|rs0|01M4MFRDR68R8736J8KRSDV900|training|best_inference_ckpt|normal|--min-runtime 8h
