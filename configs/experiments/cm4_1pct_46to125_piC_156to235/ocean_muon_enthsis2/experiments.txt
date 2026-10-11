@@ -1,1 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+cm4_1pct_46to125_piC_156to235-ocean_muon_enthsis2_am4b2|rs0|01M4MEY6F5YMR0YB8PZR9YD6RP|training|best_inference_ckpt|normal|--min-runtime 8h
