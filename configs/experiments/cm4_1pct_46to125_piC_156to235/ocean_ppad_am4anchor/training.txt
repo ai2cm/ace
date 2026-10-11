@@ -1,7 +1,7 @@
 group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_am4anchor_b1|rs0|training|high|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=1|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_am4anchor_b1|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=1|8h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_am4anchor_b2|rs0|training|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=2|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_am4anchor_b2|rs0|train|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=2|8h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_am4anchor_b3|rs0|training|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=3|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_am4anchor_b3|rs0|train|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=3|8h
