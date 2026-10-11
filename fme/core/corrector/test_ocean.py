@@ -32,6 +32,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
+from fme.core.ocean_derived_variables import frozen_enthalpy_budget_residual
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
@@ -1425,6 +1426,35 @@ def test_form_a_sis2_closes_hemispheric_budget(weight):
         hfds,
     )
     S = _support(input_data, gen_data, forcing_data)
+    area = _ICE_AREA.double() * forcing_data["sea_surface_fraction"].double()
+    scale = (area * r.abs()).sum()
+    for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
+        on = S & hemi[:, None]
+        X = (torch.where(on, r, 0.0) * area).sum(dim=(-2, -1))
+        assert torch.all(X.abs() < 1e-5 * scale), X
+
+
+def test_frozen_enthalpy_budget_residual_closes_after_correction():
+    """The derived residual of corrected data closes over the corrector support
+    per hemisphere, weighted a ssf like the corrector; the physical integral
+    sum a r does not close where ssf < 1 (coastal cell in _ice_case).
+    """
+    input_data, gen_data, forcing_data = _ice_case()
+    out = _ice_corrector()(
+        _to_device(input_data), _to_device(gen_data), _to_device(forcing_data), None
+    ).corrected
+    corrected = {**gen_data, "hfds_total_area": out["hfds_total_area"].cpu()}
+    steps = ({**forcing_data, **gen_data, **input_data}, {**forcing_data, **corrected})
+    series = {k: torch.stack([s[k] for s in steps], dim=1).double() for k in steps[1]}
+    r = frozen_enthalpy_budget_residual(OceanData(series), _DT)[:, 1]
+    S = _support(input_data, gen_data, forcing_data)
+    r_c = _residual(
+        {k: v.double() for k, v in input_data.items()},
+        {k: v.double() for k, v in corrected.items()},
+        {k: v.double() for k, v in forcing_data.items()},
+        corrected["hfds_total_area"].double(),
+    )
+    torch.testing.assert_close(torch.where(S, r, 0.0), torch.where(S, r_c, 0.0))
     area = _ICE_AREA.double() * forcing_data["sea_surface_fraction"].double()
     scale = (area * r.abs()).sum()
     for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):

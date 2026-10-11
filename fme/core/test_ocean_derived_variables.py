@@ -4,12 +4,14 @@ import math
 import pytest
 import torch
 
+from fme.core import ocean_derived_variables
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
+from fme.core.corrector.ocean import SIS2_LATENT_HEAT_OF_FUSION, sis2_ice_deficit
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
     _compute_ocean_derived_variable,
@@ -369,3 +371,98 @@ def test_sea_ice_thickness_derived_variable(case):
         equal_nan=True,
         msg="Recovered sea ice thickness should match original",
     )
+
+
+FROZEN_DERIVED_NAMES = (
+    "frozen_enthalpy_budget_residual",
+    "frozen_mass_tendency",
+    "frozen_enthalpy_budget_residual_off_support",
+    "frozen_enthalpy_storage_tendency",
+)
+_TEMPS = ["T1", "T2", "T3", "T4"]
+
+
+def _frozen_budget_case() -> TensorDict:
+    """Two steps (dim 1) of four cells (last dim): on the corrector support,
+    freeze-up (m(k-1) = 0), melt-out (m(k) = 0), ice-free.
+    """
+    shape = (1, 2, 1, 4)
+    g = torch.Generator().manual_seed(0)
+
+    def r(lo, hi):
+        return lo + (hi - lo) * torch.rand(shape, generator=g, dtype=torch.float64)
+
+    m = r(100.0, 900.0)
+    m[0, 0, 0, 1] = 0.0
+    m[0, 1, 0, 2] = 0.0
+    m[0, :, 0, 3] = 0.0
+    return {
+        "frozen_mass_total_area": m,
+        **{n: r(-15.0, -1.0) for n in _TEMPS},
+        "hfds_total_area": r(-50.0, 50.0),
+        "SNOWFL_total_area": r(0.0, 1e-5),
+        "SW_total_area": r(0.0, 100.0),
+        "LW_total_area": r(-80.0, -20.0),
+        "LH_total_area": r(-5.0, 5.0),
+        "SH_total_area": r(-20.0, 20.0),
+        "calving_residue_total_area": r(-5.0, 5.0),
+        "hfrunoffds": r(0.0, 1.0),
+        "sea_surface_fraction": torch.full(shape, 0.8, dtype=torch.float64),
+    }
+
+
+def _derive_frozen(data: TensorDict) -> TensorDict:
+    for name in FROZEN_DERIVED_NAMES:
+        data = _compute_ocean_derived_variable(
+            data, None, TIMESTEP, name, getattr(ocean_derived_variables, name)
+        )
+    return data
+
+
+def test_frozen_enthalpy_derived_variables():
+    data = _frozen_budget_case()
+    out = _derive_frozen(data)
+    dt = TIMESTEP.total_seconds()
+    m = data["frozen_mass_total_area"]
+    D = torch.where(
+        m > 0,
+        sis2_ice_deficit([data[n] for n in _TEMPS]),
+        torch.full_like(m, SIS2_LATENT_HEAT_OF_FUSION),
+    )
+    storage = (m[:, 1] * D[:, 1] - m[:, 0] * D[:, 0]) / dt
+    S = (
+        data["hfds_total_area"]
+        + SIS2_LATENT_HEAT_OF_FUSION * data["SNOWFL_total_area"]
+        - data["SW_total_area"]
+        - data["LW_total_area"]
+        + data["LH_total_area"]
+        + data["SH_total_area"]
+        + data["calving_residue_total_area"]
+        - data["hfrunoffds"] * data["sea_surface_fraction"]
+    )[:, 1]
+    r = S - storage
+    zero = torch.zeros_like(r[..., :1])
+    for name in FROZEN_DERIVED_NAMES:
+        torch.testing.assert_close(out[name][:, 0], torch.zeros_like(m[:, 0]))
+    torch.testing.assert_close(out["frozen_enthalpy_storage_tendency"][:, 1], storage)
+    torch.testing.assert_close(
+        out["frozen_mass_tendency"][:, 1], (m[:, 1] - m[:, 0]) / dt
+    )
+    torch.testing.assert_close(
+        out["frozen_enthalpy_budget_residual"][:, 1],
+        torch.cat([r[..., :3], zero], dim=-1),
+    )
+    torch.testing.assert_close(
+        out["frozen_enthalpy_budget_residual_off_support"][:, 1],
+        torch.cat([zero, r[..., 1:3], zero], dim=-1),
+    )
+
+
+def test_frozen_enthalpy_derived_variables_skip_without_inputs():
+    data = _frozen_budget_case()
+    del data["calving_residue_total_area"]
+    out = _derive_frozen(data)
+    assert "frozen_enthalpy_budget_residual" not in out
+    assert "frozen_enthalpy_budget_residual_off_support" not in out
+    assert "frozen_enthalpy_storage_tendency" in out
+    assert "frozen_mass_tendency" in out
