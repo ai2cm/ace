@@ -1,3 +1,6 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-cm4_1pct_46to125_piC_156to235-ocean_enthice_sis2forcing|rs0|01M4D5WJYEVK2XKMGJTNAHXVVQ|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config_dir configs/experiments/cm4_eval/ocean
+
+cm4_1pct_46to125_piC_156to235-ocean_enthice_sis2forcing|rs0|01M4D5WJYEVK2XKMGJTNAHXVVQ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_enthice_sis2forcing|rs0|01M4D5WJYEVK2XKMGJTNAHXVVQ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
