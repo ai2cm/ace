@@ -201,6 +201,38 @@ class GriddedOperations(abc.ABC):
         return result
 
     @abc.abstractmethod
+    def regional_area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        """Sum of regional_weights * area_weights * data over horizontal dims.
+
+        Area weights are normalized to sum to 1 over the sphere, so multiply by
+        the sphere area to integrate in physical units.
+        """
+        ...
+
+    @final
+    def regional_area_weighted_sum_dict(
+        self,
+        data: TensorMapping,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+    ) -> TensorDict:
+        result = {}
+        for name in data:
+            result[name] = self.regional_area_weighted_sum(
+                data=data[name],
+                regional_weights=regional_weights,
+                keepdim=keepdim,
+                name=name,
+            )
+        return result
+
+    @abc.abstractmethod
     def get_real_sht(
         self,
     ) -> nn.Module: ...
@@ -370,6 +402,19 @@ class LatLonOperations(GriddedOperations):
             data, regional_area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
         )
 
+    def regional_area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        regional_area_weights = self._get_area_weights(data, name, regional_weights)
+        local_sum = metrics.weighted_sum(
+            data, regional_area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+        return Distributed.get_instance().spatial_reduce_sum(local_sum)
+
     def area_weighted_gradient_magnitude_percent_diff(
         self,
         truth: torch.Tensor,
@@ -514,6 +559,17 @@ class HEALPixOperations(GriddedOperations):
     ) -> torch.Tensor:
         raise NotImplementedError(
             "Regional area weighted mean is not implemented for HEALPix."
+        )
+
+    def regional_area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        raise NotImplementedError(
+            "Regional area weighted sum is not implemented for HEALPix."
         )
 
     def get_real_sht(self) -> nn.Module:

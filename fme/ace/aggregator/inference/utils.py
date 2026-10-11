@@ -2,13 +2,17 @@ import abc
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.coordinates import HorizontalCoordinates
+from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.device import get_device
+
+from .build_context import MetricNotSupportedError
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
 
@@ -41,6 +45,33 @@ class LatLonRegion(Region):
     @property
     def regional_weights(self) -> torch.Tensor:
         return self._regional_weights
+
+
+Hemisphere = Literal["north", "south"]
+
+
+def hemisphere_weights(
+    horizontal_coordinates: HorizontalCoordinates, hemisphere: Hemisphere
+) -> torch.Tensor:
+    """Mask-only regional weights of shape (local lat, 1) on this rank's rows.
+
+    north: lat > 0, south: lat <= 0, matching the ocean corrector's split.
+    Unlike LatLonRegion, no cos(lat) factor, so combined with area weights in
+    GriddedOperations.regional_area_weighted_* the weighting is by cell area.
+    """
+    try:
+        lat = horizontal_coordinates.localize().lat_1d
+    except MissingDatasetInfo as err:
+        raise MetricNotSupportedError(
+            f"Hemisphere weights need 1D latitudes: {err}"
+        ) from err
+    if hemisphere == "north":
+        mask = lat > 0
+    elif hemisphere == "south":
+        mask = lat <= 0
+    else:
+        raise ValueError(f"Unknown hemisphere: {hemisphere!r}")
+    return mask.to(torch.float32).unsqueeze(-1)
 
 
 def compute_power_spectrum_by_sample(

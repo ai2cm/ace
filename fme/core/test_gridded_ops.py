@@ -4,7 +4,10 @@ import pytest
 import torch
 
 from fme.core import get_device, set_seed
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.metrics import spherical_area_weights
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
 
@@ -194,3 +197,61 @@ def test_latlon_operations_init_decouples_memory():
     ops = LatLonOperations(area_weights=weights)
     weights.fill_(999.0)
     assert ops._cpu_area_global.max().item() < 1.0
+
+
+def test_latlon_regional_area_weighted_sum_dict():
+    ops = LatLonOperations(area_weights=torch.ones(4, 5))
+    regional_weights = torch.tensor([[1.0], [1.0], [0.0], [0.0]])
+    data_dict: TensorMapping = {
+        "var1": torch.randn(2, 4, 5),
+        "var2": torch.randn(2, 4, 5),
+    }
+    result = ops.regional_area_weighted_sum_dict(data_dict, regional_weights)
+    assert set(result.keys()) == {"var1", "var2"}
+    for var_name, data in data_dict.items():
+        torch.testing.assert_close(result[var_name], data[..., :2, :].sum(dim=(-2, -1)))
+
+
+def test_latlon_regional_area_weighted_sum_drops_masked_nans():
+    mask = torch.ones(4, 5)
+    mask[0, 0] = 0.0
+    ops = LatLonOperations(
+        area_weights=torch.ones(4, 5),
+        spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+    )
+    data = torch.randn(2, 4, 5)
+    data[..., 0, 0] = float("nan")
+    regional_weights = torch.tensor([[1.0], [1.0], [0.0], [0.0]])
+    result = ops.regional_area_weighted_sum(data, regional_weights, name="var")
+    expected = torch.nan_to_num(data[..., :2, :]).sum(dim=(-2, -1))
+    torch.testing.assert_close(result, expected)
+
+
+def test_healpix_regional_area_weighted_sum_not_implemented():
+    with pytest.raises(NotImplementedError):
+        HEALPixOperations().regional_area_weighted_sum(
+            torch.randn(12, 4, 4), torch.ones(12, 4, 4)
+        )
+
+
+@pytest.mark.parallel
+def test_latlon_regional_area_weighted_sum_matches_global_reference():
+    dist = Distributed.get_instance()
+    device = get_device()
+    nlat, nlon = 8, 16
+    lat = torch.linspace(-78.75, 78.75, nlat)
+    global_area = spherical_area_weights(lat, nlon)
+    global_regional = (lat > 0).float().unsqueeze(-1)
+    gen = torch.Generator(device="cpu").manual_seed(0)
+    global_data = torch.randn(2, 3, nlat, nlon, generator=gen)
+    expected = (global_regional * global_area * global_data).sum(dim=(-2, -1))
+
+    ops = LatLonOperations(area_weights=global_area)
+    h_slice, w_slice = dist.get_local_slices((nlat, nlon))
+    local_data = global_data[..., h_slice, w_slice].to(device)
+    local_regional = global_regional[h_slice].to(device)
+    result = ops.regional_area_weighted_sum(local_data, local_regional)
+    torch.testing.assert_close(result.cpu(), expected)
+
+    complement = ops.regional_area_weighted_sum(local_data, 1.0 - local_regional)
+    torch.testing.assert_close(result + complement, ops.area_weighted_sum(local_data))
