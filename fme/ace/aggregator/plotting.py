@@ -1,5 +1,7 @@
-from typing import Any
+from typing import Any, Literal
 
+import cartopy.crs as ccrs
+import matplotlib.path as mpath
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -158,6 +160,84 @@ def plot_paneled_data(
     wandb_image = wandb.Image(fig, caption=caption)
     plt.close(fig)
 
+    return wandb_image
+
+
+POLAR_PANEL_INCHES = 3.5
+
+
+def _close_longitude_seam(
+    lon: np.ndarray, data: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Append the first column at lon[0] + 360 when lon spans the full circle."""
+    if len(lon) < 2:
+        return lon, data
+    dlon = lon[1] - lon[0]
+    if not np.isclose(lon[-1] + dlon - lon[0], 360.0):
+        return lon, data
+    return np.append(lon, lon[0] + 360.0), np.concatenate([data, data[:, :1]], axis=1)
+
+
+def plot_polar_paneled_data(
+    data: list[list[np.ndarray]],
+    lat: np.ndarray,
+    lon: np.ndarray,
+    hemisphere: Literal["north", "south"],
+    lat_min: float,
+    diverging: bool,
+    caption: str | None = None,
+) -> Image:
+    """Plot (lat, lon) panels on a polar stereographic cap poleward of lat_min.
+
+    Panels share one color scale. ``lat`` and ``lon`` are the 1D cell-center
+    coordinates of every panel in degrees. No coastlines are drawn, since
+    cartopy would download them at plot time.
+    """
+    vmin, vmax = get_cmap_limits(np.stack([a for row in data for a in row]), diverging)
+    if not vmin <= vmax:  # all data is nan
+        vmin, vmax = 0.0, 0.0
+    caption = "" if caption is None else caption + " "
+    caption += f"vmin={vmin:.4g}, vmax={vmax:.4g}."
+    if hemisphere == "north":
+        projection: ccrs.Projection = ccrs.NorthPolarStereo()
+        extent = [-180.0, 180.0, lat_min, 90.0]
+    else:
+        projection = ccrs.SouthPolarStereo()
+        extent = [-180.0, 180.0, -90.0, -lat_min]
+    theta = np.linspace(0, 2 * np.pi, 100)
+    circle = mpath.Path(np.stack([np.sin(theta), np.cos(theta)], axis=1) * 0.5 + 0.5)
+
+    n_rows, n_cols = len(data), len(data[0])
+    fig = Figure(
+        figsize=(POLAR_PANEL_INCHES * n_cols + 1.0, POLAR_PANEL_INCHES * n_rows)
+    )
+    mesh = None
+    axes = []
+    for i, row in enumerate(data):
+        if len(row) != n_cols:
+            raise ValueError("All rows must have the same number of panels.")
+        for j, arr in enumerate(row):
+            ax = fig.add_subplot(
+                n_rows, n_cols, i * n_cols + j + 1, projection=projection
+            )
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+            ax.set_boundary(circle, transform=ax.transAxes)
+            ax.gridlines(linewidth=0.5, color="gray", alpha=0.5)
+            panel_lon, panel = _close_longitude_seam(lon, arr)
+            mesh = ax.pcolormesh(
+                panel_lon,
+                lat,
+                np.ma.masked_invalid(panel),
+                transform=ccrs.PlateCarree(),
+                cmap="RdBu_r" if diverging else None,
+                vmin=vmin,
+                vmax=vmax,
+                shading="nearest",
+            )
+            axes.append(ax)
+    fig.colorbar(mesh, ax=axes, orientation="vertical", shrink=0.8)
+    wandb_image = WandB.get_instance().Image(fig, caption=caption)
+    plt.close(fig)
     return wandb_image
 
 

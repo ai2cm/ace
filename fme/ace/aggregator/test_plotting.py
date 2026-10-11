@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 
 from .plotting import (
+    POLAR_PANEL_INCHES,
+    _close_longitude_seam,
     _stitch_data_panels,
     clamp_date_axis,
     fold_healpix_data,
@@ -13,6 +15,7 @@ from .plotting import (
     get_cmap_limits,
     plot_imshow,
     plot_paneled_data,
+    plot_polar_paneled_data,
     plot_power_spectrum_by_period,
 )
 
@@ -117,6 +120,59 @@ def test_plot_paneled_data(shape, img_shape):
     fig = plot_paneled_data(data, diverging=True)
     assert fig.image is not None
     assert np.array_equal(fig.image.size, img_shape)
+
+
+@pytest.mark.parametrize(
+    "hemisphere, lat",
+    [
+        ("north", np.array([45.0, 60.0, 75.0])),
+        ("south", np.array([-75.0, -60.0, -45.0])),
+    ],
+)
+@pytest.mark.parametrize("diverging", [False, True])
+def test_plot_polar_paneled_data(hemisphere, lat, diverging):
+    lon = np.arange(0.0, 360.0, 45.0)
+    panel = np.random.uniform(size=(len(lat), len(lon)))
+    panel[0, 0] = np.nan  # e.g. land
+    image = plot_polar_paneled_data(
+        [[panel], [panel]],
+        lat=lat,
+        lon=lon,
+        hemisphere=hemisphere,
+        lat_min=40.0,
+        diverging=diverging,
+        caption="m",
+    )
+    assert image.image is not None
+    dpi = plt.rcParams["figure.dpi"]
+    width, height = image.image.size
+    assert height == pytest.approx(2 * POLAR_PANEL_INCHES * dpi, abs=2)
+    assert width > POLAR_PANEL_INCHES * dpi
+    assert str(image._caption).startswith("m vmin=")
+
+
+def test_plot_polar_paneled_data_all_nan():
+    lat, lon = np.array([50.0, 70.0]), np.arange(0.0, 360.0, 90.0)
+    image = plot_polar_paneled_data(
+        [[np.full((2, 4), np.nan)]],
+        lat=lat,
+        lon=lon,
+        hemisphere="north",
+        lat_min=40.0,
+        diverging=True,
+    )
+    assert image._caption == "vmin=0, vmax=0."
+
+
+def test_close_longitude_seam_full_circle_only():
+    data = np.arange(8.0).reshape(2, 4)
+    lon, closed = _close_longitude_seam(np.arange(0.0, 360.0, 90.0), data)
+    np.testing.assert_array_equal(lon, [0.0, 90.0, 180.0, 270.0, 360.0])
+    np.testing.assert_array_equal(closed[:, -1], data[:, 0])
+    partial_lon = np.array([0.0, 90.0])  # one rank's chunk
+    lon, same = _close_longitude_seam(partial_lon, data[:, :2])
+    np.testing.assert_array_equal(lon, partial_lon)
+    np.testing.assert_array_equal(same, data[:, :2])
 
 
 def test_clamp_date_axis_allows_a_140_year_series_starting_at_year_0001():

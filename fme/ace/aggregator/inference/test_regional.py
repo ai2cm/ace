@@ -418,6 +418,24 @@ def test_regional_time_mean_matches_reference():
     )
 
 
+def test_regional_time_mean_polar_projection_logs_images():
+    config = RegionalTimeMeanMetricConfig(
+        variables=["m"], lat_min=40.0, projection="polar"
+    )
+    agg, _ = _record_time_mean_batch(config, _paired_data(["m"]))
+    logs = agg.get_logs(label="regional_time_mean")
+    for region in ["north", "south"]:
+        for key in ["gen_map", "bias_map"]:
+            image = logs[f"regional_time_mean/{key}/{region}/m"]
+            assert isinstance(image, Image)
+            assert image.image is not None
+    crop_logs = RegionalTimeMeanMetricConfig(variables=["m"], lat_min=40.0)
+    crop_agg, _ = _record_time_mean_batch(crop_logs, _paired_data(["m"]))
+    crop_image = crop_agg.get_logs(label="r")["r/bias_map/north/m"]
+    polar_image = logs["regional_time_mean/bias_map/north/m"]
+    assert polar_image.image.size != crop_image.image.size
+
+
 def test_regional_time_mean_no_listed_variables_logs_nothing():
     config = RegionalTimeMeanMetricConfig(variables=["absent"])
     agg, _ = _record_time_mean_batch(config, _paired_data(["m"]))
@@ -432,6 +450,7 @@ def test_regional_time_mean_no_listed_variables_logs_nothing():
         ({"variables": ["a"], "regions": ["global"]}, "Unknown regions"),
         ({"variables": ["a"], "regions": ["north", "north"]}, "unique"),
         ({"variables": ["a"], "lat_min": 90.0}, "lat_min"),
+        ({"variables": ["a"], "projection": "mercator"}, "projection"),
     ],
 )
 def test_regional_time_mean_config_validation(kwargs, match):

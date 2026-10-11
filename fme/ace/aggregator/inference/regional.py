@@ -17,7 +17,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
-from ..plotting import plot_paneled_data
+from ..plotting import plot_paneled_data, plot_polar_paneled_data
 from .build_context import MetricBuildContext, MetricNotSupportedError
 from .data import InferenceBatchData, MetricBuildResult
 from .reduced import (
@@ -36,6 +36,7 @@ from .utils import Hemisphere, hemisphere_weights
 
 Region = Literal["global", "north", "south"]
 Reduction = Literal["mean", "sum"]
+Projection = Literal["crop", "polar"]
 SPHERE_AREA_M2 = 4 * math.pi * EARTH_RADIUS**2
 
 Reduce = AreaWeightedSingleTargetFunction
@@ -283,7 +284,8 @@ class RegionalTimeMeanAggregator:
     """Time-mean maps cropped to polar caps, with hemispheric scalars.
 
     Maps show this rank's local rows with lat > lat_min (north) or
-    lat < -lat_min (south). Scalars reduce the time-mean bias over the whole
+    lat < -lat_min (south), as a plate carree crop or on a polar stereographic
+    cap. Scalars reduce the time-mean bias over the whole
     hemisphere (north: lat > 0, south: lat <= 0) with masked cell-area weights.
     Variables absent from a batch are skipped.
     """
@@ -299,14 +301,18 @@ class RegionalTimeMeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         lat: torch.Tensor,
+        lon: torch.Tensor,
         regional_weights: Mapping[Hemisphere, torch.Tensor],
         horizontal_dims: Sequence[str],
         variables: Sequence[str],
         lat_min: float,
+        projection: Projection = "crop",
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._ops = gridded_operations
         self._lat = lat.cpu()
+        self._lon = lon.cpu()
+        self._projection = projection
         self._regional_weights = dict(regional_weights)
         self._horizontal_dims = list(horizontal_dims)
         self._variables = sorted(set(variables))
@@ -357,6 +363,25 @@ class RegionalTimeMeanAggregator:
         mean_square = self._ops.regional_area_weighted_mean(bias**2, weights, name=name)
         return float(mean_bias), float(torch.sqrt(mean_square))
 
+    def _plot(
+        self,
+        panels: list[list[np.ndarray]],
+        region: Hemisphere,
+        diverging: bool,
+        caption: str,
+    ) -> Image:
+        if self._projection == "crop":
+            return plot_paneled_data(panels, diverging=diverging, caption=caption)
+        return plot_polar_paneled_data(
+            panels,
+            lat=self._lat[self._crop_rows(region)].numpy(),
+            lon=self._lon.numpy(),
+            hemisphere=region,
+            lat_min=self._lat_min,
+            diverging=diverging,
+            caption=caption,
+        )
+
     def _get_maps(self) -> tuple[TensorDict, TensorDict]:
         return self._gen_agg.get_data(), self._target_agg.get_data()
 
@@ -376,16 +401,18 @@ class RegionalTimeMeanAggregator:
                 if not rows.any():  # this rank's chunk lies outside the cap
                     continue
                 rows_device = rows.to(bias.device)
-                logs[f"gen_map/{region}/{name}"] = plot_paneled_data(
+                logs[f"gen_map/{region}/{name}"] = self._plot(
                     [
                         [gen[name][rows_device].cpu().numpy()],
                         [target[name][rows_device].cpu().numpy()],
                     ],
+                    region,
                     diverging=False,
                     caption=self._caption("gen_map", name, region),
                 )
-                logs[f"bias_map/{region}/{name}"] = plot_paneled_data(
+                logs[f"bias_map/{region}/{name}"] = self._plot(
                     [[bias[rows_device].cpu().numpy()]],
+                    region,
                     diverging=True,
                     caption=self._caption("bias_map", name, region),
                 )
@@ -429,9 +456,10 @@ class RegionalTimeMeanMetricConfig:
     Time-mean generated and bias maps of ``variables`` cropped to polar caps,
     plus hemispheric bias and RMSE of the time mean. Needs a lat/lon grid.
 
-    Maps are plate carree crops of lat > lat_min (north) or lat < -lat_min
-    (south), logged as ``<name>/gen_map/<region>/<variable>`` (generated over
-    target) and ``<name>/bias_map/<region>/<variable>``. Scalars
+    Maps cover lat > lat_min (north) or lat < -lat_min (south), drawn as a
+    plate carree crop (``projection: crop``) or on a polar stereographic cap
+    (``projection: polar``), logged as ``<name>/gen_map/<region>/<variable>``
+    (generated over target) and ``<name>/bias_map/<region>/<variable>``. Scalars
     ``<name>/bias/<region>/<variable>`` and ``<name>/rmse/<region>/<variable>``
     reduce over the whole hemisphere (north: lat > 0, south: lat <= 0) with
     masked cell-area weights.
@@ -441,12 +469,15 @@ class RegionalTimeMeanMetricConfig:
         regional_time_means:
           - variables: [sea_ice_fraction, frozen_mass_total_area]
             lat_min: 50
+            projection: polar
 
     Parameters:
         variables: Variables to map. Required, since each adds two time-mean
             accumulators.
         regions: Any of "north", "south".
         lat_min: Equatorward edge of the map crop in degrees.
+        projection: "crop" (plate carree rows of the array) or "polar"
+            (polar stereographic, cartopy).
         name: Log label.
         enabled: Whether the metric is computed.
         strict: If True, raise rather than skip on a non-lat/lon grid.
@@ -457,6 +488,7 @@ class RegionalTimeMeanMetricConfig:
         default_factory=lambda: ["north", "south"]
     )
     lat_min: float = 40.0
+    projection: Projection = "crop"
     name: str = "regional_time_mean"
     enabled: bool = True
     strict: bool = True
@@ -473,6 +505,8 @@ class RegionalTimeMeanMetricConfig:
             raise ValueError(
                 f"regions must be non-empty and unique, got {self.regions}"
             )
+        if self.projection not in get_args(Projection):
+            raise ValueError(f"Unknown projection: {self.projection}")
         if not 0 <= self.lat_min < 90:
             raise ValueError(f"lat_min must be in [0, 90), got {self.lat_min}")
 
@@ -485,9 +519,11 @@ class RegionalTimeMeanMetricConfig:
             raise MetricNotSupportedError(
                 f"{self.name} metric requires LatLonCoordinates."
             )
+        local = coords.localize()
         agg = RegionalTimeMeanAggregator(
             ctx.ops,
-            lat=coords.localize().lat_1d,
+            lat=local.lat,
+            lon=local.lon,
             regional_weights={
                 region: hemisphere_weights(coords, region).to(get_device())
                 for region in self.regions
@@ -495,6 +531,7 @@ class RegionalTimeMeanMetricConfig:
             horizontal_dims=coords.dims,
             variables=self.variables,
             lat_min=self.lat_min,
+            projection=self.projection,
             variable_metadata=ctx.variable_metadata,
         )
         return MetricBuildResult(aggregator=agg)
