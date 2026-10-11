@@ -5,6 +5,7 @@ from collections.abc import Callable, MutableMapping
 
 import torch
 
+from fme.core.constants import LATENT_HEAT_OF_VAPORIZATION
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.ocean_data import (
     HasCellAreaInMetersSquared,
@@ -297,6 +298,7 @@ class _FrozenEnthalpyTerms:
     With m frozen mass (kg/m**2), D its enthalpy deficit (J/kg) and k the
     time index (dim 1)::
 
+        deficit_content = m D
         storage = (m(k) D(k) - m(k-1) D(k-1)) / dt,  storage[:, 0] = 0
         S       = hfds + lf_snowfl + minus_f_top + calving_residue
                   + minus_hfrunoffds
@@ -304,8 +306,8 @@ class _FrozenEnthalpyTerms:
         E       = m(k-1) > 0 or m(k) > 0               (ice cells), E[:, 0] = False
         support = m(k-1) > 0 and m(k) > 0 and ssf > 0  (corrector S_h)
 
-    S and D as in ``fme.core.corrector.ocean.SeaIceHfdsCorrection``. Terms are
-    computed on access, so storage needs no flux inputs.
+    S (``source``) and D as in ``fme.core.corrector.ocean.SeaIceHfdsCorrection``.
+    Terms are computed on access, so storage needs no flux inputs.
     """
 
     def __init__(self, data: OceanData, timestep: datetime.timedelta):
@@ -315,18 +317,22 @@ class _FrozenEnthalpyTerms:
         self._m = self._fields[FROZEN_MASS_NAME]
 
     @functools.cached_property
-    def storage(self) -> torch.Tensor:
+    def deficit_content(self) -> torch.Tensor:
         # deferred: corrector.ocean -> dataset_info -> coordinates -> this module
         from fme.core.corrector.ocean import _frozen_deficit
 
         m = self._m
-        mD = m * _frozen_deficit(self._fields, m, ICE_LAYER_TEMPERATURE_NAMES)
+        return m * _frozen_deficit(self._fields, m, ICE_LAYER_TEMPERATURE_NAMES)
+
+    @functools.cached_property
+    def storage(self) -> torch.Tensor:
+        mD = self.deficit_content
         storage = torch.zeros_like(mD)
         storage[:, 1:] = torch.diff(mD, n=1, dim=1) / self._timestep_seconds
         return storage
 
     @functools.cached_property
-    def residual(self) -> torch.Tensor:
+    def source(self) -> torch.Tensor:
         from fme.core.corrector.ocean import SEA_ICE_FLUX_TERMS, surface_flux_term
 
         ssf = self._data.sea_surface_fraction
@@ -334,7 +340,11 @@ class _FrozenEnthalpyTerms:
         for term in SEA_ICE_FLUX_TERMS:
             # derive input merges gen and forcing, so both lookups read one dict
             source = source + surface_flux_term(term, self._fields, self._fields, ssf)
-        return source - self.storage
+        return source
+
+    @property
+    def residual(self) -> torch.Tensor:
+        return self.source - self.storage
 
     def _pair(self, combine) -> torch.Tensor:
         first = torch.zeros_like(self._m[:, :1], dtype=torch.bool)
@@ -417,3 +427,84 @@ def frozen_enthalpy_storage_tendency(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return _frozen_enthalpy_terms(data, timestep).storage
+
+
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Frozen enthalpy surface source per total cell area",
+    )
+)
+def frozen_enthalpy_surface_source(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """S = hfds + lf_snowfl + minus_f_top + calving_residue + minus_hfrunoffds,
+    unrestricted.
+    """
+    return _frozen_enthalpy_terms(data, timestep).source
+
+
+@register(
+    VariableMetadata(
+        "J/m**2",
+        "Frozen enthalpy deficit content per total cell area",
+    )
+)
+def frozen_enthalpy_deficit_content(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    return _frozen_enthalpy_terms(data, timestep).deficit_content
+
+
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Implied advective tendency of ocean plus frozen enthalpy assuming closed "
+        "budgets, per total cell area",
+    )
+)
+def implied_tendency_of_ocean_and_frozen_enthalpy_due_to_advection(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Sum of the ocean heat and unrestricted frozen enthalpy residuals.
+
+    r_OHC + r = ssf dOHC/dt - d/dt(m D) - ssf hfgeou
+            + lf_snowfl + minus_f_top + calving_residue + minus_hfrunoffds
+
+    hfds cancels when ssf hfds equals hfds_total_area.
+    """
+    r_ohc = implied_tendency_of_ocean_heat_content_due_to_advection(data, timestep)
+    return r_ohc + _frozen_enthalpy_terms(data, timestep).residual
+
+
+@register(
+    VariableMetadata(
+        "kg/m**2/s",
+        "Implied net frozen-to-ocean mass flux on ice cells, per total cell area",
+    )
+)
+def implied_frozen_mass_flux_into_ocean(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Net frozen-to-ocean mass flux implied by the frozen mass budget.
+
+    M = ssf c P_f - LH_total_area / L_v - dm/dt where m(k-1) > 0 or m(k) > 0,
+    else 0; c = ocean_sea_ice_fraction, P_f = total_frozen_precipitation_rate.
+    LH_total_area includes the open-water part of the cell and over ice LH / L_v
+    overstates sublimation, so this approximates melt minus growth plus
+    transport convergence.
+    """
+    terms = _frozen_enthalpy_terms(data, timestep)
+    fields = data.data
+    flux = (
+        data.sea_surface_fraction
+        * data.ocean_sea_ice_fraction
+        * fields["total_frozen_precipitation_rate"]
+        - fields["LH_total_area"] / LATENT_HEAT_OF_VAPORIZATION
+        - frozen_mass_tendency(data, timestep)
+    )
+    return torch.where(terms.ice_cells, flux, 0.0)

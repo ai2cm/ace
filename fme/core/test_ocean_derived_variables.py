@@ -7,6 +7,7 @@ import torch
 from fme.core import ocean_derived_variables
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
+    LATENT_HEAT_OF_VAPORIZATION,
     REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
@@ -466,3 +467,148 @@ def test_frozen_enthalpy_derived_variables_skip_without_inputs():
     assert "frozen_enthalpy_budget_residual_off_support" not in out
     assert "frozen_enthalpy_storage_tendency" in out
     assert "frozen_mass_tendency" in out
+
+
+def _frozen_mass_flux_case() -> TensorDict:
+    data = _frozen_budget_case()
+    shape = data["frozen_mass_total_area"].shape
+    g = torch.Generator().manual_seed(1)
+    data["ocean_sea_ice_fraction"] = torch.rand(shape, generator=g, dtype=torch.float64)
+    data["total_frozen_precipitation_rate"] = 1e-5 * torch.rand(
+        shape, generator=g, dtype=torch.float64
+    )
+    return data
+
+
+def test_implied_frozen_mass_flux_into_ocean():
+    data = _frozen_mass_flux_case()
+    name = "implied_frozen_mass_flux_into_ocean"
+    out = _compute_ocean_derived_variable(
+        data, None, TIMESTEP, name, getattr(ocean_derived_variables, name)
+    )[name]
+    m = data["frozen_mass_total_area"]
+    snow_on_ice = (
+        data["sea_surface_fraction"]
+        * data["ocean_sea_ice_fraction"]
+        * data["total_frozen_precipitation_rate"]
+    )[:, 1]
+    sublimation = data["LH_total_area"][:, 1] / LATENT_HEAT_OF_VAPORIZATION
+    dmdt = (m[:, 1] - m[:, 0]) / TIMESTEP.total_seconds()
+    expected = snow_on_ice - sublimation - dmdt
+    torch.testing.assert_close(out[:, 0], torch.zeros_like(m[:, 0]))
+    torch.testing.assert_close(out[:, 1, ..., :3], expected[..., :3])
+    torch.testing.assert_close(out[:, 1, ..., 3], torch.zeros_like(expected[..., 3]))
+
+
+def test_implied_frozen_mass_flux_zero_when_growth_is_snowfall():
+    """Ice gaining exactly the snowfall on it, with no sublimation, exchanges
+    no mass with the ocean.
+    """
+    data = _frozen_mass_flux_case()
+    data["LH_total_area"] = torch.zeros_like(data["LH_total_area"])
+    m = data["frozen_mass_total_area"]
+    snow_on_ice = (
+        data["sea_surface_fraction"]
+        * data["ocean_sea_ice_fraction"]
+        * data["total_frozen_precipitation_rate"]
+    )
+    m[:, 1, ..., 0] = (
+        m[:, 0, ..., 0] + snow_on_ice[:, 1, ..., 0] * TIMESTEP.total_seconds()
+    )
+    name = "implied_frozen_mass_flux_into_ocean"
+    out = _compute_ocean_derived_variable(
+        data, None, TIMESTEP, name, getattr(ocean_derived_variables, name)
+    )[name]
+    torch.testing.assert_close(
+        out[:, 1, ..., 0], torch.zeros_like(out[:, 1, ..., 0]), atol=1e-15, rtol=0
+    )
+
+
+def test_frozen_enthalpy_source_and_deficit_content():
+    data = _frozen_budget_case()
+    out = data
+    for name in (
+        "frozen_enthalpy_surface_source",
+        "frozen_enthalpy_deficit_content",
+        "frozen_enthalpy_storage_tendency",
+        "frozen_enthalpy_budget_residual",
+    ):
+        out = _compute_ocean_derived_variable(
+            out, None, TIMESTEP, name, getattr(ocean_derived_variables, name)
+        )
+    m = data["frozen_mass_total_area"]
+    D = torch.where(
+        m > 0,
+        sis2_ice_deficit([data[n] for n in _TEMPS]),
+        torch.full_like(m, SIS2_LATENT_HEAT_OF_FUSION),
+    )
+    torch.testing.assert_close(out["frozen_enthalpy_deficit_content"], m * D)
+    S = out["frozen_enthalpy_surface_source"]
+    r = S - out["frozen_enthalpy_storage_tendency"]
+    torch.testing.assert_close(
+        out["frozen_enthalpy_budget_residual"][:, 1, ..., :3], r[:, 1, ..., :3]
+    )
+    torch.testing.assert_close(
+        S[:, 1] - data["hfds_total_area"][:, 1],
+        (
+            SIS2_LATENT_HEAT_OF_FUSION * data["SNOWFL_total_area"]
+            - data["SW_total_area"]
+            - data["LW_total_area"]
+            + data["LH_total_area"]
+            + data["SH_total_area"]
+            + data["calving_residue_total_area"]
+            - data["hfrunoffds"] * data["sea_surface_fraction"]
+        )[:, 1],
+    )
+
+
+def _combined_enthalpy_case(
+    hfds_total_area_offset: float, drop: str | None = None
+) -> TensorDict:
+    data = _frozen_budget_case()
+    shape = data["frozen_mass_total_area"].shape
+    data["hfds_total_area"] = data["hfds_total_area"] + hfds_total_area_offset
+    data["thetao_0"] = torch.tensor([10.0, 10.5], dtype=torch.float64).reshape(
+        1, 2, 1, 1
+    ) * torch.ones(shape, dtype=torch.float64)
+    data["hfgeou"] = torch.full(shape, 0.05, dtype=torch.float64)
+    if drop is not None:
+        del data[drop]
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0], dtype=torch.float64),
+        mask=torch.ones(*shape, 1, dtype=torch.float64),
+    )
+    return compute_ocean_derived_quantities(
+        data, depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+
+
+def test_implied_tendency_of_ocean_and_frozen_enthalpy_due_to_advection():
+    """Equals r_OHC + unrestricted r, and does not depend on hfds."""
+    name = "implied_tendency_of_ocean_and_frozen_enthalpy_due_to_advection"
+    out = _combined_enthalpy_case(0.0)
+    r = out["frozen_enthalpy_surface_source"] - out["frozen_enthalpy_storage_tendency"]
+    torch.testing.assert_close(
+        out[name],
+        out["implied_tendency_of_ocean_heat_content_due_to_advection"] + r,
+    )
+    ssf = out["sea_surface_fraction"]
+    expected = (
+        ssf * out["ocean_heat_content_tendency"]
+        - out["frozen_enthalpy_storage_tendency"]
+        - ssf * out["hfgeou"]
+        + out["frozen_enthalpy_surface_source"]
+        - out["hfds_total_area"]
+    )
+    torch.testing.assert_close(out[name], expected)
+    shifted = _combined_enthalpy_case(37.0)
+    torch.testing.assert_close(shifted[name], out[name])
+
+
+def test_frozen_mass_and_combined_skip_without_inputs():
+    out = _combined_enthalpy_case(0.0, drop="calving_residue_total_area")
+    assert "implied_frozen_mass_flux_into_ocean" not in out
+    assert "implied_tendency_of_ocean_and_frozen_enthalpy_due_to_advection" not in out
+    assert "frozen_enthalpy_surface_source" not in out
+    assert "implied_tendency_of_ocean_heat_content_due_to_advection" in out
+    assert "frozen_enthalpy_deficit_content" in out
