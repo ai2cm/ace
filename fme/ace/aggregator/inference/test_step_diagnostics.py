@@ -1,4 +1,5 @@
 import datetime
+import math
 
 import cftime
 import numpy as np
@@ -6,6 +7,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.aggregator.inference.build_context import MetricNotSupportedError
 from fme.ace.aggregator.inference.main import (
     InferenceAggregatorConfig,
     InferenceEvaluatorAggregatorConfig,
@@ -16,11 +18,14 @@ from fme.ace.aggregator.inference.main import (
 from fme.ace.aggregator.inference.step_diagnostics import (
     CorrectionDeltaAggregator,
     CorrectionDeltaMeanAggregator,
+    CorrectionDeltaRegionalSumAggregator,
     CorrectionDeltaTimeMeanAggregator,
     StepDiagnosticsMetricConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.constants import EARTH_RADIUS
+from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -406,3 +411,154 @@ def test_config_defaults():
     for config in step_diagnostics_configs:
         assert config.correction_scalars is True
         assert config.correction_maps is False
+
+
+SPHERE_AREA_M2 = 4 * math.pi * EARTH_RADIUS**2
+
+
+def hemispheric_coords() -> LatLonCoordinates:
+    return LatLonCoordinates(
+        lat=torch.linspace(-67.5, 67.5, NY), lon=torch.linspace(0.0, 315.0, NX)
+    )
+
+
+def build_regional_sum_aggregator(
+    coords: LatLonCoordinates, masks: dict[str, torch.Tensor] | None = None
+) -> CorrectionDeltaRegionalSumAggregator:
+    provider = SpatialMaskProvider(masks or {}).to(get_device())
+    config = StepDiagnosticsMetricConfig(
+        correction_scalars=False, correction_regional_sums=True
+    )
+    agg = config.build(
+        gridded_operations=coords.get_gridded_operations(provider),
+        n_timesteps=3,
+        variable_metadata={"a": VariableMetadata(units="W/m**2", long_name="a")},
+        enable_time_series=True,
+        normalize=None,
+        horizontal_coordinates=coords,
+    )
+    assert agg is not None
+    regional_sums = agg._aggregators["correction"]._regional_sums  # type: ignore
+    assert isinstance(regional_sums, CorrectionDeltaRegionalSumAggregator)
+    return regional_sums
+
+
+def hand_integral(
+    delta: torch.Tensor, coords: LatLonCoordinates, region: str
+) -> np.ndarray:
+    """Per-step, sample-mean sum over cells of cell area (m**2) * delta."""
+    lat = coords.lat.unsqueeze(-1).expand(NY, NX)
+    in_region = {"global": lat == lat, "north": lat > 0, "south": lat <= 0}[region]
+    area_m2 = coords.area_weights_m2.expand(NY, NX)
+    total = torch.zeros(delta.shape[:2], dtype=torch.float64)
+    for j in range(NY):
+        for i in range(NX):
+            if in_region[j, i] and not torch.isnan(delta[0, 0, j, i]):
+                total += float(area_m2[j, i]) * delta[:, :, j, i].double().cpu()
+    return total.mean(dim=0).numpy()
+
+
+def test_regional_sum_constant_delta_integrates_to_sphere_area():
+    coords = hemispheric_coords()
+    agg = build_regional_sum_aggregator(coords)
+    agg.record_batch({"a": constant_tensor(2.0)}, i_time_start=0)
+    ds = agg.get_dataset()
+    np.testing.assert_allclose(
+        ds["weighted_sum_correction-global-a"].values, 2.0 * SPHERE_AREA_M2, rtol=1e-5
+    )
+    np.testing.assert_allclose(
+        ds["weighted_sum_correction-north-a"].values
+        + ds["weighted_sum_correction-south-a"].values,
+        2.0 * SPHERE_AREA_M2,
+        rtol=1e-5,
+    )
+    assert ds["weighted_sum_correction-north-a"].attrs["units"] == "(W/m**2) m**2"
+
+
+@pytest.mark.parametrize("region", ["global", "north", "south"])
+def test_regional_sum_matches_hand_integral_with_land_mask(region):
+    coords = hemispheric_coords()
+    mask = torch.ones(NY, NX)
+    mask[0, 2] = 0
+    mask[NY - 1, 5] = 0
+    agg = build_regional_sum_aggregator(coords, masks={"mask_a": mask})
+    torch.manual_seed(0)
+    delta = torch.randn(2, 3, NY, NX, device=get_device())
+    delta[:, :, mask == 0] = float("nan")
+    agg.record_batch({"a": delta}, i_time_start=0)
+    ds = agg.get_dataset()
+    np.testing.assert_allclose(
+        ds[f"weighted_sum_correction-{region}-a"].values,
+        hand_integral(delta, coords, region),
+        rtol=1e-5,
+    )
+
+
+def test_regional_sum_uses_raw_delta_and_logs_denorm_series(tmp_path):
+    coords = hemispheric_coords()
+    agg = build_inference_evaluator_aggregator(
+        metrics=[MeanMetricConfig(target="norm")],
+        dataset_info=DatasetInfo(horizontal_coordinates=coords, timestep=TIMESTEP),
+        n_ic_steps=0,
+        n_forward_steps=3,
+        initial_time=xr.DataArray(np.zeros((2,)), dims=["sample"]),
+        normalize=StandardNormalizer(
+            means={"a": torch.tensor(1.0)}, stds={"a": torch.tensor(4.0)}
+        ).normalize,
+        output_dir=str(tmp_path),
+        step_diagnostics=StepDiagnosticsMetricConfig(correction_regional_sums=True),
+    )
+    inference_logs = agg.record_batch(
+        make_paired_data(delta={"a": constant_tensor(0.5)})
+    )
+    north_key = "mean/north/weighted_sum_correction/a"
+    series = [log[north_key] for log in inference_logs if north_key in log]
+    north_area_m2 = float(coords.area_weights_m2.expand(NY, NX)[coords.lat > 0].sum())
+    np.testing.assert_allclose(series, 0.5 * north_area_m2, rtol=1e-5)
+    series_keys = {key for log in inference_logs for key in log}
+    assert "mean/global/weighted_sum_correction/a" in series_keys
+    assert "mean/south/weighted_sum_correction/a" in series_keys
+    # the normalized series are unaffected
+    assert "mean_norm/weighted_correction_magnitude/a" in series_keys
+
+    agg.flush_diagnostics()
+    ds = xr.open_dataset(tmp_path / "regional_sum_correction_diagnostics.nc")
+    np.testing.assert_allclose(
+        ds["weighted_sum_correction-north-a"].values, 0.5 * north_area_m2, rtol=1e-5
+    )
+
+
+def test_regional_sum_config_build():
+    coords = hemispheric_coords()
+    regional_only = StepDiagnosticsMetricConfig(
+        correction_scalars=False, correction_regional_sums=True
+    )
+
+    def build(config, enable_time_series=True, horizontal_coordinates=coords):
+        return config.build(
+            gridded_operations=coords.get_gridded_operations(),
+            n_timesteps=3,
+            variable_metadata=None,
+            enable_time_series=enable_time_series,
+            normalize=None,
+            horizontal_coordinates=horizontal_coordinates,
+        )
+
+    agg = build(regional_only)
+    assert agg is not None
+    assert agg.log_time_series
+    assert build(regional_only, enable_time_series=False) is None
+    with pytest.raises(ValueError, match="horizontal_coordinates"):
+        build(regional_only, horizontal_coordinates=None)
+    healpix = HEALPixCoordinates(
+        face=torch.arange(12), width=torch.arange(2), height=torch.arange(2)
+    )
+    with pytest.raises(MetricNotSupportedError):
+        build(regional_only, horizontal_coordinates=healpix)
+    assert StepDiagnosticsMetricConfig().correction_regional_sums is False
+
+
+def test_regional_sum_aggregator_silent_without_data():
+    agg = build_regional_sum_aggregator(hemispheric_coords())
+    assert agg.get_logs(label="mean") == {}
+    assert len(agg.get_dataset()) == 0

@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -23,6 +24,7 @@ from .reduced import (
     get_series_data,
     series_data_to_dataset,
 )
+from .regional import Region, _get_reduce, _get_regional_weights, _integral_metadata
 
 
 class StepDiagnosticsSubAggregator(Protocol):
@@ -107,10 +109,18 @@ class StepDiagnosticsMetricConfig:
             series.
         correction_maps: Whether to log the signed time-mean normalized
             correction map image per variable.
+        correction_regional_sums: Whether to log (where per-step time series
+            are enabled) the per-step area integral of the raw, denormalized
+            correction per variable over the global, north (lat > 0) and
+            south (lat <= 0) regions, in (units) m**2, e.g. W for
+            ``hfds_total_area``. Logged as
+            ``mean/<region>/weighted_sum_correction/<variable>``. Needs a
+            lat/lon grid; no normalizer.
     """
 
     correction_scalars: bool = True
     correction_maps: bool = False
+    correction_regional_sums: bool = False
 
     def build(
         self,
@@ -119,18 +129,20 @@ class StepDiagnosticsMetricConfig:
         variable_metadata: Mapping[str, VariableMetadata] | None,
         enable_time_series: bool,
         normalize: NormalizeFn | None,
+        horizontal_coordinates: HorizontalCoordinates | None = None,
     ) -> StepDiagnosticsAggregator | None:
         """Build the aggregator, or return None when nothing is enabled or
-        no normalizer is available (the correction metrics are
-        normalized-space, so callers that supply no normalizer and keep the
-        default configuration keep their current behavior). Raises ValueError
-        when the configuration was explicitly changed from the defaults but
-        no normalizer is supplied, rather than silently dropping an explicit
-        opt-in.
+        no normalizer is available for the normalized-space metrics (callers
+        that supply no normalizer and keep the default configuration keep
+        their current behavior). Raises ValueError when the normalized-space
+        metrics were explicitly configured but no normalizer is supplied,
+        rather than silently dropping an explicit opt-in, and when regional
+        sums are requested without horizontal coordinates.
         """
-        if not (self.correction_scalars or self.correction_maps):
+        normalized = self.correction_scalars or self.correction_maps
+        if not (normalized or self.correction_regional_sums):
             return None
-        if normalize is None:
+        if normalize is None and normalized:
             if self != StepDiagnosticsMetricConfig():
                 raise ValueError(
                     "step_diagnostics metrics were explicitly configured, but "
@@ -140,12 +152,38 @@ class StepDiagnosticsMetricConfig:
                     "at its defaults."
                 )
             return None
-        time_mean = CorrectionDeltaTimeMeanAggregator(
-            gridded_operations=gridded_operations,
-            variable_metadata=variable_metadata,
-            record_scalars=self.correction_scalars,
-            record_maps=self.correction_maps,
-        )
+        if normalized:
+            time_mean: CorrectionDeltaTimeMeanAggregator | None = (
+                CorrectionDeltaTimeMeanAggregator(
+                    gridded_operations=gridded_operations,
+                    variable_metadata=variable_metadata,
+                    record_scalars=self.correction_scalars,
+                    record_maps=self.correction_maps,
+                )
+            )
+        else:
+            time_mean = None
+        if self.correction_regional_sums and enable_time_series:
+            if horizontal_coordinates is None:
+                raise ValueError(
+                    "step_diagnostics.correction_regional_sums needs "
+                    "horizontal_coordinates to build the hemisphere masks."
+                )
+            regional_sums: CorrectionDeltaRegionalSumAggregator | None = (
+                CorrectionDeltaRegionalSumAggregator(
+                    gridded_operations=gridded_operations,
+                    regional_weights={
+                        region: _get_regional_weights(horizontal_coordinates, region)
+                        for region in CORRECTION_REGIONS
+                    },
+                    n_timesteps=n_timesteps,
+                    variable_metadata=variable_metadata,
+                )
+            )
+        else:
+            regional_sums = None
+        if time_mean is None and regional_sums is None:
+            return None
         if self.correction_scalars and enable_time_series:
             time_series = CorrectionDeltaMeanAggregator(
                 gridded_operations=gridded_operations,
@@ -160,6 +198,7 @@ class StepDiagnosticsMetricConfig:
                     normalize=normalize,
                     time_mean=time_mean,
                     time_series=time_series,
+                    regional_sums=regional_sums,
                 )
             }
         )
@@ -177,6 +216,9 @@ class CorrectionDeltaAggregator:
     cells stay NaN, consistent with the masked prediction; the mask-aware
     gridded reductions handle them.
 
+    The raw (denormalized) delta goes to the regional-sum sub-aggregator,
+    whose integrals are logged under the denormalized ``mean`` label.
+
     Silent when no corrector ran: ``step_diagnostics`` is then ``None`` (or
     its delta empty), no batches are recorded, and the log and dataset
     methods return nothing.
@@ -190,20 +232,26 @@ class CorrectionDeltaAggregator:
 
     TIME_MEAN_LABEL = "time_mean_norm"
     TIME_SERIES_LABEL = "mean_norm"
+    REGIONAL_SUM_LABEL = "mean"
+    REGIONAL_SUM_DATASET = "regional_sum"
 
     def __init__(
         self,
-        normalize: NormalizeFn,
+        normalize: NormalizeFn | None,
         time_mean: "CorrectionDeltaTimeMeanAggregator | None",
         time_series: "CorrectionDeltaMeanAggregator | None",
+        regional_sums: "CorrectionDeltaRegionalSumAggregator | None" = None,
     ):
+        if normalize is None and (time_mean is not None or time_series is not None):
+            raise ValueError("Normalized correction metrics need a normalizer.")
         self._normalize = normalize
         self._time_mean = time_mean
         self._time_series = time_series
+        self._regional_sums = regional_sums
 
     @property
     def log_time_series(self) -> bool:
-        return self._time_series is not None
+        return self._time_series is not None or self._regional_sums is not None
 
     @torch.no_grad()
     def record_batch(
@@ -217,6 +265,10 @@ class CorrectionDeltaAggregator:
             return
         delta = step_diagnostics.delta
         if not delta:
+            return
+        if self._regional_sums is not None:
+            self._regional_sums.record_batch(delta, i_time_start)
+        if self._normalize is None:
             return
         correction_norm = self._normalize(delta, apply_mean=False)
         missing = set(delta) - set(correction_norm)
@@ -237,11 +289,20 @@ class CorrectionDeltaAggregator:
         return self._time_mean.get_logs(label=self.TIME_MEAN_LABEL)
 
     def time_series_logs(self, step_slice: slice) -> dict[str, Any]:
-        if self._time_series is None:
-            return {}
-        return self._time_series.get_logs(
-            label=self.TIME_SERIES_LABEL, step_slice=step_slice
-        )
+        logs: dict[str, Any] = {}
+        if self._time_series is not None:
+            logs.update(
+                self._time_series.get_logs(
+                    label=self.TIME_SERIES_LABEL, step_slice=step_slice
+                )
+            )
+        if self._regional_sums is not None:
+            logs.update(
+                self._regional_sums.get_logs(
+                    label=self.REGIONAL_SUM_LABEL, step_slice=step_slice
+                )
+            )
+        return logs
 
     def diagnostics(self) -> dict[str, xr.Dataset]:
         # Suffixed dataset names: the plain "time_mean_norm"/"mean_norm"
@@ -252,6 +313,8 @@ class CorrectionDeltaAggregator:
             datasets[self.TIME_MEAN_LABEL] = self._time_mean.get_dataset()
         if self._time_series is not None:
             datasets[self.TIME_SERIES_LABEL] = self._time_series.get_dataset()
+        if self._regional_sums is not None:
+            datasets[self.REGIONAL_SUM_DATASET] = self._regional_sums.get_dataset()
         return datasets
 
 
@@ -451,3 +514,83 @@ class CorrectionDeltaMeanAggregator:
         if self._n_batches == 0:
             return xr.Dataset()
         return series_data_to_dataset(self._get_series_data(), self._variable_metadata)
+
+
+CORRECTION_REGIONS: tuple[Region, ...] = ("global", "north", "south")
+
+
+class CorrectionDeltaRegionalSumAggregator:
+    """Granular sub-aggregator: per-forecast-step area integral of the raw
+    correction per region, ``4 pi R**2 * sum(H * mask * a * delta)`` in
+    (units) m**2; for ``hfds_total_area`` (W/m**2) the power the corrector
+    adds, in W. Silent (empty logs and dataset) until non-empty data is
+    recorded.
+    """
+
+    METRIC_NAME = "weighted_sum_correction"
+
+    def __init__(
+        self,
+        gridded_operations: GriddedOperations,
+        regional_weights: Mapping[str, torch.Tensor | None],
+        n_timesteps: int,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+    ):
+        self._dist = Distributed.get_instance()
+        self._variable_metadata: Mapping[str, VariableMetadata] = (
+            variable_metadata or {}
+        )
+        device = get_device()
+        self._region_metrics = {
+            region: AreaWeightedSingleTargetReducedMetric(
+                device=device,
+                compute_metric=_get_reduce(gridded_operations, weights, "sum"),
+                n_timesteps=n_timesteps,
+            )
+            for region, weights in regional_weights.items()
+        }
+        self._n_batches = 0
+
+    @torch.no_grad()
+    def record_batch(self, delta: TensorMapping, i_time_start: int) -> None:
+        if not delta:
+            return
+        for metric in self._region_metrics.values():
+            metric.record(tensors=delta, i_time_start=i_time_start)
+        self._n_batches += 1
+
+    def _get_series_data(
+        self, step_slice: slice | None = None
+    ) -> dict[str, list[SeriesData]]:
+        return {
+            region: get_series_data({self.METRIC_NAME: metric}, self._dist, step_slice)
+            for region, metric in self._region_metrics.items()
+        }
+
+    @torch.no_grad()
+    def get_logs(self, label: str, step_slice: slice | None = None) -> dict[str, Any]:
+        if self._n_batches == 0:
+            return {}
+        series: dict[str, np.ndarray] = {
+            f"{region}/{datum.get_wandb_key()}": datum.data
+            for region, data in self._get_series_data(step_slice).items()
+            for datum in data
+        }
+        init_step = 0 if step_slice is None else step_slice.start
+        # distinct table key: {label}/series belongs to the global mean
+        # aggregator; the per-step keys still resolve to {label}/<column>
+        return {f"{label}/correction_regional_series": data_to_table(series, init_step)}
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        if self._n_batches == 0:
+            return xr.Dataset()
+        series = [
+            SeriesData(f"{datum.metric_name}-{region}", datum.var_name, datum.data)
+            for region, data in self._get_series_data().items()
+            for datum in data
+        ]
+        metadata = {
+            k: _integral_metadata(v) for k, v in self._variable_metadata.items()
+        }
+        return series_data_to_dataset(series, metadata)

@@ -173,6 +173,7 @@ def build_inference_evaluator_aggregator(
         variable_metadata=dataset_info.variable_metadata,
         enable_time_series=enable_time_series,
         normalize=normalize,
+        horizontal_coordinates=dataset_info.horizontal_coordinates,
     )
 
     return InferenceEvaluatorAggregator(
@@ -892,6 +893,7 @@ class InferenceAggregatorConfig:
             variable_metadata=dataset_info.variable_metadata,
             enable_time_series=True,
             normalize=normalize,
+            horizontal_coordinates=horizontal_coordinates,
         )
 
         return InferenceAggregator(
