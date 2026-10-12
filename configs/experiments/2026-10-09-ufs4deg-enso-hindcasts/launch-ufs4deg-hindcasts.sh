@@ -8,6 +8,7 @@ MODE="${MODE:-true}"
 TRUE_DS="${TRUE_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh
 CLIM_DS="${CLIM_DS:-01M4HGTKEM1ZA770N6XYKBBKTG}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh-climforcing
 PRIORITY="${PRIORITY:-high}"
+CFG="${CFG:-evaluator-config-ufs4deg-hindcast-2002-2011.yaml}"   # cm4zs arms: the -fillnans variant
 declare -A ARM_CKPT=(
   [scratch-ff-ohc]=01M4GG3NPE68TAHMASSQDP7KN6 [scratch-resid-ohc-cap0005]=01M4GAA5S0HZHCH050GTT1E9SP [scratch-resid-noohc]=01M4FXFZEQ4E87VFMQZM1Q8QJ8
   [ftcm4-resid-ohc]=01M4E7NG96SV956P6HF9FMW02H [ftcm4-resid-ohc-cap0005]=01M4E7NMXAEZY6W7M442G5AF24 [ftcm4-resid-noohc]=01M4E7NS1M93SJMWBXPC8QNCM3
@@ -44,7 +45,7 @@ for A in $ARMS; do
     --dataset "${DATA_MOUNT}" \
     --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
-    -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/evaluator-config-ufs4deg-hindcast-2002-2011.yaml" ${OVERRIDE:+--override "$OVERRIDE"} 2>&1)
+    -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/${CFG}" ${OVERRIDE:+--override "$OVERRIDE"} 2>&1)
   echo "$out" | grep -qm1 "beaker.org/ex/" && { ok=$((ok+1)); echo "launched $JOB"; } || echo "FAILED $JOB: $(echo "$out" | tail -2)"
 done
 echo "hindcasts launched: $ok/$total"
