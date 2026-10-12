@@ -1,0 +1,9 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_lin8_ppad . \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+# with WANDB_USERNAME=elynnwu. shared_mem blank: default_shared_mem takes the
+# smaller node cap of jupiter and titan.
+
+# ppad = ocean_ppad baseline (MSE) rs0, a2s = ACE2S j0ng1tw3
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad-ppad_a2s-fto|o0a0rs0|ace-samudra-cm4|esiegbpk|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0|8h
