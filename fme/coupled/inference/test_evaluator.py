@@ -1,18 +1,22 @@
 import dataclasses
 import inspect
+import json
 import os
 import pathlib
 import shutil
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
+import fsspec
 import numpy as np
 import pytest
 import torch
 import xarray as xr
 import yaml
 
+from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.stepper import StepperOverrideConfig
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
@@ -835,3 +839,126 @@ def test_load_coupled_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.
     assert isinstance(checkpoint_path, str)
 
     check(load_coupled_stepper(checkpoint_path), False)
+
+
+def _small_output_dir_evaluator_config(
+    tmp_path: pathlib.Path, experiment_dir: str, output_dir: str | None
+) -> InferenceEvaluatorConfig:
+    """A short coupled evaluator run with file logging and zarr output."""
+    checkpoint_path, mock_data = _save_stochastic_coupled_stepper(tmp_path)
+    zarr_writer = DataWriterConfig(
+        save_prediction_files=False,
+        save_monthly_files=False,
+        files=[FileWriterConfig("autoregressive", format=ZarrWriterConfig())],
+    )
+    return InferenceEvaluatorConfig(
+        experiment_dir=experiment_dir,
+        output_dir=output_dir,
+        n_coupled_steps=_SEED_N_COUPLED_STEPS,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(log_to_screen=True, log_to_file=True, log_to_wandb=True),
+        loader=InferenceDataLoaderConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
+                ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
+                atmosphere=XarrayDataConfig(data_path=mock_data.atmosphere.data_dir),
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=1, interval=1
+            ),
+        ),
+        data_writer=CoupledDataWriterConfig(ocean=zarr_writer, atmosphere=zarr_writer),
+    )
+
+
+EVALUATOR_OUTPUT_PATHS = (
+    "atmosphere/autoregressive_predictions.zarr",
+    "atmosphere/autoregressive_target.zarr",
+    "atmosphere/initial_condition.nc",
+    "atmosphere/restart.nc",
+    "ocean/autoregressive_predictions.zarr",
+    "ocean/autoregressive_target.zarr",
+    "ocean/initial_condition.nc",
+    "ocean/restart.nc",
+    "ocean/time_mean_diagnostics.nc",
+)
+
+
+@pytest.mark.parametrize(
+    "output_dir",
+    [
+        pytest.param("local", id="local_output_dir"),
+        pytest.param("memory://coupled_evaluator_output", id="remote_output_dir"),
+    ],
+)
+def test_evaluator_output_dir_separates_data_from_job_files(
+    tmp_path: pathlib.Path, output_dir: str
+):
+    if output_dir == "local":
+        output_dir = str(tmp_path / "output")
+    experiment_dir = tmp_path / "job"
+    config = _small_output_dir_evaluator_config(
+        tmp_path, str(experiment_dir), output_dir
+    )
+    config_filename = tmp_path / "input_config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    fs, _ = fsspec.url_to_fs(output_dir)
+    try:
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            main(yaml_config=str(config_filename))
+
+        for path in EVALUATOR_OUTPUT_PATHS:
+            assert fs.exists(os.path.join(output_dir, path)), path
+            assert not (experiment_dir / path).exists(), path
+        assert (experiment_dir / "config.yaml").exists()
+        assert (experiment_dir / "inference_out.log").exists()
+        assert not fs.exists(os.path.join(output_dir, "inference_out.log"))
+        with fs.open(os.path.join(output_dir, "config.yaml")) as f:
+            assert yaml.safe_load(f)["output_dir"] == output_dir
+        with fs.open(os.path.join(output_dir, "provenance.json")) as f:
+            provenance = json.load(f)
+        assert provenance["experiment_dir"] == str(experiment_dir)
+        assert provenance["output_dir"] == output_dir
+        assert provenance["wandb_run_id"] is not None
+    finally:
+        if fs.exists(output_dir):
+            fs.rm(output_dir, recursive=True)
+
+
+def test_evaluator_output_dir_defaults_to_experiment_dir(tmp_path: pathlib.Path):
+    experiment_dir = tmp_path / "job"
+    config = _small_output_dir_evaluator_config(
+        tmp_path, str(experiment_dir), output_dir=None
+    )
+    config_filename = tmp_path / "input_config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+
+    for path in EVALUATOR_OUTPUT_PATHS:
+        assert (experiment_dir / path).exists(), path
+    assert (experiment_dir / "config.yaml").exists()
+    assert (experiment_dir / "inference_out.log").exists()
+    assert not (experiment_dir / "provenance.json").exists()
+
+
+def test_evaluator_config_output_dir_requires_local_experiment_dir():
+    with pytest.raises(ValueError, match="experiment_dir must be on a local"):
+        InferenceEvaluatorConfig(
+            experiment_dir="gs://bucket/job",
+            output_dir="gs://bucket/output",
+            n_coupled_steps=1,
+            checkpoint_path="unused",
+            logging=LoggingConfig(),
+            loader=InferenceDataLoaderConfig(
+                dataset=CoupledDatasetWithOptionalOceanConfig(
+                    atmosphere=XarrayDataConfig(data_path="unused"),
+                ),
+                start_indices=InferenceInitialConditionIndices(
+                    first=0, n_initial_conditions=1, interval=1
+                ),
+            ),
+        )
