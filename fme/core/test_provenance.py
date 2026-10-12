@@ -1,9 +1,10 @@
 import json
 
+import pytest
 import yaml
 
 import fme.core.wandb
-from fme.core.provenance import write_provenance
+from fme.core.provenance import validate_output_dir, write_provenance
 from fme.core.testing.wandb import mock_wandb
 
 
@@ -35,3 +36,21 @@ def test_write_provenance_without_wandb(tmp_path, monkeypatch):
     write_provenance(str(tmp_path), {"a": 1}, experiment_dir="job")
     with open(tmp_path / "provenance.json") as f:
         assert json.load(f)["wandb_run_id"] is None
+
+
+@pytest.mark.parametrize(
+    "experiment_dir, output_dir, raises",
+    [
+        ("/local/job", None, False),
+        ("gs://bucket/job", None, False),
+        ("/local/job", "gs://bucket/output", False),
+        ("gs://bucket/job", "gs://bucket/output", True),
+        ("gs://bucket/job", "/local/output", True),
+    ],
+)
+def test_validate_output_dir(experiment_dir, output_dir, raises):
+    if raises:
+        with pytest.raises(ValueError, match="experiment_dir must be on a local"):
+            validate_output_dir(experiment_dir, output_dir)
+    else:
+        validate_output_dir(experiment_dir, output_dir)

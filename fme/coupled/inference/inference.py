@@ -333,7 +333,8 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
             os.path.join(segment_dir, ATMOSPHERE_OUTPUT_DIR_NAME, "restart.nc"),
         ]
 
-    def _run_segment(segment_dir: str) -> None:
+    def _run_segment(segment_dir: str, segment_output_dir: str) -> None:
+        # coupled inference has no separate output_dir yet, so the two are equal
         config_copy.experiment_dir = segment_dir
         run_inference_from_config(config_copy)
 
