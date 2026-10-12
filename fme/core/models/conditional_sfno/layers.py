@@ -409,7 +409,7 @@ class MLP(nn.Module):
     @torch.jit.ignore
     def checkpoint_forward(self, x):  # pragma: no cover
         """Forward method with support for gradient checkpointing"""
-        return checkpoint(self.fwd, x)
+        return checkpoint(self.fwd, x, use_reentrant=False)
 
     def forward(self, x):  # pragma: no cover
         if self.checkpointing >= 2:

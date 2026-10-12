@@ -1,9 +1,8 @@
 import dataclasses
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
-import dacite
 import torch
 from torch import nn
 
@@ -156,10 +155,8 @@ class SecondaryModuleStepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "SecondaryModuleStepConfig":
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -236,6 +233,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
 
     def get_step(
         self,
@@ -437,8 +437,9 @@ class SecondaryModuleStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            residual_names=(
+                self.prognostic_names if self._config.residual_prediction else None
+            ),
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             stepper_state=args.stepper_state,
         )

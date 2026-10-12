@@ -32,6 +32,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.ema import load_ema_params_if_available
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -752,6 +753,9 @@ class StepperConfig:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.step.get_prescribed_prognostic_names()
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.step.replace_corrector(corrector)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1022,6 +1026,20 @@ class Stepper:
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._config.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """
+        Replace the step's corrector configuration with a new one.
+
+        Args:
+            corrector: The new corrector configuration.
+        """
+        self._config.replace_corrector(corrector)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
@@ -1906,12 +1924,30 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        corrector: Corrector configuration to replace that used in producing a
+            serialized stepper. Options not restated here fall back to their
+            defaults, not to the checkpoint's values. For example::
+
+                corrector:
+                  type: atmosphere_corrector
+                  config:
+                    conserve_dry_air: true
+                    total_energy_budget_correction:
+                      method: constant_temperature
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    corrector: Literal["keep"] | CorrectorSelector = "keep"
+
+    def __post_init__(self):
+        if self.corrector != "keep" and not self.corrector.training_is_default():
+            raise ValueError(
+                "StepperOverrideConfig.corrector must not set training-only "
+                "options such as corrector_disabled_epochs."
+            )
 
 
 def load_stepper_config(
@@ -1953,12 +1989,15 @@ def load_stepper_config_with_override(
 def load_stepper(
     checkpoint_path: str | pathlib.Path,
     override_config: StepperOverrideConfig | None = None,
+    use_ema_if_available: bool = False,
 ) -> Stepper:
     """Load a stepper, optionally overriding certain aspects.
 
     Args:
         checkpoint_path: The path to the serialized checkpoint.
         override_config: Configuration options to override (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights,
+            use them in place of the stepper weights.
 
     Returns:
         The stepper serialized in the checkpoint, with appropriate options
@@ -1966,6 +2005,8 @@ def load_stepper(
     """
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    if use_ema_if_available:
+        load_ema_params_if_available(checkpoint, stepper.modules, str(checkpoint_path))
     apply_stepper_override(stepper, override_config)
     return stepper
 
@@ -2004,6 +2045,12 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
+        )
+        stepper.replace_corrector(override_config.corrector)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2043,3 +2090,9 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
+        )
+        stepper_config.replace_corrector(override_config.corrector)

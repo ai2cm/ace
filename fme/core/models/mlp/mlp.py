@@ -1,4 +1,6 @@
 import dataclasses
+from collections.abc import Mapping
+from typing import Any
 
 from torch import nn
 
@@ -20,6 +22,10 @@ class MLPConfig(ModuleConfig):
 
     hidden_dim: int = 256
     depth: int = 2
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,
