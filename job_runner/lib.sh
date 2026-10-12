@@ -226,7 +226,7 @@ git_commit_and_push() {
 #   Optional:
 #     CHECKPOINT_DATASET_ARGS (array) - additional dataset mounts
 #     OVERRIDE_ARGS - config override arguments
-#     MIN_RUNTIME (default: 0) - gantry --min-runtime value, e.g. "0", "30m", "1h", "8h"
+#     MIN_RUNTIME (default: $DEFAULT_MIN_RUNTIME) - gantry --min-runtime value, e.g. "0", "30m", "1h", "8h"
 #   Note: CONFIG_PATH must be relative to repo root for gantry run
 #   Note: training jobs always keep auto-resume enabled (server default);
 #         we never emit --no-auto-resume on the training path.
@@ -234,7 +234,7 @@ git_commit_and_push() {
 run_gantry_training_job() {
     local REPO_ROOT=$(git rev-parse --show-toplevel)
     local DESCRIPTION="${1:-Training job}"
-    local MIN_RUNTIME="${MIN_RUNTIME:-0}"
+    local MIN_RUNTIME="${MIN_RUNTIME:-$DEFAULT_MIN_RUNTIME}"
 
     # Build override argv. Re-tokenize via eval so single quotes in finetuning.txt
     # group list/dict values with spaces into single argv elements (literal quotes
@@ -484,6 +484,9 @@ resolve_config_dir() {
     echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
+# gantry --min-runtime when a row leaves min_runtime blank. 0 is backfill-only.
+DEFAULT_MIN_RUNTIME=8h
+
 # Input-file columns, in file order, as <header name>:<variable parse_row sets>.
 # The single source for each file's header and for how its rows are parsed.
 TRAINING_COLUMNS=(
@@ -587,7 +590,7 @@ print_detailed_job_info() {
     echo "  N_GPUS: $N_GPUS"
     echo "  SHARED_MEM: $SHARED_MEM"
     echo "  RETRIES: $RETRIES"
-    echo "  MIN_RUNTIME: ${MIN_RUNTIME:-0}"
+    echo "  MIN_RUNTIME: ${MIN_RUNTIME:-$DEFAULT_MIN_RUNTIME}"
     echo "  WORKSPACE: $WORKSPACE"
     echo "  OVERRIDE_ARGS: ${OVERRIDE_ARGS:-(none)}"
     echo

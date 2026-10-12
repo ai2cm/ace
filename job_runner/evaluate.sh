@@ -126,7 +126,7 @@ while read TRAIN_EXPER; do
     fi
 
     if [[ -z $MIN_RUNTIME ]]; then
-        MIN_RUNTIME="--min-runtime 8h"
+        MIN_RUNTIME="--min-runtime $DEFAULT_MIN_RUNTIME"
     fi
 
     if [[ -z $EXISTING_RESULTS_DATASET ]]; then

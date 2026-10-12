@@ -240,11 +240,12 @@ passed directly to gantry as `--min-runtime <value>` and controls how long a job
 is protected from preemption before it can be interrupted.
 
 - **Format**: A gantry-style duration string (e.g. `0`, `30m`, `1h`, `8h`).
-- **Default**: `0` (the server default — preemptible at any time).
+- **Default**: `DEFAULT_MIN_RUNTIME` in `lib.sh` (`8h`), for training, evaluation,
+  and inference rows alike.
 - **Auto-resume**: Training jobs always have auto-resume enabled (server default);
   `--no-auto-resume` is never emitted on the training path.
-- **Example values**: `0` for short test runs, `1h` to protect a checkpoint cycle,
-  `8h` for a fully protected run.
+- **Example values**: `1h` to protect a checkpoint cycle, `8h` for a fully
+  protected run. `0` is backfill-only.
 
 ### TAG Field (Optional)
 

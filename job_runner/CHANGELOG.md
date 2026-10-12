@@ -20,6 +20,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 ### Changed
 
+- Blank `min_runtime` defaults to `DEFAULT_MIN_RUNTIME` (`8h`) on every
+  launcher; training paths previously defaulted to `0`, which is backfill-only
 - Input-file columns are defined once per file in `lib.sh` (`*_COLUMNS`);
   `parse_row` reads rows and `input_header` writes headers from them
 - Remove `set_default_stats()`
@@ -61,6 +63,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 ### Changed
 
+- Blank `min_runtime` defaults to `DEFAULT_MIN_RUNTIME` (`8h`) on every
+  launcher; training paths previously defaulted to `0`, which is backfill-only
 - job_runner
 
 ### Fixed
