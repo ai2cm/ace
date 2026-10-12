@@ -1,0 +1,9 @@
+group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad|rs0|train|high|jupiter|2||3|ai2/ace|seed=0|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad|rs1|train|normal|titan|1||3|ai2/ace|seed=1|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad|rs2|train|normal|titan|1||3|ai2/ace|seed=2|8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_fmean|rs0|train|high|jupiter|2||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_fmean|rs1|train|normal|titan|1||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_fmean|rs2|train|normal|titan|1||3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean|8h
