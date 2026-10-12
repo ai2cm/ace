@@ -19,6 +19,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --extra_stats: Additional stats dataset mounted at /extra_stats (optional)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
+  echo "Reads <experiment_dir>/<config_subdirectory>/pretraining.txt, header:"
+  echo "  $(input_header PRETRAINING_COLUMNS)"
   exit 1
 fi
 
@@ -70,27 +72,12 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read PRETRAINING; do
+    is_job_row "$PRETRAINING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
-    GROUP=$(echo "$PRETRAINING" | cut -d"|" -f1)
-    TAG=$(echo "$PRETRAINING" | cut -d"|" -f2)
-    OCEAN_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f3)
-    OCEAN_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f4)
-    OCEAN_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f5)
-    ATMOS_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f6)
-    ATMOS_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f7)
-    ATMOS_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f8)
-    STATUS=$(echo "$PRETRAINING" | cut -d"|" -f9)
-    PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f10)
-    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f11)
-    N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f12)
-    SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f13)
+    parse_row "$PRETRAINING" PRETRAINING_COLUMNS
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
     fi
-    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
-    WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
-    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
-    MIN_RUNTIME=$(echo "$PRETRAINING" | cut -d"|" -f17)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -104,7 +91,7 @@ while read PRETRAINING; do
     fi
 
     if [[ -z $MIN_RUNTIME ]]; then
-        MIN_RUNTIME=0
+        MIN_RUNTIME=$DEFAULT_MIN_RUNTIME
     fi
 
     JOB_GROUP="${GROUP}"
@@ -183,7 +170,7 @@ while read PRETRAINING; do
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime $DEFAULT_MIN_RUNTIME" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

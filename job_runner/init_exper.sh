@@ -7,7 +7,8 @@ set -e
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source the shared library
+# Source the shared libraries
+source "$SCRIPT_DIR/lib.sh"
 source "$SCRIPT_DIR/lib_init_exper.sh"
 
 # Print usage information

@@ -233,7 +233,7 @@ git_commit_and_push() {
 #   Optional:
 #     CHECKPOINT_DATASET_ARGS (array) - additional dataset mounts
 #     OVERRIDE_ARGS - config override arguments
-#     MIN_RUNTIME (default: 0) - gantry --min-runtime value, e.g. "0", "30m", "1h", "8h"
+#     MIN_RUNTIME (default: $DEFAULT_MIN_RUNTIME) - gantry --min-runtime value, e.g. "0", "30m", "1h", "8h"
 #   Note: CONFIG_PATH must be relative to repo root for gantry run
 #   Note: training jobs always keep auto-resume enabled (server default);
 #         we never emit --no-auto-resume on the training path.
@@ -241,7 +241,7 @@ git_commit_and_push() {
 run_gantry_training_job() {
     local REPO_ROOT=$(git rev-parse --show-toplevel)
     local DESCRIPTION="${1:-Training job}"
-    local MIN_RUNTIME="${MIN_RUNTIME:-0}"
+    local MIN_RUNTIME="${MIN_RUNTIME:-$DEFAULT_MIN_RUNTIME}"
 
     # Build override argv. Re-tokenize via eval so single quotes in finetuning.txt
     # group list/dict values with spaces into single argv elements (literal quotes
@@ -381,6 +381,10 @@ append_to_experiments_file() {
     local REPO_ROOT=$(git rev-parse --show-toplevel)
     local EXPERIMENTS_FILE="$REPO_ROOT/$EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments.txt"
 
+    if [[ ! -f "$EXPERIMENTS_FILE" ]]; then
+        input_header EXPERIMENTS_COLUMNS > "$EXPERIMENTS_FILE"
+    fi
+
     { echo;
       echo "${JOB_GROUP}|${TAG}|${EXPERIMENT_ID}|${STATUS}|${CHECKPOINT}|${PRIORITY}|${PREEMPTIBLE_FLAG}";
     } >> "$EXPERIMENTS_FILE"
@@ -490,6 +494,82 @@ resolve_config_dir() {
     echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
+# gantry --min-runtime when a row leaves min_runtime blank. 0 is backfill-only.
+DEFAULT_MIN_RUNTIME=8h
+
+# Input-file columns, in file order, as <header name>:<variable parse_row sets>.
+# The single source for each file's header and for how its rows are parsed.
+TRAINING_COLUMNS=(
+    group:GROUP tag:TAG skip_or_train:STATUS priority:PRIORITY cluster:CLUSTER
+    n_gpus:N_GPUS shared_mem:SHARED_MEM retries:RETRIES workspace:WORKSPACE
+    override_args:OVERRIDE_ARGS min_runtime:MIN_RUNTIME
+)
+PRETRAINING_COLUMNS=(
+    group:GROUP tag:TAG ocean_project:OCEAN_PROJECT ocean_wandb_id:OCEAN_WANDB_ID
+    ocean_ckpt_type:OCEAN_CKPT atmos_project:ATMOS_PROJECT
+    atmos_wandb_id:ATMOS_WANDB_ID atmos_ckpt_type:ATMOS_CKPT
+    skip_or_train:STATUS priority:PRIORITY cluster:CLUSTER n_gpus:N_GPUS
+    shared_mem:SHARED_MEM retries:RETRIES workspace:WORKSPACE
+    override:OVERRIDE_ARGS min_runtime:MIN_RUNTIME
+)
+FINETUNING_COLUMNS=(
+    group:GROUP tag:TAG wandb_project:WANDB_PROJECT wandb_id:WANDB_ID
+    ckpt_type:CKPT_TYPE skip_or_train:STATUS priority:PRIORITY cluster:CLUSTER
+    n_gpus:N_GPUS shared_mem:SHARED_MEM retries:RETRIES workspace:WORKSPACE
+    override:OVERRIDE_ARGS results_dataset:EXISTING_RESULTS_DATASET
+    min_runtime:MIN_RUNTIME
+)
+RESUMING_COLUMNS=(
+    group:GROUP tag:TAG wandb_project:WANDB_PROJECT wandb_id:WANDB_ID
+    skip_or_train:STATUS priority:PRIORITY cluster:CLUSTER n_gpus:N_GPUS
+    shared_mem:SHARED_MEM retries:RETRIES workspace:WORKSPACE
+    override:OVERRIDE_ARGS results_dataset:EXISTING_RESULTS_DATASET
+    results_dataset_ocean:EXISTING_RESULTS_OCEAN_DATASET
+    results_dataset_atmos:EXISTING_RESULTS_ATMOS_DATASET
+    min_runtime:MIN_RUNTIME config:CONFIG
+)
+EXPERIMENTS_COLUMNS=(
+    group:JOB_GROUP tag:TAG experiment_id:EXPER_ID status:STATUS checkpoint:CKPT
+    priority:PRIORITY min_runtime:MIN_RUNTIME override:OVERRIDE_ARGS
+    results_dataset:EXISTING_RESULTS_DATASET workspace:WORKSPACE cluster:CLUSTER
+    ocean_results_dataset:EXISTING_RESULTS_OCEAN_DATASET
+    atmos_results_dataset:EXISTING_RESULTS_ATMOS_DATASET shared_mem:SHARED_MEM
+)
+
+# Print the header line for an input file
+# Args: $1 = name of a *_COLUMNS array
+# Usage: input_header EXPERIMENTS_COLUMNS
+input_header() {
+    local REF="$1[@]"
+    local COLUMNS=("${!REF}")
+    local NAMES=("${COLUMNS[@]%%:*}")
+    local IFS='|'
+    echo "${NAMES[*]}"
+}
+
+# Set each column's variable from a pipe-delimited row; missing fields are empty
+# Args: $1 = row, $2 = name of a *_COLUMNS array
+# Usage: parse_row "$LINE" TRAINING_COLUMNS
+parse_row() {
+    local REF="$2[@]"
+    local COLUMNS=("${!REF}")
+    local FIELDS I
+    IFS='|' read -r -a FIELDS <<< "$1"
+    for I in "${!COLUMNS[@]}"; do
+        printf -v "${COLUMNS[$I]#*:}" '%s' "${FIELDS[$I]:-}"
+    done
+}
+
+# Succeeds for a job row; fails for the header, blank lines, and # comments
+# Args: $1 = LINE
+# Usage: is_job_row "$LINE" || continue
+is_job_row() {
+    local LINE="$1"
+    [[ -n "${LINE//[[:space:]]/}" ]] || return 1
+    [[ ! "$LINE" =~ ^[[:space:]]*# ]] || return 1
+    [[ "${LINE%%|*}" != "group" ]]
+}
+
 # Print dry-run header
 print_dry_run_header() {
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -520,7 +600,7 @@ print_detailed_job_info() {
     echo "  N_GPUS: $N_GPUS"
     echo "  SHARED_MEM: $SHARED_MEM"
     echo "  RETRIES: $RETRIES"
-    echo "  MIN_RUNTIME: ${MIN_RUNTIME:-0}"
+    echo "  MIN_RUNTIME: ${MIN_RUNTIME:-$DEFAULT_MIN_RUNTIME}"
     echo "  WORKSPACE: $WORKSPACE"
     echo "  OVERRIDE_ARGS: ${OVERRIDE_ARGS:-(none)}"
     echo
