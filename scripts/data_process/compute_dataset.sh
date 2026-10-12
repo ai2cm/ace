@@ -1,9 +1,7 @@
 #!/bin/bash
-# Submit compute_dataset_argo_workflow.yaml. Every module in the entry points'
-# transitive sibling-import closures goes to the workflow in one compressed
-# code_bundle parameter: argo hands each resolved template to argoexec as one
-# env string, which the kernel caps at MAX_ARG_STRLEN, and the modules as
-# plain text overflow it.
+# Submit compute_dataset_argo_workflow.yaml. Python module dependencies are
+# provided as a compressed code bundle to avoid exceeding the
+# MAX_ARG_STRLEN. Without this, the modules as they are now overflow it.
 
 set -e
 
