@@ -164,3 +164,8 @@ run_training "train-4deg-daily-v2-shield-amip-only.yaml"        "train-4deg-dail
 
 # --- no-CO2 arm, seed 0 (1 GPU) ---
 run_training "train-4deg-daily-v2-shield-amip-only-no-co2.yaml" "train-4deg-daily-v2-shield-amip-only-no-co2-rs0" 1
+
+# --- no-CO2, NON-residual arm, seed 0 (1 GPU): SHiELD twin of ERA5 im4ecamc ---
+# (residual_prediction false, ocean.interpolate default false; for the SHiELD
+# replication of the im4ecamc process diagnosis, reports PR 102)
+run_training "train-4deg-daily-v2-shield-amip-only-no-residual-no-co2.yaml" "train-4deg-daily-v2-shield-amip-only-no-residual-no-co2-rs0" 1

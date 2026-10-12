@@ -1,0 +1,72 @@
+# Raw-daily-output prescribed-SST rollout over 2015-2021 (out of sample:
+# training ended 2013, 2014 was validation)
+# on SHiELD AMIP member ic_0001, for the SHiELD replication of the im4ecamc
+# process diagnosis (reports PR 102; ERA5 analogue
+# aimip-like/ace-inference-4deg-v2-no-residual-no-co2-10year-2015-raw.yaml).
+# Same protocol (eight ICs on Jan 1-8, all saved fields daily) except the length:
+# ic_0001 ends 2021-12-16, so 2534 steps take the Jan 8 IC exactly to that date,
+# and the control uses the same length. Checkpoint-agnostic: normalization,
+# in_names and ocean config come from the mounted /ckpt.tar.
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+experiment_dir: /results
+n_forward_steps: 2534
+forward_steps_in_memory: 73
+n_ensemble_per_ic: 1
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: true
+  names:
+    - PRESsfc
+    - surface_temperature
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - ULWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - DSWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - TMP850
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2015-01-01T00:00:00'
+      - '2015-01-02T00:00:00'
+      - '2015-01-03T00:00:00'
+      - '2015-01-04T00:00:00'
+      - '2015-01-05T00:00:00'
+      - '2015-01-06T00:00:00'
+      - '2015-01-07T00:00:00'
+      - '2015-01-08T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace
