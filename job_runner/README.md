@@ -199,6 +199,7 @@ This is useful for:
 
 **Script Initialization:**
 - `init_script_environment()`: Initialize REPO_ROOT, GIT_BRANCH, and BEAKER_USERNAME variables
+- `is_job_row()`: Fail for an input file's header, blank lines, and `#` comments
 - `parse_dry_run_flag()`: Parse `--dry-run` flag from arguments
 - `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
 - `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root

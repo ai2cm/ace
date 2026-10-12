@@ -64,6 +64,7 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read FINETUNING; do
+    is_job_row "$FINETUNING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
     GROUP=$(echo "$FINETUNING" | cut -d"|" -f1)
     TAG=$(echo "$FINETUNING" | cut -d"|" -f2)

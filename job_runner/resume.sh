@@ -63,6 +63,7 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read RESUMING; do
+    is_job_row "$RESUMING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
     GROUP=$(echo "$RESUMING" | cut -d"|" -f1)
     TAG=$(echo "$RESUMING" | cut -d"|" -f2)

@@ -480,6 +480,16 @@ resolve_config_dir() {
     echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
+# Succeeds for a job row; fails for the header, blank lines, and # comments
+# Args: $1 = LINE
+# Usage: is_job_row "$LINE" || continue
+is_job_row() {
+    local LINE="$1"
+    [[ -n "${LINE//[[:space:]]/}" ]] || return 1
+    [[ ! "$LINE" =~ ^[[:space:]]*# ]] || return 1
+    [[ "${LINE%%|*}" != "group" ]]
+}
+
 # Print dry-run header
 print_dry_run_header() {
     if [[ "$DRY_RUN" == "true" ]]; then

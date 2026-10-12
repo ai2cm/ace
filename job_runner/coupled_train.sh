@@ -69,6 +69,7 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read PRETRAINING; do
+    is_job_row "$PRETRAINING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
     GROUP=$(echo "$PRETRAINING" | cut -d"|" -f1)
     TAG=$(echo "$PRETRAINING" | cut -d"|" -f2)

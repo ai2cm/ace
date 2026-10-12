@@ -76,6 +76,7 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read TRAIN_EXPER; do
+    is_job_row "$TRAIN_EXPER" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
     JOB_GROUP=$(echo "$TRAIN_EXPER" | cut -d"|" -f1)
     TAG=$(echo "$TRAIN_EXPER" | cut -d"|" -f2)
