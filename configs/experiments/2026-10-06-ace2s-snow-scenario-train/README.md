@@ -77,6 +77,22 @@ job names `ace2s-snowscen-<arm>-daily-{1-step-pretrain,multi-step-finetune}-rs0`
 
 ## Launches
 
+Stage 1, launched 2026-10-07 on jupiter. Three were preempted and resumed from checkpoint in the
+same experiment, so the checkpoint dataset is the result of the experiment's last job.
+
 | job | Beaker experiment | stage-1 checkpoint dataset |
 |---|---|---|
-| | | |
+| `ace2s-snowscen-cm4-control-pic-1pct-daily-1-step-pretrain-rs0` | `01M4CABX1QTY7AFC0GHZR8MQHC` | `01M4CABX213EN330KTW7RDK5TE` |
+| `ace2s-snowscen-cm4-masked-naive-pic-1pct-daily-1-step-pretrain-rs0` | `01M4CAC40BC1KFBXBYEPKE0F92` | `01M4GZPB8EDF7PHJWF1M26RA3S` |
+| `ace2s-snowscen-cm4-control-pic-1pct-randco2-daily-1-step-pretrain-rs0` | `01M4CACBZGWTA20WT3R77MM99M` | `01M4GZPB4D79PCPNR95YDQAA7N` |
+| `ace2s-snowscen-cm4-masked-naive-pic-1pct-randco2-daily-1-step-pretrain-rs0` | `01M4CACHVD9Z4HEJQS6HNQ6C63` | `01M4KRHD8JVPCJ8PEN6A5GGVD8` |
+
+Stage 2, launched 2026-10-09 to 2026-10-11 on titan (`CLUSTER=ai2/titan`, 4 GPUs), each from the
+`best_ckpt.tar` of its stage-1 checkpoint dataset above:
+
+| job | Beaker experiment |
+|---|---|
+| `ace2s-snowscen-cm4-control-pic-1pct-daily-multi-step-finetune-rs0` | `01M4HBABBR9ZKPWHSNFJ2VV290` |
+| `ace2s-snowscen-cm4-masked-naive-pic-1pct-daily-multi-step-finetune-rs0` | `01M4J32ED22Q6DXTHF62F2CPR4` |
+| `ace2s-snowscen-cm4-control-pic-1pct-randco2-daily-multi-step-finetune-rs0` | `01M4J32RB5KPZTNSV6NS1MPEX3` |
+| `ace2s-snowscen-cm4-masked-naive-pic-1pct-randco2-daily-multi-step-finetune-rs0` | `01M4PP9PA6ZG34HTHPQ3YANRKQ` |
