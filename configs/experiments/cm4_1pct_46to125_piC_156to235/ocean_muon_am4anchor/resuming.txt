@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config
+
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b1|rs0|ace-samudra-cm4|8oanfhd1|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=1 resume_results.resume_wandb=true||||8h|train-config.yaml
+
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b2|rs0|ace-samudra-cm4|obeoqxmh|train|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=2 resume_results.resume_wandb=true||||8h|train-config.yaml
+
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b3|rs0|ace-samudra-cm4|lw4czaps|train|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=3 resume_results.resume_wandb=true||||8h|train-config.yaml

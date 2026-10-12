@@ -41,12 +41,14 @@ inference:
       regional_means:                 # slice 06: NH/SH/global per-step series
         - variables: [frozen_mass_total_area, ocean_sea_ice_fraction]
           reduction: sum              # area integral: kg, m**2
+          name: regional_sum_frozen_area
         - variables:
             - frozen_enthalpy_budget_residual
             - frozen_enthalpy_budget_residual_off_support
             - implied_frozen_mass_flux_into_ocean
             - implied_tendency_of_ocean_and_frozen_enthalpy_due_to_advection
           reduction: sum              # W, kg/s
+          name: regional_sum_budget
       regional_time_means:            # slices 09 + 11: hemispheric maps + bias/RMSE
         - variables:
             - frozen_enthalpy_budget_residual
