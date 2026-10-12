@@ -7,7 +7,5 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 #
 # uncoupled_train.sh acts only on rows whose status is exactly "train".
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_pool|rs0|train|high|jupiter|4||3|ai2/ace|seed=0|8h
-cm4_1pct_46to125_piC_156to235-ocean_ppad_pool|rs1|train|normal|jupiter|4||3|ai2/ace|seed=1|8h
-
-
+cm4_1pct_46to125_piC_156to235-ocean_ppad_pool|rs0|training|high|jupiter|4||3|ai2/ace|seed=0|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_pool|rs1|training|normal|jupiter|4||3|ai2/ace|seed=1|8h
