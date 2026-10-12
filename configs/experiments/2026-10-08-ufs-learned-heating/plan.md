@@ -263,3 +263,40 @@ zero fill) and attacking the mechanism directly: `resid-cap0005-learnedheat-sstw
 weight 30 on sst (a 1 K one-step SST error is 0.085 sigma full-field, a 0.17 K thetao_0 error is 0.44
 sigma residual; x30 equalizes their loss shares). Judge on one-step SST, band power and inline
 channel_mean against the base at matched epochs.
+
+## SST-fix matrix, final (2026-10-12, epoch 200 of 200, all from scratch, inline 10-yr windows from 2012/2013)
+
+| arm | inline channel_mean | val one-step SST (K) | step-20 SST (K) | Nino3.4 2-5 yr band / truth | ice | note |
+|---|---|---|---|---|---|---|
+| base (zero fill, SST full-field) | 0.041 | 0.98 | 0.80 | 0.89 | 0.014 | |
+| + sstfill273 | 0.043 | 1.00 | 0.85 | 1.00 | 0.015 | fill value is not the cause |
+| + sstw30 (MSE weight 30 on sst) | 0.066 | 0.34 | 0.35 | 0.61 | 0.108 | destabilized early training (cm 0.43 at ep 60, ice never recovers); fails |
+| + sstres (SST residual) | 0.048 | 0.17 | 0.30 | 1.06 (2.09 at ep 100) | 0.026 | one-step fixed, band power wandered, channel_mean worse |
+| + meanfill | 0.019 | 0.55 | 0.46 | 0.89 | 0.0065 | half the base channel_mean (ocean-only; mean-fill caveat) |
+| + sstres + meanfill | 0.019 | 0.18 | 0.067 | 1.00 | 0.0062 | best on every ocean-only number |
+| constant-0 twin + sstres | 0.042 | 0.17 | 0.30 | 1.11 | 0.015 | |
+
+Troy's standing caveats apply: mean fill has destabilized earlier runs and ocean-only gains have not carried to
+coupled mode; residual SST broke ENSO amplitude on CM4 (and wandered here). None of these is adopted on this
+evidence; the decision moves to the CM4-pretrained path (see ufs-training-path memory) and to coupled tests.
+
+## Full-record rollouts, second batch (2026-10-12)
+
+| arm | SST bias 1994-2001 / 2002-2011 / 2012-2021 / 2022-23 (K) | thetao_5 | learned term model vs data (W/m2) |
+|---|---|---|---|
+| ff learned heating | -0.00 / -0.16 / -0.55 / -0.72 | +0.03 / -0.16 / -0.51 / -0.68 | -3.9 vs -3.3 / -4.4 vs +1.8 / -4.7 vs +0.5 / -4.3 vs +1.3 |
+| clean-store resid, constant 0 | +0.13 / +0.13 / +0.17 / +0.13 | +0.29 / +0.35 / +0.40 / +0.49 | |
+| clean-store ff, constant 0 | +0.25 / +0.44 / +0.51 / +0.63 | +0.22 / +0.32 / +0.36 / +0.47 | |
+| 1deg July-2026 baseline (old store, no OHC corrector, trained through 2015) | -0.00 / +0.01 / -0.09 / -0.15 | -0.00 / +0.03 / -0.11 / -0.13 | |
+
+The full-field learned-heating arm learned a constant -4 W/m2 rather than the signal: it cools the column
+steadily (-0.7 K surface by 2022), worse than its constant-0 twin warms. Only the residual arm's learned term
+tracks anything. The 1deg July baseline drifts least of all, but it is not comparable: no corrector (so no budget
+forcing on data that lose heat to the nudging), trained on 1994-2015 including the holdout, old store.
+
+## ENSO hindcasts, from scratch vs CM4-pretrained (2026-10-12)
+See reports branch troya/2026-10-09-ufs4deg-scratch-vs-cm4-pretrain-enso. Climatological-forcing Nino3.4 ACC at
+3/6/9/12 months: scratch ff 0.27/-0.04/-0.23/-0.07 (amplitude collapses to 0.3 of observed by month 3; a full-field
+ocean re-anchors to climatology), scratch resid 0.76/0.46/0.34/0.35, CM4+FT resid 0.85-0.88/0.52-0.59/0.22-0.32/
+0.06-0.12, persistence 0.77/0.32/-0.02/-0.15. Residual vs full-field is the big divide; CM4 pretraining adds ~0.1
+at 3-6 months and loses it by 9. Zero-shot CM4 arms rerunning with NaN fill.
