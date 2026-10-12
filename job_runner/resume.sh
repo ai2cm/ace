@@ -83,6 +83,7 @@ while read RESUMING; do
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$RESUMING" | cut -d"|" -f14)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$RESUMING" | cut -d"|" -f15)
     MIN_RUNTIME=$(echo "$RESUMING" | cut -d"|" -f16)
+    CONFIG=$(echo "$RESUMING" | cut -d"|" -f17)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -113,8 +114,17 @@ while read RESUMING; do
     build_cluster_args "$CLUSTER" "$WORKSPACE"
     build_stats_dataset_args
 
-    # Set config path variable for print functions
-    CONFIG_PATH_REL="/existing-results/config.yaml"
+    # Blank config resumes the dumped config; else a repo config in the subdir
+    if [[ -n $CONFIG ]]; then
+        CONFIG_PATH="$EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG"
+        if [[ ! -f "$CONFIG_PATH" ]]; then
+            echo "Error: config $CONFIG_PATH not found" >&2
+            exit 1
+        fi
+    else
+        CONFIG_PATH="/existing-results/config.yaml"
+    fi
+    CONFIG_PATH_REL="$CONFIG_PATH"
 
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -156,9 +166,6 @@ while read RESUMING; do
             --dataset "$EXISTING_RESULTS_OCEAN_DATASET:training_checkpoints/ckpt.tar:/ocean_ckpt.tar"
         )
     fi
-
-    # Set config path to use the one from existing results
-    CONFIG_PATH="/existing-results/config.yaml"
 
     # Prepend resume override to OVERRIDE_ARGS
     OVERRIDE_ARGS="resume_results.existing_dir=/existing-results ${OVERRIDE_ARGS}"
