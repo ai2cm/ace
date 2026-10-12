@@ -2,3 +2,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs0|01M4R4943SBY9B9ZGJ872TM91Q|training|best_inference_ckpt|normal|--min-runtime 8h
 cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs0|01M4R4943SBY9B9ZGJ872TM91Q|1pct_yearly_1deg|best_inference_ckpt|urgent|--min-runtime 8h||01M4R49442TGQ7JT3QGC254NHJ|ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs1|01M4S7BEA619EVHE8A9Y7SF5NT|training|best_inference_ckpt|normal|--min-runtime 8h
