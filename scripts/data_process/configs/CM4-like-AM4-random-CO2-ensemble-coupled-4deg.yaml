@@ -10,7 +10,7 @@ coupled_datasets:
 
 stats:
   start_date: "0153-01-01T06:00:00"
-  exlude_runs:
+  exclude_runs:
     - random-CO2-1xCO2-ic_0003
     - random-CO2-2xCO2-ic_0003
     - random-CO2-4xCO2-ic_0003
