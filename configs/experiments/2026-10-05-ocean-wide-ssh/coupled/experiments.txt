@@ -5,7 +5,7 @@ cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG
 # Evaluations of the fto run (beaker 01M4C8N34W492NQG1FTE7S2QMK, results
 # dataset pinned) with the shared cm4 coupled evaluations, each with and
 # without (_sshsalt) the sea surface height salt correction added at inference.
-cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG1FTE7S2QMK|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M4C8N353G27KWNEVK8EFZZCD|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG1FTE7S2QMK|run_1pct-ic0001-130yr_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M4C8N353G27KWNEVK8EFZZCD|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG1FTE7S2QMK|1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M4C8N353G27KWNEVK8EFZZCD|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG1FTE7S2QMK|1pct-ic0001-130yr_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M4C8N353G27KWNEVK8EFZZCD|ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG1FTE7S2QMK|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M4C8N353G27KWNEVK8EFZZCD|ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235-coupled_clip-owsc_a2s-fto|o0a0rs0|01M4C8N34W492NQG1FTE7S2QMK|pending_piC-ic0151-200yr_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M4C8N353G27KWNEVK8EFZZCD|ai2/ace|jupiter
