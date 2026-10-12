@@ -1,2 +1,4 @@
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_muon_a2s-fto|mu1e-3rs0|01M4QDHAJ55M0ZXAGWBK2BCB65|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8-mae2ftn_muon_a2s-fto|mu3e-3rs0|01M4QDHS8M5H70681K6VKDJ03A|training|best_inference_ckpt|normal|--min-runtime 8h
