@@ -24,6 +24,25 @@ from fme.core.labels import LabelEncoding
 from fme.core.typing_ import Slice
 
 
+def local_ic_range(
+    n_initial_conditions: int, rank: int, world_size: int
+) -> tuple[int, int]:
+    """Return the [start, end) range of initial conditions for a rank.
+
+    Assigns contiguous blocks of ICs to each rank.  The caller must ensure
+    ``n_initial_conditions`` is divisible by ``world_size``.
+    """
+    if world_size <= 0:
+        raise ValueError(f"world_size must be positive, got {world_size}")
+    if n_initial_conditions % world_size != 0:
+        raise ValueError(
+            f"Number of initial conditions ({n_initial_conditions}) must be "
+            f"divisible by the number of data-parallel ranks ({world_size})."
+        )
+    per_rank = n_initial_conditions // world_size
+    return rank * per_rank, (rank + 1) * per_rank
+
+
 @dataclasses.dataclass
 class TimestampList:
     """
@@ -292,10 +311,12 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
         sample_tuples = []
-        for i_member in range(self._n_initial_conditions):
-            # check if sample is one this local rank should process
-            if i_member % dist.total_data_parallel_ranks != dist.data_parallel_rank:
-                continue
+        local_start, local_end = local_ic_range(
+            self._n_initial_conditions,
+            dist.data_parallel_rank,
+            dist.total_data_parallel_ranks,
+        )
+        for i_member in range(local_start, local_end):
             i_window_start = i_start + self._start_indices[i_member]
             i_window_end = i_window_start + self._forward_steps_in_memory + 1
             if i_window_end > (

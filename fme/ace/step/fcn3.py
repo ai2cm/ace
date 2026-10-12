@@ -304,6 +304,9 @@ class FCN3StepConfig(StepConfigABC):
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.corrector = corrector
+
     def get_step(
         self,
         dataset_info: DatasetInfo,
@@ -474,8 +477,9 @@ class FCN3Step(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
-            residual_prediction=self._config.residual_prediction,
-            prognostic_names=self.prognostic_names,
+            residual_names=(
+                self.prognostic_names if self._config.residual_prediction else None
+            ),
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             stepper_state=args.stepper_state,
         )

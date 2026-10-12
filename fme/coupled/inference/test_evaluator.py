@@ -3,6 +3,7 @@ import inspect
 import os
 import pathlib
 import shutil
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -13,11 +14,19 @@ import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.stepper import StepperOverrideConfig
+from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
+from fme.core.testing.ema import (
+    ScaledIdentity,
+    assert_parameters_equal,
+    save_checkpoint_with_ema,
+)
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -34,10 +43,15 @@ from fme.coupled.inference.evaluator import (
     StandaloneComponentCheckpointsConfig,
     StandaloneComponentConfig,
     apply_coupled_stepper_config_inference_overrides,
+    load_stepper,
     load_stepper_config,
     main,
 )
-from fme.coupled.stepper import CoupledStepperConfig
+from fme.coupled.stepper import (
+    CoupledStepper,
+    CoupledStepperConfig,
+    load_coupled_stepper,
+)
 from fme.coupled.test_stepper import (
     AddOneWithNoise,
     CoupledDatasetInfoBuilder,
@@ -395,6 +409,39 @@ def test_apply_coupled_overrides_rejects_non_prescribed_override(override):
         )
 
 
+def test_apply_coupled_overrides_accepts_corrector():
+    config = get_stepper_config(
+        ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["exog", "ocean_frac", "sfc_temp"],
+        atmosphere_out_names=["a_diag", "sfc_temp"],
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["sfc_temp"]
+        ),
+    )
+    atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
+    assert atmosphere_corrector["force_positive_names"] == ["sfc_temp"]
+    ocean_forcing_names_before = set(config.ocean_forcing_window_names)
+
+    apply_coupled_stepper_config_inference_overrides(
+        config,
+        ocean_override=None,
+        atmosphere_override=StepperOverrideConfig(
+            corrector=CorrectorSelector(type="atmosphere_corrector", config={})
+        ),
+    )
+    atmosphere_corrector = config.atmosphere.stepper.step.config["corrector"]
+    assert atmosphere_corrector == {
+        "type": "atmosphere_corrector",
+        "config": {},
+        "corrector_disabled_epochs": 0,
+    }
+    assert set(config.ocean_forcing_window_names) == ocean_forcing_names_before
+
+
 def test_apply_coupled_overrides_rejects_ocean_supplied_prescribed_collision():
     """An override prescribing an atmosphere name the ocean supplies must fail
     when the override is applied, not at the first coupled step."""
@@ -670,3 +717,121 @@ def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
     np.testing.assert_array_equal(seed0, seed0_again)
     np.testing.assert_array_equal(seed0, seed0_chunked)
     assert not np.allclose(seed0, seed1)
+
+
+def save_coupled_stepper_with_ema(
+    tmp_path: pathlib.Path, standalone: bool
+) -> tuple[
+    str | StandaloneComponentCheckpointsConfig, Callable[[CoupledStepper, bool], None]
+]:
+    """Save coupled checkpoint(s) with EMA weights, as in a training ckpt.tar.
+
+    Args:
+        tmp_path: Directory to save to.
+        standalone: Whether to save two standalone component checkpoints
+            instead of one coupled checkpoint.
+
+    Returns:
+        The checkpoint path config, and a function asserting that a loaded
+        stepper holds the EMA weights (if its second argument is True) or the
+        stepper weights.
+    """
+    ocean_in_names = ["o_exog", "sst", "a_diag"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_fraction", "surface_temperature"]
+    atmos_out_names = ["a_diag", "surface_temperature"]
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=1,
+        n_initial_conditions=1,
+        data_dir=tmp_path / "stepper_data",
+    )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        save_standalone_component_checkpoints=standalone,
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": ScaledIdentity()}
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": ScaledIdentity()}
+        ),
+    )
+    if isinstance(checkpoint_path, StandaloneComponentCheckpointsConfig):
+        ocean_weights = save_checkpoint_with_ema(
+            load_single_stepper(checkpoint_path.ocean.path),
+            checkpoint_path.ocean.path,
+        )
+        atmosphere_weights = save_checkpoint_with_ema(
+            load_single_stepper(checkpoint_path.atmosphere.path),
+            checkpoint_path.atmosphere.path,
+        )
+
+        def check(stepper: CoupledStepper, expect_ema: bool):
+            assert_parameters_equal(
+                stepper.ocean.modules, ocean_weights[int(expect_ema)]
+            )
+            assert_parameters_equal(
+                stepper.atmosphere.modules, atmosphere_weights[int(expect_ema)]
+            )
+
+    else:
+        weights = save_checkpoint_with_ema(
+            load_stepper(checkpoint_path), checkpoint_path
+        )
+
+        def check(stepper: CoupledStepper, expect_ema: bool):
+            assert_parameters_equal(stepper.modules, weights[int(expect_ema)])
+
+    return checkpoint_path, check
+
+
+@pytest.mark.parametrize("standalone", [False, True])
+@pytest.mark.parametrize(
+    "use_ema_if_available, expect_ema",
+    [(None, True), (True, True), (False, False)],
+    ids=["default", "enabled", "disabled"],
+)
+def test_inference_evaluator_config_load_stepper_uses_ema_weights(
+    tmp_path: pathlib.Path,
+    standalone: bool,
+    use_ema_if_available: bool | None,
+    expect_ema: bool,
+):
+    checkpoint_path, check = save_coupled_stepper_with_ema(tmp_path, standalone)
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_coupled_steps=1,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(),
+        loader=InferenceDataLoaderConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
+                atmosphere=XarrayDataConfig(data_path="unused")
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                n_initial_conditions=1, first=0, interval=1
+            ),
+        ),
+    )
+    if use_ema_if_available is not None:
+        config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
+
+    check(config.load_stepper(), expect_ema)
+
+
+def test_load_coupled_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Coupled warm starts (CoupledParameterInitConfig) load weights through
+    load_coupled_stepper, and must keep getting the stepper weights of a
+    checkpoint that has EMA weights.
+    """
+    checkpoint_path, check = save_coupled_stepper_with_ema(tmp_path, standalone=False)
+    assert isinstance(checkpoint_path, str)
+
+    check(load_coupled_stepper(checkpoint_path), False)

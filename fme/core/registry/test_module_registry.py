@@ -242,9 +242,7 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "filter_type": "linear",
             "use_mlp": True,
             "num_layers": 4,
-            "operator_type": "dhconv",
             "affine_norms": True,
-            "spectral_transform": "sht",
             "label_embed_dim": 3,
             "clip_latent_global_means": True,
         },
@@ -353,3 +351,58 @@ def test_latest_module_backwards_compatibility(selector_name: str):
         "to remove this error. In either case update the checkpoint "
         "(and configuration) as its own isolated commit."
     )
+
+
+def _ncsfno_config_with_legacy_keys() -> dict[str, Any]:
+    """Minimal config with all eight deprecated keys at their old defaults."""
+    return {
+        "embed_dim": 8,
+        "noise_embed_dim": 4,
+        "noise_type": "isotropic",
+        "filter_type": "linear",
+        "use_mlp": True,
+        "num_layers": 4,
+        "affine_norms": True,
+        # deprecated keys (old defaults)
+        "spectral_transform": "sht",
+        "operator_type": "dhconv",
+        "rank": 1.0,
+        "factorization": None,
+        "separable": False,
+        "complex_network": True,
+        "complex_activation": "real",
+        "spectral_layers": 1,
+    }
+
+
+def test_ncsfno_legacy_keys_load_successfully():
+    """A config dict carrying all eight deprecated keys at their old defaults
+    should load through ModuleSelector and build a module."""
+    config = _ncsfno_config_with_legacy_keys()
+    selector = ModuleSelector(type="NoiseConditionedSFNO", config=config)
+    dataset_info = DatasetInfo(img_shape=(9, 18))
+    module = selector.build(
+        n_in_channels=5, n_out_channels=6, dataset_info=dataset_info
+    )
+    assert isinstance(module, Module)
+
+
+def test_ncsfno_separable_true_raises():
+    config = _ncsfno_config_with_legacy_keys()
+    config["separable"] = True
+    with pytest.raises(ValueError, match="separable"):
+        ModuleSelector(type="NoiseConditionedSFNO", config=config)
+
+
+def test_ncsfno_factorization_non_none_raises():
+    config = _ncsfno_config_with_legacy_keys()
+    config["factorization"] = "dense"
+    with pytest.raises(ValueError, match="factorization"):
+        ModuleSelector(type="NoiseConditionedSFNO", config=config)
+
+
+def test_ncsfno_operator_type_non_dhconv_raises():
+    config = _ncsfno_config_with_legacy_keys()
+    config["operator_type"] = "fft"
+    with pytest.raises(ValueError, match="operator_type"):
+        ModuleSelector(type="NoiseConditionedSFNO", config=config)
