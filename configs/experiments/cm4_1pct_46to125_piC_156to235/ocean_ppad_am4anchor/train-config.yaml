@@ -289,9 +289,9 @@ stepper:
             method: prescribed_open_ocean
             open_ocean:
               q_terms:
-                - hfds
-                - calving_residue
-                - minus_hfrunoffds
+                - f_top
+                - minus_lf_snowfl
+                - precipitation_heat
               coastal: method
               # block_size set via override_args
           force_positive_names:
