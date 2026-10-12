@@ -239,6 +239,11 @@ stepper:
         config:
           noise_embed_dim: 32
           conditioned_blocks: all_blocks
+          # activation checkpointing, as mhaw9t6l. The ocean_ppad pretrain
+          # does not set it, and without it this recipe (n_ensemble 2, batch
+          # 4/GPU) OOMs a 4xH100 node in the first backward
+          # (01M4RVXMQMDE8GYVSY79WD46JY: 73 GiB allocated + 2.16 GiB asked).
+          checkpoint_strategy: all
           ch_width:
             - 280
             - 380
