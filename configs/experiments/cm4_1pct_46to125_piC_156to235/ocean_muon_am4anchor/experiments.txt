@@ -7,8 +7,8 @@ cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b1|rs0|01M4NW7P8EWF2Q5VGS5ZWM
 cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b1|rs0|01M4PV6BH7R5ZZVJN3T7KSB616|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b1|rs0|01M4PV6BH7R5ZZVJN3T7KSB616|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b2|rs0|01M4Q81CMY0P13X6C2SW6FVRNE|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b2|rs0|01M4Q81CMY0P13X6C2SW6FVRNE|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b2|rs0|01M4Q81CMY0P13X6C2SW6FVRNE|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b2|rs0|01M4Q81CMY0P13X6C2SW6FVRNE|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b3|rs0|01M4Q81QW2SQETZYTQ28J8BYBE|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b3|rs0|01M4Q81QW2SQETZYTQ28J8BYBE|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b3|rs0|01M4Q81QW2SQETZYTQ28J8BYBE|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_muon_am4anchor_b3|rs0|01M4Q81QW2SQETZYTQ28J8BYBE|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
