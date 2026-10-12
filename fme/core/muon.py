@@ -1,19 +1,27 @@
 """Muon optimizer with an auxiliary AdamW parameter group.
 
-Vendored from Keller Jordan's reference implementation
-(https://github.com/KellerJordan/Muon, ``muon.py``,
-``SingleDeviceMuonWithAuxAdam``; MIT License, Copyright (c) 2024 Keller
-Jordan), because torch < 2.9 ships no Muon. Changes from the reference:
+The Muon math (momentum, Newton-Schulz orthogonalization, learning-rate
+adjustment, decoupled weight decay) is delegated to torch's functional
+``torch.optim._muon.muon``. ``torch.optim.Muon`` itself is not used directly
+because its constructor rejects parameters with ``ndim != 2`` (conv kernels
+are 4D) and it has no AdamW group for the remaining parameters. This module
+is the thin layer around the functional call:
 
-- Gradients are not modified in place (the reference's Nesterov update
-  overwrites ``p.grad``); parameters with ``grad=None`` are skipped instead
-  of being given zero gradients.
-- Any parameter with ``ndim > 2`` (not only 4D conv kernels) is flattened
-  to ``(shape[0], -1)`` for the orthogonalization.
-- ``nesterov`` and ``ns_steps`` are configurable, and AdamW defaults match
-  ``torch.optim.AdamW`` (betas ``(0.9, 0.999)``, eps ``1e-8``).
+- Parameters with ``ndim > 2`` are passed to torch as ``(shape[0], -1)``
+  views, so updates write through to the parameter (a non-contiguous
+  parameter is updated through a contiguous copy that is copied back). The
+  momentum buffer is stored in the parameter's own shape, as in the
+  previously vendored implementation, so its checkpoints load unchanged.
+- Parameters with ``grad=None`` are skipped; gradients are not modified.
+- An AdamW group (defaults match ``torch.optim.AdamW``: betas
+  ``(0.9, 0.999)``, eps ``1e-8``) updates the non-Muon parameters.
 - ``load_state_dict`` refuses a state dict whose parameter groups are not
   Muon/AdamW groups of the same layout (e.g. one saved by plain AdamW).
+
+torch's Newton-Schulz iteration fuses its bfloat16 matmuls (``addmm``), so
+its updates differ from the previously vendored kernel's by bfloat16
+rounding (about 3% of the update RMS); runs resumed from vendored-era
+checkpoints are not bitwise reproducible.
 
 Muon is single-device: under DDP the gradients are already all-reduced
 before ``step``, so every rank computes the same Newton-Schulz update.
@@ -23,53 +31,19 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 import torch
+from torch.optim import _muon as torch_muon
 
 _MUON_FLAG = "use_muon"
+ADJUST_LR_FNS = (None, "original", "match_rms_adamw")
 
 
-def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
-    """Approximately orthogonalize a matrix with a quintic Newton-Schulz
-    iteration.
-
-    The coefficients maximize the slope at zero, so the result is not exactly
-    ``U V^T`` but ``U S' V^T`` with ``S'`` roughly uniform in [0.5, 1.5],
-    which does not hurt model performance relative to exact orthogonalization.
-    Runs in bfloat16 as in the reference implementation.
+def _as_matrix(t: torch.Tensor) -> tuple[torch.Tensor, bool]:
+    """Return a ``(shape[0], -1)`` matrix of ``t`` and whether it is a copy
+    (``t`` not contiguous) that must be written back after an in-place update.
     """
-    assert G.ndim >= 2
-    a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
-    transposed = G.size(-2) > G.size(-1)
-    if transposed:
-        X = X.mT
-    # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) + 1e-7)
-    for _ in range(steps):
-        A = X @ X.mT
-        B = b * A + c * A @ A
-        X = a * X + B @ X
-    if transposed:
-        X = X.mT
-    return X
-
-
-def muon_update(
-    grad: torch.Tensor,
-    momentum: torch.Tensor,
-    beta: float,
-    ns_steps: int,
-    nesterov: bool,
-) -> torch.Tensor:
-    """Update the momentum buffer in place and return the orthogonalized
-    update, shaped as a 2D ``(shape[0], -1)`` matrix.
-    """
-    momentum.lerp_(grad, 1 - beta)
-    update = grad.lerp(momentum, beta) if nesterov else momentum
-    if update.ndim > 2:
-        update = update.reshape(update.shape[0], -1)
-    update = zeropower_via_newtonschulz5(update, steps=ns_steps)
-    update = update * max(1, update.size(-2) / update.size(-1)) ** 0.5
-    return update
+    if t.is_contiguous():
+        return t.view(t.shape[0], -1), False
+    return t.contiguous().view(t.shape[0], -1), True
 
 
 def adam_update(
@@ -80,6 +54,12 @@ def adam_update(
     betas: tuple[float, float],
     eps: float,
 ) -> torch.Tensor:
+    """Update the Adam moments in place and return the bias-corrected update.
+
+    From Keller Jordan's Muon reference implementation
+    (https://github.com/KellerJordan/Muon, ``muon.py``; MIT License,
+    Copyright (c) 2024 Keller Jordan).
+    """
     exp_avg.lerp_(grad, 1 - betas[0])
     exp_avg_sq.lerp_(grad.square(), 1 - betas[1])
     exp_avg_c = exp_avg / (1 - betas[0] ** step)
@@ -100,6 +80,22 @@ class Muon(torch.optim.Optimizer):
     through the momentum mix, not its size; the clip matters mainly for the
     AdamW group.
 
+    ``adjust_lr_fn`` sets the per-matrix step size from the flattened shape
+    ``(A, B) = (shape[0], prod(shape[1:]))``:
+
+    - ``None``/``"original"`` (Keller Jordan's reference): step
+      ``lr * sqrt(max(1, A / B))``.
+    - ``"match_rms_adamw"`` (Moonshot, arXiv:2502.16982): step
+      ``lr * 0.2 * sqrt(max(A, B))``, which gives the update an RMS of about
+      ``0.2 * lr`` to match AdamW. For a 3x3 conv kernel, flattened to
+      ``(C_out, C_in * 9)`` with ``C_out <= C_in * 9``, this is a
+      ``0.2 * sqrt(9 * C_in)`` times larger step than ``"original"`` at the
+      same ``lr`` (9.6x for ``C_in = 256``, 13.6x for 512), while decoupled
+      weight decay still uses the unadjusted ``lr``. Switching between the two
+      therefore needs ``lr`` and ``weight_decay`` retuned together; e.g. an
+      ``lr`` of 1e-3 under ``"original"`` corresponds to roughly 1e-4 under
+      ``"match_rms_adamw"``.
+
     Args:
         muon_params: Parameters with ``ndim >= 2`` to update with Muon.
         adamw_params: Parameters to update with AdamW.
@@ -108,6 +104,8 @@ class Muon(torch.optim.Optimizer):
         nesterov: Whether Muon uses Nesterov momentum.
         weight_decay: Decoupled weight decay for the Muon group.
         ns_steps: Number of Newton-Schulz iterations.
+        adjust_lr_fn: Muon step-size adjustment, one of ``None``,
+            ``"original"`` (same as ``None``) and ``"match_rms_adamw"``.
         adamw_lr: AdamW group learning rate.
         adamw_betas: AdamW group betas.
         adamw_eps: AdamW group epsilon.
@@ -122,7 +120,8 @@ class Muon(torch.optim.Optimizer):
         momentum: float = 0.95,
         nesterov: bool = True,
         weight_decay: float = 0.0,
-        ns_steps: int = 5,
+        ns_steps: int = torch_muon.DEFAULT_NS_STEPS,
+        adjust_lr_fn: str | None = None,
         adamw_lr: float = 3e-4,
         adamw_betas: tuple[float, float] = (0.9, 0.999),
         adamw_eps: float = 1e-8,
@@ -130,6 +129,11 @@ class Muon(torch.optim.Optimizer):
     ):
         muon_params = list(muon_params)
         adamw_params = list(adamw_params)
+        if adjust_lr_fn not in ADJUST_LR_FNS:
+            raise ValueError(
+                f"Muon adjust_lr_fn must be one of {list(ADJUST_LR_FNS)}, "
+                f"got {adjust_lr_fn!r}."
+            )
         if len(muon_params) == 0:
             raise ValueError("Muon requires at least one parameter with ndim >= 2.")
         for p in muon_params:
@@ -150,6 +154,7 @@ class Muon(torch.optim.Optimizer):
                 "nesterov": nesterov,
                 "weight_decay": weight_decay,
                 "ns_steps": ns_steps,
+                "adjust_lr_fn": adjust_lr_fn,
                 _MUON_FLAG: True,
             }
         ]
@@ -166,6 +171,13 @@ class Muon(torch.optim.Optimizer):
             )
         super().__init__(param_groups, dict())
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        super().__setstate__(state)
+        # Muon groups saved before adjust_lr_fn existed used "original".
+        for group in self.param_groups:
+            if group.get(_MUON_FLAG):
+                group.setdefault("adjust_lr_fn", None)
+
     @torch.no_grad()
     def step(self, closure=None):
         loss = None
@@ -173,38 +185,83 @@ class Muon(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
         for group in self.param_groups:
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                state = self.state[p]
-                if group[_MUON_FLAG]:
-                    if len(state) == 0:
-                        state["momentum_buffer"] = torch.zeros_like(p)
-                    update = muon_update(
-                        p.grad,
-                        state["momentum_buffer"],
-                        beta=group["momentum"],
-                        ns_steps=group["ns_steps"],
-                        nesterov=group["nesterov"],
-                    )
-                    update = update.reshape(p.shape).to(p.dtype)
-                else:
-                    if len(state) == 0:
-                        state["exp_avg"] = torch.zeros_like(p)
-                        state["exp_avg_sq"] = torch.zeros_like(p)
-                        state["step"] = 0
-                    state["step"] += 1
-                    update = adam_update(
-                        p.grad,
-                        state["exp_avg"],
-                        state["exp_avg_sq"],
-                        state["step"],
-                        group["betas"],
-                        group["eps"],
-                    )
-                p.mul_(1 - group["lr"] * group["weight_decay"])
-                p.add_(update, alpha=-group["lr"])
+            if group[_MUON_FLAG]:
+                self._muon_step(group)
+            else:
+                self._adamw_step(group)
         return loss
+
+    def _muon_step(self, group: dict[str, Any]) -> None:
+        params: list[torch.Tensor] = []
+        grads: list[torch.Tensor] = []
+        bufs: list[torch.Tensor] = []
+        # (original, matrix copy) pairs to write back after the update
+        write_back: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            state = self.state[p]
+            if len(state) == 0:
+                state["momentum_buffer"] = torch.zeros_like(
+                    p, memory_format=torch.contiguous_format
+                )
+            if not group["nesterov"] and p.dtype == torch.bfloat16:
+                # torch's Newton-Schulz casts its input with .bfloat16() and
+                # then normalizes it in place; without Nesterov that input is
+                # the momentum buffer itself, which would be overwritten.
+                raise ValueError(
+                    "Muon with nesterov=False does not support bfloat16 " "parameters."
+                )
+            # torch's muon reads the gradient only, so a copy is fine.
+            grads.append(p.grad.reshape(p.shape[0], -1))
+            for t, out in ((p, params), (state["momentum_buffer"], bufs)):
+                matrix, is_copy = _as_matrix(t)
+                out.append(matrix)
+                if is_copy:
+                    write_back.append((t, matrix))
+        if len(params) == 0:
+            return
+        torch_muon.muon(
+            params,
+            grads,
+            bufs,
+            lr=group["lr"],
+            weight_decay=group["weight_decay"],
+            momentum=group["momentum"],
+            nesterov=group["nesterov"],
+            ns_coefficients=(
+                torch_muon.DEFAULT_A,
+                torch_muon.DEFAULT_B,
+                torch_muon.DEFAULT_C,
+            ),
+            ns_steps=group["ns_steps"],
+            eps=torch_muon.EPS,
+            adjust_lr_fn=group["adjust_lr_fn"],
+            has_complex=False,
+        )
+        for t, matrix in write_back:
+            t.copy_(matrix.view(t.shape))
+
+    def _adamw_step(self, group: dict[str, Any]) -> None:
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            state = self.state[p]
+            if len(state) == 0:
+                state["exp_avg"] = torch.zeros_like(p)
+                state["exp_avg_sq"] = torch.zeros_like(p)
+                state["step"] = 0
+            state["step"] += 1
+            update = adam_update(
+                p.grad,
+                state["exp_avg"],
+                state["exp_avg_sq"],
+                state["step"],
+                group["betas"],
+                group["eps"],
+            )
+            p.mul_(1 - group["lr"] * group["weight_decay"])
+            p.add_(update, alpha=-group["lr"])
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         check_muon_state_dict_compatible(self, state_dict)

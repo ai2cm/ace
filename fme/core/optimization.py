@@ -11,6 +11,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -79,6 +80,7 @@ _MUON_KWARGS = frozenset(
         "nesterov",
         "weight_decay",
         "ns_steps",
+        "adjust_lr_fn",
         "adamw_lr",
         "adamw_betas",
         "adamw_eps",
@@ -378,9 +380,12 @@ class OptimizationConfig:
             Muon the allowed keys are ``momentum`` (default 0.95),
             ``nesterov`` (default True), ``weight_decay`` (decoupled, Muon
             group, default 0.0), ``ns_steps`` (Newton-Schulz iterations,
-            default 5), ``adamw_lr`` (required), ``adamw_betas`` (default
-            ``[0.9, 0.999]``), ``adamw_eps`` (default 1e-8) and
-            ``adamw_weight_decay`` (decoupled, default 0.0).
+            default 5), ``adjust_lr_fn`` (Muon step-size rule, ``None``/
+            ``"original"`` or ``"match_rms_adamw"``, default None; see
+            :class:`fme.core.muon.Muon`), ``adamw_lr`` (required),
+            ``adamw_betas`` (default ``[0.9, 0.999]``), ``adamw_eps``
+            (default 1e-8) and ``adamw_weight_decay`` (decoupled, default
+            0.0).
         adamw_names: Muon only. Substrings of parameter names (as given by
             ``named_parameters()``, prefixed by the module index, e.g.
             ``"0.module.film.W_scale.weight"``) whose matrix parameters are
@@ -445,6 +450,12 @@ class OptimizationConfig:
                 raise ValueError(
                     f"Unknown kwargs for Muon: {sorted(unknown)}. "
                     f"Allowed: {sorted(_MUON_KWARGS)}."
+                )
+            adjust_lr_fn = self.kwargs.get("adjust_lr_fn")
+            if adjust_lr_fn not in MUON_ADJUST_LR_FNS:
+                raise ValueError(
+                    "Muon kwargs['adjust_lr_fn'] must be one of "
+                    f"{list(MUON_ADJUST_LR_FNS)}, got {adjust_lr_fn!r}."
                 )
             if "adamw_lr" not in self.kwargs:
                 raise ValueError(
