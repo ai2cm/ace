@@ -1,0 +1,225 @@
+#!/usr/bin/env python
+"""Compose a 4deg coupled fine-tune config for one residual-anchor ocean arm.
+
+Mirrors what job_runner/create_coupled_train_config.sh does for the 1deg
+coupled arms, without yq: the shared 1deg coupled train template, with its
+eight zarr names swapped for the 4deg stores, gets the ocean arm's own
+`stepper` block spliced in as `stepper.ocean.stepper` and the 4deg ACE2S
+atmosphere's `stepper` block as `stepper.atmosphere.stepper`. Template values
+win on conflict, as in the shell version.
+
+Our ocean arms are deterministic (MSE) steppers, so the ocean loss is MSE with
+a single ensemble member, the variant the 1deg "coupled_mse" arm used, rather
+than the ensemble loss the stochastic 1deg oceans train with. The atmosphere
+stays frozen and contributes no loss, exactly as at 1deg, so "coupled
+fine-tuning" here is fine-tuning the ocean against an interactive atmosphere.
+
+    python make_coupled_ft_config.py resid-ohc   # writes resid-ohc-coupled-ft.yaml
+"""
+
+import argparse
+import copy
+import pathlib
+
+import yaml
+
+HERE = pathlib.Path(__file__).resolve().parent
+ARMS_DIR = HERE.parent
+TEMPLATE = HERE / "train-config-template-4deg.yaml"
+ATMOS = HERE / "atmos-ace2s-ft-4deg-stepper.yaml"
+
+# keys the shell version strips from a component's stepper before splicing
+STRIP = (
+    "loss",
+    "optimize_last_step_only",
+    "n_ensemble",
+    "parameter_init",
+    "train_n_forward_steps",
+)
+
+
+def merge_template_wins(template: dict, incoming: dict) -> dict:
+    """Deep-merge ``incoming`` under ``template``; template keys win on conflict."""
+    out = copy.deepcopy(incoming)
+    for k, v in template.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = merge_template_wins(v, out[k])
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "arm", help="ocean arm name, e.g. resid-ohc (its yaml sits in the parent dir)"
+    )
+    ap.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="no pretrained ocean weights: train the ocean from random init inside the "
+        "coupled system, with the ocean-only arms' 75-epoch / lr 1e-4 schedule "
+        "(writes <arm>-coupled-scratch.yaml)",
+    )
+    ap.add_argument(
+        "--target-ocean-atmosphere",
+        action="store_true",
+        help="with --from-scratch: force the atmosphere with the TRUE ocean surface "
+        "during training (stepper_training.atmosphere_forced_by_target_ocean), so "
+        "it is never driven by the untrained ocean's SST; the ocean still sees the "
+        "interactive atmosphere (writes <arm>-coupled-scratch-trueocean.yaml)",
+    )
+    ap.add_argument(
+        "--loss",
+        choices=["mse", "ens"],
+        default="mse",
+        help="ocean loss in the coupled fine-tune: mse (1 member, the default) or ens "
+        "(EnsembleLoss CRPS 0.9 + energy 0.1, 2 members, the team's 1-degree protocol; "
+        "writes <arm>-coupled-ft-ens.yaml)",
+    )
+    ap.add_argument(
+        "--joint",
+        choices=["none", "ens", "wave1"],
+        default="none",
+        help="also train the atmosphere: 'ens' unfreezes it with its own EnsembleLoss "
+        "(weight 1, wave-1 step schedule) at the same lr/epochs as --loss ens; 'wave1' "
+        "reproduces the 1pct-only wave-1 protocol (lr 1e-5, 25 epochs, stochastic step "
+        "schedules on both components). Writes <arm>-coupled-ft-joint<mode>.yaml",
+    )
+    args = ap.parse_args()
+    if args.joint != "none" and args.loss != "ens":
+        ap.error("--joint requires --loss ens")
+    if args.target_ocean_atmosphere and not args.from_scratch:
+        ap.error("--target-ocean-atmosphere requires --from-scratch")
+
+    cfg = yaml.safe_load(TEMPLATE.read_text())
+    ocean = yaml.safe_load((ARMS_DIR / f"{args.arm}.yaml").read_text())["stepper"]
+    atmos = yaml.safe_load(ATMOS.read_text())["stepper"]
+    for comp in (ocean, atmos):
+        for k in STRIP:
+            comp.pop(k, None)
+
+    cfg["stepper"]["ocean"]["stepper"] = merge_template_wins(
+        cfg["stepper"]["ocean"].get("stepper") or {}, ocean
+    )
+    cfg["stepper"]["atmosphere"]["stepper"] = merge_template_wins(
+        cfg["stepper"]["atmosphere"].get("stepper") or {}, atmos
+    )
+    sic = ocean["step"]["config"]["corrector"]["config"]["sea_ice_fraction_correction"][
+        "sea_ice_fraction_name"
+    ]
+    cfg["stepper"]["ocean_fraction_prediction"]["sea_ice_fraction_name"] = sic
+
+    st = cfg["stepper_training"]
+    if args.loss == "ens":
+        # the team's protocol: ensemble loss, two members (they differ through the
+        # stochastic atmosphere)
+        st["n_ensemble"] = 2
+        st["ocean"]["loss"] = {
+            "type": "EnsembleLoss",
+            "kwargs": {"crps_weight": 0.9, "energy_score_weight": 0.1},
+        }
+    else:
+        # deterministic ocean: MSE, one member (the 1deg coupled_mse variant)
+        st["n_ensemble"] = 1
+        st["ocean"]["loss"] = {"type": "MSE"}
+
+    arm = args.arm
+    if args.from_scratch:
+        # Troy's question (2026-09-24): does Samudra trained from scratch against the
+        # stochastic ACE atmosphere, never having seen perfect forcing, come out
+        # different from pretrain-then-coupled-FT? Same ocean stepper, no ocean
+        # weights, the ocean-only arms' schedule (75 epochs, lr 1e-4), and the
+        # coupled template's 4 coupled steps and warmup.
+        st["ocean"].pop("parameter_init", None)
+        ocean_train = yaml.safe_load((ARMS_DIR / f"{arm}.yaml").read_text())
+        cfg["max_epochs"] = ocean_train["max_epochs"]
+        cfg["optimization"]["lr"] = ocean_train["optimization"]["lr"]
+        cfg["evaluate_before_training"] = False
+        variant = "scratch"
+        lines = [
+            f"{arm}-coupled-scratch: 4deg '{arm}' ocean arm trained FROM SCRATCH",
+            "inside the coupled system, against the frozen stochastic 4deg ACE2S",
+            "atmosphere, instead of pretrained with perfect atmospheric forcing and",
+            "then coupled-FT'd. Generated by make_coupled_ft_config.py --from-scratch:",
+            "the coupled-ft config with the ocean's parameter_init removed and the",
+            f"ocean-only arm's max_epochs ({cfg['max_epochs']}) and",
+            f"lr ({cfg['optimization']['lr']}).",
+        ]
+        if args.target_ocean_atmosphere:
+            # Troy (2026-09-24): don't let the untrained ocean's SST corrupt the
+            # atmosphere; drive ACE with the true ocean surface while the ocean
+            # trains against ACE's interactive output. Inline inference is
+            # still fully coupled.
+            st["atmosphere_forced_by_target_ocean"] = True
+            variant = "scratch-trueocean"
+            lines[0] = f"{arm}-coupled-scratch-trueocean: as {arm}-coupled-scratch, but"
+            lines.insert(
+                1,
+                "with the atmosphere forced by the TRUE ocean surface during training",
+            )
+            lines.insert(
+                2,
+                "(stepper_training.atmosphere_forced_by_target_ocean: true); the",
+            )
+            lines.insert(3, "ocean still sees the interactive atmosphere. Otherwise:")
+        out = HERE / f"{arm}-coupled-{variant}.yaml"
+    else:
+        out = HERE / (
+            f"{arm}-coupled-ft-ens.yaml"
+            if args.loss == "ens"
+            else f"{arm}-coupled-ft.yaml"
+        )
+        if args.joint != "none":
+            # the atmosphere trains too: nothing frozen, its own ensemble loss, and
+            # the wave-1 stochastic atmosphere step schedule (0..41 of 80 per window)
+            at = st["atmosphere"]
+            at["parameter_init"] = {"weights_path": "/atmos_ckpt.tar"}
+            at["loss_weight"] = 1.0
+            at["n_steps"] = {
+                "outcomes": [
+                    {"steps": 0, "probability": 0.025},
+                    {"steps": 1, "probability": 0.29},
+                    {"steps": 2, "probability": 0.29},
+                    {"steps": 4, "probability": 0.29},
+                    {"steps": 21, "probability": 0.1},
+                    {"steps": 41, "probability": 0.05},
+                ]
+            }
+            if args.joint == "wave1":
+                st["ocean"]["n_steps"] = {
+                    "outcomes": [
+                        {"steps": 0, "probability": 0.1},
+                        {"steps": 1, "probability": 0.3},
+                        {"steps": 2, "probability": 0.3},
+                        {"steps": 4, "probability": 0.3},
+                    ]
+                }
+                cfg["optimization"]["lr"] = 1.0e-5
+                cfg["max_epochs"] = 25
+            out = HERE / f"{arm}-coupled-ft-joint{args.joint}.yaml"
+        lines = [
+            f"{arm}-coupled-ft: 4deg coupled fine-tune of the '{arm}' ocean arm",
+            "against the frozen 4deg ACE2S atmosphere. Generated by",
+            "make_coupled_ft_config.py from train-config-template-4deg.yaml (the",
+            "shared 1deg coupled template with 4deg stores), the arm's own stepper",
+            f"block ({arm}.yaml) and the 4deg atmosphere's stepper block. Ocean loss",
+            (
+                "EnsembleLoss with two members"
+                if args.loss == "ens"
+                else "MSE with one member"
+            )
+            + (
+                ", atmosphere ALSO TRAINED (unfrozen, own EnsembleLoss),"
+                if args.joint != "none"
+                else ", atmosphere frozen with no loss, 8 epochs,"
+            ),
+            "as at 1deg.",
+        ]
+    header = "".join(f"# {line}\n" for line in lines)
+    out.write_text(header + yaml.safe_dump(cfg, sort_keys=False, width=100))
+    print(f"wrote {out}")
+
+
+if __name__ == "__main__":
+    main()
