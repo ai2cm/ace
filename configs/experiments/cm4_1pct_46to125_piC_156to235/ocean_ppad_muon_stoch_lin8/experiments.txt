@@ -1,3 +1,5 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RVXMQMDE8GYVSY79WD46JY|canceled_oom|best_inference_ckpt|normal|--min-runtime 8h
 
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RXX7G88Q31ME4QCASSTAPW|training|best_inference_ckpt|normal|--min-runtime 8h
