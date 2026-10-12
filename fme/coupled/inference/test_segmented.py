@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import datetime
+import json
 import os
 import pathlib
 import tempfile
@@ -100,8 +101,8 @@ def _restart_paths(segment_dir: str) -> tuple[str, str]:
     )
 
 
-def _run_inference_from_config_mock(config: InferenceConfig):
-    for restart_path in _restart_paths(config.experiment_dir):
+def _run_inference_from_config_mock(config: InferenceConfig, config_data=None):
+    for restart_path in _restart_paths(config.resolved_output_dir):
         os.makedirs(os.path.dirname(restart_path), exist_ok=True)
         with open(restart_path, "w") as f:
             f.write("mock restart file")
@@ -323,8 +324,8 @@ def _segmented_config_factory(
     can be split into segments.
 
     Returns ``(make_config, atmos_steps_per_ocean_step)``, where
-    ``make_config(experiment_dir, n_coupled_steps)`` writes a config yaml and
-    returns its path.
+    ``make_config(experiment_dir, n_coupled_steps, output_dir=None)`` writes a
+    config yaml and returns its path.
     """
     config, _, atmos_steps_per_ocean_step = _setup(
         ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
@@ -345,9 +346,14 @@ def _segmented_config_factory(
         log_to_screen=True, log_to_file=False, log_to_wandb=log_to_wandb
     )
 
-    def make_config(experiment_dir: pathlib.Path, n_coupled_steps: int) -> str:
+    def make_config(
+        experiment_dir: pathlib.Path,
+        n_coupled_steps: int,
+        output_dir: str | None = None,
+    ) -> str:
         config.n_coupled_steps = n_coupled_steps
         config.experiment_dir = str(experiment_dir)
+        config.output_dir = output_dir
         # one yaml per experiment dir, so a previously written config stays valid
         config_filename = str(tmp_path / f"config-{experiment_dir.name}.yaml")
         with open(config_filename, "w") as f:
@@ -445,3 +451,38 @@ def test_segmented_inference_wandb_run_per_segment(monkeypatch):
                 "myrun-segment_19700105T00",
             ]
             assert len({run["id"] for run in wandb.runs}) == 2  # distinct runs
+
+
+@pytest.mark.medium_duration
+def test_inference_segmented_entrypoint_output_dir():
+    """With output_dir set, each segment's data output (including the restarts
+    the next segment starts from) goes to ``output_dir/<segment>``, while the
+    job directory keeps the config and per-segment job directories."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        make_config, _ = _segmented_config_factory(
+            tmp_path, total_coupled_steps=4, log_to_wandb=True
+        )
+        run_dir = tmp_path / "job"
+        output_dir = tmp_path / "output"
+        config_filename = make_config(run_dir, 2, output_dir=str(output_dir))
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            main(yaml_config=config_filename, segments=2)
+            run_ids = [run["id"] for run in wandb.runs]
+
+        assert (run_dir / "config.yaml").exists()
+        labels = ["segment_19700101T00", "segment_19700105T00"]
+        for label, run_id in zip(labels, run_ids):
+            segment_output_dir = output_dir / label
+            for component_dir in (OCEAN_OUTPUT_DIR_NAME, ATMOSPHERE_OUTPUT_DIR_NAME):
+                assert (
+                    segment_output_dir / component_dir / "autoregressive_predictions.nc"
+                ).exists()
+                assert (segment_output_dir / component_dir / "restart.nc").exists()
+                assert not (run_dir / label / component_dir / "restart.nc").exists()
+            with open(segment_output_dir / "provenance.json") as f:
+                provenance = json.load(f)
+            assert provenance["experiment_dir"] == str(run_dir / label)
+            assert provenance["output_dir"] == str(segment_output_dir)
+            assert provenance["wandb_run_id"] == run_id

@@ -3,8 +3,8 @@ import dataclasses
 import datetime
 import logging
 import os
-from collections.abc import Collection, Sequence
-from typing import Literal
+from collections.abc import Collection, Mapping, Sequence
+from typing import Any, Literal
 
 import cftime
 import dacite
@@ -23,8 +23,10 @@ from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.logging_utils import LoggingConfig
+from fme.core.provenance import validate_output_dir, write_provenance
 from fme.core.timing import GlobalTimer
 from fme.coupled.aggregator import InferenceAggregatorConfig
 from fme.coupled.data_loading.batch_data import CoupledPrognosticState
@@ -148,13 +150,21 @@ class InferenceConfig:
     Configuration for running inference.
 
     Parameters:
-        experiment_dir: Directory to save results to.
+        experiment_dir: Job directory, holding the config, logs, and wandb
+            state. Must be on a local filesystem when ``output_dir`` is set.
+            When ``output_dir`` is unset it also receives the data output.
         n_coupled_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to a CoupledStepper training checkpoint to load, or a
             mapping to two separate Stepper training checkpoints.
         logging: configuration for logging.
         initial_condition: Configuration for initial condition data.
         forcing_loader: Configuration for forcing data.
+        output_dir: Directory for data writer outputs (including restart files)
+            and aggregator diagnostics. Defaults to ``experiment_dir``. This can
+            be a local directory, like ``/results``, or a remote directory
+            prefixed with a protocol recognized by ``fsspec``, like
+            ``gs://bucket/results``. When set, a copy of the config and a
+            ``provenance.json`` pointing back to the job are also written here.
         coupled_steps_in_memory: Number of coupled steps to complete in memory
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
@@ -185,6 +195,7 @@ class InferenceConfig:
     logging: LoggingConfig
     initial_condition: CoupledInitialConditionConfig
     forcing_loader: CoupledForcingDataLoaderConfig
+    output_dir: str | None = None
     coupled_steps_in_memory: int = 1
     data_writer: CoupledDataWriterConfig = dataclasses.field(
         default_factory=lambda: CoupledDataWriterConfig()
@@ -207,6 +218,12 @@ class InferenceConfig:
             self.ocean_stepper_override,
             self.atmosphere_stepper_override,
         )
+        validate_output_dir(self.experiment_dir, self.output_dir)
+
+    @property
+    def resolved_output_dir(self) -> str:
+        """Directory receiving data writer outputs and diagnostics."""
+        return self.output_dir if self.output_dir is not None else self.experiment_dir
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -261,7 +278,7 @@ class InferenceConfig:
             "atmosphere": dataset_metadata,
         }
         return self.data_writer.build_paired(
-            experiment_dir=self.experiment_dir,
+            experiment_dir=self.resolved_output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
@@ -288,9 +305,9 @@ def main(
     with torch.no_grad():
         if segments is None:
             with GlobalTimer():
-                return run_inference_from_config(config)
+                return run_inference_from_config(config, config_data=config_data)
         else:
-            run_segmented_inference(config, segments)
+            run_segmented_inference(config, segments, config_data=config_data)
 
 
 def _get_initialization_time_and_timestep(
@@ -313,7 +330,11 @@ def _get_initialization_time_and_timestep(
     return initialization_time, stepper.config.timestep
 
 
-def run_segmented_inference(config: InferenceConfig, segments: int):
+def run_segmented_inference(
+    config: InferenceConfig,
+    segments: int,
+    config_data: Mapping[str, Any] | None = None,
+):
     """Run coupled inference in multiple segments, each resumable after preemption.
 
     Each segment after the first starts from the previous segment's ocean and
@@ -322,21 +343,26 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
 
     Args:
         config: Configuration for each segment. Its initial condition is used
-            only for the first segment.
+            only for the first segment; later segments start from the previous
+            segment's restart files, which the data writer puts in the previous
+            segment's output directory.
         segments: Total number of segments; only missing ones are run.
+        config_data: The configuration as given by the user, copied into each
+            segment's output directory when ``config.output_dir`` is set.
     """
     config_copy = copy.deepcopy(config)
 
-    def _get_restart_paths(segment_dir: str) -> Sequence[str]:
+    def _get_restart_paths(segment_output_dir: str) -> Sequence[str]:
         return [
-            os.path.join(segment_dir, OCEAN_OUTPUT_DIR_NAME, "restart.nc"),
-            os.path.join(segment_dir, ATMOSPHERE_OUTPUT_DIR_NAME, "restart.nc"),
+            os.path.join(segment_output_dir, OCEAN_OUTPUT_DIR_NAME, "restart.nc"),
+            os.path.join(segment_output_dir, ATMOSPHERE_OUTPUT_DIR_NAME, "restart.nc"),
         ]
 
     def _run_segment(segment_dir: str, segment_output_dir: str) -> None:
-        # coupled inference has no separate output_dir yet, so the two are equal
         config_copy.experiment_dir = segment_dir
-        run_inference_from_config(config_copy)
+        if config.output_dir is not None:
+            config_copy.output_dir = segment_output_dir
+        run_inference_from_config(config_copy, config_data=config_data)
 
     def _set_initial_condition(restart_paths: Sequence[str]) -> None:
         ocean_restart_path, atmosphere_restart_path = restart_paths
@@ -361,16 +387,39 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         run_segment=_run_segment,
         set_initial_condition=_set_initial_condition,
         description="segmented coupled inference",
+        output_dir=config.output_dir,
     )
 
 
-def run_inference_from_config(config: InferenceConfig):
+def run_inference_from_config(
+    config: InferenceConfig, config_data: Mapping[str, Any] | None = None
+):
+    """Run coupled inference.
+
+    Args:
+        config: The inference configuration.
+        config_data: The configuration as given by the user, copied into the
+            output directory when ``config.output_dir`` is set. Defaults to
+            ``dataclasses.asdict(config)``.
+    """
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
     timer.start("initialization")
 
     makedirs(config.experiment_dir, exist_ok=True)
+    dist = Distributed.get_instance()
+    if dist.is_root():
+        makedirs(config.resolved_output_dir, exist_ok=True)
+    dist.barrier()
     config.configure_logging(log_filename="inference_out.log")
+    if config.output_dir is not None and config.output_dir != config.experiment_dir:
+        write_provenance(
+            config.output_dir,
+            config_data=(
+                config_data if config_data is not None else dataclasses.asdict(config)
+            ),
+            experiment_dir=config.experiment_dir,
+        )
 
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
@@ -409,7 +458,7 @@ def run_inference_from_config(config: InferenceConfig):
         dataset_info=dataset_info,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
-        output_dir=config.experiment_dir,
+        output_dir=config.resolved_output_dir,
     )
 
     writer = config.get_data_writer(data=data)
