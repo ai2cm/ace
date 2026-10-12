@@ -509,8 +509,8 @@ def test_inference_output_dir_defaults_to_experiment_dir(tmp_path):
 def test_inference_config_output_dir_requires_local_experiment_dir():
     with pytest.raises(ValueError, match="experiment_dir must be on a local"):
         InferenceConfig(
-            experiment_dir="gs://bucket/job",
-            output_dir="gs://bucket/output",
+            experiment_dir="memory://bucket/job",
+            output_dir="memory://bucket/output",
             n_coupled_steps=1,
             checkpoint_path="unused",
             logging=LoggingConfig(),

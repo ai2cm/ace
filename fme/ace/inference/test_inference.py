@@ -699,9 +699,9 @@ def test_inference_config_output_dir_requires_local_experiment_dir(tmp_path):
     stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
     with pytest.raises(ValueError, match="experiment_dir must be on a local"):
         _small_inference_config(
-            "gs://bucket/job",
+            "memory://bucket/job",
             stepper_path,
             data,
             ic_path,
-            output_dir="gs://bucket/output",
+            output_dir="memory://bucket/output",
         )

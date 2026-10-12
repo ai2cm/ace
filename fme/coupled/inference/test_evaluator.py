@@ -948,8 +948,8 @@ def test_evaluator_output_dir_defaults_to_experiment_dir(tmp_path: pathlib.Path)
 def test_evaluator_config_output_dir_requires_local_experiment_dir():
     with pytest.raises(ValueError, match="experiment_dir must be on a local"):
         InferenceEvaluatorConfig(
-            experiment_dir="gs://bucket/job",
-            output_dir="gs://bucket/output",
+            experiment_dir="memory://bucket/job",
+            output_dir="memory://bucket/output",
             n_coupled_steps=1,
             checkpoint_path="unused",
             logging=LoggingConfig(),

@@ -42,10 +42,10 @@ def test_write_provenance_without_wandb(tmp_path, monkeypatch):
     "experiment_dir, output_dir, raises",
     [
         ("/local/job", None, False),
-        ("gs://bucket/job", None, False),
-        ("/local/job", "gs://bucket/output", False),
-        ("gs://bucket/job", "gs://bucket/output", True),
-        ("gs://bucket/job", "/local/output", True),
+        ("memory://bucket/job", None, False),
+        ("/local/job", "memory://bucket/output", False),
+        ("memory://bucket/job", "memory://bucket/output", True),
+        ("memory://bucket/job", "/local/output", True),
     ],
 )
 def test_validate_output_dir(experiment_dir, output_dir, raises):

@@ -1833,5 +1833,5 @@ def test_evaluator_config_output_dir_requires_local_experiment_dir(
 ):
     with pytest.raises(ValueError, match="experiment_dir must be on a local"):
         _small_evaluator_config(
-            tmp_path, "gs://bucket/job", output_dir="gs://bucket/output"
+            tmp_path, "memory://bucket/job", output_dir="memory://bucket/output"
         )
