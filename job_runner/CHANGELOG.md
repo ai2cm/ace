@@ -15,9 +15,13 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] Default `SHARED_MEM` of `N_GPUS` / `N_TOTAL_GPUS_ON_NODE` times 80% the
   node total RAM
 - [FEAT] Validate job name <= 128 characters (beaker max)
+- [FEAT] Launcher usage text prints its input file's header
+- [FEAT] Training scripts create `experiments.txt` with its header if missing
 
 ### Changed
 
+- Input-file columns are defined once per file in `lib.sh` (`*_COLUMNS`);
+  `parse_row` reads rows and `input_header` writes headers from them
 - Remove `set_default_stats()`
 - Allow `--atmos_stats` and `--ocean_stats` to be used separately.
 - CLUSTER can be now be set for eval jobs
@@ -46,6 +50,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
   experiment ID in `experiments.txt`
 - [ISSUE] Input-file headers, blank lines, and `#` comments are no longer
   counted as skipped jobs in the `--dry-run` summary.
+- [ISSUE] `init_exper.sh` wrote a `resuming.txt` header without the `config`
+  column that `resume.sh` reads.
 
 ## [0.0.1] - 2025-11-06
 
@@ -84,4 +90,3 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] `train.sh` and `finetune.sh` with `--coupled` flag
 - [FEAT] Keyword-based job specification in `*.txt` files
 - [FEAT] Automated `run_` to `ran_` in `experiments.txt`
-- [FEAT] Document `*.txt` headers in each launcher script `--help`.

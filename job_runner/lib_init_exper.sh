@@ -57,45 +57,22 @@ create_input_txt_files() {
     # Determine which files to create based on template type
     case "$TEMPLATE_TYPE" in
         ocean|atmos)
-            # Create training.txt with header
-            echo "group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime" \
-                > "$EXPERIMENT_DIR/training.txt"
-
-            # Create finetuning.txt with header (note: 'tag' is second field)
-            echo "group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime" \
-                > "$EXPERIMENT_DIR/finetuning.txt"
-
-            # Create experiments.txt with header
-            echo "group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem" \
-                > "$EXPERIMENT_DIR/experiments.txt"
-
-            # Create resuming.txt with header
-            echo "group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime" \
-                > "$EXPERIMENT_DIR/resuming.txt"
+            input_header TRAINING_COLUMNS > "$EXPERIMENT_DIR/training.txt"
+            input_header FINETUNING_COLUMNS > "$EXPERIMENT_DIR/finetuning.txt"
+            input_header EXPERIMENTS_COLUMNS > "$EXPERIMENT_DIR/experiments.txt"
+            input_header RESUMING_COLUMNS > "$EXPERIMENT_DIR/resuming.txt"
             ;;
 
         coupled)
-            # Create pretraining.txt with header (note: 'tag' is second field)
-            echo "group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime" \
-                > "$EXPERIMENT_DIR/pretraining.txt"
-
-            # Create finetuning.txt with header (note: 'tag' is second field)
-            echo "group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime" \
-                > "$EXPERIMENT_DIR/finetuning.txt"
-
-            # Create experiments.txt with header
-            echo "group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem" \
-                > "$EXPERIMENT_DIR/experiments.txt"
-
-            # Create resuming.txt with header
-            echo "group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime" \
-                > "$EXPERIMENT_DIR/resuming.txt"
+            input_header PRETRAINING_COLUMNS > "$EXPERIMENT_DIR/pretraining.txt"
+            input_header FINETUNING_COLUMNS > "$EXPERIMENT_DIR/finetuning.txt"
+            input_header EXPERIMENTS_COLUMNS > "$EXPERIMENT_DIR/experiments.txt"
+            input_header RESUMING_COLUMNS > "$EXPERIMENT_DIR/resuming.txt"
             ;;
 
         *)
             echo "Warning: Unknown template type '$TEMPLATE_TYPE', creating generic files" >&2
-            echo "group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem" \
-                > "$EXPERIMENT_DIR/experiments.txt"
+            input_header EXPERIMENTS_COLUMNS > "$EXPERIMENT_DIR/experiments.txt"
             ;;
     esac
 }

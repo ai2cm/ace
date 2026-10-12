@@ -18,6 +18,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --config-dir <path>: Read the evaluator config files from this directory instead of"
   echo "      <experiment_dir>/<config_subdirectory>/. Absolute, or relative to the repo root,"
   echo "      and must resolve inside it. experiments.txt is read from <experiment_dir>/<config_subdirectory>/ either way."
+  echo "Reads <experiment_dir>/<config_subdirectory>/experiments.txt, header:"
+  echo "  $(input_header EXPERIMENTS_COLUMNS)"
   exit 1
 fi
 
@@ -78,20 +80,7 @@ FIRST_JOB_PRINTED=false
 while read TRAIN_EXPER; do
     is_job_row "$TRAIN_EXPER" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
-    JOB_GROUP=$(echo "$TRAIN_EXPER" | cut -d"|" -f1)
-    TAG=$(echo "$TRAIN_EXPER" | cut -d"|" -f2)
-    EXPER_ID=$(echo "$TRAIN_EXPER" | cut -d"|" -f3)
-    STATUS=$(echo "$TRAIN_EXPER" | cut -d"|" -f4)
-    CKPT=$(echo "$TRAIN_EXPER" | cut -d"|" -f5)
-    PRIORITY=$(echo "$TRAIN_EXPER" | cut -d"|" -f6)
-    MIN_RUNTIME=$(echo "$TRAIN_EXPER" | cut -d"|" -f7)
-    OVERRIDE_ARGS=$(echo "$TRAIN_EXPER" | cut -d"|" -f8)
-    EXISTING_RESULTS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f9)
-    WORKSPACE=$(echo "$TRAIN_EXPER" | cut -d"|" -f10)
-    CLUSTER=$(echo "$TRAIN_EXPER" | cut -d"|" -f11)
-    EXISTING_RESULTS_OCEAN_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f12)
-    EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
-    SHARED_MEM=$(echo "$TRAIN_EXPER" | cut -d"|" -f14)
+    parse_row "$TRAIN_EXPER" EXPERIMENTS_COLUMNS
 
     # Check if STATUS starts with "run_" (but not "run_inf_", which is for inference)
     if [[ ! "$STATUS" =~ ^run_ ]] || [[ "$STATUS" =~ ^run_inf_ ]]; then

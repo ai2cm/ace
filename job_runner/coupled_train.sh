@@ -18,6 +18,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --ocean_stats: Override ocean stats data path (optional)"
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
+  echo "Reads <experiment_dir>/<config_subdirectory>/pretraining.txt, header:"
+  echo "  $(input_header PRETRAINING_COLUMNS)"
   exit 1
 fi
 
@@ -71,26 +73,10 @@ FIRST_JOB_PRINTED=false
 while read PRETRAINING; do
     is_job_row "$PRETRAINING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
-    GROUP=$(echo "$PRETRAINING" | cut -d"|" -f1)
-    TAG=$(echo "$PRETRAINING" | cut -d"|" -f2)
-    OCEAN_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f3)
-    OCEAN_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f4)
-    OCEAN_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f5)
-    ATMOS_PROJECT=$(echo "$PRETRAINING" | cut -d"|" -f6)
-    ATMOS_WANDB_ID=$(echo "$PRETRAINING" | cut -d"|" -f7)
-    ATMOS_CKPT=$(echo "$PRETRAINING" | cut -d"|" -f8)
-    STATUS=$(echo "$PRETRAINING" | cut -d"|" -f9)
-    PRIORITY=$(echo "$PRETRAINING" | cut -d"|" -f10)
-    CLUSTER=$(echo "$PRETRAINING" | cut -d"|" -f11)
-    N_GPUS=$(echo "$PRETRAINING" | cut -d"|" -f12)
-    SHARED_MEM=$(echo "$PRETRAINING" | cut -d"|" -f13)
+    parse_row "$PRETRAINING" PRETRAINING_COLUMNS
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
     fi
-    RETRIES=$(echo "$PRETRAINING" | cut -d"|" -f14)
-    WORKSPACE=$(echo "$PRETRAINING" | cut -d"|" -f15)
-    OVERRIDE_ARGS=$(echo "$PRETRAINING" | cut -d"|" -f16)
-    MIN_RUNTIME=$(echo "$PRETRAINING" | cut -d"|" -f17)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
