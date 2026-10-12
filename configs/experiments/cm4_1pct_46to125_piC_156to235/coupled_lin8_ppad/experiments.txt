@@ -1,0 +1,2 @@
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad-ppad_a2s-fto|o0a0rs0|01M4RVYW60M5X07JRDD3JGAKG0|training|best_inference_ckpt|normal|--min-runtime 8h
