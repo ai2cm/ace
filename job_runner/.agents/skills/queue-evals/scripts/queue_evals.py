@@ -11,11 +11,13 @@ experiment's final beaker job (jobs[-1]) exited 0. `apply` checks that each
 row's config (evaluator-config-<tag>.yaml, or inference-config-<tag>.yaml for
 run_inf_<tag>) exists where evaluate.sh / inference.sh will look for it.
 
-`mark` looks up each run_* row's launched job by the name evaluate.sh /
+`mark` looks up each run_* / running_* row's launched job by the name evaluate.sh /
 inference.sh give it, `<group>-{eval,inf}_<ckpt>-<tag>[-<row tag>]`, in the
 workspace lib.sh resolves for the row's cluster. Beaker appends `-<4 hex>`
 when the name is taken, so suffixed names are matched too, but only an exact
-name that exited 0 is marked ran_ unless passed to --accept.
+name that exited 0 is marked ran_ unless passed to --accept. Rows whose job
+is pending or running become running_*, and rows whose every match failed
+become failed_*; running_* rows are rechecked on the next `mark`.
 """
 
 import argparse
@@ -101,13 +103,20 @@ def launch_workspace(root, cluster, workspace, cache={}):
     return cache[key]
 
 
+LAUNCHABLE = ("running_", "run_")
+NEW_PREFIX = {"ran": "ran_", "in-flight": "running_", "failed": "failed_"}
+
+
+def launch_tag(status):
+    for prefix in LAUNCHABLE:
+        if status.startswith(prefix):
+            return status[len(prefix) :]
+    return None
+
+
 def launched_name(f):
-    status = f[STATUS]
-    kind, tag = (
-        ("inf", status[len("run_inf_") :])
-        if status.startswith("run_inf_")
-        else ("eval", status[len("run_") :])
-    )
+    tag = launch_tag(f[STATUS])
+    kind, tag = ("inf", tag[len("inf_") :]) if tag.startswith("inf_") else ("eval", tag)
     name = f"{f[0]}-{kind}_{f[CKPT]}-{tag}"
     return f"{name}-{f[TAG]}" if f[TAG] else name
 
@@ -133,11 +142,8 @@ def launched(workspace, name):
     for e in json.loads(out.stdout or "[]"):
         if pattern.fullmatch(e["name"]):
             s = e["jobs"][-1]["status"] if e.get("jobs") else {}
-            state = (
-                "exited"
-                if s.get("exited")
-                else ("running" if s.get("started") else "pending")
-            )
+            done = s.get("exited") or s.get("finalized") or s.get("canceled")
+            state = "exited" if done else ("running" if s.get("started") else "pending")
             found.append((e["name"], e["id"], state, s.get("exitCode")))
     return found
 
@@ -160,18 +166,21 @@ def cmd_mark(args):
         changed = False
         for i, line in enumerate(lines):
             f = fields(line)
-            if not (f and f[STATUS].startswith("run_")):
+            if not (f and launch_tag(f[STATUS]) is not None):
                 continue
             name = launched_name(f)
             found = launched(
                 launch_workspace(root, field(f, CLUSTER), field(f, WORKSPACE)), name
             )
             kind = classify(name, found)
-            if kind == "ran" or (kind == "suffixed-success" and name in args.accept):
-                f[STATUS] = "ran_" + f[STATUS][len("run_") :]
+            if kind == "suffixed-success" and name in args.accept:
+                kind = "ran"
+            new = NEW_PREFIX.get(kind, "") + launch_tag(f[STATUS])
+            if kind in NEW_PREFIX and new != f[STATUS]:
+                f[STATUS] = new
                 lines[i] = "|".join(f)
                 changed = True
-                kind += " -> ran_"
+                kind += f" -> {new}"
             matches = ",".join(f"{n}:{x}:{s}:{c}" for n, x, s, c in found)
             print(f"{path}|{name}|{kind}|{matches}")
         if changed:
