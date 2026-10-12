@@ -2045,7 +2045,7 @@ def apply_stepper_override_to_stepper_config(
 def _apply_stepper_override(
     target: Stepper | StepperConfig,
     replace_multi_call: Callable[[MultiCallConfig | None], None],
-    override_config: StepperOverrideConfig | None = None,
+    override_config: StepperOverrideConfig | None,
 ) -> None:
     if override_config is None:
         override_config = StepperOverrideConfig()
