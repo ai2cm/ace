@@ -12,6 +12,11 @@
 #
 # The key below is joined onto --run-directory, so it names the store relative
 # to that directory. Run with --debug first to confirm the join resolves.
+#
+# The masks were removed again from the store on GCS and weka on 2026-10-07:
+# training concatenates it with stores that have no masks, which the strict
+# concat check rejects. Re-run this append before evaluating a checkpoint
+# trained on the 2025-03-21 piControl store on 1pctCO2.
 variable_sources:
   lsm_masks.zarr:
     - mask_column_soil_moisture

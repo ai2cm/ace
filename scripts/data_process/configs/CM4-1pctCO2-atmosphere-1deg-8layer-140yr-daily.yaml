@@ -15,9 +15,9 @@
 #
 # The 6-hourly source store is written by
 # CM4-1pctCO2-atmosphere-1deg-8layer-140yr.yaml. Unlike the piControl store it
-# carries no static soil masks, so the 12 mask_ fields are appended afterwards
-# with CM4-1pctCO2-land-mask-append.yaml; without them the evaluator's
-# SpatialMaskProvider compatibility check rejects the store.
+# carries no static soil masks. Checkpoints trained on the 2025-03-21 piControl
+# store need the 12 mask_ fields to evaluate on this store; append them with
+# CM4-1pctCO2-land-mask-append.yaml (the store as kept has none, see there).
 #
 # Variables in none of the three lists below are dropped by the coarsening.
 runs:
