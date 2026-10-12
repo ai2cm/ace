@@ -217,7 +217,8 @@ Each job type reads from a pipe-delimited text file:
 - **Uncoupled training**: `training.txt` (11 fields)
 - **Coupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Uncoupled fine-tuning**: `finetuning.txt` (15 fields)
-- **Resume**: `resuming.txt` (16 fields)
+- **Resume**: `resuming.txt` (17 fields; optional `config` names a repo config in
+  the config subdirectory, used in place of the resumed run's dumped config)
 - **Evaluate / Inference**: `experiments.txt` (14 fields), always read from
   `<experiment_dir>/<config_subdirectory>/`, never from `--config-dir`
 

@@ -29,28 +29,35 @@ is not `train` are skipped. A one-row file reports `Will Process: 1, Will Skip: 
 
 ## Resuming a completed or stopped run
 
-`resume.sh <experiment_dir> <config_subdir>` reads `resuming.txt` (16 fields):
+`resume.sh <experiment_dir> <config_subdir>` reads `resuming.txt` (17 fields):
 
 ```
-group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config
 ```
 
 Typical use is extending a run that finished all its epochs — train for a larger
 `max_epochs` than originally configured.
 
-### The config does not come from the repo
+### Which config a resume runs
 
-`resume.sh` sets the config to `/existing-results/config.yaml` (`resume.sh:157`),
+**`config` blank (default):** the config is `/existing-results/config.yaml`,
 mounted from the previous run's results dataset. **Editing the repo's
-`train-config.yaml` has no effect on a resume.** Every change must go through the
-`override` field.
+`train-config.yaml` has no effect on such a resume.** Every change must go
+through the `override` field.
 
 That file is the *resolved* config the original job dumped, so overrides from the
 original submission are already baked into it. Do not repeat them — a run
 submitted with `--override seed=0` already has `seed: 0` in the dumped config.
 
-`resume.sh` prepends `resume_results.existing_dir=/existing-results` to whatever
-`override` holds (`resume.sh:159-160`), so never write that field yourself.
+**`config` set:** a file name in `<experiment_dir>/<config_subdir>/`, e.g.
+`train-config.yaml`, used in place of the dumped config. Use it when the change
+touches a list (next section). The job runs the committed, pushed copy that
+gantry clones, not the working tree. A repo config carries none of the original
+submission's overrides, so **do** repeat them (`seed`, per-row `block_size`, ...)
+in `override`.
+
+Either way, `resume.sh` prepends `resume_results.existing_dir=/existing-results`
+to whatever `override` holds, so never write that field yourself.
 
 The dataset must contain `config.yaml`, `wandb_run_id`, and
 `training_checkpoints/ckpt.tar`; those are what get mounted.
@@ -64,7 +71,8 @@ dict keyed `"0"`, and the merge then raises
 
     ConfigTypeError: Cannot merge DictConfig with ListConfig
 
-So touching one element of `validation` or `inference` means inlining the
+So touching one element of `validation` or `inference` means either pointing
+the `config` field at a fixed repo config (preferred), or inlining the
 **entire** list as a single override value. That works because
 `run_gantry_training_job` re-tokenizes `OVERRIDE_ARGS` through `eval`
 (`lib.sh:185-193`), so a single-quoted flow-style YAML value survives as one argv
