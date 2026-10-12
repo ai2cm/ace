@@ -335,7 +335,7 @@ class InferenceConfig:
         variable_metadata: Mapping[str, VariableMetadata],
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
-            experiment_dir=self.resolved_output_dir,
+            output_dir=self.resolved_output_dir,
             # each batch contains all samples, for different times
             initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,

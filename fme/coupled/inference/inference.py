@@ -278,7 +278,7 @@ class InferenceConfig:
             "atmosphere": dataset_metadata,
         }
         return self.data_writer.build_paired(
-            experiment_dir=self.resolved_output_dir,
+            output_dir=self.resolved_output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,

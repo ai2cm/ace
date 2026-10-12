@@ -215,7 +215,7 @@ def test_step_diagnostics_writer_writes_delta_series(
     if coarsen_factor > 1:
         config.time_coarsen = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = getattr(config, builder)(experiment_dir=tmpdir, **build_kwargs)
+        writer = getattr(config, builder)(output_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
         filename = os.path.join(tmpdir, "step_diagnostics", "correction_deltas.nc")
@@ -244,7 +244,7 @@ def test_no_step_diagnostics_output_by_default_or_without_corrector():
     # flag off: no step-diagnostics output at all
     config.save_step_diagnostics = False
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build_paired(output_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
@@ -253,7 +253,7 @@ def test_no_step_diagnostics_output_by_default_or_without_corrector():
     config.save_step_diagnostics = True
     batch_no_diagnostics = dataclasses.replace(batch, step_diagnostics=None)
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build_paired(output_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch_no_diagnostics)
         writer.finalize()
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
@@ -263,7 +263,7 @@ def test_no_step_diagnostics_output_by_default_or_without_corrector():
         batch, step_diagnostics=StepDiagnostics(delta={})
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build_paired(output_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch_empty_delta)
         writer.finalize()
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))

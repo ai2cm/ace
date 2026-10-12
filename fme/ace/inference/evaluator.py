@@ -299,7 +299,7 @@ class InferenceEvaluatorConfig:
         # initial_condition_times from data.initial_time already has one entry per
         # sample (n_ic * n_ensemble_per_ic); do not repeat by n_ensemble_per_ic again.
         return self.data_writer.build_paired(
-            experiment_dir=self.resolved_output_dir,
+            output_dir=self.resolved_output_dir,
             initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,

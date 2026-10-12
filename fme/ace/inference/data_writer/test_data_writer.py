@@ -206,7 +206,7 @@ class TestDataWriter:
             save_monthly_files=True,
             names=None,
         ).build_paired(
-            experiment_dir=str(tmp_path),
+            output_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=TIMESTEP,
@@ -365,7 +365,7 @@ class TestDataWriter:
             save_monthly_files=True,
             names=save_names,
         ).build_paired(
-            experiment_dir=str(tmp_path),
+            output_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=4,  # unused
             timestep=TIMESTEP,
@@ -439,7 +439,7 @@ class TestDataWriter:
             save_monthly_files=True,
             names=None,
         ).build_paired(
-            experiment_dir=str(tmp_path),
+            output_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=3,
             timestep=TIMESTEP,
@@ -501,7 +501,7 @@ class TestDataWriter:
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
             files=[region_config],
         ).build(
-            experiment_dir=str(tmp_path),
+            output_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=sample_metadata,
@@ -632,7 +632,7 @@ class TestDataWriter:
             time_coarsen=None,
             files=[region_config],
         ).build(
-            experiment_dir=str(tmp_path),
+            output_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=sample_metadata,
@@ -706,7 +706,7 @@ def test_default_netcdf_writers_record_data_writer_io(tmp_path):
         dims=["sample", "time"],
     )
     writer = DataWriterConfig().build(
-        experiment_dir=str(tmp_path),
+        output_dir=str(tmp_path),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_times,
         timestep=TIMESTEP,

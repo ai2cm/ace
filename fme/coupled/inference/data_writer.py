@@ -40,7 +40,7 @@ class CoupledDataWriterConfig:
 
     def build_paired(
         self,
-        experiment_dir: str,
+        output_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
@@ -50,13 +50,13 @@ class CoupledDataWriterConfig:
         coords: CoupledCoords,
         dataset_metadata: dict[str, DatasetMetadata],
     ) -> "CoupledPairedDataWriter":
-        ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
+        ocean_dir = os.path.join(output_dir, OCEAN_OUTPUT_DIR_NAME)
         makedirs(ocean_dir, exist_ok=True)
-        atmos_dir = os.path.join(experiment_dir, ATMOSPHERE_OUTPUT_DIR_NAME)
+        atmos_dir = os.path.join(output_dir, ATMOSPHERE_OUTPUT_DIR_NAME)
         makedirs(atmos_dir, exist_ok=True)
         return CoupledPairedDataWriter(
             ocean_writer=self.ocean.build_paired(
-                experiment_dir=ocean_dir,
+                output_dir=ocean_dir,
                 initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_ocean,
                 timestep=ocean_timestep,
@@ -65,7 +65,7 @@ class CoupledDataWriterConfig:
                 dataset_metadata=dataset_metadata["ocean"],
             ),
             atmosphere_writer=self.atmosphere.build_paired(
-                experiment_dir=atmos_dir,
+                output_dir=atmos_dir,
                 initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_atmosphere,
                 timestep=atmosphere_timestep,

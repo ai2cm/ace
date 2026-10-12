@@ -108,7 +108,7 @@ class BenchmarkConfig:
         self, data: InferenceGriddedData, output_dir: str
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
-            experiment_dir=output_dir,
+            output_dir=output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,

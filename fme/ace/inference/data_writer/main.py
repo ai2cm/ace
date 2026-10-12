@@ -125,7 +125,7 @@ class DataWriterConfig:
 
     def build_paired(
         self,
-        experiment_dir: str,
+        output_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
@@ -138,7 +138,7 @@ class DataWriterConfig:
         writers: list[PairedSubwriter] = []
         if self.save_prediction_files:
             raw_writer: PairedSubwriter = PairedRawDataWriter(
-                path=experiment_dir,
+                path=output_dir,
                 initial_condition_times=initial_condition_times,
                 save_names=self.names,
                 variable_metadata=variable_metadata,
@@ -151,7 +151,7 @@ class DataWriterConfig:
         if self.save_monthly_files:
             writers.append(
                 PairedMonthlyDataWriter(
-                    path=experiment_dir,
+                    path=output_dir,
                     initial_condition_times=initial_condition_times,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
@@ -164,7 +164,7 @@ class DataWriterConfig:
         for writer_config in self.files or []:
             writers.append(
                 writer_config.build_paired(
-                    experiment_dir=experiment_dir,
+                    output_dir=output_dir,
                     initial_condition_times=initial_condition_times,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
@@ -175,12 +175,12 @@ class DataWriterConfig:
             )
         return PairedDataWriter(
             writers=writers,
-            path=experiment_dir,
+            path=output_dir,
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
             step_diagnostics_writer=self._build_step_diagnostics_writer(
-                experiment_dir=experiment_dir,
+                output_dir=output_dir,
                 initial_condition_times=initial_condition_times,
                 variable_metadata=variable_metadata,
                 coords=coords,
@@ -190,7 +190,7 @@ class DataWriterConfig:
 
     def _build_step_diagnostics_writer(
         self,
-        experiment_dir: str,
+        output_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -200,7 +200,7 @@ class DataWriterConfig:
             return None
 
         def writer_factory(name: str) -> RawDataWriter | TimeCoarsen:
-            path = os.path.join(experiment_dir, STEP_DIAGNOSTICS_DIR)
+            path = os.path.join(output_dir, STEP_DIAGNOSTICS_DIR)
             os.makedirs(path, exist_ok=True)
             writer: RawDataWriter | TimeCoarsen = RawDataWriter(
                 path=path,
@@ -219,7 +219,7 @@ class DataWriterConfig:
 
     def build(
         self,
-        experiment_dir: str,
+        output_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
@@ -235,7 +235,7 @@ class DataWriterConfig:
         if "face" not in coords:
             if self.save_prediction_files:
                 raw_writer: Subwriter = RawDataWriter(
-                    path=experiment_dir,
+                    path=output_dir,
                     label="autoregressive_predictions",
                     initial_condition_times=initial_condition_times,
                     save_names=self.names,
@@ -249,7 +249,7 @@ class DataWriterConfig:
             if self.save_monthly_files:
                 writers.append(
                     MonthlyDataWriter(
-                        path=experiment_dir,
+                        path=output_dir,
                         label="monthly_mean_predictions",
                         initial_condition_times=initial_condition_times,
                         timestep=timestep,
@@ -262,7 +262,7 @@ class DataWriterConfig:
             for writer_config in self.files or []:
                 writers.append(
                     writer_config.build(
-                        experiment_dir=experiment_dir,
+                        output_dir=output_dir,
                         initial_condition_times=initial_condition_times,
                         n_timesteps=n_timesteps,
                         timestep=timestep,
@@ -273,12 +273,12 @@ class DataWriterConfig:
                 )
         return DataWriter(
             writers=writers,
-            path=experiment_dir,
+            path=output_dir,
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
             step_diagnostics_writer=self._build_step_diagnostics_writer(
-                experiment_dir=experiment_dir,
+                output_dir=output_dir,
                 initial_condition_times=initial_condition_times,
                 variable_metadata=variable_metadata,
                 coords=coords,
