@@ -106,21 +106,13 @@ class ParameterInitializationConfig:
     Parameters:
         weights_path: path to a Stepper checkpoint
             containing weights to load
-        weights_submodule: dotted name of the submodule of the module being
-            initialized that the checkpoint's module corresponds to. Use it
-            when the destination wraps the checkpoint's architecture, so the
-            checkpoint's parameters live one level down: initializing a
-            noise-conditioned module from a deterministic checkpoint of the
-            same network needs ``conditional_model``, since
-            ``NoiseConditionedModel`` holds the wrapped network under that
-            name. Every loaded parameter name is prefixed with it before being
-            matched against the destination, both when the weights are loaded
-            and when ``alpha``/``beta`` pair them with the current weights, so
-            ``parameters`` exclude and frozen patterns are written against
-            destination names either way. Parameters the destination has and
-            the checkpoint does not (the zero-initialized conditioning layers,
-            for instance) keep their initialized values. Raises at
-            initialization if no weights were loaded to rename.
+        weights_submodule: dotted name of the destination submodule that the
+            checkpoint's module corresponds to; loaded parameter names are
+            prefixed with it. E.g. "conditional_model" to initialize a
+            NoiseConditionedModel from a deterministic checkpoint of the same
+            network. Destination parameters absent from the checkpoint keep
+            their initial values. ``parameters`` patterns use destination
+            names.
         parameters: list of ParameterClassification objects, each specifying
             whether parameters are excluded from initialization or frozen.
             By default modules are unfrozen and all parameters are included.
@@ -143,18 +135,6 @@ class ParameterInitializationConfig:
     frozen_parameters: FrozenParameterConfig | None = None
 
     def __post_init__(self):
-        if self.weights_submodule is not None:
-            # Not validated against weights_path here: the coupled stepper
-            # loads component weights from CoupledParameterInitConfig's
-            # checkpoint, which requires weights_path to be None. Whether any
-            # weights were actually loaded is known only to the initializer,
-            # so apply_weights raises there instead.
-            if any(segment == "" for segment in self.weights_submodule.split(".")):
-                raise ValueError(
-                    "weights_submodule must be a dotted submodule name with no "
-                    "empty segments (no leading, trailing or doubled '.'), got "
-                    f"{self.weights_submodule!r}"
-                )
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
             if len(self.parameters) > 0:
                 raise ValueError(
@@ -182,11 +162,6 @@ class ParameterInitializationConfig:
         return ParameterInitializer(
             config=self, load_weights_and_history=load_weights_and_history
         )
-
-    @property
-    def has_submodule_prefix(self) -> bool:
-        """Whether loaded weights are renamed onto a submodule."""
-        return self.weights_submodule is not None
 
     def apply_submodule_prefix(
         self, state_dict: Mapping[str, Any]
@@ -248,13 +223,10 @@ class ParameterInitializer:
         """
         filled_parameters = self._filled_parameters(len(modules))
         if self.base_weights is None:
-            if self.config.has_submodule_prefix:
-                raise ValueError(
-                    "weights_submodule is set but no weights were loaded, so it "
-                    "has nothing to rename. Set weights_path, or the coupled "
-                    "CoupledParameterInitConfig.checkpoint_path, to the "
-                    "checkpoint whose parameters it names."
-                )
+            # Checked here rather than in __post_init__ because coupled
+            # components load weights with weights_path=None.
+            if self.config.weights_submodule is not None:
+                raise ValueError("weights_submodule is set but no weights were loaded")
             return
         for module, state_dict, classification in zip(
             modules, self.base_weights, filled_parameters
@@ -305,10 +277,7 @@ class ParameterInitializer:
         if base_weights is not None and (
             self.config.alpha != 0 or self.config.beta != 0
         ):
-            # Renamed onto the destination's names, exactly as apply_weights
-            # loaded them, so that the L2-SP terms pair each parameter with the
-            # base value it was initialized from and `exclude` patterns match
-            # destination names in both places.
+            # Use destination names, as in apply_weights.
             base_weights = [
                 {
                     name: value.to(device)

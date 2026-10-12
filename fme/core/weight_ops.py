@@ -103,34 +103,22 @@ def prefix_submodule(
     state_dict: Mapping[str, Any], submodule: str
 ) -> Mapping[str, Any]:
     """
-    Rename a state dict onto a submodule of the module it will be loaded into.
+    Rename a state dict's keys onto a submodule of the destination module.
 
-    Used when the destination module wraps the architecture the state dict came
-    from, so every parameter lives one level deeper: loading a deterministic
-    checkpoint into a ``NoiseConditionedModel`` of the same network needs
-    ``submodule="conditional_model"``.
-
-    The leading "module." that ``strip_leading_module`` describes names the
-    DistributedDataParallel or DummyWrapper layer rather than a submodule of
-    the network, so the new name is inserted after it and not before it.
+    The submodule name is inserted after any leading "module." (the
+    DistributedDataParallel/DummyWrapper layer, see strip_leading_module).
     """
-    renamed = {}
-    for name, value in state_dict.items():
+
+    def rename(name: str) -> str:
         if name.startswith(_WRAPPER_PREFIX):
-            inner = name[len(_WRAPPER_PREFIX) :]
-            renamed[f"{_WRAPPER_PREFIX}{submodule}.{inner}"] = value
-        else:
-            renamed[f"{submodule}.{name}"] = value
-    return renamed
+            return f"{_WRAPPER_PREFIX}{submodule}.{name[len(_WRAPPER_PREFIX) :]}"
+        return f"{submodule}.{name}"
+
+    return {rename(name): value for name, value in state_dict.items()}
 
 
 def require_subset(from_state: Mapping[str, Any], to_module: torch.nn.Module):
-    """
-    Raise unless every name in from_state is a parameter name of to_module.
-
-    Shared by the two places that load base weights into a module, so both
-    report the same diagnosis of a name mismatch.
-    """
+    """Raise unless every name in from_state is in to_module's state dict."""
     from_names = set(from_state.keys())
     to_names = set(to_module.state_dict().keys())
     if not from_names.issubset(to_names):
@@ -172,45 +160,29 @@ def overwrite_weights(
 
 
 def _missing_parameters_message(from_names: set[str], to_names: set[str]) -> str:
-    """Explain a failed source-is-subset-of-dest check, with a fix if there is one.
-
-    Only called on the failure path, so the extra work costs nothing in the
-    normal case.
-    """
     missing = sorted(from_names - to_names)
-    parts = [
-        f"Dest module is missing {len(missing)} of the source's "
-        f"{len(from_names)} parameters, which is not allowed.",
-    ]
-    # Candidate submodules are compared inside the DDP/DummyWrapper layer, since
-    # that leading "module." is not a submodule of the network (see
-    # strip_leading_module) and prefix_submodule inserts after it.
+    message = (
+        f"Dest module is missing {len(missing)} of the source's {len(from_names)} "
+        f"parameters, which is not allowed. First missing: "
+        f"{missing[:_MAX_MISSING_SHOWN]}."
+    )
+    # Suggest top-level submodules of the destination that the source would
+    # match if prefixed, i.e. the destination may wrap the source.
     inner_from = {_strip_wrapper_prefix(name) for name in from_names}
     inner_to = {_strip_wrapper_prefix(name) for name in to_names}
-    prefixes = {name.split(".", 1)[0] for name in inner_to if "." in name}
     candidates = sorted(
         prefix
-        for prefix in prefixes
+        for prefix in {name.split(".", 1)[0] for name in inner_to if "." in name}
         if {f"{prefix}.{name}" for name in inner_from}.issubset(inner_to)
     )
     if candidates:
-        # The subset test is necessary but not sufficient: more than one
-        # submodule can satisfy it, and satisfying it is not proof that the
-        # architectures correspond. So this suggests, and does not decide.
         listed = " or ".join(repr(candidate) for candidate in candidates)
-        parts.append(
-            "The destination may wrap the source: prefixing every source name "
-            f"with {listed} would make the names match. If the destination does "
-            "wrap the checkpoint's architecture (for example a "
-            "NoiseConditionedModel built from a deterministic checkpoint), set "
-            f"ParameterInitializationConfig.weights_submodule to {listed}. Check "
-            "that the submodule really is the checkpoint's architecture; a "
-            "matching prefix alone does not establish that."
+        message += (
+            f" The names would match under submodule {listed}; if the destination "
+            "wraps the source architecture, set "
+            "ParameterInitializationConfig.weights_submodule."
         )
-    shown = missing[:_MAX_MISSING_SHOWN]
-    elided = len(missing) - len(shown)
-    parts.append(f"Missing: {shown}" + (f" and {elided} more" if elided > 0 else ""))
-    return " ".join(parts)
+    return message
 
 
 def overwrite_weight_initial_slice(module, name, from_param):
