@@ -1,5 +1,5 @@
 # make cm4_1pctCO2_coupled_1daily RESOLUTION=4deg
-version: "2026-09-09"
+version: "2026-09-02"
 family_name: cm4-1pctCO2-4deg-coupled-1daily
 output_directory: gs://vcm-ml-intermediate
 
@@ -8,11 +8,13 @@ coupled_datasets:
     how: interpolate_sst
   coupled_sea_surface:
     precomputed_sea_ice_mask:
-      zarr_path: gs://vcm-ml-intermediate/2026-09-09-cm4-piControl-4deg-coupled-1daily-ocean.zarr
+      zarr_path: gs://vcm-ml-intermediate/2026-09-02-cm4-piControl-4deg-coupled-1daily-ocean.zarr
     ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
     ocean_extra_fill_values:
       UI: 0.0
       VI: 0.0
+    # the ocean store is 1-daily; the default (120h) is for 5-daily stores
+    timedelta: 24h
     surface_flux_window_avg:
       window_timedelta: 24h
       # The ocean store labels its 1-day intervals at the interval end, so the
@@ -55,3 +57,5 @@ input_datasets:
   stats:
     atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr-stats/combined
     ocean_dir: gs://vcm-ml-intermediate/2026-09-02-cm4-1pctCO2-4deg-ocean-1daily-stats/2026-09-02-cm4-1pctCO2-4deg-ocean-1daily
+stats:
+  beaker_dataset: 2026-09-02-cm4-1pctCO2-4deg-coupled-1daily-stats
