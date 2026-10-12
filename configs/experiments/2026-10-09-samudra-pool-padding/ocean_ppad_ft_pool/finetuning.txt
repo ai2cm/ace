@@ -14,6 +14,6 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # uncoupled_finetune.sh acts only on rows whose status is exactly "train".
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs0|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
-cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs1|ace-samudra-cm4|esiegbpk|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
-cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs2|ace-samudra-cm4|esiegbpk|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
-cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_nopad|rs0|ace-samudra-cm4|esiegbpk|best_inference_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs1|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs2|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_nopad|rs0|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
