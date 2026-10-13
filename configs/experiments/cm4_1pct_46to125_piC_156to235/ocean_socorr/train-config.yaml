@@ -256,8 +256,6 @@ stepper:
             - sfdsi
             - UI
             - VI
-          zos_global_mean_correction:
-            reference_global_mean: -1.3e-4
           ocean_salt_content_correction:
             method: scaled_salinity
             budget_config:
@@ -292,7 +290,7 @@ stepper:
       - total_frozen_precipitation_rate
       # ocean prognostic
       - sst
-      - zos
+      - SSH
       - so_0
       - so_1
       - so_2
@@ -378,7 +376,7 @@ stepper:
       out_names:
       # ocean prognostic
       - sst
-      - zos
+      - SSH
       - so_0
       - so_1
       - so_2
@@ -466,4 +464,3 @@ stepper:
       - tauuo
       - tauvo
       - wfo
-      - SSH
