@@ -38,7 +38,7 @@ for S in $SCENARIOS; do
     --dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar" \
     --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
-    -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/${CFG}" 2>&1)
+    -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/${CFG}" 2>&1) || true   # a results dataset of a RUNNING job is not mountable; use the last finalized one
   echo "$out" | grep -qm1 "beaker.org/ex/" && { ok=$((ok+1)); echo "launched $JOB"; } || echo "FAILED $JOB: $(echo "$out" | tail -2)"
 done
 echo "coupled checkpoint evals launched: $ok/$total"
