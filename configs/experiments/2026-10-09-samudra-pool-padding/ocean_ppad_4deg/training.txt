@@ -8,8 +8,8 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 #
 # uncoupled_train.sh acts only on rows whose status is exactly "train".
 
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs0|train|high|jupiter|2||3|ai2/ace|seed=0 stepper.step.config.builder.config.pad_pool=true|8h
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs1|train|normal|jupiter|2||3|ai2/ace|seed=1 stepper.step.config.builder.config.pad_pool=true|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs0|training|high|jupiter|2||3|ai2/ace|seed=0 stepper.step.config.builder.config.pad_pool=true|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs1|training|normal|jupiter|2||3|ai2/ace|seed=1 stepper.step.config.builder.config.pad_pool=true|8h
 
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs0|train|high|jupiter|2||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|train|normal|jupiter|2||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs0|training|high|jupiter|2||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|training|normal|jupiter|2||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
