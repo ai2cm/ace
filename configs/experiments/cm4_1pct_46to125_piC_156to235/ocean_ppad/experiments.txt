@@ -2,11 +2,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # --config-dir configs/experiments/cm4_eval/ocean
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad|rs1|01M4HEEYG66J2DBGVSVVPKN27S|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_ppad|rs1|01M4HEEYG66J2DBGVSVVPKN27S|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs1|01M4HEEYG66J2DBGVSVVPKN27S|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs1|01M4HEEYG66J2DBGVSVVPKN27S|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad|rs2|01M4HEF9B2ZD39D5YFRK9A080C|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_ppad|rs2|01M4HEF9B2ZD39D5YFRK9A080C|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs2|01M4HEF9B2ZD39D5YFRK9A080C|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad|rs2|01M4HEF9B2ZD39D5YFRK9A080C|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
@@ -14,12 +14,13 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|ra
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs1|01M4HEG18G10GVQB6ZAMZ10PH0|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs1|01M4HEG18G10GVQB6ZAMZ10PH0|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs2|01M4HEGC3YTYN1JTB5YCZEYB8C|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs2|01M4HEGC3YTYN1JTB5YCZEYB8C|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs2|01M4HEGC3YTYN1JTB5YCZEYB8C|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_cde25|rs0|01M4KC0S3BDR6VGA4ES90ZCP2F|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|01M4KC13J5ZCNH39V0DS6DXEKM|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|01M4KC13J5ZCNH39V0DS6DXEKM|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|01M4KC13J5ZCNH39V0DS6DXEKM|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|01M4KC13J5ZCNH39V0DS6DXEKM|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
