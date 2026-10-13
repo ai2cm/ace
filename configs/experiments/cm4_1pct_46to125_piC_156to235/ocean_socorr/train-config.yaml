@@ -256,6 +256,8 @@ stepper:
             - sfdsi
             - UI
             - VI
+          zos_global_mean_correction:
+            reference_global_mean: -1.3e-4
           ocean_salt_content_correction:
             method: scaled_salinity
             budget_config:
@@ -464,3 +466,4 @@ stepper:
       - tauuo
       - tauvo
       - wfo
+      - zos

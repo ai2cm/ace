@@ -1,15 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
 # --config-dir configs/experiments/cm4_eval/ocean
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr|rs0|01M4VR1XPQKKEP8JTTSMZCHFX3|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr|rs1|01M4VR298F6QY04WTCVESYGQM2|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr|rs2|01M4VR2N47QEW5K9QTEEH4XJFB|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm|rs0|01M4VR301DRAVYRG2E6YQ6MBJK|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm|rs1|01M4VR3CHSNKHVJ53KH37TTJ03|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm|rs2|01M4VR3R46FNW5NK3SDA7M4MNB|training|best_inference_ckpt|normal|--min-runtime 8h
