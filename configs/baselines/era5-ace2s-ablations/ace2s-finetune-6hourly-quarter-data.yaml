@@ -1,0 +1,239 @@
+# arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
+# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+#
+# 6-hourly quarter-data arm, stage 2: fine-tune of the 6h quarter-data pretrain.
+# Replace PRETRAIN_RESULT_DATASET with the beaker result dataset of the
+# ace2s-pretrain-6hourly-quarter-data run. Same 3-step detached recipe, same
+# training data subset (18/70 years) as the pretrain. Seed 0.
+# Evaluation as the 6-hourly pretrain: 5-year inline inference (7300 steps)
+# every epoch and the 81-year rollout (118260 steps, 8 ICs, weight 0, zonal-mean
+# images off as in the resume) at epochs 5 and 10.
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_save_epochs:
+  step: 5
+ema_checkpoint_save_epochs:
+  step: 5
+validate_using_ema: true
+max_epochs: 10
+ema:
+  decay: 0.999
+inference:
+  - name: inference
+    n_forward_steps: 7300
+    forward_steps_in_memory: 40
+    n_ensemble_per_ic: 3
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-02-15T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-05-15T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-08-15T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1996-11-15T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 4
+    aggregator:
+      step_means:
+        - step: 20
+          target: denorm
+        - step: 20
+          target: norm
+      ensembles:
+        - step: 20
+      histogram:
+        enabled: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+  - name: long_81year
+    weight: 0.0
+    epochs:
+      start: 4
+      step: 5
+    n_forward_steps: 118260
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+          - '1940-01-03T00:00:00'
+          - '1940-01-04T00:00:00'
+          - '1940-01-05T00:00:00'
+          - '1940-01-06T00:00:00'
+          - '1940-01-07T00:00:00'
+          - '1940-01-08T00:00:00'
+          - '1940-01-09T00:00:00'
+          - '1940-01-10T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 4
+    aggregator:
+      step_means: []
+      ensembles: []
+      zonal_mean:
+        enabled: false
+      histogram:
+        enabled: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    concat:
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1940-01-01'
+        stop_time: '1940-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1944-01-01'
+        stop_time: '1944-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1948-01-01'
+        stop_time: '1948-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1952-01-01'
+        stop_time: '1952-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1956-01-01'
+        stop_time: '1956-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1960-01-01'
+        stop_time: '1960-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1964-01-01'
+        stop_time: '1964-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1968-01-01'
+        stop_time: '1968-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1972-01-01'
+        stop_time: '1972-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1976-01-01'
+        stop_time: '1976-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1980-01-01'
+        stop_time: '1980-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1984-01-01'
+        stop_time: '1984-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1988-01-01'
+        stop_time: '1988-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1992-01-01'
+        stop_time: '1992-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2011-01-01'
+        stop_time: '2011-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2015-01-01'
+        stop_time: '2015-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2019-01-01'
+        stop_time: '2019-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2024-01-01'
+        stop_time: '2024-12-31'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 4
+    prefetch_factor: 2
+    dataset:
+      data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1996-01-01'
+        stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 3
+  optimize_last_step_only: false
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  loss:
+    type: EnsembleLoss
+    weights:
+      h500: 5.0
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
