@@ -1,12 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VJ40QYECRFW7NS8V29E1CP|canceled_ssh_budget|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VJ4M84ZS69QM505AXVSTZN|canceled_ssh_budget|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VJ40QYECRFW7NS8V29E1CP|canceled_ssh_budget|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VJ40QYECRFW7NS8V29E1CP|canceled_ssh_budget|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VJ4M84ZS69QM505AXVSTZN|canceled_ssh_budget|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VJ4M84ZS69QM505AXVSTZN|canceled_ssh_budget|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+# --config-dir configs/experiments/cm4_eval/ocean
