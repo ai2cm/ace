@@ -13,12 +13,12 @@ cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft|rs2|0
 
 # rs0 fine-tuning checkpoint after epoch 1 (downloaded mid-run), uploaded as
 # spencerc/2026-10-13-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-rs0-epoch1
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic1|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic2|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic1|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic2|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic1|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic2|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 0||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|titan
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic1|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic2|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic1|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic2|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic1|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic2|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
