@@ -1,4 +1,3 @@
-import dataclasses
 import logging
 import os
 import time
@@ -8,13 +7,8 @@ from typing import Any
 import numpy as np
 import wandb
 
-from fme.core.cloud import is_local
-from fme.core.disk_metric_logger import (
-    CheckpointMark,
-    DiskMetricLogger,
-    read_metrics_by_step,
-)
 from fme.core.distributed import Distributed
+from fme.core.metric_backup import MetricBackup, WandBLogCall
 
 WANDB_RUN_ID_FILE = "wandb_run_id"
 
@@ -118,8 +112,7 @@ class WandB:
         self._enabled = False
         self._configured = False
         self._id = None
-        # only the root rank logs metrics to disk, see build_disk_logger
-        self._disk_logger: DiskMetricLogger | None = None
+        self._metric_backup = MetricBackup()
 
     def configure(self, log_to_wandb: bool, metrics_log_dir: str):
         """Set up logging to wandb and to disk.
@@ -137,9 +130,8 @@ class WandB:
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
-        if self._disk_logger is not None:
-            self._disk_logger.close()
-        self._disk_logger = build_disk_logger(metrics_log_dir)
+        self._metric_backup.close()
+        self._metric_backup = MetricBackup.from_directory(metrics_log_dir)
 
     def init(
         self,
@@ -188,7 +180,7 @@ class WandB:
                 logging.info(f"New non-resuming wandb run with id: {id_}.")
             self._id = id_
         if resumable:
-            self._restore_disk_metrics()
+            self._metric_backup.restore(self._first_unreceived_step, self._relog)
             Distributed.get_instance().barrier()
 
     def finish(self):
@@ -214,67 +206,40 @@ class WandB:
             wandb.log(dict(data), step=step, commit=commit)
             if sleep is not None:
                 time.sleep(sleep)
-        if self._disk_logger is not None:
-            self._disk_logger.log(dict(data), step=step)
+        self._metric_backup.log(dict(data), step=step)
         dist = Distributed.get_instance()
         dist.barrier()
 
     def mark_checkpoint(self):
-        """Write the checkpoint mark file, recording the current size of the
-        on-disk metrics file and the last step logged.
+        """Back up the logged metrics to the last saved checkpoint, so that
+        ``init`` can recover them on resume (see ``MetricBackup``).
 
         Call right after saving a checkpoint that training can resume from.
-        On resume, ``init`` truncates the metrics file back to this size and
-        re-logs to wandb the scalars up to this step that wandb never
-        received. Only the root rank writes the file; other ranks do nothing.
-        Does no logging and no collectives, so it is safe to call from the
-        termination listener's thread (see
-        `fme.core.distributed.shutdown.add_post_abort_callback`).
+        Safe to call from the termination listener's thread.
         """
-        if self._disk_logger is not None:
-            self._disk_logger.write_checkpoint_mark()
+        self._metric_backup.mark_checkpoint()
 
-    def _restore_disk_metrics(self):
-        """Truncate the on-disk metrics file back to the checkpoint mark, then
-        if this job resumed an online wandb run, re-log to wandb the scalars
-        from ``wandb.run.step`` up to the mark's last step (see
-        ``metrics_to_relog``).
-
-        Skips the truncation if this rank has no disk logger or no mark file
-        exists. Skips the re-log if this rank has no wandb run, the run is
-        offline (the previous job's offline files hold the metrics), or the run
-        is new rather than resumed (e.g. ``resume_wandb: false``), since a new
-        run has lost nothing.
+    def _first_unreceived_step(self) -> int | None:
+        """The first step the resumed wandb run has not received, or None if
+        nothing should be re-logged to it: this rank has no wandb run, the run
+        is offline (the previous job's offline files hold the metrics), or the
+        run is new rather than resumed (e.g. ``resume_wandb: false``), since a
+        new run has lost nothing.
         """
-        if self._disk_logger is None:
-            return
-        mark = self._disk_logger.restore_to_checkpoint_mark()
-        if mark is None:
-            return
         if wandb.run is None:  # this rank does not log to wandb
-            return
+            return None
         if wandb.run.offline:
             logging.info(
                 "wandb is offline, so disk metrics are not re-logged: the "
                 "previous job's offline wandb files hold them"
             )
-            return
+            return None
         if not wandb.run.resumed:
-            return
-        first_step = wandb.run.step
-        logging.info(
-            f"Checking disk metrics for steps wandb lacks: wandb resumed at "
-            f"step {first_step}, checkpoint mark at step {mark.last_step}"
-        )
-        calls = metrics_to_relog(self._disk_logger.directory, first_step, mark)
-        for call in calls:
-            wandb.log(call.data, step=call.step, commit=call.commit)
-        if calls:
-            epochs = [call.data["epoch"] for call in calls if "epoch" in call.data]
-            logging.info(
-                f"Recovered wandb logs for {len(calls)} steps from disk "
-                f"(steps {calls[0].step} to {calls[-1].step}, epochs {epochs})"
-            )
+            return None
+        return wandb.run.step
+
+    def _relog(self, call: WandBLogCall):
+        wandb.log(call.data, step=call.step, commit=call.commit)
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
@@ -320,91 +285,6 @@ def scale_image(
     image_data = np.maximum(image_data, 0)
     image_data[np.isnan(image_data)] = 0
     return image_data
-
-
-def build_disk_logger(metrics_log_dir: str) -> DiskMetricLogger | None:
-    """Build the DiskMetricLogger for this process, or None if it should not
-    log metrics to disk.
-
-    In distributed training every process has a rank, and only the root
-    rank (rank 0) logs metrics, to wandb and to disk. Other ranks get None
-    so that one process owns the metrics file and the checkpoint mark. The
-    root rank also gets None, with a warning, when ``metrics_log_dir`` is
-    not on a local file system.
-    """
-    if not Distributed.get_instance().is_root():
-        return None
-    if not is_local(metrics_log_dir):
-        logging.warning(
-            f"Disk metric logging is only supported on a local file system. "
-            f"Got metrics_log_dir={metrics_log_dir!r}, so no metrics will be "
-            f"saved to disk and none can be recovered on resume."
-        )
-        return None
-    return DiskMetricLogger(metrics_log_dir)
-
-
-@dataclasses.dataclass(frozen=True)
-class WandBLogCall:
-    """The arguments of one call to ``wandb.log``."""
-
-    data: dict[str, Any]
-    step: int
-    commit: bool
-
-
-def metrics_to_relog(
-    directory: str | os.PathLike, first_step: int, mark: CheckpointMark
-) -> list[WandBLogCall]:
-    """Build the ``wandb.log`` calls that fill the gap between what wandb
-    received before the previous job was killed and what that job logged to
-    disk.
-
-    For example, with these lines in the restored metrics file, a checkpoint
-    mark with ``last_step=30``, and wandb having received step 10 so that
-    ``first_step=11``::
-
-        {"step": 10, "batch_loss": 0.5}
-        {"step": 20, "batch_loss": 0.4}
-        {"step": 20, "val_loss": 0.3}
-        {"step": 30, "batch_loss": 0.2}
-
-    the result is::
-
-        [
-            WandBLogCall({"batch_loss": 0.4, "val_loss": 0.3}, step=20, commit=True),
-            WandBLogCall({"batch_loss": 0.2}, step=30, commit=False),
-        ]
-
-    Step 10 is dropped since wandb has it, the two step-20 lines are merged
-    into one call, and step 30 is left uncommitted since it is the mark's
-    ``last_step``.
-
-    Args:
-        directory: Directory holding the restored metrics file.
-        first_step: The first step wandb does not have. On resume this is
-            ``wandb.run.step``. Earlier steps are skipped, since wandb rejects
-            logs at steps it already passed.
-        mark: The checkpoint mark written by
-            ``DiskMetricLogger.write_checkpoint_mark`` when the checkpoint
-            being resumed from was saved. Only ``mark.last_step`` is used:
-            the ``step`` passed to the last ``WandB.log`` call before that
-            checkpoint was saved, i.e. the step the resumed job starts
-            logging at again.
-
-    Returns:
-        One call per step from ``first_step`` on, in ascending order, each
-        holding every metric logged at that step. Every call has
-        ``commit=True`` except the one at ``mark.last_step``, the step the
-        resumed job starts logging at again (e.g. end-of-epoch metrics after
-        a checkpoint saved before validation). That call has
-        ``commit=False`` so wandb holds the step open and the resumed job's
-        logs merge into it instead of being rejected.
-    """
-    return [
-        WandBLogCall(data=data, step=step, commit=step != mark.last_step)
-        for step, data in read_metrics_by_step(directory, first_step).items()
-    ]
 
 
 def init_wandb_with_resumption(

@@ -66,6 +66,9 @@ class DiskMetricLogger:
         """
         if self._file is None:
             raise RuntimeError("DiskMetricLogger is closed")
+        # recorded even when there are no scalars to write: the checkpoint
+        # mark's last_step is the step a resumed job starts logging at again,
+        # which MetricBackup relogs to wandb without committing it
         self._last_step = step
         scalars = _extract_serializable(data)
         if not scalars:
@@ -100,10 +103,12 @@ class DiskMetricLogger:
         of the metrics file when the checkpoint was saved. This method keeps
         the file up to that size, plus any lines just past it that are at the
         mark's last step (ie. step 1000), since the resumed job may not log
-        those again. Lines after that come from training the resumed job
-        redoes, so they are moved to a ``metrics.jsonl.discarded.<timestamp>``
-        file. If this logger has not logged anything yet, the file it restores
-        is the previous job's file that was moved aside on construction.
+        those again: lines at that step can come from logs the caller made
+        at the checkpoint's step after saving it. Lines after that come from
+        training the resumed job redoes, so they are moved to a
+        ``metrics.jsonl.discarded.<timestamp>`` file. If this logger has not
+        logged anything yet, the file it restores is the previous job's file
+        that was moved aside on construction.
 
         Returns:
             The mark restored to, or None if nothing was restored because

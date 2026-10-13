@@ -7,8 +7,8 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from fme.core import wandb
-from fme.core.disk_metric_logger import DiskMetricLogger
 from fme.core.distributed import Distributed
+from fme.core.metric_backup import MetricBackup, WandBLogCall
 
 
 class MockWandB:
@@ -20,7 +20,7 @@ class MockWandB:
         self._last_received_step: int | None = None
         self._id: str | None = None
         self._resumed = False
-        self._disk_logger: DiskMetricLogger | None = None
+        self._metric_backup = MetricBackup()
         self._runs: list[dict[str, Any]] = []
         # wandb reads WANDB_NAME only on the first init; model that one-time
         # snapshot so an explicit `name` is needed to rename subsequent runs.
@@ -31,9 +31,8 @@ class MockWandB:
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
-        if self._disk_logger is not None:
-            self._disk_logger.close()
-        self._disk_logger = wandb.build_disk_logger(metrics_log_dir)
+        self._metric_backup.close()
+        self._metric_backup = MetricBackup.from_directory(metrics_log_dir)
 
     def init(
         self,
@@ -63,7 +62,7 @@ class MockWandB:
             else:
                 self._wandb_init(resume="never", **kwargs)
         if resumable:
-            self._restore_disk_metrics()
+            self._metric_backup.restore(self._first_unreceived_step, self._relog)
 
     def _wandb_init(
         self,
@@ -142,31 +141,26 @@ class MockWandB:
         # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)
-        if self._disk_logger is not None:
-            self._disk_logger.log(dict(data), step=step)
+        self._metric_backup.log(dict(data), step=step)
 
     def mark_checkpoint(self):
-        if self._disk_logger is not None:
-            self._disk_logger.write_checkpoint_mark()
+        self._metric_backup.mark_checkpoint()
 
-    def _restore_disk_metrics(self):
+    def _first_unreceived_step(self) -> int | None:
         """Mirror wandb: a resumed run continues at the step after the last
-        one it received, and rejects logs at any step already committed.
+        one it received, and a new run has lost nothing to re-log.
         """
-        if self._disk_logger is None:
-            return
-        mark = self._disk_logger.restore_to_checkpoint_mark()
-        if mark is None or not self._resumed:
-            return
+        if not self._resumed:
+            return None
         received_steps = list(self._logs)
         if self._last_received_step is not None:
             received_steps.append(self._last_received_step)
-        first_step = max(received_steps, default=-1) + 1
-        for call in wandb.metrics_to_relog(
-            self._disk_logger.directory, first_step, mark
-        ):
-            self._last_step = call.step + 1 if call.commit else call.step
-            self._logs[call.step].update(call.data)
+        return max(received_steps, default=-1) + 1
+
+    def _relog(self, call: WandBLogCall):
+        """Mirror wandb: an uncommitted step stays open for later logs."""
+        self._last_step = call.step + 1 if call.commit else call.step
+        self._logs[call.step].update(call.data)
 
     def drop_logs_after(self, step: int):
         """Simulate wandb never receiving logs after ``step``, e.g. because
@@ -222,8 +216,7 @@ def mock_wandb():
     try:
         yield mock
     finally:
-        if mock._disk_logger is not None:
-            mock._disk_logger.close()
+        mock._metric_backup.close()
         wandb.singleton = original
 
 

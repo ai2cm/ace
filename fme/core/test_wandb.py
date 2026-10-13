@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import fme.core.disk_metric_logger
+import fme.core.metric_backup
 import fme.core.wandb
 from fme.core.disk_metric_logger import CHECKPOINT_MARK_FILENAME, read_metrics
 from fme.core.testing.wandb import mock_wandb
@@ -42,7 +43,7 @@ class TestDiskLoggingIntegration:
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True, metrics_log_dir="memory://b/metrics")
             wandb.log({"loss": 0.5}, step=0)
-        assert wandb._disk_logger is None
+        assert not wandb._metric_backup.enabled
 
     def test_disk_logging_rerun_starts_fresh(self, tmp_path):
         log_dir = str(tmp_path / "metrics")
@@ -79,7 +80,7 @@ def _log_previous_job(log_dir: str, records: list[tuple[dict, int]], mark_after:
         previous_job.log(data, step=step)
         if i == mark_after:
             previous_job.mark_checkpoint()
-    _close_disk_logger(previous_job)
+    _close_metric_backup(previous_job)
 
 
 def _resume_wandb(
@@ -114,13 +115,12 @@ def _resume_wandb(
     try:
         wandb.init(resumable=resumable, experiment_dir=str(tmp_path))
     finally:
-        _close_disk_logger(wandb)
+        _close_metric_backup(wandb)
     return logged
 
 
-def _close_disk_logger(wandb: WandB):
-    if wandb._disk_logger is not None:
-        wandb._disk_logger.close()
+def _close_metric_backup(wandb: WandB):
+    wandb._metric_backup.close()
 
 
 # the checkpoint mark is after the step-30 batch logs; a timings log at step
@@ -209,10 +209,11 @@ def test_mark_checkpoint_does_not_use_logging_module(tmp_path, monkeypatch):
     wandb.log({"loss": 0.5}, step=0)
     mock_logging = unittest.mock.MagicMock()
     monkeypatch.setattr(fme.core.wandb, "logging", mock_logging)
+    monkeypatch.setattr(fme.core.metric_backup, "logging", mock_logging)
     monkeypatch.setattr(fme.core.disk_metric_logger, "logging", mock_logging)
     with unittest.mock.patch.object(logging.Logger, "_log") as logger_log:
         wandb.mark_checkpoint()
-    _close_disk_logger(wandb)
+    _close_metric_backup(wandb)
     assert mock_logging.mock_calls == []
     logger_log.assert_not_called()
     assert os.path.exists(os.path.join(tmp_path, "metrics", CHECKPOINT_MARK_FILENAME))
@@ -222,4 +223,4 @@ def test_mark_checkpoint_without_disk_logging_is_a_no_op():
     wandb = WandB()
     wandb.configure(log_to_wandb=False, metrics_log_dir="memory://b/metrics")
     wandb.mark_checkpoint()
-    assert wandb._disk_logger is None
+    assert not wandb._metric_backup.enabled
