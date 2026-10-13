@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
 # --config-dir configs/experiments/cm4_eval/ocean_enthsis2
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_enthsis2prog_am4b3|rs0|01M4SXV97BQ1GC6HVKP8TQPXDQ|training|best_inference_ckpt|normal|--min-runtime 8h
