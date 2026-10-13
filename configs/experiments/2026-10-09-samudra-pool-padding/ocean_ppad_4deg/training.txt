@@ -18,5 +18,5 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs1|training|normal|jupiter|1
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs0|training|normal|jupiter|1||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|training|normal|jupiter|1||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
 
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs0|train|urgent|jupiter|1||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|8h
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs1|train|urgent|jupiter|1||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs0|training|urgent|jupiter|1||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs1|training|urgent|jupiter|1||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|8h
