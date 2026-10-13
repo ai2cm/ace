@@ -1,0 +1,38 @@
+# Standalone 10-year segmented inference for tropical cyclone tracking.
+# 6-hourly ACE2S model, 2001-2010, 1 member, saves raw fields for
+# TempestExtremes DetectNodes/StitchNodes.
+# Launch: python -m fme.ace.inference <config> --segments 10
+checkpoint_path: /ckpt.tar
+experiment_dir: /output
+n_forward_steps: 1460
+forward_steps_in_memory: 80
+initial_condition:
+  path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2001-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  names:
+    - PRMSL
+    - air_temperature_3
+    - TMP2m
+    - UGRD10m
+    - VGRD10m
+    - HGTsfc
+    - PRATEsfc
+    - total_water_path
