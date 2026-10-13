@@ -43,4 +43,4 @@ def test_no_metrics_written_for_non_local_experiment_dir():
             experiment_dir="memory://bucket/exp", config={}, resumable=False
         )
         wandb.log({"loss": 1.0}, step=1)
-        assert wandb._disk_logger is None
+        assert not wandb._disk_logger.enabled
