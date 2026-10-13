@@ -5,3 +5,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VRR1D8ZP9N3RM3V2A4F8K8|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VRRAJCHXH82V44XR4TGZAQ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VRR1D8ZP9N3RM3V2A4F8K8|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VRR1D8ZP9N3RM3V2A4F8K8|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VRRAJCHXH82V44XR4TGZAQ|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VRRAJCHXH82V44XR4TGZAQ|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
