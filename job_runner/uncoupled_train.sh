@@ -19,6 +19,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --extra_stats: Additional stats dataset mounted at /extra_stats (optional)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
+  echo "Reads <experiment_dir>/<config_subdirectory>/training.txt, header:"
+  echo "  $(input_header TRAINING_COLUMNS)"
   exit 1
 fi
 
@@ -63,21 +65,12 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read TRAINING; do
+    is_job_row "$TRAINING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
-    GROUP=$(echo "$TRAINING" | cut -d"|" -f1)
-    TAG=$(echo "$TRAINING" | cut -d"|" -f2)
-    STATUS=$(echo "$TRAINING" | cut -d"|" -f3)
-    PRIORITY=$(echo "$TRAINING" | cut -d"|" -f4)
-    CLUSTER=$(echo "$TRAINING" | cut -d"|" -f5)
-    N_GPUS=$(echo "$TRAINING" | cut -d"|" -f6)
-    SHARED_MEM=$(echo "$TRAINING" | cut -d"|" -f7)
+    parse_row "$TRAINING" TRAINING_COLUMNS
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
     fi
-    RETRIES=$(echo "$TRAINING" | cut -d"|" -f8)
-    WORKSPACE=$(echo "$TRAINING" | cut -d"|" -f9)
-    OVERRIDE_ARGS=$(echo "$TRAINING" | cut -d"|" -f10)
-    MIN_RUNTIME=$(echo "$TRAINING" | cut -d"|" -f11)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -91,7 +84,7 @@ while read TRAINING; do
     fi
 
     if [[ -z $MIN_RUNTIME ]]; then
-        MIN_RUNTIME=0
+        MIN_RUNTIME=$DEFAULT_MIN_RUNTIME
     fi
 
     JOB_GROUP="${GROUP}"
@@ -148,7 +141,7 @@ while read TRAINING; do
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime $DEFAULT_MIN_RUNTIME" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

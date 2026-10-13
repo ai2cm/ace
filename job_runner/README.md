@@ -199,6 +199,9 @@ This is useful for:
 
 **Script Initialization:**
 - `init_script_environment()`: Initialize REPO_ROOT, GIT_BRANCH, and BEAKER_USERNAME variables
+- `is_job_row()`: Fail for an input file's header, blank lines, and `#` comments
+- `input_header()`: Print an input file's header from its `*_COLUMNS` array
+- `parse_row()`: Set each `*_COLUMNS` variable from a pipe-delimited row
 - `parse_dry_run_flag()`: Parse `--dry-run` flag from arguments
 - `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
 - `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
@@ -211,30 +214,38 @@ This is useful for:
 
 ## Input File Formats
 
-Each job type reads from a pipe-delimited text file:
+Each job type reads one pipe-delimited text file. Its columns are the
+`*_COLUMNS` array in `lib.sh`, the single source for both the header and how
+rows are parsed (`parse_row`); running a launcher with no arguments prints its
+header.
 
-- **Coupled training**: `pretraining.txt` (17 fields)
-- **Uncoupled training**: `training.txt` (11 fields)
-- **Coupled fine-tuning**: `finetuning.txt` (15 fields)
-- **Uncoupled fine-tuning**: `finetuning.txt` (15 fields)
-- **Resume**: `resuming.txt` (17 fields; optional `config` names a repo config in
-  the config subdirectory, used in place of the resumed run's dumped config)
-- **Evaluate / Inference**: `experiments.txt` (14 fields), always read from
-  `<experiment_dir>/<config_subdirectory>/`, never from `--config-dir`
+| Job type | File | Columns |
+| --- | --- | --- |
+| Uncoupled training | `training.txt` | `TRAINING_COLUMNS` |
+| Coupled training | `pretraining.txt` | `PRETRAINING_COLUMNS` |
+| Fine-tuning (coupled or uncoupled) | `finetuning.txt` | `FINETUNING_COLUMNS` |
+| Resume | `resuming.txt` | `RESUMING_COLUMNS` |
+| Evaluate / Inference | `experiments.txt` | `EXPERIMENTS_COLUMNS` |
+
+`experiments.txt` is always read from `<experiment_dir>/<config_subdirectory>/`,
+never from `--config-dir`. Training scripts create it with its header if it is
+missing. In `resuming.txt`, the optional `config` column names a repo config in
+the config subdirectory, used in place of the resumed run's dumped config.
 
 ### `min_runtime` Field (Optional, Training Inputs)
 
 All training-related input files (`pretraining.txt`, `training.txt`, `finetuning.txt`,
-`resuming.txt`) include an optional `min_runtime` field as the last column. It is
+`resuming.txt`) include an optional `min_runtime` field. It is
 passed directly to gantry as `--min-runtime <value>` and controls how long a job
 is protected from preemption before it can be interrupted.
 
 - **Format**: A gantry-style duration string (e.g. `0`, `30m`, `1h`, `8h`).
-- **Default**: `0` (the server default — preemptible at any time).
+- **Default**: `DEFAULT_MIN_RUNTIME` in `lib.sh` (`8h`), for training, evaluation,
+  and inference rows alike.
 - **Auto-resume**: Training jobs always have auto-resume enabled (server default);
   `--no-auto-resume` is never emitted on the training path.
-- **Example values**: `0` for short test runs, `1h` to protect a checkpoint cycle,
-  `8h` for a fully protected run.
+- **Example values**: `1h` to protect a checkpoint cycle, `8h` for a fully
+  protected run. `0` is backfill-only.
 
 ### TAG Field (Optional)
 
@@ -245,9 +256,3 @@ All training, finetuning, and evaluation input files now include an optional `ta
   - Evaluation: Modifies the job name from `{GROUP}-evaluator_{CKPT}-{CONFIG}` to `{GROUP}-{TAG}-evaluator_{CKPT}-{CONFIG}`
 - **Format**: Can be empty (leave blank between pipes) or contain an alphanumeric identifier
 - **Propagation**: TAG is automatically written to `experiments.txt` by training scripts and read by evaluation scripts
-- **Example headers**:
-  - Uncoupled training: `group|tag|skip_or_train|priority|...`
-  - Coupled training: `group|tag|ocean_project|ocean_wandb_id|...`
-  - Uncoupled finetuning: `group|tag|wandb_project|wandb_id|...`
-  - Coupled finetuning: `group|tag|wandb_project|wandb_id|...`
-  - Experiments: `group|tag|exper_id|status|ckpt_type|priority|...`

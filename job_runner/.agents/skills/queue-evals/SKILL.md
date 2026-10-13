@@ -11,8 +11,9 @@ on the branch that owns the experiment directory (`../../../AGENTS.md`,
 
 ## Row semantics
 
-`experiments.txt` columns are in `../../../README.md`. The `status` field
-(field 4) decides which script acts on a row:
+`experiments.txt` columns are `EXPERIMENTS_COLUMNS` in `../../../lib.sh`,
+which the script also reads. The `status` column decides which script acts on
+a row:
 
 | status | acted on by | config read |
 | --- | --- | --- |

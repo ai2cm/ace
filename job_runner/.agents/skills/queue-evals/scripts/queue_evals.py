@@ -27,8 +27,8 @@ import re
 import subprocess
 import sys
 
-TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME = 1, 2, 3, 4, 5, 6
-WORKSPACE, CLUSTER = 9, 10
+# Column positions, set by load_columns from EXPERIMENTS_COLUMNS in lib.sh
+TAG = EXPER_ID = STATUS = CKPT = PRIORITY = MIN_RUNTIME = WORKSPACE = CLUSTER = -1
 
 
 def repo_root(path):
@@ -39,6 +39,31 @@ def repo_root(path):
         check=True,
     )
     return pathlib.Path(out.stdout.strip())
+
+
+def load_columns(root):
+    global TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME, WORKSPACE, CLUSTER
+    out = subprocess.run(
+        ["bash", "-c", "source job_runner/lib.sh; input_header EXPERIMENTS_COLUMNS"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    index = {name: i for i, name in enumerate(out.stdout.strip().split("|"))}
+    TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME, WORKSPACE, CLUSTER = (
+        index[name]
+        for name in (
+            "tag",
+            "experiment_id",
+            "status",
+            "checkpoint",
+            "priority",
+            "min_runtime",
+            "workspace",
+            "cluster",
+        )
+    )
 
 
 def fields(line):
@@ -256,6 +281,7 @@ def main():
     a.add_argument("--config-dir", help="repo-root-relative, as passed to evaluate.sh")
     a.set_defaults(func=cmd_apply)
     args = p.parse_args()
+    load_columns(repo_root(args.dir))
     args.func(args)
 
 

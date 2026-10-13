@@ -1,5 +1,7 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
+# --config-dir configs/experiments/cm4_eval/ocean
+
 # Rows are not hand-written, but this file is hand-edited. experiment_id is a
 # Beaker id that exists only after submission, and the job runner appends one
 # row per launched job (see append_to_experiments_file in job_runner/lib.sh,
@@ -21,11 +23,14 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # ocean_wide
 
-cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|01M09FGGX0XWMEBVV7HEQTN7QB|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|01M09FGGX0XWMEBVV7HEQTN7QB|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|01M09FGGX0XWMEBVV7HEQTN7QB|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|01M09FGS32Q75CQ8GDV8T6EG4Z|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|01M09FGS32Q75CQ8GDV8T6EG4Z|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|01M09FGS32Q75CQ8GDV8T6EG4Z|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|01M09FH1ACEWZA2CZ103X2C396|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|01M09FH1ACEWZA2CZ103X2C396|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|01M09FH1ACEWZA2CZ103X2C396|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
 
 # ocean_wide_ohc_cde1
@@ -66,11 +71,11 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9E
 
 # ocean_wide_ohc_clip_cde1
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs0|01M3MY3MC52FXMX8E2P2XKFN4J|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs1|01M3MY401VHXTHRYYAX114988D|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_cde1|rs2|01M3MY4ATNVRT8R867FNGKXEAN|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 1h
