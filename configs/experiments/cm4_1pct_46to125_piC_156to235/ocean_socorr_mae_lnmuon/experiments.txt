@@ -4,3 +4,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VJ58WVASMG0GKTKAPQ
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VJ5S7R4CMWS8T2S9017M2J|canceled_requeue|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VMHNPRR9E845WS1NY9RVB4|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VMJ0F3MDMG2PM556ZB7ZRH|training|best_inference_ckpt|normal|--min-runtime 8h
