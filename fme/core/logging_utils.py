@@ -147,14 +147,11 @@ class LoggingConfig:
         else:
             wandb_dir = DEFAULT_TMP_DIR
 
-        # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
-        wandb.configure(
-            log_to_wandb=self.log_to_wandb,
-            metrics_log_dir=self.metrics_log_dir,
-        )
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
+            log_to_wandb=self.log_to_wandb,
+            metrics_log_dir=self.metrics_log_dir,
             config=config_copy,
             # wandb reads WANDB_NAME only on the first init in a process, so pass
             # it explicitly for later runs (e.g. segments) to be named correctly.

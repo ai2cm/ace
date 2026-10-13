@@ -491,7 +491,7 @@ def test_run_inference_simple(
 
     with GlobalTimer(), torch.no_grad():
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
+            wandb.init(log_to_wandb=True)
             record_logs = unittest.mock.MagicMock(
                 side_effect=get_record_to_wandb("inference").log
             )  # this init must be within mock_wandb context
@@ -524,7 +524,7 @@ def test_run_inference_simple(
 
 def test_wandb_step_logger_with_label():
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.init(log_to_wandb=True)
         logger = WandBStepLogger(label="inference")
         logger.log([{"a": 1}, {"b": 2}])
         assert logger.step == 2
@@ -538,7 +538,7 @@ def test_wandb_step_logger_with_label():
 
 def test_wandb_step_logger_without_label():
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.init(log_to_wandb=True)
         logger = WandBStepLogger(label="")
         logger.log([{"a": 1}, {"b": 2}])
         assert logger.step == 2
@@ -550,7 +550,7 @@ def test_wandb_step_logger_without_label():
 def test_wandb_step_logger_label_override():
     """log() with an explicit label overrides the default."""
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.init(log_to_wandb=True)
         logger = WandBStepLogger(label="inference")
         logger.log([{"a": 1}])
         logger.log([{"b": 2}], label="")
@@ -565,7 +565,7 @@ def test_wandb_step_logger_label_override():
 def test_wandb_step_logger_skips_empty_logs():
     """Empty dicts don't produce wandb.log calls, but step still advances."""
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.init(log_to_wandb=True)
         logger = WandBStepLogger(label="inference")
         logger.log([{}, {"a": 1}, {}])
         assert logger.step == 3
@@ -577,7 +577,7 @@ def test_wandb_step_logger_skips_empty_logs():
 
 def test_get_record_to_wandb_returns_step_logger():
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.init(log_to_wandb=True)
         logger = get_record_to_wandb(label="test")
         assert isinstance(logger, WandBStepLogger)
         assert logger.step == 0

@@ -263,8 +263,7 @@ def _run_seeded_inference(
     config_filename = run_dir / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+    with mock_wandb():
         main(yaml_config=str(config_filename))
     ds = xr.open_dataset(
         run_dir / "autoregressive_predictions.nc", decode_timedelta=False
@@ -376,7 +375,6 @@ def test_inference_entrypoint(tmp_path: pathlib.Path, n_ensemble_per_ic: int):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
