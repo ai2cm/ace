@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VJ58WVASMG0GKTKAPQFEMQ|training|best_inference_ckpt|normal|--min-runtime 8h
