@@ -4,6 +4,6 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RVXMQMDE8
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RXX7G88Q31ME4QCASSTAPW|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RXX7G88Q31ME4QCASSTAPW|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RXX7G88Q31ME4QCASSTAPW|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RXX7G88Q31ME4QCASSTAPW|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8|mu3e-3rs0|01M4RXX7G88Q31ME4QCASSTAPW|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
