@@ -64,12 +64,35 @@ the treatment `snow_season`) aggregators of the 2026-09-17 arms:
   years; keeps the W&B keys of the earlier arms);
 - `inference_1pct`, 1pctCO2, from 0041-0044 and 0123-0126 (never entering the 0131-0140 holdout).
 
+## Evaluation
+
+Each fine-tuned arm is evaluated from `best_inference_ckpt.tar` of its stage-2 result dataset,
+one GPU per run, three runs per arm (`run-ace-evaluator.sh`; the configs are shared by the two
+source sets of an arm):
+
+| scenario | what | IC | steps |
+|---|---|---|---|
+| `1pctco2` | the full 1pctCO2 ramp; years 0046-0125 are training years, 0131-0140 held out | 0001-01-02 | 51,050, four members |
+| `picontrol` | the piControl tail of the 2026-09-29 round | 0311-01-01 | 14,600, four members |
+| `randco2-4xco2` | the held-out random-CO2 member ic_0003 at 4xCO2 (only its year 0155 was seen, as validation) | 0152-10-02 | 1,916, four members |
+
+The `1pctco2` and `picontrol` runs carry the 2026-09-29 round's writers (`daily_fields`,
+`means_50d`) and aggregators and write to
+`gs://vcm-ml-intermediate/2026-10-06-ace2s-snow-scenario-train/<arm>-<scenario>/`; the
+ENSO and IPO indices are off on the ramp, which crashes their summary plots at year 0001 on
+this branch (#1439).
+
+The random-CO2 member is the one test with truth where CO2 moves independently of SST (305 to
+4,471 ppmv here): a model using CO2 as a stand-in for the warming, which training on piControl
+and 1pctCO2 alone allows, is right on the ramp but not there. It logs to W&B only.
+
 ## Launch
 
 ```
 ./run-ace-train.sh cm4-control-pic-1pct cm4-masked-naive-pic-1pct
 ./run-ace-train.sh cm4-control-pic-1pct-randco2 cm4-masked-naive-pic-1pct-randco2
 ./run-ace-finetune.sh ARM STAGE1_RESULT_DATASET [...]
+./run-ace-evaluator.sh [JOB_NAME_FILTER]
 ```
 
 8 GPUs on jupiter (4 on titan with `CLUSTER=ai2/titan`), W&B group `ace2s-snow-scenario-train`,
@@ -90,9 +113,15 @@ same experiment, so the checkpoint dataset is the result of the experiment's las
 Stage 2, launched 2026-10-09 to 2026-10-11 on titan (`CLUSTER=ai2/titan`, 4 GPUs), each from the
 `best_ckpt.tar` of its stage-1 checkpoint dataset above:
 
-| job | Beaker experiment |
-|---|---|
-| `ace2s-snowscen-cm4-control-pic-1pct-daily-multi-step-finetune-rs0` | `01M4HBABBR9ZKPWHSNFJ2VV290` |
-| `ace2s-snowscen-cm4-masked-naive-pic-1pct-daily-multi-step-finetune-rs0` | `01M4J32ED22Q6DXTHF62F2CPR4` |
-| `ace2s-snowscen-cm4-control-pic-1pct-randco2-daily-multi-step-finetune-rs0` | `01M4J32RB5KPZTNSV6NS1MPEX3` |
-| `ace2s-snowscen-cm4-masked-naive-pic-1pct-randco2-daily-multi-step-finetune-rs0` | `01M4PP9PA6ZG34HTHPQ3YANRKQ` |
+| job | Beaker experiment | stage-2 checkpoint dataset | `best_inference_ckpt` epoch |
+|---|---|---|---|
+| `ace2s-snowscen-cm4-control-pic-1pct-daily-multi-step-finetune-rs0` | `01M4HBABBR9ZKPWHSNFJ2VV290` | `01M4RE0QHT2DE8V0QRCEWM43VA` | 1 of 50 |
+| `ace2s-snowscen-cm4-masked-naive-pic-1pct-daily-multi-step-finetune-rs0` | `01M4J32ED22Q6DXTHF62F2CPR4` | `01M4J32EDGBPFNG7W8PSANBFQN` | 36 of 50 |
+| `ace2s-snowscen-cm4-control-pic-1pct-randco2-daily-multi-step-finetune-rs0` | `01M4J32RB5KPZTNSV6NS1MPEX3` | `01M4J32RBKK133V679PS5X2CWC` | 4 of 45 |
+| `ace2s-snowscen-cm4-masked-naive-pic-1pct-randco2-daily-multi-step-finetune-rs0` | `01M4PP9PA6ZG34HTHPQ3YANRKQ` | `01M4RZQ6E9Z8TZ8DF9BVG88E5K` | 21, stopped at 21 of 45 |
+
+The control pic-1pct and masked-naive randco2 fine-tunes were preempted once and resumed; their
+checkpoint datasets are the last job's. The masked-naive randco2 fine-tune was stopped after its
+inline error had been flat for 15 epochs. The control randco2 inline rollouts drifted at epoch 6
+(both scenarios, upper troposphere and stratosphere) and never recovered, so its
+`best_inference_ckpt` is from before that.

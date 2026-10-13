@@ -1,0 +1,28 @@
+# Held-out random-CO2 member ic_0003 at 4xCO2, the whole member: AM4 with the
+# prescribed SST ramping about 1 K per year while CO2 jumps to a new random
+# value every two weeks or so. Only its year 0155 entered training, as
+# validation; the pic-1pct arms never saw random-CO2 data at all.
+experiment_dir: /results
+n_forward_steps: 1916  # the whole member
+forward_steps_in_memory: 50
+n_ensemble_per_ic: 4
+seed: 0
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0152-10-02T00:00:00'
+  dataset:
+    data_path: /climate-default/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily
+    file_pattern: random-CO2-4xCO2-ic_0003.zarr
+    engine: zarr
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
