@@ -18,7 +18,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --ocean_stats: Override ocean stats data path (optional)"
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
-  echo "  resuming.txt columns: group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|extra_env"
+  echo "Reads <experiment_dir>/<config_subdirectory>/resuming.txt, header:"
+  echo "  $(input_header RESUMING_COLUMNS)"
   exit 1
 fi
 
@@ -64,30 +65,12 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read RESUMING; do
+    is_job_row "$RESUMING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
-    GROUP=$(echo "$RESUMING" | cut -d"|" -f1)
-    TAG=$(echo "$RESUMING" | cut -d"|" -f2)
-    WANDB_PROJECT=$(echo "$RESUMING" | cut -d"|" -f3)
-    WANDB_ID=$(echo "$RESUMING" | cut -d"|" -f4)
-    STATUS=$(echo "$RESUMING" | cut -d"|" -f5)
-    PRIORITY=$(echo "$RESUMING" | cut -d"|" -f6)
-    CLUSTER=$(echo "$RESUMING" | cut -d"|" -f7)
-    N_GPUS=$(echo "$RESUMING" | cut -d"|" -f8)
-    SHARED_MEM=$(echo "$RESUMING" | cut -d"|" -f9)
+    parse_row "$RESUMING" RESUMING_COLUMNS
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
     fi
-    RETRIES=$(echo "$RESUMING" | cut -d"|" -f10)
-    WORKSPACE=$(echo "$RESUMING" | cut -d"|" -f11)
-    OVERRIDE_ARGS=$(echo "$RESUMING" | cut -d"|" -f12)
-    EXISTING_RESULTS_DATASET=$(echo "$RESUMING" | cut -d"|" -f13)
-    EXISTING_RESULTS_OCEAN_DATASET=$(echo "$RESUMING" | cut -d"|" -f14)
-    EXISTING_RESULTS_ATMOS_DATASET=$(echo "$RESUMING" | cut -d"|" -f15)
-    MIN_RUNTIME=$(echo "$RESUMING" | cut -d"|" -f16)
-    # Space-separated KEY=VALUE pairs passed through to gantry as --env.
-    # Needed to probe process-level settings (e.g. MALLOC_ARENA_MAX) that are
-    # not config and so cannot ride in the override column.
-    EXTRA_ENV=$(echo "$RESUMING" | cut -d"|" -f17)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -101,7 +84,7 @@ while read RESUMING; do
     fi
 
     if [[ -z $MIN_RUNTIME ]]; then
-        MIN_RUNTIME=0
+        MIN_RUNTIME=$DEFAULT_MIN_RUNTIME
     fi
 
     JOB_GROUP="${GROUP}"
@@ -124,8 +107,17 @@ while read RESUMING; do
         EXTRA_ENV_ARGS+=(--env "$ENV_KV")
     done
 
-    # Set config path variable for print functions
-    CONFIG_PATH_REL="/existing-results/config.yaml"
+    # Blank config resumes the dumped config; else a repo config in the subdir
+    if [[ -n $CONFIG ]]; then
+        CONFIG_PATH="$EXPERIMENT_DIR/$CONFIG_SUBDIR/$CONFIG"
+        if [[ ! -f "$CONFIG_PATH" ]]; then
+            echo "Error: config $CONFIG_PATH not found" >&2
+            exit 1
+        fi
+    else
+        CONFIG_PATH="/existing-results/config.yaml"
+    fi
+    CONFIG_PATH_REL="$CONFIG_PATH"
 
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -169,9 +161,6 @@ while read RESUMING; do
         )
     fi
 
-    # Set config path to use the one from existing results
-    CONFIG_PATH="/existing-results/config.yaml"
-
     # Prepend resume override to OVERRIDE_ARGS
     OVERRIDE_ARGS="resume_results.existing_dir=/existing-results ${OVERRIDE_ARGS}"
 
@@ -183,7 +172,7 @@ while read RESUMING; do
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime $DEFAULT_MIN_RUNTIME" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

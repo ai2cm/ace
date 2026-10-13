@@ -1,0 +1,24 @@
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg|rs0|01M4RE0AK2VP34TBGTP914P55N|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg|rs1|01M4RE0Q6A8QJWHDNA5ARS9N5Q|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg|rs2|01M4RE14XDG0ZE4V5WCHFC9BV9|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft|rs0|01M4V0C2F51160KT7Q8HW1TJA9|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft|rs1|01M4V0CMTQCJHP3CD090C1WQBY|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft|rs2|01M4V0D682ZSXZ9TEAG9JP0HAB|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# rs0 fine-tuning checkpoint after epoch 1 (downloaded mid-run), uploaded as
+# spencerc/2026-10-13-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-rs0-epoch1
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic1|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic2|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic1|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic2|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic1|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic2|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR_4deg-ft-ep1|rs0|01M4V0C2F51160KT7Q8HW1TJA9|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4VGR7Y9KWT9N55QDNHMVZ3P|ai2/ace|jupiter
