@@ -278,19 +278,10 @@ stepper:
     stepper:
       input_masking:
         mask_value: 0
-        fill_value: 0.0
+        fill_value: mean
         exclude_names_and_prefixes:
           - land_fraction
-          - DLWRFsfc
-          - DSWRFsfc
-          - ULWRFsfc
-          - USWRFsfc
-          - LHTFLsfc
-          - SHTFLsfc
-          - PRATEsfc
-          - eastward_surface_wind_stress
-          - northward_surface_wind_stress
-          - total_frozen_precipitation_rate
+          - sea_surface_fraction
       step:
         type: single_module
         config:
@@ -314,6 +305,7 @@ stepper:
                 - 1
               norm: instance
               zonally_periodic_upsample: true
+              lat_pad: pole
           normalization:
             network:
               global_means_path: /ocean_stats/centering.nc
@@ -321,8 +313,11 @@ stepper:
           corrector:
             type: ocean_corrector
             config:
+              corrector_disabled_epochs: 1
+              ocean_heat_content_correction:
+                method: scaled_temperature
               surface_energy_flux_correction:
-                method: prescribed
+                method: prescribed_open_ocean
               force_positive_names:
                 - so_0
                 - so_1
@@ -353,8 +348,8 @@ stepper:
                   - sfdsi
                   - UI
                   - VI
-              ocean_heat_content_correction:
-                method: scaled_temperature
+              zos_global_mean_correction:
+                reference_global_mean: -0.00013
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
@@ -552,6 +547,7 @@ stepper:
             - tauuo
             - tauvo
             - wfo
+            - SSH
   atmosphere:
     timedelta: 6h
     # stepper added by job_runner/create_coupled_train_config.sh
