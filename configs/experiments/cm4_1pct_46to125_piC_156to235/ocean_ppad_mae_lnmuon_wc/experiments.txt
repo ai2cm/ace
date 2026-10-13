@@ -1,5 +1,5 @@
 
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_mae_lnmuon_wc|rs0|01M4QDBVHG8WQ47M28T8R8GCK2|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_ppad_mae_lnmuon_wc|rs0|01M4QDBVHG8WQ47M28T8R8GCK2|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_mae_lnmuon_wc|rs0|01M4QDBVHG8WQ47M28T8R8GCK2|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_ppad_mae_lnmuon_wc|rs0|01M4QDBVHG8WQ47M28T8R8GCK2|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
