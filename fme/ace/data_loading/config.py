@@ -7,6 +7,7 @@ from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
+from fme.core.dataset.time_coarsen import TimeCoarsenDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -19,7 +20,9 @@ class DataLoaderConfig:
     Parameters:
         dataset: Could be a single dataset configuration,
             or a sequence of datasets to be concatenated using the keyword `concat`,
-            or datasets from different sources to be merged using the keyword `merge`.
+            or datasets from different sources to be merged using the keyword `merge`,
+            or any of these coarsened in time by wrapping it in a
+            `TimeCoarsenDatasetConfig` (keyword `dataset` with a `factor`).
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
         prefetch_factor: how many batches a single data worker will attempt to
@@ -56,7 +59,12 @@ class DataLoaderConfig:
         pre-loaded window.
     """
 
-    dataset: ConcatDatasetConfig | MergeDatasetConfig | XarrayDataConfig
+    dataset: (
+        ConcatDatasetConfig
+        | MergeDatasetConfig
+        | XarrayDataConfig
+        | TimeCoarsenDatasetConfig
+    )
     batch_size: int
     num_data_workers: int = 0
     prefetch_factor: int | None = None

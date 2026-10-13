@@ -1475,3 +1475,63 @@ def test_inference_data_loader_excludes_variable_absent_from_all_samples(tmp_pat
     assert batch_data.data_mask is not None
     assert batch_data.data_mask["foo"].all()
     assert not batch_data.data_mask["nonexistent_var"].any()
+
+
+@pytest.mark.parametrize("factor", [1, 3])
+def test_xarray_loader_time_coarsen(tmp_path, factor: int):
+    """A time-coarsened loader yields snapshots at window ends, window means and a
+    timestep scaled by the factor; the config also parses from a plain dict."""
+    import dacite
+    from xarray.coders import CFDatetimeCoder
+
+    from fme.core.dataset.time_coarsen import TimeCoarsenDatasetConfig
+
+    n_coarse = 2  # 1 initial condition and 1 step forward
+    n_times = 2 * n_coarse * factor + 1
+    data_path = _create_dataset_on_disk(tmp_path, n_times=n_times)
+    config = dacite.from_dict(
+        DataLoaderConfig,
+        {
+            "dataset": {
+                "dataset": {"data_path": str(tmp_path), "n_repeats": 1},
+                "factor": factor,
+                "window_names": ["bar"],
+            },
+            "batch_size": 2,
+            "num_data_workers": 0,
+        },
+        config=dacite.Config(strict=True),
+    )
+    assert isinstance(config.dataset, TimeCoarsenDatasetConfig)
+    requirements = DataRequirements(["foo", "bar"], n_coarse)
+    data = get_gridded_data(config, False, requirements)  # type: ignore
+    assert data.dataset_info.timestep == datetime.timedelta(days=factor)
+    raw = xr.open_dataset(
+        data_path,
+        decode_times=CFDatetimeCoder(use_cftime=True),
+        decode_timedelta=False,
+    )
+    n_samples = 0
+    for batch in data.loader:
+        assert batch.data["foo"].shape[1] == n_coarse
+        assert batch.data["bar"].shape[1] == n_coarse
+        for i in range(batch.data["foo"].shape[0]):
+            n_samples += 1
+            ic_time = batch.time.values[i, 0]
+            fine_end = int(np.argwhere(raw.time.values == ic_time)[0, 0])
+            fine_start = fine_end - factor + 1
+            assert fine_start >= 0
+            for k in range(n_coarse):
+                end = fine_end + k * factor
+                torch.testing.assert_close(
+                    batch.data["foo"][i, k].cpu(),
+                    torch.as_tensor(raw["foo"].values[end]),
+                )
+                torch.testing.assert_close(
+                    batch.data["bar"][i, k].cpu(),
+                    torch.as_tensor(
+                        raw["bar"].values[end - factor + 1 : end + 1].mean(axis=0)
+                    ),
+                )
+    # every fine timestep whose sample fits in the file starts a sample
+    assert n_samples == n_times - n_coarse * factor + 1

@@ -113,6 +113,7 @@ from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
+from fme.core.dataset.time_coarsen import TimeCoarsenDatasetConfig
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.generics.lr_tuning import LRTuningConfig
