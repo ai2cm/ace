@@ -3,7 +3,7 @@
 # TempestExtremes DetectNodes/StitchNodes.
 # Launch: python -m fme.ace.inference <config> --segments 10
 checkpoint_path: /ckpt.tar
-experiment_dir: /output
+experiment_dir: /results
 n_forward_steps: 1460
 forward_steps_in_memory: 80
 initial_condition:
