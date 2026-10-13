@@ -1,0 +1,15 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+# From-scratch 4deg runs of train-config.yaml (James Duncan's 4deg ocean_ppad
+# baseline with dilation [1, 2, 4, 4]), two seeds per arm:
+# - ocean_ppad_pool: lat_pad pole (with the continuation past the far pole the
+#   4 deg bottleneck needs) and pad_pool on
+# - ocean_ppad_nopad: the control, lat_pad constant and pad_pool off
+#
+# uncoupled_train.sh acts only on rows whose status is exactly "train".
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs0|train|high|jupiter|2||3|ai2/ace|seed=0 stepper.step.config.builder.config.pad_pool=true|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs1|train|normal|jupiter|2||3|ai2/ace|seed=1 stepper.step.config.builder.config.pad_pool=true|8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs0|train|high|jupiter|2||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|train|normal|jupiter|2||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|8h
