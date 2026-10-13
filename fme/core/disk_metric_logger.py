@@ -54,7 +54,7 @@ class DiskMetricLogger:
         self._offset = 0
         self._last_step: int | None = None
         self.enabled = directory is not None and Distributed.get_instance().is_root()
-        if directory is not None and self.enabled and not is_local(str(directory)):
+        if self.enabled and not is_local(str(directory)):
             logging.warning(
                 f"Disk metric logging is only supported on a local file system. "
                 f"Got metrics_log_dir={directory!r}, so no metrics will be "

@@ -13,11 +13,41 @@ from fme.core.disk_metric_logger import (
     read_metrics,
     read_metrics_by_step,
 )
+from fme.core.distributed import Distributed
 
 
 @pytest.fixture
 def log_dir(tmp_path):
     return str(tmp_path / "metrics")
+
+
+def _use_disabled_logger(logger: DiskMetricLogger):
+    assert not logger.enabled
+    logger.log({"loss": 0.5}, step=0)
+    logger.write_checkpoint_mark()
+    assert logger.restore_to_checkpoint_mark() is None
+    logger.close()
+
+
+def test_logger_without_directory_does_nothing():
+    _use_disabled_logger(DiskMetricLogger(None))
+
+
+def test_logger_on_non_root_rank_does_nothing(log_dir, monkeypatch):
+    os.makedirs(log_dir)
+    with open(os.path.join(log_dir, METRICS_FILENAME), "w") as f:
+        f.write('{"step": 0, "loss": 1.0}\n')
+    monkeypatch.setattr(Distributed.get_instance(), "is_root", lambda: False)
+    _use_disabled_logger(DiskMetricLogger(log_dir))
+    # the root rank's metrics file is not moved aside, and nothing is written
+    assert os.listdir(log_dir) == [METRICS_FILENAME]
+
+
+def test_logger_on_non_local_directory_does_nothing(caplog):
+    with caplog.at_level(logging.WARNING):
+        logger = DiskMetricLogger("memory://bucket/metrics")
+    assert "only supported on a local file system" in caplog.text
+    _use_disabled_logger(logger)
 
 
 def test_creates_directory(log_dir):
