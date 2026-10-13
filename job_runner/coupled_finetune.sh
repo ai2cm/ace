@@ -19,6 +19,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --extra_stats: Additional stats dataset mounted at /extra_stats (optional)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
+  echo "Reads <experiment_dir>/<config_subdirectory>/finetuning.txt, header:"
+  echo "  $(input_header FINETUNING_COLUMNS)"
   exit 1
 fi
 
@@ -65,25 +67,12 @@ SKIPPED_JOBS=0
 FIRST_JOB_PRINTED=false
 
 while read FINETUNING; do
+    is_job_row "$FINETUNING" || continue
     TOTAL_JOBS=$((TOTAL_JOBS + 1))
-    GROUP=$(echo "$FINETUNING" | cut -d"|" -f1)
-    TAG=$(echo "$FINETUNING" | cut -d"|" -f2)
-    WANDB_PROJECT=$(echo "$FINETUNING" | cut -d"|" -f3)
-    WANDB_ID=$(echo "$FINETUNING" | cut -d"|" -f4)
-    CKPT_TYPE=$(echo "$FINETUNING" | cut -d"|" -f5)
-    STATUS=$(echo "$FINETUNING" | cut -d"|" -f6)
-    PRIORITY=$(echo "$FINETUNING" | cut -d"|" -f7)
-    CLUSTER=$(echo "$FINETUNING" | cut -d"|" -f8)
-    N_GPUS=$(echo "$FINETUNING" | cut -d"|" -f9)
-    SHARED_MEM=$(echo "$FINETUNING" | cut -d"|" -f10)
+    parse_row "$FINETUNING" FINETUNING_COLUMNS
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
     fi
-    RETRIES=$(echo "$FINETUNING" | cut -d"|" -f11)
-    WORKSPACE=$(echo "$FINETUNING" | cut -d"|" -f12)
-    OVERRIDE_ARGS=$(echo "$FINETUNING" | cut -d"|" -f13)
-    EXISTING_RESULTS_DATASET=$(echo "$FINETUNING" | cut -d"|" -f14)
-    MIN_RUNTIME=$(echo "$FINETUNING" | cut -d"|" -f15)
 
     if [[ "$STATUS" != "train" ]]; then
         SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -97,7 +86,7 @@ while read FINETUNING; do
     fi
 
     if [[ -z $MIN_RUNTIME ]]; then
-        MIN_RUNTIME=0
+        MIN_RUNTIME=$DEFAULT_MIN_RUNTIME
     fi
 
     JOB_GROUP="${GROUP}"
@@ -170,7 +159,7 @@ while read FINETUNING; do
 
     # Append to experiments.txt
     append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime 8h" "$GIT_BRANCH"
+        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime $DEFAULT_MIN_RUNTIME" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 
