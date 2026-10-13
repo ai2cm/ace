@@ -2,5 +2,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # --config-dir configs/experiments/cm4_eval/ocean
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu3e-3|01M4HH3AZRPFTRVSR19KK2FR21|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu3e-3|01M4HH3AZRPFTRVSR19KK2FR21|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu3e-3|01M4HH3AZRPFTRVSR19KK2FR21|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon|mu3e-3|01M4HH3AZRPFTRVSR19KK2FR21|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h

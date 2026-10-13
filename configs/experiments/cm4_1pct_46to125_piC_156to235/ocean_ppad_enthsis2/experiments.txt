@@ -3,10 +3,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # --config-dir configs/experiments/cm4_eval/ocean_enthsis2
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b3|rs0|01M4J70CDPXW570DFQYE9DYYVH|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b3|rs0|01M4J70CDPXW570DFQYE9DYYVH|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b3|rs0|01M4J70CDPXW570DFQYE9DYYVH|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b2|rs0|01M4J70RBK55YWX3GCG6H3K2JR|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b2|rs0|01M4J70RBK55YWX3GCG6H3K2JR|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b2|rs0|01M4J70RBK55YWX3GCG6H3K2JR|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_enthsis2_am4b2|rs0|01M4J70RBK55YWX3GCG6H3K2JR|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_enthsis2_am4b3|rs0|01M4J71443WVHJMQWA1SCRFS04|training|best_inference_ckpt|normal|--min-runtime 8h
 
