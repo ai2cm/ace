@@ -11,5 +11,5 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke2|01M4
 # Shared coupled configs; results_dataset left empty so evaluate.sh mounts the
 # final (successful) job's result.
 #   job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled/poo_ft . --config-dir configs/experiments/cm4_eval/coupled
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|01M4JGG15KPP9KYT4E4WZAZKYE|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|01M4JGG15KPP9KYT4E4WZAZKYE|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|01M4JGG15KPP9KYT4E4WZAZKYE|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|01M4JGG15KPP9KYT4E4WZAZKYE|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
