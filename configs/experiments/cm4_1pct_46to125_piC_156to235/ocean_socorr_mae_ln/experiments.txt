@@ -1,2 +1,4 @@
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VJ40QYECRFW7NS8V29E1CP|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VJ4M84ZS69QM505AXVSTZN|training|best_inference_ckpt|normal|--min-runtime 8h
