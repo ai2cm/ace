@@ -5,3 +5,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_socorr|rs0|01M4VR82VE1D40PB593FTRCJ03|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr|rs1|01M4VR8E8ZH3BH97SAZQQFYWZH|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr|rs2|01M4VR8SQA0TS0QYEWS97QCZ7N|training|best_inference_ckpt|normal|--min-runtime 8h
