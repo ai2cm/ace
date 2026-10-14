@@ -26,6 +26,7 @@ def _use_disabled_logger(logger: DiskMetricLogger):
     logger.log({"loss": 0.5}, step=0)
     logger.write_checkpoint_mark()
     assert logger.restore_to_checkpoint_mark() is None
+    assert logger.metrics_by_step(first_step=0) == {}
     logger.close()
 
 
@@ -378,6 +379,15 @@ def test_corrupt_line_is_skipped(log_dir):
     records = read_metrics(log_dir)
     assert records == [{"step": 0, "loss": 0.5}, {"step": 2, "loss": 0.3}]
     assert read_metrics_by_step(log_dir, first_step=1) == {2: {"loss": 0.3}}
+
+
+def test_logger_reads_its_own_metrics_by_step(log_dir):
+    logger = DiskMetricLogger(log_dir)
+    logger.log({"loss": 0.5}, step=0)
+    logger.log({"loss": 0.4}, step=1)
+    logger.log({"val_loss": 0.3}, step=1)
+    assert logger.metrics_by_step(first_step=1) == {1: {"loss": 0.4, "val_loss": 0.3}}
+    logger.close()
 
 
 def test_read_metrics_empty_directory(tmp_path):

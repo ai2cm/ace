@@ -8,11 +8,7 @@ from typing import Any
 import numpy as np
 import wandb
 
-from fme.core.disk_metric_logger import (
-    CheckpointMark,
-    DiskMetricLogger,
-    read_metrics_by_step,
-)
+from fme.core.disk_metric_logger import CheckpointMark, DiskMetricLogger
 from fme.core.distributed import Distributed
 
 WANDB_RUN_ID_FILE = "wandb_run_id"
@@ -240,6 +236,7 @@ class WandB:
         return wandb.run.step
 
     def _relog(self, call: "WandBLogCall"):
+        """Send one re-logged call from the disk metrics to wandb."""
         wandb.log(call.data, step=call.step, commit=call.commit)
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
@@ -298,7 +295,7 @@ class WandBLogCall:
 
 
 def metrics_to_relog(
-    directory: str | os.PathLike, first_step: int, mark: CheckpointMark
+    disk_logger: DiskMetricLogger, first_step: int, mark: CheckpointMark
 ) -> list[WandBLogCall]:
     """Build the ``wandb.log`` calls that fill the gap between what wandb
     received before the previous job was killed and what that job logged to
@@ -325,7 +322,7 @@ def metrics_to_relog(
     ``last_step``.
 
     Args:
-        directory: Directory holding the restored metrics file.
+        disk_logger: The logger whose metrics file was restored.
         first_step: The first step wandb does not have. On resume this is
             ``wandb.run.step``. Earlier steps are skipped, since wandb rejects
             logs at steps it already passed.
@@ -347,7 +344,7 @@ def metrics_to_relog(
     """
     return [
         WandBLogCall(data=data, step=step, commit=step != mark.last_step)
-        for step, data in read_metrics_by_step(directory, first_step).items()
+        for step, data in disk_logger.metrics_by_step(first_step).items()
     ]
 
 
@@ -373,7 +370,7 @@ def restore_disk_metrics(
         f"Checking disk metrics for steps wandb lacks: wandb resumed at "
         f"step {first_step}, checkpoint mark at step {mark.last_step}"
     )
-    calls = metrics_to_relog(disk_logger.directory, first_step, mark)
+    calls = metrics_to_relog(disk_logger, first_step, mark)
     for call in calls:
         log(call)
     if calls:

@@ -53,18 +53,19 @@ class DiskMetricLogger:
         self._file: io.BufferedWriter | None = None
         self._offset = 0
         self._last_step: int | None = None
-        self.enabled = directory is not None and Distributed.get_instance().is_root()
-        if self.enabled and not is_local(str(directory)):
+        if directory is not None and not Distributed.get_instance().is_root():
+            directory = None
+        if directory is not None and not is_local(str(directory)):
             logging.warning(
                 f"Disk metric logging is only supported on a local file system. "
-                f"Got metrics_log_dir={directory!r}, so no metrics will be "
+                f"Got directory={directory!r}, so no metrics will be "
                 f"saved to disk and none can be recovered on resume."
             )
-            self.enabled = False
-        if directory is None or not self.enabled:
+            directory = None
+        self._directory = directory
+        if directory is None:
             return
         os.makedirs(directory, exist_ok=True)
-        self.directory = directory
         self._path = os.path.join(directory, METRICS_FILENAME)
         self._mark_path = os.path.join(directory, CHECKPOINT_MARK_FILENAME)
         if os.path.exists(self._path) and os.path.getsize(self._path) > 0:
@@ -75,6 +76,11 @@ class DiskMetricLogger:
                 self._previous_path,
             )
         self._file = open(self._path, "wb")
+
+    @property
+    def enabled(self) -> bool:
+        """Whether this logger writes metrics to disk."""
+        return self._directory is not None
 
     @property
     def offset(self) -> int:
@@ -145,7 +151,7 @@ class DiskMetricLogger:
         if source_path is None:
             logging.warning(
                 "No metrics file to restore in %s, so no disk metrics are restored",
-                self.directory,
+                self._directory,
             )
             return None
         source_size = os.path.getsize(source_path)
@@ -172,6 +178,15 @@ class DiskMetricLogger:
         self._restore(source_path, offset)
         self._last_step = mark.last_step
         return mark
+
+    def metrics_by_step(self, first_step: int) -> dict[int, dict[str, Any]]:
+        """Read this logger's metrics file into a dict keyed by step, or an
+        empty dict if the logger is disabled (see the module-level
+        ``read_metrics_by_step``).
+        """
+        if self._directory is None:
+            return {}
+        return read_metrics_by_step(self._directory, first_step)
 
     def _read_checkpoint_mark(self) -> CheckpointMark | None:
         try:
