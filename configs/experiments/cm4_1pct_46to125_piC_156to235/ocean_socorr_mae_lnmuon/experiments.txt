@@ -19,3 +19,13 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4XW2259BDDS7ZC4M
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# 30-epoch century evals (resumed rs0 tagged rs0-ep30; mean-fill rs1/rs2 fresh at 30 ep)
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0-ep30|01M4XW199W1TP9JJ8CXK2B0CQ3|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0-ep30|01M4XW199W1TP9JJ8CXK2B0CQ3|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0-ep30|01M4XW2259BDDS7ZC4MGYQSKSC|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0-ep30|01M4XW2259BDDS7ZC4MGYQSKSC|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
