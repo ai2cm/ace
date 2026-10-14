@@ -40,7 +40,7 @@ def test_file_writer_config_build():
     ) as mock_writer:
         mock_writer.return_value = MagicMock()
         writer = config.build(
-            output_dir="test_experiment",
+            experiment_dir="test_experiment",
             initial_condition_times=np.array([cftime.DatetimeGregorian(2020, 1, 1)]),
             n_timesteps=10,
             variable_metadata={},
@@ -84,7 +84,7 @@ def test_file_writer_config_build_missing_coords():
 
     with pytest.raises(ValueError):
         config.build(
-            output_dir="test_experiment",
+            experiment_dir="test_experiment",
             initial_condition_times=np.array([cftime.DatetimeGregorian(2020, 1, 1)]),
             n_timesteps=10,
             timestep=datetime.timedelta(days=1),
@@ -230,7 +230,7 @@ def test__select_time_file_writer_single_sample(
         time_selection=time_selection,
     )
     file_writer = file_writer_config.build(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=np.array([cftime.DatetimeGregorian(2019, 12, 31)]),
         n_timesteps=-1,  # unused for netcdf
         timestep=datetime.timedelta(days=1),
@@ -298,7 +298,7 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
     ):
         with pytest.raises(NotImplementedError):
             file_writer = file_writer_config.build(
-                output_dir=str(tmpdir),
+                experiment_dir=str(tmpdir),
                 initial_condition_times=initial_condition_times,
                 n_timesteps=-1,  # unused for netcdf
                 timestep=datetime.timedelta(days=1),
@@ -309,7 +309,7 @@ def test__select_time_file_writer_multiple_samples(time_selection, tmpdir):
         return
 
     file_writer = file_writer_config.build(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=initial_condition_times,
         n_timesteps=-1,  # unused for netcdf
         timestep=datetime.timedelta(days=1),
@@ -453,7 +453,7 @@ def test_file_writer_with_healpix_data_and_zarr(tmpdir):
         [cftime.DatetimeGregorian(2019, 12, 31)] * n_samples
     )
     writer = config.build(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_timesteps,
         timestep=datetime.timedelta(days=1),
@@ -537,7 +537,7 @@ def test_file_writer_monthly(tmpdir):
     n_samples = 1
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
     writer = config.build(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_timesteps,
         timestep=datetime.timedelta(days=5),
@@ -570,7 +570,7 @@ def test_file_writer_monthly_zarr(tmpdir):
     n_samples = 1
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
     writer = config.build(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_timesteps,
         timestep=datetime.timedelta(days=5),
@@ -621,7 +621,7 @@ def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
     )
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
     writer = config.build_paired(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=initial_condition_times,
         n_timesteps=10,
         timestep=datetime.timedelta(days=1),
@@ -647,10 +647,10 @@ def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
         pytest.param(MonthlyCoarsenConfig(), id="monthly-coarsen"),
     ],
 )
-def test_netcdf_file_writer_with_non_local_output_dir(
+def test_netcdf_file_writer_with_non_local_experiment_dir(
     time_coarsen: TimeCoarsenConfig | MonthlyCoarsenConfig | None,
 ):
-    output_dir = "memory://output_dir"
+    experiment_dir = "memory://experiment_dir"
     format = NetCDFWriterConfig()
     config = FileWriterConfig(
         label="test",
@@ -661,7 +661,7 @@ def test_netcdf_file_writer_with_non_local_output_dir(
     initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
     with pytest.raises(ValueError, match="only supports local"):
         config.build(
-            output_dir=output_dir,
+            experiment_dir=experiment_dir,
             initial_condition_times=initial_condition_times,
             n_timesteps=1,
             timestep=datetime.timedelta(hours=6),
@@ -700,7 +700,7 @@ def test_coarsened_file_writer_time_coordinates(
         format=format,
     )
     writer = config.build(
-        output_dir=str(tmpdir),
+        experiment_dir=str(tmpdir),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_timesteps,
         timestep=timestep,

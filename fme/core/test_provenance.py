@@ -1,56 +1,61 @@
+import dataclasses
 import json
+import os
 
+import fsspec
 import pytest
 import yaml
 
-import fme.core.wandb
-from fme.core.provenance import validate_output_dir, write_provenance
-from fme.core.testing.wandb import mock_wandb
+import fme
+from fme.core.distributed import Distributed
+from fme.core.provenance import write_provenance
+from fme.core.testing.output_dir import OUTPUT_DIR_KINDS, output_dir_of_kind
 
 
-def test_write_provenance(tmp_path, monkeypatch):
-    monkeypatch.setenv("BEAKER_EXPERIMENT_ID", "beaker-id")
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    config_data = {"experiment_dir": "job", "nested": {"a": 1}}
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        wandb.init()
-        run_id = wandb.get_id()
-        write_provenance(str(output_dir), config_data, experiment_dir="job")
-    assert run_id is not None
-    with open(output_dir / "config.yaml") as f:
-        assert yaml.safe_load(f) == config_data
-    with open(output_dir / "provenance.json") as f:
+@dataclasses.dataclass
+class _Logging:
+    entity: str = "my-entity"
+    project: str = "my-project"
+
+
+@dataclasses.dataclass
+class _Config:
+    experiment_dir: str
+    logging: _Logging = dataclasses.field(default_factory=_Logging)
+
+
+def _read_outputs(output_dir: str) -> tuple[dict, dict]:
+    with fsspec.open(os.path.join(output_dir, "config.yaml")) as f:
+        config_data = yaml.safe_load(f)
+    with fsspec.open(os.path.join(output_dir, "provenance.json")) as f:
         provenance = json.load(f)
-    assert provenance["experiment_dir"] == "job"
-    assert provenance["output_dir"] == str(output_dir)
-    assert provenance["beaker_experiment_id"] == "beaker-id"
-    assert provenance["wandb_run_id"] == run_id
-    assert provenance["environment"]["BEAKER_EXPERIMENT_ID"] == "beaker-id"
+    return config_data, provenance
 
 
-def test_write_provenance_without_wandb(tmp_path, monkeypatch):
-    # a fresh, never-initialized WandB has no run id
-    monkeypatch.setattr(fme.core.wandb, "singleton", fme.core.wandb.WandB())
-    write_provenance(str(tmp_path), {"a": 1}, experiment_dir="job")
-    with open(tmp_path / "provenance.json") as f:
-        assert json.load(f)["wandb_run_id"] is None
+@pytest.mark.parametrize("kind", OUTPUT_DIR_KINDS)
+def test_write_provenance(tmp_path, monkeypatch, kind):
+    monkeypatch.setenv("BEAKER_EXPERIMENT_ID", "exp-id")
+    monkeypatch.delenv("BEAKER_JOB_ID", raising=False)
+    config = _Config(experiment_dir=str(tmp_path / "job"))
+    with output_dir_of_kind(kind, tmp_path) as output_dir:
+        write_provenance(output_dir, config, config.experiment_dir)
+        config_data, provenance = _read_outputs(output_dir)
+    assert config_data == dataclasses.asdict(config)
+    written_at = provenance.pop("written_at")
+    assert written_at.endswith("+00:00")
+    assert provenance == {
+        "experiment_dir": config.experiment_dir,
+        "output_dir": output_dir,
+        "beaker_experiment_id": "exp-id",
+        "beaker_job_id": None,
+        "wandb": {"entity": "my-entity", "project": "my-project", "run_id": None},
+        "fme_version": fme.__version__,
+    }
 
 
-@pytest.mark.parametrize(
-    "experiment_dir, output_dir, raises",
-    [
-        ("/local/job", None, False),
-        ("memory://bucket/job", None, False),
-        ("/local/job", "memory://bucket/output", False),
-        ("memory://bucket/job", "memory://bucket/output", True),
-        ("memory://bucket/job", "/local/output", True),
-    ],
-)
-def test_validate_output_dir(experiment_dir, output_dir, raises):
-    if raises:
-        with pytest.raises(ValueError, match="experiment_dir must be on a local"):
-            validate_output_dir(experiment_dir, output_dir)
-    else:
-        validate_output_dir(experiment_dir, output_dir)
+def test_write_provenance_non_root_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(Distributed, "is_root", lambda self: False)
+    output_dir = tmp_path / "output"
+    config = _Config(experiment_dir=str(tmp_path / "job"))
+    write_provenance(str(output_dir), config, config.experiment_dir)
+    assert not output_dir.exists()

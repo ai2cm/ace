@@ -1,8 +1,7 @@
 import dataclasses
 import logging
 import pathlib
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
 
 import dacite
 import torch
@@ -17,10 +16,14 @@ from fme.ace.stepper.single_module import apply_stepper_override_to_stepper_conf
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
-from fme.core.provenance import validate_output_dir, write_provenance
+from fme.core.output_dir import (
+    is_separate_output_dir,
+    resolve_output_dir,
+    validate_output_dir,
+)
+from fme.core.provenance import write_provenance
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
@@ -307,9 +310,9 @@ class InferenceEvaluatorConfig:
     Configuration for running inference including comparison to reference data.
 
     Parameters:
-        experiment_dir: Job directory, holding the config, logs, and wandb
-            state. Must be on a local filesystem when ``output_dir`` is set.
-            When ``output_dir`` is unset it also receives the data output.
+        experiment_dir: Job directory, holding the config, logs and wandb state.
+            Must be local when ``output_dir`` is set; otherwise it also
+            receives the data output. See :class:`fme.ace.InferenceConfig`.
         n_coupled_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to a CoupledStepper training checkpoint to load, or a
             mapping to two separate Stepper training checkpoints.
@@ -318,12 +321,6 @@ class InferenceEvaluatorConfig:
             target in inference.
         coupled_steps_in_memory: Number of coupled steps to complete in memory
             at a time, will load one more step for initial condition.
-        output_dir: Directory for data writer outputs (including restart files)
-            and aggregator diagnostics. Defaults to ``experiment_dir``. This can
-            be a local directory, like ``/results``, or a remote directory
-            prefixed with a protocol recognized by ``fsspec``, like
-            ``gs://bucket/results``. When set, a copy of the config and a
-            ``provenance.json`` pointing back to the job are also written here.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference evaluator aggregator.
         prediction_loader: Configuration for prediction data to evaluate. If given,
@@ -347,6 +344,13 @@ class InferenceEvaluatorConfig:
             ocean ``seed + 1``. Leave unset (None) for the default
             non-reproducible behavior. Only affects the stepper rollout (not the
             ``prediction_loader`` comparison path).
+        output_dir: Directory for data writer outputs (including restart files)
+            and aggregator diagnostics. Defaults to ``experiment_dir``. May be
+            a remote ``fsspec`` path such as ``gs://bucket/results``, with the
+            limitations described in :class:`fme.ace.InferenceConfig`. When set
+            to a directory other than ``experiment_dir``, a copy of the effective
+            config and a ``provenance.json`` pointing back to the job are written
+            there.
     """
 
     experiment_dir: str
@@ -355,7 +359,6 @@ class InferenceEvaluatorConfig:
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     coupled_steps_in_memory: int = 1
-    output_dir: str | None = None
     data_writer: CoupledDataWriterConfig = dataclasses.field(
         default_factory=lambda: CoupledDataWriterConfig()
     )
@@ -367,6 +370,7 @@ class InferenceEvaluatorConfig:
     atmosphere_stepper_override: StepperOverrideConfig | None = None
     use_ema_if_available: bool = True
     seed: int | None = None
+    output_dir: str | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -382,7 +386,7 @@ class InferenceEvaluatorConfig:
     @property
     def resolved_output_dir(self) -> str:
         """Directory receiving data writer outputs and diagnostics."""
-        return self.output_dir if self.output_dir is not None else self.experiment_dir
+        return resolve_output_dir(self.experiment_dir, self.output_dir)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -437,7 +441,7 @@ class InferenceEvaluatorConfig:
             "atmosphere": dataset_metadata,
         }
         return self.data_writer.build_paired(
-            output_dir=self.resolved_output_dir,
+            experiment_dir=self.resolved_output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
@@ -495,38 +499,19 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     )
     prepare_directory(config.experiment_dir, config_data)
     with GlobalTimer(), torch.no_grad():
-        return run_evaluator_from_config(config, config_data=config_data)
+        return run_evaluator_from_config(config)
 
 
-def run_evaluator_from_config(
-    config: InferenceEvaluatorConfig, config_data: Mapping[str, Any] | None = None
-):
-    """Run coupled inference and evaluate it against reference data.
-
-    Args:
-        config: The evaluator configuration.
-        config_data: The configuration as given by the user, copied into the
-            output directory when ``config.output_dir`` is set. Defaults to
-            ``dataclasses.asdict(config)``.
-    """
+def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
     timer.start("initialization")
 
     makedirs(config.experiment_dir, exist_ok=True)
-    dist = Distributed.get_instance()
-    if dist.is_root():
-        makedirs(config.resolved_output_dir, exist_ok=True)
-    dist.barrier()
+    makedirs(config.resolved_output_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
-    if config.output_dir is not None and config.output_dir != config.experiment_dir:
-        write_provenance(
-            config.output_dir,
-            config_data=(
-                config_data if config_data is not None else dataclasses.asdict(config)
-            ),
-            experiment_dir=config.experiment_dir,
-        )
+    if is_separate_output_dir(config.experiment_dir, config.output_dir):
+        write_provenance(config.resolved_output_dir, config, config.experiment_dir)
 
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True

@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-import json
 import logging
 import os
 import pathlib
@@ -71,6 +70,11 @@ from fme.core.testing.ema import (
     ScaledIdentity,
     assert_parameters_equal,
     save_checkpoint_with_ema,
+)
+from fme.core.testing.output_dir import (
+    OUTPUT_DIR_KINDS,
+    assert_outputs_in_output_dir,
+    output_dir_of_kind,
 )
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
@@ -1309,12 +1313,11 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-@pytest.mark.medium_duration
-def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
-    # Use an in-memory filesystem for the experiment directory to test using
-    # an experiment_dir on a non-local filesystem.
-    experiment_dir = "memory://experiment_dir"
-
+def _small_zarr_evaluator_config(
+    tmp_path: pathlib.Path, experiment_dir: str
+) -> InferenceEvaluatorConfig:
+    """A short evaluator run writing zarr output, so it can target remote
+    directories, with file logging enabled."""
     forward_steps_in_memory = 2
     in_names = ["var", "forcing_var"]
     out_names = ["var"]
@@ -1342,7 +1345,7 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     files = [FileWriterConfig("autoregressive", format=ZarrWriterConfig())]
-    config = InferenceEvaluatorConfig(
+    return InferenceEvaluatorConfig(
         experiment_dir=experiment_dir,
         n_forward_steps=2,
         forward_steps_in_memory=forward_steps_in_memory,
@@ -1361,9 +1364,21 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
-    config_filename = tmp_path / "config.yaml"
-    with open(config_filename, "w") as f:
+
+
+def _write_config(config, path: pathlib.Path) -> str:
+    with open(path, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
+    return str(path)
+
+
+@pytest.mark.medium_duration
+def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
+    # Use an in-memory filesystem for the experiment directory to test using
+    # an experiment_dir on a non-local filesystem.
+    experiment_dir = "memory://experiment_dir"
+    config = _small_zarr_evaluator_config(tmp_path, experiment_dir)
+    config_filename = _write_config(config, tmp_path / "config.yaml")
 
     with pytest.warns(UserWarning, match="local file system"):
         main(yaml_config=str(config_filename))
@@ -1390,6 +1405,34 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         assert fs.isdir(os.path.join(experiment_dir, directory))
 
     fs.rm(experiment_dir, recursive=True)
+
+
+@pytest.mark.parametrize("output_dir_kind", OUTPUT_DIR_KINDS)
+@pytest.mark.medium_duration
+def test_evaluator_writes_data_to_output_dir(tmp_path: pathlib.Path, output_dir_kind):
+    experiment_dir = str(tmp_path / "job")
+    config = _small_zarr_evaluator_config(tmp_path, experiment_dir)
+    # data written by FV3GFSData(path=tmp_path) in the config helper
+    validation = ValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(str(tmp_path / "data")), batch_size=1
+        )
+    )
+    with output_dir_of_kind(output_dir_kind, tmp_path) as output_dir:
+        config = dataclasses.replace(
+            config, output_dir=output_dir, validation=validation
+        )
+        main(yaml_config=_write_config(config, tmp_path / "input_config.yaml"))
+        assert_outputs_in_output_dir(
+            experiment_dir,
+            output_dir,
+            [
+                "autoregressive_predictions.zarr",
+                "restart.nc",
+                "time_mean_diagnostics.nc",
+                "validation",
+            ],
+        )
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [2, 3])
@@ -1711,127 +1754,3 @@ def test_inference_evaluator_config_load_stepper_uses_ema_weights(
     assert_parameters_equal(
         stepper.modules, ema_weights if expect_ema else stepper_weights
     )
-
-
-def _small_evaluator_config(
-    tmp_path: pathlib.Path,
-    experiment_dir: str,
-    output_dir: str | None,
-) -> InferenceEvaluatorConfig:
-    """A short evaluator run with validation, file logging and zarr output."""
-    stepper_path = tmp_path / "stepper"
-    dim_sizes = DimSizes(
-        n_time=3, horizontal=[DimSize("lat", 16), DimSize("lon", 32)], nz_interface=4
-    )
-    save_plus_one_stepper(
-        stepper_path,
-        in_names=["var"],
-        out_names=["var"],
-        mean=0.0,
-        std=10.0,
-        data_shape=dim_sizes.shape_nd,
-    )
-    data = FV3GFSData(
-        path=tmp_path,
-        names=["var"],
-        dim_sizes=dim_sizes,
-        timestep_days=TIMESTEP.total_seconds() / 86400,
-        save_vertical_coordinate=False,
-    )
-    return InferenceEvaluatorConfig(
-        experiment_dir=experiment_dir,
-        output_dir=output_dir,
-        n_forward_steps=2,
-        forward_steps_in_memory=1,
-        checkpoint_path=str(stepper_path),
-        logging=LoggingConfig(log_to_screen=True, log_to_file=True, log_to_wandb=True),
-        loader=data.inference_data_loader_config,
-        data_writer=DataWriterConfig(
-            save_prediction_files=False,
-            save_monthly_files=False,
-            files=[FileWriterConfig("autoregressive", format=ZarrWriterConfig())],
-        ),
-        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
-        validation=ValidationConfig(
-            loader=DataLoaderConfig(
-                dataset=XarrayDataConfig(str(data.data_path)), batch_size=1
-            ),
-        ),
-    )
-
-
-EVALUATOR_OUTPUT_PATHS = (
-    "autoregressive_predictions.zarr",
-    "autoregressive_target.zarr",
-    "initial_condition.nc",
-    "restart.nc",
-    "time_mean_diagnostics.nc",
-    "validation/mean_diagnostics.nc",
-)
-
-
-@pytest.mark.parametrize(
-    "output_dir",
-    [
-        pytest.param("local", id="local_output_dir"),
-        pytest.param("memory://evaluator_output", id="remote_output_dir"),
-    ],
-)
-def test_evaluator_output_dir_separates_data_from_job_files(
-    tmp_path: pathlib.Path, output_dir: str
-):
-    if output_dir == "local":
-        output_dir = str(tmp_path / "output")
-    experiment_dir = tmp_path / "job"
-    config = _small_evaluator_config(tmp_path, str(experiment_dir), output_dir)
-    config_filename = tmp_path / "input_config.yaml"
-    with open(config_filename, "w") as f:
-        yaml.dump(dataclasses.asdict(config), f)
-    fs, _ = fsspec.url_to_fs(output_dir)
-    try:
-        with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
-            main(yaml_config=str(config_filename))
-
-        for path in EVALUATOR_OUTPUT_PATHS:
-            assert fs.exists(os.path.join(output_dir, path)), path
-            assert not (experiment_dir / path).exists(), path
-        assert (experiment_dir / "config.yaml").exists()
-        assert (experiment_dir / "inference_out.log").exists()
-        assert not fs.exists(os.path.join(output_dir, "inference_out.log"))
-        with fs.open(os.path.join(output_dir, "config.yaml")) as f:
-            assert yaml.safe_load(f)["output_dir"] == output_dir
-        with fs.open(os.path.join(output_dir, "provenance.json")) as f:
-            provenance = json.load(f)
-        assert provenance["experiment_dir"] == str(experiment_dir)
-        assert provenance["output_dir"] == output_dir
-        assert provenance["wandb_run_id"] is not None
-    finally:
-        if fs.exists(output_dir):
-            fs.rm(output_dir, recursive=True)
-
-
-def test_evaluator_output_dir_defaults_to_experiment_dir(tmp_path: pathlib.Path):
-    experiment_dir = tmp_path / "job"
-    config = _small_evaluator_config(tmp_path, str(experiment_dir), output_dir=None)
-    config_filename = tmp_path / "input_config.yaml"
-    with open(config_filename, "w") as f:
-        yaml.dump(dataclasses.asdict(config), f)
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        main(yaml_config=str(config_filename))
-
-    for path in EVALUATOR_OUTPUT_PATHS:
-        assert (experiment_dir / path).exists(), path
-    assert (experiment_dir / "config.yaml").exists()
-    assert (experiment_dir / "inference_out.log").exists()
-    assert not (experiment_dir / "provenance.json").exists()
-
-
-def test_evaluator_config_output_dir_requires_local_experiment_dir(
-    tmp_path: pathlib.Path,
-):
-    with pytest.raises(ValueError, match="experiment_dir must be on a local"):
-        _small_evaluator_config(
-            tmp_path, "memory://bucket/job", output_dir="memory://bucket/output"
-        )

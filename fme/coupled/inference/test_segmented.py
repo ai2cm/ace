@@ -3,7 +3,6 @@
 import contextlib
 import dataclasses
 import datetime
-import json
 import os
 import pathlib
 import tempfile
@@ -101,8 +100,8 @@ def _restart_paths(segment_dir: str) -> tuple[str, str]:
     )
 
 
-def _run_inference_from_config_mock(config: InferenceConfig, config_data=None):
-    for restart_path in _restart_paths(config.resolved_output_dir):
+def _run_inference_from_config_mock(config: InferenceConfig):
+    for restart_path in _restart_paths(config.experiment_dir):
         os.makedirs(os.path.dirname(restart_path), exist_ok=True)
         with open(restart_path, "w") as f:
             f.write("mock restart file")
@@ -455,34 +454,21 @@ def test_segmented_inference_wandb_run_per_segment(monkeypatch):
 
 @pytest.mark.medium_duration
 def test_inference_segmented_entrypoint_output_dir():
-    """With output_dir set, each segment's data output (including the restarts
-    the next segment starts from) goes to ``output_dir/<segment>``, while the
-    job directory keeps the config and per-segment job directories."""
+    """With output_dir set, each segment's restarts land in
+    ``output_dir/<segment>`` and resubmitting skips the completed segments."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = pathlib.Path(tmp_dir)
-        make_config, _ = _segmented_config_factory(
-            tmp_path, total_coupled_steps=4, log_to_wandb=True
-        )
+        make_config, _ = _segmented_config_factory(tmp_path, total_coupled_steps=4)
         run_dir = tmp_path / "job"
         output_dir = tmp_path / "output"
         config_filename = make_config(run_dir, 2, output_dir=str(output_dir))
-        with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
-            main(yaml_config=config_filename, segments=2)
-            run_ids = [run["id"] for run in wandb.runs]
+        main(yaml_config=config_filename, segments=2)
+        for label in ["segment_19700101T00", "segment_19700105T00"]:
+            for restart_path in _restart_paths(str(output_dir / label)):
+                assert os.path.exists(restart_path)
+            for restart_path in _restart_paths(str(run_dir / label)):
+                assert not os.path.exists(restart_path)
 
-        assert (run_dir / "config.yaml").exists()
-        labels = ["segment_19700101T00", "segment_19700105T00"]
-        for label, run_id in zip(labels, run_ids):
-            segment_output_dir = output_dir / label
-            for component_dir in (OCEAN_OUTPUT_DIR_NAME, ATMOSPHERE_OUTPUT_DIR_NAME):
-                assert (
-                    segment_output_dir / component_dir / "autoregressive_predictions.nc"
-                ).exists()
-                assert (segment_output_dir / component_dir / "restart.nc").exists()
-                assert not (run_dir / label / component_dir / "restart.nc").exists()
-            with open(segment_output_dir / "provenance.json") as f:
-                provenance = json.load(f)
-            assert provenance["experiment_dir"] == str(run_dir / label)
-            assert provenance["output_dir"] == str(segment_output_dir)
-            assert provenance["wandb_run_id"] == run_id
+        with _mock_segmented_dependencies() as mock:
+            main(yaml_config=config_filename, segments=2)
+        assert mock.call_count == 0

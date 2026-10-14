@@ -4,7 +4,7 @@ import datetime
 import logging
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Literal
 
 import cftime
 import dacite
@@ -43,7 +43,12 @@ from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
-from fme.core.provenance import validate_output_dir, write_provenance
+from fme.core.output_dir import (
+    is_separate_output_dir,
+    resolve_output_dir,
+    validate_output_dir,
+)
+from fme.core.provenance import write_provenance
 from fme.core.timing import GlobalTimer
 
 from .evaluator import resolve_variable_metadata
@@ -219,35 +224,18 @@ class InferenceConfig:
     Configuration for running inference.
 
     Parameters:
-        experiment_dir: Job directory, holding the config, logs, and wandb
-            state. Must be on a local filesystem when ``output_dir`` is set.
-            When ``output_dir`` is unset it also receives the data output, and
-            may then be remote (see ``output_dir``), but logging to a file in
-            a remote ``experiment_dir`` is not supported; to silence the
-            warning related to this, set ``log_to_file`` to ``False`` in the
-            :class:`fme.ace.LoggingConfig`.
+        experiment_dir: Job directory, holding the config, logs and wandb state.
+            Must be on a local filesystem when ``output_dir`` is set. When
+            ``output_dir`` is unset, it also receives the data output and may
+            then be a remote directory, with the same limitations as a remote
+            ``output_dir``; in that case logging to a file is not supported (to
+            silence the related warning, set ``log_to_file`` to ``False`` in
+            the :class:`fme.ace.LoggingConfig`).
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: Configuration for logging.
         initial_condition: Configuration for initial condition data.
         forcing_loader: Configuration for forcing data.
-        output_dir: Directory for data writer outputs (including restart files)
-            and aggregator diagnostics. Defaults to ``experiment_dir``. This can
-            be a local directory, like ``/results``, or a remote directory
-            prefixed with a protocol recognized by ``fsspec``, like
-            ``gs://bucket/results``. When set, a copy of the config and a
-            ``provenance.json`` pointing back to the job are also written here.
-
-            .. note::
-                While most types of output can be written to a remote
-                ``output_dir``, to write raw or time-coarsened data the zarr
-                writer must be used. See the ``files`` parameter of the
-                :class:`fme.ace.DataWriterConfig` for more details on how this
-                can be configured. Monthly coarsened data configured through
-                ``files`` can be written to zarr. The legacy
-                ``save_monthly_files`` option remains netCDF-only. There are
-                no such restrictions for a local ``output_dir``.
-
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time.
         data_writer: Configuration for data writers.
@@ -272,6 +260,16 @@ class InferenceConfig:
             stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
             noise sequence, independent of forward_steps_in_memory. Leave unset
             (None) for the default non-reproducible behavior.
+        output_dir: Directory for data writer outputs (including restart files)
+            and aggregator diagnostics. Defaults to ``experiment_dir``. This
+            can be a local directory, like ``/results``, or a remote directory
+            prefixed with a protocol recognized by ``fsspec``, like
+            ``gs://bucket/results``. Writing raw or time-coarsened data to a
+            remote directory requires the zarr writer (see the ``files``
+            parameter of :class:`fme.ace.DataWriterConfig`); the legacy
+            ``save_monthly_files`` option remains netCDF-only. When set to a
+            directory other than ``experiment_dir``, a copy of the effective config
+            and a ``provenance.json`` pointing back to the job are written there.
     """
 
     experiment_dir: str
@@ -280,7 +278,6 @@ class InferenceConfig:
     logging: LoggingConfig
     initial_condition: InitialConditionConfig
     forcing_loader: ForcingDataLoaderConfig
-    output_dir: str | None = None
     forward_steps_in_memory: int = 10
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
@@ -294,6 +291,7 @@ class InferenceConfig:
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
     seed: int | None = None
+    output_dir: str | None = None
 
     def __post_init__(self):
         self.data_writer.validate_time_coarsen(
@@ -305,7 +303,7 @@ class InferenceConfig:
     @property
     def resolved_output_dir(self) -> str:
         """Directory receiving data writer outputs and diagnostics."""
-        return self.output_dir if self.output_dir is not None else self.experiment_dir
+        return resolve_output_dir(self.experiment_dir, self.output_dir)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -335,7 +333,7 @@ class InferenceConfig:
         variable_metadata: Mapping[str, VariableMetadata],
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
-            output_dir=self.resolved_output_dir,
+            experiment_dir=self.resolved_output_dir,
             # each batch contains all samples, for different times
             initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
@@ -361,41 +359,20 @@ def main(
     with torch.no_grad():
         if segments is None:
             with GlobalTimer():
-                return run_inference_from_config(config, config_data=config_data)
+                return run_inference_from_config(config)
         else:
-            run_segmented_inference(config, segments, config_data=config_data)
+            run_segmented_inference(config, segments)
 
 
-def run_inference_from_config(
-    config: InferenceConfig, config_data: Mapping[str, Any] | None = None
-):
-    """Run inference.
-
-    Args:
-        config: The inference configuration.
-        config_data: The configuration as given by the user, copied into the
-            output directory when ``config.output_dir`` is set. Defaults to
-            ``dataclasses.asdict(config)``.
-    """
+def run_inference_from_config(config: InferenceConfig):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
     with timer.context("initialization"):
         makedirs(config.experiment_dir, exist_ok=True)
-        dist = Distributed.get_instance()
-        if dist.is_root():
-            makedirs(config.resolved_output_dir, exist_ok=True)
-        dist.barrier()
+        makedirs(config.resolved_output_dir, exist_ok=True)
         config.configure_logging(log_filename="inference_out.log")
-        if config.output_dir is not None and config.output_dir != config.experiment_dir:
-            write_provenance(
-                config.output_dir,
-                config_data=(
-                    config_data
-                    if config_data is not None
-                    else dataclasses.asdict(config)
-                ),
-                experiment_dir=config.experiment_dir,
-            )
+        if is_separate_output_dir(config.experiment_dir, config.output_dir):
+            write_provenance(config.resolved_output_dir, config, config.experiment_dir)
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
@@ -415,6 +392,7 @@ def run_inference_from_config(
         )
         stepper = config.load_stepper()
         stepper.set_eval()
+        dist = Distributed.get_instance()
         n_ic = initial_condition.as_batch_data().time.sizes["sample"]
         ic_already_sharded = (
             dist.total_data_parallel_ranks > 1
@@ -541,32 +519,34 @@ def _get_initialization_time_and_timestep(
     return initialization_time, stepper.training_dataset_info.timestep
 
 
-def run_segmented_inference(
-    config: InferenceConfig,
-    segments: int,
-    config_data: Mapping[str, Any] | None = None,
-):
+def run_segmented_inference(config: InferenceConfig, segments: int):
     """Run inference in multiple segments, each resumable after preemption.
 
     Args:
         config: Configuration for each segment. Its initial condition is used
             only for the first segment; later segments start from the previous
-            segment's restart file, which the data writer puts in the previous
-            segment's output directory.
+            segment's restart file. Each segment writes its job files to
+            ``experiment_dir/<segment>`` and its data output to
+            ``output_dir/<segment>`` (``experiment_dir/<segment>`` if unset).
+            When ``output_dir`` is separate from ``experiment_dir``, each
+            segment records its own provenance under ``output_dir/<segment>``
+            and a top-level record is written to ``output_dir`` before the
+            segments run; the top-level record has no wandb run id because
+            wandb is not yet initialized at that point.
         segments: Total number of segments; only missing ones are run.
-        config_data: The configuration as given by the user, copied into each
-            segment's output directory when ``config.output_dir`` is set.
     """
+    if is_separate_output_dir(config.experiment_dir, config.output_dir):
+        write_provenance(config.resolved_output_dir, config, config.experiment_dir)
     config_copy = copy.deepcopy(config)
 
-    def _get_restart_paths(segment_output_dir: str) -> Sequence[str]:
-        return [os.path.join(segment_output_dir, "restart.nc")]
+    def _get_restart_paths(label: str) -> Sequence[str]:
+        return [os.path.join(config.resolved_output_dir, label, "restart.nc")]
 
-    def _run_segment(segment_dir: str, segment_output_dir: str) -> None:
-        config_copy.experiment_dir = segment_dir
+    def _run_segment(label: str) -> None:
+        config_copy.experiment_dir = os.path.join(config.experiment_dir, label)
         if config.output_dir is not None:
-            config_copy.output_dir = segment_output_dir
-        run_inference_from_config(config_copy, config_data=config_data)
+            config_copy.output_dir = os.path.join(config.output_dir, label)
+        run_inference_from_config(config_copy)
 
     def _set_initial_condition(restart_paths: Sequence[str]) -> None:
         (restart_path,) = restart_paths
@@ -585,5 +565,4 @@ def run_segmented_inference(
         get_restart_paths=_get_restart_paths,
         run_segment=_run_segment,
         set_initial_condition=_set_initial_condition,
-        output_dir=config.output_dir,
     )

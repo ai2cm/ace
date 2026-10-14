@@ -321,7 +321,7 @@ class FileWriterConfig:
 
     def build_paired(
         self,
-        output_dir: str,
+        experiment_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
@@ -335,7 +335,7 @@ class FileWriterConfig:
             reference_label = f"{self.label}_{reference_suffix}"
             prediction_label = f"{self.label}_{prediction_suffix}"
             reference_writer = dataclasses.replace(self, label=reference_label).build(
-                output_dir=output_dir,
+                experiment_dir=experiment_dir,
                 initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps,
                 timestep=timestep,
@@ -347,7 +347,7 @@ class FileWriterConfig:
             prediction_label = self.label
             reference_writer = None
         prediction_writer = dataclasses.replace(self, label=prediction_label).build(
-            output_dir=output_dir,
+            experiment_dir=experiment_dir,
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=timestep,
@@ -361,7 +361,7 @@ class FileWriterConfig:
 
     def build(
         self,
-        output_dir: str,
+        experiment_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
@@ -373,7 +373,7 @@ class FileWriterConfig:
         Build a FileWriter object for saving data within the specified region.
 
         Args:
-            output_dir: The directory where outputs are saved.
+            experiment_dir: The directory where experiment outputs are saved.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
             n_timesteps: Total number of inference forward steps.
@@ -428,7 +428,7 @@ class FileWriterConfig:
         if isinstance(self.format, ZarrWriterConfig):
             if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
                 raw_writer = MonthlyZarrWriter(
-                    path=os.path.join(output_dir, f"{self.label}.zarr"),
+                    path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                     initial_condition_times=initial_condition_times,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
@@ -455,7 +455,7 @@ class FileWriterConfig:
                     dims = ("sample", "time", *(d.name for d in spatial_dims))
                     zarr_writer_cls = ZarrWriterAdapter
                 raw_writer = zarr_writer_cls(
-                    path=os.path.join(output_dir, f"{self.label}.zarr"),
+                    path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                     dims=dims,
                     data_coords=ensure_numpy_coords(subselect_coords_),
                     timestep=timestep_write,
@@ -475,7 +475,7 @@ class FileWriterConfig:
                 )
             if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
                 raw_writer = MonthlyDataWriter(
-                    path=output_dir,
+                    path=experiment_dir,
                     label=self.label,
                     initial_condition_times=initial_condition_times,
                     timestep=timestep,
@@ -486,7 +486,7 @@ class FileWriterConfig:
                 )
             else:
                 raw_writer = RawDataWriter(
-                    path=output_dir,
+                    path=experiment_dir,
                     label=self.label,
                     initial_condition_times=initial_condition_times,
                     save_names=self.names,

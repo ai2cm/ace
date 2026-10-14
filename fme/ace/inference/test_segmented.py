@@ -2,7 +2,6 @@
 
 import dataclasses
 import datetime
-import json
 import os
 import pathlib
 import unittest.mock
@@ -25,6 +24,7 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
     get_initial_condition,
@@ -36,6 +36,7 @@ from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
+from fme.core.cloud import exists
 from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
@@ -53,6 +54,7 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.testing import mock_wandb
+from fme.core.testing.output_dir import assert_provenance, output_dir_of_kind
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -110,8 +112,8 @@ def save_stepper(
 
 def _segmented_config_factory(tmp_path: pathlib.Path, *, log_to_wandb: bool):
     """Write a PlusOne stepper, forcing data and initial condition into tmp_path,
-    returning a ``make_config(experiment_dir, n_forward_steps, output_dir=None)``
-    builder."""
+    returning a ``make_config(experiment_dir, n_forward_steps, **overrides)``
+    builder, where ``overrides`` replace fields of the inference config."""
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
         n_time=18, horizontal=[DimSize("lat", 16), DimSize("lon", 32)], nz_interface=4
@@ -142,12 +144,9 @@ def _segmented_config_factory(tmp_path: pathlib.Path, *, log_to_wandb: bool):
     )
     ic.to_netcdf(ic_path, mode="w")
 
-    def make_config(
-        experiment_dir, n_forward_steps: int, output_dir: str | None = None
-    ) -> str:
+    def make_config(experiment_dir, n_forward_steps: int, **overrides) -> str:
         config = fme.ace.InferenceConfig(
             experiment_dir=str(experiment_dir),
-            output_dir=output_dir,
             n_forward_steps=n_forward_steps,
             forward_steps_in_memory=2,
             checkpoint_path=str(stepper_path),
@@ -168,6 +167,7 @@ def _segmented_config_factory(tmp_path: pathlib.Path, *, log_to_wandb: bool):
             ),
             allow_incompatible_dataset=True,
         )
+        config = dataclasses.replace(config, **overrides)
         config_path = str(tmp_path / "config.yaml")
         with open(config_path, "w") as f:
             yaml.dump(dataclasses.asdict(config), f)
@@ -205,7 +205,40 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
     )
 
 
-def _run_inference_from_config_mock(config: fme.ace.InferenceConfig, config_data=None):
+def test_inference_segmented_entrypoint_remote_output_dir(tmp_path):
+    """With a (here remote) output_dir, each segment's restart lands in
+    ``output_dir/<segment>``, the next segment resumes from it, and resubmitting
+    the same config skips the completed segments."""
+    make_config = _segmented_config_factory(tmp_path, log_to_wandb=False)
+    run_dir = tmp_path / "job"
+    zarr_writer = DataWriterConfig(
+        save_prediction_files=False,
+        save_monthly_files=False,
+        files=[FileWriterConfig("autoregressive", format=ZarrWriterConfig())],
+    )
+    with output_dir_of_kind("memory", tmp_path) as output_dir:
+        config_path = make_config(
+            run_dir, 3, output_dir=output_dir, data_writer=zarr_writer
+        )
+        main(config_path, 2)
+        for label in ["segment_20000101T06", "segment_20000102T00"]:
+            assert exists(os.path.join(output_dir, label, "restart.nc"))
+            assert not (run_dir / label / "restart.nc").exists()
+        assert_provenance(str(run_dir), output_dir)
+        segment = "segment_20000101T06"
+        assert_provenance(
+            os.path.join(run_dir, segment), os.path.join(output_dir, segment)
+        )
+
+        mock = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.ace.inference.inference.run_inference_from_config", new=mock
+        ):
+            main(config_path, 2)
+        mock.assert_not_called()
+
+
+def _run_inference_from_config_mock(config: fme.ace.InferenceConfig):
     if not os.path.exists(config.experiment_dir):
         os.makedirs(config.experiment_dir)
     with open(os.path.join(config.experiment_dir, "restart.nc"), "w") as f:
@@ -298,32 +331,6 @@ def test_run_segmented_inference(tmp_path):
             segment_dir = os.path.join(config.experiment_dir, label)
             assert os.path.exists(os.path.join(segment_dir, "restart.nc"))
         assert mock.call_count == 3
-
-
-def test_inference_segmented_entrypoint_output_dir(tmp_path):
-    """With output_dir set, each segment's data output (including the restart
-    the next segment starts from) goes to ``output_dir/<segment>``, while the
-    job directory keeps the config and per-segment job directories."""
-    make_config = _segmented_config_factory(tmp_path, log_to_wandb=True)
-    run_dir = tmp_path / "job"
-    output_dir = tmp_path / "output"
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        main(make_config(run_dir, 3, output_dir=str(output_dir)), 2)
-        run_ids = [run["id"] for run in wandb.runs]
-
-    assert (run_dir / "config.yaml").exists()
-    labels = ["segment_20000101T06", "segment_20000102T00"]
-    for label, run_id in zip(labels, run_ids):
-        segment_output_dir = output_dir / label
-        assert (segment_output_dir / "autoregressive_predictions.nc").exists()
-        assert (segment_output_dir / "restart.nc").exists()
-        assert not (run_dir / label / "restart.nc").exists()
-        with open(segment_output_dir / "provenance.json") as f:
-            provenance = json.load(f)
-        assert provenance["experiment_dir"] == str(run_dir / label)
-        assert provenance["output_dir"] == str(segment_output_dir)
-        assert provenance["wandb_run_id"] == run_id
 
 
 def test_get_segment_label_raises_on_collision():

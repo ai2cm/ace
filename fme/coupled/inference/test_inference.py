@@ -1,5 +1,4 @@
 import dataclasses
-import json
 import os
 import pathlib
 from unittest.mock import MagicMock
@@ -17,6 +16,11 @@ from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
+from fme.core.testing.output_dir import (
+    OUTPUT_DIR_KINDS,
+    assert_outputs_in_output_dir,
+    output_dir_of_kind,
+)
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
@@ -32,9 +36,11 @@ from fme.coupled.inference.inference import (
     main,
 )
 from fme.coupled.inference.test_evaluator import (
+    COUPLED_OUTPUT_PATHS,
     _create_dataset_info_for_stepper,
     save_coupled_stepper,
     save_coupled_stepper_with_ema,
+    zarr_coupled_data_writer,
 )
 from fme.coupled.test_stepper import AddOneWithNoise, CoupledDatasetInfoBuilder
 
@@ -368,6 +374,44 @@ def _run_seeded_inference(
     return ds["a_prog"].values
 
 
+@pytest.mark.parametrize("output_dir_kind", OUTPUT_DIR_KINDS)
+@pytest.mark.medium_duration
+def test_inference_writes_data_to_output_dir(tmp_path: pathlib.Path, output_dir_kind):
+    config, _, _ = _setup(
+        ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
+        ocean_out_names=["o_prog", "sst", "o_diag"],
+        atmos_in_names=[
+            "a_prog",
+            "surface_temperature",
+            "forcing_var",
+            "ocean_fraction",
+        ],
+        atmos_out_names=["a_prog", "surface_temperature", "a_diag"],
+        tmp_path=tmp_path,
+        n_coupled_steps=2,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=1,
+    )
+    experiment_dir = tmp_path / "job"
+    with output_dir_of_kind(output_dir_kind, tmp_path) as output_dir:
+        config = dataclasses.replace(
+            config,
+            experiment_dir=str(experiment_dir),
+            output_dir=output_dir,
+            logging=dataclasses.replace(config.logging, log_to_file=True),
+            data_writer=zarr_coupled_data_writer(),
+        )
+        config_filename = tmp_path / "input_config.yaml"
+        with open(config_filename, "w") as f:
+            yaml.dump(dataclasses.asdict(config), f)
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            main(yaml_config=str(config_filename))
+        assert_outputs_in_output_dir(
+            str(experiment_dir), output_dir, COUPLED_OUTPUT_PATHS
+        )
+
+
 @pytest.mark.slow
 def test_inference_seed_reproducible(tmp_path: pathlib.Path):
     """A seeded run is reproducible end-to-end, and a different seed gives a
@@ -428,99 +472,3 @@ def test_inference_config_load_stepper_uses_ema_weights(
         config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
 
     check(config.load_stepper(), expect_ema)
-
-
-def _small_output_dir_config(
-    tmp_path: pathlib.Path, experiment_dir: str, output_dir: str | None
-) -> InferenceConfig:
-    """A short coupled inference run with file logging."""
-    config, _, _ = _setup(
-        ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
-        ocean_out_names=["o_prog", "sst", "o_diag"],
-        atmos_in_names=["a_prog", "surface_temperature", "ocean_fraction"],
-        atmos_out_names=["a_prog", "surface_temperature", "a_diag"],
-        tmp_path=tmp_path,
-        n_coupled_steps=2,
-        coupled_steps_in_memory=1,
-        n_initial_conditions=1,
-    )
-    return dataclasses.replace(
-        config,
-        experiment_dir=experiment_dir,
-        output_dir=output_dir,
-        logging=LoggingConfig(log_to_screen=True, log_to_file=True, log_to_wandb=True),
-    )
-
-
-def _run_inference_main(config: InferenceConfig, yaml_path: pathlib.Path) -> None:
-    """Dump ``config`` to ``yaml_path`` and run the inference entrypoint on it."""
-    with open(yaml_path, "w") as f:
-        yaml.dump(dataclasses.asdict(config), f)
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
-        main(yaml_config=str(yaml_path))
-
-
-OUTPUT_PATHS = (
-    "atmosphere/autoregressive_predictions.nc",
-    "atmosphere/restart.nc",
-    "ocean/autoregressive_predictions.nc",
-    "ocean/restart.nc",
-    "ocean/time_mean_diagnostics.nc",
-)
-
-
-def test_inference_output_dir_separates_data_from_job_files(tmp_path):
-    experiment_dir = tmp_path / "job"
-    output_dir = tmp_path / "output"
-    config = _small_output_dir_config(
-        tmp_path, str(experiment_dir), output_dir=str(output_dir)
-    )
-    _run_inference_main(config, yaml_path=tmp_path / "input_config.yaml")
-
-    for path in OUTPUT_PATHS:
-        assert (output_dir / path).exists(), path
-        assert not (experiment_dir / path).exists(), path
-    assert (experiment_dir / "config.yaml").exists()
-    assert (experiment_dir / "inference_out.log").exists()
-    assert not (output_dir / "inference_out.log").exists()
-    # provenance links the data back to the job
-    with open(output_dir / "config.yaml") as f:
-        assert yaml.safe_load(f)["output_dir"] == str(output_dir)
-    with open(output_dir / "provenance.json") as f:
-        provenance = json.load(f)
-    assert provenance["experiment_dir"] == str(experiment_dir)
-    assert provenance["output_dir"] == str(output_dir)
-    assert provenance["wandb_run_id"] is not None
-
-
-def test_inference_output_dir_defaults_to_experiment_dir(tmp_path):
-    experiment_dir = tmp_path / "job"
-    config = _small_output_dir_config(tmp_path, str(experiment_dir), output_dir=None)
-    _run_inference_main(config, yaml_path=tmp_path / "input_config.yaml")
-
-    for path in OUTPUT_PATHS:
-        assert (experiment_dir / path).exists(), path
-    assert (experiment_dir / "config.yaml").exists()
-    assert (experiment_dir / "inference_out.log").exists()
-    assert not (experiment_dir / "provenance.json").exists()
-
-
-def test_inference_config_output_dir_requires_local_experiment_dir():
-    with pytest.raises(ValueError, match="experiment_dir must be on a local"):
-        InferenceConfig(
-            experiment_dir="memory://bucket/job",
-            output_dir="memory://bucket/output",
-            n_coupled_steps=1,
-            checkpoint_path="unused",
-            logging=LoggingConfig(),
-            initial_condition=CoupledInitialConditionConfig(
-                ocean=ComponentInitialConditionConfig(path="unused"),
-                atmosphere=ComponentInitialConditionConfig(path="unused"),
-            ),
-            forcing_loader=CoupledForcingDataLoaderConfig(
-                atmosphere=ForcingDataLoaderConfig(
-                    dataset=XarrayDataConfig(data_path="unused")
-                )
-            ),
-        )

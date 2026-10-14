@@ -2,7 +2,6 @@
 
 import dataclasses
 import datetime
-import json
 import pathlib
 
 import cftime
@@ -22,6 +21,7 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.inference import (
     InferenceConfig,
     InitialConditionConfig,
@@ -49,6 +49,11 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
 from fme.core.testing.ema import assert_parameters_equal
+from fme.core.testing.output_dir import (
+    OUTPUT_DIR_KINDS,
+    assert_outputs_in_output_dir,
+    output_dir_of_kind,
+)
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -230,23 +235,20 @@ def _write_inference_inputs(
 
 
 def _small_inference_config(
-    experiment_dir: pathlib.Path | str,
+    experiment_dir: pathlib.Path,
     stepper_path: pathlib.Path,
     data: FV3GFSData,
     ic_path: pathlib.Path,
-    output_dir: str | None = None,
-    log_to_file: bool = False,
     seed: int | None = None,
 ) -> InferenceConfig:
     """A short inference run on the inputs from ``_write_inference_inputs``."""
     return InferenceConfig(
         experiment_dir=str(experiment_dir),
-        output_dir=output_dir,
         n_forward_steps=2,
         forward_steps_in_memory=1,
         checkpoint_path=str(stepper_path),
         logging=LoggingConfig(
-            log_to_screen=False, log_to_file=log_to_file, log_to_wandb=True
+            log_to_screen=False, log_to_file=False, log_to_wandb=True
         ),
         initial_condition=InitialConditionConfig(path=str(ic_path)),
         forcing_loader=ForcingDataLoaderConfig(
@@ -267,7 +269,6 @@ def _small_inference_config(
 
 
 def _run_inference_main(config: InferenceConfig, yaml_path: pathlib.Path) -> None:
-    """Dump ``config`` to ``yaml_path`` and run the inference entrypoint on it."""
     with open(yaml_path, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
@@ -283,8 +284,8 @@ def _run_seeded_inference(
     seed: int | None,
 ) -> np.ndarray:
     run_dir.mkdir()
-    config = _small_inference_config(run_dir, stepper_path, data, ic_path, seed=seed)
-    _run_inference_main(config, yaml_path=run_dir / "config.yaml")
+    config = _small_inference_config(run_dir, stepper_path, data, ic_path, seed)
+    _run_inference_main(config, run_dir / "config.yaml")
     ds = xr.open_dataset(
         run_dir / "autoregressive_predictions.nc", decode_timedelta=False
     )
@@ -305,6 +306,33 @@ def test_inference_entrypoint_seed_reproducible(tmp_path: pathlib.Path):
 
     np.testing.assert_array_equal(seed0_a, seed0_b)
     assert not np.allclose(seed0_a, seed1)
+
+
+@pytest.mark.parametrize("output_dir_kind", OUTPUT_DIR_KINDS)
+def test_inference_writes_data_to_output_dir(tmp_path: pathlib.Path, output_dir_kind):
+    stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
+    experiment_dir = tmp_path / "job"
+    config = _small_inference_config(experiment_dir, stepper_path, data, ic_path)
+    with output_dir_of_kind(output_dir_kind, tmp_path) as output_dir:
+        config = dataclasses.replace(
+            config,
+            output_dir=output_dir,
+            logging=dataclasses.replace(config.logging, log_to_file=True),
+            data_writer=dataclasses.replace(
+                config.data_writer,
+                files=[FileWriterConfig("autoregressive", format=ZarrWriterConfig())],
+            ),
+        )
+        _run_inference_main(config, tmp_path / "input_config.yaml")
+        assert_outputs_in_output_dir(
+            str(experiment_dir),
+            output_dir,
+            [
+                "autoregressive_predictions.zarr",
+                "restart.nc",
+                "time_mean_diagnostics.nc",
+            ],
+        )
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [1, 2])
@@ -640,68 +668,3 @@ def test_inference_config_load_stepper_uses_ema_weights(
     assert_parameters_equal(
         stepper.modules, ema_weights if expect_ema else stepper_weights
     )
-
-
-OUTPUT_FILENAMES = (
-    "autoregressive_predictions.nc",
-    "initial_condition.nc",
-    "restart.nc",
-    "time_mean_diagnostics.nc",
-)
-
-
-def test_inference_output_dir_separates_data_from_job_files(tmp_path):
-    stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
-    experiment_dir = tmp_path / "job"
-    output_dir = tmp_path / "output"
-    config = _small_inference_config(
-        experiment_dir,
-        stepper_path,
-        data,
-        ic_path,
-        output_dir=str(output_dir),
-        log_to_file=True,
-    )
-    _run_inference_main(config, yaml_path=tmp_path / "input_config.yaml")
-
-    for filename in OUTPUT_FILENAMES:
-        assert (output_dir / filename).exists(), filename
-        assert not (experiment_dir / filename).exists(), filename
-    assert (experiment_dir / "config.yaml").exists()
-    assert (experiment_dir / "inference_out.log").exists()
-    assert not (output_dir / "inference_out.log").exists()
-    # provenance links the data back to the job
-    with open(output_dir / "config.yaml") as f:
-        assert yaml.safe_load(f)["output_dir"] == str(output_dir)
-    with open(output_dir / "provenance.json") as f:
-        provenance = json.load(f)
-    assert provenance["experiment_dir"] == str(experiment_dir)
-    assert provenance["output_dir"] == str(output_dir)
-    assert provenance["wandb_run_id"] is not None
-
-
-def test_inference_output_dir_defaults_to_experiment_dir(tmp_path):
-    stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
-    experiment_dir = tmp_path / "job"
-    config = _small_inference_config(
-        experiment_dir, stepper_path, data, ic_path, log_to_file=True
-    )
-    _run_inference_main(config, yaml_path=tmp_path / "input_config.yaml")
-
-    for filename in OUTPUT_FILENAMES:
-        assert (experiment_dir / filename).exists(), filename
-    assert (experiment_dir / "config.yaml").exists()
-    assert (experiment_dir / "inference_out.log").exists()
-    assert not (experiment_dir / "provenance.json").exists()
-
-
-def test_inference_config_output_dir_requires_local_experiment_dir(tmp_path):
-    stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
-    with pytest.raises(ValueError, match="experiment_dir must be on a local"):
-        _small_inference_config(
-            "memory://bucket/job",
-            stepper_path,
-            data,
-            ic_path,
-            output_dir="memory://bucket/output",
-        )
