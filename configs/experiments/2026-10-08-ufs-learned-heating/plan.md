@@ -300,3 +300,13 @@ See reports branch troya/2026-10-09-ufs4deg-scratch-vs-cm4-pretrain-enso. Climat
 ocean re-anchors to climatology), scratch resid 0.76/0.46/0.34/0.35, CM4+FT resid 0.85-0.88/0.52-0.59/0.22-0.32/
 0.06-0.12, persistence 0.77/0.32/-0.02/-0.15. Residual vs full-field is the big divide; CM4 pretraining adds ~0.1
 at 3-6 months and loses it by 9. Zero-shot CM4 arms rerunning with NaN fill.
+
+## On the program path (2026-10-14)
+
+Troy: unaccounted heating is top priority; the learned term had only been trained from scratch. Launched the recipe as
+CM4-pretrained fine-tunes (the path that matters): `resid-ohc-cap0005-learnedheat-ftcm4.yaml` and its constant-0 twin
+`resid-ohc-cap0005-const0-ftcm4.yaml`, both 60 epochs from the CM4 4deg hybrid anchor (samudra-anchor4deg-resid-ohc-cap0005)
+on the cm4vars-uh store with the CM4 stats + unaccounted_heating stats (Beaker 01M4W3MH28S5HPAJ84R7AB4V3W). The new output
+channel is appended last so the checkpoint's output weights fill the initial slice. Jobs samudra-ufs4deg-resid-ohc-cap0005-
+{learnedheat,const0}-ftcm4, launcher `launch-ufs4deg-learnedheat-ftcm4.sh`. None of the UFS arms has been coupled fine-tuned:
+that needs the ERA5 4deg coupled-atmosphere store (stress sign, 6-h label offset, masks, budget target) first.
