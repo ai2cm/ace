@@ -11,3 +11,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4VRR1D8ZP9N3RM3V2A4
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VRRAJCHXH82V44XR4TGZAQ|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4VRRAJCHXH82V44XR4TGZAQ|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4XW199W1TP9JJ8CXK2B0CQ3|training|best_inference_ckpt|normal|--min-runtime 8h
