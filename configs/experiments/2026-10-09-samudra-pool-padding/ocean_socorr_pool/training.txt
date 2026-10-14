@@ -6,4 +6,4 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 #
 # uncoupled_train.sh acts only on rows whose status is exactly "train".
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs0|training|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true|8h
