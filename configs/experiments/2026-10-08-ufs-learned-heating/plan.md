@@ -328,3 +328,23 @@ that needs the ERA5 4deg coupled-atmosphere store (stress sign, 6-h label offset
 - Learned vs constant-0 are indistinguishable on the inline windows (0.042 vs 0.041; the windows start in 2012 where
   the unaccounted term is small). The decisive comparison is the full-record drift: 30-yr rollouts launched
   (samudra-ufs4deg-resid-ohc-cap0005-{learnedheat,const0}-ftcm4-eval-30yr-1994).
+
+### 30-yr rollouts of the CM4-pretrained fine-tunes (2026-10-14) - figure `fig_30yr_ftcm4.png`
+
+| global bias by period | train 1994-2001 | untouched 2002-2011 | train 2012-2021 | val 2022-2023 |
+|---|---|---|---|---|
+| constant 0, CM4 FT: SST (K) | +0.14 | +0.15 | +0.23 | +0.26 |
+| constant 0, CM4 FT: thetao_5 (K) | +0.18 | +0.21 | +0.24 | +0.30 |
+| learned, CM4 FT: SST (K) | +0.00 | -0.06 | -0.03 | +0.06 |
+| learned, CM4 FT: thetao_5 (K) | +0.03 | -0.01 | -0.02 | +0.11 |
+| learned, CM4 FT: thetao_10 (K) | +0.01 | +0.01 | -0.00 | +0.04 |
+| learned term, model vs data (W/m2) | -3.2 vs -3.3 | -1.8 vs +1.8 | +0.0 vs +0.4 | +3.5 vs +1.3 |
+
+- Best full-record behaviour of any UFS arm: SST within +-0.06 K and 100 m within 0.11 K over 30 years, including the
+  untouched decade; the constant-0 twin warms +0.14 -> +0.26 K at the surface and +0.18 -> +0.30 K at 100 m.
+- The learned term tracks the data in the training years better than from scratch (2012-2021: +0.0 vs +0.4, where the
+  from-scratch arm gave -0.7 after 18 free years; 1994-2001 year by year within 0.4 W/m2) and overshoots the 2022-23
+  validation years (+3.5 vs +1.3). The untouched decade is still wrong-signed (-1.8 vs +1.8), exactly as from scratch:
+  the term is a function of the state it sees, not of the nudging the data carried, and in a decade whose forcing it
+  never trained on it cannot know the sign. The column stays on track there anyway because the 1994-2001 term dominates.
+- Ice bias 0 throughout for both.
