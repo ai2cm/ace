@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+import logging
 from collections.abc import Callable, Mapping
 
 # we use Type to distinguish from type attr of ModuleSelector
@@ -14,6 +15,8 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoding
 
 from .registry import Registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -32,10 +35,10 @@ class ModuleConfig(abc.ABC):
 
         Override to return a string in a builder whose modules cannot be
         compiled, e.g. because the forward pass has data-dependent shapes.
-        :meth:`Module.compile` then raises ``NotImplementedError`` with this
-        reason instead of letting dynamo silently fall back to eager after a
-        long tracing attempt. Returns None, meaning compilation is supported,
-        unless overridden.
+        :meth:`Module.compile` then logs this reason and leaves the module
+        uncompiled, instead of letting dynamo spend a long tracing attempt
+        before falling back to eager. Returns None, meaning compilation is
+        supported, unless overridden.
 
         This is a classmethod rather than a ``ClassVar`` so that it is not a
         dataclass field (which would leak into ``ModuleSelector.config`` and
@@ -149,21 +152,19 @@ class Module:
         The underlying module (parameters, state dict, ``torch_module``) is
         unchanged; only the callable used in ``__call__`` is compiled. Call
         after any distributed wrapping so the compiled graph includes it.
-        Returns this Module unchanged when compilation is disabled (see
-        :func:`fme.core.compile.compile_enabled`).
+        Returns this Module unchanged when the builder declared compilation
+        unsupported via ``ModuleConfig.compile_unsupported_reason()``, or when
+        compilation is disabled (see :func:`fme.core.compile.is_compile_enabled`).
 
         Args:
             kwargs: Forwarded to ``torch.compile``.
-
-        Raises:
-            NotImplementedError: If the builder declared compilation
-                unsupported via ``ModuleConfig.compile_unsupported_reason()``.
         """
         if self._compile_unsupported_reason is not None:
-            raise NotImplementedError(
-                "torch.compile is not supported for this module: "
+            logger.info(
+                "torch.compile skipped, module runs eagerly: "
                 f"{self._compile_unsupported_reason}"
             )
+            return self
         if not is_compile_enabled():
             return self
         return Module(

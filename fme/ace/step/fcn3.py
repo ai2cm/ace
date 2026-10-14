@@ -10,7 +10,7 @@ from torch import nn
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: ignore
     AtmoSphericNeuralOperatorNet,
 )
-from fme.core.compile import is_compile_enabled
+from fme.core.compile import is_compile_enabled, remove_deprecated_compile_key
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
@@ -159,19 +159,6 @@ class FCN3StepConfig(StepConfigABC):
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         residual_prediction: Whether to use residual prediction.
-        compile: Whether to run forward passes through ``torch.compile``.
-            Applied after distributed wrapping, so distributed data parallel is
-            inside the compiled graph, and to the single module this step owns.
-            State dict keys are unchanged, so checkpoints stay compatible with
-            uncompiled runs. The flag is saved in the step config, so inference
-            from a checkpoint trained with it enabled also compiles. Setting
-            the ``FME_COMPILE`` environment variable to ``0`` disables
-            compilation regardless of this flag. Note the
-            discrete-continuous spherical convolutions this network uses are
-            implemented with sparse tensors, which ``torch.compile`` cannot
-            trace, so the compiled step runs with graph breaks around those
-            operations: it is still correct, but it is not a single fused
-            graph.
     """
 
     builder: FCN3Selector
@@ -189,7 +176,6 @@ class FCN3StepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
-    compile: bool = False
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -250,7 +236,9 @@ class FCN3StepConfig(StepConfigABC):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(state)
+        state_copy = dict(state)
+        remove_deprecated_compile_key(state_copy)
+        return state_copy
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -401,11 +389,12 @@ class FCN3Step(StepABC):
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
-        # not a replacement: state dict, device, train/eval still go via self.module
+        # not a replacement: state dict, device, train/eval still go via self.module.
+        # The discrete-continuous spherical convolutions use sparse tensors, which
+        # torch.compile cannot trace, so the compiled module has graph breaks
+        # around them.
         self._forward_module = (
-            torch.compile(self.module)
-            if config.compile and is_compile_enabled()
-            else self.module
+            torch.compile(self.module) if is_compile_enabled() else self.module
         )
         self._img_shape = dataset_info.img_shape
         self._config = config

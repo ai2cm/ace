@@ -6,6 +6,7 @@ from typing import Any
 import torch
 from torch import nn
 
+from fme.core.compile import remove_deprecated_compile_key
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
@@ -61,17 +62,6 @@ class SecondaryModuleStepConfig(StepConfigABC):
         prescribed_prognostic_names: Prognostic variable names to overwrite from
             forcing data at each step (e.g. for inference with observed values).
         residual_prediction: Whether to use residual prediction.
-        compile: Whether to run forward passes through ``torch.compile``.
-            Applied after distributed wrapping, so distributed data parallel is
-            inside the compiled graph, and to every module the step owns (the
-            main module, the secondary module and the secondary decoder). State
-            dict keys are unchanged, so checkpoints stay compatible with
-            uncompiled runs. The flag is saved in the step config, so inference
-            from a checkpoint trained with it enabled also compiles. Module
-            builders that declare compilation unsupported raise
-            ``NotImplementedError`` at step construction. Setting the
-            ``FME_COMPILE`` environment variable to ``0`` disables compilation
-            regardless of this flag.
     """
 
     builder: ModuleSelector
@@ -89,7 +79,6 @@ class SecondaryModuleStepConfig(StepConfigABC):
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
-    compile: bool = False
 
     def __post_init__(self):
         for name in self.prescribed_prognostic_names:
@@ -168,7 +157,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(state)
+        state_copy = dict(state)
+        remove_deprecated_compile_key(state_copy)
+        return state_copy
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -349,10 +340,11 @@ class SecondaryModuleStep(StepABC):
         self.module = self.module.wrap_module(dist.wrap_module)
         self.secondary_module = self.secondary_module.wrap_module(dist.wrap_module)
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
-        if config.compile:
-            self.module = self.module.compile()
-            self.secondary_module = self.secondary_module.compile()
-            self.secondary_decoder = self.secondary_decoder.compile()
+        # after distributed wrapping, so the wrapper is inside the compiled
+        # graph; state dict keys are unchanged
+        self.module = self.module.compile()
+        self.secondary_module = self.secondary_module.compile()
+        self.secondary_decoder = self.secondary_decoder.compile()
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector

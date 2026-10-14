@@ -7,6 +7,7 @@ from typing import Any
 import torch
 from torch import nn
 
+from fme.core.compile import remove_deprecated_compile_key
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
@@ -51,16 +52,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
             passing it to the main model. The radiation outputs returned by
             .step() will not be detached.
         residual_prediction: Whether to use residual prediction.
-        compile: Whether to run forward passes through ``torch.compile``.
-            Applied after distributed wrapping, so distributed data parallel is
-            inside the compiled graph, and to every module the step owns (the
-            main module and the radiation module). State dict keys are
-            unchanged, so checkpoints stay compatible with uncompiled runs.
-            The flag is saved in the step config, so inference from a
-            checkpoint trained with it enabled also compiles. Module builders
-            that declare compilation unsupported raise ``NotImplementedError``
-            at step construction. Setting the ``FME_COMPILE`` environment
-            variable to ``0`` disables compilation regardless of this flag.
     """
 
     builder: ModuleSelector
@@ -78,7 +69,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
     )
     detach_radiation: bool = False
     residual_prediction: bool = False
-    compile: bool = False
 
     def __post_init__(self):
         seen_names: dict[str, str] = {}
@@ -147,7 +137,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(state)
+        state_copy = dict(state)
+        remove_deprecated_compile_key(state_copy)
+        return state_copy
 
     @property
     def _normalize_names(self) -> frozenset[str]:
@@ -316,9 +308,10 @@ class SeparateRadiationStep(StepABC):
         dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
         self.radiation_module = self.radiation_module.wrap_module(dist.wrap_module)
-        if config.compile:
-            self.module = self.module.compile()
-            self.radiation_module = self.radiation_module.compile()
+        # after distributed wrapping, so the wrapper is inside the compiled
+        # graph; state dict keys are unchanged
+        self.module = self.module.compile()
+        self.radiation_module = self.radiation_module.compile()
         self._timestep = timestep
         self._corrector = corrector
 

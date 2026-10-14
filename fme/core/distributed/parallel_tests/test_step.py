@@ -7,7 +7,6 @@ work in parallel mode. This may duplicate StepABC test coverage in the
 non-parallel StepABC tests (which include also cases that don't work in parallel).
 """
 
-import copy
 import dataclasses
 import datetime
 import pathlib
@@ -24,6 +23,7 @@ from torch import nn
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.compile import compile_enabled
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
@@ -417,15 +417,6 @@ def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
         )
 
 
-def _with_compile(selector: StepSelector) -> StepSelector:
-    config = copy.deepcopy(selector.config)
-    if selector.type == "multi_call":
-        config["wrapped_step"]["config"]["compile"] = True
-    else:
-        config["compile"] = True
-    return StepSelector(type=selector.type, config=config)
-
-
 @pytest.mark.parametrize("get_config", SELECTOR_GETTERS.values())
 @pytest.mark.parallel
 def test_compiled_step_matches_eager(
@@ -439,9 +430,10 @@ def test_compiled_step_matches_eager(
     img_shape = DEFAULT_IMG_SHAPE
     n_samples = 2
     selector = get_config(None)
-    eager_step = get_step(selector, img_shape)
+    with compile_enabled(False):
+        eager_step = get_step(selector, img_shape)
     with compile_backend("aot_eager"):
-        compiled_step = get_step(_with_compile(selector), img_shape)
+        compiled_step = get_step(selector, img_shape)
     compiled_step.load_state(eager_step.get_state())
     eager_step.eval()
     compiled_step.eval()

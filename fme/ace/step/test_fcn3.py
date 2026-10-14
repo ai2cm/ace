@@ -1,3 +1,4 @@
+import dataclasses
 from unittest import mock
 
 import pytest
@@ -27,7 +28,6 @@ SURFACE_DIAGNOSTIC_NAMES = ["PRATEsfc"]
 
 
 def _get_fcn3_step_config(
-    compile: bool = False,
     normalization_layer: str = "none",
 ) -> FCN3StepConfig:
     """A minimal FCN3 step config, kept small so compiling it stays cheap."""
@@ -62,7 +62,6 @@ def _get_fcn3_step_config(
                 .union(SURFACE_DIAGNOSTIC_NAMES)
             )
         ),
-        compile=compile,
     )
 
 
@@ -93,27 +92,38 @@ def _grads(step: FCN3Step) -> TensorDict:
     }
 
 
+@pytest.mark.parametrize("compile", [True, False])
+def test_fcn3_step_config_with_removed_compile_option_still_loads(compile: bool):
+    """The step config used to take a ``compile`` option, which checkpoints and
+    configs saved before its removal still contain."""
+    state = dataclasses.asdict(_get_fcn3_step_config())
+    with pytest.warns(DeprecationWarning, match="compile"):
+        loaded = FCN3StepConfig.from_state({**state, "compile": compile})
+    assert dataclasses.asdict(loaded) == state
+
+
 def test_fcn3_step_does_not_compile_when_compile_disabled():
     with compile_enabled(False), mock.patch("torch.compile") as mock_compile:
-        step = _get_step(_get_fcn3_step_config(compile=True))
+        step = _get_step(_get_fcn3_step_config())
     mock_compile.assert_not_called()
     # FCN3Step keeps its forward callable private; it is the module when eager
     assert step._forward_module is step.module
 
 
 @pytest.mark.medium_duration
-def test_fcn3_step_compile_flag():
-    """compile=True runs the forward through torch.compile while leaving the
+def test_fcn3_step_compiles():
+    """Compiling runs the forward through torch.compile while leaving the
     checkpoint state identical in structure to the uncompiled step.
 
-    The step config only exposes ``compile: bool``, so the backend is forced
-    to ``aot_eager`` from the outside to keep the test within the suite's
-    timeouts while still exercising dynamo tracing.
+    The step calls ``torch.compile`` with its default backend, so the backend
+    is forced to ``aot_eager`` from the outside to keep the test within the
+    suite's timeouts while still exercising dynamo tracing.
     """
     torch.manual_seed(0)
-    eager_step = _get_step(_get_fcn3_step_config())
+    with compile_enabled(False):
+        eager_step = _get_step(_get_fcn3_step_config())
     with compile_backend("aot_eager"):
-        compiled_step = _get_step(_get_fcn3_step_config(compile=True))
+        compiled_step = _get_step(_get_fcn3_step_config())
     eager_state = eager_step.get_state()
     compiled_step.load_state(eager_state)
     assert compiled_step.get_state()["module"].keys() == eager_state["module"].keys()
@@ -141,17 +151,18 @@ def test_fcn3_step_compile_flag():
         "instance_norm_s2",
     ],
 )
-def test_fcn3_step_compile_flag_train_gradients(normalization_layer: str):
+def test_compiled_fcn3_step_train_gradients(normalization_layer: str):
     """A compiled step trains: the activation-checkpointed forward and its
     backward produce finite gradients matching the uncompiled step's.
     """
     torch.manual_seed(0)
-    eager_step = _get_step(
-        _get_fcn3_step_config(normalization_layer=normalization_layer)
-    )
+    with compile_enabled(False):
+        eager_step = _get_step(
+            _get_fcn3_step_config(normalization_layer=normalization_layer)
+        )
     with compile_backend("aot_eager"):
         compiled_step = _get_step(
-            _get_fcn3_step_config(compile=True, normalization_layer=normalization_layer)
+            _get_fcn3_step_config(normalization_layer=normalization_layer)
         )
     compiled_step.load_state(eager_step.get_state())
     args = _get_args(eager_step)
@@ -179,7 +190,7 @@ def test_fcn3_step_compiles_after_distributed_wrapping():
     one, so distributed data parallel is inside the compiled graph.
     """
     with compile_backend("aot_eager"):
-        step = _get_step(_get_fcn3_step_config(compile=True))
+        step = _get_step(_get_fcn3_step_config())
     # the presence of the (single-rank) distributed wrapper inside the compiled
     # module is the contract under test, so its type is asserted directly
     assert isinstance(step.module, DummyWrapper)

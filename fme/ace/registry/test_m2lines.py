@@ -1,3 +1,4 @@
+import logging
 from unittest import mock
 
 import pytest
@@ -159,9 +160,9 @@ def _floenet_dataset_info(height: int, width: int) -> DatasetInfo:
 
 
 @pytest.mark.skipif(not GRAPHCAST_AVAIL, reason="trimesh/rtree are not available")
-def test_floenet_rejects_compile_without_tracing():
+def test_floenet_runs_eagerly_without_tracing(caplog: pytest.LogCaptureFixture):
     """FloeNet cannot be traced by dynamo, and an attempted trace takes minutes
-    before failing, so asking to compile it must raise immediately instead."""
+    before failing, so it is left uncompiled without attempting one."""
     selector = ModuleSelector(
         type="FloeNet",
         config={"latent_dimension": 8, "meshes": 6, "M0": 0, "processor_steps": 1},
@@ -171,9 +172,9 @@ def test_floenet_rejects_compile_without_tracing():
         n_out_channels=2,
         dataset_info=_floenet_dataset_info(9, 18),
     )
-    with mock.patch("torch.compile") as mock_compile:
-        with pytest.raises(NotImplementedError) as err:
-            module.compile()
+    with caplog.at_level(logging.INFO), mock.patch("torch.compile") as mock_compile:
+        compiled = module.compile()
     mock_compile.assert_not_called()
-    assert "FloeNet" in str(err.value)
-    assert "data-dependent" in str(err.value)
+    assert not compiled.is_compiled
+    assert "FloeNet" in caplog.text
+    assert "data-dependent" in caplog.text

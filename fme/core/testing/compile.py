@@ -22,10 +22,11 @@ from fme.core.compile import compile_enabled
 
 @contextlib.contextmanager
 def compile_backend(backend: str) -> Iterator[None]:
-    """Force every ``torch.compile`` call in the body to use ``backend``.
+    """Enable compilation and force every ``torch.compile`` call in the body to
+    use ``backend``.
 
-    Step and module configs only expose ``compile: bool``, so there is no
-    config-level way to pick a backend. The default inductor backend takes
+    Steps call ``torch.compile`` with its default backend, so there is no
+    config-level way to pick one. The default inductor backend takes
     tens of seconds to compile even tiny networks, which does not fit the test
     suite's timeouts, while ``"aot_eager"`` still runs the full dynamo tracing
     and AOTAutograd path (so graph breaks and tracing errors still surface) in
@@ -40,16 +41,30 @@ def compile_backend(backend: str) -> Iterator[None]:
     def _compile(module: Any, **kwargs: Any) -> Any:
         return real_compile(module, **{**kwargs, "backend": backend})
 
-    with mock.patch("torch.compile", side_effect=_compile):
+    with compile_enabled(True), mock.patch("torch.compile", side_effect=_compile):
         yield
 
 
 @pytest.fixture(autouse=True)
-def dynamo_hygiene(compile_disabled: None) -> Iterator[None]:
-    """Enable compilation and isolate a test module's dynamo state.
+def compile_on(compile_disabled: None) -> Iterator[None]:
+    """Enable compilation for every test in a test module, on any device.
 
     The suite's ``compile_disabled`` fixture runs every test eagerly; this
-    fixture depends on it so that it re-enables compilation afterwards.
+    fixture depends on it so that it re-enables compilation afterwards. Use it
+    in modules where every test compiles; elsewhere, :func:`compile_backend`
+    enables compilation for the steps it builds.
+
+    Import this name into a test module to make it autouse for that module::
+
+        from fme.core.testing import compile_on  # noqa: F401
+    """
+    with compile_enabled(True):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def dynamo_hygiene() -> Iterator[None]:
+    """Isolate a test module's dynamo state from the rest of the suite.
 
     Dynamo's compilation cache is keyed on code objects and is process-global,
     so compiled functions and guards leak between tests sharing an xdist
@@ -62,7 +77,6 @@ def dynamo_hygiene(compile_disabled: None) -> Iterator[None]:
     """
     torch._dynamo.reset()
     try:
-        with compile_enabled(True):
-            yield
+        yield
     finally:
         torch._dynamo.reset()

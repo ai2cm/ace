@@ -1,4 +1,3 @@
-import copy
 import dataclasses
 import pathlib
 import tempfile
@@ -16,6 +15,7 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.compile import compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
@@ -2540,8 +2540,8 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
 
 
 @pytest.mark.medium_duration
-def test_single_module_step_compile_flag():
-    """compile=True runs the forward through torch.compile while leaving the
+def test_single_module_step_compiles():
+    """Compiling runs the forward through torch.compile while leaving the
     checkpoint state identical in structure to the uncompiled step.
     """
     torch.manual_seed(0)
@@ -2556,8 +2556,8 @@ def test_single_module_step_compile_flag():
 
 
 @pytest.mark.medium_duration
-def test_single_module_step_compile_flag_compiles_secondary_decoder():
-    """compile=True compiles every module the step owns, including the
+def test_single_module_step_compiles_secondary_decoder():
+    """A step compiles every module it owns, including the
     secondary decoder, without changing the checkpoint state or the outputs.
     """
     torch.manual_seed(0)
@@ -2579,6 +2579,32 @@ def test_single_module_step_compile_flag_compiles_secondary_decoder():
     assert "diagnostic_rad" in eager_out  # produced by the secondary decoder
 
 
+@pytest.mark.parametrize(
+    "selector_getter",
+    [
+        get_single_module_selector,
+        get_secondary_module_selector,
+        get_separate_radiation_selector,
+    ],
+)
+@pytest.mark.parametrize("compile", [True, False])
+def test_step_config_with_removed_compile_option_still_loads(
+    selector_getter: Callable[[], StepSelector], compile: bool
+):
+    """Step configs used to take a ``compile`` option, which checkpoints and
+    configs saved before its removal still contain."""
+    selector = selector_getter()
+    with pytest.warns(DeprecationWarning, match="compile"):
+        loaded = StepSelector(
+            type=selector.type, config={**selector.config, "compile": compile}
+        )
+    step = get_step(loaded, DEFAULT_IMG_SHAPE)
+    assert (
+        step.get_state().keys()
+        == get_step(selector, DEFAULT_IMG_SHAPE).get_state().keys()
+    )
+
+
 def test_no_secondary_decoder_compile_is_noop():
     decoder = NoSecondaryDecoder()
     assert decoder.compile() is decoder
@@ -2586,37 +2612,28 @@ def test_no_secondary_decoder_compile_is_noop():
 
 def _get_eager_and_compiled_steps(
     selector_getter: Callable[[], StepSelector],
-    compile_path: tuple[str, ...] = ("compile",),
     img_shape: tuple[int, int] = DEFAULT_IMG_SHAPE,
 ) -> tuple[StepABC, StepABC]:
-    """Build the same step twice, eager and with ``compile=True``.
+    """Build the same step twice, with compilation disabled and enabled.
 
-    The compiled step is built under the ``aot_eager`` backend (the step
-    configs only expose ``compile: bool``, so the backend has to be forced from
-    the outside to stay within the suite's timeouts) and is loaded with the
-    eager step's state, so the two steps differ only in whether their forward
-    passes run through ``torch.compile``.
+    The compiled step is built under the ``aot_eager`` backend (steps call
+    ``torch.compile`` with its default backend, so it has to be forced from the
+    outside to stay within the suite's timeouts) and is loaded with the eager
+    step's state, so the two steps differ only in whether their forward passes
+    run through ``torch.compile``.
 
     Args:
-        selector_getter: Returns the eager step selector.
-        compile_path: Key path to the ``compile`` field within the selector
-            config, e.g. ``("wrapped_step", "config", "compile")`` when the
-            flag belongs to a wrapped step.
+        selector_getter: Returns the step selector.
         img_shape: Image shape of the dataset the steps are built for.
 
     Returns:
         The eager step and the compiled step, in that order.
     """
-    eager_selector = selector_getter()
-    compiled_config = copy.deepcopy(eager_selector.config)
-    target = compiled_config
-    for key in compile_path[:-1]:
-        target = target[key]
-    target[compile_path[-1]] = True
-    compiled_selector = StepSelector(type=eager_selector.type, config=compiled_config)
-    eager_step = get_step(eager_selector, img_shape)
+    selector = selector_getter()
+    with compile_enabled(False):
+        eager_step = get_step(selector, img_shape)
     with compile_backend("aot_eager"):
-        compiled_step = get_step(compiled_selector, img_shape)
+        compiled_step = get_step(selector, img_shape)
     compiled_step.load_state(eager_step.get_state())
     return eager_step, compiled_step
 
@@ -2659,8 +2676,8 @@ def _assert_compiled_step_matches_eager(
 
 
 @pytest.mark.medium_duration
-def test_secondary_module_step_compile_flag():
-    """compile=True on a secondary-module step compiles every module it owns
+def test_secondary_module_step_compiles():
+    """A secondary-module step compiles every module it owns
     while leaving the checkpoint state and the predictions unchanged.
     """
     torch.manual_seed(0)
@@ -2673,8 +2690,8 @@ def test_secondary_module_step_compile_flag():
 
 
 @pytest.mark.medium_duration
-def test_separate_radiation_step_compile_flag():
-    """compile=True on a separate-radiation step compiles both the main and the
+def test_separate_radiation_step_compiles():
+    """A separate-radiation step compiles both the main and the
     radiation module while leaving the checkpoint state and the predictions
     unchanged.
     """
@@ -2688,16 +2705,13 @@ def test_separate_radiation_step_compile_flag():
 
 
 @pytest.mark.medium_duration
-def test_multi_call_step_inherits_wrapped_step_compile():
-    """A multi-call step owns no modules of its own, so compilation is
-    configured on the wrapped step and inherited: the repeated forward passes
-    go through the compiled modules and the state keys are unchanged.
+def test_multi_call_step_uses_wrapped_step_compiled_modules():
+    """A multi-call step owns no modules of its own: the repeated forward passes
+    go through the wrapped step's compiled modules and the state keys are
+    unchanged.
     """
     torch.manual_seed(0)
-    eager_step, compiled_step = _get_eager_and_compiled_steps(
-        get_multi_call_selector,
-        compile_path=("wrapped_step", "config", "compile"),
-    )
+    eager_step, compiled_step = _get_eager_and_compiled_steps(get_multi_call_selector)
     eager_out = _assert_compiled_step_matches_eager(eager_step, compiled_step)
     # the perturbed-forcing outputs, i.e. the extra calls really happened
     assert [name for name in eager_out if name.endswith("double")]
@@ -2744,7 +2758,7 @@ def test_step_compiles_after_distributed_wrapping(
 
 
 @pytest.mark.medium_duration
-def test_single_module_step_compile_flag_trains():
+def test_compiled_single_module_step_trains():
     """A compiled step trains: with activation checkpointing around the
     compiled module, the backward pass produces finite gradients that match the
     eager step's.
@@ -2811,8 +2825,8 @@ def _get_single_module_mlp_selector() -> StepSelector:
 
 @pytest.mark.parallel
 @pytest.mark.medium_duration
-def test_single_module_step_compile_flag_distributed():
-    """compile=True works with the distributed wrapper the parallel test matrix
+def test_compiled_single_module_step_distributed():
+    """Compilation works with the distributed wrapper the parallel test matrix
     installs, which torch.compile then traces through: same state keys and same
     predictions as the eager step.
     """

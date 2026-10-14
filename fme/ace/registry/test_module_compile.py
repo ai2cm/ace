@@ -23,6 +23,7 @@ one construct we control.
 
 import dataclasses
 import functools
+import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 from unittest import mock
@@ -40,6 +41,7 @@ from fme.ace.models.healpix.healpix_blocks import (
 )
 from fme.ace.models.healpix.healpix_paddings import have_earth2grid
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
+from fme.core.compile import compile_enabled
 from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -51,6 +53,7 @@ from fme.core.step.args import StepArgs
 from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
+    compile_on,  # noqa: F401  autouse in this module
     dynamo_hygiene,  # noqa: F401  autouse in this module
     get_dataset_info,
     trivial_network_and_loss_normalization,
@@ -174,7 +177,8 @@ class BuilderCase:
         conditional: Whether the selector conditions on batch labels, in which
             case the tests pass a :class:`BatchLabels` alongside the input.
         expect_unsupported: Whether the builder declares ``torch.compile``
-            unsupported, so ``Module.compile()`` must raise instead of tracing.
+            unsupported, so ``Module.compile()`` must leave it uncompiled
+            instead of tracing.
         marks: Marks applied to the parametrized cases, e.g. dependency skips.
     """
 
@@ -745,7 +749,7 @@ ROLLOUT_CASES = [
 ]
 
 
-def _rollout_step_selector(case: RolloutCase, compile: bool) -> StepSelector:
+def _rollout_step_selector(case: RolloutCase) -> StepSelector:
     """A residual single-module step with two prognostics and one forcing."""
     all_names = [*ROLLOUT_PROGNOSTIC_NAMES, ROLLOUT_FORCING_NAME]
     return StepSelector(
@@ -759,7 +763,6 @@ def _rollout_step_selector(case: RolloutCase, compile: bool) -> StepSelector:
                 out_names=list(ROLLOUT_PROGNOSTIC_NAMES),
                 normalization=trivial_network_and_loss_normalization(all_names),
                 residual_prediction=ResidualPredictionConfig(),
-                compile=compile,
             )
         ),
     )
@@ -773,10 +776,11 @@ def _build_rollout_step(case: RolloutCase, compile: bool) -> StepABC:
                     parameter.mul_(case.init_scale)
 
     torch.manual_seed(0)
-    return _rollout_step_selector(case, compile).get_step(
-        get_dataset_info(img_shape=case.img_shape, device=get_device()),
-        scale_weights,
-    )
+    with compile_enabled(compile):
+        return _rollout_step_selector(case).get_step(
+            get_dataset_info(img_shape=case.img_shape, device=get_device()),
+            scale_weights,
+        )
 
 
 def _rollout(
@@ -860,16 +864,21 @@ def test_compiled_rollout_matches_eager(case: RolloutCase):
 
 
 @pytest.mark.parametrize("case", UNSUPPORTED_CASES)
-def test_compile_unsupported_builder_raises_without_tracing(case: BuilderCase):
-    """A builder that declares compilation unsupported must fail immediately.
+def test_compile_unsupported_builder_runs_eagerly_without_tracing(
+    case: BuilderCase, caplog: pytest.LogCaptureFixture
+):
+    """A builder that declares compilation unsupported is left uncompiled.
 
     Letting dynamo attempt the trace instead would burn minutes before falling
     back to eager, so the reason is checked before ``torch.compile`` is called
-    at all.
+    at all, and logged so the eager run is not a surprise.
     """
     module = _build_module(case)
-    with mock.patch("torch.compile") as mock_compile:
-        with pytest.raises(NotImplementedError) as err:
-            module.compile()
+    with (
+        caplog.at_level(logging.INFO),
+        mock.patch("torch.compile") as mock_compile,
+    ):
+        compiled = module.compile()
     mock_compile.assert_not_called()
-    assert case.name in str(err.value)
+    assert not compiled.is_compiled
+    assert case.name in caplog.text

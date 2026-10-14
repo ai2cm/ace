@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import logging
 import pathlib
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -18,7 +19,10 @@ from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
 from fme.core.registry.module import Module
-from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse in this module
+from fme.core.testing import (  # noqa: F401  autouse in this module
+    compile_on,
+    dynamo_hygiene,
+)
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
 
@@ -425,15 +429,18 @@ def _build_compile_unsupported_module() -> Module:
     return selector.build(n_in_channels=1, n_out_channels=1, dataset_info=DatasetInfo())
 
 
-def test_compile_unsupported_builder_raises_without_tracing():
-    """A builder declaring compilation unsupported must fail fast: compile()
-    raises with the declared reason and never reaches torch.compile, since
-    tracing an untraceable module can take minutes before falling back."""
+def test_compile_unsupported_builder_runs_eagerly_without_tracing(
+    caplog: pytest.LogCaptureFixture,
+):
+    """A builder declaring compilation unsupported is left uncompiled, with the
+    declared reason logged, and never reaches torch.compile, since tracing an
+    untraceable module can take minutes before falling back."""
     module = _build_compile_unsupported_module()
-    with mock.patch("torch.compile") as mock_compile:
-        with pytest.raises(NotImplementedError, match="not traceable"):
-            module.compile()
+    with caplog.at_level(logging.INFO), mock.patch("torch.compile") as mock_compile:
+        compiled = module.compile()
     mock_compile.assert_not_called()
+    assert not compiled.is_compiled
+    assert "not traceable" in caplog.text
 
 
 def test_compile_unsupported_reason_survives_wrapping_and_to():
@@ -441,8 +448,10 @@ def test_compile_unsupported_reason_survives_wrapping_and_to():
     applies before compiling it (device placement, distributed wrapping)."""
     module = _build_compile_unsupported_module().to(fme.get_device())
     module = module.wrap_module(lambda m: m)
-    with pytest.raises(NotImplementedError, match="not traceable"):
-        module.compile()
+    with mock.patch("torch.compile") as mock_compile:
+        compiled = module.compile()
+    mock_compile.assert_not_called()
+    assert not compiled.is_compiled
 
 
 def test_module_compile_is_a_no_op_when_compile_disabled():
