@@ -6,6 +6,9 @@ import os
 import time
 from typing import Any
 
+from fme.core.cloud import is_local
+from fme.core.distributed import Distributed
+
 METRICS_FILENAME = "metrics.jsonl"
 CHECKPOINT_MARK_FILENAME = "checkpoint_mark.json"
 
@@ -35,14 +38,35 @@ class DiskMetricLogger:
     metrics logged before it.
 
     Values that are not JSON-serializable (e.g. images, tensors) are dropped.
+
+    Only the root rank (rank 0) writes metrics, so that one process owns the
+    metrics file and the checkpoint mark. The logger is disabled, and every
+    method does nothing, on other ranks, when ``directory`` is None, or (with
+    a warning) when ``directory`` is not on a local file system.
+
+    Parameters:
+        directory: Directory to write the metrics file and checkpoint mark to.
     """
 
-    def __init__(self, directory: str | os.PathLike):
+    def __init__(self, directory: str | os.PathLike | None):
+        self._previous_path: str | None = None
+        self._file: io.BufferedWriter | None = None
+        self._offset = 0
+        self._last_step: int | None = None
+        self.enabled = directory is not None and Distributed.get_instance().is_root()
+        if self.enabled and not is_local(str(directory)):
+            logging.warning(
+                f"Disk metric logging is only supported on a local file system. "
+                f"Got metrics_log_dir={directory!r}, so no metrics will be "
+                f"saved to disk and none can be recovered on resume."
+            )
+            self.enabled = False
+        if directory is None or not self.enabled:
+            return
         os.makedirs(directory, exist_ok=True)
         self.directory = directory
         self._path = os.path.join(directory, METRICS_FILENAME)
         self._mark_path = os.path.join(directory, CHECKPOINT_MARK_FILENAME)
-        self._previous_path: str | None = None
         if os.path.exists(self._path) and os.path.getsize(self._path) > 0:
             self._previous_path = _unused_path(f"{self._path}.{_timestamp()}")
             os.rename(self._path, self._previous_path)
@@ -50,9 +74,7 @@ class DiskMetricLogger:
                 "Moved metrics from a previous job in this directory to %s",
                 self._previous_path,
             )
-        self._file: io.BufferedWriter | None = open(self._path, "wb")
-        self._offset = 0
-        self._last_step: int | None = None
+        self._file = open(self._path, "wb")
 
     @property
     def offset(self) -> int:
@@ -64,6 +86,8 @@ class DiskMetricLogger:
 
         Non-serializable values are dropped.
         """
+        if not self.enabled:
+            return
         if self._file is None:
             raise RuntimeError("DiskMetricLogger is closed")
         self._last_step = step
@@ -87,6 +111,8 @@ class DiskMetricLogger:
         that lock forever and the mark would never be written, so it does not
         log (see `fme.core.distributed.shutdown.add_post_abort_callback`).
         """
+        if not self.enabled:
+            return
         tmp_path = f"{self._mark_path}.tmp"
         with open(tmp_path, "w") as f:
             json.dump({"offset": self._offset, "last_step": self._last_step}, f)
@@ -108,8 +134,10 @@ class DiskMetricLogger:
         Returns:
             The mark restored to, or None if nothing was restored because
             there is no mark, no metrics file, or the file is shorter than the
-            mark's offset.
+            mark's offset, or the logger is disabled.
         """
+        if not self.enabled:
+            return None
         mark = self._read_checkpoint_mark()
         if mark is None:
             return None
