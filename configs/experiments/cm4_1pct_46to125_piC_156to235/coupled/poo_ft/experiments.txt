@@ -13,3 +13,9 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-smoke2|01M4
 #   job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled/poo_ft . --config-dir configs/experiments/cm4_eval/coupled
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|01M4JGG15KPP9KYT4E4WZAZKYE|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0|01M4JGG15KPP9KYT4E4WZAZKYE|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+# Seeded 1pct reruns with monthly surface maps on GCS, to map the year ~100
+# heat-flux / sea-ice-loss episode of the unseeded 1pct eval (wandb mbyl8pyn).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-s0|01M4JGG15KPP9KYT4E4WZAZKYE|run_1pct-ic0001-130yr-maps-gcs|best_inference_ckpt|high|--min-runtime 8h|seed=0 experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-14-poo-ft-1pct-episode-maps/seed0||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-s1|01M4JGG15KPP9KYT4E4WZAZKYE|run_1pct-ic0001-130yr-maps-gcs|best_inference_ckpt|high|--min-runtime 8h|seed=1 experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-14-poo-ft-1pct-episode-maps/seed1||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_poo-owc_a2s-ft|o2a0rs0-s2|01M4JGG15KPP9KYT4E4WZAZKYE|run_1pct-ic0001-130yr-maps-gcs|best_inference_ckpt|high|--min-runtime 8h|seed=2 experiment_dir=gs://vcm-ml-intermediate/elynnwu-research/2026-10-14-poo-ft-1pct-episode-maps/seed2||ai2/ace|jupiter+titan
