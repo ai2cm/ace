@@ -26,6 +26,9 @@ PROGNOSTIC_VARIABLES = (
     + [f"eastward_wind_{i}" for i in range(8)]
     + [f"northward_wind_{i}" for i in range(8)]
 )
+# Near-surface prognostics carried by some ACE models but not others. Included only
+# on request, since the source zarr must carry them and older models do not use them.
+NEAR_SURFACE_VARIABLES = ["TMP2m", "Q2m", "UGRD10m", "VGRD10m"]
 
 
 def create_ic(
@@ -33,8 +36,11 @@ def create_ic(
     ic_timestamp: str,
     target_timestamp: np.datetime64,
 ) -> xr.Dataset:
-    ic = era5.sel(time=ic_timestamp)
-    return ic.assign_coords(time=target_timestamp)
+    # Select with a single-element list so `time` stays a length-1 dimension rather
+    # than collapsing to a scalar coordinate. `get_initial_condition` requires the
+    # prognostic variables to have shape (n_samples, [spatial dims]).
+    ic = era5.sel(time=[ic_timestamp])
+    return ic.assign_coords(time=[target_timestamp])
 
 
 @click.command()
@@ -62,17 +68,30 @@ def create_ic(
         "Output files are named {target_date}_IC{i}.nc."
     ),
 )
+@click.option(
+    "--include-near-surface/--no-include-near-surface",
+    default=False,
+    help=(
+        "Include the near-surface prognostics (TMP2m, Q2m, UGRD10m, VGRD10m) required "
+        "by models that carry them as inputs. The source zarr must provide them."
+    ),
+)
 def main(
     local_output_dir: str,
     era5_gcs_data: str,
     target_timestamp: str,
     ic_timestamps: Tuple[str, ...],
+    include_near_surface: bool,
 ):
     logging.basicConfig(level=logging.INFO)
     os.makedirs(local_output_dir, exist_ok=True)
 
+    prognostic_variables = PROGNOSTIC_VARIABLES + (
+        NEAR_SURFACE_VARIABLES if include_near_surface else []
+    )
+
     logging.info(f"Opening ERA5 data from {era5_gcs_data}")
-    era5 = xr.open_zarr(era5_gcs_data)[PROGNOSTIC_VARIABLES]
+    era5 = xr.open_zarr(era5_gcs_data)[prognostic_variables]
 
     target_dt = np.datetime64(target_timestamp)
     target_date = target_timestamp.split("T")[0]

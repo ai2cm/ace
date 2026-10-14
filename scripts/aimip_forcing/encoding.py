@@ -24,6 +24,10 @@ def set_shards_chunks(ds, shards=OUTPUT_SHARDING, chunks=OUTPUT_CHUNKING):
     """
     out_ds = xr.Dataset()
     for name, da in ds.data_vars.items():
+        if not da.dims:
+            # zarr rejects empty chunk/shard tuples, and a scalar needs neither.
+            out_ds[name] = da
+            continue
         da_chunks = []
         da_shards = []
         chunking_dict = {}

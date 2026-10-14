@@ -69,7 +69,15 @@ def main(
     first_step = ds.sel(time=[input_timestamp]).assign_coords(
         time=[np.datetime64(output_timestamp)]
     )
-    ds_with_prepended = xr.concat([first_step, ds], dim="time")
+    # Concat defaults would broadcast variables without a time dimension along it,
+    # storing one constant per timestep.
+    ds_with_prepended = xr.concat(
+        [first_step, ds],
+        dim="time",
+        data_vars="minimal",
+        coords="minimal",
+        compat="override",
+    )
 
     logging.info("Setting chunking and sharding for output.")
     ds_with_prepended = clear_encoding(ds_with_prepended)

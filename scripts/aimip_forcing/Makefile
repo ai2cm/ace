@@ -6,14 +6,18 @@ GCS_PATH_PUBLIC_AIMIP_FORCING := gs://vcm-ml-intermediate/2025-09-05-era5-0.25de
 ZENODO_FORCING_URL := https://zenodo.org/api/records/17065758/files/$(PUBLIC_FORCING_FILE_NAME)/content
 LOCAL_FORCING_FILE := $(LOCAL_DATA_DIR)/$(PUBLIC_FORCING_FILE_NAME)
 LOCAL_REGRIDDED_FILE := $(LOCAL_DATA_DIR)/ERA5-1deg-monthly-mean-forcing-1978-2024.nc
-OUTPUT_ZARR_NAME = 2025-09-09-aimip-era5-1deg-forcing-1978-2024.zarr
+OUTPUT_ZARR_NAME ?= 2025-09-09-aimip-era5-1deg-forcing-1978-2024.zarr
 LOCAL_OUTPUT_ZARR := $(LOCAL_DATA_DIR)/$(OUTPUT_ZARR_NAME)
 GCS_PATH_PROCESSED_FORCING ?= gs://vcm-ml-intermediate/$(OUTPUT_ZARR_NAME)
 ENVIRONMENT_NAME=regrid-aimip-forcing
 IC_OUTPUT_DIR := $(LOCAL_DATA_DIR)/aimip_ics
+# e.g. --include-near-surface to add TMP2m/Q2m/UGRD10m/VGRD10m
+IC_EXTRA_ARGS ?=
 GCS_IC_PATH ?= gs://vcm-ml-intermediate/2025-09-12-AIMIP-evaluation-ICs/
 ERA5_GCS_DATA ?= gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-1940-2022.zarr
-MODIFIED_FORCING_NAME = 2025-09-12-aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
+# e.g. --ace2-era5-gcs-data <zarr> to match the model's ERA5 build
+FORCING_EXTRA_ARGS ?=
+MODIFIED_FORCING_NAME ?= 2025-09-12-aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
 LOCAL_MODIFIED_FORCING := $(LOCAL_DATA_DIR)/$(MODIFIED_FORCING_NAME)
 GCS_PATH_MODIFIED_FORCING ?= gs://vcm-ml-intermediate/$(MODIFIED_FORCING_NAME)
 
@@ -45,7 +49,8 @@ $(LOCAL_REGRIDDED_FILE): $(LOCAL_FORCING_FILE)
 	python regrid_aimip_forcing.py $(LOCAL_FORCING_FILE) $(LOCAL_REGRIDDED_FILE)
 
 $(LOCAL_OUTPUT_ZARR): $(LOCAL_REGRIDDED_FILE)
-	python interpolate_aimip_forcing.py $(LOCAL_REGRIDDED_FILE) $(LOCAL_OUTPUT_ZARR)
+	python interpolate_aimip_forcing.py $(LOCAL_REGRIDDED_FILE) $(LOCAL_OUTPUT_ZARR) \
+	  $(FORCING_EXTRA_ARGS)
 
 upload_processed_aimip_forcing: $(LOCAL_OUTPUT_ZARR)
 	gsutil -m cp -r $(LOCAL_OUTPUT_ZARR) $(GCS_PATH_PROCESSED_FORCING)
@@ -56,7 +61,7 @@ process_aimip_forcing: upload_processed_aimip_forcing
 $(IC_OUTPUT_DIR)/.done: data_dir
 	mkdir -p $(IC_OUTPUT_DIR)
 	python create_aimip_ic_datasets.py $(IC_OUTPUT_DIR) \
-	  --era5-gcs-data $(ERA5_GCS_DATA)
+	  --era5-gcs-data $(ERA5_GCS_DATA) $(IC_EXTRA_ARGS)
 	touch $(IC_OUTPUT_DIR)/.done
 
 upload_aimip_ics: $(IC_OUTPUT_DIR)/.done
