@@ -167,6 +167,7 @@ def _get_test_yaml_files(
     batch_size: int = 2,
     sample_with_replacement: int | None = 10,
     lr_tuning: LRTuningConfig | None = None,
+    label_dropout_rate: float = 0.0,
 ):
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
@@ -354,6 +355,7 @@ def _get_test_yaml_files(
             num_data_workers=0,
             time_buffer=time_buffer,
             sample_with_replacement=sample_with_replacement,
+            label_dropout_rate=label_dropout_rate,
         ),
         validation=_make_validation_entries(
             valid_data_path=valid_data_path,
@@ -504,6 +506,7 @@ def _setup(
     multi_validation: bool = False,
     use_variable_masking: bool = False,
     lr_tuning: LRTuningConfig | None = None,
+    label_dropout_rate: float = 0.0,
 ):
     if not path.exists():
         path.mkdir()
@@ -615,6 +618,7 @@ def _setup(
         multi_validation=multi_validation,
         partial_train_data_path=partial_data_dir,
         lr_tuning=lr_tuning,
+        label_dropout_rate=label_dropout_rate,
     )
     return train_config_filename, inference_config_filename
 
@@ -1089,6 +1093,35 @@ def test_train_without_inline_inference(tmp_path):
     assert "val_extra/mean/loss" in epoch_logs
     val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
     assert val_extra_output.exists()
+
+
+@pytest.mark.medium_duration
+def test_train_with_label_dropout(tmp_path):
+    """A conditional model trains end-to-end with full label dropout.
+
+    With label_dropout_rate=1.0 every training sample is fed the all-zeros
+    (unconditional) label, so this exercises the label-dropout data path and
+    confirms the ConditionalLayerNorm forward handles the withheld-label state
+    without error. NoiseConditionedSFNO is the conditional (labelled) nettype.
+    """
+    train_config, _ = _setup(
+        tmp_path,
+        "NoiseConditionedSFNO",
+        log_to_wandb=True,
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,  # must be even
+        skip_inline_inference=True,
+        label_dropout_rate=1.0,
+    )
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        wandb_logs = wandb.get_logs()
+    assert any("val/mean/loss" in epoch_logs for epoch_logs in wandb_logs)
+    best_checkpoint_path = (
+        tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar"
+    )
+    assert best_checkpoint_path.exists()
 
 
 @pytest.mark.medium_duration
