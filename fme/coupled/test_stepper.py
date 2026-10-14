@@ -359,6 +359,107 @@ def test_atmosphere_output_rename_couples_mismatched_names():
     )
 
 
+def _stress_rename_configs():
+    """Atmosphere outputting eastward_surface_stress, ocean reading
+    eastward_surface_wind_stress (the rename test's pair)."""
+    atmosphere = ComponentConfig(
+        timedelta="6h",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["a", "frac", "eastward_surface_stress"],
+                        out_names=["a", "eastward_surface_stress"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={
+                                    "a": 0.0,
+                                    "frac": 0.0,
+                                    "eastward_surface_stress": 0.0,
+                                },
+                                stds={
+                                    "a": 1.0,
+                                    "frac": 1.0,
+                                    "eastward_surface_stress": 1.0,
+                                },
+                            ),
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name="a",
+                            ocean_fraction_name="frac",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    ocean = ComponentConfig(
+        timedelta="12h",
+        stepper=StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="SphericalFourierNeuralOperatorNet",
+                            config={"scale_factor": 1, "embed_dim": 1, "num_layers": 1},
+                        ),
+                        in_names=["sst", "eastward_surface_wind_stress"],
+                        out_names=["sst"],
+                        next_step_forcing_names=["eastward_surface_wind_stress"],
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                means={"sst": 0.0, "eastward_surface_wind_stress": 0.0},
+                                stds={"sst": 1.0, "eastward_surface_wind_stress": 1.0},
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    return atmosphere, ocean
+
+
+def test_atmosphere_output_scale_flips_the_stress_sign():
+    atmosphere, ocean = _stress_rename_configs()
+    rename = {"eastward_surface_wind_stress": "eastward_surface_stress"}
+    config = CoupledStepperConfig(
+        atmosphere=atmosphere,
+        ocean=ocean,
+        sst_name="sst",
+        atmosphere_output_rename=rename,
+        atmosphere_output_scale={"eastward_surface_wind_stress": -1.0},
+    )
+    assert (
+        config.atmosphere_output_scale_for_ocean_forcing("eastward_surface_wind_stress")
+        == -1.0
+    )
+    assert config.atmosphere_output_scale_for_ocean_forcing("sst") == 1.0
+    # the scale keys are ocean forcing names (after the rename), not atmosphere names
+    with pytest.raises(ValueError, match="atmosphere_output_scale key"):
+        CoupledStepperConfig(
+            atmosphere=atmosphere,
+            ocean=ocean,
+            sst_name="sst",
+            atmosphere_output_rename=rename,
+            atmosphere_output_scale={"eastward_surface_stress": -1.0},
+        )
+    with pytest.raises(ValueError, match="nonzero"):
+        CoupledStepperConfig(
+            atmosphere=atmosphere,
+            ocean=ocean,
+            sst_name="sst",
+            atmosphere_output_rename=rename,
+            atmosphere_output_scale={"eastward_surface_wind_stress": 0.0},
+        )
+
+
 def test_ocean_forcings_from_data_reads_an_exchanged_flux_from_the_data():
     atmosphere = ComponentConfig(
         timedelta="6h",
