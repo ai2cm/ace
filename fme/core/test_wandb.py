@@ -42,7 +42,7 @@ class TestDiskLoggingIntegration:
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True, metrics_log_dir="memory://b/metrics")
             wandb.log({"loss": 0.5}, step=0)
-        assert wandb._disk_logger is None
+        assert not wandb._disk_logger.enabled
 
     def test_disk_logging_rerun_starts_fresh(self, tmp_path):
         log_dir = str(tmp_path / "metrics")
@@ -119,8 +119,7 @@ def _resume_wandb(
 
 
 def _close_disk_logger(wandb: WandB):
-    if wandb._disk_logger is not None:
-        wandb._disk_logger.close()
+    wandb._disk_logger.close()
 
 
 # the checkpoint mark is after the step-30 batch logs; a timings log at step
@@ -222,4 +221,4 @@ def test_mark_checkpoint_without_disk_logging_is_a_no_op():
     wandb = WandB()
     wandb.configure(log_to_wandb=False, metrics_log_dir="memory://b/metrics")
     wandb.mark_checkpoint()
-    assert wandb._disk_logger is None
+    assert not wandb._disk_logger.enabled
