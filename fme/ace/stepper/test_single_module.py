@@ -677,17 +677,16 @@ def test_train_on_batch_pushforward_steps_must_leave_a_loss_step():
             "pushforward_steps": 1,
             "n_forward_steps": TimeLengthSchedule(
                 start_value=3,
-                milestones=[
-                    TimeLengthMilestone(
-                        epoch=2,
-                        value=TimeLengthProbabilities(
-                            outcomes=[
-                                TimeLengthProbability(steps=1, probability=0.5),
-                                TimeLengthProbability(steps=3, probability=0.5),
-                            ]
-                        ),
-                    )
-                ],
+                milestones=[TimeLengthMilestone(epoch=2, value=4)],
+            ),
+        },
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=2, probability=0.5),
+                    TimeLengthProbability(steps=3, probability=0.5),
+                ]
             ),
         },
     ],

@@ -1504,7 +1504,8 @@ class TrainStepperConfig:
             gradients and do not contribute to the optimized loss, so the model
             is trained on inputs it produced itself without being asked to
             improve the steps that produced them. Must be less than the number
-            of loss steps. Cannot be combined with optimize_last_step_only.
+            of loss steps. Cannot be combined with optimize_last_step_only or
+            with a sampled or scheduled n_forward_steps.
             The aggregate ``loss`` metric, including the validation loss used
             to select the best checkpoint, sums only the optimized steps.
         n_ensemble: The number of ensemble members evaluated for each training
@@ -1539,17 +1540,17 @@ class TrainStepperConfig:
             raise ValueError(
                 "pushforward_steps cannot be combined with optimize_last_step_only"
             )
-        schedule = self.n_forward_steps_schedule
-        if (
-            self.pushforward_steps > 0
-            and schedule is not None
-            and self.pushforward_steps >= schedule.min_n_forward_steps
-        ):
-            raise ValueError(
-                f"pushforward_steps ({self.pushforward_steps}) must be less than "
-                "the fewest forward steps n_forward_steps can sample "
-                f"({schedule.min_n_forward_steps})"
-            )
+        if self.pushforward_steps > 0 and self.n_forward_steps is not None:
+            if not isinstance(self.n_forward_steps, int):
+                raise ValueError(
+                    "pushforward_steps cannot be combined with a sampled or "
+                    "scheduled n_forward_steps"
+                )
+            if self.pushforward_steps >= self.n_forward_steps:
+                raise ValueError(
+                    f"pushforward_steps ({self.pushforward_steps}) must be less "
+                    f"than n_forward_steps ({self.n_forward_steps})"
+                )
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
                 self.n_ensemble = 2
