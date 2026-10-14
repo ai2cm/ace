@@ -150,13 +150,7 @@ class WandB:
         """
         Initialize wandb, potentially with resumption logic.
 
-        If `resumable`, truncates the on-disk metrics file back to the last
-        checkpoint, and if the wandb run was resumed, re-logs to wandb the rows
-        wandb never received. The truncation happens even when logging to wandb
-        is off, so the file does not keep rows from training the resumed job
-        redoes. Must be called on all ranks: the root rank does this restore
-        and then waits at a barrier for every other rank, so no rank starts
-        training before the restore is done.
+        Must be called on all ranks, as it contains a barrier.
 
         Args:
             resumable: If True, attempt to resume the run in the experiment directory,
@@ -223,13 +217,8 @@ class WandB:
         """Write the checkpoint mark file, recording the current size of the
         on-disk metrics file and the last step logged.
 
-        Call right after saving a checkpoint that training can resume from.
-        On resume, ``init`` truncates the metrics file back to this size and
-        re-logs to wandb the scalars up to this step that wandb never
-        received. Only the root rank writes the file; other ranks do nothing.
-        Does no logging and no collectives, so it is safe to call from the
-        termination listener's thread (see
-        `fme.core.distributed.shutdown.add_post_abort_callback`).
+        Call right after saving a checkpoint that training can resume from
+        to ensure correct resumption of WandB logging.
         """
         if self._disk_logger is not None:
             self._disk_logger.write_checkpoint_mark()

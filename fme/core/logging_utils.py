@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
-from fme.core.cloud import is_local
+from fme.core.cloud import is_local, is_relative
 from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -41,10 +41,9 @@ class LoggingConfig:
         log_to_file: Whether to log to a file.
         log_to_wandb: Whether to log to Weights & Biases.
         metrics_log_dir: Subdirectory of the experiment directory to write
-            scalar metrics to disk as JSONL, so a resumed job can recover any
-            that wandb lost. Required, since recovering metrics after
-            preemption needs it. If the experiment directory is not on a local
-            file system, disk metric logging is skipped with a warning.
+            scalar metrics to disk as JSONL. Required so a resumed job can
+            recover any that wandb lost. Ignored with a warning if the
+            experiment directory is remote.
         log_format: Format of the log messages.
         level: Sets the logging level.
         wandb_dir_in_experiment_dir: Whether to create the wandb_dir in the
@@ -63,7 +62,7 @@ class LoggingConfig:
     wandb_dir_in_experiment_dir: bool = False
 
     def __post_init__(self):
-        if os.path.isabs(self.metrics_log_dir) or "://" in self.metrics_log_dir:
+        if not is_relative(self.metrics_log_dir):
             raise ValueError(
                 "metrics_log_dir must be a relative path, a subdirectory of the "
                 f"experiment directory, got {self.metrics_log_dir!r}"
