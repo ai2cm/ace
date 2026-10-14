@@ -181,9 +181,12 @@ class InferenceEvaluatorConfig:
             Must be on a local filesystem when ``output_dir`` is set. When
             ``output_dir`` is unset, it also receives the data output and may
             then be a remote directory, with the same limitations as a remote
-            ``output_dir``; in that case logging to a file is not supported (to
-            silence the related warning, set ``log_to_file`` to ``False`` in
-            the :class:`fme.ace.LoggingConfig`).
+            ``output_dir``; in that case logging to a file and writing scalar
+            metrics to disk are not supported (to silence the related warning
+            about the log file, set ``log_to_file`` to ``False`` in the
+            :class:`fme.ace.LoggingConfig`). To keep both while writing data
+            remotely, use a local ``experiment_dir`` and a remote
+            ``output_dir``.
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
