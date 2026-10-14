@@ -1,0 +1,5 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config|extra_env
+
+# Resume the 15-ep rs0 pretrains to 30 epochs under the same wandb runs (constant lr, so equivalent to a fresh 30-ep run).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|ace-samudra-cm4|a4arb5j4|train|high|jupiter+titan|4||3|ai2/ace|max_epochs=30 resume_results.resume_wandb=True|01M4VRR1DGCR2HSC9QJTWSCZMF|||8h||
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|ace-samudra-cm4|f0poiu4k|train|high|jupiter+titan|4||3|ai2/ace|max_epochs=30 resume_results.resume_wandb=True|01M4VRRAJQ0Q8MN36DXRNP0EJN|||8h||
