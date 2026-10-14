@@ -6,9 +6,9 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # smaller node cap of jupiter and titan.
 
 # direct arm: mu3e-3 (solu1ede) straight into the coupled stage, noise added here
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3n_a2s-fto|o0a0rs0|ace-samudra-cm4|solu1ede|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h|MALLOC_ARENA_MAX=4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3n_a2s-fto|o0a0rs0|ace-samudra-cm4|solu1ede|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter+titan|8||3|ai2/ace|seed=0 stepper.ocean.stepper.step.config.builder.config.noise_embed_dim=32 stepper.ocean.stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.ocean.parameter_init.weights_submodule=conditional_model|8h|MALLOC_ARENA_MAX=4
 
 # chain arm: the uncoupled stochastic lin8 finetune of mu3e-3
 # (../ocean_ppad_muon_stoch_lin8), already noise-conditioned. Set the ocean
-# wandb id and flip to train when that run finishes.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3stoch_a2s-fto|o0a0rs0|ace-samudra-cm4|TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
+# wandb id ezqzx1z3 (best_inference_ckpt from beaker 01M4RXX7G88Q31ME4QCASSTAPW).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3stoch_a2s-fto|o0a0rs0|ace-samudra-cm4|ezqzx1z3|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
