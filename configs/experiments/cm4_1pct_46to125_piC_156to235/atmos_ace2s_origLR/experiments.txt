@@ -1,9 +1,12 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs2|01M28TMDSSMJ5MN3YZ4ZT34MV3|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config-dir configs/experiments/cm4_eval/atmos
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs2|01M28TMDSSMJ5MN3YZ4ZT34MV3|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs0|01M3A53BWMKB71VGWYBS1ECF2G|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs1|01M3A53WACSCQKQCGBJF9DRC7S|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs0|01M3A53BWMKB71VGWYBS1ECF2G|trained|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs1|01M3A53WACSCQKQCGBJF9DRC7S|trained|best_inference_ckpt|normal|--min-runtime 8h

@@ -1,44 +1,23 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01SG215WVZK0GCRYZ8QGX2P|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config-dir configs/experiments/cm4_eval/atmos
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01SGEQ8110DHRV7YVN1HH3T|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01WGHA2BM2PF6FT3QA21Y5Q|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01SGVQK06MW6EMARMHNFCT9|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01WGY7QY16SNYX3QKKZMD03|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01SRMP4CNJF3G1NA80A4NZF|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01WHC4V0B4VSRN3RZRXKZNG|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01SS0YWZMNG9D1GMKHSFWSX|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01SSECG5NDPDEBEPAWF7DEK|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01VZ8H41DZ7V6KBS3888S8M|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01VZNEWVRSRRHTQKCVNCQ97|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01W036PBC6WRKC3RXFF8K25|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01WGHA2BM2PF6FT3QA21Y5Q|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01WGY7QY16SNYX3QKKZMD03|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01WHC4V0B4VSRN3RZRXKZNG|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0DK1HQJCGW2D83ZNN9TPQM4|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DK2298DFR9JAR6DJXQ1QE5|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0DKADFAWRQYVR7HGYRETK2H|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|trained|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0||training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GP9GNE4ZMZ5SDN3A2AK24R|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GP9GNE4ZMZ5SDN3A2AK24R|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0GP9GNE4ZMZ5SDN3A2AK24R|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-newinf|01M2TYT9RQP29J1GFTW63C803K|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-newinf|01M2TYT9RQP29J1GFTW63C803K|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-newinf|01M3A4DX2TDEJYTA5YPF4TWA44|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-newinf|01M3A4DX2TDEJYTA5YPF4TWA44|trained|best_inference_ckpt|normal|--min-runtime 8h
 
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|skip_randco2-1xCO2-ic_0003|best_inference_ckpt|high|--min-runtime 2h
@@ -50,6 +29,6 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|skip
 cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|skip_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h
 
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-7day|01M0DKAZ255RJZYJP18S920FZP|run_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h|n_forward_steps=28
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-7day|01M0DKAZ255RJZYJP18S920FZP|ran_abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h|n_forward_steps=28
 
-cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-7day|01M0DKAZ255RJZYJP18S920FZP|run_1xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h|n_forward_steps=28
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2-7day|01M0DKAZ255RJZYJP18S920FZP|ran_1xCO2-ensemble|best_inference_ckpt|high|--min-runtime 2h|n_forward_steps=28
