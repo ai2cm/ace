@@ -17,18 +17,21 @@ docstrings of `generate_paper_configs.py` / `submit_paper_jobs.py`, then check
 the status section below against `argo list`, `beaker`, and the GCS paths
 (weka is not mounted on the submitting machine).
 
-## Status (2026-09-28)
+## Status (2026-09-30)
 
-- **2026-09-28, the norm-ablation eval suites are being regenerated and
-  resubmitted** (144 jobs: 48 cells × besttrain/bestinf/lastepoch, wandb
-  group `ace2-fm-eval-2026-09-28`). The regime base configs gained an ERA5
-  `10year_insample` entry on fm (1995–2004, weight 0), zonal-mean output on
-  every long entry and the `trend` aggregator on the long, 10- and 7-year
-  entries (era5 unrestricted, since its variable list skips levels 2/4/5/6).
-  The watcher ignores eval experiments created before
-  `generate_eval_configs.EVAL_GENERATION_START`; the superseded
-  `ace2-fm-eval-2026-06-26` experiments, wandb runs and result datasets are
-  deleted once the new set has succeeded and matches the old scalars.
+- **2026-09-30, the norm-ablation eval suites are regenerated and the old
+  generation deleted.** All 144 jobs (48 cells × besttrain/bestinf/lastepoch,
+  wandb group `ace2-fm-eval-2026-09-28`) succeeded. The regime base configs
+  gained an ERA5 `10year_insample` entry on fm (1995–2004, weight 0),
+  zonal-mean output on every long entry and the `trend` aggregator on the
+  long, 10- and 7-year entries (era5 unrestricted, since its variable list
+  skips levels 2/4/5/6); every non-weather entry wrote zonal-mean, trend,
+  time-mean and spectrum netCDFs. Old and new scalars agree within the
+  noise-conditioned models' run-to-run spread (no systematic shift, same
+  long-rollout blowup count). The superseded `ace2-fm-eval-2026-06-26`
+  generation is deleted: 144 Beaker experiments, their 144 result datasets
+  and 180 wandb runs (incl. 4 crashed and 32 stale 09-17 nc-swin-v2.1 runs).
+  `generate_eval_configs.EVAL_GENERATION_START` now filters nothing.
 - **2026-09-28, the nc-swin-v2.1 blowup diagnostics are all in, and the
   cause is residual prediction on the Swin backbone as such**, not the v2.1
   variant, its size, or numerics. All four ran to completion (exit 0) in
