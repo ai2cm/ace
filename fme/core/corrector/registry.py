@@ -54,7 +54,10 @@ class CorrectorConfigABC(abc.ABC):
         ...
 
     def validate_names(
-        self, out_names: Iterable[str], forcing_names: Iterable[str]
+        self,
+        out_names: Iterable[str],
+        forcing_names: Iterable[str],
+        in_names: Iterable[str],
     ) -> None:
         """Check the step's names against what the corrector reads.
 
@@ -63,6 +66,7 @@ class CorrectorConfigABC(abc.ABC):
         Args:
             out_names: Names the step outputs (the corrector's gen_data).
             forcing_names: Names the corrector receives as forcing_data.
+            in_names: Names the step takes as input (the corrector's input_data).
         """
 
     @final

@@ -51,9 +51,14 @@ class CorrectorSelector(CorrectorConfigABC):
         return self._corrector_config_instance.corrector_disabled_epochs == 0
 
     def validate_names(
-        self, out_names: Iterable[str], forcing_names: Iterable[str]
+        self,
+        out_names: Iterable[str],
+        forcing_names: Iterable[str],
+        in_names: Iterable[str],
     ) -> None:
-        self._corrector_config_instance.validate_names(out_names, forcing_names)
+        self._corrector_config_instance.validate_names(
+            out_names, forcing_names, in_names
+        )
 
     @classmethod
     def register(cls, type_name):

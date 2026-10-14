@@ -421,36 +421,131 @@ _AM4_FLUX_COUNTERPART: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 
 
 @dataclasses.dataclass
+class HemispherePair:
+    """A constant per hemisphere (north: lat > 0)."""
+
+    north: float
+    south: float
+
+
+@dataclasses.dataclass
+class CorrectedAM4FluxConfig:
+    """AM4 surface fluxes mapped to SIS2-equivalent fluxes, per total cell area.
+
+    With x^A the AM4 counterpart of x (see ``SurfaceFluxAnchorConfig``), h the
+    hemisphere, and fields at the step endpoints k-1 (input) and k (gen)::
+
+        c    = (osif(k-1) + osif(k)) / 2                       ice fraction of ssf
+        T    = (TS(k-1) + TS(k)) / 2      degC, finite endpoints only;
+               min(T_w, 0) if neither is finite
+        T_w  = (sst(k-1) + sst(k)) / 2 - 273.15   degC; 0 if an endpoint is missing
+        f_x  = x^A ssf + ssf (a_{x,h} c + b_{x,h} c^2)
+               + [x = LH] k_h (L_f / L_v) LH^A ssf P
+        P    = c e_i(T) / (c e_i(T) + (1 - c) e_w(T_w))        0 where c = 0
+        e_i  = 6.112 exp(22.46 T / (272.62 + T))              hPa, over ice
+        e_w  = 6.112 exp(17.62 T_w / (243.12 + T_w))          hPa, over water
+
+    T is clipped to [-80, 0] and T_w to [-80, 40] degC before e_i, e_w (keeps
+    them finite). Defaults: per-hemisphere least-squares fit of the pentad
+    hemisphere integrals on interior sea ice, CM4 piControl and 1pctCO2
+    (analysis frozen-deficit-sensible-brine 07, ``theta_interior_S``).
+
+    Parameters:
+        a: Coefficient of c ssf per flux and hemisphere, W/m**2.
+        b: Coefficient of c**2 ssf per flux and hemisphere, W/m**2.
+        k_latent: Weight k of the sublimation term on LH per hemisphere.
+        surface_temperature_name: SIS2 ice surface temperature, degC.
+        sea_ice_fraction_name: Sea-ice fraction of the sea surface.
+    """
+
+    a: dict[str, HemispherePair] = dataclasses.field(
+        default_factory=lambda: {
+            "SW_total_area": HemispherePair(-1.6304945127633705, -0.4022235549041929),
+            "LW_total_area": HemispherePair(-0.3281091888012141, -0.007214586865773239),
+            "LH_total_area": HemispherePair(0.9234031941869304, 3.1743228690416596),
+            "SH_total_area": HemispherePair(-1.4440363502988236, -0.14606114629674224),
+        }
+    )
+    b: dict[str, HemispherePair] = dataclasses.field(
+        default_factory=lambda: {
+            "SW_total_area": HemispherePair(1.7212766373926998, 0.4282568517898835),
+            "LW_total_area": HemispherePair(0.37650403607943506, 0.006496533866703292),
+            "LH_total_area": HemispherePair(-0.994746896743058, -3.7104199131610978),
+            "SH_total_area": HemispherePair(1.65059116441646, 0.16054086385235647),
+        }
+    )
+    k_latent: HemispherePair = dataclasses.field(
+        default_factory=lambda: HemispherePair(0.8797973784044766, 0.6723897652236426)
+    )
+    surface_temperature_name: str = "TS"
+    sea_ice_fraction_name: str = "ocean_sea_ice_fraction"
+
+    def __post_init__(self):
+        for label, coeffs in (("a", self.a), ("b", self.b)):
+            missing = [f for f in ANCHORED_FLUXES if f not in coeffs]
+            unknown = [f for f in coeffs if f not in ANCHORED_FLUXES]
+            if missing or unknown:
+                raise ValueError(
+                    f"{label} needs exactly the keys {list(ANCHORED_FLUXES)}; "
+                    f"missing {missing}, unknown {unknown}"
+                )
+
+    @property
+    def prognostic_names(self) -> list[str]:
+        """Read at both step endpoints, so in in_names and out_names."""
+        return [self.surface_temperature_name, self.sea_ice_fraction_name, "sst"]
+
+
+AnchorRegion = Literal["open_ocean", "open_ocean_and_ice"]
+
+
+@dataclasses.dataclass
 class SurfaceFluxAnchorConfig:
-    """Block-anchors each generated SIS2 surface flux to its AM4 counterpart.
+    """Block-anchors each generated SIS2 surface flux to an AM4-derived target.
 
     For x in ``fluxes``, on the anchor set K::
 
         x^A  = AM4 counterpart x ssf     (SW: DSWRFsfc - USWRFsfc,
                                           LW: DLWRFsfc - ULWRFsfc,
                                           LH: LHTFLsfc, SH: SHTFLsfc)
-        x    = x_hat + <x^A>_B - <x_hat>_B    on K;  x_hat off K
+        f_x  = x^A                       ``target`` None
+             = CorrectedAM4FluxConfig f_x  otherwise
+        x    = x_hat + <f_x>_B - <x_hat>_B    on K;  x_hat off K
 
     <.>_B is the a A-weighted mean over B ∩ K, B the ``block_size`` x
     ``block_size`` lat-lon blocks of the local grid, so
-    sum_{B ∩ K} a A x = sum_{B ∩ K} a A x^A per block and flux, A from
+    sum_{B ∩ K} a A x = sum_{B ∩ K} a A f_x per block and flux, A from
     ``area_basis`` (1 per total cell area).
+
+    Regions, with S = (m(k-1) > 0 and m(k) > 0 and ssf > 0) the sea-ice support
+    and M = (input ocean_fraction == 1 and ssf > 0) minus S::
+
+        coast     = ssf < interior_min_sea_surface_fraction
+                    or land_fraction > interior_max_land_fraction
+        H         = ssf == 1 and land_fraction > 0      (land hidden in ssf)
+        "open_ocean"          K = M
+        "open_ocean_and_ice"  K = (M ∪ S) minus (coast and not H)
 
     Parameters:
         fluxes: Generated fluxes to anchor, per total cell area.
         block_size: Block edge n in grid cells; must divide the local grid.
-        region: Anchor set K. "open_ocean": M = (input ocean_fraction == 1 and
-            ssf > 0) minus the sea-ice support S.
-        frozen_mass_name: Frozen mass defining S = (m(k-1) > 0 and m(k) > 0 and
-            ssf > 0), as in ``SeaIceHfdsCorrectionConfig``.
+        region: Anchor set K.
+        frozen_mass_name: Frozen mass defining S, as in
+            ``SeaIceHfdsCorrectionConfig``.
+        target: AM4-to-SIS2 flux map f_x; None anchors to x^A.
+        interior_min_sea_surface_fraction: ssf below this is coastal.
+        interior_max_land_fraction: land_fraction above this is coastal.
     """
 
     fluxes: list[AnchoredFlux] = dataclasses.field(
         default_factory=lambda: list(ANCHORED_FLUXES)
     )
     block_size: int = 5
-    region: Literal["open_ocean"] = "open_ocean"
+    region: AnchorRegion = "open_ocean"
     frozen_mass_name: str = "frozen_mass_total_area"
+    target: CorrectedAM4FluxConfig | None = None
+    interior_min_sea_surface_fraction: float = 0.999
+    interior_max_land_fraction: float = 1e-6
 
     def __post_init__(self):
         if self.block_size < 1:
@@ -473,18 +568,45 @@ class SurfaceFluxAnchorConfig:
             names.extend(positive + negative)
         return names
 
-    def validate_names(self, out_names: Iterable[str], forcing_names: Iterable[str]):
+    def validate_names(
+        self,
+        out_names: Iterable[str],
+        forcing_names: Iterable[str],
+        in_names: Iterable[str],
+    ):
         out_names, forcing_names = set(out_names), set(forcing_names)
+        in_names = set(in_names)
         missing_out = [f for f in self.fluxes if f not in out_names]
         if missing_out:
             raise ValueError(
                 f"surface_flux_anchor fluxes must be in out_names: {missing_out}"
             )
-        missing_forcing = [n for n in self.am4_names if n not in forcing_names]
+        am4_names = list(self.am4_names)
+        if self.target is not None and "LH_total_area" in self.fluxes:
+            am4_names += ["LHTFLsfc"]
+        missing_forcing = [n for n in am4_names if n not in forcing_names]
         if missing_forcing:
             raise ValueError(
                 "surface_flux_anchor needs AM4 fluxes in the corrector's forcing "
                 f"(in_names or corrector_forcing_names): {missing_forcing}"
+            )
+        if self.target is not None:
+            not_prognostic = [
+                n
+                for n in self.target.prognostic_names
+                if n not in in_names or n not in out_names
+            ]
+            if not_prognostic:
+                raise ValueError(
+                    "surface_flux_anchor target needs these in in_names and "
+                    f"out_names: {not_prognostic}"
+                )
+        if self.region == "open_ocean_and_ice" and "land_fraction" not in (
+            in_names | forcing_names
+        ):
+            raise ValueError(
+                "surface_flux_anchor region open_ocean_and_ice needs land_fraction "
+                "in in_names or forcing"
             )
 
 
@@ -740,6 +862,7 @@ class SurfaceFluxAnchor:
 
     config: SurfaceFluxAnchorConfig
     area_weight: AreaWeight
+    north: torch.Tensor  # (lat, 1) bool, local latitude rows
 
     def __call__(
         self,
@@ -759,26 +882,148 @@ class SurfaceFluxAnchor:
             input_data[cfg.frozen_mass_name], gen_data[cfg.frozen_mass_name], ssf
         )
         K = _open_ocean_cells(inp, on_ice)
+        if cfg.region == "open_ocean_and_ice":
+            K = (K | on_ice) & ~_coast_without_hidden_land(
+                ssf,
+                inp.land_fraction,
+                cfg.interior_min_sea_surface_fraction,
+                cfg.interior_max_land_fraction,
+            )
         w = torch.where(
             K,
             self.area_weight.local(self.area_weight.field(input_data, forcing_data)),
             0.0,
         )
+        x_am4: dict[str, torch.Tensor] = {
+            flux: _am4_flux(flux, forcing_data, ssf, gen_data[flux])
+            for flux in cfg.fluxes
+        }
+        if cfg.target is None:
+            target = x_am4
+        else:
+            target = corrected_am4_fluxes(
+                cfg.target,
+                x_am4,
+                forcing_data["LHTFLsfc"] * ssf,
+                input_data,
+                gen_data,
+                ssf,
+                self.north.to(ssf.device),
+            )
         out: TensorDict = {}
         for flux in cfg.fluxes:
             x_hat = gen_data[flux]
-            positive, negative = _AM4_FLUX_COUNTERPART[flux]
-            x_am4 = (
-                sum((forcing_data[n] for n in positive), torch.zeros_like(x_hat))
-                - sum((forcing_data[n] for n in negative), torch.zeros_like(x_hat))
-            ) * ssf
             anchored = (
                 x_hat
-                + block_mean(x_am4, w, cfg.block_size)
+                + block_mean(target[flux], w, cfg.block_size)
                 - block_mean(x_hat, w, cfg.block_size)
             )
             out[flux] = torch.where(K, anchored, x_hat)
         return out, corrector_state
+
+
+def _am4_flux(
+    flux: str, forcing_data: TensorMapping, ssf: torch.Tensor, like: torch.Tensor
+) -> torch.Tensor:
+    """x^A per total cell area."""
+    positive, negative = _AM4_FLUX_COUNTERPART[flux]
+    return (
+        sum((forcing_data[n] for n in positive), torch.zeros_like(like))
+        - sum((forcing_data[n] for n in negative), torch.zeros_like(like))
+    ) * ssf
+
+
+def _coast_without_hidden_land(
+    ssf: torch.Tensor,
+    land_fraction: torch.Tensor,
+    min_ssf: float,
+    max_land_fraction: float,
+) -> torch.Tensor:
+    """Coast and not H; see ``SurfaceFluxAnchorConfig``."""
+    coast = (ssf < min_ssf) | (land_fraction > max_land_fraction)
+    hidden_land = (ssf == 1) & (land_fraction > 0)
+    return coast & ~hidden_land
+
+
+_T_MIN_CELSIUS, _T_MAX_CELSIUS = -80.0, 40.0
+
+
+def _saturation_vapor_pressure_ice(T: torch.Tensor) -> torch.Tensor:
+    return 6.112 * torch.exp(22.46 * T / (272.62 + T))
+
+
+def _saturation_vapor_pressure_water(T: torch.Tensor) -> torch.Tensor:
+    return 6.112 * torch.exp(17.62 * T / (243.12 + T))
+
+
+def _endpoint_mean_finite(t0: torch.Tensor, t1: torch.Tensor):
+    """Mean of the finite endpoints and whether any endpoint was finite."""
+    f0, f1 = torch.isfinite(t0), torch.isfinite(t1)
+    n = f0.to(t0.dtype) + f1.to(t0.dtype)
+    total = torch.where(f0, t0, 0.0) + torch.where(f1, t1, 0.0)
+    return total / torch.clamp(n, min=1.0), n > 0
+
+
+def corrected_am4_fluxes(
+    config: CorrectedAM4FluxConfig,
+    x_am4: Mapping[str, torch.Tensor],
+    lh_am4: torch.Tensor,
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    ssf: torch.Tensor,
+    north: torch.Tensor,
+) -> TensorDict:
+    """f_x of ``CorrectedAM4FluxConfig`` for each flux in ``x_am4``.
+
+    Args:
+        config: Constants and field names.
+        x_am4: x^A per total cell area, by flux name.
+        lh_am4: LH^A per total cell area (LHTFLsfc ssf).
+        input_data: Fields at k-1.
+        gen_data: Fields at k.
+        ssf: Sea surface fraction.
+        north: Northern-hemisphere mask, broadcastable to the fields.
+    """
+    c = 0.5 * (
+        input_data[config.sea_ice_fraction_name]
+        + gen_data[config.sea_ice_fraction_name]
+    )
+    sst0, sst1 = input_data["sst"], gen_data["sst"]
+    sst_ok = torch.isfinite(sst0) & torch.isfinite(sst1) & (sst0 > 0) & (sst1 > 0)
+    T_w = torch.where(
+        sst_ok,
+        0.5 * (torch.where(sst_ok, sst0, 0.0) + torch.where(sst_ok, sst1, 0.0))
+        - FREEZING_TEMPERATURE_KELVIN,
+        0.0,
+    )
+    T, any_finite = _endpoint_mean_finite(
+        input_data[config.surface_temperature_name],
+        gen_data[config.surface_temperature_name],
+    )
+    T = torch.where(any_finite, T, torch.clamp(T_w, max=0.0))
+    T = torch.clamp(T, _T_MIN_CELSIUS, 0.0)
+    T_w = torch.clamp(T_w, _T_MIN_CELSIUS, _T_MAX_CELSIUS)
+    num = c * _saturation_vapor_pressure_ice(T)
+    den = num + (1 - c) * _saturation_vapor_pressure_water(T_w)
+    sublimation_share = torch.where(den > 0, num / torch.where(den > 0, den, 1.0), 0.0)
+
+    def per_hemisphere(pair: HemispherePair) -> torch.Tensor:
+        return torch.where(north, c.new_tensor(pair.north), c.new_tensor(pair.south))
+
+    out: TensorDict = {}
+    for flux, xa in x_am4.items():
+        a, b = per_hemisphere(config.a[flux]), per_hemisphere(config.b[flux])
+        f = xa + ssf * (a * c + b * c**2)
+        if flux == "LH_total_area":
+            f = (
+                f
+                + per_hemisphere(config.k_latent)
+                * (SIS2_LATENT_HEAT_OF_FUSION / LATENT_HEAT_OF_VAPORIZATION)
+                * lh_am4
+                * sublimation_share
+            )
+        out[flux] = f
+    return out
 
 
 def block_mean(x: torch.Tensor, w: torch.Tensor, n: int) -> torch.Tensor:
@@ -1130,8 +1375,8 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             sea-surface-fraction-weighted global mean of the generated ``zos``
             to a reference value.
         surface_flux_anchor: Optional block anchor of generated SIS2 surface
-            fluxes to AM4; runs before ``surface_energy_flux_correction`` so
-            it reads the anchored fluxes.
+            fluxes to AM4 or corrected AM4; runs before
+            ``surface_energy_flux_correction`` so it reads the anchored fluxes.
     """
 
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
@@ -1144,10 +1389,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     surface_flux_anchor: SurfaceFluxAnchorConfig | None = None
 
     def validate_names(
-        self, out_names: Iterable[str], forcing_names: Iterable[str]
+        self,
+        out_names: Iterable[str],
+        forcing_names: Iterable[str],
+        in_names: Iterable[str],
     ) -> None:
         if self.surface_flux_anchor is not None:
-            self.surface_flux_anchor.validate_names(out_names, forcing_names)
+            self.surface_flux_anchor.validate_names(out_names, forcing_names, in_names)
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -1241,6 +1489,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                         torch.cos(torch.deg2rad(lat)).unsqueeze(-1),
                         self.surface_flux_anchor.area_basis,
                     ),
+                    (lat > 0).unsqueeze(-1),
                 )
             )
         sefc = self.surface_energy_flux_correction

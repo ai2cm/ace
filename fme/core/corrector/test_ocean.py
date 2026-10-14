@@ -15,6 +15,8 @@ from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.corrector.ocean import (
     AnchoredFlux,
     AreaWeight,
+    CorrectedAM4FluxConfig,
+    HemispherePair,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     OceanSaltContentBudgetConfig,
@@ -30,6 +32,7 @@ from fme.core.corrector.ocean import (
     _compute_ocean_net_surface_energy_flux,
     area_basis,
     block_mean,
+    corrected_am4_fluxes,
     sis2_ice_deficit,
     surface_flux_term,
 )
@@ -2211,10 +2214,10 @@ def test_surface_flux_anchor_validate_names(out_names, forcing_names, match):
         config={"surface_flux_anchor": {"block_size": 3}},
     )
     if match is None:
-        selector.validate_names(out_names, forcing_names)
+        selector.validate_names(out_names, forcing_names, out_names)
     else:
         with pytest.raises(ValueError, match=match):
-            selector.validate_names(out_names, forcing_names)
+            selector.validate_names(out_names, forcing_names, out_names)
 
 
 def _flux_anchor_step_config(corrector_forcing_names):
@@ -2253,3 +2256,325 @@ def test_surface_flux_anchor_config_from_state():
         3,
         "open_ocean",
     )
+
+
+# --- corrected-AM4 anchor target on open ocean and sea ice ------------------
+
+
+def _reference_corrected_am4(input_data, gen_data, forcing_data, north, theta):
+    """numpy restatement of frozen-deficit-sensible-brine
+    ``07_producer.py::diagnostic_sis2_flux`` (with its ``temperatures`` T_S
+    branch and ``p_form``), float64, keyed by fme flux name."""
+    import numpy as np
+
+    def a(t):
+        return t.double().cpu().numpy()
+
+    ssf = a(forcing_data["sea_surface_fraction"])
+    c = 0.5 * (
+        a(input_data["ocean_sea_ice_fraction"]) + a(gen_data["ocean_sea_ice_fraction"])
+    )
+    sst = np.stack([a(input_data["sst"]), a(gen_data["sst"])])
+    Tw = np.where((sst[0] > 0) & (sst[1] > 0), 0.5 * (sst[0] + sst[1]) - 273.15, 0.0)
+    t0, t1 = a(input_data["TS"]), a(gen_data["TS"])
+    n = np.isfinite(t0).astype(float) + np.isfinite(t1).astype(float)
+    T = np.where(
+        n > 0,
+        (np.nan_to_num(t0) + np.nan_to_num(t1)) / np.maximum(n, 1),
+        np.minimum(Tw, 0.0),
+    )
+    T = np.clip(np.where(np.isfinite(T), T, 0.0), -80.0, 0.0)
+    Tw = np.clip(Tw, -80.0, 40.0)
+    num = c * 6.112 * np.exp(22.46 * T / (272.62 + T))
+    den = num + (1 - c) * 6.112 * np.exp(17.62 * Tw / (243.12 + Tw))
+    f = {k: a(v) for k, v in forcing_data.items()}
+    xa = {
+        "SW": f["DSWRFsfc"] - f["USWRFsfc"],
+        "LW": f["DLWRFsfc"] - f["ULWRFsfc"],
+        "LH": f["LHTFLsfc"],
+        "SH": f["SHTFLsfc"],
+    }
+    out = {}
+    for x in ("SW", "LW", "LH", "SH"):
+        par = theta[x]
+        pick = lambda key: np.where(north, par["north"][key], par["south"][key])  # noqa: E731
+        out[x] = xa[x] * ssf + ssf * (pick("a") * c + pick("b") * c**2)
+        if x == "LH":
+            share = np.where(den > 0, num / np.where(den > 0, den, 1.0), 0.0)
+            out[x] = out[x] + pick("k") * 3.34e5 / 2.5e6 * xa["LH"] * ssf * share
+    return {f"{x}_total_area": torch.as_tensor(v) for x, v in out.items()}
+
+
+def _theta(config: CorrectedAM4FluxConfig):
+    """07-constants.yaml layout {flux: {hemisphere: {a, b, k}}} of a config."""
+    return {
+        flux.removesuffix("_total_area"): {
+            h: {
+                "a": getattr(config.a[flux], h),
+                "b": getattr(config.b[flux], h),
+                "k": getattr(config.k_latent, h),
+            }
+            for h in ("north", "south")
+        }
+        for flux in _FLUXES
+    }
+
+
+_ICE_H = (5, 0)  # hidden land: ssf == 1, land_fraction > 0
+_ICE_COAST = (5, 2)  # coast_noH: ssf < 0.999
+_TS_ONE_NAN = (0, 1)
+_TS_BOTH_NAN = (5, 3)
+
+
+def _target_case(seed=3):
+    """_flux_case with sea ice in both hemispheres (rows 0, 1 south; row 5
+    north), an H ice cell, a coastal ice cell, ocean_sea_ice_fraction, TS
+    (NaN at some endpoints) and larger AM4 fluxes."""
+    input_data, gen_data, forcing_data = _flux_case()
+    g = torch.Generator().manual_seed(seed)
+
+    def r(lo, hi):
+        return lo + (hi - lo) * torch.rand(_OO_SHAPE, generator=g)
+
+    ssf = forcing_data["sea_surface_fraction"].clone()
+    land = forcing_data["land_fraction"].clone()
+    ssf[:, _ICE_COAST[0], _ICE_COAST[1]] = 0.9
+    land[:, _ICE_COAST[0], _ICE_COAST[1]] = 0.1
+    land[:, _ICE_H[0], _ICE_H[1]] = 0.2
+    for d in (input_data, forcing_data):
+        d["sea_surface_fraction"], d["land_fraction"] = ssf, land
+    m = input_data["frozen_mass_total_area"].clone()
+    m[:, 5, :5] = r(100.0, 900.0)[:, 5, :5]
+    input_data["frozen_mass_total_area"] = m
+    gen_data["frozen_mass_total_area"] = m * 1.1
+    ice = m > 0
+    for d in (input_data, gen_data):
+        d["ocean_sea_ice_fraction"] = torch.where(ice, r(0.05, 1.0), 0.0)
+        d["TS"] = torch.where(ice, r(-30.0, -0.5), 0.0)
+    input_data["TS"][:, _TS_ONE_NAN[0], _TS_ONE_NAN[1]] = float("nan")
+    for d in (input_data, gen_data):
+        d["TS"][:, _TS_BOTH_NAN[0], _TS_BOTH_NAN[1]] = float("nan")
+    for name in ("DSWRFsfc", "USWRFsfc", "DLWRFsfc", "ULWRFsfc"):
+        forcing_data[name] = r(100.0, 400.0)
+    forcing_data["LHTFLsfc"] = r(-5.0, 60.0)
+    forcing_data["SHTFLsfc"] = r(-30.0, 30.0)
+    return input_data, gen_data, forcing_data
+
+
+def _north():
+    return (_OO_LAT > 0).unsqueeze(-1)
+
+
+def _fme_target(data, config=None):
+    input_data, gen_data, forcing_data = data
+    config = CorrectedAM4FluxConfig() if config is None else config
+    ssf = forcing_data["sea_surface_fraction"]
+    x_am4: dict[str, torch.Tensor] = {f: _flux_am4(forcing_data, f) for f in _FLUXES}
+    return corrected_am4_fluxes(
+        config,
+        x_am4,
+        forcing_data["LHTFLsfc"] * ssf,
+        input_data,
+        gen_data,
+        ssf,
+        _north(),
+    )
+
+
+def test_corrected_am4_matches_reference():
+    data = _target_case()
+    config = CorrectedAM4FluxConfig(
+        a={f: HemispherePair(3.0 + i, -2.0 - i) for i, f in enumerate(_FLUXES)},
+        b={f: HemispherePair(-4.0 + i, 5.0 - i) for i, f in enumerate(_FLUXES)},
+        k_latent=HemispherePair(0.9, 0.7),
+    )
+    for cfg in (CorrectedAM4FluxConfig(), config):
+        got = _fme_target(data, cfg)
+        input_data, gen_data, forcing_data = data
+        ref = _reference_corrected_am4(
+            input_data, gen_data, forcing_data, _north().numpy(), _theta(cfg)
+        )
+        for flux in _FLUXES:
+            assert torch.isfinite(got[flux]).all(), flux
+            torch.testing.assert_close(
+                got[flux].double(), ref[flux], rtol=1e-5, atol=1e-4
+            )
+    lh = _fme_target(data, config)["LH_total_area"]
+    no_k = dataclasses.replace(config, k_latent=HemispherePair(0.0, 0.0))
+    assert not torch.allclose(lh, _fme_target(data, no_k)["LH_total_area"])
+
+
+def test_corrected_am4_identity_without_ice():
+    input_data, gen_data, forcing_data = _target_case()
+    for d in (input_data, gen_data):
+        d["ocean_sea_ice_fraction"] = torch.zeros_like(d["ocean_sea_ice_fraction"])
+    got = _fme_target((input_data, gen_data, forcing_data))
+    for flux in _FLUXES:
+        torch.testing.assert_close(got[flux], _flux_am4(forcing_data, flux))
+
+
+def test_corrected_am4_surface_temperature_fill():
+    """One finite endpoint: T is that endpoint. None: T = min(T_w, 0)."""
+    data = _target_case()
+    input_data, gen_data, _ = data
+    lh = _fme_target(data)["LH_total_area"]
+    filled_in, filled_gen = dict(input_data), dict(gen_data)
+    filled_in["TS"] = input_data["TS"].clone()
+    filled_gen["TS"] = gen_data["TS"].clone()
+    i, j = _TS_ONE_NAN
+    filled_in["TS"][:, i, j] = gen_data["TS"][:, i, j]
+    i, j = _TS_BOTH_NAN
+    T_w = 0.5 * (input_data["sst"] + gen_data["sst"]) - 273.15
+    for d in (filled_in, filled_gen):
+        d["TS"][:, i, j] = torch.clamp(T_w[:, i, j], max=0.0)
+    lh_filled = _fme_target((filled_in, filled_gen, data[2]))["LH_total_area"]
+    assert torch.isfinite(lh).all()
+    torch.testing.assert_close(lh, lh_filled)
+
+
+def _ice_anchor_config(target=True, block_size=3):
+    return OceanCorrectorConfig(
+        surface_flux_anchor=SurfaceFluxAnchorConfig(
+            block_size=block_size,
+            region="open_ocean_and_ice",
+            target=CorrectedAM4FluxConfig() if target else None,
+        )
+    )
+
+
+def _ice_anchor_set(input_data, gen_data):
+    """K = (M ∪ S) minus coast_noH, restated."""
+    ssf, land = input_data["sea_surface_fraction"], input_data["land_fraction"]
+    S = (
+        (input_data["frozen_mass_total_area"] > 0)
+        & (gen_data["frozen_mass_total_area"] > 0)
+        & (ssf > 0)
+    )
+    coast_noH = ((ssf < 0.999) | (land > 1e-6)) & ~((ssf == 1) & (land > 0))
+    return (_anchor_set(input_data, gen_data) | S) & ~coast_noH
+
+
+@pytest.mark.parametrize("n", [1, 3, 6])
+@pytest.mark.parametrize("target", [True, False], ids=["corrected", "raw"])
+def test_surface_flux_anchor_ice_region_block_integrals_equal_target(n, target):
+    data = _target_case()
+    input_data, gen_data, forcing_data = data
+    out = _run_corrected(_ice_anchor_config(target, n), data).corrected
+    K = _ice_anchor_set(input_data, gen_data)
+    assert K[:, _ICE_H[0], _ICE_H[1]].all()
+    assert not K[:, _ICE_COAST[0], _ICE_COAST[1]].any()
+    assert K[:, 0, :5].all() and K[:, 5, 3].all()  # south and north ice
+    f = (
+        _fme_target(data)
+        if target
+        else {x: _flux_am4(forcing_data, x) for x in _FLUXES}
+    )
+    w = torch.where(K, _OO_AREA.double(), 0.0)
+    shape = (_OO_SHAPE[0], 6 // n, n, 6 // n, n)
+    for flux in _FLUXES:
+        x = out[flux].cpu().double()
+        fx = f[flux].double()
+        blocks_x = (w * x).reshape(shape).sum(dim=(-3, -1))
+        blocks_f = (w * fx).reshape(shape).sum(dim=(-3, -1))
+        scale = (w * fx.abs()).sum() + (w * x.abs()).sum()
+        torch.testing.assert_close(blocks_x, blocks_f, atol=1e-5 * scale, rtol=0)
+        torch.testing.assert_close(x[~K], gen_data[flux][~K].double())
+
+
+def test_surface_flux_anchor_default_is_raw_am4_open_ocean():
+    anchor = SurfaceFluxAnchorConfig()
+    assert (anchor.region, anchor.target) == ("open_ocean", None)
+    data = _target_case()
+    raw = _run_corrected(_flux_anchor_config(), data).corrected
+    with_region = OceanCorrectorConfig(
+        surface_flux_anchor=SurfaceFluxAnchorConfig(
+            block_size=3, region="open_ocean", target=None
+        )
+    )
+    same = _run_corrected(with_region, data).corrected
+    for flux in _FLUXES:
+        torch.testing.assert_close(raw[flux], same[flux])
+
+
+def test_surface_flux_anchor_ice_region_gradients_finite():
+    input_data, gen_data, forcing_data = _target_case()
+    for name in [*_FLUXES, "TS", "ocean_sea_ice_fraction", "sst"]:
+        gen_data[name] = gen_data[name].clone().requires_grad_(True)
+    out = _ice_anchor_config()._build(
+        LatLonOperations(_OO_AREA), None, _DT, lat=_OO_LAT
+    )(input_data, gen_data, forcing_data, None)
+    sum(out.corrected[f].pow(2).sum() for f in _FLUXES).backward()
+    for name in [*_FLUXES, "TS", "ocean_sea_ice_fraction", "sst"]:
+        g = gen_data[name].grad
+        assert g is not None and torch.isfinite(g).all(), name
+
+
+def test_corrected_am4_config_needs_every_flux():
+    coeffs = CorrectedAM4FluxConfig().a
+    missing = {k: v for k, v in coeffs.items() if k != "SH_total_area"}
+    unknown = {**coeffs, "X_total_area": HemispherePair(0.0, 0.0)}
+    with pytest.raises(ValueError, match="a needs exactly"):
+        CorrectedAM4FluxConfig(a=missing)
+    with pytest.raises(ValueError, match="b needs exactly"):
+        CorrectedAM4FluxConfig(b=missing)
+    with pytest.raises(ValueError, match="unknown.*X_total_area"):
+        CorrectedAM4FluxConfig(a=unknown)
+
+
+_TARGET_NAMES = ["TS", "ocean_sea_ice_fraction", "sst"]
+
+
+@pytest.mark.parametrize(
+    "in_names, out_names, forcing_names, match",
+    [
+        (_TARGET_NAMES + ["land_fraction"], _FLUXES + _TARGET_NAMES, _AM4_NAMES, None),
+        (
+            ["sst", "ocean_sea_ice_fraction", "land_fraction"],
+            _FLUXES + _TARGET_NAMES,
+            _AM4_NAMES,
+            "TS",
+        ),
+        (
+            _TARGET_NAMES + ["land_fraction"],
+            _FLUXES + ["sst", "TS"],
+            _AM4_NAMES,
+            "ocean_sea_ice_fraction",
+        ),
+        (_TARGET_NAMES, _FLUXES + _TARGET_NAMES, _AM4_NAMES, "land_fraction"),
+        (_TARGET_NAMES, _FLUXES + _TARGET_NAMES, _AM4_NAMES + ["land_fraction"], None),
+    ],
+)
+def test_surface_flux_anchor_target_validate_names(
+    in_names, out_names, forcing_names, match
+):
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config={
+            "surface_flux_anchor": {
+                "block_size": 3,
+                "region": "open_ocean_and_ice",
+                "target": {},
+            }
+        },
+    )
+    if match is None:
+        selector.validate_names(out_names, forcing_names, in_names)
+    else:
+        with pytest.raises(ValueError, match=match):
+            selector.validate_names(out_names, forcing_names, in_names)
+
+
+def test_surface_flux_anchor_target_from_state():
+    config = OceanCorrectorConfig.from_state(
+        {
+            "surface_flux_anchor": {
+                "region": "open_ocean_and_ice",
+                "block_size": 9,
+                "target": {"k_latent": {"north": 1.0, "south": 0.5}},
+            }
+        }
+    )
+    anchor = config.surface_flux_anchor
+    assert anchor is not None and anchor.target is not None
+    assert anchor.target.k_latent == HemispherePair(1.0, 0.5)
+    assert anchor.target.a == CorrectedAM4FluxConfig().a
