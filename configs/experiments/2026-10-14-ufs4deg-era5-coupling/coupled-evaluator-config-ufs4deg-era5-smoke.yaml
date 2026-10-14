@@ -1,0 +1,54 @@
+# Smoke test of the UFS 4deg ocean coupled to the ERA5 4deg daily ACE2S atmosphere: 1 IC, 12 coupled steps (60 days),
+# two-checkpoint form (no coupled fine-tune). Exercises the aligned ERA5 coupled-atmosphere store (-6 h relabel, UFS
+# fractions), the stress rename + sign flip, and the 5 daily atmosphere steps per 5-day ocean step.
+experiment_dir: /results
+checkpoint_path:
+  ocean:
+    timedelta: 5D
+    path: /ocean_ckpt.tar
+  atmosphere:
+    timedelta: 1D
+    path: /atmos_ckpt.tar
+  sst_name: sst
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  atmosphere_output_rename:
+    eastward_surface_wind_stress: eastward_surface_stress
+    northward_surface_wind_stress: northward_surface_stress
+  atmosphere_output_scale:  # ERA5 stress is the stress on the ocean; the UFS ocean was trained on FV3's momentum flux (CM4 sign)
+    eastward_surface_wind_stress: -1.0
+    northward_surface_wind_stress: -1.0
+n_coupled_steps: 12
+coupled_steps_in_memory: 4
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /ufs4deg
+      file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5
+      file_pattern: 2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2012-01-01T18:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: true
+    names: [sst, thetao_0, ocean_sea_ice_fraction, hfds_total_area]
+  atmosphere:
+    save_prediction_files: true
+    names: [surface_temperature, TMP2m, eastward_surface_stress, DSWRFsfc, LHTFLsfc, sea_ice_fraction, ocean_fraction]
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm

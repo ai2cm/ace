@@ -133,6 +133,9 @@ class StandaloneComponentCheckpointsConfig:
         ocean_forcings_from_data: Ocean forcings the atmosphere produces that are
             read from the data instead. See ``CoupledStepperConfig``.
 
+        atmosphere_output_scale: Factors applied to atmosphere outputs when they
+            force the ocean, keyed by ocean forcing name; see
+            ``CoupledStepperConfig.atmosphere_output_scale``.
     """
 
     ocean: StandaloneComponentConfig
@@ -143,6 +146,7 @@ class StandaloneComponentCheckpointsConfig:
     atmosphere_stepper_override: StepperOverrideConfig | None = None
     atmosphere_output_rename: dict[str, str] | None = None
     ocean_forcings_from_data: list[str] = dataclasses.field(default_factory=list)
+    atmosphere_output_scale: dict[str, float] | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -162,6 +166,7 @@ class StandaloneComponentCheckpointsConfig:
             ocean_fraction_prediction=self.ocean_fraction_prediction,
             atmosphere_output_rename=self.atmosphere_output_rename,
             ocean_forcings_from_data=self.ocean_forcings_from_data,
+            atmosphere_output_scale=self.atmosphere_output_scale,
         )
 
     def load_stepper(self) -> CoupledStepper:
