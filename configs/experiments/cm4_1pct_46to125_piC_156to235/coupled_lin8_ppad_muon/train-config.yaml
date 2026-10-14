@@ -351,8 +351,10 @@ stepper:
                 reference_global_mean: -0.00013
             type: ocean_corrector
           builder:
-            type: Samudra
             config:
+              noise_embed_dim: 32
+              conditioned_blocks: all_blocks
+              checkpoint_strategy: all
               ch_width:
                 - 280
                 - 380
@@ -371,6 +373,7 @@ stepper:
               norm: instance
               zonally_periodic_upsample: true
               lat_pad: pole
+            type: Samudra
           normalization:
             network:
               global_means_path: /ocean_stats/centering.nc
