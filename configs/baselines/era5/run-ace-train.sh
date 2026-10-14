@@ -31,8 +31,7 @@ run_training() {
     --description 'Run ACE2S-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
-    --preemptible \
+    --min-runtime 8h \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
