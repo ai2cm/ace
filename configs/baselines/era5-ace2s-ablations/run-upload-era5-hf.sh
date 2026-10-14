@@ -49,7 +49,7 @@ for store in "${STORES[@]}"; do
       EXTRA_ARGS+=(--dataset "andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata")
       ;;
     stats-4deg)
-      EXTRA_ARGS+=(--dataset "andrep/2026-09-08-era5-4deg-8layer-stats-1990-2019:/statsdata-4deg")
+      # 4deg stats are on weka, not a beaker dataset
       ;;
     clim-1deg-daily)
       EXTRA_ARGS+=(--dataset "01M3778WCW285GX2WQ7WT8PWW6:/clim-forcing-1deg-daily")

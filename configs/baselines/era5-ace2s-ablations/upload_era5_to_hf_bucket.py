@@ -42,9 +42,9 @@ STORES = {
         "desc": "1° normalization stats (centering + scaling, ~25 MB)",
     },
     "stats-4deg": {
-        "source": "/statsdata-4deg",
+        "source": "/climate-default/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019",
         "dest": "normalization-stats/4deg",
-        "desc": "4° normalization stats (~5 MB)",
+        "desc": "4° normalization stats (~5 MB, on weka)",
     },
     "clim-1deg-daily": {
         "source": "/clim-forcing-1deg-daily",
