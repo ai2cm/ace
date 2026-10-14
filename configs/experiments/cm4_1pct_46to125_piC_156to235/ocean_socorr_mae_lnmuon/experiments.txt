@@ -17,3 +17,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4XW199W1TP9JJ8CXK2B
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4XW2259BDDS7ZC4MGYQSKSC|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|training|best_inference_ckpt|normal|--min-runtime 8h
