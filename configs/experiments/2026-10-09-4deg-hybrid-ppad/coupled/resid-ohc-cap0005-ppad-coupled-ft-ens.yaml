@@ -1,7 +1,7 @@
-# resid-ohc-cap0005-ppad-coupled-ft-ens: 4deg coupled fine-tune of the hybrid-residual ocean on James's ocean_ppad baseline
-# WITHOUT mean fill (samudra-ppad4deg-resid-ohc-cap0005-ppad, best_inference_ckpt), ensemble loss, two members, frozen 4deg
-# ACE2S atmosphere; otherwise identical to resid-ohc-cap0005-ppad-fmean-coupled-ft-ens.yaml. Troy 2026-10-13: the mean-fill
-# hybrid blew up at epoch 4 of its coupled fine-tune; this arm tells whether that comes from the fill or the residual chain.
+# resid-ohc-cap0005-ppad-coupled-ft-ens: 4deg coupled fine-tune of the hybrid-residual ocean on the ppad baseline WITHOUT mean
+# fill (samudra-ppad4deg-resid-ohc-cap0005-ppad, best_inference_ckpt), ensemble loss, same protocol and edits as the -fmean twin.
+# Purpose: the mean-fill hybrid blew up at epoch 4 of its coupled fine-tune (0.038 -> 0.073 ocean channel-mean) while the
+# full-field baseline stayed steady; this arm says whether that instability belongs to the mean fill or to the residual chain.
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
