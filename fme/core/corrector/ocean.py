@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
@@ -282,6 +282,24 @@ SEA_ICE_FLUX_TERMS: tuple[SeaIceFluxTerm, ...] = (
     "minus_hfrunoffds",
 )
 
+AreaBasis = Literal["total_area", "ocean_area"]
+
+
+def area_basis(names: Iterable[str]) -> AreaBasis:
+    """Area basis of fields: "total_area" if every name ends "_total_area"
+    (per total cell area), "ocean_area" if none does (per ocean area).
+
+    Raises:
+        ValueError: if the names mix the two bases.
+    """
+    names = list(names)
+    total = [n.endswith("_total_area") for n in names]
+    if all(total):
+        return "total_area"
+    if not any(total):
+        return "ocean_area"
+    raise ValueError(f"fields mix per-total-area and per-ocean-area bases: {names}")
+
 
 @dataclasses.dataclass
 class SeaIceHfdsCorrectionConfig:
@@ -292,13 +310,15 @@ class SeaIceHfdsCorrectionConfig:
 
         r_c     = S_c - (m(k) D(k) - m(k-1) D(k-1)) / dt
         S       = lf_snowfl + minus_f_top + hfds + calving_residue + minus_hfrunoffds
-        delta_c = -w_c sum_{S_h} a A r / sum_{S_h} a A w
+        X_h     = sum_{S_h} a A r
+        delta_c = -w_c X_h / sum_{S_h} a A w
 
-    with a the grid area weight and A = sea_surface_fraction.
-
-    so the corrected hfds closes the sea-ice energy budget integrated over S_h.
-    Flux terms are read by ``surface_flux_term`` (gen_data, then forcing, then
-    the AM4 equivalent where one exists).
+    with a the grid area weight and A set by ``area_basis``: A = 1 for fields
+    per total cell area (names ending "_total_area"), A = sea_surface_fraction
+    for fields per ocean area. Then sum_{S_h} a A (r + delta) = 0: the corrected
+    hfds closes the sea-ice energy budget integrated over S_h. Flux terms are
+    read by ``surface_flux_term`` (gen_data, then forcing, then the AM4
+    equivalent where one exists), always per total cell area.
 
     Parameters:
         method: Budget form; only "form_A_sis2".
@@ -321,6 +341,11 @@ class SeaIceHfdsCorrectionConfig:
         n = len(SIS2_ICE_LAYER_SALINITY)
         if len(self.ice_layer_temperature_names) != n:
             raise ValueError(f"ice_layer_temperature_names must have {n} entries")
+        _ = self.area_basis  # raises on mixed basis
+
+    @property
+    def area_basis(self) -> AreaBasis:
+        return area_basis(["hfds_total_area", self.frozen_mass_name])
 
 
 OpenOceanQTerm = Literal[
@@ -341,13 +366,14 @@ class OpenOceanAnchorConfig:
 
         Q_hat  = sum of ``q_terms``                   generated SIS2-side flux
         F      = net surface flux x ssf     (AM4, or Q of ``flux_source`` "sis2")
-        Q      = Q_hat + <F>_B - <Q_hat>_B            <x>_B: A-weighted mean on B ∩ M
+        Q      = Q_hat + <F>_B - <Q_hat>_B            <x>_B: a A-weighted mean on B ∩ M
         hfds   = Q - calving_residue - minus_hfrunoffds
 
     B are ``block_size`` x ``block_size`` lat-lon blocks of the local grid, so
-    sum_{B ∩ M} a A Q = sum_{B ∩ M} a A F per block. Terms come from
-    ``surface_flux_term`` (gen_data, forcing, AM4); "hfds" is the generated
-    ``hfds_total_area``.
+    sum_{B ∩ M} a A Q = sum_{B ∩ M} a A F per block, with A from ``area_basis``
+    (1 per total cell area, sea_surface_fraction per ocean area). Terms come
+    from ``surface_flux_term`` (gen_data, forcing, AM4; per total cell area);
+    "hfds" is the generated ``hfds_total_area``.
 
     Parameters:
         q_terms: Terms summed into Q_hat; e.g. ["hfds", "calving_residue",
@@ -369,6 +395,11 @@ class OpenOceanAnchorConfig:
             raise ValueError("block_size must be positive")
         if len(self.q_terms) == 0:
             raise ValueError("q_terms must not be empty")
+
+    @property
+    def area_basis(self) -> AreaBasis:
+        """Every term is ``hfds_total_area`` or a ``surface_flux_term`` output."""
+        return area_basis(["hfds_total_area"])
 
 
 @dataclasses.dataclass
@@ -471,16 +502,19 @@ class SurfaceEnergyFluxCorrection:
 
 @dataclasses.dataclass
 class AreaWeight:
-    """<X> = area_weighted_mean(A X) / area_weighted_mean(A), A =
-    sea_surface_fraction; ``local`` gives the per-cell weight a A for block
-    means (a = cos(lat), proportional to the lat-lon grid's area weight).
+    """<X> = area_weighted_mean(A X) / area_weighted_mean(A), A = 1 for
+    ``basis`` "total_area", sea_surface_fraction for "ocean_area"; ``local``
+    gives the per-cell weight a A for block means (a = cos(lat), proportional
+    to the lat-lon grid's area weight).
     """
 
     area_weighted_mean: AreaWeightedMean
     cos_lat: torch.Tensor  # (lat, 1), local latitude rows
+    basis: AreaBasis
 
     def field(self, input_data: TensorMapping, forcing_data: TensorMapping):
-        return OceanData({**input_data, **forcing_data}).sea_surface_fraction
+        ssf = OceanData({**input_data, **forcing_data}).sea_surface_fraction
+        return torch.ones_like(ssf) if self.basis == "total_area" else ssf
 
     def total(self, A: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         """Proportional to sum a A x; same constant for every x."""
@@ -1046,20 +1080,23 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             if sefc.sea_ice is not None or sefc.open_ocean is not None:
                 if lat is None:
                     raise ValueError("sea_ice/open_ocean corrections need latitudes")
-                area_weight = AreaWeight(
-                    area_weighted_mean,
-                    torch.cos(torch.deg2rad(lat)).unsqueeze(-1),
-                )
+                cos_lat = torch.cos(torch.deg2rad(lat)).unsqueeze(-1)
                 if sefc.sea_ice is not None:
                     sea_ice = SeaIceHfdsCorrection(
                         sefc.sea_ice,
-                        area_weight,
+                        AreaWeight(
+                            area_weighted_mean, cos_lat, sefc.sea_ice.area_basis
+                        ),
                         (lat > 0).unsqueeze(-1),
                         timestep_seconds,
                     )
                 if sefc.open_ocean is not None:
                     open_ocean = OpenOceanAnchor(
-                        sefc.open_ocean, area_weight, sefc.flux_source
+                        sefc.open_ocean,
+                        AreaWeight(
+                            area_weighted_mean, cos_lat, sefc.open_ocean.area_basis
+                        ),
+                        sefc.flux_source,
                     )
             corrections.append(
                 SurfaceEnergyFluxCorrection(

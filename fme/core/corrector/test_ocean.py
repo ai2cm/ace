@@ -13,17 +13,20 @@ from fme.core.constants import (
 )
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.corrector.ocean import (
+    AreaWeight,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     OceanSaltContentBudgetConfig,
     OpenOceanAnchorConfig,
     SeaIceFractionConfig,
+    SeaIceHfdsCorrection,
     SeaIceHfdsCorrectionConfig,
     SeaSurfaceHeightSaltBudget,
     SeaSurfaceHeightSaltBudgetConfig,
     SurfaceEnergyFluxCorrectionConfig,
     ZosGlobalMeanCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
+    area_basis,
     block_mean,
     sis2_ice_deficit,
     surface_flux_term,
@@ -1426,7 +1429,7 @@ def test_form_a_sis2_closes_hemispheric_budget(weight):
         hfds,
     )
     S = _support(input_data, gen_data, forcing_data)
-    area = _ICE_AREA.double() * forcing_data["sea_surface_fraction"].double()
+    area = _ICE_AREA.double()  # r per total cell area: energy = sum a r
     scale = (area * r.abs()).sum()
     for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
         on = S & hemi[:, None]
@@ -1435,9 +1438,9 @@ def test_form_a_sis2_closes_hemispheric_budget(weight):
 
 
 def test_frozen_enthalpy_budget_residual_closes_after_correction():
-    """The derived residual of corrected data closes over the corrector support
-    per hemisphere, weighted a ssf like the corrector; the physical integral
-    sum a r does not close where ssf < 1 (coastal cell in _ice_case).
+    """The derived residual of corrected data closes the energy integral
+    sum a r over the corrector support per hemisphere, including the coastal
+    cell (ssf < 1) in _ice_case.
     """
     input_data, gen_data, forcing_data = _ice_case()
     out = _ice_corrector()(
@@ -1455,12 +1458,60 @@ def test_frozen_enthalpy_budget_residual_closes_after_correction():
         corrected["hfds_total_area"].double(),
     )
     torch.testing.assert_close(torch.where(S, r, 0.0), torch.where(S, r_c, 0.0))
-    area = _ICE_AREA.double() * forcing_data["sea_surface_fraction"].double()
+    area = _ICE_AREA.double()
     scale = (area * r.abs()).sum()
     for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
         on = S & hemi[:, None]
         X = (torch.where(on, r, 0.0) * area).sum(dim=(-2, -1))
         assert torch.all(X.abs() < 1e-5 * scale), X
+
+
+def test_form_a_sis2_ocean_area_basis_closes_a_ssf_integral():
+    data = [{k: v.double() for k, v in d.items()} for d in _ice_case()]
+    input_data, gen_data, forcing_data = data
+    correction = SeaIceHfdsCorrection(
+        SeaIceHfdsCorrectionConfig(),
+        AreaWeight(
+            LatLonOperations(_ICE_AREA.double()).area_weighted_mean,
+            torch.cos(torch.deg2rad(_ICE_LAT.double())).unsqueeze(-1),
+            "ocean_area",
+        ),
+        (_ICE_LAT > 0).unsqueeze(-1),
+        _DT.total_seconds(),
+    )
+    S, hfds = correction(input_data, gen_data, forcing_data)
+    r = _residual(input_data, gen_data, forcing_data, hfds)
+    ssf = forcing_data["sea_surface_fraction"]
+    a_ssf = _ICE_AREA.double() * ssf
+    scale = (a_ssf * r.abs()).sum()
+    for hemi in (_ICE_LAT < 0, _ICE_LAT > 0):
+        on = S & hemi[:, None]
+        X = (torch.where(on, r, 0.0) * a_ssf).sum(dim=(-2, -1))
+        assert torch.all(X.abs() < 1e-10 * scale), X
+        E = (torch.where(on, r, 0.0) * _ICE_AREA.double()).sum(dim=(-2, -1))
+        if bool((on & (ssf < 1)).any()):
+            assert torch.all(E.abs() > 1e-6 * scale), E
+
+
+@pytest.mark.parametrize(
+    "names, expected",
+    [
+        (["hfds_total_area", "frozen_mass_total_area"], "total_area"),
+        (["hfds", "frozen_mass"], "ocean_area"),
+        (["hfds_total_area", "frozen_mass"], None),
+    ],
+)
+def test_area_basis(names, expected):
+    if expected is None:
+        with pytest.raises(ValueError, match="mix"):
+            area_basis(names)
+    else:
+        assert area_basis(names) == expected
+
+
+def test_sea_ice_config_mixed_basis_raises():
+    with pytest.raises(ValueError, match="mix"):
+        SeaIceHfdsCorrectionConfig(frozen_mass_name="frozen_mass")
 
 
 def test_form_a_sis2_delta_shape_on_support():
@@ -1714,7 +1765,7 @@ def test_open_ocean_anchor_block_integrals_equal_am4(q_terms):
         * ssf
     )
     M = _anchored_mask(input_data)
-    w = torch.where(M, _OO_AREA.double() * ssf, 0.0)
+    w = torch.where(M, _OO_AREA.double(), 0.0)  # q, F per total cell area
     shape = (_OO_SHAPE[0], 6 // n, n, 6 // n, n)
     blocks_q = (w * q).reshape(shape).sum(dim=(-3, -1))
     blocks_f = (w * am4).reshape(shape).sum(dim=(-3, -1))
