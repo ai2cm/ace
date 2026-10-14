@@ -6,3 +6,5 @@
 # preempted (submitted with min-runtime 0), stopped and resubmitted: cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs2|01M4RSPRDJ27S3JXN4FGKXQZFX|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs0|01M4XK4Y9V6EEG3093K8H9NHV8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs1|01M4XK5ZFYXAYXXWE0P82VZC6X|training|best_inference_ckpt|normal|--min-runtime 8h
