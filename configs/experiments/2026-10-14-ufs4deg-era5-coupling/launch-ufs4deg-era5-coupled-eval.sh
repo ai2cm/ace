@@ -7,7 +7,7 @@ OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M39XBD8K0KB3GAQ79ETVN470}"   # 4deg-daily-ace2s-ft3-detached-rs0 (Jeremy, wandb 1r7oyu58)
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 OCEAN_DS="${OCEAN_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh (zarr at the dataset root)
-ERA5_DS="${ERA5_DS:?era5 coupled-atmosphere dataset (zarr is a subdirectory)}"
+ERA5_DS="${ERA5_DS:-01M4W630AM1HQRYKJ2AJ0JMNN1}"   # era5-4deg-8layer-daily-ufs-coupled-1994-2023-v2 (zarr contents at the dataset root)
 ERA5_ZARR=2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
 CFG="${CFG:-coupled-evaluator-config-ufs4deg-era5-smoke.yaml}"
 NAME="${NAME:-smoke}"
@@ -29,7 +29,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${OCEAN_CKPT_DS}:${OCEAN_CKPT_FILE}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar" \
   --dataset "${OCEAN_DS}:/ufs4deg/2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
-  --dataset "${ERA5_DS}:${ERA5_ZARR}:/era5/${ERA5_ZARR}" \
+  --dataset "${ERA5_DS}:/era5/${ERA5_ZARR}" \   # the zarr contents sit at the dataset root
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
   -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/${CFG}" 2>&1) || true
