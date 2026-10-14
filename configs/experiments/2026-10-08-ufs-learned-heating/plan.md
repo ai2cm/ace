@@ -310,3 +310,21 @@ on the cm4vars-uh store with the CM4 stats + unaccounted_heating stats (Beaker 0
 channel is appended last so the checkpoint's output weights fill the initial slice. Jobs samudra-ufs4deg-resid-ohc-cap0005-
 {learnedheat,const0}-ftcm4, launcher `launch-ufs4deg-learnedheat-ftcm4.sh`. None of the UFS arms has been coupled fine-tuned:
 that needs the ERA5 4deg coupled-atmosphere store (stress sign, 6-h label offset, masks, budget target) first.
+
+### CM4-pretrained fine-tunes finished (2026-10-14)
+
+60 epochs from the CM4 4deg hybrid anchor, inline 10-yr windows from 2012/2013:
+
+| arm | best inline channel_mean | one-step val SST (K) | step-20 SST (K) | SST bias | ice | band |
+|---|---|---|---|---|---|---|
+| learned heating, CM4 FT (ep 59) | 0.042 | 0.46 | 0.44 | +0.10 | 0.010 | 1.15 |
+| constant 0, CM4 FT (ep 59) | 0.041 | 0.46 | 0.44 | +0.04 | 0.011 | 1.16 |
+| constant 0, CM4 FT 20 ep (2026-10-06) | 0.052 | 0.50 | 0.49 | +0.04 | 0.014 | 1.21 |
+| learned heating, from scratch 200 ep | 0.041 | 0.98 | 0.80 | +0.10 | 0.014 | 0.89 |
+
+- The CM4 prior gives the fine-tunes what the from-scratch arms never got: no one-step SST noise (0.46 K, half the
+  from-scratch 0.98), ENSO band power near 1 from epoch 1 (the from-scratch arm needs 100 epochs), and the same
+  channel_mean at 60 epochs as from-scratch at 200. The earlier 20-epoch fine-tunes were simply under-trained.
+- Learned vs constant-0 are indistinguishable on the inline windows (0.042 vs 0.041; the windows start in 2012 where
+  the unaccounted term is small). The decisive comparison is the full-record drift: 30-yr rollouts launched
+  (samudra-ufs4deg-resid-ohc-cap0005-{learnedheat,const0}-ftcm4-eval-30yr-1994).
