@@ -1,8 +1,11 @@
+from unittest import mock
+
 import pytest
 import torch
 
 import fme
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3Step, FCN3StepConfig
+from fme.core.compile import compile_enabled
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.optimization import Checkpoint
 from fme.core.step.args import StepArgs
@@ -88,6 +91,14 @@ def _grads(step: FCN3Step) -> TensorDict:
         for name, param in step.module.named_parameters()
         if param.grad is not None
     }
+
+
+def test_fcn3_step_does_not_compile_when_compile_disabled():
+    with compile_enabled(False), mock.patch("torch.compile") as mock_compile:
+        step = _get_step(_get_fcn3_step_config(compile=True))
+    mock_compile.assert_not_called()
+    # FCN3Step keeps its forward callable private; it is the module when eager
+    assert step._forward_module is step.module
 
 
 @pytest.mark.medium_duration

@@ -69,7 +69,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
             uncompiled runs. The flag is saved in the step config, so inference
             from a checkpoint trained with it enabled also compiles. Module
             builders that declare compilation unsupported raise
-            ``NotImplementedError`` at step construction.
+            ``NotImplementedError`` at step construction. Setting the
+            ``FME_COMPILE`` environment variable to ``0`` disables compilation
+            regardless of this flag.
     """
 
     builder: ModuleSelector

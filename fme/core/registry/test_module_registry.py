@@ -11,6 +11,7 @@ import torch
 import yaml
 
 import fme
+from fme.core.compile import compile_enabled
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.non_distributed import DummyWrapper
@@ -442,6 +443,14 @@ def test_compile_unsupported_reason_survives_wrapping_and_to():
     module = module.wrap_module(lambda m: m)
     with pytest.raises(NotImplementedError, match="not traceable"):
         module.compile()
+
+
+def test_module_compile_is_a_no_op_when_compile_disabled():
+    module = Module(_LinearNet(), label_encoding=None)
+    with compile_enabled(False), mock.patch("torch.compile") as mock_compile:
+        compiled = module.compile()
+    mock_compile.assert_not_called()
+    assert not compiled.is_compiled
 
 
 @pytest.mark.medium_duration

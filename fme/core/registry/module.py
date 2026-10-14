@@ -9,6 +9,7 @@ import dacite
 import torch
 from torch import nn
 
+from fme.core.compile import is_compile_enabled
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoding
 
@@ -148,6 +149,8 @@ class Module:
         The underlying module (parameters, state dict, ``torch_module``) is
         unchanged; only the callable used in ``__call__`` is compiled. Call
         after any distributed wrapping so the compiled graph includes it.
+        Returns this Module unchanged when compilation is disabled (see
+        :func:`fme.core.compile.compile_enabled`).
 
         Args:
             kwargs: Forwarded to ``torch.compile``.
@@ -161,6 +164,8 @@ class Module:
                 "torch.compile is not supported for this module: "
                 f"{self._compile_unsupported_reason}"
             )
+        if not is_compile_enabled():
+            return self
         return Module(
             self._module,
             self._label_encoding,

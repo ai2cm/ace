@@ -17,6 +17,8 @@ from unittest import mock
 import pytest
 import torch
 
+from fme.core.compile import compile_enabled
+
 
 @contextlib.contextmanager
 def compile_backend(backend: str) -> Iterator[None]:
@@ -43,8 +45,11 @@ def compile_backend(backend: str) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def dynamo_hygiene() -> Iterator[None]:
-    """Isolate a test module's dynamo state from the rest of the suite.
+def dynamo_hygiene(compile_disabled: None) -> Iterator[None]:
+    """Enable compilation and isolate a test module's dynamo state.
+
+    The suite's ``compile_disabled`` fixture runs every test eagerly; this
+    fixture depends on it so that it re-enables compilation afterwards.
 
     Dynamo's compilation cache is keyed on code objects and is process-global,
     so compiled functions and guards leak between tests sharing an xdist
@@ -57,6 +62,7 @@ def dynamo_hygiene() -> Iterator[None]:
     """
     torch._dynamo.reset()
     try:
-        yield
+        with compile_enabled(True):
+            yield
     finally:
         torch._dynamo.reset()

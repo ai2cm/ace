@@ -7,6 +7,7 @@ work in parallel mode. This may duplicate StepABC test coverage in the
 non-parallel StepABC tests (which include also cases that don't work in parallel).
 """
 
+import copy
 import dataclasses
 import datetime
 import pathlib
@@ -36,7 +37,11 @@ from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.testing import (
+    compile_backend,
+    dynamo_hygiene,  # noqa: F401  autouse in this module
+    trivial_network_and_loss_normalization,
+)
 from fme.core.typing_ import TensorDict
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
@@ -410,6 +415,57 @@ def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
             f"Step output checkpoint created at {checkpoint_path}, "
             "please re-run the test."
         )
+
+
+def _with_compile(selector: StepSelector) -> StepSelector:
+    config = copy.deepcopy(selector.config)
+    if selector.type == "multi_call":
+        config["wrapped_step"]["config"]["compile"] = True
+    else:
+        config["compile"] = True
+    return StepSelector(type=selector.type, config=config)
+
+
+@pytest.mark.parametrize("get_config", SELECTOR_GETTERS.values())
+@pytest.mark.parallel
+def test_compiled_step_matches_eager(
+    get_config: Callable[[pathlib.Path | None], StepSelector],
+):
+    """Compiling a step leaves its outputs unchanged under every parallel
+    decomposition. The step compiles after distributed wrapping, so the
+    compiled graph contains the distributed wrapper and, under spatial
+    parallelism, the decomposed network's collectives."""
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    selector = get_config(None)
+    eager_step = get_step(selector, img_shape)
+    with compile_backend("aot_eager"):
+        compiled_step = get_step(_with_compile(selector), img_shape)
+    compiled_step.load_state(eager_step.get_state())
+    eager_step.eval()
+    compiled_step.eval()
+    dist = Distributed.get_instance()
+    args = StepArgs(
+        input=dist.scatter_spatial(
+            get_tensor_dict(eager_step.input_names, img_shape, n_samples), img_shape
+        ),
+        next_step_input_data=dist.scatter_spatial(
+            get_tensor_dict(eager_step.next_step_input_names, img_shape, n_samples),
+            img_shape,
+        ),
+        labels=None,
+    )
+
+    with torch.no_grad():
+        # the noise-conditioned network draws noise in its forward pass
+        torch.manual_seed(1)
+        eager_output = eager_step.step(args=args, wrapper=lambda x: x).output
+        torch.manual_seed(1)
+        compiled_output = compiled_step.step(args=args, wrapper=lambda x: x).output
+
+    for name, tensor in eager_output.items():
+        torch.testing.assert_close(compiled_output[name], tensor, atol=1e-4, rtol=1e-4)
 
 
 @pytest.mark.parametrize(

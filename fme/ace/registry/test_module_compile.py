@@ -38,11 +38,13 @@ from fme.ace.models.healpix.healpix_blocks import (
     ConvNeXtBlockConfig,
     TransposedConvUpsampleBlockConfig,
 )
+from fme.ace.models.healpix.healpix_paddings import have_earth2grid
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
+from fme.core.rand import use_generator
 from fme.core.registry.module import Module, ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.args import StepArgs
@@ -544,6 +546,117 @@ def test_compiled_module_backward_matches_eager(case: BuilderCase):
     module.torch_module.zero_grad(set_to_none=True)
     _sum_of_squares(_seeded_forward(module, x, labels)).backward()
     assert compiled_missing == _grads_missing(module.torch_module)
+
+
+def _case(name: str) -> BuilderCase:
+    return next(case for case in BUILDER_CASES if case.name == name)
+
+
+def _grads(module: nn.Module) -> dict[str, torch.Tensor]:
+    return {
+        name: parameter.grad.clone()
+        for name, parameter in module.named_parameters()
+        if parameter.grad is not None
+    }
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid is not installed")
+def test_compiled_healpix_unet_with_default_padding_matches_eager():
+    """The HEALPixUNet builder case uses ``karlbauer`` padding so that it does
+    not need the optional earth2grid dependency, but ``earth2grid`` is the
+    builder's default padding and so what production configs compile."""
+    config = _healpix_unet_config()
+    del config["hpx_padding_mode"]
+    case = dataclasses.replace(
+        _case("HEALPixUNet"),
+        build_selector=functools.partial(
+            ModuleSelector, type="HEALPixUNet", config=config
+        ),
+    )
+    module = _build_module(case)
+    module.torch_module.train()
+    compiled = module.compile(backend="aot_eager")
+    x = _make_input(case)
+
+    _sum_of_squares(module(x)).backward()
+    eager_grads = _grads(module.torch_module)
+    module.torch_module.zero_grad(set_to_none=True)
+    compiled_output = compiled(x)
+    _sum_of_squares(compiled_output).backward()
+
+    torch.testing.assert_close(compiled_output, module(x), **TOLERANCE)
+    torch.testing.assert_close(_grads(module.torch_module), eager_grads, **TOLERANCE)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "aot_eager",
+        pytest.param(
+            "inductor",
+            marks=pytest.mark.skipif(
+                get_device().type != "cuda",
+                # inductor's CPU codegen fails a stride assertion on this
+                # network (seen on torch 2.7.1); production compiles on CUDA
+                reason="inductor CPU codegen fails on NoiseConditionedSFNO",
+            ),
+        ),
+    ],
+)
+def test_compiled_noise_conditioned_module_reproduces_seeded_draws(backend: str):
+    """Seeded inference draws the conditioning noise from a CPU generator held
+    in a module global (``fme.core.rand.use_generator``), with a new generator
+    per inference segment. A compiled network must reproduce the eager draws
+    for every such generator, including under inductor, which otherwise
+    replaces in-graph random draws with its own random stream."""
+    case = _case("NoiseConditionedSFNO")
+    module = _build_module(case)
+    # the noise conditioning is zero-initialized, so at initialization the
+    # output does not depend on the draws this test is about
+    torch.manual_seed(0)
+    with torch.no_grad():
+        for parameter in module.torch_module.parameters():
+            parameter.normal_(std=0.5)
+    module.torch_module.eval()
+    compiled = module.compile(backend=backend)
+    x = _make_input(case)
+    labels = _make_labels(case)
+
+    def forward(module: Module, seed: int) -> torch.Tensor:
+        with use_generator(torch.Generator().manual_seed(seed)):
+            return module(x, labels)
+
+    with torch.no_grad():
+        eager_outputs = [forward(module, seed) for seed in (0, 1)]
+        compiled_outputs = [forward(compiled, seed) for seed in (0, 1)]
+
+    assert not torch.allclose(eager_outputs[0], eager_outputs[1])
+    for compiled_output, eager_output in zip(compiled_outputs, eager_outputs):
+        torch.testing.assert_close(compiled_output, eager_output, **TOLERANCE)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    get_device().type != "cuda", reason="mixed precision training is CUDA-only"
+)
+def test_compiled_module_matches_eager_under_autocast():
+    """Training with ``enable_automatic_mixed_precision`` runs the forward
+    under bfloat16 autocast (``Optimization.autocast``), which dynamo must
+    trace into the compiled graph rather than ignore."""
+    case = _case("SphericalFourierNeuralOperatorNet")
+    module = _build_module(case)
+    module.torch_module.train()
+    compiled = module.compile(backend="aot_eager")
+    x = _make_input(case)
+
+    with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+        eager_output = module(x)
+        compiled_output = compiled(x)
+
+    assert compiled_output.dtype == eager_output.dtype
+    torch.testing.assert_close(compiled_output, eager_output, atol=1e-2, rtol=1e-2)
 
 
 @pytest.mark.slow
