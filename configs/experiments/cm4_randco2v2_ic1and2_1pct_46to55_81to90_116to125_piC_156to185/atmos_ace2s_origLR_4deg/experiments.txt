@@ -10,3 +10,21 @@ cm4_randco2v2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origL
 cm4_randco2v2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origLR_4deg-ft|rs1|01M4VARBVZTXYNZ0NAJMXPBMNP|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_randco2v2_ic1and2_1pct_46to55_81to90_116to125_piC_156to185-atmos_ace2s_origLR_4deg-ft|rs2|01M4VAS2ECMPA0WXEGE617DCV8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# rs0 fine-tuning best_inference_ckpt at epoch 5 (downloaded mid-run 2026-10-14), dataset 01M4X7ZY6DWPE5NF4N80YVCH0Y
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep5|rs0|01M4VAQPMEW02AJ1AYG3PAT97W|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6DWPE5NF4N80YVCH0Y|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep5|rs0|01M4VAQPMEW02AJ1AYG3PAT97W|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6DWPE5NF4N80YVCH0Y|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep5|rs0|01M4VAQPMEW02AJ1AYG3PAT97W|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6DWPE5NF4N80YVCH0Y|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep5|rs0|01M4VAQPMEW02AJ1AYG3PAT97W|run_abrupt-4xCO2|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6DWPE5NF4N80YVCH0Y|ai2/ace|titan
+
+# rs1 fine-tuning best_inference_ckpt at epoch 8 (downloaded mid-run 2026-10-14), dataset 01M4X7ZY6TQKXWRZ1NGF2C1PF5
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs1|01M4VARBVZTXYNZ0NAJMXPBMNP|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6TQKXWRZ1NGF2C1PF5|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs1|01M4VARBVZTXYNZ0NAJMXPBMNP|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6TQKXWRZ1NGF2C1PF5|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs1|01M4VARBVZTXYNZ0NAJMXPBMNP|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6TQKXWRZ1NGF2C1PF5|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs1|01M4VARBVZTXYNZ0NAJMXPBMNP|run_abrupt-4xCO2|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6TQKXWRZ1NGF2C1PF5|ai2/ace|titan
+
+# rs2 fine-tuning best_inference_ckpt at epoch 8 (downloaded mid-run 2026-10-14), dataset 01M4X7ZY6FJEPN8RBT3FYJY065
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs2|01M4VAS2ECMPA0WXEGE617DCV8|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6FJEPN8RBT3FYJY065|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs2|01M4VAS2ECMPA0WXEGE617DCV8|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6FJEPN8RBT3FYJY065|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs2|01M4VAS2ECMPA0WXEGE617DCV8|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6FJEPN8RBT3FYJY065|ai2/ace|titan
+rco2v2_ic12_1pct_46to55_81to90_116to125_piC_156to185-ace2s_origLR_4deg-ft-ep8|rs2|01M4VAS2ECMPA0WXEGE617DCV8|run_abrupt-4xCO2|best_inference_ckpt|high|--min-runtime 1h||01M4X7ZY6FJEPN8RBT3FYJY065|ai2/ace|titan
