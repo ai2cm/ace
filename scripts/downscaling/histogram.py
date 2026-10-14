@@ -1,0 +1,233 @@
+import xarray as xr
+import numpy as np
+import dask
+import dask.array as da
+from dask.diagnostics import ProgressBar
+import matplotlib.pyplot as plt
+import argparse
+import os
+import re
+import cftime
+from datetime import datetime
+
+
+WIND_SPEED = "wind_speed"
+# 10m wind component name pairs, tried in order against the dataset
+WIND_COMPONENT_NAMES = (
+    ("UGRD10m", "VGRD10m"),
+    ("eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"),
+)
+
+TIME_FORMAT = "%Y%m%d:%H%M"
+# strptime accepts fewer digits than the format implies ("2013011:1200" parses
+# as 2013-01-01 12:00, "20130101:12" as 00:12), which would silently select the
+# wrong window, so the field widths are checked before parsing.
+TIME_PATTERN = re.compile(r"^\d{8}:\d{4}$")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Compute histograms over dataset"
+    )
+    parser.add_argument(
+        "path",
+        help="zarr dataset path",
+    )
+    parser.add_argument(
+        "--variables",
+        nargs="+",
+        default=["PRATEsfc", "eastward_wind_at_ten_meters",
+                 "northward_wind_at_ten_meters", "PRMSL", "wind_speed"],
+        help="Variables to compute histograms for",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="./histograms",
+        help="Output directory for histogram data",
+    )
+    parser.add_argument(
+        "--start-time",
+        default=None,
+    )
+    parser.add_argument(
+        "--stop-time",
+        default=None,
+    )
+    args = parser.parse_args()
+    return args
+
+
+def find_wind_components(ds: xr.Dataset) -> tuple[str, str]:
+    """Names of the 10m eastward/northward wind components in ``ds``."""
+    for eastward, northward in WIND_COMPONENT_NAMES:
+        if eastward in ds and northward in ds:
+            return eastward, northward
+    raise ValueError(
+        f"cannot derive {WIND_SPEED!r}: no 10m wind component pair in dataset, "
+        f"looked for {' and '.join(map(str, WIND_COMPONENT_NAMES))}"
+    )
+
+
+def add_wind_speed(ds: xr.Dataset) -> tuple[xr.Dataset, tuple[str, str]]:
+    """``ds`` with a lazy ``wind_speed`` variable, plus its component names."""
+    eastward, northward = find_wind_components(ds)
+    wind_speed = np.sqrt(ds[eastward] ** 2 + ds[northward] ** 2)
+    wind_speed.attrs = {
+        "units": ds[eastward].attrs.get("units", "m/s"),
+        "long_name": "wind speed at ten meters",
+    }
+    return ds.assign({WIND_SPEED: wind_speed}), (eastward, northward)
+
+
+def compute_histograms(
+    ds: xr.Dataset, variables: list[str], bins: dict[str, np.ndarray]
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Histograms for ``variables`` in a single pass over the data.
+
+    The histograms are submitted to dask as one graph, so inputs shared between
+    them (e.g. the wind components read by both ``wind_speed`` and its own
+    component histograms) are read once rather than once per variable.
+    """
+    counts = {
+        var: da.histogram(ds[var].data, bins=bins[var])[0] for var in variables
+    }
+    with ProgressBar():
+        (counts,) = dask.compute(counts)
+    # bins are explicit edges, so they are the edges da.histogram would return
+    return {var: (counts[var], bins[var]) for var in variables}
+
+
+def trim_empty_bins(
+    counts: np.ndarray, edges: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """``counts`` and ``edges`` without their all-zero leading and trailing bins.
+
+    Only the contiguous runs of empty bins at the two ends are dropped; empty
+    bins that have populated bins on both sides are kept, so gaps within the
+    distribution stay visible. Returned unchanged if every bin is empty.
+    """
+    (populated,) = np.nonzero(counts)
+    if len(populated) == 0:
+        return counts, edges
+    first, last = populated[0], populated[-1]
+    # bin i spans edges[i] to edges[i + 1], so keeping bins first..last needs
+    # one more edge than bins
+    return counts[first : last + 1], edges[first : last + 2]
+
+
+def save_histogram(
+    counts: np.ndarray, edges: np.ndarray, variable: str, output_dir: str, units: str
+) -> None:
+    nc = xr.Dataset(
+        data_vars={
+            "counts": (("bin",), counts),
+            "edges": (("bin_edge",), edges),
+        },
+        coords={
+            "bin": np.arange(len(counts)),
+            "bin_edge": np.arange(len(edges)),
+        },
+    )
+    nc.to_netcdf(f"{output_dir}/{variable}_histogram.nc")
+    # plot histogram as step plot and save to png, over the populated range only
+    # (the netCDF above keeps the full bin range)
+    plot_counts, plot_edges = trim_empty_bins(counts, edges)
+    frequency = plot_counts / plot_counts.sum()
+    plt.step(plot_edges[:-1], frequency, where="post")
+    plt.yscale("log")
+    plt.xlabel(f"{units}")
+    plt.ylabel("Frequency")
+    plt.title(f"{variable}")
+    plt.savefig(f"{output_dir}/{variable}_histogram.png")
+    plt.close()
+
+
+def estimate_bins(
+    data: xr.DataArray, nbins: int = 500, stretch_factor: float = 6) -> np.ndarray:
+    data_0 = data.isel(time=0)
+    data_min, data_max = dask.compute(data_0.min(), data_0.max())
+    center = (float(data_min) + float(data_max)) / 2
+    half_width = (float(data_max) - float(data_min)) / 2 * stretch_factor
+    return np.linspace(center - half_width, center + half_width, nbins + 1)
+
+
+def str_to_datetime(time_str: str) -> datetime:
+    """Parse a "YYYYMMDD:HHMM" timestamp, e.g. "20130101:1200" -> 2013-01-01 12:00.
+    """
+    if not TIME_PATTERN.match(time_str):
+        raise ValueError(
+            f"{time_str!r} is not a YYYYMMDD:HHMM timestamp, e.g. 20130101:1200"
+        )
+    return datetime.strptime(time_str, TIME_FORMAT)
+
+
+def on_dataset_calendar(time: datetime, ds: xr.Dataset) -> datetime | cftime.datetime:
+    """``time`` rebuilt on ``ds``'s own calendar, so it can index ``ds.time``.
+    """
+    index = ds.indexes["time"]
+    if not isinstance(index, xr.CFTimeIndex):
+        return time
+    return cftime.datetime(
+        time.year,
+        time.month,
+        time.day,
+        time.hour,
+        time.minute,
+        calendar=index.calendar,
+    )
+
+
+def main():
+    args = parse_args()
+    ds = xr.open_zarr(args.path)
+    
+    t_min = (
+        args.start_time if args.start_time is None
+        else on_dataset_calendar(str_to_datetime(args.start_time), ds)
+    )
+    t_max = (
+        args.stop_time if args.stop_time is None
+        else on_dataset_calendar(str_to_datetime(args.stop_time), ds)
+    ) 
+    time_index = ds.indexes["time"]
+    ds = ds.sel(time=slice(t_min, t_max))
+    if ds.sizes["time"] == 0:
+        # an empty selection only surfaces as an IndexError once bins are
+        # estimated, so it is reported here where the cause is still visible
+        raise ValueError(
+            f"no timesteps in [{t_min}, {t_max}]; {args.path} spans "
+            f"[{time_index[0]}, {time_index[-1]}] ({len(time_index)} steps)"
+            if len(time_index) > 0
+            else f"{args.path} has no timesteps"
+        )
+
+    if len(args.variables) == 0:
+        raise ValueError("No variables provided to compute histograms for.")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    variables = list(args.variables)
+    # wind speed is derived from the components, so any component histograms
+    # that were also requested go in the same group and share the reads
+    wind_group: list[str] = []
+    if WIND_SPEED in variables and WIND_SPEED not in ds:
+        ds, components = add_wind_speed(ds)
+        wind_group = [WIND_SPEED] + [c for c in components if c in variables]
+    groups = [g for g in [wind_group] if g] + [
+        [var] for var in variables if var not in wind_group
+    ]
+
+    for group in groups:
+        print(f"computing bins for {', '.join(group)}...")
+        bins = {var: estimate_bins(ds[var]) for var in group}
+        print(f"computing histograms for {', '.join(group)}...")
+        histograms = compute_histograms(ds, group, bins)
+
+        for var, (var_counts, var_edges) in histograms.items():
+            save_histogram(var_counts, var_edges, var, args.output_dir, units=ds[var].attrs.get("units", ""))
+
+    print("done")
+
+
+if __name__ == "__main__":
+    main()  
