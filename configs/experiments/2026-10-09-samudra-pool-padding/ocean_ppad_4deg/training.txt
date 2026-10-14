@@ -6,6 +6,8 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 #   4 deg bottleneck needs) and pad_pool on
 # - ocean_ppad_nopad: the control, lat_pad constant and pad_pool off
 # - ocean_ppad_nopool: lat_pad pole alone, pad_pool off (urgent, added later)
+# - ocean_ppad_fmean_pool: lat_pad pole and pad_pool on, with the input mask
+#   filled with the mean (urgent, added later)
 #
 # First submitted on 2 GPUs (rs0 at high priority) and cancelled; resubmitted
 # on 1 GPU at normal priority, since 2 GPUs were not much faster.
@@ -20,3 +22,6 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|training|normal|jupiter|
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs0|training|urgent|jupiter|1||3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|8h
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs1|training|urgent|jupiter|1||3|ai2/ace|seed=1 stepper.step.config.builder.config.lat_pad=pole stepper.step.config.builder.config.pad_pool=false|8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_fmean_pool|rs0|train|urgent|jupiter|1||3|ai2/ace|seed=0 stepper.step.config.builder.config.pad_pool=true stepper.input_masking.fill_value=mean|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_fmean_pool|rs1|train|urgent|jupiter|1||3|ai2/ace|seed=1 stepper.step.config.builder.config.pad_pool=true stepper.input_masking.fill_value=mean|8h
