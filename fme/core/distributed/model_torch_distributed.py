@@ -32,6 +32,7 @@ from fme.core import metrics
 from fme.core.device import in_dataloader_worker, using_gpu, using_srun
 
 from ._gloo_patch import patch_gloo_alltoall
+from ._sht_patch import DistributedInverseRealSHT
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
@@ -461,7 +462,7 @@ class ModelTorchDistributed(DistributedBackend):
         ).float()
 
     def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
-        return thd.DistributedInverseRealSHT(
+        return DistributedInverseRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
         ).float()
 
