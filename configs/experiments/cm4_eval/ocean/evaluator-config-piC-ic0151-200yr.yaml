@@ -1,7 +1,7 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
 #   --config-dir configs/experiments/cm4_eval/ocean
 experiment_dir: /results
-n_forward_steps: 14598
+n_forward_steps: 14598  # --min-runtime 2h
 forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 logging:
