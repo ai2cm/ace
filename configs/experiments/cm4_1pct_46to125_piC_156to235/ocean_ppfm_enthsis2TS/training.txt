@@ -1,3 +1,3 @@
 group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_ppfm_enthsis2TS_am4b3_fluxb9|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.q_terms='[hfds,calving_residue,minus_hfrunoffds]' stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=3 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.coastal=method|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppfm_enthsis2TS_fluxb9|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.q_terms='[hfds,calving_residue,minus_hfrunoffds]' stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.block_size=9 stepper.step.config.corrector.config.surface_energy_flux_correction.open_ocean.coastal=method|8h
