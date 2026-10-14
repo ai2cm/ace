@@ -53,6 +53,7 @@ jobs:
             --workspace ${{ env.BEAKER_WORKSPACE }} \
             --priority low \
             --preemptible \
+            --min-runtime 20m \
             --cluster ai2/saturn-cirrascale \
             --cluster ai2/jupiter \
             --cluster ai2/ceres-cirrascale \
