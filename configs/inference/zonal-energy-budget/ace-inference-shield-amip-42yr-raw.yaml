@@ -1,0 +1,92 @@
+# 42-year prescribed-SST rollout with full daily raw output for zonal energy
+# budget analysis. Based on the +4K response control config (ace2s-shield-plus-
+# like/ace-inference-shield-amip-control.yaml) with save_prediction_files: true
+# and an expanded data_writer.names that includes winds and frozen precipitation
+# (needed for the energy budget's explicit transport and L_f*P_frozen terms).
+#
+# Checkpoint: nogznxwv (no-CO2, residual prediction, SHiELD AMIP member 1).
+# Window: 1979-01-02 through 2020-12-31 (15339 daily steps), single IC.
+# Forcing: SHiELD AMIP member 1 (ic_0001) SST + sea ice.
+# Expected output size: ~12 GiB.
+#
+# Note: DSWRFtoa (incoming solar at TOA) is a forcing variable (next_step_
+# forcing_names), not a model output, so it is not saved here. For the TOA
+# energy budget, read DSWRFtoa from the forcing zarr at the same timesteps.
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+experiment_dir: /results
+forward_steps_in_memory: 73
+n_forward_steps: 15339
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  names:
+    # Prognostic state (needed for column energy integral)
+    - PRESsfc
+    - surface_temperature
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    # Winds on all levels (for explicit meridional energy transport)
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_2
+    - eastward_wind_3
+    - eastward_wind_4
+    - eastward_wind_5
+    - eastward_wind_6
+    - eastward_wind_7
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_2
+    - northward_wind_3
+    - northward_wind_4
+    - northward_wind_5
+    - northward_wind_6
+    - northward_wind_7
+    # Radiation fluxes (TOA and surface energy budget terms)
+    - ULWRFtoa
+    - USWRFtoa
+    - ULWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - DSWRFsfc
+    # Surface turbulent fluxes
+    - LHTFLsfc
+    - SHTFLsfc
+    # Precipitation (L_f * P_frozen term in energy budget)
+    - PRATEsfc
+    - total_frozen_precipitation_rate
+    # Moisture budget
+    - tendency_of_total_water_path_due_to_advection
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '1979-01-02T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace
