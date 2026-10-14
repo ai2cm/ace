@@ -29,7 +29,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${OCEAN_CKPT_DS}:${OCEAN_CKPT_FILE}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar" \
   --dataset "${OCEAN_DS}:/ufs4deg/2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
-  --dataset "${ERA5_DS}:/era5/${ERA5_ZARR}" \   # the zarr contents sit at the dataset root
+  --dataset "${ERA5_DS}:/era5/${ERA5_ZARR}" \
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
   -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/${CFG}" 2>&1) || true
