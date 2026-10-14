@@ -50,19 +50,13 @@ def dynamo_hygiene() -> Iterator[None]:
     so compiled functions and guards leak between tests sharing an xdist
     worker; ``torch._dynamo.reset()`` before and after each test keeps a
     compile in one test from being served (or invalidated) by another.
-    ``Module.compile()`` also sets the process-global
-    ``torch._dynamo.config.fail_on_recompile_limit_hit`` flag, which
-    ``torch._dynamo.reset()`` does not restore, so it is saved and restored
-    explicitly here.
 
     Import this name into a test module to make it autouse for that module::
 
         from fme.core.testing import dynamo_hygiene  # noqa: F401
     """
-    fail_on_recompile_limit_hit = torch._dynamo.config.fail_on_recompile_limit_hit
     torch._dynamo.reset()
     try:
         yield
     finally:
         torch._dynamo.reset()
-        torch._dynamo.config.fail_on_recompile_limit_hit = fail_on_recompile_limit_hit

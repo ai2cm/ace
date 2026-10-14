@@ -96,32 +96,6 @@ CONDITIONAL_BUILDERS = [
 ]
 
 
-def compile_torch_module(module: nn.Module, **kwargs: Any) -> nn.Module:
-    """Compile ``module`` with ``torch.compile``, failing loudly on recompiles.
-
-    Sets the process-global ``torch._dynamo.config.fail_on_recompile_limit_hit``
-    flag: by default, when a compiled region exceeds dynamo's recompile limit,
-    dynamo silently falls back to running it in eager mode, so a configuration
-    that asked for compilation quietly stops being compiled. Since compilation
-    is requested explicitly, a clear error is more useful than that silent
-    fallback. Note the flag is process-global, so it applies to every
-    ``torch.compile``d region in the process, not just this module.
-
-    Varying the batch size does not trip the limit: dynamo recompiles once with
-    dynamic shapes and then reuses that graph, so only genuinely static
-    recompiles count toward the limit.
-
-    Args:
-        module: The module to compile.
-        kwargs: Forwarded to ``torch.compile``.
-
-    Returns:
-        The compiled module.
-    """
-    torch._dynamo.config.fail_on_recompile_limit_hit = True
-    return torch.compile(module, **kwargs)
-
-
 class Module:
     """A built network together with its label encoding.
 
@@ -190,7 +164,7 @@ class Module:
         return Module(
             self._module,
             self._label_encoding,
-            forward_module=compile_torch_module(self._module, **kwargs),
+            forward_module=torch.compile(self._module, **kwargs),
             compile_unsupported_reason=self._compile_unsupported_reason,
         )
 

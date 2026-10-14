@@ -13,9 +13,10 @@ import yaml
 import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
-from fme.core.registry.module import Module, compile_torch_module
+from fme.core.registry.module import Module
 from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse in this module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
@@ -444,26 +445,22 @@ def test_compile_unsupported_reason_survives_wrapping_and_to():
 
 
 @pytest.mark.medium_duration
-def test_compile_sets_fail_on_recompile_limit_hit():
-    """Compiling must opt out of dynamo's silent eager fallback, so that a
-    compiled run which hits the recompile limit raises instead of quietly
-    running uncompiled."""
-    torch._dynamo.config.fail_on_recompile_limit_hit = False
-    net = _LinearNet().to(fme.get_device())
-    Module(net, label_encoding=None).compile(backend="aot_eager")
-    assert torch._dynamo.config.fail_on_recompile_limit_hit is True
-
-
-@pytest.mark.medium_duration
-def test_compile_torch_module_compiles_and_sets_flag():
-    torch._dynamo.config.fail_on_recompile_limit_hit = False
-    net = _LinearNet().to(fme.get_device())
-    compiled = compile_torch_module(net, backend="aot_eager")
-    # isinstance is the assertion here: the contract of compile_torch_module is
-    # that it returns torch.compile's wrapper type, not the original module.
-    assert isinstance(compiled, torch._dynamo.eval_frame.OptimizedModule)
-    assert compiled._orig_mod is net
-    assert torch._dynamo.config.fail_on_recompile_limit_hit is True
+def test_compiled_modules_exceeding_shared_recompile_limit_fall_back_to_eager():
+    """Without distributed data parallel, every module is wrapped in
+    DummyWrapper, so dynamo traces each compiled module through the same
+    DummyWrapper.forward code object and all of them share one recompile
+    budget. Exhausting that budget must fall back to eager, not raise."""
+    nets = [
+        DummyWrapper(torch.nn.Linear(n_features, 2)).to(fme.get_device())
+        for n_features in (2, 3, 4)
+    ]
+    modules = [
+        Module(net, label_encoding=None).compile(backend="eager") for net in nets
+    ]
+    with torch._dynamo.config.patch(recompile_limit=2):
+        for net, module, n_features in zip(nets, modules, (2, 3, 4)):
+            x = torch.randn(1, n_features, device=fme.get_device())
+            torch.testing.assert_close(module(x), net(x))
 
 
 def _ncsfno_config_with_legacy_keys() -> dict[str, Any]:
