@@ -348,3 +348,18 @@ that needs the ERA5 4deg coupled-atmosphere store (stress sign, 6-h label offset
   the term is a function of the state it sees, not of the nudging the data carried, and in a decade whose forcing it
   never trained on it cannot know the sign. The column stays on track there anyway because the 1994-2001 term dominates.
 - Ice bias 0 throughout for both.
+
+### First coupled results with the ERA5 4deg atmosphere (2026-10-14, zero-shot, 10 yr from 2012-01)
+
+| coupled zero-shot, 2012-2021 | SST bias (K), yearly range | thetao_10 end | T2m bias | hfds vs data (W/m2) | Nino3.4 anom std (data 0.78 K) | corr |
+|---|---|---|---|---|---|---|
+| learned heating, CM4 FT | -0.03 .. -0.21 (mean -0.10) | +0.10 | +0.0 .. +0.34 | -0.5 .. -4.5 | 0.72 K | 0.44 |
+| constant 0, CM4 FT | -0.06 .. -0.24 (mean -0.15) | +0.11 | +0.0 .. +0.32 | +0.6 .. -4.0 | 0.53 K | 0.23 |
+
+- Both stable for the decade. Coupled SST runs COLD (opposite to the ocean-only warm drift) under a warm air layer (+0.2-0.3 K):
+  the ERA5 atmosphere delivers 1-4 W/m2 less heat into the ocean than the replay data carry.
+- The learned term halves the cold bias and keeps the ENSO amplitude (0.72 vs 0.53 K, data 0.78); its ocean mean in coupled mode is
+  mostly negative (-0.1 .. -1.4 W/m2) where the data's is positive in 2012-2015, so it is not tracking the data's nudging; it acts
+  as a state-dependent correction that happens to help under this atmosphere. Single member: the corr difference (0.44 vs 0.23)
+  is within one draw's noise.
+- Coupled FT of the learned-heating ocean with the ensemble loss is queued (samudra-ufs4deg-era5-learnedheat-ftcm4-era5-coupled-ft-ens).
