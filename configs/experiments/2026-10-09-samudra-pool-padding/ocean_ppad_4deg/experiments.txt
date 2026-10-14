@@ -19,8 +19,8 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|01M4TVW7X2G5M8QH6Y2DMH8X
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs0|01M4VJ17ZY0Q876777SRY7WNAP|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopool|rs1|01M4VJ1SSZZ5P5WNF1Z4XZ68MC|training|best_inference_ckpt|normal|--min-runtime 8h
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs0|01M4TVTVX6YM40YV5H7HHAQXM6|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M4WVMJQNYWGXWYH1B4XABSRQ|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs1|01M4TVVAH8T01KA7A8ZVP5RN09|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M4WWM1QZ0SS5WQ088WJWVGVZ|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs0|01M4TVTVX6YM40YV5H7HHAQXM6|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M4WVMJQNYWGXWYH1B4XABSRQ|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_pool|rs1|01M4TVVAH8T01KA7A8ZVP5RN09|pending_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M4WWM1QZ0SS5WQ088WJWVGVZ|ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs0|01M4TVVS14EFAZ401JQAK6825V|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M4X92WB6N5B41VT66NBTBZVZ|ai2/ace|jupiter
 cm4_1pct_46to125_piC_156to235_4deg-ocean_ppad_nopad|rs1|01M4TVW7X2G5M8QH6Y2DMH8XEC|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M4X3H92934A7WF8J7MN4NZW4|ai2/ace|jupiter
 
