@@ -194,6 +194,7 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"corrector_forcing_name is an output variable: '{name}'"
                 )
+        self.corrector.validate_names(self.output_names, self.next_step_input_names)
         for name in self.next_step_forcing_names:
             if name not in self.in_names and name not in self.corrector_forcing_names:
                 raise ValueError(

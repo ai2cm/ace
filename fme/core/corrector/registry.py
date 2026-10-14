@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, Self, final
 
 import dacite
@@ -52,6 +52,18 @@ class CorrectorConfigABC(abc.ABC):
         nothing to remove.
         """
         ...
+
+    def validate_names(
+        self, out_names: Iterable[str], forcing_names: Iterable[str]
+    ) -> None:
+        """Check the step's names against what the corrector reads.
+
+        Default: no check. Called from the step config's ``__post_init__``.
+
+        Args:
+            out_names: Names the step outputs (the corrector's gen_data).
+            forcing_names: Names the corrector receives as forcing_data.
+        """
 
     @final
     def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":

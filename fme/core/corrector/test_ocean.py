@@ -13,6 +13,7 @@ from fme.core.constants import (
 )
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.corrector.ocean import (
+    AnchoredFlux,
     AreaWeight,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
@@ -24,6 +25,7 @@ from fme.core.corrector.ocean import (
     SeaSurfaceHeightSaltBudget,
     SeaSurfaceHeightSaltBudgetConfig,
     SurfaceEnergyFluxCorrectionConfig,
+    SurfaceFluxAnchorConfig,
     ZosGlobalMeanCorrectionConfig,
     _compute_ocean_net_surface_energy_flux,
     area_basis,
@@ -34,9 +36,12 @@ from fme.core.corrector.ocean import (
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import frozen_enthalpy_budget_residual
+from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
+from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.typing_ import TensorMapping
 
 DEVICE = get_device()
@@ -1033,6 +1038,7 @@ def test_ocean_corrector_config_fields_are_known():
         "ocean_salt_content_correction",
         "keep_gradient_through_clamps",
         "zos_global_mean_correction",
+        "surface_flux_anchor",  # test_surface_flux_anchor_subset_*
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(OceanCorrectorConfig)}
@@ -2030,3 +2036,220 @@ def test_prescribed_open_ocean_sis2_with_am4_precipitation_heat():
     open_ = (1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]) == 1
     expected = torch.where(open_, _sis2_hfds(no_om4) + p_h, gen_data["hfds_total_area"])
     torch.testing.assert_close(hfds, expected)
+
+
+# --- per-flux AM4 block anchor of generated SIS2 surface fluxes ------------
+
+_FLUXES: list[AnchoredFlux] = [
+    "SW_total_area",
+    "LW_total_area",
+    "LH_total_area",
+    "SH_total_area",
+]
+
+
+def _flux_am4(forcing_data, flux):
+    """x^A per total cell area: independent restatement of the AM4 counterparts."""
+    f = forcing_data
+    ssf = f["sea_surface_fraction"]
+    return {
+        "SW_total_area": (f["DSWRFsfc"] - f["USWRFsfc"]) * ssf,
+        "LW_total_area": (f["DLWRFsfc"] - f["ULWRFsfc"]) * ssf,
+        "LH_total_area": f["LHTFLsfc"] * ssf,
+        "SH_total_area": f["SHTFLsfc"] * ssf,
+    }[flux]
+
+
+def _anchor_set(input_data, gen_data):
+    """K = M: open, ssf > 0, off the sea-ice support."""
+    S = (
+        (input_data["frozen_mass_total_area"] > 0)
+        & (gen_data["frozen_mass_total_area"] > 0)
+        & (input_data["sea_surface_fraction"] > 0)
+    )
+    return _anchored_mask(input_data) & ~S
+
+
+def _flux_anchor_config(
+    fluxes: list[AnchoredFlux] | None = None, block_size=3, **kwargs
+):
+    anchor = SurfaceFluxAnchorConfig(
+        fluxes=list(_FLUXES if fluxes is None else fluxes), block_size=block_size
+    )
+    return OceanCorrectorConfig(surface_flux_anchor=anchor, **kwargs)
+
+
+def _run_corrected(config, data):
+    return config._build(LatLonOperations(_OO_AREA), None, _DT, lat=_OO_LAT)(
+        *[_to_device(d) for d in data], None
+    )
+
+
+def _flux_case():
+    """_oo_case with an ice cell inside an open row, so K differs from M's
+    open-water test, and spatially varying AM4 fluxes."""
+    input_data, gen_data, forcing_data = _oo_case()
+    m = input_data["frozen_mass_total_area"]
+    m[:, 1, 1] = 50.0  # ice at both endpoints, sea_ice_fraction 0: in S, not K
+    gen_data["frozen_mass_total_area"] = m * 1.1
+    return input_data, gen_data, forcing_data
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 6])
+def test_surface_flux_anchor_block_integrals_equal_am4(n):
+    data = _flux_case()
+    input_data, gen_data, forcing_data = data
+    out = _run_corrected(_flux_anchor_config(block_size=n), data).corrected
+    K = _anchor_set(input_data, gen_data)
+    assert K.any() and (~K).any()
+    w = torch.where(K, _OO_AREA.double(), 0.0)  # a A, A = 1 per total cell area
+    shape = (_OO_SHAPE[0], 6 // n, n, 6 // n, n)
+    for flux in _FLUXES:
+        x = out[flux].cpu().double()
+        x_am4 = _flux_am4(forcing_data, flux).double()
+        blocks_x = (w * x).reshape(shape).sum(dim=(-3, -1))
+        blocks_am4 = (w * x_am4).reshape(shape).sum(dim=(-3, -1))
+        scale = (w * x_am4.abs()).sum() + (w * x.abs()).sum()
+        torch.testing.assert_close(blocks_x, blocks_am4, atol=1e-5 * scale, rtol=0)
+        if n > 1:  # n = 1 prescribes x^A; larger blocks keep the generated pattern
+            assert not torch.allclose(x[K], x_am4[K]), flux
+
+
+def test_surface_flux_anchor_identity_when_generated_equals_am4():
+    data = _flux_case()
+    input_data, gen_data, forcing_data = data
+    for flux in _FLUXES:
+        gen_data[flux] = _flux_am4(forcing_data, flux)
+    out = _run_corrected(_flux_anchor_config(), data).corrected
+    for flux in _FLUXES:
+        torch.testing.assert_close(out[flux].cpu(), gen_data[flux])
+
+
+def test_surface_flux_anchor_untouched_off_anchor_set():
+    data = _flux_case()
+    input_data, gen_data, _ = data
+    out = _run_corrected(_flux_anchor_config(), data).corrected
+    off = ~_anchor_set(input_data, gen_data)
+    assert off.any()
+    for flux in _FLUXES:
+        torch.testing.assert_close(out[flux].cpu()[off], gen_data[flux][off])
+
+
+def test_surface_flux_anchor_subset_modifies_only_listed_fluxes():
+    data = _flux_case()
+    _, gen_data, _ = data
+    result = _run_corrected(_flux_anchor_config(fluxes=["SW_total_area"]), data)
+    assert set(result.modified_names) == {"SW_total_area"}
+    for flux in _FLUXES[1:]:
+        torch.testing.assert_close(result.corrected[flux].cpu(), gen_data[flux])
+
+
+def test_surface_flux_anchor_runs_before_surface_energy_flux_correction():
+    """flux_source sis2 reads the generated fluxes; it must see the anchored ones."""
+    data = _flux_case()
+    sefc = SurfaceEnergyFluxCorrectionConfig(
+        method="prescribed_open_ocean", flux_source="sis2"
+    )
+    both = _run_corrected(
+        _flux_anchor_config(surface_energy_flux_correction=sefc), data
+    ).corrected
+    anchored_gen = {**data[1], **{f: both[f].cpu() for f in _FLUXES}}
+    sefc_on_anchored = _run_corrected(
+        OceanCorrectorConfig(surface_energy_flux_correction=sefc),
+        (data[0], anchored_gen, data[2]),
+    ).corrected
+    torch.testing.assert_close(
+        both["hfds_total_area"], sefc_on_anchored["hfds_total_area"]
+    )
+
+
+def test_surface_flux_anchor_gradients_finite():
+    input_data, gen_data, forcing_data = _flux_case()
+    for flux in _FLUXES:
+        gen_data[flux] = gen_data[flux].clone().requires_grad_(True)
+    out = _flux_anchor_config()._build(
+        LatLonOperations(_OO_AREA), None, _DT, lat=_OO_LAT
+    )(input_data, gen_data, forcing_data, None)
+    sum(out.corrected[f].pow(2).sum() for f in _FLUXES).backward()
+    for flux in _FLUXES:
+        g = gen_data[flux].grad
+        assert g is not None and torch.isfinite(g).all(), flux
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"fluxes": []}, "must not be empty"),
+        ({"fluxes": ["SW_total_area", "SW_total_area"]}, "unique"),
+        ({"block_size": 0}, "block_size"),
+    ],
+)
+def test_surface_flux_anchor_config_rejects(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        SurfaceFluxAnchorConfig(**kwargs)
+
+
+def test_surface_flux_anchor_block_must_divide_grid():
+    with pytest.raises(ValueError, match="block_size"):
+        _run_corrected(_flux_anchor_config(block_size=4), _flux_case())
+
+
+_AM4_NAMES = ["DSWRFsfc", "USWRFsfc", "DLWRFsfc", "ULWRFsfc", "LHTFLsfc", "SHTFLsfc"]
+
+
+@pytest.mark.parametrize(
+    "out_names, forcing_names, match",
+    [
+        (_FLUXES, _AM4_NAMES, None),
+        (_FLUXES[1:], _AM4_NAMES, "out_names.*SW_total_area"),
+        (_FLUXES, _AM4_NAMES[1:], "forcing.*DSWRFsfc"),
+    ],
+)
+def test_surface_flux_anchor_validate_names(out_names, forcing_names, match):
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config={"surface_flux_anchor": {"block_size": 3}},
+    )
+    if match is None:
+        selector.validate_names(out_names, forcing_names)
+    else:
+        with pytest.raises(ValueError, match=match):
+            selector.validate_names(out_names, forcing_names)
+
+
+def _flux_anchor_step_config(corrector_forcing_names):
+    names = ["sst", *_FLUXES]
+    return SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=names,
+        out_names=names,
+        normalization=NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(
+                means={n: 0.0 for n in names}, stds={n: 1.0 for n in names}
+            )
+        ),
+        corrector=CorrectorSelector(
+            type="ocean_corrector",
+            config={"surface_flux_anchor": {"block_size": 3}},
+        ),
+        corrector_forcing_names=corrector_forcing_names,
+    )
+
+
+def test_surface_flux_anchor_validated_by_step_config():
+    _flux_anchor_step_config(_AM4_NAMES)
+    with pytest.raises(ValueError, match="ULWRFsfc"):
+        _flux_anchor_step_config([n for n in _AM4_NAMES if n != "ULWRFsfc"])
+
+
+def test_surface_flux_anchor_config_from_state():
+    config = OceanCorrectorConfig.from_state(
+        {"surface_flux_anchor": {"fluxes": ["LH_total_area"], "block_size": 3}}
+    )
+    anchor = config.surface_flux_anchor
+    assert anchor is not None
+    assert (anchor.fluxes, anchor.block_size, anchor.region) == (
+        ["LH_total_area"],
+        3,
+        "open_ocean",
+    )

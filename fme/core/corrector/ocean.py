@@ -402,6 +402,92 @@ class OpenOceanAnchorConfig:
         return area_basis(["hfds_total_area"])
 
 
+AnchoredFlux = Literal[
+    "SW_total_area", "LW_total_area", "LH_total_area", "SH_total_area"
+]
+ANCHORED_FLUXES: tuple[AnchoredFlux, ...] = (
+    "SW_total_area",
+    "LW_total_area",
+    "LH_total_area",
+    "SH_total_area",
+)
+_AM4_FLUX_COUNTERPART: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    # flux: (positive AM4 names, negative AM4 names); x^A = (sum pos - sum neg) ssf
+    "SW_total_area": (("DSWRFsfc",), ("USWRFsfc",)),
+    "LW_total_area": (("DLWRFsfc",), ("ULWRFsfc",)),
+    "LH_total_area": (("LHTFLsfc",), ()),
+    "SH_total_area": (("SHTFLsfc",), ()),
+}
+
+
+@dataclasses.dataclass
+class SurfaceFluxAnchorConfig:
+    """Block-anchors each generated SIS2 surface flux to its AM4 counterpart.
+
+    For x in ``fluxes``, on the anchor set K::
+
+        x^A  = AM4 counterpart x ssf     (SW: DSWRFsfc - USWRFsfc,
+                                          LW: DLWRFsfc - ULWRFsfc,
+                                          LH: LHTFLsfc, SH: SHTFLsfc)
+        x    = x_hat + <x^A>_B - <x_hat>_B    on K;  x_hat off K
+
+    <.>_B is the a A-weighted mean over B ∩ K, B the ``block_size`` x
+    ``block_size`` lat-lon blocks of the local grid, so
+    sum_{B ∩ K} a A x = sum_{B ∩ K} a A x^A per block and flux, A from
+    ``area_basis`` (1 per total cell area).
+
+    Parameters:
+        fluxes: Generated fluxes to anchor, per total cell area.
+        block_size: Block edge n in grid cells; must divide the local grid.
+        region: Anchor set K. "open_ocean": M = (input ocean_fraction == 1 and
+            ssf > 0) minus the sea-ice support S.
+        frozen_mass_name: Frozen mass defining S = (m(k-1) > 0 and m(k) > 0 and
+            ssf > 0), as in ``SeaIceHfdsCorrectionConfig``.
+    """
+
+    fluxes: list[AnchoredFlux] = dataclasses.field(
+        default_factory=lambda: list(ANCHORED_FLUXES)
+    )
+    block_size: int = 5
+    region: Literal["open_ocean"] = "open_ocean"
+    frozen_mass_name: str = "frozen_mass_total_area"
+
+    def __post_init__(self):
+        if self.block_size < 1:
+            raise ValueError("block_size must be positive")
+        if len(self.fluxes) == 0:
+            raise ValueError("fluxes must not be empty")
+        if len(set(self.fluxes)) != len(self.fluxes):
+            raise ValueError(f"fluxes must be unique: {self.fluxes}")
+        _ = self.area_basis  # raises on mixed basis
+
+    @property
+    def area_basis(self) -> AreaBasis:
+        return area_basis(self.fluxes)
+
+    @property
+    def am4_names(self) -> list[str]:
+        names: list[str] = []
+        for flux in self.fluxes:
+            positive, negative = _AM4_FLUX_COUNTERPART[flux]
+            names.extend(positive + negative)
+        return names
+
+    def validate_names(self, out_names: Iterable[str], forcing_names: Iterable[str]):
+        out_names, forcing_names = set(out_names), set(forcing_names)
+        missing_out = [f for f in self.fluxes if f not in out_names]
+        if missing_out:
+            raise ValueError(
+                f"surface_flux_anchor fluxes must be in out_names: {missing_out}"
+            )
+        missing_forcing = [n for n in self.am4_names if n not in forcing_names]
+        if missing_forcing:
+            raise ValueError(
+                "surface_flux_anchor needs AM4 fluxes in the corrector's forcing "
+                f"(in_names or corrector_forcing_names): {missing_forcing}"
+            )
+
+
 @dataclasses.dataclass
 class ZosGlobalMeanCorrectionConfig:
     """Configuration for setting the global mean of generated sea surface
@@ -562,7 +648,7 @@ class SeaIceHfdsCorrection:
             - m0 * _frozen_deficit(input_data, m0, cfg.ice_layer_temperature_names)
         ) / self.timestep_seconds
         residual = source - storage
-        support = (m0 > 0) & (m1 > 0) & (ssf > 0)
+        support = _sea_ice_support(m0, m1, ssf)
         if cfg.weight == "uniform":
             weight = torch.ones_like(hfds)
         else:
@@ -622,7 +708,7 @@ class OpenOceanAnchor:
 
         q_hat = sum((term(n) for n in cfg.q_terms), torch.zeros_like(hfds))
         F = _open_ocean_q(self.flux_source, gen_data, forcing_data, ssf, sst)
-        anchored = (inp.ocean_fraction == 1) & (ssf > 0) & ~on_ice
+        anchored = _open_ocean_cells(inp, on_ice)
         w = torch.where(
             anchored,
             self.area_weight.local(self.area_weight.field(input_data, forcing_data)),
@@ -634,6 +720,65 @@ class OpenOceanAnchor:
             - block_mean(q_hat, w, cfg.block_size)
         )
         return anchored, q - term("calving_residue") - term("minus_hfrunoffds")
+
+
+def _sea_ice_support(
+    m0: torch.Tensor, m1: torch.Tensor, ssf: torch.Tensor
+) -> torch.Tensor:
+    """S: frozen mass > 0 at both step endpoints, on ocean cells."""
+    return (m0 > 0) & (m1 > 0) & (ssf > 0)
+
+
+def _open_ocean_cells(inp: OceanData, on_ice: torch.Tensor) -> torch.Tensor:
+    """M: input ocean_fraction == 1 and ssf > 0, off ``on_ice``."""
+    return (inp.ocean_fraction == 1) & (inp.sea_surface_fraction > 0) & ~on_ice
+
+
+@dataclasses.dataclass
+class SurfaceFluxAnchor:
+    """Applies ``SurfaceFluxAnchorConfig``; see its docstring for the math."""
+
+    config: SurfaceFluxAnchorConfig
+    area_weight: AreaWeight
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the anchored fluxes.
+        """
+        cfg = self.config
+        inp = OceanData({**input_data, **forcing_data})
+        ssf = inp.sea_surface_fraction
+        on_ice = _sea_ice_support(
+            input_data[cfg.frozen_mass_name], gen_data[cfg.frozen_mass_name], ssf
+        )
+        K = _open_ocean_cells(inp, on_ice)
+        w = torch.where(
+            K,
+            self.area_weight.local(self.area_weight.field(input_data, forcing_data)),
+            0.0,
+        )
+        out: TensorDict = {}
+        for flux in cfg.fluxes:
+            x_hat = gen_data[flux]
+            positive, negative = _AM4_FLUX_COUNTERPART[flux]
+            x_am4 = (
+                sum((forcing_data[n] for n in positive), torch.zeros_like(x_hat))
+                - sum((forcing_data[n] for n in negative), torch.zeros_like(x_hat))
+            ) * ssf
+            anchored = (
+                x_hat
+                + block_mean(x_am4, w, cfg.block_size)
+                - block_mean(x_hat, w, cfg.block_size)
+            )
+            out[flux] = torch.where(K, anchored, x_hat)
+        return out, corrector_state
 
 
 def block_mean(x: torch.Tensor, w: torch.Tensor, n: int) -> torch.Tensor:
@@ -984,6 +1129,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         zos_global_mean_correction: Optional configuration for setting the
             sea-surface-fraction-weighted global mean of the generated ``zos``
             to a reference value.
+        surface_flux_anchor: Optional block anchor of generated SIS2 surface
+            fluxes to AM4; runs before ``surface_energy_flux_correction`` so
+            it reads the anchored fluxes.
     """
 
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
@@ -993,6 +1141,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
     zos_global_mean_correction: ZosGlobalMeanCorrectionConfig | None = None
+    surface_flux_anchor: SurfaceFluxAnchorConfig | None = None
+
+    def validate_names(
+        self, out_names: Iterable[str], forcing_names: Iterable[str]
+    ) -> None:
+        if self.surface_flux_anchor is not None:
+            self.surface_flux_anchor.validate_names(out_names, forcing_names)
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -1032,8 +1187,9 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     ) -> "OceanCorrector":
         lat = None
         sefc = self.surface_energy_flux_correction
-        if sefc is not None and (
-            sefc.sea_ice is not None or sefc.open_ocean is not None
+        if self.surface_flux_anchor is not None or (
+            sefc is not None
+            and (sefc.sea_ice is not None or sefc.open_ocean is not None)
         ):
             lat = dataset_info.horizontal_coordinates.localize().lat_1d
         spatial_mask_provider: SpatialMaskProviderABC
@@ -1072,6 +1228,19 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                 SeaIceFractionCorrection(
                     self.sea_ice_fraction_correction,
                     keep_gradient=self.keep_gradient_through_clamps,
+                )
+            )
+        if self.surface_flux_anchor is not None:
+            if lat is None:
+                raise ValueError("surface_flux_anchor needs latitudes")
+            corrections.append(
+                SurfaceFluxAnchor(
+                    self.surface_flux_anchor,
+                    AreaWeight(
+                        area_weighted_mean,
+                        torch.cos(torch.deg2rad(lat)).unsqueeze(-1),
+                        self.surface_flux_anchor.area_basis,
+                    ),
                 )
             )
         sefc = self.surface_energy_flux_correction

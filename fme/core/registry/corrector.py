@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, ClassVar  # noqa: UP035
 
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
@@ -49,6 +49,11 @@ class CorrectorSelector(CorrectorConfigABC):
         without a schedule, and the schedule has no effect at inference.
         """
         return self._corrector_config_instance.corrector_disabled_epochs == 0
+
+    def validate_names(
+        self, out_names: Iterable[str], forcing_names: Iterable[str]
+    ) -> None:
+        self._corrector_config_instance.validate_names(out_names, forcing_names)
 
     @classmethod
     def register(cls, type_name):
