@@ -12,6 +12,7 @@ ERA5_ZARR=2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
 CFG="${CFG:-coupled-evaluator-config-ufs4deg-era5-smoke.yaml}"
 NAME="${NAME:-smoke}"
 PRIORITY="${PRIORITY:-high}"
+EXTRA_OVERRIDE="${EXTRA_OVERRIDE:-}"   # e.g. data_writer.ocean.names=[sst,...] for oceans without the learned-heating channel
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
@@ -32,5 +33,5 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${ERA5_DS}:/era5/${ERA5_ZARR}" \
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
-  -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/${CFG}" 2>&1) || true
+  -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/${CFG}" ${EXTRA_OVERRIDE:+--override "$EXTRA_OVERRIDE"} 2>&1) || true
 echo "$out" | grep -qm1 "beaker.org/ex/" && echo "launched $JOB" || echo "FAILED $JOB: $(echo "$out" | tail -3)"
