@@ -1,0 +1,174 @@
+# Coupled ENSO hindcasts, two-checkpoint form (an ocean checkpoint + the ERA5 4deg atmosphere, no coupled fine-tune):
+# 120 monthly ICs in the untouched 2002-2011 decade (the same ICs as the ocean-only hindcast report) x 128 coupled steps
+# (~21 months) with the atmosphere INTERACTIVE, so this is true ENSO forecast skill, not the forced-ocean ceiling.
+# Scored by scripts/score_hindcasts.py of reports troya/2026-10-09-ufs4deg-scratch-vs-cm4-pretrain-enso (Nino3.4 ACC vs persistence).
+experiment_dir: /results
+checkpoint_path:
+  ocean:
+    timedelta: 5D
+    path: /ocean_ckpt.tar
+  atmosphere:
+    timedelta: 1D
+    path: /atmos_ckpt.tar
+  sst_name: sst
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  atmosphere_output_rename:
+    eastward_surface_wind_stress: eastward_surface_stress
+    northward_surface_wind_stress: northward_surface_stress
+  atmosphere_output_scale:
+    eastward_surface_wind_stress: -1.0
+    northward_surface_wind_stress: -1.0
+n_coupled_steps: 128
+coupled_steps_in_memory: 8
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /ufs4deg
+      file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5
+      file_pattern: 2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2002-01-03T18:00:00'
+    - '2002-02-02T18:00:00'
+    - '2002-03-04T18:00:00'
+    - '2002-04-03T18:00:00'
+    - '2002-05-03T18:00:00'
+    - '2002-06-02T18:00:00'
+    - '2002-07-02T18:00:00'
+    - '2002-08-01T18:00:00'
+    - '2002-09-05T18:00:00'
+    - '2002-10-05T18:00:00'
+    - '2002-11-04T18:00:00'
+    - '2002-12-04T18:00:00'
+    - '2003-01-03T18:00:00'
+    - '2003-02-02T18:00:00'
+    - '2003-03-04T18:00:00'
+    - '2003-04-03T18:00:00'
+    - '2003-05-03T18:00:00'
+    - '2003-06-02T18:00:00'
+    - '2003-07-02T18:00:00'
+    - '2003-08-01T18:00:00'
+    - '2003-09-05T18:00:00'
+    - '2003-10-05T18:00:00'
+    - '2003-11-04T18:00:00'
+    - '2003-12-04T18:00:00'
+    - '2004-01-03T18:00:00'
+    - '2004-02-02T18:00:00'
+    - '2004-03-03T18:00:00'
+    - '2004-04-02T18:00:00'
+    - '2004-05-02T18:00:00'
+    - '2004-06-01T18:00:00'
+    - '2004-07-01T18:00:00'
+    - '2004-08-05T18:00:00'
+    - '2004-09-04T18:00:00'
+    - '2004-10-04T18:00:00'
+    - '2004-11-03T18:00:00'
+    - '2004-12-03T18:00:00'
+    - '2005-01-02T18:00:00'
+    - '2005-02-01T18:00:00'
+    - '2005-03-03T18:00:00'
+    - '2005-04-02T18:00:00'
+    - '2005-05-02T18:00:00'
+    - '2005-06-01T18:00:00'
+    - '2005-07-01T18:00:00'
+    - '2005-08-05T18:00:00'
+    - '2005-09-04T18:00:00'
+    - '2005-10-04T18:00:00'
+    - '2005-11-03T18:00:00'
+    - '2005-12-03T18:00:00'
+    - '2006-01-02T18:00:00'
+    - '2006-02-01T18:00:00'
+    - '2006-03-03T18:00:00'
+    - '2006-04-02T18:00:00'
+    - '2006-05-02T18:00:00'
+    - '2006-06-01T18:00:00'
+    - '2006-07-01T18:00:00'
+    - '2006-08-05T18:00:00'
+    - '2006-09-04T18:00:00'
+    - '2006-10-04T18:00:00'
+    - '2006-11-03T18:00:00'
+    - '2006-12-03T18:00:00'
+    - '2007-01-02T18:00:00'
+    - '2007-02-01T18:00:00'
+    - '2007-03-03T18:00:00'
+    - '2007-04-02T18:00:00'
+    - '2007-05-02T18:00:00'
+    - '2007-06-01T18:00:00'
+    - '2007-07-01T18:00:00'
+    - '2007-08-05T18:00:00'
+    - '2007-09-04T18:00:00'
+    - '2007-10-04T18:00:00'
+    - '2007-11-03T18:00:00'
+    - '2007-12-03T18:00:00'
+    - '2008-01-02T18:00:00'
+    - '2008-02-01T18:00:00'
+    - '2008-03-02T18:00:00'
+    - '2008-04-01T18:00:00'
+    - '2008-05-01T18:00:00'
+    - '2008-06-05T18:00:00'
+    - '2008-07-05T18:00:00'
+    - '2008-08-04T18:00:00'
+    - '2008-09-03T18:00:00'
+    - '2008-10-03T18:00:00'
+    - '2008-11-02T18:00:00'
+    - '2008-12-02T18:00:00'
+    - '2009-01-01T18:00:00'
+    - '2009-02-05T18:00:00'
+    - '2009-03-02T18:00:00'
+    - '2009-04-01T18:00:00'
+    - '2009-05-01T18:00:00'
+    - '2009-06-05T18:00:00'
+    - '2009-07-05T18:00:00'
+    - '2009-08-04T18:00:00'
+    - '2009-09-03T18:00:00'
+    - '2009-10-03T18:00:00'
+    - '2009-11-02T18:00:00'
+    - '2009-12-02T18:00:00'
+    - '2010-01-01T18:00:00'
+    - '2010-02-05T18:00:00'
+    - '2010-03-02T18:00:00'
+    - '2010-04-01T18:00:00'
+    - '2010-05-01T18:00:00'
+    - '2010-06-05T18:00:00'
+    - '2010-07-05T18:00:00'
+    - '2010-08-04T18:00:00'
+    - '2010-09-03T18:00:00'
+    - '2010-10-03T18:00:00'
+    - '2010-11-02T18:00:00'
+    - '2010-12-02T18:00:00'
+    - '2011-01-01T18:00:00'
+    - '2011-02-05T18:00:00'
+    - '2011-03-02T18:00:00'
+    - '2011-04-01T18:00:00'
+    - '2011-05-01T18:00:00'
+    - '2011-06-05T18:00:00'
+    - '2011-07-05T18:00:00'
+    - '2011-08-04T18:00:00'
+    - '2011-09-03T18:00:00'
+    - '2011-10-03T18:00:00'
+    - '2011-11-02T18:00:00'
+    - '2011-12-02T18:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: true
+    names: [sst]
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
