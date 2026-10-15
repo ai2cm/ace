@@ -203,6 +203,7 @@ This is useful for:
 - `input_header()`: Print an input file's header from its `*_COLUMNS` array
 - `parse_row()`: Set each `*_COLUMNS` variable from a pipe-delimited row
 - `parse_dry_run_flag()`: Parse `--dry-run` flag from arguments
+- `validate_config_once()`: Validate a config; under `--dry-run`, once per unique config and overrides
 - `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
 - `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
 

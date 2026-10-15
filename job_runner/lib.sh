@@ -425,6 +425,25 @@ parse_dry_run_flag() {
     export DRY_RUN
 }
 
+# Newline-separated "<config>|<overrides>" keys already validated this run
+VALIDATED_CONFIGS=""
+
+# Validate a config; in dry-run mode, only the first row with a given config and overrides
+# Args: VALIDATE_MODULE CONFIG_TYPE CONFIG_PATH_REL [OVERRIDE ...]
+# Usage: validate_config_once "$FME_MODULE_VALIDATE" evaluator "$CONFIG_PATH_REL" "${OVERRIDE_ARGV[@]}"
+validate_config_once() {
+    local MODULE="$1" CONFIG_TYPE="$2" CONFIG="$3"
+    shift 3
+    local KEY="${CONFIG}|$*"
+
+    if [[ "$DRY_RUN" == "true" ]] && grep -qxF -- "$KEY" <<<"$VALIDATED_CONFIGS"; then
+        echo "    (already validated: ${CONFIG})"
+        return 0
+    fi
+    python -m "$MODULE" --config_type "$CONFIG_TYPE" "$CONFIG" --override "$@" || return
+    VALIDATED_CONFIGS+="${KEY}"$'\n'
+}
+
 # Parse --config-dir argument from arguments
 # Sets global CONFIG_DIR_OVERRIDE variable (empty when the flag is absent)
 # Usage: parse_config_dir_arg "$@"

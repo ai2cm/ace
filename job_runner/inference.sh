@@ -191,7 +191,7 @@ while read TRAIN_EXPER; do
     # list/dict values with spaces into single argv elements (literal quotes read
     # from the file are otherwise ignored by word-splitting).
     eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
-    python -m $FME_MODULE_VALIDATE --config_type inference "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
+    validate_config_once "$FME_MODULE_VALIDATE" inference "$CONFIG_PATH_REL" "${OVERRIDE_ARGV[@]}"
 
     # Run gantry command unless in dry-run mode
     if [[ "$DRY_RUN" != "true" ]]; then
