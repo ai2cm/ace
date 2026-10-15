@@ -430,16 +430,6 @@ class SingleModuleStep(StepABC):
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
         )
-        # A network that pads its input fields across the pole needs to know
-        # which channels are vector components, whose sign flips there. The
-        # builder is not given the names and core cannot import the model
-        # classes, so the names go to any module that takes them.
-        set_input_names = getattr(module.torch_module, "set_input_names", None)
-        if set_input_names is not None:
-            input_channel_names = list(packed_in_names)
-            if config.include_channel_mask_inputs:
-                input_channel_names += [f"mask:{name}" for name in packed_in_names]
-            set_input_names(input_channel_names)
         self.module = module.to(get_device())
 
         dist = Distributed.get_instance()

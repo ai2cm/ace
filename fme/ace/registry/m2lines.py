@@ -50,20 +50,11 @@ class SamudraBuilder(ModuleConfig):
             upsampler, default                      edge row  raises
             ======================================  ========  ========
 
-            "constant" (the default) is the original network. "pole_edge" pads
-            like "pole" with the antipode taken at a cell edge, so a
-            period-two zonal ripple cancels in the pad. "pole" is exact for
-            scalar fields only and, like "pole_edge", requires
-            ``zonally_periodic_upsample``;
+            "constant" (the default) is the original network. "pole" is exact
+            for scalar fields only and requires ``zonally_periodic_upsample``;
             a pad longer than a level's height (the 4 degree bottleneck's 3
             rows under a dilation of 4) continues past the far pole. See
             ``Samudra``.
-        pole_pad_vector_names: Input channels that are vector components, by
-            name or name prefix (e.g. ``uo_``, ``vo_``, ``UI``, ``VI``), whose
-            pole pad at the first convolution is negated, the true continuation
-            of a vector component across the pole. Requires a "pole" or
-            "pole_edge" ``lat_pad``; not supported with ``noise_embed_dim``.
-            The step hands the network its input names. See ``Samudra``.
         pad_pool: Pad an odd height or width by one row or column at the end
             of the axis in each pool instead of dropping the last one, and crop
             it off the decoder's upsample instead of refilling a dropped one,
@@ -86,7 +77,6 @@ class SamudraBuilder(ModuleConfig):
     zonally_periodic_upsample: bool = False
     lat_pad: LatPad = "constant"
     pad_pool: bool = False
-    pole_pad_vector_names: list[str] | None = None
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
@@ -99,23 +89,11 @@ class SamudraBuilder(ModuleConfig):
             raise ValueError("norm_kwargs should not have num_features")
         if "normalized_shape" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have normalized_shape")
-        if self.lat_pad in ("pole", "pole_edge") and not self.zonally_periodic_upsample:
+        if self.lat_pad == "pole" and not self.zonally_periodic_upsample:
             raise ValueError(
-                f"lat_pad {self.lat_pad!r} requires zonally_periodic_upsample: "
-                "the default upsampler always replicates the latitude edge"
+                "lat_pad 'pole' requires zonally_periodic_upsample: the default "
+                "upsampler always replicates the latitude edge"
             )
-        if self.pole_pad_vector_names is not None:
-            if self.lat_pad not in ("pole", "pole_edge"):
-                raise ValueError(
-                    "pole_pad_vector_names requires lat_pad 'pole' or "
-                    f"'pole_edge', got {self.lat_pad!r}"
-                )
-            if self.noise_embed_dim > 0:
-                raise ValueError(
-                    "pole_pad_vector_names is not supported with noise "
-                    "conditioning: the noise wrapper does not pass on the "
-                    "input names"
-                )
         if self.noise_embed_dim < 0:
             raise ValueError("noise_embed_dim must not be negative")
         if self.noise_embed_dim > 0 and self.conditioned_blocks is None:
@@ -160,7 +138,6 @@ class SamudraBuilder(ModuleConfig):
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             lat_pad=self.lat_pad,
             pad_pool=self.pad_pool,
-            pole_pad_vector_names=self.pole_pad_vector_names,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )
