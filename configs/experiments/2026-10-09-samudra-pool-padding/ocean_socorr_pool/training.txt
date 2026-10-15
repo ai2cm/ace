@@ -4,7 +4,16 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 # the mean, beaker 01M4VR953T8GG20SDZ09VHY82B for rs0) with pad_pool on: the
 # pole padding is already in the config, so pad_pool is the only change.
 #
+# The two fixes of the 2026-10-15 pad-pool vo-banding report, each on its own
+# on top of ocean_socorr_fm_pool:
+# - ocean_socorr_fm_pool_edge: lat_pad pole_edge, the half-column antipode
+# - ocean_socorr_fm_pool_vsign: the pole pad of the vector input channels
+#   negated (pole_pad_vector_names)
+#
 # uncoupled_train.sh acts only on rows whose status is exactly "train".
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs0|training|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true|8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs1|training|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true|8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true 'stepper.step.config.builder.config.pole_pad_vector_names=[uo_,vo_,UI,VI,eastward_surface_wind_stress,northward_surface_wind_stress]'|8h
