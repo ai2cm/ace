@@ -1,6 +1,8 @@
 """End-to-end tests for create_coupled_datasets.write_datasets_and_stats on
 tiny synthetic atmosphere and ocean zarr stores in a temporary directory."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -19,7 +21,9 @@ from create_coupled_datasets import (  # noqa: E402
     CoupledInputDatasetConfig,
     CoupledStatsConfig,
     CreateCoupledDatasetsConfig,
+    EnsembleRunConfig,
     InputDatasetsConfig,
+    InputEnsembleConfig,
     InputStatsConfig,
 )
 from create_window_avg_dataset import WindowAvgDatasetConfig  # noqa: E402
@@ -352,3 +356,58 @@ def test_strided_ocean_input_gives_5daily_coherent_fractions(tmp_path):
     ts = result["surface_temperature"].values
     np.testing.assert_allclose(ts[:, 0, 1], 270.0 + held)
     np.testing.assert_allclose(ts[:, 0, 0], 270.0 + steps)
+
+
+def _make_ensemble_config(tmp_path, run_names, exclude_runs):
+    """Ensemble config whose runs all share the synthetic single-run inputs."""
+    single = _make_config(tmp_path)
+    inputs = single.input_datasets
+    run = EnsembleRunConfig(atmosphere=inputs.atmosphere, ocean=inputs.ocean)
+    return CreateCoupledDatasetsConfig(
+        version=single.version,
+        family_name=single.family_name,
+        output_directory=single.output_directory,
+        coupled_datasets=single.coupled_datasets,
+        input_datasets=InputEnsembleConfig(
+            runs={name: run for name in run_names},
+            stats=inputs.stats,
+            climate_data_type=inputs.climate_data_type,
+        ),
+        stats=CoupledStatsConfig(exclude_runs=exclude_runs),
+    )
+
+
+def test_ensemble_stats_omit_excluded_runs(tmp_path):
+    config = _make_ensemble_config(
+        tmp_path, ["run-a", "run-excluded"], exclude_runs=["run-excluded"]
+    )
+    config.write_coupled_datasets(debug=False, subsample=False)
+
+    ensemble_dir = tmp_path / "outputs" / "v1-synthetic"
+    stats_dir = tmp_path / "outputs" / "v1-synthetic-stats"
+    for store in ["sea_ice", "ocean", "atmosphere"]:
+        assert (ensemble_dir / f"run-excluded-{store}.zarr").exists()
+    assert (stats_dir / "run-a").exists()
+    assert not (stats_dir / "run-excluded").exists()
+    for category in create_coupled_datasets.STATS_CATEGORIES:
+        for fname in STATS_NC_FILE_NAMES:
+            combined = stats_dir / "combined" / category / fname
+            assert combined.exists(), f"missing combined stats file {combined}"
+
+
+@pytest.mark.parametrize(
+    "exclude_runs, match",
+    [
+        (["run-c"], "not in input_datasets.runs"),
+        (["run-a", "run-b"], "excludes every ensemble run"),
+    ],
+)
+def test_invalid_exclude_runs_raises(tmp_path, exclude_runs, match):
+    with pytest.raises(ValueError, match=match):
+        _make_ensemble_config(tmp_path, ["run-a", "run-b"], exclude_runs)
+
+
+def test_exclude_runs_on_single_dataset_raises(tmp_path):
+    config = _make_config(tmp_path)
+    with pytest.raises(ValueError, match="only supported for ensemble"):
+        dataclasses.replace(config, stats=CoupledStatsConfig(exclude_runs=["run-a"]))
