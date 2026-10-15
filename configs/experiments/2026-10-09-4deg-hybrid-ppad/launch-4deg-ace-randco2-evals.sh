@@ -11,6 +11,7 @@ CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 TAG="${TAG:?short label for the atmosphere, e.g. rco2rs2-before}"
 CO2S="${CO2S:-1 2 4}"
 PRIORITY="${PRIORITY:-high}"
+CLUSTERS="${CLUSTERS:-ai2/ceres ai2/jupiter ai2/titan}"   # 1-GPU 4deg jobs: widen when the climate clusters are full
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
@@ -24,7 +25,7 @@ for X in $CO2S; do
     --description "ACE-only random-CO2 ${X}xCO2 ic_0003 5.25-yr rollout of atmosphere ${TAG} (${CKPT_DS}:${CKPT_FILE})" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace --priority "$PRIORITY" --preemptible \
-    --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
+    $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
