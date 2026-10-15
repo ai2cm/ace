@@ -26,14 +26,25 @@ ORDER = [
     "ace2sft-rs0 (never saw randCO2), before",
     "ace2sft-rs0, after coupled FT ep1 (lifted)",
     "rco2 rs2 ep11, before",
-    "rco2 rs2, after coupled FT (lifted)",
 ]
-COL = {
-    ORDER[0]: "#2a78d6",
-    ORDER[1]: "#eb6834",
-    ORDER[2]: "#1baf7a",
-    ORDER[3]: "#eda100",
-}
+ORDER += sorted(
+    [a for a in set(df.atmosphere) if a.startswith("rco2 rs2, after")],
+    key=lambda a: int(a.split("ep")[1].split()[0]),
+)
+_pal = [
+    "#2a78d6",
+    "#eb6834",
+    "#1baf7a",
+    "#eda100",
+    "#8e5bd6",
+    "#d6498f",
+    "#5b6b7a",
+    "#0f8fa8",
+    "#a0522d",
+    "#6b8e23",
+    "#444444",
+]
+COL = {a: _pal[i % len(_pal)] for i, a in enumerate(ORDER)}
 FIELDS = [
     ("ULWRFtoa", "OLR anomaly (W/m²)"),
     ("air_temperature_0", "top-layer T anomaly (K)"),

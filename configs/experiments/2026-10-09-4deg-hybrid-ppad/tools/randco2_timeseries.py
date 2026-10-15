@@ -37,8 +37,18 @@ MODELS = {  # legend label -> atmosphere name in randco2_compare.csv
     "ACE2S-ft rs0 (1pctCO$_2$ 46–125, piC 156–235; never saw random CO$_2$)": "ace2sft-rs0 (never saw randCO2), before",
     "ACE2S-ft rs0 after coupled FT (jointens epoch 1, lifted out)": "ace2sft-rs0, after coupled FT ep1 (lifted)",
     "random-CO$_2$ rs2, epoch 11 (Spencer's v2 1pct_46to125 arm), before coupling": "rco2 rs2 ep11, before",
-    "random-CO$_2$ rs2 after coupled FT (lifted out)": "rco2 rs2, after coupled FT (lifted)",
 }
+for _a in sorted(
+    {
+        a
+        for a in pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).atmosphere
+        if str(a).startswith("rco2 rs2, after")
+    },
+    key=lambda a: int(a.split("ep")[1].split()[0]),
+):
+    MODELS[
+        f"random-CO$_2$ rs2 after coupled FT epoch {_a.split('ep')[1].split()[0]} (EMA, lifted out)"
+    ] = _a
 COLORS = {m: f"C{i}" for i, m in enumerate(MODELS)}
 YLIMITS = {"air_temperature_0": (210, 240), "TMP2m": (282, 301)}
 YLABELS = {"air_temperature_0": "Global mean T$_0$ [K]", "TMP2m": "Global mean T2m [K]"}

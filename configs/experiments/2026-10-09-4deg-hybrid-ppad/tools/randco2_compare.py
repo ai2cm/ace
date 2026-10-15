@@ -46,6 +46,24 @@ FIELDS = [
 ]
 
 api = wandb.Api()
+# per-epoch "after" atmospheres from the watchdog (tools/watch_coupled_ft_epochs.sh)
+import re as _re
+
+_after = {}
+for _r in api.runs(
+    PROJECT,
+    filters={"group": "ace4deg-randco2-before-after-coupled-ft"},
+    order="-created_at",
+):
+    _m = _re.match(
+        r"ace4deg-randco2-(\d)xCO2-ic3-(rco2rs2-after-jointens-ep(\d+))$", _r.name
+    )
+    if _m:
+        _after[int(_m.group(3))] = _m.group(2)
+for _ep in sorted(_after):
+    RUNS[f"rco2 rs2, after coupled FT ep{_ep} (lifted, EMA)"] = (
+        "ace4deg-randco2-{x}xCO2-ic3-" + _after[_ep]
+    )
 runs = {}
 for r in api.runs(
     PROJECT, filters={"jobType": "inference"}, order="-created_at", per_page=600
