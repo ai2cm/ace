@@ -5,3 +5,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs0|01M4XY9G5EY27Q0F6JWQ3FSFA
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs1|01M4YN3NV2C0Q4XT85XT0G2H5P|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|01M507AEKGJ14Z1FPMTVS6WB7H|training|best_inference_ckpt|normal|--min-runtime 8h
