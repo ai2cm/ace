@@ -81,9 +81,10 @@ def test_samudra_builder_pad_pool():
     assert output.shape == (2, 3, *img_shape)
 
 
-def test_samudra_builder_rejects_pole_lat_pad_with_the_default_upsampler():
+@pytest.mark.parametrize("lat_pad", ["pole", "pole_edge"])
+def test_samudra_builder_rejects_pole_lat_pad_with_the_default_upsampler(lat_pad):
     with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
-        SamudraBuilder(lat_pad="pole")
+        SamudraBuilder(lat_pad=lat_pad)
 
 
 @pytest.mark.parametrize("conditioned_blocks", ["bottleneck", "all_blocks"])

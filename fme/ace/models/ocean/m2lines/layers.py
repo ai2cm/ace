@@ -9,7 +9,7 @@ from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
 from .activations import CappedGELU
 
-LatPad = Literal["constant", "pole"]
+LatPad = Literal["constant", "pole", "pole_edge"]
 
 
 def pad_latitude(
@@ -24,11 +24,15 @@ def pad_latitude(
     longer than the height continues past the far pole. "pole" is exact only
     for scalar fields (vector components change sign across the pole) and
     only where the edge rows touch the pole, so levels that dropped or padded
-    a row in pooling are approximate.
+    a row in pooling are approximate. "pole_edge" is "pole" with the two
+    columns averaged at every width, the antipode taken at a cell edge: half a
+    column off for an even width, but a period-two zonal ripple in the edge
+    rows cancels in the pad instead of coming back in phase.
     """
     if mode == "constant":
         return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
-    if mode == "pole":
+    if mode in ("pole", "pole_edge"):
+        edge = mode == "pole_edge"
         height = x.shape[-2]
         if pad_start > height or pad_end > height:
             # Past the far pole a meridian runs back up itself, so pad one full
@@ -40,19 +44,28 @@ def pad_latitude(
             return pad_latitude(x, pad_start - first_start, pad_end - first_end, mode)
         parts = []
         if pad_start > 0:
-            parts.append(_rotate_half_longitude(x[..., :pad_start, :].flip(-2)))
+            parts.append(
+                _rotate_half_longitude(x[..., :pad_start, :].flip(-2), edge=edge)
+            )
         parts.append(x)
         if pad_end > 0:
-            parts.append(_rotate_half_longitude(x[..., height - pad_end :, :].flip(-2)))
+            parts.append(
+                _rotate_half_longitude(
+                    x[..., height - pad_end :, :].flip(-2), edge=edge
+                )
+            )
         return torch.cat(parts, dim=-2)
     raise ValueError(f"unknown latitude padding mode {mode!r}")
 
 
-def _rotate_half_longitude(x: torch.Tensor) -> torch.Tensor:
-    """Each column replaced by its antipodal column (longitude + 180)."""
+def _rotate_half_longitude(x: torch.Tensor, edge: bool = False) -> torch.Tensor:
+    """Each column replaced by its antipodal column (longitude + 180). With
+    ``edge``, or for an odd width, by the mean of the two columns either side
+    of the cell edge nearest the antipode.
+    """
     width = x.shape[-1]
     half = width // 2
-    if width % 2 == 0:
+    if width % 2 == 0 and not edge:
         return torch.roll(x, shifts=half, dims=-1)
     return 0.5 * (
         torch.roll(x, shifts=half, dims=-1) + torch.roll(x, shifts=half + 1, dims=-1)
