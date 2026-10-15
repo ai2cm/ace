@@ -115,6 +115,9 @@ check_wetmask_equivalence_budget:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.check_wetmask_equivalence \
 		configs/om4-picontrol-1deg-5daily-budget.yaml \
 		configs/om4-1pctco2-1deg-5daily-budget.yaml
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.check_wetmask_equivalence \
+		configs/om4-picontrol-4deg-5daily-budget.yaml \
+		configs/om4-1pctco2-4deg-5daily-budget.yaml
 
 smoke_test_picontrol_1deg_budget:
 	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-1deg-5daily-budget.yaml
@@ -122,8 +125,15 @@ smoke_test_picontrol_1deg_budget:
 smoke_test_1pctco2_1deg_budget:
 	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-1deg-5daily-budget.yaml
 
+smoke_test_picontrol_4deg_budget:
+	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-4deg-5daily-budget.yaml
+
+smoke_test_1pctco2_4deg_budget:
+	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-4deg-5daily-budget.yaml
+
 smoke_tests_budget: check_wetmask_equivalence_budget \
-	smoke_test_picontrol_1deg_budget smoke_test_1pctco2_1deg_budget
+	smoke_test_picontrol_1deg_budget smoke_test_1pctco2_1deg_budget \
+	smoke_test_picontrol_4deg_budget smoke_test_1pctco2_4deg_budget
 
 test:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pytest --confcutdir=. pipeline
@@ -163,6 +173,12 @@ dataflow_picontrol_1deg_budget:
 dataflow_1pctco2_1deg_budget:
 	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-1deg-5daily-budget.yaml
 
+dataflow_picontrol_4deg_budget:
+	$(MAKE) dataflow CONFIG=configs/om4-picontrol-4deg-5daily-budget.yaml
+
+dataflow_1pctco2_4deg_budget:
+	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-4deg-5daily-budget.yaml
+
 .PHONY: generate_face_masks \
 	generate_face_masks_picontrol generate_face_masks_1pctco2 smoke_test \
 	smoke_test_picontrol_1deg smoke_test_picontrol_4deg \
@@ -172,8 +188,10 @@ dataflow_1pctco2_1deg_budget:
 	smoke_test_1pctco2_1deg_1daily smoke_test_1pctco2_4deg_1daily \
 	check_wetmask_equivalence_1daily smoke_tests_1daily \
 	check_wetmask_equivalence_budget smoke_test_picontrol_1deg_budget \
-	smoke_test_1pctco2_1deg_budget smoke_tests_budget test \
+	smoke_test_1pctco2_1deg_budget smoke_test_picontrol_4deg_budget \
+	smoke_test_1pctco2_4deg_budget smoke_tests_budget test \
 	dataflow_picontrol_1deg_budget dataflow_1pctco2_1deg_budget \
+	dataflow_picontrol_4deg_budget dataflow_1pctco2_4deg_budget \
 	dataflow dataflow_picontrol_1deg \
 	dataflow_picontrol_4deg dataflow_1pctco2_1deg dataflow_1pctco2_4deg \
 	dataflow_picontrol_1deg_1daily dataflow_picontrol_4deg_1daily \

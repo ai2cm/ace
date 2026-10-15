@@ -141,8 +141,9 @@ target.
 ### Configs
 
 One config per output store, under `configs/`: {piControl, 1pctCO2} ×
-{1° `F90`, 4° `F22.5`}, plus the 1° sea-ice budget companions
-`om4-{picontrol,1pctco2}-1deg-5daily-budget.yaml`: 5-daily block means
+{1° `F90`, 4° `F22.5`}, plus the sea-ice budget companions
+`om4-{picontrol,1pctco2}-1deg-5daily-budget.yaml` and
+`om4-{picontrol,1pctco2}-4deg-5daily-budget.yaml`: 5-daily block means
 (`time_block_mean: 20`) of the SIS2 surface fluxes and ice/snow transport,
 plus `calving_residue_total_area` and `frozen_mass_total_area`, all per
 total cell area (`<name>_total_area`), on the 5-daily stores' time axis,
