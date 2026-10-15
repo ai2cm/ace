@@ -2,14 +2,32 @@
 """Replace finished `training` rows of experiments.txt with evaluate/inference rows.
 
   queue_evals.py mark <dir> [--accept <expected_name> ...]
-  queue_evals.py status <dir>
+  queue_evals.py status <dir> [FILTERS]
+  queue_evals.py settle <dir> [FILTERS]
   queue_evals.py apply <dir> --row run_<tag>[:<min_runtime>] [--row ...]
-      [--priority P] [--keep-training] [--config-dir PATH]
+      [--priority P] [--keep-training] [--config-dir PATH|auto] [--settle-rest]
+      [FILTERS]
 
-<dir> is searched recursively for experiments.txt. A row is finished when its
-experiment's final beaker job (jobs[-1]) exited 0. `apply` checks that each
-row's config (evaluator-config-<tag>.yaml, or inference-config-<tag>.yaml for
-run_inf_<tag>) exists where evaluate.sh / inference.sh will look for it.
+  FILTERS: [--only <experiment_id> ...] [--exclude <experiment_id> ...]
+      [--group-regex RE]
+
+<dir> is searched recursively for experiments.txt. A `training` row's state is
+its experiment's final beaker job (jobs[-1]): pending, running, canceled, or
+exited with an exit code. A row is finished when that job exited 0. `settle`
+sets each final `training` row to trained (exit 0), canceled, or failed.
+
+`apply` checks that each row's config (evaluator-config-<tag>.yaml, or
+inference-config-<tag>.yaml for run_inf_<tag>) exists where evaluate.sh /
+inference.sh will look for it. A --row without :<min_runtime> takes the
+config's `# --min-runtime <t>` comment, else the training row's value.
+`--config-dir auto` uses, per experiments.txt, its own directory when that
+holds every requested config, else the one configs/experiments/*_eval/*/ dir
+whose requested configs' file_pattern set equals that of the experiment's
+train-config.yaml + finetune-config.yaml; any other outcome skips the file.
+When the configs are not in the experiments.txt directory, a
+`# --config-dir <dir>` note for readers goes above the first queued row; the
+script never reads these notes back.
+`--settle-rest` then settles every remaining `training` row, filters ignored.
 
 `mark` looks up each run_* / running_* row's launched job by the name evaluate.sh /
 inference.sh give it, `<group>-{eval,inf}_<ckpt>-<tag>[-<row tag>]`, in the
@@ -21,6 +39,7 @@ become failed_*; running_* rows are rechecked on the next `mark`.
 """
 
 import argparse
+import functools
 import json
 import pathlib
 import re
@@ -71,7 +90,10 @@ def fields(line):
     return f if len(f) > STATUS and not line.lstrip().startswith("#") else None
 
 
+@functools.cache
 def job_state(experiment_id):
+    if not experiment_id:
+        return "error", ["empty experiment_id"]
     out = subprocess.run(
         ["beaker", "experiment", "get", experiment_id, "--format", "json"],
         capture_output=True,
@@ -80,28 +102,80 @@ def job_state(experiment_id):
     if out.returncode:
         return "error", out.stderr.strip().splitlines()[-1:]
     s = json.loads(out.stdout)[0]["jobs"][-1]["status"]
+    if s.get("exited") and s.get("exitCode") == 0:
+        return "exited", 0
+    if s.get("canceled"):
+        return "canceled", s.get("exitCode")
     if s.get("exited"):
         return "exited", s.get("exitCode")
     return ("running" if s.get("started") else "pending"), None
 
 
-def training_states(root):
-    cache = {}
+def settled_status(state, code):
+    if state == "exited":
+        return "trained" if code == 0 else "failed"
+    return "canceled" if state == "canceled" else None
+
+
+def selected(f, args):
+    return args is None or (
+        (not args.only or f[EXPER_ID] in args.only)
+        and f[EXPER_ID] not in args.exclude
+        and (not args.group_regex or re.search(args.group_regex, f[0]))
+    )
+
+
+def training_states(root, args=None):
     for path in sorted(pathlib.Path(root).rglob("experiments.txt")):
         for line in path.read_text().splitlines():
             f = fields(line)
-            if f and f[STATUS] == "training":
-                if f[EXPER_ID] not in cache:
-                    cache[f[EXPER_ID]] = job_state(f[EXPER_ID])
-                yield path, f, *cache[f[EXPER_ID]]
+            if f and f[STATUS] == "training" and selected(f, args):
+                yield path, f, *job_state(f[EXPER_ID])
+
+
+def row_key(f):
+    return f[0], f[EXPER_ID]
 
 
 def config_name(status):
     if status.startswith("run_inf_"):
-        return f"inference-config-{status[len('run_inf_'):]}.yaml"
+        return f"inference-config-{status[len('run_inf_') :]}.yaml"
     if status.startswith("run_"):
-        return f"evaluator-config-{status[len('run_'):]}.yaml"
+        return f"evaluator-config-{status[len('run_') :]}.yaml"
     sys.exit(f"status must start with run_ or run_inf_: {status}")
+
+
+def file_patterns(config):
+    text = config.read_text() if config.is_file() else ""
+    return {m.strip("'\"") for m in re.findall(r"file_pattern:\s*(\S+)", text)}
+
+
+def auto_config_dir(root, exper_dir, statuses):
+    if all((exper_dir / config_name(s)).is_file() for s in statuses):
+        return None, None
+    train = set().union(
+        *(
+            file_patterns(exper_dir / n)
+            for n in ("train-config.yaml", "finetune-config.yaml")
+        )
+    )
+    if not train:
+        return None, "no file_pattern in train-config.yaml or finetune-config.yaml"
+    matches = [
+        d.relative_to(root)
+        for d in sorted(root.glob("configs/experiments/*_eval/*/"))
+        if all((d / config_name(s)).is_file() for s in statuses)
+        and set().union(*(file_patterns(d / config_name(s)) for s in statuses)) == train
+    ]
+    if len(matches) != 1:
+        return None, f"{len(matches)} eval dirs match its file_patterns: {matches}"
+    return str(matches[0]), None
+
+
+def runtime_hint(config):
+    text = config.read_text() if config.is_file() else ""
+    m = re.search(r"#\s*--min-runtime\s+(\S+)", text)
+    return m.group(1) if m else None
 
 
 def field(f, i):
@@ -213,47 +287,96 @@ def cmd_mark(args):
 
 
 def cmd_status(args):
-    for path, f, state, code in training_states(args.dir):
+    for path, f, state, code in training_states(args.dir, args):
         print(f"{path}|{f[0]}|{f[EXPER_ID]}|{state}|{code}")
 
 
+def settle(root, args=None, skip=()):
+    new_status: dict[pathlib.Path, dict[tuple, str]] = {}
+    for path, f, state, code in training_states(root, args):
+        new = settled_status(state, code)
+        if new and path not in skip:
+            new_status.setdefault(path, {})[row_key(f)] = new
+    for path, by_key in new_status.items():
+        lines = path.read_text().splitlines()
+        for i, line in enumerate(lines):
+            f = fields(line)
+            if f and f[STATUS] == "training" and row_key(f) in by_key:
+                f[STATUS] = by_key[row_key(f)]
+                lines[i] = "|".join(f)
+                print(f"{path}|{f[0]}|{f[EXPER_ID]}|{f[STATUS]}")
+        path.write_text("\n".join(lines) + "\n")
+
+
+def cmd_settle(args):
+    settle(args.dir, args)
+
+
 def cmd_apply(args):
+    root = repo_root(args.dir)
     rows = [(r.split(":", 1) + [None])[:2] for r in args.row]
-    finished: dict[pathlib.Path, set[str]] = {}
-    for path, f, state, code in training_states(args.dir):
+    statuses = [status for status, _ in rows]
+    finished: dict[pathlib.Path, set[tuple]] = {}
+    for path, f, state, code in training_states(args.dir, args):
         if state == "exited" and code == 0:
-            finished.setdefault(path, set()).add(f[EXPER_ID])
-    for path, ids in finished.items():
-        config_dir = (
-            repo_root(args.dir) / args.config_dir if args.config_dir else path.parent
-        )
-        for status, _ in rows:
-            if not (config_dir / config_name(status)).is_file():
+            finished.setdefault(path, set()).add(row_key(f))
+    skipped = set()
+    for path, keys in finished.items():
+        config_dir_arg = args.config_dir
+        if config_dir_arg == "auto":
+            config_dir_arg, err = auto_config_dir(root, path.parent, statuses)
+            if err:
+                print(f"error: {path}: {err}; skipped", file=sys.stderr)
+                skipped.add(path)
+                continue
+        config_dir = root / config_dir_arg if config_dir_arg else path.parent
+        lines = path.read_text().splitlines()
+        shared = config_dir.resolve() != path.parent.resolve()
+        comment = f"# --config-dir {config_dir_arg}" if shared else None
+        runtimes = {}
+        for status, runtime in rows:
+            config = config_dir / config_name(status)
+            if not config.is_file():
+                print(f"warning: {config} not found", file=sys.stderr)
+            runtimes[status] = runtime or runtime_hint(config)
+            if not runtimes[status]:
                 print(
-                    f"warning: {config_dir / config_name(status)} not found",
+                    f"warning: {config}: no --min-runtime hint; "
+                    "min_runtime copied from the training row",
                     file=sys.stderr,
                 )
         out = []
-        for line in path.read_text().splitlines():
+        for line in lines:
             f = fields(line)
-            if not (f and f[EXPER_ID] in ids and f[STATUS] == "training"):
+            if not (f and row_key(f) in keys and f[STATUS] == "training"):
                 out.append(line)
                 continue
+            if comment:
+                if [x for x in out if x.strip()][-1:] != [comment]:
+                    out += ["", comment] if out and out[-1].strip() else [comment]
+                comment = None
             if args.keep_training:
                 out.append(line)
-            for status, runtime in rows:
+            for status in statuses:
                 g = f + [""] * (MIN_RUNTIME + 1 - len(f))
                 g[STATUS] = status
                 if args.priority:
                     g[PRIORITY] = args.priority
-                if runtime:
-                    g[MIN_RUNTIME] = f"--min-runtime {runtime}"
+                if runtimes[status]:
+                    g[MIN_RUNTIME] = f"--min-runtime {runtimes[status]}"
                 out.append("|".join(g))
-        comment = f"# --config-dir {args.config_dir}" if args.config_dir else None
-        if comment and comment not in out:
-            out[1:1] = ["", comment]
         path.write_text("\n".join(out) + "\n")
-        print(f"{path}: {sorted(ids)}")
+        print(f"{path}: {config_dir_arg or path.parent}: {sorted(k[1] for k in keys)}")
+    if args.settle_rest:
+        settle(args.dir, skip=skipped)
+
+
+def add_filters(parser):
+    parser.add_argument("--only", action="append", default=[], metavar="EXPERIMENT_ID")
+    parser.add_argument(
+        "--exclude", action="append", default=[], metavar="EXPERIMENT_ID"
+    )
+    parser.add_argument("--group-regex", help="re.search on the group column")
 
 
 def main():
@@ -272,13 +395,27 @@ def main():
     m.set_defaults(func=cmd_mark)
     s = sub.add_parser("status")
     s.add_argument("dir")
+    add_filters(s)
     s.set_defaults(func=cmd_status)
+    t = sub.add_parser("settle")
+    t.add_argument("dir")
+    add_filters(t)
+    t.set_defaults(func=cmd_settle)
     a = sub.add_parser("apply")
     a.add_argument("dir")
     a.add_argument("--row", action="append", required=True, help="STATUS[:MIN_RUNTIME]")
     a.add_argument("--priority", help="default: copied from the training row")
     a.add_argument("--keep-training", action="store_true")
-    a.add_argument("--config-dir", help="repo-root-relative, as passed to evaluate.sh")
+    a.add_argument(
+        "--config-dir",
+        help="repo-root-relative, as passed to evaluate.sh, or `auto`",
+    )
+    a.add_argument(
+        "--settle-rest",
+        action="store_true",
+        help="then settle every remaining training row, filters ignored",
+    )
+    add_filters(a)
     a.set_defaults(func=cmd_apply)
     args = p.parse_args()
     load_columns(repo_root(args.dir))
