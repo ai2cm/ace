@@ -21,8 +21,7 @@ RHO_0 = DENSITY_OF_SEA_WATER_CM4  # [kg m-3]
 G_EARTH = GRAVITY  # [m s-2]
 
 # Density-threshold mixed layer depth defaults of ``OceanData.mld_wright97``.
-DELTA_RHO_THRESHOLD = 0.03  # [kg m-3], as MOM6's mlotst diagnostic:
-# https://github.com/NOAA-GFDL/MOM6/blob/89921f1c0a6486f4bd7f6d5428fd101e2610a05f/src/parameterizations/vertical/MOM_diabatic_driver.F90#L3499-L3502
+DELTA_RHO_THRESHOLD = 0.03  # [kg m-3], as MOM6's mlotst diagnostic
 MLD_REF_LAYER = 1  # reference layer index, dimensionless
 
 # Reduced-range fit, -2<T<30 degC, 28<S<38 PSU, 0<p<5e7 Pa.
