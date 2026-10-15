@@ -25,3 +25,7 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|01M4KC13J5ZCNH39V0DS6DXEKM|ra
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+# --config-dir configs/experiments/cm4_eval/ocean
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0-mld|01M4HEFPANCBNHNH0FC5A8V4HV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
