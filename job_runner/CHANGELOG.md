@@ -17,6 +17,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] Validate job name <= 128 characters (beaker max)
 - [FEAT] Launcher usage text prints its input file's header
 - [FEAT] Training scripts create `experiments.txt` with its header if missing
+- [FEAT] `{evaluate,inference}.sh --dry-run` validates each unique config and
+  override set once, skipping repeats
 
 ### Changed
 
