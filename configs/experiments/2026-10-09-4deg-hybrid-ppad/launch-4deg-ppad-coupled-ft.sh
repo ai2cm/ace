@@ -12,6 +12,7 @@ COUPLED_STATS="${COUPLED_STATS:-01KY8D816E67NXHP2EB29FHBJM}"   # 4deg cm4 couple
 ATMOS_DS="${ATMOS_DS:-01M0YFRM5TKQR6GSNDXKJSBNAS}"           # 4deg atmos_ace2s-ft rs0 results
 ATMOS_CKPT="${ATMOS_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
 OCEAN_CKPT="${OCEAN_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
+OCEAN_DS_OVERRIDE="${OCEAN_DS_OVERRIDE:-}"   # e.g. an ocean lifted out of an FTO checkpoint (FTO-then-... stages)
 N_GPUS="${N_GPUS:-2}"
 PRIORITY="${PRIORITY:-high}"
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -22,7 +23,9 @@ cd "$REPO_ROOT"
 ok=0; total=0
 for A in $ARMS; do
   total=$((total+1))
+  if [ -n "$OCEAN_DS_OVERRIDE" ]; then OCEAN_DS=$OCEAN_DS_OVERRIDE; else
   OCEAN_DS=$(beaker experiment get "troya/samudra-ppad4deg-${A}${OCEAN_ARM_SUFFIX}" --format json | jq -r '.[0].jobs[-1].result.beaker')
+  fi
   [ -n "$OCEAN_DS" ] && [ "$OCEAN_DS" != "null" ] || { echo "no results dataset for $A"; continue; }
   JOB="samudra-ppad4deg-${A}${OCEAN_ARM_SUFFIX}-coupled-ft${VARIANT}"
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
