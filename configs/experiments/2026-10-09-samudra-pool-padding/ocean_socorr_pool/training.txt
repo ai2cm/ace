@@ -17,3 +17,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs1|training|high|jupiter|4||
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|training|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge|8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|training|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true 'stepper.step.config.builder.config.pole_pad_vector_names=[uo_,vo_,UI,VI,eastward_surface_wind_stress,northward_surface_wind_stress]'|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1|train|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge|8h
