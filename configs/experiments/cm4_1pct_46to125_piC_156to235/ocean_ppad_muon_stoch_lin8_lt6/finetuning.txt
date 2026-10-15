@@ -1,0 +1,4 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# 6-epoch long-tail stage after the mu3e-3 stochastic lin8 run (ezqzx1z3).
+cm4_1pct_46to125_piC_156to235-ocean_ppad_muon_stoch_lin8_lt6|mu3e-3rs0|ace-samudra-cm4|ezqzx1z3|best_inference_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=0|01M4TQR4PPTTCEDV9RHRFQNK6V|8h
