@@ -4,13 +4,6 @@ experiment_dir: /results
 n_coupled_steps: 9488  # --min-runtime 6h
 coupled_steps_in_memory: 16
 checkpoint_path: /ckpt.tar
-data_writer:
-  ocean:
-    save_prediction_files: false
-    save_monthly_files: false
-  atmosphere:
-    save_prediction_files: false
-    save_monthly_files: false
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -39,3 +32,84 @@ loader:
   start_indices:
     times:
     - '0001-01-06T00:00:00'
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: kuroshio_extension_monthly
+        names: [sst]
+        lat_extent: [30.0, 40.0]
+        lon_extent: [140.0, 180.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: gulf_stream_monthly
+        names: [sst]
+        lat_extent: [35.0, 45.0]
+        lon_extent: [285.0, 315.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: n_atlantic_subpolar_monthly
+        names: [sst]
+        lat_extent: [50.0, 65.0]
+        lon_extent: [300.0, 340.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: acc_monthly
+        names: [sst]
+        lat_extent: [-60.0, -45.0]
+        lon_extent: [0.0, 360.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: n_pacific_gyre_monthly
+        names: [sst]
+        lat_extent: [25.0, 40.0]
+        lon_extent: [180.0, 220.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: tropical_pacific_monthly_sst
+        names: [sst, hfds_total_area]
+        lat_extent: [-20.0, 20.0]
+        lon_extent: [120.0, 290.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: arctic_hfds
+        names: [hfds_total_area]
+        lat_extent: [40.0, 90.0]
+        lon_extent: [0.0, 360.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: antarctic_hfds
+        names: [hfds_total_area]
+        lat_extent: [-90.0, -50.0]
+        lon_extent: [0.0, 360.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+    - label: tropical_pacific_monthly
+      names:
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - DSWRFsfc
+      - USWRFsfc
+      - DLWRFsfc
+      - ULWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      lat_extent: [-20.0, 20.0]
+      lon_extent: [120.0, 290.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: true

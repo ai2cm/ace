@@ -23,6 +23,10 @@ loader:
       file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
       engine: zarr
   num_data_workers: 4
+aggregator:
+  log_histograms: true
+  log_nino34_index: true
+  log_ipo_index: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
@@ -62,14 +66,24 @@ data_writer:
       time_coarsen:
         method: monthly_mean
       save_reference: true
-    - label: nino3_nino34_monthly
-      names: [sst]
-      lat_extent: [-5.0, 5.0]
-      lon_extent: [190.0, 270.0]
+    - label: tropical_pacific_monthly_sst
+      names: [sst, hfds_total_area]
+      lat_extent: [-20.0, 20.0]
+      lon_extent: [120.0, 290.0]
       time_coarsen:
         method: monthly_mean
       save_reference: true
-aggregator:
-  log_histograms: true
-  log_nino34_index: true
-  log_ipo_index: true
+    - label: arctic_hfds
+      names: [hfds_total_area]
+      lat_extent: [40.0, 90.0]
+      lon_extent: [0.0, 360.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: true
+    - label: antarctic_hfds
+      names: [hfds_total_area]
+      lat_extent: [-90.0, -50.0]
+      lon_extent: [0.0, 360.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: true
