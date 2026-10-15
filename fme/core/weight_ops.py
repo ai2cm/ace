@@ -77,6 +77,17 @@ class CopyWeightsConfig:
         return module
 
 
+_WRAPPER_PREFIX = "module."
+_MAX_MISSING_SHOWN = 10
+
+
+def _strip_wrapper_prefix(name: str) -> str:
+    """Remove a leading "module." from one parameter name."""
+    if name.startswith(_WRAPPER_PREFIX):
+        return name[len(_WRAPPER_PREFIX) :]
+    return name
+
+
 def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
     """
     Remove the leading "module." from the keys of a state dict.
@@ -85,10 +96,33 @@ def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
     a DistributedDataParallel layer or DummyWrapper layer, which adds a leading
     "module." to the keys of the state dict.
     """
-    return {
-        k[len("module.") :] if k.startswith("module.") else k: v
-        for k, v in state_dict.items()
-    }
+    return {_strip_wrapper_prefix(k): v for k, v in state_dict.items()}
+
+
+def prefix_submodule(
+    state_dict: Mapping[str, Any], submodule: str
+) -> Mapping[str, Any]:
+    """
+    Rename a state dict's keys onto a submodule of the destination module.
+
+    The submodule name is inserted after any leading "module." (the
+    DistributedDataParallel/DummyWrapper layer, see strip_leading_module).
+    """
+
+    def rename(name: str) -> str:
+        if name.startswith(_WRAPPER_PREFIX):
+            return f"{_WRAPPER_PREFIX}{submodule}.{name[len(_WRAPPER_PREFIX) :]}"
+        return f"{submodule}.{name}"
+
+    return {rename(name): value for name, value in state_dict.items()}
+
+
+def require_subset(from_state: Mapping[str, Any], to_module: torch.nn.Module):
+    """Raise unless every name in from_state is in to_module's state dict."""
+    from_names = set(from_state.keys())
+    to_names = set(to_module.state_dict().keys())
+    if not from_names.issubset(to_names):
+        raise ValueError(_missing_parameters_message(from_names, to_names))
 
 
 def overwrite_weights(
@@ -114,15 +148,8 @@ def overwrite_weights(
     """
     if exclude_parameters is None:
         exclude_parameters = []
-    from_names = set(from_state.keys())
-    to_names = set(to_module.state_dict().keys())
-    if not from_names.issubset(to_names):
-        missing_parameters = from_names - to_names
-        raise ValueError(
-            f"Dest module is missing parameters {missing_parameters}, "
-            "which is not allowed"
-        )
-    for name in from_names:
+    require_subset(from_state, to_module)
+    for name in from_state.keys():
         if any(wildcard_match(pattern, name) for pattern in exclude_parameters):
             continue
         from_param = from_state[name]
@@ -130,6 +157,32 @@ def overwrite_weights(
             overwrite_weight_initial_slice(to_module, name, from_param)
         except AttributeError:  # if state is not a parameter
             pass
+
+
+def _missing_parameters_message(from_names: set[str], to_names: set[str]) -> str:
+    missing = sorted(from_names - to_names)
+    message = (
+        f"Dest module is missing {len(missing)} of the source's {len(from_names)} "
+        f"parameters, which is not allowed. First missing: "
+        f"{missing[:_MAX_MISSING_SHOWN]}."
+    )
+    # Suggest top-level submodules of the destination that the source would
+    # match if prefixed, i.e. the destination may wrap the source.
+    inner_from = {_strip_wrapper_prefix(name) for name in from_names}
+    inner_to = {_strip_wrapper_prefix(name) for name in to_names}
+    candidates = sorted(
+        prefix
+        for prefix in {name.split(".", 1)[0] for name in inner_to if "." in name}
+        if {f"{prefix}.{name}" for name in inner_from}.issubset(inner_to)
+    )
+    if candidates:
+        listed = " or ".join(repr(candidate) for candidate in candidates)
+        message += (
+            f" The names would match under submodule {listed}; if the destination "
+            "wraps the source architecture, set "
+            "ParameterInitializationConfig.weights_submodule."
+        )
+    return message
 
 
 def overwrite_weight_initial_slice(module, name, from_param):
