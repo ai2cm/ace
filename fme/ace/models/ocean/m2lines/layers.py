@@ -13,7 +13,11 @@ LatPad = Literal["constant", "pole", "pole_edge"]
 
 
 def pad_latitude(
-    x: torch.Tensor, pad_start: int, pad_end: int, mode: LatPad
+    x: torch.Tensor,
+    pad_start: int,
+    pad_end: int,
+    mode: LatPad,
+    sign: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Pad the latitude (second-to-last) axis of ``x`` by ``pad_start`` rows
     before index 0 and ``pad_end`` rows after the last.
@@ -28,6 +32,12 @@ def pad_latitude(
     columns averaged at every width, the antipode taken at a cell edge: half a
     column off for an even width, but a period-two zonal ripple in the edge
     rows cancels in the pad instead of coming back in phase.
+
+    ``sign``, one value per channel (the third-to-last axis), multiplies the
+    rows a pole mode pads (not ``x``): -1 for the components of a vector,
+    whose local east and north directions reverse across the pole, makes the
+    pad their true continuation. Rows past both poles get it twice, back to
+    +1. It has no effect under "constant".
     """
     if mode == "constant":
         return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
@@ -40,20 +50,23 @@ def pad_latitude(
             # where the two half turns cancel; for an odd width the rows past
             # both poles average their antipodal columns twice.
             first_start, first_end = min(pad_start, height), min(pad_end, height)
-            x = pad_latitude(x, first_start, first_end, mode)
-            return pad_latitude(x, pad_start - first_start, pad_end - first_end, mode)
+            x = pad_latitude(x, first_start, first_end, mode, sign)
+            return pad_latitude(
+                x, pad_start - first_start, pad_end - first_end, mode, sign
+            )
+
+        def across_pole(rows: torch.Tensor) -> torch.Tensor:
+            rows = _rotate_half_longitude(rows.flip(-2), edge=edge)
+            if sign is not None:
+                rows = rows * sign.to(rows.dtype)[:, None, None]
+            return rows
+
         parts = []
         if pad_start > 0:
-            parts.append(
-                _rotate_half_longitude(x[..., :pad_start, :].flip(-2), edge=edge)
-            )
+            parts.append(across_pole(x[..., :pad_start, :]))
         parts.append(x)
         if pad_end > 0:
-            parts.append(
-                _rotate_half_longitude(
-                    x[..., height - pad_end :, :].flip(-2), edge=edge
-                )
-            )
+            parts.append(across_pole(x[..., height - pad_end :, :]))
         return torch.cat(parts, dim=-2)
     raise ValueError(f"unknown latitude padding mode {mode!r}")
 
@@ -361,6 +374,12 @@ class ConvNeXtBlock(torch.nn.Module):
                     hidden_channels, embed_dim_noise
                 )
 
+        # Per-channel sign of the pole pad at the first 3x3 convolution, the
+        # one whose input channels are physical fields (set by Samudra for its
+        # first block); not saved, so checkpoints are unchanged.
+        self.lat_pad_sign: torch.Tensor | None
+        self.register_buffer("lat_pad_sign", None, persistent=False)
+
     def _build_norm(self, norm: str | None, num_features: int) -> list[torch.nn.Module]:
         if norm == "batch":
             return [torch.nn.BatchNorm2d(num_features, **self.norm_kwargs)]
@@ -390,7 +409,13 @@ class ConvNeXtBlock(torch.nn.Module):
         skip = self.skip_module(x)
         for i, layer in enumerate(self.convblock):
             if isinstance(layer, nn.Conv2d) and layer.kernel_size[0] != 1:
-                x = pad_latitude(x, self.N_pad, self.N_pad, self.lat_pad)
+                x = pad_latitude(
+                    x,
+                    self.N_pad,
+                    self.N_pad,
+                    self.lat_pad,
+                    sign=self.lat_pad_sign if i == 0 else None,
+                )
                 x = torch.nn.functional.pad(
                     x, (self.N_pad, self.N_pad, 0, 0), mode=self.pad
                 )

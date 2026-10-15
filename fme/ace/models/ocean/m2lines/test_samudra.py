@@ -487,14 +487,19 @@ def test_conditioning_rejects_noise_coarser_than_the_block():
 
 
 def _reference_convnext_forward(
-    block: ConvNeXtBlock, x: torch.Tensor, lat_pad: LatPad
+    block: ConvNeXtBlock,
+    x: torch.Tensor,
+    lat_pad: LatPad,
+    first_sign: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """ConvNeXtBlock.forward (no conditioning, no LayerNorm) with ``lat_pad``
-    written out at each conv."""
+    written out at each conv, and ``first_sign`` on the first conv's pole
+    pad."""
     skip = block.skip_module(x)
-    for layer in block.convblock:
+    for i, layer in enumerate(block.convblock):
         if isinstance(layer, torch.nn.Conv2d) and layer.kernel_size[0] != 1:
-            x = pad_latitude(x, block.N_pad, block.N_pad, lat_pad)
+            sign = first_sign if i == 0 else None
+            x = pad_latitude(x, block.N_pad, block.N_pad, lat_pad, sign=sign)
             x = torch.nn.functional.pad(
                 x, (block.N_pad, block.N_pad, 0, 0), mode=block.pad
             )
@@ -519,7 +524,10 @@ def _reference_upsample(
 
 
 def _reference_samudra_forward(
-    model: Samudra, fts: torch.Tensor, lat_pad: LatPad
+    model: Samudra,
+    fts: torch.Tensor,
+    lat_pad: LatPad,
+    first_sign: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Samudra.forward with ``lat_pad`` written out at every site: block convs,
     the final conv, the upsampler, the decoder refill and, under ``pad_pool``,
@@ -534,7 +542,8 @@ def _reference_samudra_forward(
                 fts, (model.N_pad, model.N_pad, 0, 0), mode=model.pad
             )
         if isinstance(layer, ConvNeXtBlock):
-            fts = _reference_convnext_forward(layer, fts, lat_pad)
+            sign = first_sign if layer is model.layers[0] else None
+            fts = _reference_convnext_forward(layer, fts, lat_pad, first_sign=sign)
         elif isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample):
             fts = _reference_upsample(fts, model.zonally_periodic_upsample, lat_pad)
         elif isinstance(layer, AvgPool):
@@ -922,3 +931,70 @@ def test_samudra_pole_lat_pad_runs_the_4deg_production_dilations(pad_pool, lat_p
         out = model(torch.randn(1, 1, 45, 90))
     assert out.shape == (1, 1, 45, 90)
     assert torch.isfinite(out).all()
+
+
+@pytest.mark.parametrize("mode", ["pole", "pole_edge"])
+def test_pad_latitude_sign_negates_only_the_signed_channels_pad_rows(mode: LatPad):
+    torch.manual_seed(0)
+    x = torch.randn(1, 2, 4, 6)
+    unsigned = pad_latitude(x, 2, 1, mode)
+    signed = pad_latitude(x, 2, 1, mode, sign=torch.tensor([1.0, -1.0]))
+    torch.testing.assert_close(signed[:, 0], unsigned[:, 0])
+    torch.testing.assert_close(signed[:, 1, 2:6], x[:, 1])
+    torch.testing.assert_close(signed[:, 1, [0, 1, 6]], -unsigned[:, 1, [0, 1, 6]])
+    assert torch.equal(
+        pad_latitude(x, 2, 1, "constant", sign=-torch.ones(2)),
+        pad_latitude(x, 2, 1, "constant"),
+    )
+
+
+def test_pad_latitude_sign_past_both_poles_is_the_original_row():
+    """A vector component is negated across one pole and back to itself
+    across two."""
+    x = torch.randn(1, 1, 2, 6)
+    padded = pad_latitude(x, 0, 4, "pole", sign=torch.tensor([-1.0]))
+    torch.testing.assert_close(
+        padded[..., 2:4, :], -pad_latitude(x, 0, 2, "pole")[..., 2:, :]
+    )
+    torch.testing.assert_close(padded[..., 4:, :], x, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("lat_pad", ["pole", "pole_edge"])
+def test_samudra_pole_pad_vector_sign_matches_reference_forward_bitwise(
+    lat_pad: LatPad,
+):
+    """The named vector channels' pole pad is negated at the first block's
+    first convolution and nowhere else."""
+    model = _small_samudra(
+        zonally_periodic_upsample=True,
+        lat_pad=lat_pad,
+        pole_pad_vector_names=["vo_"],
+    )
+    model.set_input_names(["sst", "vo_0"])
+    torch.manual_seed(1)
+    x = torch.randn(2, 2, *_SMALL_SHAPE)
+    with torch.no_grad():
+        out = model(x)
+        signed = _reference_samudra_forward(
+            model, x, lat_pad, first_sign=torch.tensor([1.0, -1.0])
+        )
+        unsigned = _reference_samudra_forward(model, x, lat_pad)
+    assert torch.equal(out, signed)
+    assert not torch.allclose(out, unsigned)
+
+
+def test_samudra_pole_pad_vector_names_need_the_input_names():
+    model = _samudra(
+        zonally_periodic_upsample=True, lat_pad="pole", pole_pad_vector_names=["uo_"]
+    )
+    with pytest.raises(RuntimeError, match="set_input_names"):
+        model(torch.randn(1, 4, 16, 32))
+    with pytest.raises(ValueError, match="match no input channel"):
+        model.set_input_names(["a", "b", "c", "vo_0"])
+    with pytest.raises(ValueError, match="for 4 input channels"):
+        model.set_input_names(["uo_0"])
+
+
+def test_samudra_pole_pad_vector_names_require_a_pole_lat_pad():
+    with pytest.raises(ValueError, match="requires lat_pad"):
+        _samudra(pole_pad_vector_names=["uo_"])

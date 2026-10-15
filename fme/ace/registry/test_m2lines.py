@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 import torch
 
@@ -11,6 +13,10 @@ from fme.ace.registry.m2lines import SamudraBuilder
 from fme.ace.registry.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.dataset_info import DatasetInfo
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
+from fme.core.testing.dataset_info import get_dataset_info
+from fme.core.testing.normalization import trivial_network_and_loss_normalization
 
 
 def test_samudra_builder():
@@ -194,3 +200,50 @@ def test_noise_conditioned_samudra_draws_independent_noise_per_sample():
         output = model(x)
     assert not torch.allclose(output[0], output[1])
     assert not torch.allclose(output[1], output[2])
+
+
+def test_single_module_step_hands_samudra_its_input_names():
+    """The step names the network's input channels, so that the vector
+    channels' pole pad can be negated."""
+    in_names = ["sst", "uo_0", "vo_0", "UI"]
+    out_names = ["sst", "uo_0"]
+    selector = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="Samudra",
+                    config={
+                        "ch_width": [4, 4],
+                        "dilation": [1, 2],
+                        "n_layers": [1, 1],
+                        "zonally_periodic_upsample": True,
+                        "lat_pad": "pole",
+                        "pole_pad_vector_names": ["uo_", "vo_", "UI"],
+                    },
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=trivial_network_and_loss_normalization(
+                    sorted(set(in_names + out_names))
+                ),
+            )
+        ),
+    )
+    step = selector.get_step(get_dataset_info(img_shape=(16, 32)))
+    samudra = step.modules[0].module  # unwrap the (DDP-like) wrapper
+    first_block = samudra.layers[0]
+    assert first_block.lat_pad_sign.tolist() == [1.0, -1.0, -1.0, -1.0]
+
+
+def test_samudra_builder_pole_pad_vector_names_validation():
+    with pytest.raises(ValueError, match="requires lat_pad"):
+        SamudraBuilder(pole_pad_vector_names=["uo_"])
+    with pytest.raises(ValueError, match="noise conditioning"):
+        SamudraBuilder(
+            zonally_periodic_upsample=True,
+            lat_pad="pole",
+            pole_pad_vector_names=["uo_"],
+            noise_embed_dim=2,
+            conditioned_blocks="bottleneck",
+        )

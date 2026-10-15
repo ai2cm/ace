@@ -1,7 +1,7 @@
 import dataclasses
 import functools
-from collections.abc import Mapping
-from typing import Any, Literal, get_args
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, cast, get_args
 
 import numpy as np
 import torch
@@ -81,6 +81,15 @@ class Samudra(torch.nn.Module):
         original cells keep the floor pooling's windows, so a checkpoint
         trained without it fine-tunes with it on. By default False. Adds no
         parameters.
+    pole_pad_vector_names : list of str, optional
+        Input channels that are vector components, by name or name prefix
+        (e.g. ``uo_``, ``vo_``, ``UI``, ``VI``). Their pole pad at the first
+        block's first convolution, the one padding site whose channels are
+        physical fields, is negated, since a vector's local east and north
+        directions reverse across the pole. Requires a "pole" or "pole_edge"
+        ``lat_pad`` and the input names, handed over with ``set_input_names``
+        before the first forward. By default None (no sign). Adds no
+        parameters.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -125,6 +134,7 @@ class Samudra(torch.nn.Module):
         conditioned_blocks: ConditionedBlocks | None = None,
         lat_pad: LatPad = "constant",
         pad_pool: bool = False,
+        pole_pad_vector_names: list[str] | None = None,
     ):
         super().__init__()
 
@@ -150,8 +160,14 @@ class Samudra(torch.nn.Module):
                 "upsampler always replicates the latitude edge, so the pole rule "
                 "would reach every site but the upsampler"
             )
+        if pole_pad_vector_names is not None and lat_pad not in ("pole", "pole_edge"):
+            raise ValueError(
+                "pole_pad_vector_names requires lat_pad 'pole' or 'pole_edge', "
+                f"got {lat_pad!r}"
+            )
         self.lat_pad = lat_pad
         self.pad_pool = pad_pool
+        self.pole_pad_vector_names = pole_pad_vector_names
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
@@ -278,7 +294,42 @@ class Samudra(torch.nn.Module):
         self.layers = nn.ModuleList(layers)
         self.num_steps = int(len(ch_width_with_input) - 1)
 
+    def set_input_names(self, names: Sequence[str]) -> None:
+        """Name the input channels, in channel order, so that
+        ``pole_pad_vector_names`` can pick out the vector components. Does
+        nothing when ``pole_pad_vector_names`` is None.
+        """
+        if self.pole_pad_vector_names is None:
+            return
+        if len(names) != self.input_channels:
+            raise ValueError(
+                f"got {len(names)} input names for {self.input_channels} "
+                "input channels"
+            )
+        vector_names = self.pole_pad_vector_names
+        unmatched = [v for v in vector_names if not any(n.startswith(v) for n in names)]
+        if unmatched:
+            raise ValueError(
+                f"pole_pad_vector_names {unmatched} match no input channel"
+            )
+        sign = torch.tensor(
+            [
+                -1.0 if any(n.startswith(v) for v in vector_names) else 1.0
+                for n in names
+            ],
+            device=next(self.parameters()).device,
+        )
+        cast(ConvNeXtBlock, self.layers[0]).lat_pad_sign = sign
+
     def forward(self, fts, context: Context | None = None):
+        if (
+            self.pole_pad_vector_names is not None
+            and cast(ConvNeXtBlock, self.layers[0]).lat_pad_sign is None
+        ):
+            raise RuntimeError(
+                "pole_pad_vector_names is set but set_input_names was never "
+                "called, so the vector channels are unknown"
+            )
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:
