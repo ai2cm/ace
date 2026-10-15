@@ -2,11 +2,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # --config-dir configs/experiments/cm4_eval/ocean
 # Epoch-30 EMA checkpoints of the 30-ep socorr Muon runs (inline best epochs are 8-18; launched by hand 2026-10-15)
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4XW199W1TP9JJ8CXK2B0CQ3|run_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4XW199W1TP9JJ8CXK2B0CQ3|run_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4XW2259BDDS7ZC4MGYQSKSC|run_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4XW2259BDDS7ZC4MGYQSKSC|run_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|run_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|run_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|run_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|run_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4XW199W1TP9JJ8CXK2B0CQ3|running_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon|rs0|01M4XW199W1TP9JJ8CXK2B0CQ3|running_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4XW2259BDDS7ZC4MGYQSKSC|running_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs0|01M4XW2259BDDS7ZC4MGYQSKSC|running_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|running_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs1|01M4XW2J5P2B4VKZTBYJDXFQ6S|running_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|running_piC-ic0151-200yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|running_1pct-ic0001-130yr|ema_ckpt_0030|high|--min-runtime 8h|||ai2/ace|jupiter+titan
