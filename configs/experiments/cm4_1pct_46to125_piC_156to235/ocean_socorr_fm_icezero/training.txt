@@ -1,3 +1,3 @@
 group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_icezero|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_icezero|rs0|training|urgent|jupiter|4||3|ai2/ace|seed=0|8h
