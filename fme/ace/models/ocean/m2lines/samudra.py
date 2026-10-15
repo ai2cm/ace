@@ -49,7 +49,7 @@ class Samudra(torch.nn.Module):
         longitude axis in the decoder, removing the lon=0 seam introduced by the
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
-    lat_pad : {"constant", "pole"}, optional
+    lat_pad : {"constant", "pole", "pole_edge"}, optional
         Padding of the latitude axis (see ``pad_latitude``). What each mode
         puts beyond the latitude edges at each site:
 
@@ -63,8 +63,10 @@ class Samudra(torch.nn.Module):
         upsampler, default                      edge row  raises
         ======================================  ========  ========
 
-        The upsampler replicates the edge under "constant" because it always
-        has. "pole" is exact for scalar fields only and requires
+        "pole_edge" pads like "pole" with the antipode taken at a cell edge
+        (see ``pad_latitude``). The upsampler replicates the edge under
+        "constant" because it always has. "pole" is exact for scalar fields
+        only and, like "pole_edge", requires
         ``zonally_periodic_upsample``; a pad longer than a level's height (the
         4 degree bottleneck's 3 rows under a dilation of 4) continues past the
         far pole. By default "constant", the original behavior. Adds no
@@ -142,9 +144,9 @@ class Samudra(torch.nn.Module):
         self.zonally_periodic_upsample = zonally_periodic_upsample
         if lat_pad not in get_args(LatPad):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
-        if lat_pad == "pole" and not zonally_periodic_upsample:
+        if lat_pad in ("pole", "pole_edge") and not zonally_periodic_upsample:
             raise ValueError(
-                "lat_pad 'pole' requires zonally_periodic_upsample: the default "
+                f"lat_pad {lat_pad!r} requires zonally_periodic_upsample: the default "
                 "upsampler always replicates the latitude edge, so the pole rule "
                 "would reach every site but the upsampler"
             )

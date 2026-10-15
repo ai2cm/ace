@@ -50,8 +50,11 @@ class SamudraBuilder(ModuleConfig):
             upsampler, default                      edge row  raises
             ======================================  ========  ========
 
-            "constant" (the default) is the original network. "pole" is exact
-            for scalar fields only and requires ``zonally_periodic_upsample``;
+            "constant" (the default) is the original network. "pole_edge" pads
+            like "pole" with the antipode taken at a cell edge, so a
+            period-two zonal ripple cancels in the pad. "pole" is exact for
+            scalar fields only and, like "pole_edge", requires
+            ``zonally_periodic_upsample``;
             a pad longer than a level's height (the 4 degree bottleneck's 3
             rows under a dilation of 4) continues past the far pole. See
             ``Samudra``.
@@ -89,10 +92,10 @@ class SamudraBuilder(ModuleConfig):
             raise ValueError("norm_kwargs should not have num_features")
         if "normalized_shape" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have normalized_shape")
-        if self.lat_pad == "pole" and not self.zonally_periodic_upsample:
+        if self.lat_pad in ("pole", "pole_edge") and not self.zonally_periodic_upsample:
             raise ValueError(
-                "lat_pad 'pole' requires zonally_periodic_upsample: the default "
-                "upsampler always replicates the latitude edge"
+                f"lat_pad {self.lat_pad!r} requires zonally_periodic_upsample: "
+                "the default upsampler always replicates the latitude edge"
             )
         if self.noise_embed_dim < 0:
             raise ValueError("noise_embed_dim must not be negative")
