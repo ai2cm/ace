@@ -428,6 +428,10 @@ e3smv3_piControl_100yr_coupled:
 cm4_like_am4_random_co2_ensemble_atmosphere:
 	./compute_dataset.sh --dataset --stats $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
 
+.PHONY: cm4_abrupt_4xCO2_ensemble_atmosphere
+cm4_abrupt_4xCO2_ensemble_atmosphere:
+	./compute_dataset.sh --dataset --stats $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/CM4-abrupt-4xCO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
+
 .PHONY: cm4_like_am4_random_co2_ensemble_coupled
 cm4_like_am4_random_co2_ensemble_coupled:
 	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED)
