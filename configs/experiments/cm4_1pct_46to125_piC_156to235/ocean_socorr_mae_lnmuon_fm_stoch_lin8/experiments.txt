@@ -6,3 +6,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8|01M50
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8|01M50Q5J94PCSWGNCSNSXSBSZA|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8-ema8|01M50Q5J94PCSWGNCSNSXSBSZA|running_1pct-ic0001-130yr|ema_ckpt_0008|high|--min-runtime 8h||01M51R87SKGM0TQEPY2ST1R1YG|ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8-ema16|01M50Q5J94PCSWGNCSNSXSBSZA|running_1pct-ic0001-130yr|ema_ckpt_0016|high|--min-runtime 8h||01M51R87SKGM0TQEPY2ST1R1YG|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8|01M50Q5J94PCSWGNCSNSXSBSZA|run_1pct-ic0001-130yr-ens4|best_inference_ckpt|high|--min-runtime 8h||01M51R87SKGM0TQEPY2ST1R1YG|ai2/ace|jupiter+titan
