@@ -1,0 +1,8 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# --config-dir configs/experiments/cm4_eval/ocean
+# ocean_socorr_fm rs0 best_inference_ckpt (epoch 57; the inline 1pct rollout blew up over
+# epochs 35-53 and recovered from 54). Compare against socorr_fm_ep30 (ema_ckpt_0030).
+# results_dataset pins the 6th (final, exit 0) attempt's dataset. Launched by hand 2026-10-16 (elynnwu).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm|rs0|01M4VR953T8GG20SDZ09VHY82B|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M50JXWW56DXJKY2JE9VXN1T6|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm|rs0|01M4VR953T8GG20SDZ09VHY82B|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M50JXWW56DXJKY2JE9VXN1T6|ai2/ace|jupiter+titan
