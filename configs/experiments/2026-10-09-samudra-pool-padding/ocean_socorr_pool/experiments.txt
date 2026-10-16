@@ -9,3 +9,9 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|01M507AEKGJ14Z1FPMTVS6WB7H|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1|01M50HYENVB3HNA7Q4T3G1FT5H|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# 1pct yearly evals of pole_edge rs0 from its first job's result dataset (the
+# job was preempted after epoch 16): best_inference_ckpt is epoch 16, ckpt is
+# 16 epochs and 320 batches.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
