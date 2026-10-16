@@ -19,8 +19,8 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
 #
 # The epoch-30 EMA checkpoint of pole_edge rs0, from its retry job's result
-# dataset, on saturn's A100s. pending_ until that dataset commits: beaker
-# can't mount the dataset of a running job.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|pending_1pct_yearly_1deg|ema_ckpt_0030|high|--min-runtime 8h||01M51FYD2K8FA2ZEHQ9ZRH3QVR|ai2/ace|a100
+# dataset, on saturn's A100s. Held until that dataset committed when the
+# retry was preempted (beaker can't mount the dataset of a running job).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|ema_ckpt_0030|high|--min-runtime 8h||01M51FYD2K8FA2ZEHQ9ZRH3QVR|ai2/ace|a100
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|training|best_inference_ckpt|normal|--min-runtime 8h
