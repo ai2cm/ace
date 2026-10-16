@@ -1,8 +1,8 @@
 
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3n_a2s-fto|o0a0rs0|01M4RVY7X737DDHG4H7XR9EE6P|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3n_a2s-fto|o0a0rs0|01M4RVY7X737DDHG4H7XR9EE6P|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3n_a2s-fto|o0a0rs0|01M4RVY7X737DDHG4H7XR9EE6P|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3n_a2s-fto|o0a0rs0|01M4RVY7X737DDHG4H7XR9EE6P|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3stoch_a2s-fto|o0a0rs0|01M4VVTK9V3TTZCZGQ07350ZSV|training|best_inference_ckpt|normal|--min-runtime 8h
 
