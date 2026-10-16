@@ -3,8 +3,8 @@
 # epoch's checkpoint and launch the ACE-only random-CO2 evaluations on it, so the per-epoch drift of ACE's CO2 response
 # can be tracked (not just the selected checkpoint). Polls the Beaker experiment: for each segment's log line
 # "Saving checkpoints for epoch N" (written after the epoch's inline inference) it fetches that segment's
-# training_checkpoints/ckpt.tar, checks it is the end-of-epoch save (epoch == N, 0 batches into the next epoch; the
-# trainer also overwrites ckpt.tar mid-epoch every 1000 batches, ~1 h later, so the poll must be faster than that),
+# training_checkpoints/ckpt.tar, checks it is the end-of-epoch save (num_batches_seen == N x batches/epoch; the trainer also overwrites
+# ckpt.tar mid-epoch every 1000 batches, ~1 h later, so the poll must be faster than that),
 # lifts with --ema, uploads ace4deg-atmos-lifted-<TAG>-ep<N> and runs launch-4deg-ace-randco2-evals.sh with
 # TAG=<TAG>-ep<N>. Epochs done are recorded in $STATE so the loop is restartable. Exits when the experiment has
 # exited and no unprocessed epoch remains, or after MAX_EPOCHS.
@@ -15,6 +15,7 @@ EXPERIMENT="${EXPERIMENT:?beaker experiment name or id}"
 TAG="${TAG:?tag prefix, e.g. rco2rs2-after-jointens}"
 MAX_EPOCHS="${MAX_EPOCHS:-8}"
 POLL="${POLL:-300}"
+BATCHES_PER_EPOCH="${BATCHES_PER_EPOCH:-1460}"   # 160 yr x 73 ocean steps / batch 8
 WORK="${WORK:-/home/troya/ace-randco2-figs/watchdog-work}"
 STATE="${STATE:-/home/troya/ace-randco2-figs/watchdog-${TAG}.done}"
 export CLUSTERS="${CLUSTERS:-ai2/rhea ai2/prometheus ai2/ceres ai2/jupiter ai2/titan ai2/saturn ai2/neptune}"
@@ -45,7 +46,9 @@ for j in e['jobs']:
       info=$(PYTHONPATH="$REPO_ROOT" python "$SCRIPT_DIR/extract_atmosphere_from_coupled_ckpt.py" \
              "$D/src/training_checkpoints/ckpt.tar" "$D/upload/training_checkpoints/best_inference_ckpt.tar" --ema 2>&1 | grep "^wrote")
       log "epoch $N: $info"
-      if ! echo "$info" | grep -q "epoch $N, batches [0-9]* (+0 this epoch)"; then
+      # the restart checkpoint is written at the end of train_one_epoch, BEFORE the epoch counter increments and before
+      # the inline evaluation: the end-of-epoch-N file reads "epoch N-1, batches N*B (+B this epoch)"
+      if ! echo "$info" | grep -q "batches $((N * BATCHES_PER_EPOCH)) "; then
         log "epoch $N: ckpt.tar is not the end-of-epoch-$N save (already overwritten or not yet uploaded); will retry"
         rm -rf "$D"; continue
       fi
