@@ -54,8 +54,7 @@ def test_stepper_training_metadata_roundtrip():
 def test_get_job_id_wandb():
     with mock_wandb(), mock_distributed():
         wandb = WandB.get_instance()
-        assert get_job_id() is None, "wandb is not enabled/configured"
-        wandb.configure(log_to_wandb=True)
-        wandb.init()
+        assert get_job_id() is None, "wandb is not initialized"
+        wandb.init(log_to_wandb=True)
         job_id = get_job_id()
         assert wandb.get_id() == job_id

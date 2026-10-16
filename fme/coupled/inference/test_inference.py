@@ -263,7 +263,6 @@ def test_inference(
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
@@ -343,8 +342,7 @@ def test_inference_with_empty_ocean_forcing(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
 
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+    with mock_wandb():
         main(yaml_config=str(config_filename))
 
 
@@ -357,8 +355,7 @@ def _run_seeded_inference(
     config_filename = run_dir / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
-    with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+    with mock_wandb():
         main(yaml_config=str(config_filename))
     ds = xr.open_dataset(
         run_dir / "atmosphere" / "autoregressive_predictions.nc",

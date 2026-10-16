@@ -771,7 +771,6 @@ def test_train_and_inference(
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
         inference_evaluator_main(yaml_config=inference_config)
         inference_logs = wandb.get_logs()
 
@@ -1153,12 +1152,11 @@ def test_train_and_inference_with_derived_forcings(tmp_path):
         derived_forcings=derived_forcings,
     )
     with patch_cm4_solar_constant(1.0):
-        with mock_wandb() as wandb:
+        with mock_wandb():
             train_main(
                 yaml_config=train_config,
             )
-        with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
+        with mock_wandb():
             inference_evaluator_main(yaml_config=inference_config)
 
 

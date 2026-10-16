@@ -72,13 +72,13 @@ def main(
         stds[varname] = fitted_model(window_years)
 
     wandb = WandB.get_instance()
-    wandb.configure(log_to_wandb=True)
     config = {
         "window_years": window_years,
         "batches": batches,
     }
 
     wandb.init(
+        log_to_wandb=True,
         name=name + "-plus-std",
         job_type="training",
         config=config,
@@ -98,6 +98,7 @@ def main(
             )
 
     wandb.init(
+        log_to_wandb=True,
         name=name,
         job_type="training",
         config=config,
@@ -116,6 +117,7 @@ def main(
             )
 
     wandb.init(
+        log_to_wandb=True,
         name=name + "-minus-std",
         job_type="training",
         config=config,

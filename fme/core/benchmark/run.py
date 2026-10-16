@@ -136,9 +136,9 @@ def main(
     if wandb_project is not None:
         entity, project = wandb_project.split("/")
         wandb = WandB.get_instance()
-        wandb.configure(log_to_wandb=True)
         wandb_name = f"{get_git_commit()}-{safe_device_name}"
         wandb.init(
+            log_to_wandb=True,
             resumable=False,
             project=project,
             entity=entity,

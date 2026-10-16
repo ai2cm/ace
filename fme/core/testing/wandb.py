@@ -14,7 +14,6 @@ from fme.core.distributed import Distributed
 class MockWandB:
     def __init__(self):
         self._enabled = False
-        self._configured = False
         self._logs: dict[int, dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
         self._id: str | None = None
@@ -25,23 +24,18 @@ class MockWandB:
         self._env_name_snapshot: str | None = None
         self._env_name_snapshot_taken = False
 
-    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
-        dist = Distributed.get_instance()
-        self._enabled = log_to_wandb and dist.is_root()
-        self._configured = True
-        if metrics_log_dir is not None and dist.is_root():
-            self._disk_logger = DiskMetricLogger(metrics_log_dir)
-
     def init(
         self,
+        log_to_wandb: bool,
+        metrics_log_dir: str | None = None,
         resumable: bool = False,
         experiment_dir: str | None = None,
         **kwargs,
     ):
-        if not self._configured:
-            raise RuntimeError(
-                "must call WandB.configure before WandB init can be called"
-            )
+        dist = Distributed.get_instance()
+        self._enabled = log_to_wandb and dist.is_root()
+        if metrics_log_dir is not None and dist.is_root():
+            self._disk_logger = DiskMetricLogger(metrics_log_dir)
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -154,10 +148,6 @@ class MockWandB:
     @property
     def enabled(self) -> bool:
         return self._enabled
-
-    @property
-    def configured(self) -> bool:
-        return self._configured
 
 
 @contextlib.contextmanager

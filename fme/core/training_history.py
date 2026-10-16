@@ -88,7 +88,7 @@ def get_job_id() -> str | None:
     Get the wandb ID of the current job.
     """
     wandb = WandB.get_instance()
-    if wandb.enabled and wandb.configured:
+    if wandb.enabled:
         return wandb.get_id()
     else:
         return None

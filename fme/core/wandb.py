@@ -110,19 +110,13 @@ class WandB:
 
     def __init__(self):
         self._enabled = False
-        self._configured = False
         self._id = None
         self._disk_logger: DiskMetricLogger | None = None
 
-    def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
-        dist = Distributed.get_instance()
-        self._enabled = log_to_wandb and dist.is_root()
-        self._configured = True
-        if metrics_log_dir is not None and dist.is_root():
-            self._disk_logger = DiskMetricLogger(metrics_log_dir)
-
     def init(
         self,
+        log_to_wandb: bool,
+        metrics_log_dir: str | None = None,
         resumable: bool = False,
         experiment_dir: str | None = None,
         **kwargs,
@@ -131,16 +125,20 @@ class WandB:
         Initialize wandb, potentially with resumption logic.
 
         Args:
+            log_to_wandb: Whether to log to Weights & Biases. Only the root
+                rank logs, so this is ignored on other ranks.
+            metrics_log_dir: If given, the root rank also writes scalar
+                metrics to disk as JSONL in this directory.
             resumable: If True, attempt to resume the run in the experiment directory,
                 or start a new run there if no run is found.
             experiment_dir: The directory where the experiment is being run. Required if
                 `resumable` is True.
             **kwargs: Passed to wandb.init.
         """
-        if not self._configured:
-            raise RuntimeError(
-                "must call WandB.configure before WandB init can be called"
-            )
+        dist = Distributed.get_instance()
+        self._enabled = log_to_wandb and dist.is_root()
+        if metrics_log_dir is not None and dist.is_root():
+            self._disk_logger = DiskMetricLogger(metrics_log_dir)
         if self._enabled:
             if resumable:
                 if experiment_dir is None:
@@ -206,10 +204,6 @@ class WandB:
     @property
     def enabled(self) -> bool:
         return self._enabled
-
-    @property
-    def configured(self) -> bool:
-        return self._configured
 
     def get_id(self) -> str | None:
         return self._id
