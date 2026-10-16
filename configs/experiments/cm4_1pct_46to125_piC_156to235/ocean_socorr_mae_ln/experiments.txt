@@ -4,10 +4,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VRQCJTTZ1SGW7QFKX5FA09|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VRQCJTTZ1SGW7QFKX5FA09|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VRQCJTTZ1SGW7QFKX5FA09|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln|rs0|01M4VRQCJTTZ1SGW7QFKX5FA09|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VRQP8EX2YBK8MRG9GHRQCY|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VRQP8EX2YBK8MRG9GHRQCY|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VRQP8EX2YBK8MRG9GHRQCY|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_ln_fm|rs0|01M4VRQP8EX2YBK8MRG9GHRQCY|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
