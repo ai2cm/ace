@@ -24,7 +24,6 @@ df = pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).dropna(
 df = df[df.atmosphere.str.contains("before|after")]  # ours (have monthly files)
 ORDER = [
     "ace2sft-rs0 (never saw randCO2), before",
-    "ace2sft-rs0, after coupled FT ep1 (lifted)",
     "rco2 rs2 ep11, before",
 ]
 ORDER += sorted(

@@ -35,7 +35,6 @@ VARIABLES = ["air_temperature_0", "TMP2m"]
 CLIMATES = ["1xCO2", "2xCO2", "4xCO2"]
 MODELS = {  # legend label -> atmosphere name in randco2_compare.csv
     "ACE2S-ft rs0 (1pctCO$_2$ 46–125, piC 156–235; never saw random CO$_2$)": "ace2sft-rs0 (never saw randCO2), before",
-    "ACE2S-ft rs0 after coupled FT (jointens epoch 1, lifted out)": "ace2sft-rs0, after coupled FT ep1 (lifted)",
     "random-CO$_2$ rs2, epoch 11 (Spencer's v2 1pct_46to125 arm), before coupling": "rco2 rs2 ep11, before",
 }
 for _a in sorted(

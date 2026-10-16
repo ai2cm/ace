@@ -26,7 +26,6 @@ PROJECT = "ai2cm/ace2-cm4-atmos-noLSM"
 # once the rco2rs2 coupled FT has a checkpoint (tools/lift_atmosphere_and_eval.sh)
 RUNS = {
     "ace2sft-rs0 (never saw randCO2), before": "ace4deg-randco2-{x}xCO2-ic3-ace2sft-rs0-before",
-    "ace2sft-rs0, after coupled FT ep1 (lifted)": "ace4deg-randco2-{x}xCO2-ic3-ace2sft-rs0-after-jointens-ep1",
     "rco2 rs2 ep11, before": "ace4deg-randco2-{x}xCO2-ic3-rco2rs2-before",
     "rco2 rs2 ep3 (Spencer)": "rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR_4deg-ft-ep3-eval_best_inference_ckpt-randco2-{x}xCO2-ic3-rs2",
     "rco2 rs0 ep3 (Spencer)": "rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR_4deg-ft-ep3-eval_best_inference_ckpt-randco2-{x}xCO2-ic3-rs0",
