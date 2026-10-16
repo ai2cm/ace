@@ -64,6 +64,20 @@ for j in e['jobs']:
       rm -rf "$D/src"
     done
   done <<< "$segs"
+  # refresh the analysis once an epoch's three evaluations have all exited
+  for N in $(cat "$STATE"); do
+    grep -qx "$N" "$STATE.refreshed" 2>/dev/null && continue
+    n_ok=0
+    for X in 1 2 4; do
+      beaker experiment get "troya/ace4deg-randco2-${X}xCO2-ic3-${TAG}-ep${N}" --format json 2>/dev/null \
+        | python3 -c "import json,sys; s=json.load(sys.stdin)[0]['jobs'][-1]['status']; sys.exit(0 if s.get('exited') and s.get('exitCode')==0 else 1)" \
+        && n_ok=$((n_ok+1))
+    done
+    if [ "$n_ok" -eq 3 ]; then
+      log "epoch $N: all three evaluations finished; refreshing the analysis"
+      "$SCRIPT_DIR/refresh_randco2_analysis.sh" 2>&1 | sed "s/^/  /" && echo "$N" >> "$STATE.refreshed"
+    fi
+  done
   n_done=$(wc -l < "$STATE")
   if [ "$n_done" -ge "$MAX_EPOCHS" ]; then log "all $MAX_EPOCHS epochs processed; exiting"; exit 0; fi
   if [ "$all_exited" = 1 ]; then log "experiment exited with $n_done epochs processed; exiting"; exit 0; fi
