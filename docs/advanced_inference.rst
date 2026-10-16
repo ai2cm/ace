@@ -59,9 +59,13 @@ parameter in the ``fme.ace.inference`` entrypoint:
 The above example will result in three segments being run with
 ``n_forward_steps`` each. Output from each segment will be stored in
 subdirectories under the ``experiment_dir``, labeled by the segment start
-time of the first (or only) ensemble member. If a segment directory with a
-restart file already exists, it will be skipped, and the run will resume
-starting with the first incomplete segment.
+time of the first (or only) ensemble member. If ``output_dir`` is set, each
+segment's data output (including its restart file) instead goes to the
+same-labeled subdirectory under ``output_dir``, mirroring the job files under
+``experiment_dir``. If a segment's restart file already exists, the segment
+will be skipped, and the run will resume starting with the first incomplete
+segment. Since completion is detected from restart files in the output
+directory, changing ``output_dir`` between resubmissions reruns all segments.
 
 For example, running inference with the example configuration defined in the
 :ref:`example-yaml-configuration` on the

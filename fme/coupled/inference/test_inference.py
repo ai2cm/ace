@@ -16,6 +16,11 @@ from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
+from fme.core.testing.output_dir import (
+    OUTPUT_DIR_KINDS,
+    assert_outputs_in_output_dir,
+    output_dir_of_kind,
+)
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
@@ -31,9 +36,11 @@ from fme.coupled.inference.inference import (
     main,
 )
 from fme.coupled.inference.test_evaluator import (
+    COUPLED_OUTPUT_PATHS,
     _create_dataset_info_for_stepper,
     save_coupled_stepper,
     save_coupled_stepper_with_ema,
+    zarr_coupled_data_writer,
 )
 from fme.coupled.test_stepper import AddOneWithNoise, CoupledDatasetInfoBuilder
 
@@ -365,6 +372,46 @@ def _run_seeded_inference(
         decode_timedelta=False,
     )
     return ds["a_prog"].values
+
+
+@pytest.mark.parametrize("output_dir_kind", OUTPUT_DIR_KINDS)
+@pytest.mark.medium_duration
+def test_inference_writes_data_to_output_dir(tmp_path: pathlib.Path, output_dir_kind):
+    config, _, _ = _setup(
+        ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
+        ocean_out_names=["o_prog", "sst", "o_diag"],
+        atmos_in_names=[
+            "a_prog",
+            "surface_temperature",
+            "forcing_var",
+            "ocean_fraction",
+        ],
+        atmos_out_names=["a_prog", "surface_temperature", "a_diag"],
+        tmp_path=tmp_path,
+        n_coupled_steps=2,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=1,
+    )
+    experiment_dir = tmp_path / "job"
+    with output_dir_of_kind(output_dir_kind, tmp_path) as output_dir:
+        config = dataclasses.replace(
+            config,
+            experiment_dir=str(experiment_dir),
+            output_dir=output_dir,
+            logging=dataclasses.replace(config.logging, log_to_file=True),
+            data_writer=zarr_coupled_data_writer(),
+        )
+        config_filename = tmp_path / "input_config.yaml"
+        with open(config_filename, "w") as f:
+            yaml.dump(dataclasses.asdict(config), f)
+        with mock_wandb() as wandb:
+            wandb.configure(
+                log_to_wandb=True, metrics_log_dir=str(experiment_dir / "metrics")
+            )
+            main(yaml_config=str(config_filename))
+        assert_outputs_in_output_dir(
+            str(experiment_dir), output_dir, COUPLED_OUTPUT_PATHS
+        )
 
 
 @pytest.mark.slow
