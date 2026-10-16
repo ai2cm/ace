@@ -85,7 +85,18 @@ class SamudraBuilder(ModuleConfig):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(state)
+        state = dict(state)
+        # Runs launched while this experiment branch briefly had a
+        # pole_pad_vector_names option store it even when unused; a checkpoint
+        # that used it needs the code of exp/2026-10-15-samudra-vo-banding-fixes.
+        if "pole_pad_vector_names" in state:
+            if state["pole_pad_vector_names"] is not None:
+                raise ValueError(
+                    "this checkpoint negates the pole pad of vector channels "
+                    "(pole_pad_vector_names), which this code does not support"
+                )
+            del state["pole_pad_vector_names"]
+        return state
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:

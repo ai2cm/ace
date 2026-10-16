@@ -194,3 +194,25 @@ def test_noise_conditioned_samudra_draws_independent_noise_per_sample():
         output = model(x)
     assert not torch.allclose(output[0], output[1])
     assert not torch.allclose(output[1], output[2])
+
+
+def test_samudra_builder_loads_an_unused_pole_pad_vector_names_key():
+    """Checkpoints from runs launched while this branch had the option store
+    pole_pad_vector_names as None; they load, and one that used it raises."""
+    config = {
+        "ch_width": [4, 4],
+        "dilation": [1, 2],
+        "n_layers": [1, 1],
+        "zonally_periodic_upsample": True,
+        "lat_pad": "pole_edge",
+    }
+    selector = ModuleSelector(
+        type="Samudra", config={**config, "pole_pad_vector_names": None}
+    )
+    model = selector.build(5, 3, DatasetInfo(img_shape=(16, 32))).torch_module
+    assert isinstance(model, Samudra)
+    assert model.lat_pad == "pole_edge"
+    with pytest.raises(ValueError, match="pole_pad_vector_names"):
+        ModuleSelector(
+            type="Samudra", config={**config, "pole_pad_vector_names": ["uo_"]}
+        )
