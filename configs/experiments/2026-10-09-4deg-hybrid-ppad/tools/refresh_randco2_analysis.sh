@@ -10,4 +10,5 @@ cd "$OUT"
 python "$SCRIPT_DIR/randco2_compare.py" > compare.log 2>&1
 python "$SCRIPT_DIR/randco2_fig.py" > fig.log 2>&1
 python "$SCRIPT_DIR/randco2_timeseries.py" > timeseries.log 2>&1
+python "$SCRIPT_DIR/randco2_tendency_phase.py" > tendency.log 2>&1
 echo "refreshed $OUT: $(ls figures | tr '\n' ' ')"
