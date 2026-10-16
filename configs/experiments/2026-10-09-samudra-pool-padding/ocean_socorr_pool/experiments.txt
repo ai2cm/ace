@@ -15,5 +15,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1|01M50HYENVB3HNA7Q4T3
 # 16 epochs and 320 batches. First submitted as 01M52FSN33VDTMHT3N535AKSAV and
 # 01M52FSWZPZ7WQNS8CWZMHS2XZ, which failed to load the checkpoint (its builder
 # config carries pole_pad_vector_names); resubmitted after e2fec8ce6.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
