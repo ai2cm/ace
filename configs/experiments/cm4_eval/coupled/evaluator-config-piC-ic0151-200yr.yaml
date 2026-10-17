@@ -1,9 +1,37 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
 #   --config-dir configs/experiments/cm4_eval/coupled
 experiment_dir: /results
-n_coupled_steps: 14598
+n_coupled_steps: 14598  # --min-runtime 8h
 coupled_steps_in_memory: 18
 checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
 data_writer:
   ocean:
     save_prediction_files: false
@@ -44,41 +72,44 @@ data_writer:
         time_coarsen:
           method: monthly_mean
         save_reference: true
-      - label: nino3_nino34_monthly
-        names: [sst]
-        lat_extent: [-5.0, 5.0]
-        lon_extent: [190.0, 270.0]
+      - label: tropical_pacific_monthly_sst
+        names: [sst, hfds_total_area]
+        lat_extent: [-20.0, 20.0]
+        lon_extent: [120.0, 290.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: arctic_hfds
+        names: [hfds_total_area]
+        lat_extent: [40.0, 90.0]
+        lon_extent: [0.0, 360.0]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: true
+      - label: antarctic_hfds
+        names: [hfds_total_area]
+        lat_extent: [-90.0, -50.0]
+        lon_extent: [0.0, 360.0]
         time_coarsen:
           method: monthly_mean
         save_reference: true
   atmosphere:
     save_prediction_files: false
     save_monthly_files: false
-logging:
-  log_to_screen: true
-  log_to_wandb: true
-  log_to_file: true
-  project: ace-samudra-coupled-cm4
-  entity: ai2cm
-loader:
-  num_data_workers: 1
-  dataset:
-    ocean:
-      merge:
-        - data_path: /climate-default
-          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
-          engine: zarr
-        - data_path: /climate-default
-          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
-          engine: zarr
-    atmosphere:
-      merge:
-        - data_path: /climate-default
-          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
-          engine: zarr
-        - data_path: /climate-default
-          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-          engine: zarr
-  start_indices:
-    times:
-    - '0151-01-06T00:00:00'
+    files:
+    - label: tropical_pacific_monthly
+      names:
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - DSWRFsfc
+      - USWRFsfc
+      - DLWRFsfc
+      - ULWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      lat_extent: [-20.0, 20.0]
+      lon_extent: [120.0, 290.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: true

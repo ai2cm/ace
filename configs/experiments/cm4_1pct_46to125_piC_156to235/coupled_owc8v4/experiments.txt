@@ -1,2 +1,6 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config-dir configs/experiments/cm4_eval/coupled
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8v4_a2s-fto|o2a0rs0|01M2KGZR24HB8EBXACJH3CQARM|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h

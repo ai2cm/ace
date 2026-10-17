@@ -1,7 +1,7 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
 #   --config-dir configs/experiments/cm4_eval/atmos
 experiment_dir: /results
-n_forward_steps: 189760
+n_forward_steps: 189760  # --min-runtime 6h
 forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 1
@@ -37,3 +37,27 @@ aggregator:
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
+  files:
+  - label: tropical_pacific_monthly
+    names:
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+    - DSWRFsfc
+    - USWRFsfc
+    - DLWRFsfc
+    - ULWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    lat_extent: [-20.0, 20.0]
+    lon_extent: [120.0, 290.0]
+    time_coarsen:
+      method: monthly_mean
+    save_reference: true
+  - label: tropical_pacific_monthly_sst
+    names: [surface_temperature]
+    lat_extent: [-20.0, 20.0]
+    lon_extent: [120.0, 290.0]
+    time_coarsen:
+      method: monthly_mean
+    save_reference: false
