@@ -1,0 +1,19 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# 10-epoch fine-tunes of the two finished rs0 ocean_ppad baselines with
+# pad_pool on; see finetune-config-template.yaml. Each starts from its
+# baseline's best_inference_ckpt, the checkpoint the baseline is evaluated
+# with, and keeps its seed:
+#   ocean_ppad rs0        wandb esiegbpk, beaker 01M4HEEJZ1ZFF7455M7T48S6EC
+#   ocean_ppad_fmean rs0  wandb mnh7jo06, beaker 01M4HEFPANCBNHNH0FC5A8V4HV
+# The fmean baseline's input_masking fill value (mean) comes in with its
+# saved stepper.
+# ft_nopad is the control: the same fine-tune with neither padding, lat_pad
+# constant (the baseline trained with pole) and pad_pool off.
+#
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train".
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs0|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs1|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs2|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_nopad|rs0|ace-samudra-cm4|esiegbpk|best_inference_ckpt|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.lat_pad=constant stepper.step.config.builder.config.pad_pool=false|01M4PMAEPQ6EWYZXZ15F5QX1ZN|8h

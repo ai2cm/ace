@@ -1,0 +1,34 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs0|01M4XY9G5EY27Q0F6JWQ3FSFA3|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs1|01M4YN3NV2C0Q4XT85XT0G2H5P|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|01M507AEKGJ14Z1FPMTVS6WB7H|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1|01M50HYENVB3HNA7Q4T3G1FT5H|canceled|best_inference_ckpt|normal|--min-runtime 8h
+
+# 1pct yearly evals of pole_edge rs0 from its first job's result dataset (the
+# job was preempted after epoch 16): best_inference_ckpt is epoch 16, ckpt is
+# 16 epochs and 320 batches. First submitted as 01M52FSN33VDTMHT3N535AKSAV and
+# 01M52FSWZPZ7WQNS8CWZMHS2XZ, which failed to load the checkpoint (its builder
+# config carries pole_pad_vector_names); resubmitted after e2fec8ce6.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+#
+# The epoch-30 EMA checkpoint of pole_edge rs0, from its retry job's result
+# dataset, on saturn's A100s. Held until that dataset committed when the
+# retry was preempted (beaker can't mount the dataset of a running job). Launched as
+# 01M52ZXY9QNM3SPF6M2NGKV1GT.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0030|high|--min-runtime 8h||01M51FYD2K8FA2ZEHQ9ZRH3QVR|ai2/ace|a100
+#
+# The epoch-45 EMA checkpoint of pole_edge rs0, from its third job's result
+# dataset (committed when that job was preempted), on saturn's A100s. Launched
+# as 01M54WEKS1VT8XMKBTA7JNS2JF.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0045|high|--min-runtime 8h||01M52ZST2Z15YQPJ4WNAVXTZJ4|ai2/ace|a100
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|training|best_inference_ckpt|normal|--min-runtime 8h
