@@ -10,6 +10,7 @@ lives with each training experiment and just names the checkpoint.
 | --- | --- | --- |
 | `evaluator-config-1pct_yearly_4deg.yaml` | `run_1pct_yearly_4deg` | 4deg zarrs (`2026-07-22-cm4-*-4deg-coupled-ocean`, `2026-07-15-om4-*-4deg-ocean-5daily`) |
 | `evaluator-config-1pct_yearly_1deg.yaml` | `run_1pct_yearly_1deg` | 1deg zarrs (`2026-07-15-om4-1pctco2-1deg-*`) |
+| `evaluator-config-piC-ic0151-200yr.yaml` | `run_piC-ic0151-200yr` | 1deg zarrs; James's standard 200-year piControl eval (`cm4_eval/ocean`), from 0151-01-06 |
 | `evaluator-config-piC_yearly_1deg.yaml` | `run_piC_yearly_1deg` | 1deg zarrs; runs over the piControl stores (`2026-07-15-om4-picontrol-1deg-*`), 199 years from 0152-01-01 |
 
 A 1deg checkpoint needs a twin config with the 1deg stores
