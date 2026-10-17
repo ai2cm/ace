@@ -23,5 +23,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|training|urgent|jup
 # rs1 (01M50HYENVB3HNA7Q4T3G1FT5H) was canceled before it started; rs1b is
 # the same run under a new name, since the canceled experiment keeps rs1's.
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1|canceled|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge|8h
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|train|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|training|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge|8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|training|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge 'stepper.step.config.builder.config.dilation=[1,1,4,8]'|8h
