@@ -41,9 +41,10 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|piC_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
 #
 # The same two rs0 checkpoints over James's standard 200-year piControl eval
-# (cm4_eval/ocean, the ocean twin of the coupled piC evals).
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+# (cm4_eval/ocean, the ocean twin of the coupled piC evals). Launched as
+# 01M563BNMWPHZJ7Y0SK3VB78WF and 01M563BX4PMM8PH8KC1HSNBJ9G.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
 #
 # d1148 rs1's latest checkpoint (ckpt.tar, run on its EMA weights) from its
 # third job's result dataset, over 1pctCO2 and the standard piControl eval.
