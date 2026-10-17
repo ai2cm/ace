@@ -10,11 +10,3 @@ cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs0|01M4XK4Y9
 cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs1|01M4XK5ZFYXAYXXWE0P82VZC6X|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs2|01M4XK6BCRBAPPJVVWKDFP2Y76|training|best_inference_ckpt|normal|--min-runtime 8h
-
-# deleted (H100 submission), resubmitted on titan: cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M5538R7TV6BXB9CE4M91KB84|training|best_inference_ckpt|normal|--min-runtime 8h
-
-# deleted (H100 submission), resubmitted on titan: cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs1|01M55396RNCR5RAGHGMR4AGGTN|training|best_inference_ckpt|normal|--min-runtime 8h
-
-# deleted (H100 submission), resubmitted on titan: cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M5539MSD98FVNSNQTAA4H7C1|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs0|01M55CVWZQ3C1EG410SBP0FAZD|training|best_inference_ckpt|normal|--min-runtime 8h
