@@ -32,11 +32,13 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6
 # pole_edge rs0 after training finished (fourth job, dataset committed): the
 # final epoch-60 EMA checkpoint, and the final best inference checkpoint,
 # epoch 50 (tagged rs0_ep50 as the epoch-16 best_inference_ckpt eval holds
-# the rs0 name), each over 1pctCO2 and piControl.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|run_piC_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|run_piC_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+# the rs0 name), each over 1pctCO2 and piControl. Launched as
+# 01M5629FKES8NJK6K7CB50D8X4, 01M5629Q2X8NTMH74K6HGP2M6E,
+# 01M5629Z2S3R7V12GJFQ104WZ0 and 01M562A6FFSD6FX3ECENVDWH59 (row order).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|piC_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|piC_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|training|best_inference_ckpt|normal|--min-runtime 8h
 
