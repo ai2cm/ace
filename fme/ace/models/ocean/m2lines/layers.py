@@ -20,20 +20,24 @@ def pad_latitude(
 
     Modes: "constant" pads zeros, and "pole" continues across the pole using
     the edge rows flipped and rotated 180 degrees in longitude (for an odd
-    width, the two columns nearest the antipode are averaged). "pole" is exact
-    only for scalar fields (vector components change sign across the pole) and
-    only where the edge rows touch the pole, so levels that dropped a row in
-    pooling are approximate.
+    width, the two columns nearest the antipode are averaged). A "pole" pad
+    longer than the height continues past the far pole. "pole" is exact only
+    for scalar fields (vector components change sign across the pole) and
+    only where the edge rows touch the pole, so levels that dropped or padded
+    a row in pooling are approximate.
     """
     if mode == "constant":
         return torch.nn.functional.pad(x, (0, 0, pad_start, pad_end), mode="constant")
     if mode == "pole":
         height = x.shape[-2]
         if pad_start > height or pad_end > height:
-            raise ValueError(
-                f"pole padding of ({pad_start}, {pad_end}) rows exceeds the "
-                f"height {height}"
-            )
+            # Past the far pole a meridian runs back up itself, so pad one full
+            # crossing and pole-pad that for the rest. Exact for an even width,
+            # where the two half turns cancel; for an odd width the rows past
+            # both poles average their antipodal columns twice.
+            first_start, first_end = min(pad_start, height), min(pad_end, height)
+            x = pad_latitude(x, first_start, first_end, mode)
+            return pad_latitude(x, pad_start - first_start, pad_end - first_end, mode)
         parts = []
         if pad_start > 0:
             parts.append(_rotate_half_longitude(x[..., :pad_start, :].flip(-2)))
@@ -105,14 +109,36 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
 
 
 class AvgPool(torch.nn.Module):
+    """Average pooling by ``pooling`` in both axes.
+
+    Like ``torch.nn.AvgPool2d``, by default it drops the last rows or columns
+    of an axis whose size is not a multiple of ``pooling``. With ``pad_pool``
+    it instead pads that axis at its end up to the next multiple, latitude
+    with ``lat_pad`` (see ``pad_latitude``) and longitude with ``pad``, so
+    every row and column is pooled.
+    """
+
     def __init__(
         self,
         pooling: int = 2,
+        pad_pool: bool = False,
+        pad: str = "circular",
+        lat_pad: LatPad = "constant",
     ):
         super().__init__()
         self.avgpool = torch.nn.AvgPool2d(pooling)
+        self.pooling = pooling
+        self.pad_pool = pad_pool
+        self.pad = pad
+        self.lat_pad = lat_pad
 
     def forward(self, x):
+        if self.pad_pool:
+            height, width = x.shape[-2:]
+            x = pad_latitude(x, 0, -height % self.pooling, self.lat_pad)
+            x = torch.nn.functional.pad(
+                x, (0, -width % self.pooling, 0, 0), mode=self.pad
+            )
         return self.avgpool(x)
 
 
