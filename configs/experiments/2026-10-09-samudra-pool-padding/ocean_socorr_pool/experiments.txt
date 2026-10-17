@@ -30,3 +30,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0045|high|--min-runtime 8h||01M52ZST2Z15YQPJ4WNAVXTZJ4|ai2/ace|a100
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|training|best_inference_ckpt|normal|--min-runtime 8h
