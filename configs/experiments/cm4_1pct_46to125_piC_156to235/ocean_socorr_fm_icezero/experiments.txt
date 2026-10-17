@@ -1,6 +1,6 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_icezero|rs0|01M50DDVGDY0S5TQZR0792DDS4|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_icezero|rs0|01M50DDVGDY0S5TQZR0792DDS4|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_icezero|rs0|01M50DDVGDY0S5TQZR0792DDS4|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_icezero|rs0|01M50DDVGDY0S5TQZR0792DDS4|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
