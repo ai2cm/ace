@@ -9,7 +9,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.training_history import TrainingHistory
-from fme.core.weight_ops import overwrite_weights
+from fme.core.weight_ops import overwrite_weights, prefix_submodule, require_subset
 from fme.core.wildcard import apply_by_exclude, apply_by_include, wildcard_match
 
 Weights = list[Mapping[str, Any]]
@@ -106,6 +106,13 @@ class ParameterInitializationConfig:
     Parameters:
         weights_path: path to a Stepper checkpoint
             containing weights to load
+        weights_submodule: dotted name of the destination submodule that the
+            checkpoint's module corresponds to; loaded parameter names are
+            prefixed with it. E.g. "conditional_model" to initialize a
+            NoiseConditionedModel from a deterministic checkpoint of the same
+            network. Destination parameters absent from the checkpoint keep
+            their initial values. ``parameters`` patterns use destination
+            names.
         parameters: list of ParameterClassification objects, each specifying
             whether parameters are excluded from initialization or frozen.
             By default modules are unfrozen and all parameters are included.
@@ -120,6 +127,7 @@ class ParameterInitializationConfig:
     """
 
     weights_path: str | None = None
+    weights_submodule: str | None = None
     parameters: list[ParameterClassification] = dataclasses.field(default_factory=list)
     alpha: float = 0.0
     beta: float = 0.0
@@ -154,6 +162,14 @@ class ParameterInitializationConfig:
         return ParameterInitializer(
             config=self, load_weights_and_history=load_weights_and_history
         )
+
+    def apply_submodule_prefix(
+        self, state_dict: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """Rename loaded weights onto the configured submodule, if any."""
+        if self.weights_submodule is None:
+            return state_dict
+        return prefix_submodule(state_dict, self.weights_submodule)
 
 
 def null_weights_and_history(*_) -> StepperWeightsAndHistory:
@@ -206,15 +222,20 @@ class ParameterInitializer:
             modules: a list of nn.Modules to initialize
         """
         filled_parameters = self._filled_parameters(len(modules))
-        if self.base_weights is not None:
-            for module, state_dict, classification in zip(
-                modules, self.base_weights, filled_parameters
-            ):
-                overwrite_weights(
-                    state_dict,
-                    module,
-                    exclude_parameters=classification.exclude,
-                )
+        if self.base_weights is None:
+            # Checked here rather than in __post_init__ because coupled
+            # components load weights with weights_path=None.
+            if self.config.weights_submodule is not None:
+                raise ValueError("weights_submodule is set but no weights were loaded")
+            return
+        for module, state_dict, classification in zip(
+            modules, self.base_weights, filled_parameters
+        ):
+            overwrite_weights(
+                self.config.apply_submodule_prefix(state_dict),
+                module,
+                exclude_parameters=classification.exclude,
+            )
 
     def freeze_weights(self, modules: list[nn.Module]):
         """
@@ -256,18 +277,18 @@ class ParameterInitializer:
         if base_weights is not None and (
             self.config.alpha != 0 or self.config.beta != 0
         ):
-            for module, state_dict in zip(modules, base_weights):
-                state_dict = {
-                    name: value.to(device) for name, value in state_dict.items()
+            # Use destination names, as in apply_weights.
+            base_weights = [
+                {
+                    name: value.to(device)
+                    for name, value in self.config.apply_submodule_prefix(
+                        state_dict
+                    ).items()
                 }
-                from_names = set(state_dict.keys())
-                to_names = set(module.state_dict().keys())
-                if not from_names.issubset(to_names):
-                    missing_parameters = from_names - to_names
-                    raise ValueError(
-                        f"Dest module is missing parameters {missing_parameters}, "
-                        "which is not allowed"
-                    )
+                for state_dict in base_weights
+            ]
+            for module, state_dict in zip(modules, base_weights):
+                require_subset(state_dict, module)
 
             def regularizer():
                 loss = torch.tensor(0.0, device=device)

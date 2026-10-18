@@ -3,7 +3,7 @@ import pytest
 import torch
 from torch import nn
 
-from fme.core.weight_ops import CopyWeightsConfig, overwrite_weights
+from fme.core.weight_ops import CopyWeightsConfig, overwrite_weights, prefix_submodule
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -160,3 +160,31 @@ def test_apply_copy_weights_config(
                     param.detach().cpu().numpy(),
                     original_dest_model_state[name].detach().cpu().numpy(),
                 )
+
+
+@pytest.mark.parametrize(
+    "name, submodule, expected",
+    [
+        ("module.layers.0.weight", "wrapped", "module.wrapped.layers.0.weight"),
+        ("layers.0.weight", "wrapped", "wrapped.layers.0.weight"),
+        ("module.layers.0.weight", "a.b", "module.a.b.layers.0.weight"),
+    ],
+)
+def test_prefix_submodule(name, submodule, expected):
+    assert list(prefix_submodule({name: torch.zeros(1)}, submodule)) == [expected]
+
+
+def test_overwrite_weights_error_suggests_candidate_submodules():
+    class Inner(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(2, 2)
+
+    class Wrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.first = Inner()
+            self.second = Inner()
+
+    with pytest.raises(ValueError, match="'first' or 'second'.*weights_submodule"):
+        overwrite_weights(Inner().state_dict(), Wrapper())
