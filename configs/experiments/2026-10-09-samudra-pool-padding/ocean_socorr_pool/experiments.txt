@@ -49,9 +49,10 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8
 # d1148 rs1's latest checkpoint (ckpt.tar, run on its EMA weights) from its
 # third job's result dataset, over 1pctCO2 and the standard piControl eval.
 # Held until that job was preempted (2026-10-18 00:00Z, 46 epochs and 420
-# batches) and the dataset committed.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|run_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M554A3NK19ZTVDKDTPABG6VA|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|run_piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M554A3NK19ZTVDKDTPABG6VA|ai2/ace|a100
+# batches) and the dataset committed. Launched as 01M568D0M6GMQK2AJH1SJ7GQ6R
+# and 01M568D85HDZAE54JB65C5SBQC.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M554A3NK19ZTVDKDTPABG6VA|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M554A3NK19ZTVDKDTPABG6VA|ai2/ace|a100
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|training|best_inference_ckpt|normal|--min-runtime 8h
 
