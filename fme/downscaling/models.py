@@ -1,6 +1,6 @@
 import dataclasses
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import cached_property
 from typing import Any
 
@@ -35,7 +35,7 @@ from fme.downscaling.noise import (
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
-from fme.downscaling.typing_ import FineResCoarseResPair
+from fme.downscaling.typing_ import Denoiser, FineResCoarseResPair
 
 
 @dataclasses.dataclass
@@ -592,6 +592,49 @@ class DiffusionModel:
         latents = torch.randn(outputs_shape).to(device=get_device())
         return inputs, latents
 
+    @property
+    def base_model(self) -> "DiffusionModel":
+        """Model used for input preparation and output postprocessing; matches
+        ``DenoisingMoEPredictor.base_model``.
+        """
+        return self
+
+    def get_base_prediction(self, coarse_data: TensorMapping) -> torch.Tensor | None:
+        """Normalized, interpolated coarse outputs that the sampler's residual is
+        relative to, or None if the model does not predict a residual.
+        """
+        if not self.config.predict_residual:
+            return None
+        return interpolate(
+            self.out_packer.pack(
+                self.normalizer.coarse.normalize(
+                    {k: coarse_data[k] for k in self.out_packer.names}
+                ),
+                axis=self._channel_axis,
+            ),
+            self.downscale_factor,
+        )
+
+    def run_sampler(
+        self,
+        latents: torch.Tensor,
+        inputs: torch.Tensor,
+        wrap_denoiser: Callable[[Denoiser], Denoiser] | None = None,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Run the EDM sampler, optionally wrapping the denoiser it calls."""
+        net: Denoiser = self.module
+        if wrap_denoiser is not None:
+            net = wrap_denoiser(net)
+        return edm_sampler(
+            net,
+            latents,
+            inputs,
+            S_churn=self.config.churn,
+            sigma_min=self.config.sigma_min,
+            sigma_max=self.config.sigma_max,
+            num_steps=self.config.num_diffusion_generation_steps,
+        )
+
     def postprocess_generated(
         self,
         generated_norm: torch.Tensor,
@@ -599,16 +642,8 @@ class DiffusionModel:
         n_samples: int,
     ) -> tuple[TensorDict, torch.Tensor]:
         """Add residual, separate samples, and denormalize sampler output."""
-        if self.config.predict_residual:
-            base_prediction = interpolate(
-                self.out_packer.pack(
-                    self.normalizer.coarse.normalize(
-                        {k: coarse_data[k] for k in self.out_packer.names}
-                    ),
-                    axis=self._channel_axis,
-                ),
-                self.downscale_factor,
-            )
+        base_prediction = self.get_base_prediction(coarse_data)
+        if base_prediction is not None:
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
             )
@@ -630,15 +665,7 @@ class DiffusionModel:
         inputs, latents = self.prepare_generation_inputs(
             coarse_data, static_inputs, n_samples
         )
-        generated_norm, latent_steps = edm_sampler(
-            self.module,
-            latents,
-            inputs,
-            S_churn=self.config.churn,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
-            num_steps=self.config.num_diffusion_generation_steps,
-        )
+        generated_norm, latent_steps = self.run_sampler(latents, inputs)
         generated, generated_norm = self.postprocess_generated(
             generated_norm, coarse_data, n_samples
         )

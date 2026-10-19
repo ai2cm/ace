@@ -210,6 +210,7 @@ class EvaluatorConfig:
             evaluator_model = PatchPredictor(
                 model,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+                multidiffusion=self.patch.multidiffusion,
             )
         else:
             evaluator_model = model
@@ -247,6 +248,7 @@ class EvaluatorConfig:
             evaluator_model = PatchPredictor(
                 model=model,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+                multidiffusion=self.patch.multidiffusion,
             )
         else:
             evaluator_model = model

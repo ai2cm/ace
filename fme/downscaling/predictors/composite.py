@@ -6,7 +6,12 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import Patch, get_patches
-from fme.downscaling.models import DiffusionModel, ModelOutputs
+from fme.downscaling.models import (
+    DiffusionModel,
+    ModelOutputs,
+    _repeat_batch_by_samples,
+)
+from fme.downscaling.predictors.multidiffusion import generate_multidiffusion
 from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
 
@@ -26,11 +31,21 @@ class PatchPredictionConfig:
             supported.
         coarse_horizontal_overlap: number of pixels to overlap in the
             coarse data.
+        multidiffusion: if True, generate a single full-extent sample with
+            MultiDiffusion (https://arxiv.org/abs/2302.08113): at every
+            denoising step, each patch is denoised at the model's trained
+            patch shape and overlapping patch estimates are averaged, instead
+            of generating each patch independently and averaging the finished
+            patch samples. Requires divide_generation=True and
+            composite_prediction=True. Larger coarse_horizontal_overlap values
+            give smoother joins between patches at the cost of more model
+            calls.
     """
 
     divide_generation: bool = False
     composite_prediction: bool = False
     coarse_horizontal_overlap: int = 1
+    multidiffusion: bool = False
 
     def __post_init__(self):
         if self.divide_generation and not self.composite_prediction:
@@ -40,6 +55,11 @@ class PatchPredictionConfig:
         if not self.divide_generation and self.composite_prediction:
             raise ValueError(
                 "composite_prediction=True requires divide_generation=True."
+            )
+        if self.multidiffusion and not self.divide_generation:
+            raise ValueError(
+                "multidiffusion=True requires divide_generation=True and "
+                "composite_prediction=True."
             )
 
     @property
@@ -61,12 +81,16 @@ class PatchPredictor:
         self,
         model: DiffusionModel | DenoisingMoEPredictor,
         coarse_horizontal_overlap: int = 1,
+        multidiffusion: bool = False,
     ):
         """
         Args:
             model: the model to use for generating predictions.
             coarse_horizontal_overlap: the number of pixels to overlap
                 between patches in the coarse data.
+            multidiffusion: if True, jointly denoise the full extent with
+                MultiDiffusion instead of averaging independently generated
+                patches. See PatchPredictionConfig.
         """
         self.model = model
         self.modules = self.model.modules
@@ -74,6 +98,7 @@ class PatchPredictor:
         self.coarse_yx_patch_extent = self.model.coarse_shape
         self.downscale_factor = self.model.downscale_factor
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
+        self.multidiffusion = multidiffusion
 
     @property
     def coarse_shape(self) -> tuple[int, int]:
@@ -118,13 +143,17 @@ class PatchPredictor:
         batch: PairedBatchData,
         n_samples: int = 1,
     ) -> ModelOutputs:
-        predictions = []
-        loss = 0.0
-
         coarse_patches, fine_patches = self._get_patches(
             coarse_yx_extent=batch.coarse.horizontal_shape,
             fine_yx_extent=batch.fine.horizontal_shape,
         )
+        if self.multidiffusion:
+            return self._generate_on_batch_multidiffusion(
+                batch, coarse_patches, n_samples
+            )
+
+        predictions = []
+        loss = 0.0
         batch_generator = batch.generate_from_patches(
             coarse_patches=coarse_patches, fine_patches=fine_patches
         )
@@ -155,6 +184,12 @@ class PatchPredictor:
         coarse_patches, fine_patches = self._get_patches(
             coarse_yx_extent=coarse_yx_extent, fine_yx_extent=fine_yx_extent
         )
+        if self.multidiffusion:
+            generated, _, _ = generate_multidiffusion(
+                self.model, batch, coarse_patches, n_samples
+            )
+            return generated
+
         predictions = []
         batch_generator = batch.generate_from_patches(coarse_patches)
         for data_patch in batch_generator:
@@ -167,6 +202,31 @@ class PatchPredictor:
         prediction = composite_patch_predictions(predictions, fine_patches)
 
         return prediction
+
+    def _generate_on_batch_multidiffusion(
+        self,
+        batch: PairedBatchData,
+        coarse_patches: list[Patch],
+        n_samples: int,
+    ) -> ModelOutputs:
+        base_model = self.model.base_model
+        generated, generated_norm, latent_steps = generate_multidiffusion(
+            self.model, batch.coarse, coarse_patches, n_samples
+        )
+        targets_norm = base_model.out_packer.pack(
+            base_model.normalizer.fine.normalize(dict(batch.fine.data)),
+            axis=base_model._channel_axis,
+        )
+        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
+        [loss_component] = base_model.loss(generated_norm, targets_norm)
+        # add ensemble dim to the target since not provided by the model
+        target = {k: v.unsqueeze(1) for k, v in batch.fine.data.items()}
+        return ModelOutputs(
+            prediction=generated,
+            target=target,
+            loss=loss_component.loss.mean(),
+            latent_steps=latent_steps,
+        )
 
 
 def check_input_shape_supported(

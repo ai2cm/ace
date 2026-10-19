@@ -90,6 +90,7 @@ class Downscaler:
         return PatchPredictor(
             model=base_model,
             coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
+            multidiffusion=output.patch.multidiffusion,
         )
 
     def _on_device_generator(self, loader):

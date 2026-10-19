@@ -126,6 +126,7 @@ class EventDownscaler:
         return PatchPredictor(
             base_model,
             coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+            multidiffusion=self.patch.multidiffusion,
         )
 
     def run(self):
@@ -204,6 +205,7 @@ class Downscaler:
             return PatchPredictor(
                 model=base_model,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+                multidiffusion=self.patch.multidiffusion,
             )
         return base_model
 
