@@ -1097,9 +1097,8 @@ def test_xarray_dataset_properties_labels_are_independent(mock_monthly_netcdfs):
 def test_get_xarray_datasets_leaves_first_member_properties_alone(
     mock_monthly_netcdfs,
 ):
-    """The combined properties must be built on a copy of the first member's
-    properties, so that merging the other members or injecting masks into the
-    result does not reach the first member.
+    """Merging the other members' labels into the combined properties, or
+    injecting masks into them, must not reach the first member's properties.
     """
     mock_data: MockData = mock_monthly_netcdfs
     configs = [
