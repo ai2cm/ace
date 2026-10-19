@@ -1,0 +1,63 @@
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_coupled_steps: 146
+coupled_steps_in_memory: 1
+loader:
+  num_data_workers: 4
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
+        engine: zarr
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+    - '0241-01-06T00:00:00'
+    - '0241-02-05T00:00:00'
+    - '0241-03-02T00:00:00'
+    - '0241-04-01T00:00:00'
+    - '0241-05-01T00:00:00'
+    - '0241-06-05T00:00:00'
+    - '0241-07-05T00:00:00'
+    - '0241-08-04T00:00:00'
+    - '0241-09-03T00:00:00'
+    - '0241-10-03T00:00:00'
+    - '0241-11-02T00:00:00'
+    - '0241-12-02T00:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    - sst
+    - zos
+    - thetao_0
+    - thetao_1
+    - thetao_2
+    - thetao_3
+    - thetao_4
+    - thetao_6
+    - thetao_8
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
