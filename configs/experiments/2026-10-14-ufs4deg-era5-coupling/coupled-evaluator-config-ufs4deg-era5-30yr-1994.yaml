@@ -1,0 +1,59 @@
+# 30-yr coupled free rollout of the UFS 4deg ocean + ERA5 4deg daily ACE2S over the full replay record (1994-01-05 .. 2023-09), for the raw
+# annual time series and the per-decade temperature-change profile against the summer 1deg coupled model (wandb ace-samudra-ufs/5khbtwwb).
+# Two-checkpoint (zero-shot) or single coupled checkpoint, as the launcher mounts them.
+# 10-year coupled zero-shot rollout of a UFS 4deg ocean with the ERA5 4deg daily ACE2S atmosphere from 2012-01-01T18 (730
+# coupled steps), two-checkpoint form (no coupled fine-tune), monthly outputs. Same store/rename/scale as the smoke config.
+# The 2012-2021 window is in the ocean's training years and outside the atmosphere's (ERA5 model trained 1940-1995, 2011-2019, 2021-).
+experiment_dir: /results
+checkpoint_path:
+  ocean:
+    timedelta: 5D
+    path: /ocean_ckpt.tar
+  atmosphere:
+    timedelta: 1D
+    path: /atmos_ckpt.tar
+  sst_name: sst
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  atmosphere_output_rename:
+    eastward_surface_wind_stress: eastward_surface_stress
+    northward_surface_wind_stress: northward_surface_stress
+  atmosphere_output_scale:  # ERA5 stress is the stress on the ocean; the UFS ocean was trained on FV3's momentum flux (CM4 sign)
+    eastward_surface_wind_stress: -1.0
+    northward_surface_wind_stress: -1.0
+n_coupled_steps: 2170  # 1994-01-05 .. 2023-09, the whole replay record incl. the untouched 2002-2011 decade
+coupled_steps_in_memory: 10
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /ufs4deg
+      file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5
+      file_pattern: 2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '1994-01-05T18:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [sst, thetao_0, thetao_5, thetao_10, ocean_sea_ice_fraction, hfds_total_area, unaccounted_heating]
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [surface_temperature, TMP2m, DSWRFsfc, DLWRFsfc, ULWRFsfc, USWRFsfc, LHTFLsfc, SHTFLsfc, PRATEsfc, eastward_surface_stress, northward_surface_stress, sea_ice_fraction, ocean_fraction]
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
