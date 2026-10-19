@@ -4,7 +4,7 @@
 # diagnostics so the response can be split by period offline. Troy 2026-10-19, for the random-CO2-through-coupled-FT report.
 # Launch: CFG=1pct-ic0001-140yr CKPT_DS=<atmosphere dataset> TAG=<label> ./launch-4deg-ace-eval.sh
 experiment_dir: /results
-n_forward_steps: 204399 # 140 noleap years at 6 h, minus the initial condition
+n_forward_steps: 204380 # 0001-01-06T00 to 0141-01-01T00 at 6 h (140 years less the 5-day fill window at the store start)
 forward_steps_in_memory: 50
 checkpoint_path: /ckpt.tar
 logging:
@@ -19,7 +19,9 @@ aggregator:
 loader:
   start_indices:
     times:
-      - "0001-01-01T06:00:00"
+      # nudged 5 days past the store start: the coupled sea_ice store (ocean-sourced sea-ice/ocean fraction) is an
+      # all-NaN forward-fill window until the first 5-daily ocean snapshot, which NaNs the rollout from step 1
+      - "0001-01-06T00:00:00"
   dataset:
     merge:
       - data_path: /climate-default
