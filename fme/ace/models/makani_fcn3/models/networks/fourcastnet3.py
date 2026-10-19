@@ -221,9 +221,6 @@ class DiscreteContinuousDecoder(nn.Module):
                 grid_out=grid_out,
                 mode="bilinear",
             )
-            # torch-harmonics stores expand_poles as a 0-d tensor, and dynamo
-            # can't branch on a tensor without a graph break
-            self.upsample.expand_poles = bool(self.upsample.expand_poles)
 
         # heuristic for finding theta_cutoff
         # nto entirely clear if out or in shape should be used here with a
