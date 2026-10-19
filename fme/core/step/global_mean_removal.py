@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import logging
+from collections.abc import Collection
 from typing import Literal
 
 import torch
@@ -407,6 +408,38 @@ class SharedGlobalMeanRemovalConfig:
                     name,
                 )
 
+    def validate_pinned_variables(
+        self, pinned_names: Collection[str], all_names: Collection[str]
+    ) -> None:
+        """Reject a reference field pinned differently from a shifted field.
+
+        Every field is shifted to the reference field's climatology under
+        the reference field's own normalization constants. Under grouped
+        normalization, a field pinned differently from the reference is
+        normalized against the other set of constants, which would leave
+        a per-group constant bias on the network's input.
+
+        Args:
+            pinned_names: Variables normalized with the pooled constants
+                under grouped normalization.
+            all_names: The step's input and output names; listed fields
+                outside them have no effect and are not checked.
+        """
+        reference_pinned = self.reference_field in pinned_names
+        mismatched = sorted(
+            name
+            for name in set(self.field_names).intersection(all_names)
+            if (name in pinned_names) != reference_pinned
+        )
+        if mismatched:
+            raise ValueError(
+                f"global_mean_removal fields {mismatched} are "
+                f"{'not ' if reference_pinned else ''}in pinned_variables, "
+                f"while reference_field '{self.reference_field}' is"
+                f"{'' if reference_pinned else ' not'}. Pin the reference "
+                "field and every field it shifts consistently."
+            )
+
     def build(self, in_names: list[str]) -> SharedGlobalMeanRemoval:
         return SharedGlobalMeanRemoval(
             reference_field=self.reference_field,
@@ -457,6 +490,13 @@ class PerChannelGlobalMeanRemovalConfig:
                     )
                 elif name not in in_names:
                     raise ValueError(f"field_name '{name}' not in in_names: {in_names}")
+
+    def validate_pinned_variables(
+        self, pinned_names: Collection[str], all_names: Collection[str]
+    ) -> None:
+        """No-op: each field is shifted using its own normalization constants,
+        so any combination of pinned and per-group fields is consistent.
+        """
 
     def build(self, in_names: list[str]) -> PerChannelGlobalMeanRemoval:
         return PerChannelGlobalMeanRemoval(

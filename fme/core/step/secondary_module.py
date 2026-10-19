@@ -81,6 +81,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
+        self.normalization.raise_if_grouped("SecondaryModuleStepConfig")
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
