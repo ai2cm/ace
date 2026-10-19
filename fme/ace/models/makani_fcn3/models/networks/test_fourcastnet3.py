@@ -1,5 +1,7 @@
+import copy
 from unittest import mock
 
+import pytest
 import torch
 import torch_harmonics as th
 
@@ -15,12 +17,15 @@ N_AUX_CHANNELS = 1
 IMG_SHAPE = (16, 32)
 
 
-def _get_small_net() -> AtmoSphericNeuralOperatorNet:
+def _get_small_net(
+    model_grid_type: str = "legendre-gauss",
+) -> AtmoSphericNeuralOperatorNet:
     """A small FCN3 network which uses all three DISCO convolutions (encoder,
     decoder and local processor blocks).
 
-    Uses the same grid for the model and the SHT, as ``FCN3Config`` does by
-    default, so no resampling is needed.
+    By default uses the same grid for the model and the SHT, as ``FCN3Config``
+    does by default, so no resampling is needed. Pass
+    ``model_grid_type="equiangular"`` to resample between the grids.
     """
     return AtmoSphericNeuralOperatorNet(
         n_atmo_channels=N_ATMO_CHANNELS,
@@ -31,7 +36,7 @@ def _get_small_net() -> AtmoSphericNeuralOperatorNet:
         n_aux_channels=N_AUX_CHANNELS,
         inp_shape=IMG_SHAPE,
         out_shape=IMG_SHAPE,
-        model_grid_type="legendre-gauss",
+        model_grid_type=model_grid_type,
         sht_grid_type="legendre-gauss",
         scale_factor=1,
         atmo_embed_dim=2,
@@ -85,10 +90,15 @@ def test__AtmoSphericNeuralOperatorNet():
     assert x_surf_out.shape == (n_batch, n_surf_channels, *img_shape)
 
 
-def test_compiles_without_graph_breaks():
+def _get_resamplers(net: AtmoSphericNeuralOperatorNet) -> list[th.ResampleS2]:
+    return [m for m in net.modules() if isinstance(m, th.ResampleS2)]
+
+
+@pytest.mark.parametrize("model_grid_type", ["legendre-gauss", "equiangular"])
+def test_compiles_without_graph_breaks(model_grid_type: str):
     """The single-rank network is traceable by torch.compile as one graph."""
     torch.manual_seed(0)
-    net = _get_small_net()
+    net = _get_small_net(model_grid_type=model_grid_type)
     inputs = _get_inputs()
     torch._dynamo.reset()
     try:
@@ -96,6 +106,31 @@ def test_compiles_without_graph_breaks():
     finally:
         torch._dynamo.reset()
     assert explanation.graph_break_count == 0
+
+
+def test_equiangular_model_grid_resamples_unchanged():
+    """With an equiangular model grid the decoders resample to the SHT grid,
+    expanding the poles, and give the same outputs as torch-harmonics'
+    resampler with its tensor-valued ``expand_poles`` flag.
+    """
+    torch.manual_seed(0)
+    net = _get_small_net(model_grid_type="equiangular")
+    resamplers = _get_resamplers(net)
+    assert len(resamplers) > 0
+    for resampler in resamplers:
+        assert not resampler.skip_resampling
+        assert resampler.expand_poles is True
+
+    ref_net = copy.deepcopy(net)
+    for resampler in _get_resamplers(ref_net):
+        resampler.expand_poles = torch.tensor(resampler.expand_poles)
+
+    inputs = _get_inputs()
+    with torch.no_grad():
+        out = net(*inputs)
+        ref_out = ref_net(*inputs)
+    for x, x_ref in zip(out, ref_out):
+        torch.testing.assert_close(x, x_ref, atol=0, rtol=0)
 
 
 def test_matches_torch_harmonics_disco_convolution():
