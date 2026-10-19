@@ -71,3 +71,9 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKY
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M564A9ZX566P2EME05FMNZYR|ai2/ace|a100
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M564A9ZX566P2EME05FMNZYR|ai2/ace|a100
+
+# d1148 rs1's final checkpoint, the epoch-60 EMA checkpoint, over 1pctCO2 and
+# the standard piControl eval. The training run's epoch-60 inference error
+# (0.1365) comes from these weights, as it validates with the EMA.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|run_1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|run_piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
