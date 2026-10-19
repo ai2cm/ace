@@ -30,14 +30,16 @@ def test_compile_enabled_restores_previous_setting():
     assert not is_compile_enabled()
 
 
-@pytest.mark.parametrize("value, expected", [(None, None), ("1", True), ("0", False)])
+@pytest.mark.parametrize(
+    "value, expected", [(None, None), ("", None), ("1", True), ("0", False)]
+)
 def test_parse_compile_env(value: str | None, expected: bool | None):
     assert _parse_compile_env(value) is expected
 
 
-@pytest.mark.parametrize("value", ["true", "", "2"])
+@pytest.mark.parametrize("value", ["true", " ", "2"])
 def test_parse_compile_env_rejects_other_values(value: str):
-    with pytest.raises(ValueError, match="FME_COMPILE"):
+    with pytest.raises(ValueError, match="FME_COMPILE must be '0' or '1'"):
         _parse_compile_env(value)
 
 

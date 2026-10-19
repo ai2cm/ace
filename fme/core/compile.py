@@ -13,13 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_compile_env(value: str | None) -> bool | None:
-    if value is None:
+    # an empty value (FME_COMPILE=) is treated as unset
+    if value is None or value == "":
         return None
     if value == "1":
         return True
     if value == "0":
         return False
-    raise ValueError(f"FME_COMPILE must be '0' or '1' if set, got '{value}'.")
+    raise ValueError(
+        f"FME_COMPILE must be '0' or '1' (or unset or empty), got {value!r}."
+    )
 
 
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
