@@ -1141,21 +1141,19 @@ stepper:
           global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/scaling-residual.nc
         grouped:
           groups:
-            c96:
-              labels:
-              - amip
-              - ramped
-              - som
-              normalization:
-                global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
-                global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
+            amip:
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
+            ramped:
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
+            som:
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
             era5:
-              labels:
-              - era5
-              normalization:
-                global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/era5/centering.nc
-                global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/era5/scaling-full-field.nc
-          default_group: era5
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/era5/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/era5/scaling-full-field.nc
+          default_label: era5
           pinned_variables:
           - global_mean_co2
           - HGTsfc
