@@ -1060,7 +1060,7 @@ def test_xarray_concat_keeps_each_member_labels(mock_monthly_netcdfs):
     configs = [
         XarrayDataConfig(
             data_path=mock_data.tmpdir,
-            subset=TimeSlice(f"2003-0{i + 3}-01", f"2003-0{i + 3}-28"),
+            subset=TimeSlice(f"2003-0{i + 3}-01", f"2003-0{i + 3}-01"),
             labels=[label],
         )
         for i, label in enumerate(labels)
