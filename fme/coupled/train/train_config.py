@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 import torch
 
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.data_loading.config import DataLoaderConfig as AtmosphereDataLoaderConfig
+from fme.ace.data_loading.getters import get_gridded_data as get_atmosphere_gridded_data
 from fme.core.cli import ResumeResultsConfig
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
@@ -44,6 +46,7 @@ from fme.coupled.data_loading.getters import (
 )
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.data_loading.mixed import MixedGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
@@ -341,6 +344,9 @@ class TrainConfig:
 
     Attributes:
         train_loader: Configuration for the coupled training data loader.
+        train_loader_atmosphere_only: Optional uncoupled atmosphere data loader whose
+            batches are interleaved with the coupled ones as atmosphere-only updates
+            (``stepper_training.atmosphere_only`` sets the share and schedule).
         validation: Configuration(s) for inline validation runs. Accepts a single
             InlineValidationConfig or a list of them. The weighted sum of each
             run's loss is used for checkpoint selection. Each entry can specify
@@ -411,6 +417,9 @@ class TrainConfig:
         default_factory=list
     )
     seed: int | None = None
+    # uncoupled atmosphere loader for atmosphere-only replay batches; requires
+    # stepper_training.atmosphere_only (prototype, fme/coupled/data_loading/mixed.py)
+    train_loader_atmosphere_only: AtmosphereDataLoaderConfig | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
     )
@@ -545,9 +554,31 @@ class TrainConfig:
 
     def _get_train_data(self) -> GriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_train_data(
+        coupled = get_gridded_train_data(
             self.train_loader,
             requirements=data_requirements,
+        )
+        if (self.train_loader_atmosphere_only is None) != (
+            self.stepper_training.atmosphere_only is None
+        ):
+            raise ValueError(
+                "train_loader_atmosphere_only and stepper_training.atmosphere_only "
+                "must be set together."
+            )
+        replay = self.stepper_training.atmosphere_only
+        if self.train_loader_atmosphere_only is None or replay is None:
+            return coupled
+        atmosphere_only = get_atmosphere_gridded_data(
+            self.train_loader_atmosphere_only,
+            train=True,
+            requirements=self.stepper_training.get_atmosphere_only_data_requirements(
+                self.stepper
+            ),
+        )
+        return MixedGriddedData(  # type: ignore[return-value]
+            coupled,
+            atmosphere_only,
+            fraction=replay.fraction,
         )
 
     def _get_validation_data(

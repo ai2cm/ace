@@ -30,12 +30,17 @@ from fme.ace.stepper.parameter_init import (
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
+    TrainStepper,
+    TrainStepperConfig,
     process_ensemble_prediction_generator_list,
 )
 from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
-from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
+from fme.ace.stepper.time_length_probabilities import (
+    TimeLengthProbabilities,
+    TimeLengthSchedule,
+)
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import load_ema_params_if_available
@@ -1533,6 +1538,7 @@ class CoupledStepperTrainLoss:
         ocean_schedule: ComponentLossSchedule,
         atmosphere_schedule: ComponentLossSchedule,
         optimize_single_component_per_batch: bool = False,
+        forced_realm: Literal["ocean", "atmosphere"] | None = None,
     ):
         self._loss_objs: dict[str, StepLoss] = {
             "ocean": ocean_loss,
@@ -1552,6 +1558,9 @@ class CoupledStepperTrainLoss:
         # the training batch loss) yet reproducible. ``_selected_realm is None``
         # means both realms are eligible (the disabled / no-selection case).
         self._optimize_single_component_per_batch = optimize_single_component_per_batch
+        # Atmosphere-only replay (AtmosphereOnlyTrainingConfig.coupled_batches_update
+        # == "ocean"): every coupled batch optimizes only this realm, no RNG draw.
+        self._forced_realm = forced_realm
         self._component_choice_rng: np.random.RandomState | None = None
         self._eval_component_choice_rng: np.random.RandomState | None = None
         self._selected_realm: Literal["ocean", "atmosphere"] | None = None
@@ -1611,6 +1620,9 @@ class CoupledStepperTrainLoss:
         ``ComponentLossSchedule.sample_n_steps``); the selection itself applies
         in both modes via ``step_is_optimized``.
         """
+        if self._forced_realm is not None:
+            self._selected_realm = self._forced_realm
+            return
         if not self._optimize_single_component_per_batch:
             self._selected_realm = None
             return
@@ -1675,7 +1687,10 @@ class CoupledStepperTrainLoss:
         # component_optimization_choice, which only picks the RNG), so the
         # accumulated/validation loss stays single-component-per-batch.
         if (
-            self._optimize_single_component_per_batch
+            (
+                self._optimize_single_component_per_batch
+                or self._forced_realm is not None
+            )
             and self._selected_realm is not None
             and realm != self._selected_realm
         ):
@@ -1768,6 +1783,45 @@ class ComponentTrainingConfig:
 
 
 @dataclasses.dataclass
+class AtmosphereOnlyTrainingConfig:
+    """Replay of atmosphere-only training batches inside a coupled fine-tune
+    (prototype, Troy 2026-10-20): a share of the training batches comes from a
+    separate uncoupled atmosphere loader (``TrainConfig.train_loader_atmosphere_only``,
+    e.g. the random-CO2 ensemble, which has no ocean) and is stepped by the
+    atmosphere alone from the data's own surface forcing, exactly as in
+    standalone ACE training. The ocean never sees these batches.
+
+    Parameters:
+        fraction: Share of each epoch's training batches that are atmosphere-only
+            (the coupled loader's batches make up the rest; the epoch grows by
+            ``1 / (1 - fraction)``).
+        n_steps: Forward-step schedule for the atmosphere-only batches. Defaults
+            to the coupled atmosphere component's ``n_steps``.
+        coupled_batches_update: ``"both"`` leaves the coupled batches as configured
+            (``optimize_single_component_per_batch`` applies); ``"ocean"`` makes
+            every coupled batch an ocean-only update, so the atmosphere trains
+            only on the atmosphere-only data.
+    """
+
+    fraction: float = 0.5
+    n_steps: TimeLengthProbabilities | int | None = None
+    coupled_batches_update: Literal["both", "ocean"] = "both"
+
+    def __post_init__(self):
+        if not 0.0 < self.fraction < 1.0:
+            raise ValueError("atmosphere_only.fraction must be in (0, 1)")
+
+    def n_steps_schedule(self, default: TimeLengthProbabilities | int | None):
+        n_steps = self.n_steps if self.n_steps is not None else default
+        if n_steps is None:
+            raise ValueError(
+                "atmosphere_only.n_steps must be set when the atmosphere component "
+                "has no n_steps"
+            )
+        return TimeLengthSchedule.from_constant(n_steps)
+
+
+@dataclasses.dataclass
 class CoupledTrainStepperConfig:
     """Configuration for training-specific aspects of a coupled stepper.
 
@@ -1789,6 +1843,9 @@ class CoupledTrainStepperConfig:
             Requires both realms to be non-null (validated in __post_init__).
         parameter_init: The coupled parameter initialization configuration for
             fine-tuning a previously-trained coupled stepper.
+        atmosphere_only: Optional replay of atmosphere-only batches from
+            ``TrainConfig.train_loader_atmosphere_only`` (see
+            AtmosphereOnlyTrainingConfig).
     """
 
     n_coupled_steps: int
@@ -1799,6 +1856,7 @@ class CoupledTrainStepperConfig:
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
     )
+    atmosphere_only: AtmosphereOnlyTrainingConfig | None = None
 
     def __post_init__(self):
         """Validate that parameter_init is not specified in conflicting ways.
@@ -1902,6 +1960,23 @@ class CoupledTrainStepperConfig:
             ),
         )
 
+    def get_atmosphere_only_data_requirements(
+        self, stepper_config: CoupledStepperConfig
+    ) -> DataRequirements:
+        """Window requirements of the atmosphere-only (replay) loader: the
+        atmosphere stepper's own evaluation-window requirements for the replay
+        step schedule (all its names, incl. the surface forcings the coupled
+        path would take from the ocean).
+        """
+        if self.atmosphere_only is None:
+            raise ValueError("atmosphere_only is not configured")
+        schedule = self.atmosphere_only.n_steps_schedule(self.atmosphere.n_steps)
+        return (
+            stepper_config.atmosphere.stepper.get_evaluation_window_data_requirements(
+                schedule.max_n_forward_steps
+            )
+        )
+
     def _build_loss(
         self, stepper: CoupledStepper, n_coupled_steps: int
     ) -> CoupledStepperTrainLoss:
@@ -1928,6 +2003,12 @@ class CoupledTrainStepperConfig:
             atmosphere_schedule=atmos_schedule,
             optimize_single_component_per_batch=(
                 self.optimize_single_component_per_batch
+            ),
+            forced_realm=(
+                "ocean"
+                if self.atmosphere_only is not None
+                and self.atmosphere_only.coupled_batches_update == "ocean"
+                else None
             ),
         )
 
@@ -2010,6 +2091,21 @@ class CoupledTrainStepper(
         self._stepper = stepper
         self._config = config
         self._loss = self._config._build_loss(stepper, config.n_coupled_steps)
+        self._atmosphere_only: TrainStepper | None = None
+        if config.atmosphere_only is not None:
+            # the same atmosphere Stepper object (shared weights, optimizer, EMA),
+            # wrapped with the standalone training logic for replay batches
+            self._atmosphere_only = TrainStepper(
+                stepper=stepper.atmosphere,
+                config=TrainStepperConfig(
+                    loss=config.atmosphere.loss,
+                    n_forward_steps=config.atmosphere_only.n_steps_schedule(
+                        config.atmosphere.n_steps
+                    ),
+                    n_ensemble=config.n_ensemble,
+                    optimize_last_step_only=config.atmosphere.optimize_last_step_only,
+                ),
+            )
 
     @property
     def ocean(self) -> Stepper:
@@ -2188,7 +2284,7 @@ class CoupledTrainStepper(
 
     def train_on_batch(
         self,
-        data: CoupledBatchData,
+        data: "CoupledBatchData | BatchData",
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
         evaluate_all_steps: bool = False,
@@ -2196,7 +2292,9 @@ class CoupledTrainStepper(
         """
         Args:
             data: The coupled batch data, consisting of separate batches for ocean and
-                atmosphere with the same initial condition time.
+                atmosphere with the same initial condition time; or, when
+                atmosphere-only replay is configured, a plain atmosphere BatchData
+                that is stepped by the atmosphere alone (ocean untouched).
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
@@ -2206,6 +2304,46 @@ class CoupledTrainStepper(
                 the stochastically-sampled range toward the accumulated loss.
 
         """
+        if isinstance(data, BatchData):
+            if self._atmosphere_only is None:
+                raise ValueError(
+                    "Got an atmosphere-only batch but stepper_training.atmosphere_only "
+                    "is not configured."
+                )
+            atmos_out = self._atmosphere_only.train_on_batch(
+                data,
+                optimization,
+                compute_derived_variables=compute_derived_variables,
+                evaluate_all_steps=evaluate_all_steps,
+            )
+            # keep the realm loss key the coupled batches use, namespace the rest
+            atmos_metrics = {
+                f"atmosphere_only/{k}": v
+                for k, v in atmos_out.metrics.items()
+                if k != "loss"
+            }
+            atmos_metrics["loss/atmosphere"] = atmos_out.metrics["loss"]
+            atmos_metrics["atmosphere_only/loss"] = atmos_out.metrics["loss"]
+            # the ocean half is an empty placeholder: these outputs only feed the
+            # training-loop metrics (get_metrics), never the aggregators
+            return CoupledTrainOutput(
+                total_metrics={"loss": atmos_out.metrics["loss"]},
+                ocean=TrainOutput(
+                    metrics={},
+                    gen_data=EnsembleTensorDict({}),
+                    target_data=EnsembleTensorDict({}),
+                    time=atmos_out.time,
+                    normalize=lambda x: dict(x),
+                ),
+                atmosphere=TrainOutput(
+                    metrics=atmos_metrics,
+                    gen_data=atmos_out.gen_data,
+                    target_data=atmos_out.target_data,
+                    time=atmos_out.time,
+                    normalize=atmos_out.normalize,
+                    derive_func=atmos_out.derive_func,
+                ),
+            )
         atmos_forward_data = self.atmosphere.get_forward_data(
             data.atmosphere_data,
             compute_derived_variables=False,
