@@ -1381,14 +1381,21 @@ def test_parallel__get_raw_times(tmpdir):
 
 
 def test_dataset_properties_update_masks(mock_monthly_netcdfs):
+    """Masks injected into the returned properties must land on them without
+    reaching the dataset's own properties.
+    """
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
     data_properties = dataset.properties
     assert not data_properties.spatial_mask_provider.masks
-    existing_mask = SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
-    data_properties.update_spatial_mask_provider(existing_mask)
-    assert "mask_0" in dataset.properties.spatial_mask_provider.masks
+
+    data_properties.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    )
+
+    assert "mask_0" in data_properties.spatial_mask_provider.masks
+    assert not dataset.properties.spatial_mask_provider.masks
 
 
 def test_dataset_properties_copy_masks_are_independent(mock_monthly_netcdfs):

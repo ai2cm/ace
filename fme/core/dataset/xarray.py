@@ -722,7 +722,7 @@ class XarrayDataset(DatasetABC):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
-            self._spatial_mask_provider,
+            self._spatial_mask_provider.copy(),
             self.timestep,
             self._is_remote,
             set(self._labels) if self._labels is not None else None,
