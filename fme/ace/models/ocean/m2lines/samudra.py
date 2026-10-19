@@ -1,6 +1,7 @@
 import dataclasses
+import functools
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import torch
 import torch.nn as nn
@@ -9,7 +10,9 @@ from fme.ace.models.ocean.m2lines.layers import (
     AvgPool,
     BilinearUpsample,
     ConvNeXtBlock,
+    LatPad,
     ZonallyPeriodicBilinearUpsample,
+    pad_latitude,
 )
 from fme.ace.models.ocean.m2lines.utils import pairwise
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
@@ -45,6 +48,12 @@ class Samudra(torch.nn.Module):
         longitude axis in the decoder, removing the lon=0 seam introduced by the
         default (non-periodic) bilinear upsampling. By default False to preserve
         the behavior of checkpoints trained without it.
+    lat_pad : {"constant", "pole"}, optional
+        Latitude padding used wherever the network pads latitude (see
+        ``pad_latitude``), except that the upsampler ignores it when
+        ``zonally_periodic_upsample`` is False and, under "constant", the
+        periodic upsampler does not pad latitude. By default "constant", the
+        original behavior. Adds no parameters, so checkpoints load across modes.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -87,6 +96,7 @@ class Samudra(torch.nn.Module):
         zonally_periodic_upsample: bool = False,
         context_config: ContextConfig | None = None,
         conditioned_blocks: ConditionedBlocks | None = None,
+        lat_pad: LatPad = "constant",
     ):
         super().__init__()
 
@@ -104,8 +114,11 @@ class Samudra(torch.nn.Module):
         self.upscale_factor = upscale_factor
         self.checkpoint_strategy = checkpoint_strategy
         self.zonally_periodic_upsample = zonally_periodic_upsample
+        if lat_pad not in get_args(LatPad):
+            raise ValueError(f"unknown lat_pad {lat_pad!r}")
+        self.lat_pad = lat_pad
         upsample_cls = (
-            ZonallyPeriodicBilinearUpsample
+            functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
             else BilinearUpsample
         )
@@ -163,6 +176,7 @@ class Samudra(torch.nn.Module):
                     upscale_factor=self.upscale_factor,
                     checkpoint_strategy=self.checkpoint_strategy,
                     context_config=block_context(),
+                    lat_pad=self.lat_pad,
                 )
             )
             layers.append(AvgPool())
@@ -178,6 +192,7 @@ class Samudra(torch.nn.Module):
                 upscale_factor=self.upscale_factor,
                 checkpoint_strategy=self.checkpoint_strategy,
                 context_config=block_context(),
+                lat_pad=self.lat_pad,
             )
         )
         layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -197,6 +212,7 @@ class Samudra(torch.nn.Module):
                     upscale_factor=self.upscale_factor,
                     checkpoint_strategy=self.checkpoint_strategy,
                     context_config=block_context(),
+                    lat_pad=self.lat_pad,
                 )
             )
             layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -212,6 +228,7 @@ class Samudra(torch.nn.Module):
                 upscale_factor=self.upscale_factor,
                 checkpoint_strategy=self.checkpoint_strategy,
                 context_config=block_context(),
+                lat_pad=self.lat_pad,
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
@@ -229,11 +246,9 @@ class Samudra(torch.nn.Module):
         count = 0
         for layer in self.layers:
             if isinstance(layer, nn.Conv2d):
+                fts = pad_latitude(fts, self.N_pad, self.N_pad, self.lat_pad)
                 fts = torch.nn.functional.pad(
                     fts, (self.N_pad, self.N_pad, 0, 0), mode=self.pad
-                )
-                fts = torch.nn.functional.pad(
-                    fts, (0, 0, self.N_pad, self.N_pad), mode="constant"
                 )
             # only the ConvNeXt blocks are conditionable; the pooling, upsample
             # and final conv layers take the tensor alone
@@ -261,9 +276,10 @@ class Samudra(torch.nn.Module):
                     pad_h = skip.shape[2] - fts.shape[2]
                     pad_w = skip.shape[3] - fts.shape[3]
                     pads_lr = (pad_w // 2, pad_w - pad_w // 2, 0, 0)
-                    pads_tb = (0, 0, pad_h // 2, pad_h - pad_h // 2)
+                    fts = pad_latitude(
+                        fts, pad_h // 2, pad_h - pad_h // 2, self.lat_pad
+                    )
                     fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
-                    fts = nn.functional.pad(fts, pads_tb, mode="constant")
                     fts += skip
                     count += 1
         return fts
