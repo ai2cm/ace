@@ -151,7 +151,7 @@ class SpatialMaskProvider(SpatialMaskProviderABC):
 
     def localize(self) -> "SpatialMaskProvider":
         if not self._masks:
-            return self
+            return self.copy()
         return SpatialMaskProvider(
             {
                 k: v[Distributed.get_instance().get_local_slices(v.shape)].contiguous()

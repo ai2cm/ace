@@ -22,6 +22,7 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
 )
 from fme.core.dataset.concat import XarrayConcat, get_dataset
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
@@ -1443,6 +1444,30 @@ def test_dataset_properties_update_leaves_original_labels_alone(merge):
 
     assert original_labels == {"amip"}
     assert properties.all_labels == {"amip", "som"}
+
+
+@pytest.mark.parametrize(
+    "derive",
+    [DatasetProperties.to_device, DatasetProperties.localize],
+    ids=["to_device", "localize"],
+)
+def test_dataset_properties_derived_copy_is_independent(derive):
+    """Updating properties derived by to_device or localize must not reach
+    the properties they were derived from.
+    """
+    properties = _properties_with_labels({"amip"})
+    derived = derive(properties)
+
+    assert derived.all_labels is not None
+    derived.all_labels.add("som")
+    derived.variable_metadata["a"] = VariableMetadata(units="K", long_name="a")
+    derived.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(1, 1)})
+    )
+
+    assert properties.all_labels == {"amip"}
+    assert properties.variable_metadata == {}
+    assert not properties.spatial_mask_provider.masks
 
 
 def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):

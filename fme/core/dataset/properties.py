@@ -29,13 +29,13 @@ class DatasetProperties:
     def to_device(self) -> "DatasetProperties":
         device = get_device()
         return DatasetProperties(
-            self.variable_metadata,
+            dict(self.variable_metadata),
             self.vertical_coordinate.to(device),
             self.horizontal_coordinates.to(device),
             self.spatial_mask_provider.to(device),
             self.timestep,
             self.is_remote,
-            self.all_labels,
+            set(self.all_labels) if self.all_labels is not None else None,
         )
 
     def localize(self) -> "DatasetProperties":
@@ -43,13 +43,13 @@ class DatasetProperties:
         spatial chunk based on the current distributed layout.
         """
         return DatasetProperties(
-            self.variable_metadata,
+            dict(self.variable_metadata),
             self.vertical_coordinate,
             self.horizontal_coordinates.localize(),
             self.spatial_mask_provider.localize(),
             self.timestep,
             self.is_remote,
-            self.all_labels,
+            set(self.all_labels) if self.all_labels is not None else None,
         )
 
     def update(self, other: "DatasetProperties", strict: bool = True):
