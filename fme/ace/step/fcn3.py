@@ -10,7 +10,7 @@ from torch import nn
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: ignore
     AtmoSphericNeuralOperatorNet,
 )
-from fme.core.compile import is_compile_enabled, remove_deprecated_compile_key
+from fme.core.compile import is_compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
@@ -236,9 +236,7 @@ class FCN3StepConfig(StepConfigABC):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        state_copy = dict(state)
-        remove_deprecated_compile_key(state_copy)
-        return state_copy
+        return dict(state)
 
     @property
     def _normalize_names(self) -> frozenset[str]:

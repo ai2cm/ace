@@ -1,4 +1,3 @@
-import dataclasses
 from unittest import mock
 
 import pytest
@@ -90,16 +89,6 @@ def _grads(step: FCN3Step) -> TensorDict:
         for name, param in step.module.named_parameters()
         if param.grad is not None
     }
-
-
-@pytest.mark.parametrize("compile", [True, False])
-def test_fcn3_step_config_with_removed_compile_option_still_loads(compile: bool):
-    """The step config used to take a ``compile`` option, which checkpoints and
-    configs saved before its removal still contain."""
-    state = dataclasses.asdict(_get_fcn3_step_config())
-    with pytest.warns(DeprecationWarning, match="compile"):
-        loaded = FCN3StepConfig.from_state({**state, "compile": compile})
-    assert dataclasses.asdict(loaded) == state
 
 
 def test_fcn3_step_does_not_compile_when_compile_disabled():

@@ -7,7 +7,6 @@ from typing import Any
 import torch
 from torch import nn
 
-from fme.core.compile import remove_deprecated_compile_key
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.corrector.registry import CorrectorABC
@@ -232,7 +231,6 @@ class SingleModuleStepConfig(StepConfigABC):
         state_copy = dict(state)
         if "crps_training" in state_copy:
             del state_copy["crps_training"]
-        remove_deprecated_compile_key(state_copy)
         if isinstance(state_copy.get("residual_prediction"), bool):
             # residual_prediction was a bool before it grew per-variable and
             # normalization options. True meant every prognostic, full-field

@@ -7,7 +7,6 @@ from typing import Any
 import torch
 from torch import nn
 
-from fme.core.compile import remove_deprecated_compile_key
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
@@ -137,9 +136,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        state_copy = dict(state)
-        remove_deprecated_compile_key(state_copy)
-        return state_copy
+        return dict(state)
 
     @property
     def _normalize_names(self) -> frozenset[str]:

@@ -2579,32 +2579,6 @@ def test_single_module_step_compiles_secondary_decoder():
     assert "diagnostic_rad" in eager_out  # produced by the secondary decoder
 
 
-@pytest.mark.parametrize(
-    "selector_getter",
-    [
-        get_single_module_selector,
-        get_secondary_module_selector,
-        get_separate_radiation_selector,
-    ],
-)
-@pytest.mark.parametrize("compile", [True, False])
-def test_step_config_with_removed_compile_option_still_loads(
-    selector_getter: Callable[[], StepSelector], compile: bool
-):
-    """Step configs used to take a ``compile`` option, which checkpoints and
-    configs saved before its removal still contain."""
-    selector = selector_getter()
-    with pytest.warns(DeprecationWarning, match="compile"):
-        loaded = StepSelector(
-            type=selector.type, config={**selector.config, "compile": compile}
-        )
-    step = get_step(loaded, DEFAULT_IMG_SHAPE)
-    assert (
-        step.get_state().keys()
-        == get_step(selector, DEFAULT_IMG_SHAPE).get_state().keys()
-    )
-
-
 def test_no_secondary_decoder_compile_is_noop():
     decoder = NoSecondaryDecoder()
     assert decoder.compile() is decoder

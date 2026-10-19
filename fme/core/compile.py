@@ -1,9 +1,7 @@
 import contextlib
 import logging
 import os
-import warnings
 from collections.abc import Generator
-from typing import Any
 
 from fme.core.device import get_device
 
@@ -63,19 +61,3 @@ def is_compile_enabled() -> bool:
         )
         _LOGGED_AUTO_SKIP = True
     return False
-
-
-def remove_deprecated_compile_key(state: dict[str, Any]) -> None:
-    """Drop the removed step-config ``compile`` option from a serialized config.
-
-    Steps now always compile when :func:`is_compile_enabled`, so checkpoints
-    and configs that still set the option keep loading.
-    """
-    if "compile" in state:
-        del state["compile"]
-        warnings.warn(
-            "The step config 'compile' option is deprecated and ignored: steps "
-            "compile automatically on CUDA. Set the FME_COMPILE environment "
-            "variable to '0' to disable compilation.",
-            DeprecationWarning,
-        )
