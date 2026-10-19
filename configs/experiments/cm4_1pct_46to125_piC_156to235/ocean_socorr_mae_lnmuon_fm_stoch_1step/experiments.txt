@@ -5,5 +5,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # best_inference_ckpt is epoch 1 here because the 20-yr inline rollout error rises through a 1-step stage.
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|training|best_inference_ckpt|normal|--min-runtime 8h
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|run_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|run_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|running_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|running_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
