@@ -46,7 +46,7 @@ from .config import (
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
 )
-from .getters import get_forcing_data, get_gridded_data
+from .getters import get_datasets, get_forcing_data, get_gridded_data
 from .inference import (
     CoupledForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
@@ -486,6 +486,45 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
     # check that
     assert np.allclose(sample.ocean[0]["bar"].cpu().numpy(), expected_ocean)
     assert np.allclose(sample.atmosphere[0]["foo"].cpu().numpy(), expected_atmos)
+
+
+def test_get_datasets_leaves_first_member_properties_alone(tmp_path):
+    """The combined properties must be built on a copy of the first member's
+    properties, so that merging the other members does not reach the first
+    member's labels.
+    """
+    ocean_names = ["bar"]
+    atmos_names = ["foo"]
+    mock_data = create_coupled_data_on_disk(
+        tmp_path,
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        ocean_names=ocean_names,
+        atmosphere_names=atmos_names,
+    )
+    configs = CoupledConcatDatasetConfig(
+        concat=[
+            mock_data.get_dataset_config_with_kwargs(
+                ocean_kwargs={"labels": [f"ocean_{label}"]},
+                atmos_kwargs={"labels": [f"atmos_{label}"]},
+            )
+            for label in ["amip", "som"]
+        ]
+    )
+    requirements = CoupledDataRequirements(
+        ocean_timestep=datetime.timedelta(days=2),
+        ocean_requirements=DataRequirements(ocean_names, n_timesteps=2),
+        atmosphere_timestep=datetime.timedelta(days=1),
+        atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
+    )
+
+    dataset, properties = get_datasets(configs, requirements)
+
+    first_member_properties = dataset._underlying_datasets[0].properties
+    assert first_member_properties.ocean.all_labels == {"ocean_amip"}
+    assert first_member_properties.atmosphere.all_labels == {"atmos_amip"}
+    assert properties.ocean.all_labels == {"ocean_amip", "ocean_som"}
+    assert properties.atmosphere.all_labels == {"atmos_amip", "atmos_som"}
 
 
 def test_zarr_engine_used_true():

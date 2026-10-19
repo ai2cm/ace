@@ -1,9 +1,11 @@
+import dataclasses
 import datetime
 from typing import Any, cast
 
 import cftime
 import numpy as np
 import pytest
+import torch
 
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.inference import (
@@ -13,7 +15,10 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.requirements import DataRequirements
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.getters import get_forcing_data
@@ -22,6 +27,7 @@ from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .test_data_loader import MockCoupledData, create_coupled_data_on_disk
@@ -33,11 +39,15 @@ def _setup(
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList,
     ocean_data_config_kwargs: dict[str, Any] | None = None,
     atmos_data_config_kwargs: dict[str, Any] | None = None,
+    ocean_config: MergeNoConcatDatasetConfig | None = None,
+    dataset_info: CoupledDatasetInfo | None = None,
 ) -> InferenceDataset:
     dataset_config = mock_data.get_dataset_config_with_kwargs(
         ocean_kwargs=ocean_data_config_kwargs,
         atmos_kwargs=atmos_data_config_kwargs,
     )
+    if ocean_config is not None:
+        dataset_config = dataclasses.replace(dataset_config, ocean=ocean_config)
     # ocean timesteps include initial condition plus total_coupled_steps
     ocean_n_timesteps = total_coupled_steps + 1  # one forward window in memory
     n_inner_steps = int(mock_data.ocean.timestep / mock_data.atmosphere.timestep)
@@ -60,6 +70,7 @@ def _setup(
         config=config,
         total_coupled_steps=total_coupled_steps,
         requirements=coupled_requirements,
+        dataset_info=dataset_info,
     )
     return dataset
 
@@ -225,6 +236,88 @@ def test_validate_inference_length_atmos(
             total_coupled_steps=_N_STEPS,
             start_indices=start_indices,
         )
+
+
+def _dataset_info_with_ocean_masks(
+    mock_data: MockCoupledData, ocean_masks: dict[str, torch.Tensor]
+) -> CoupledDatasetInfo:
+    return CoupledDatasetInfo(
+        ocean=DatasetInfo(
+            horizontal_coordinates=mock_data.ocean.hcoord,
+            vertical_coordinate=mock_data.ocean.vcoord,
+            spatial_mask_provider=SpatialMaskProvider(ocean_masks),
+            timestep=mock_data.ocean.timestep,
+        ),
+        atmosphere=mock_data.build_dataset_info().atmosphere,
+    )
+
+
+def _create_data_for_ocean_masks(tmp_path, ocean_names: list[str]) -> MockCoupledData:
+    return create_coupled_data_on_disk(
+        tmp_path,
+        n_forward_times_ocean=5,
+        n_forward_times_atmosphere=15,
+        ocean_names=ocean_names,
+        atmosphere_names=["foo"],
+    )
+
+
+def _setup_for_ocean_masks(
+    mock_data: MockCoupledData, merge: bool, dataset_info: CoupledDatasetInfo
+) -> InferenceDataset:
+    ocean_config = None
+    if merge:
+        ocean_config = MergeNoConcatDatasetConfig(
+            merge=[XarrayDataConfig(data_path=str(mock_data.ocean.data_dir))]
+        )
+    return _setup(
+        mock_data,
+        total_coupled_steps=2,
+        start_indices=ExplicitIndices([0]),
+        ocean_config=ocean_config,
+        dataset_info=dataset_info,
+    )
+
+
+@pytest.mark.parametrize("merge", [False, True])
+def test_inference_dataset_takes_ocean_masks_from_dataset_info(tmp_path, merge):
+    """Ocean data without masks gets the masks from the checkpoint's dataset
+    info, for both a single and a merged ocean dataset.
+    """
+    mock_data = _create_data_for_ocean_masks(tmp_path, ["bar"])
+    ocean_mask = torch.zeros(mock_data.img_shape)
+    ocean_mask[:, :2] = 1.0
+    dataset_info = _dataset_info_with_ocean_masks(mock_data, {"mask_2d": ocean_mask})
+
+    dataset = _setup_for_ocean_masks(mock_data, merge, dataset_info)
+
+    masks = dataset.properties.ocean.spatial_mask_provider.masks
+    assert set(masks) == {"mask_2d"}
+    torch.testing.assert_close(masks["mask_2d"].cpu(), ocean_mask)
+
+
+@pytest.mark.parametrize("merge", [False, True])
+@pytest.mark.parametrize("checkpoint_masks_match", [True, False])
+def test_inference_dataset_keeps_ocean_masks_from_data(
+    tmp_path, merge, checkpoint_masks_match
+):
+    """Ocean data with masks keeps them, whether the checkpoint's masks match
+    or differ.
+    """
+    mock_data = _create_data_for_ocean_masks(tmp_path, ["bar", "mask_2d"])
+    data_mask = torch.as_tensor(mock_data.ocean.ds["mask_2d"].values)
+    if checkpoint_masks_match:
+        dataset_info = mock_data.build_dataset_info()
+    else:
+        dataset_info = _dataset_info_with_ocean_masks(
+            mock_data, {"mask_2d": 1.0 - data_mask, "mask_0": data_mask}
+        )
+
+    dataset = _setup_for_ocean_masks(mock_data, merge, dataset_info)
+
+    masks = dataset.properties.ocean.spatial_mask_provider.masks
+    assert set(masks) == {"mask_2d"}
+    torch.testing.assert_close(masks["mask_2d"].cpu(), data_mask)
 
 
 def test_no_target_inference_with_n_repeats(tmp_path):
