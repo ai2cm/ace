@@ -1,1 +1,5 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# joint fine-tuning of cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|cjvhgrus|best_inference_ckpt|train|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper_training.optimize_single_component_per_batch=true|8h
