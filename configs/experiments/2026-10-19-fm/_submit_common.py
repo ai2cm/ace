@@ -1,0 +1,163 @@
+"""Shared CLI/submission plumbing for the submit_*_jobs.py scripts.
+
+Each submit script discovers its own configs and builds its own gantry-job
+argument list, but they share the same `--dry-run`/`--beaker-*` flags and the
+same "print the command, build the env, subprocess.run it" submission step.
+"""
+
+import argparse
+import os
+import pathlib
+import subprocess
+from collections.abc import Callable, Iterable, Sequence
+from typing import TypeVar
+
+from _beaker_listing import existing_job_names
+
+T = TypeVar("T")
+
+
+def add_beaker_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_workspace: str,
+    default_cluster: list[str],
+    default_priority: str,
+) -> None:
+    """Register --dry-run and the --beaker-* flags shared by all submit scripts."""
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print commands without executing them.",
+    )
+    parser.add_argument(
+        "--beaker-workspace",
+        default=default_workspace,
+        help=f"Beaker workspace to submit jobs to (default: {default_workspace}).",
+    )
+    parser.add_argument(
+        "--beaker-cluster",
+        nargs="+",
+        default=default_cluster,
+        metavar="CLUSTER",
+        help=(
+            "Beaker cluster(s) to target (default: " f"{' '.join(default_cluster)})."
+        ),
+    )
+    parser.add_argument(
+        "--beaker-priority",
+        default=default_priority,
+        help=f"Beaker job priority (default: {default_priority}).",
+    )
+    parser.add_argument(
+        "--skip-if-in-beaker",
+        action="store_true",
+        help=(
+            "Skip each job whose name already has a succeeded or running "
+            "experiment in the Beaker workspace, so a resubmission only fills "
+            "in what is missing. Failed and canceled experiments do not count."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-job",
+        nargs="+",
+        default=(),
+        metavar="NAME",
+        help=("Job names never to submit, whatever the other filters select."),
+    )
+
+
+def drop_jobs_in_beaker(
+    jobs: Iterable[T], job_name: Callable[[T], str], args: argparse.Namespace
+) -> list[T]:
+    """`jobs` without those named by --exclude-job and, with
+    --skip-if-in-beaker, without those already succeeded or running in Beaker.
+
+    One workspace listing per call, matched on the job name with gantry's
+    collision suffix stripped.
+    """
+    jobs = list(jobs)
+    excluded = set(args.exclude_job)
+    existing: set[str] = set()
+    if args.skip_if_in_beaker:
+        print(f"Listing experiments in {args.beaker_workspace}...")
+        existing = existing_job_names(args.beaker_workspace)
+    pending = []
+    for job in jobs:
+        name = job_name(job)
+        if name in excluded:
+            print(f"Skipping (excluded): {name}")
+        elif name in existing:
+            print(f"Skipping (already in Beaker): {name}")
+        else:
+            pending.append(job)
+    if excluded or args.skip_if_in_beaker:
+        print(f"{len(jobs) - len(pending)} skipped, {len(pending)} to submit.")
+    return pending
+
+
+def submit_job(
+    run_script: pathlib.Path,
+    job_args: list[str],
+    *,
+    wandb_project: str,
+    args: argparse.Namespace,
+    cwd: pathlib.Path,
+    extra_env: dict[str, str] | None = None,
+) -> None:
+    """Print and (unless --dry-run) submit a gantry job via `run_script`.
+
+    `job_args` are the positional arguments passed to `run_script` (config
+    path, job name, job group, and any script-specific trailing args).
+    """
+    cmd = [str(run_script), *job_args]
+    print("Submitting:", " ".join(cmd))
+    if args.dry_run:
+        return
+    env = {
+        **os.environ,
+        "WANDB_PROJECT": wandb_project,
+        "BEAKER_WORKSPACE": args.beaker_workspace,
+        "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
+        "BEAKER_PRIORITY": args.beaker_priority,
+        **(extra_env or {}),
+    }
+    subprocess.run(cmd, check=True, cwd=cwd, env=env)
+
+
+def check_configs_at_head(config_paths: Sequence[pathlib.Path]) -> None:
+    """Fail unless each config is committed, with no local edits, at HEAD.
+
+    Gantry clones the repo from GitHub at HEAD instead of uploading the working
+    tree, so an untracked or locally-modified config never reaches the job as
+    written. Untracked, that surfaces only once the job has started, as a
+    FileNotFoundError from prepare_config; modified, it silently runs the
+    committed version instead. Both are fixed by committing (and pushing) the
+    configs, so check before spending a submission on them.
+    """
+    missing = []
+    modified = []
+    for path in config_paths:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", path.name],
+            cwd=path.parent,
+            capture_output=True,
+        )
+        if tracked.returncode != 0:
+            missing.append(path.name)
+            continue
+        dirty = subprocess.run(
+            ["git", "diff", "HEAD", "--quiet", "--", path.name],
+            cwd=path.parent,
+        )
+        if dirty.returncode != 0:
+            modified.append(path.name)
+    if missing or modified:
+        lines = ["Configs must be committed before submitting; gantry clones HEAD."]
+        if missing:
+            lines.append("Not tracked by git:")
+            lines.extend(f"  {name}" for name in missing)
+        if modified:
+            lines.append("Tracked but modified locally (HEAD version would run):")
+            lines.extend(f"  {name}" for name in modified)
+        raise SystemExit("\n".join(lines))
