@@ -49,19 +49,24 @@ api = wandb.Api()
 import re as _re
 
 _after = {}
+_LABEL = {
+    "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",
+    "rco2rs2-replay": "rco2 rs2, coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "rco2rs2-replay-oceanonly": "rco2 rs2, ocean-only coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+}
 for _r in api.runs(
     PROJECT,
     filters={"group": "ace4deg-randco2-before-after-coupled-ft"},
     order="-created_at",
 ):
     _m = _re.match(
-        r"ace4deg-randco2-(\d)xCO2-ic3-(rco2rs2-after-jointens-ep(\d+))$", _r.name
+        r"ace4deg-randco2-(\d)xCO2-ic3-((" + "|".join(_LABEL) + r")-ep(\d+))$", _r.name
     )
     if _m:
-        _after[int(_m.group(3))] = _m.group(2)
-for _ep in sorted(_after):
-    RUNS[f"rco2 rs2, after coupled FT ep{_ep} (lifted, EMA)"] = (
-        "ace4deg-randco2-{x}xCO2-ic3-" + _after[_ep]
+        _after[(_m.group(3), int(_m.group(4)))] = _m.group(2)
+for _kind, _ep in sorted(_after):
+    RUNS[_LABEL[_kind].format(ep=_ep)] = (
+        "ace4deg-randco2-{x}xCO2-ic3-" + _after[(_kind, _ep)]
     )
 runs = {}
 for r in api.runs(
