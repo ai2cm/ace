@@ -1,0 +1,54 @@
+# ACE-only (prescribed SST + sea ice) 140-year rollout through the whole CM4 1pctCO2 ramp (years 1-140, CO2 284 -> 1145 ppm),
+# to look at the atmosphere's out-of-sample behaviour: years 1-40 and 131-140 are holdout, 41-45 and 126-130 validation,
+# 46-125 the training window of every atmosphere compared here. Monthly files carry the CO2 forcing and the global
+# diagnostics so the response can be split by period offline. Troy 2026-10-19, for the random-CO2-through-coupled-FT report.
+# Launch: CFG=1pct-ic0001-140yr CKPT_DS=<atmosphere dataset> TAG=<label> ./launch-4deg-ace-eval.sh
+experiment_dir: /results
+n_forward_steps: 204399 # 140 noleap years at 6 h, minus the initial condition
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+loader:
+  start_indices:
+    times:
+      - "0001-01-01T06:00:00"
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-1pctco2-4deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr.zarr
+        engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names:
+    - carbon_dioxide
+    - TMP2m
+    - surface_temperature
+    - air_temperature_7
+    - air_temperature_0
+    - ULWRFtoa
+    - USWRFtoa
+    - DSWRFtoa
+    - ULWRFsfc
+    - DLWRFsfc
+    - DSWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - specific_total_water_7
+    - specific_total_water_0
+    - h500
+    - TMP850
