@@ -3173,3 +3173,31 @@ def test_single_module_step_config_rejects_unknown_pinned_variable():
             out_names=["b"],
             normalization=normalization,
         )
+
+
+def test_single_module_step_float32_matmul_precision_default_is_untouched():
+    """With the default (None) the process-wide matmul precision is left alone."""
+    original = torch.get_float32_matmul_precision()
+    get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+    assert torch.get_float32_matmul_precision() == original
+
+
+@pytest.mark.parametrize("precision", ["highest", "high", "medium"])
+def test_single_module_step_sets_float32_matmul_precision(precision: str):
+    """Building the step with float32_matmul_precision applies the torch
+    setting, so it takes effect at inference as well as training."""
+    original = torch.get_float32_matmul_precision()
+    try:
+        # Start from a different setting so the assertion fails if the step
+        # does not apply the configured value (torch defaults to "highest").
+        other = "medium" if precision != "medium" else "high"
+        torch.set_float32_matmul_precision(other)
+        config = dict(
+            get_single_module_selector().config, float32_matmul_precision=precision
+        )
+        selector = StepSelector(type="single_module", config=config)
+        step = get_step(selector, DEFAULT_IMG_SHAPE)
+        assert isinstance(step, SingleModuleStep)
+        assert torch.get_float32_matmul_precision() == precision
+    finally:
+        torch.set_float32_matmul_precision(original)
