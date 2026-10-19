@@ -59,3 +59,13 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKY
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Final best inference checkpoints, from each finished run's last result
+# dataset, over 1pctCO2 and the standard piControl eval: d1148 rs1 at epoch 32
+# (0.1178; later epochs drift up to 0.137), pole_edge rs1b at epoch 12
+# (0.146; it degraded after epoch 25 and blew up from epoch 52). pole_edge
+# rs0's epoch-50 best is evaluated above (rs0_ep50).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M564A9ZX566P2EME05FMNZYR|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M564A9ZX566P2EME05FMNZYR|ai2/ace|a100
