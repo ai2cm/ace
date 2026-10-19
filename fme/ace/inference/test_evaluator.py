@@ -76,6 +76,11 @@ from fme.core.testing.ema import (
     assert_parameters_equal,
     save_checkpoint_with_ema,
 )
+from fme.core.testing.output_dir import (
+    OUTPUT_DIR_KINDS,
+    assert_outputs_in_output_dir,
+    output_dir_of_kind,
+)
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
@@ -1320,12 +1325,11 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-@pytest.mark.medium_duration
-def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
-    # Use an in-memory filesystem for the experiment directory to test using
-    # an experiment_dir on a non-local filesystem.
-    experiment_dir = "memory://experiment_dir"
-
+def _small_zarr_evaluator_config(
+    tmp_path: pathlib.Path, experiment_dir: str
+) -> InferenceEvaluatorConfig:
+    """A short evaluator run writing zarr output, so it can target remote
+    directories, with file logging enabled."""
     forward_steps_in_memory = 2
     in_names = ["var", "forcing_var"]
     out_names = ["var"]
@@ -1353,7 +1357,7 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     files = [FileWriterConfig("autoregressive", format=ZarrWriterConfig())]
-    config = InferenceEvaluatorConfig(
+    return InferenceEvaluatorConfig(
         experiment_dir=experiment_dir,
         n_forward_steps=2,
         forward_steps_in_memory=forward_steps_in_memory,
@@ -1372,9 +1376,21 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
-    config_filename = tmp_path / "config.yaml"
-    with open(config_filename, "w") as f:
+
+
+def _write_config(config, path: pathlib.Path) -> str:
+    with open(path, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
+    return str(path)
+
+
+@pytest.mark.medium_duration
+def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
+    # Use an in-memory filesystem for the experiment directory to test using
+    # an experiment_dir on a non-local filesystem.
+    experiment_dir = "memory://experiment_dir"
+    config = _small_zarr_evaluator_config(tmp_path, experiment_dir)
+    config_filename = _write_config(config, tmp_path / "config.yaml")
 
     with pytest.warns(UserWarning, match="local file system"):
         main(yaml_config=str(config_filename))
@@ -1476,6 +1492,34 @@ def test_evaluator_labels_select_normalization_group(
         expected_std,
         rtol=1e-5,
     )
+
+
+@pytest.mark.parametrize("output_dir_kind", OUTPUT_DIR_KINDS)
+@pytest.mark.medium_duration
+def test_evaluator_writes_data_to_output_dir(tmp_path: pathlib.Path, output_dir_kind):
+    experiment_dir = str(tmp_path / "job")
+    config = _small_zarr_evaluator_config(tmp_path, experiment_dir)
+    # data written by FV3GFSData(path=tmp_path) in the config helper
+    validation = ValidationConfig(
+        loader=DataLoaderConfig(
+            dataset=XarrayDataConfig(str(tmp_path / "data")), batch_size=1
+        )
+    )
+    with output_dir_of_kind(output_dir_kind, tmp_path) as output_dir:
+        config = dataclasses.replace(
+            config, output_dir=output_dir, validation=validation
+        )
+        main(yaml_config=_write_config(config, tmp_path / "input_config.yaml"))
+        assert_outputs_in_output_dir(
+            experiment_dir,
+            output_dir,
+            [
+                "autoregressive_predictions.zarr",
+                "restart.nc",
+                "time_mean_diagnostics.nc",
+                "validation",
+            ],
+        )
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [2, 3])

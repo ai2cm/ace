@@ -323,8 +323,8 @@ def _segmented_config_factory(
     can be split into segments.
 
     Returns ``(make_config, atmos_steps_per_ocean_step)``, where
-    ``make_config(experiment_dir, n_coupled_steps)`` writes a config yaml and
-    returns its path.
+    ``make_config(experiment_dir, n_coupled_steps, output_dir=None)`` writes a
+    config yaml and returns its path.
     """
     config, _, atmos_steps_per_ocean_step = _setup(
         ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
@@ -345,9 +345,14 @@ def _segmented_config_factory(
         log_to_screen=True, log_to_file=False, log_to_wandb=log_to_wandb
     )
 
-    def make_config(experiment_dir: pathlib.Path, n_coupled_steps: int) -> str:
+    def make_config(
+        experiment_dir: pathlib.Path,
+        n_coupled_steps: int,
+        output_dir: str | None = None,
+    ) -> str:
         config.n_coupled_steps = n_coupled_steps
         config.experiment_dir = str(experiment_dir)
+        config.output_dir = output_dir
         # one yaml per experiment dir, so a previously written config stays valid
         config_filename = str(tmp_path / f"config-{experiment_dir.name}.yaml")
         with open(config_filename, "w") as f:
@@ -447,3 +452,25 @@ def test_segmented_inference_wandb_run_per_segment(monkeypatch):
                 "myrun-segment_19700105T00",
             ]
             assert len({run["id"] for run in wandb.runs}) == 2  # distinct runs
+
+
+@pytest.mark.medium_duration
+def test_inference_segmented_entrypoint_output_dir():
+    """With output_dir set, each segment's restarts land in
+    ``output_dir/<segment>`` and resubmitting skips the completed segments."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        make_config, _ = _segmented_config_factory(tmp_path, total_coupled_steps=4)
+        run_dir = tmp_path / "job"
+        output_dir = tmp_path / "output"
+        config_filename = make_config(run_dir, 2, output_dir=str(output_dir))
+        main(yaml_config=config_filename, segments=2)
+        for label in ["segment_19700101T00", "segment_19700105T00"]:
+            for restart_path in _restart_paths(str(output_dir / label)):
+                assert os.path.exists(restart_path)
+            for restart_path in _restart_paths(str(run_dir / label)):
+                assert not os.path.exists(restart_path)
+
+        with _mock_segmented_dependencies() as mock:
+            main(yaml_config=config_filename, segments=2)
+        assert mock.call_count == 0

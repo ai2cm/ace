@@ -21,6 +21,7 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
+from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.ace.inference.inference import (
     InferenceConfig,
     InitialConditionConfig,
@@ -48,6 +49,11 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import mock_wandb
 from fme.core.testing.ema import assert_parameters_equal
+from fme.core.testing.output_dir import (
+    OUTPUT_DIR_KINDS,
+    assert_outputs_in_output_dir,
+    output_dir_of_kind,
+)
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -228,16 +234,16 @@ def _write_inference_inputs(
     return stepper_path, data, ic_path
 
 
-def _run_seeded_inference(
-    run_dir: pathlib.Path,
+def _small_inference_config(
+    experiment_dir: pathlib.Path,
     stepper_path: pathlib.Path,
     data: FV3GFSData,
     ic_path: pathlib.Path,
-    seed: int | None,
-) -> np.ndarray:
-    run_dir.mkdir()
-    config = InferenceConfig(
-        experiment_dir=str(run_dir),
+    seed: int | None = None,
+) -> InferenceConfig:
+    """A short inference run on the inputs from ``_write_inference_inputs``."""
+    return InferenceConfig(
+        experiment_dir=str(experiment_dir),
         n_forward_steps=2,
         forward_steps_in_memory=1,
         checkpoint_path=str(stepper_path),
@@ -260,12 +266,28 @@ def _run_seeded_inference(
         aggregator=InferenceAggregatorConfig(log_global_mean_time_series=False),
         seed=seed,
     )
-    config_filename = run_dir / "config.yaml"
-    with open(config_filename, "w") as f:
+
+
+def _run_inference_main(config: InferenceConfig, yaml_path: pathlib.Path) -> None:
+    with open(yaml_path, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True, metrics_log_dir=str(run_dir / "metrics"))
-        main(yaml_config=str(config_filename))
+        wandb.configure(
+            log_to_wandb=True, metrics_log_dir=str(yaml_path.parent / "metrics")
+        )
+        main(yaml_config=str(yaml_path))
+
+
+def _run_seeded_inference(
+    run_dir: pathlib.Path,
+    stepper_path: pathlib.Path,
+    data: FV3GFSData,
+    ic_path: pathlib.Path,
+    seed: int | None,
+) -> np.ndarray:
+    run_dir.mkdir()
+    config = _small_inference_config(run_dir, stepper_path, data, ic_path, seed)
+    _run_inference_main(config, run_dir / "config.yaml")
     ds = xr.open_dataset(
         run_dir / "autoregressive_predictions.nc", decode_timedelta=False
     )
@@ -286,6 +308,33 @@ def test_inference_entrypoint_seed_reproducible(tmp_path: pathlib.Path):
 
     np.testing.assert_array_equal(seed0_a, seed0_b)
     assert not np.allclose(seed0_a, seed1)
+
+
+@pytest.mark.parametrize("output_dir_kind", OUTPUT_DIR_KINDS)
+def test_inference_writes_data_to_output_dir(tmp_path: pathlib.Path, output_dir_kind):
+    stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
+    experiment_dir = tmp_path / "job"
+    config = _small_inference_config(experiment_dir, stepper_path, data, ic_path)
+    with output_dir_of_kind(output_dir_kind, tmp_path) as output_dir:
+        config = dataclasses.replace(
+            config,
+            output_dir=output_dir,
+            logging=dataclasses.replace(config.logging, log_to_file=True),
+            data_writer=dataclasses.replace(
+                config.data_writer,
+                files=[FileWriterConfig("autoregressive", format=ZarrWriterConfig())],
+            ),
+        )
+        _run_inference_main(config, tmp_path / "input_config.yaml")
+        assert_outputs_in_output_dir(
+            str(experiment_dir),
+            output_dir,
+            [
+                "autoregressive_predictions.zarr",
+                "restart.nc",
+                "time_mean_diagnostics.nc",
+            ],
+        )
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [1, 2])

@@ -25,6 +25,12 @@ from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.logging_utils import LoggingConfig
+from fme.core.output_dir import (
+    is_separate_output_dir,
+    resolve_output_dir,
+    validate_output_dir,
+)
+from fme.core.provenance import write_provenance
 from fme.core.timing import GlobalTimer
 from fme.coupled.aggregator import InferenceAggregatorConfig
 from fme.coupled.data_loading.batch_data import CoupledPrognosticState
@@ -148,7 +154,9 @@ class InferenceConfig:
     Configuration for running inference.
 
     Parameters:
-        experiment_dir: Directory to save results to.
+        experiment_dir: Job directory, holding the config, logs and wandb state.
+            Must be local when ``output_dir`` is set; otherwise it also
+            receives the data output. See :class:`fme.ace.InferenceConfig`.
         n_coupled_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to a CoupledStepper training checkpoint to load, or a
             mapping to two separate Stepper training checkpoints.
@@ -177,6 +185,13 @@ class InferenceConfig:
             ``coupled_steps_in_memory``. The atmosphere takes this value and the
             ocean ``seed + 1``. Leave unset (None) for the default
             non-reproducible behavior.
+        output_dir: Directory for data writer outputs (including restart files)
+            and aggregator diagnostics. Defaults to ``experiment_dir``. May be
+            a remote ``fsspec`` path such as ``gs://bucket/results``, with the
+            limitations described in :class:`fme.ace.InferenceConfig`. When set
+            to a directory other than ``experiment_dir``, a copy of the effective
+            config and a ``provenance.json`` pointing back to the job are written
+            there.
     """
 
     experiment_dir: str
@@ -197,6 +212,7 @@ class InferenceConfig:
     atmosphere_stepper_override: StepperOverrideConfig | None = None
     use_ema_if_available: bool = True
     seed: int | None = None
+    output_dir: str | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -207,6 +223,12 @@ class InferenceConfig:
             self.ocean_stepper_override,
             self.atmosphere_stepper_override,
         )
+        validate_output_dir(self.experiment_dir, self.output_dir)
+
+    @property
+    def resolved_output_dir(self) -> str:
+        """Directory receiving data writer outputs and diagnostics."""
+        return resolve_output_dir(self.experiment_dir, self.output_dir)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -261,7 +283,7 @@ class InferenceConfig:
             "atmosphere": dataset_metadata,
         }
         return self.data_writer.build_paired(
-            experiment_dir=self.experiment_dir,
+            experiment_dir=self.resolved_output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
@@ -322,19 +344,31 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
 
     Args:
         config: Configuration for each segment. Its initial condition is used
-            only for the first segment.
+            only for the first segment. Each segment writes its job files to
+            ``experiment_dir/<segment>`` and its data output to
+            ``output_dir/<segment>`` (``experiment_dir/<segment>`` if unset).
+            When ``output_dir`` is separate from ``experiment_dir``, each
+            segment records its own provenance under ``output_dir/<segment>``
+            and a top-level record is written to ``output_dir`` before the
+            segments run; the top-level record has no wandb run id because
+            wandb is not yet initialized at that point.
         segments: Total number of segments; only missing ones are run.
     """
+    if is_separate_output_dir(config.experiment_dir, config.output_dir):
+        write_provenance(config.resolved_output_dir, config, config.experiment_dir)
     config_copy = copy.deepcopy(config)
 
-    def _get_restart_paths(segment_dir: str) -> Sequence[str]:
+    def _get_restart_paths(label: str) -> Sequence[str]:
+        segment_dir = os.path.join(config.resolved_output_dir, label)
         return [
             os.path.join(segment_dir, OCEAN_OUTPUT_DIR_NAME, "restart.nc"),
             os.path.join(segment_dir, ATMOSPHERE_OUTPUT_DIR_NAME, "restart.nc"),
         ]
 
-    def _run_segment(segment_dir: str) -> None:
-        config_copy.experiment_dir = segment_dir
+    def _run_segment(label: str) -> None:
+        config_copy.experiment_dir = os.path.join(config.experiment_dir, label)
+        if config.output_dir is not None:
+            config_copy.output_dir = os.path.join(config.output_dir, label)
         run_inference_from_config(config_copy)
 
     def _set_initial_condition(restart_paths: Sequence[str]) -> None:
@@ -369,7 +403,10 @@ def run_inference_from_config(config: InferenceConfig):
     timer.start("initialization")
 
     makedirs(config.experiment_dir, exist_ok=True)
+    makedirs(config.resolved_output_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
+    if is_separate_output_dir(config.experiment_dir, config.output_dir):
+        write_provenance(config.resolved_output_dir, config, config.experiment_dir)
 
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
@@ -408,7 +445,7 @@ def run_inference_from_config(config: InferenceConfig):
         dataset_info=dataset_info,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
-        output_dir=config.experiment_dir,
+        output_dir=config.resolved_output_dir,
     )
 
     writer = config.get_data_writer(data=data)
