@@ -155,3 +155,7 @@ run_training "ace2s-pretrain-daily-6hsamples.yaml" "1deg-daily-ace2s-6hsamples-p
 # Stage 2: 3-step detached fine-tune (staged; fill in PRETRAIN_RESULT_DATASET
 # in the config header once the pretrain finishes).
 run_training "ace2s-finetune-daily-6hsamples.yaml" "1deg-daily-ace2s-6hsamples-ft3-detached-rs0" 8
+
+# Width-384 daily pretrain resumed from 40 to 160 epochs (511k optimizer steps,
+# the 6-hourly recipe's count); same wandb run as the original (pokhj3ps).
+run_training "ace2s-pretrain-n384-resume160.yaml" "1deg-daily-ace2s-n384-pretrain-rs0" 8
