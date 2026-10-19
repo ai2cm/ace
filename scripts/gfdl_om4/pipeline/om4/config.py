@@ -52,7 +52,7 @@ class StreamConfig:
             (e.g. 20 subsamples 6-hourly data to 5-daily block ends). The
             cross-stream time-alignment assertion then guarantees the
             subsample lands exactly on the shared time coordinate.
-        time_coarsen_factor: if set, average every N consecutive timesteps,
+        time_block_mean_factor: if set, average every N consecutive timesteps,
             in N-step blocks aligned to the source store's raw time grid like
             ``time_subsample_stride`` (e.g. 5 coarsens daily means to 5-day
             means), labeling each block mean with its block's final
@@ -60,7 +60,8 @@ class StreamConfig:
             time-varying footprint still fails the wetmask assertion. N must
             evenly divide the source store's time axis (a trailing partial
             block raises rather than being dropped). Mutually exclusive with
-            ``time_subsample_stride``.
+            ``time_subsample_stride`` and with the pipeline's
+            ``shift_timestamps_to_avg_interval_midpoint``.
         full_cell_variables: variables additionally regridded with full-cell
             semantics — NaN filled with 0 over the whole grid (land
             included) and conservatively regridded without ocean-fraction
@@ -86,7 +87,7 @@ class StreamConfig:
     renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     time_subsample_stride: int | None = None
-    time_coarsen_factor: int | None = None
+    time_block_mean_factor: int | None = None
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
     postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
     face_mask_url: str | None = None
@@ -106,16 +107,16 @@ class StreamConfig:
                 f"time_subsample_stride must be >= 1; got "
                 f"{self.time_subsample_stride}"
             )
-        if self.time_coarsen_factor is not None:
-            if self.time_coarsen_factor < 1:
+        if self.time_block_mean_factor is not None:
+            if self.time_block_mean_factor < 1:
                 raise ValueError(
-                    f"time_coarsen_factor must be >= 1; got "
-                    f"{self.time_coarsen_factor}"
+                    f"time_block_mean_factor must be >= 1; got "
+                    f"{self.time_block_mean_factor}"
                 )
             if self.time_subsample_stride is not None:
                 raise ValueError(
                     f"stream {self.name!r} sets both time_subsample_stride and "
-                    "time_coarsen_factor; choose one"
+                    "time_block_mean_factor; choose one"
                 )
         for name in self.full_cell_variables:
             if name not in self.variables:
@@ -184,7 +185,8 @@ class PipelineConfig:
         shift_timestamps_to_avg_interval_midpoint: if True, shift time labels
             backwards by half the timestep, the convention of legacy
             mean-state stores. Off for snapshot stores, whose raw timestamps
-            are kept verbatim.
+            are kept verbatim. Not allowed when any stream sets
+            ``time_block_mean_factor``.
         start_time: optional inclusive time-range start (e.g. "0151-01-06"),
             applied to all streams.
         end_time: optional inclusive time-range end.
@@ -205,6 +207,18 @@ class PipelineConfig:
         names = [stream.name for stream in self.streams]
         if len(set(names)) != len(names):
             raise ValueError(f"stream names must be unique; got {names}")
+        if self.shift_timestamps_to_avg_interval_midpoint:
+            block_mean_streams = [
+                stream.name
+                for stream in self.streams
+                if stream.time_block_mean_factor is not None
+            ]
+            if block_mean_streams:
+                raise ValueError(
+                    "shift_timestamps_to_avg_interval_midpoint cannot be "
+                    "combined with time_block_mean_factor; set on streams "
+                    f"{block_mean_streams}"
+                )
 
 
 def load_config(path: str, member: str | None = None) -> PipelineConfig:

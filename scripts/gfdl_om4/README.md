@@ -49,7 +49,7 @@ holds. OM4 reads 3D variables one level at a time. Before consolidating
 into output shards, read chunks are split to `gcd(read width, shard)`
 (`shard_aligned_chunk_size`), which puts every chunk boundary on a shard
 boundary; where the read width divides the shard the split is a no-op. An
-OM4 stream with `time_coarsen_factor` is read at `lcm(source width,
+OM4 stream with `time_block_mean_factor` is read at `lcm(source width,
 factor)` source steps per chunk, so each read chunk holds whole source
 chunks and whole averaging blocks; a beam step averages each chunk's blocks
 and re-keys it in output timesteps before the per-chunk transforms. The
@@ -161,7 +161,7 @@ holds the 36-member list. Members are named by their short `ic_NNNN` names
 is `ic_NNNN.zarr`, matching the atmosphere stores from `scripts/data_process`.
 Its sources are raw daily/6-hourly stores, so the 5-daily configs subsample
 snapshots (`time_subsample_stride`) and average the daily-mean fluxes over
-5-day blocks (`time_coarsen_factor`) in the pipeline; the 1-daily configs
+5-day blocks (`time_block_mean_factor`) in the pipeline; the 1-daily configs
 only subsample the 6-hourly ice streams.
 
 ### Running
