@@ -73,6 +73,7 @@ def test_merged_properties_leave_member_properties_alone(cls):
         assert dataset.properties.all_labels == {f"label_{i}"}
     # reading the property again must give the same result as the first read
     assert set(merged_dataset.properties.variable_metadata) == {"var_0", "var_1"}
+    assert merged_dataset.properties.all_labels == {"label_0", "label_1"}
 
 
 @pytest.mark.parametrize("cls", [MergedXarrayDataset, TimePaddedMergedDataset])
@@ -92,6 +93,11 @@ def test_merged_properties_leave_member_masks_alone(cls):
     assert set(merged_masks) == {"mask_0", "mask_1"}
     for i, dataset in enumerate(datasets):
         assert set(dataset.properties.spatial_mask_provider.masks) == {f"mask_{i}"}
+    # reading the property again must give the same result as the first read
+    assert set(merged_dataset.properties.spatial_mask_provider.masks) == {
+        "mask_0",
+        "mask_1",
+    }
 
 
 def test_merged_set_epoch():
