@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_ln_fm|rs0|01M5AKSQ2PTP296WVQ0GN2W4E8|training|best_inference_ckpt|normal|--min-runtime 8h
