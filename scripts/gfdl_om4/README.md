@@ -10,7 +10,7 @@ and writes one templated, sharded zarr v3 store.
 
 | Pipeline | Package | Configs | Make targets | Output |
 | --- | --- | --- | --- | --- |
-| OM4 | `pipeline/om4/` | `configs/om4-*.yaml`, `configs/cm4-*-1daily.yaml` | `om4.mk` (unprefixed) | OM4/CM4 ocean stores, one per config |
+| OM4 | `pipeline/om4/` | `configs/om4-*.yaml`, `configs/cm4-*-1daily.yaml`, `configs/cm4-abrupt-4xCO2-*.yaml` | `om4.mk` (unprefixed) | OM4/CM4 ocean stores, one per config (per member for an ensemble config) |
 | randco2 | `pipeline/randco2/` | `configs/cm4-like-am4-randco2-*.yaml` | `randco2.mk` (`randco2_*`) | CM4-like-AM4 random-CO2 sea-surface stores, one per member |
 
 Both run from `scripts/gfdl_om4/` through the one `Makefile`, which holds
@@ -48,7 +48,11 @@ source chunk is fetched and decoded once rather than once per timestep it
 holds. OM4 reads 3D variables one level at a time. Before consolidating
 into output shards, read chunks are split to `gcd(read width, shard)`
 (`shard_aligned_chunk_size`), which puts every chunk boundary on a shard
-boundary; where the read width divides the shard the split is a no-op. The
+boundary; where the read width divides the shard the split is a no-op. An
+OM4 stream with `time_coarsen_factor` is read at `lcm(source width,
+factor)` source steps per chunk, so each read chunk holds whole source
+chunks and whole averaging blocks; a beam step averages each chunk's blocks
+and re-keys it in output timesteps before the per-chunk transforms. The
 output layout (time chunk and shard from the config's `output`) does not
 depend on the read width.
 
@@ -107,7 +111,7 @@ Contents, under `pipeline/om4/`:
 - `pipeline/om4/config.py`: YAML→dataclass configuration (dacite). Stream
   options cover source-dim renaming (e.g. ice-model `xT/yT/xB/yB` onto the
   ocean `xh/yh/xq/yq` conventions), time subsampling to the shared snapshot
-  instants, full-cell (per-total-cell-area) regridding for selected
+  instants or block-mean time coarsening onto them, full-cell (per-total-cell-area) regridding for selected
   variables, and named postprocess transforms.
 - `pipeline/om4/postprocess.py`: named post-regrid transforms selectable per
   stream — Kelvin `sst`, `hfds_total_area`, and the sea-ice conventions
@@ -121,8 +125,9 @@ Contents, under `pipeline/om4/`:
   See `run._rotate_pairs` for how the flagged faces and the wall-zero
   fill keep every velocity output on the tracer wetmask footprint
   (`mask_k`).
-- `pipeline/om4/check_output.py`, `pipeline/om4/check_wetmask_equivalence.py`:
-  post-run and cross-config checks used by `om4.mk`.
+- `pipeline/om4/check_output.py`, `pipeline/om4/check_wetmask_equivalence.py`,
+  `pipeline/om4/check_member_wetmask_equivalence.py`: post-run,
+  cross-config and cross-member checks used by `om4.mk`.
 
 ### Setup
 
@@ -136,7 +141,8 @@ make generate_face_masks     # per-simulation remap-born-zero face masks
 Face-mask artifacts are per-simulation (see `pipeline/om4/face_masks.py`): each
 `generate_face_masks_*` target scans that source's first year and checks the
 flagged surface-face counts against the independent census baked into the
-target.
+target. The abrupt-4xCO2 ensemble shares one artifact, scanned from its first
+member (`make generate_face_masks_abrupt_4xco2`).
 
 ### Configs
 
@@ -146,6 +152,17 @@ the permanent inputs prefix, sources are read from
 `vcm-ml-raw-flexible-retention`, and outputs are flat dated zarrs in
 `gs://vcm-ml-intermediate/`; nothing consumed by a production run lives
 under `vcm-ml-scratch`.
+
+The CM4 abrupt-4xCO2 ensemble has one 5-daily and one 1-daily config per
+resolution, each carrying a `{member}` placeholder (as in randco2); pass
+`--member` (or `MEMBER=` to the make targets) to resolve it, and `om4.mk`
+holds the 36-member list. Members are named by their short `ic_NNNN` names
+(the configs add the source's `abrupt-4xCO2-` prefix), so each output store
+is `ic_NNNN.zarr`, matching the atmosphere stores from `scripts/data_process`.
+Its sources are raw daily/6-hourly stores, so the 5-daily configs subsample
+snapshots (`time_subsample_stride`) and average the daily-mean fluxes over
+5-day blocks (`time_coarsen_factor`) in the pipeline; the 1-daily configs
+only subsample the 6-hourly ice streams.
 
 ### Running
 
@@ -169,6 +186,11 @@ make smoke_test_picontrol_1deg   # or any single config
 - `make smoke_test_repeat_fails` — a repeat run against an existing output
   store must refuse to initialize into it.
 
+The abrupt-4xCO2 ensemble has its own set: `make smoke_tests_abrupt_4xco2`
+smoke-tests one member at both resolutions, checks all 36 members derive the
+same wetmask, and runs the repeat-run check; `make
+smoke_tests_abrupt_4xco2_1daily` does the same for the 1-daily configs.
+
 The pipeline can also be invoked directly, with any beam pipeline options
 after the script's own arguments:
 
@@ -191,6 +213,9 @@ python -m pipeline.om4.run --config configs/om4-picontrol-1deg-5daily.yaml \
    ```
    make push_dataflow
    make dataflow_picontrol_1deg     # one target per config
+   make dataflow_abrupt_4xco2_1deg_ic_0001   # one per ensemble member
+   make dataflow_abrupt_4xco2_1deg_all       # or all 36
+   make dataflow_abrupt_4xco2_1deg_1daily_ic_0001   # 1-daily, likewise
    ```
 
    `make dataflow*` first checks that `$(IMAGE_NAME)` exists in Artifact

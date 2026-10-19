@@ -2,10 +2,13 @@
 
 Each YAML file describes one output store: the source zarr stores and the
 streams of variables to read from them, the transforms to apply (vector
-rotation, level splitting), the target grid and weight artifact, and the
-output layout. Transforms are code; configs only select and parameterize
-them, so a new simulation or a new output store is a config change, not a
-code change.
+rotation, level splitting, time subsampling or coarsening), the target grid
+and weight artifact, and the output layout. An ensemble's members differ
+only in a name inside URLs, so a config may carry the ``{member}``
+placeholder there and describe one store per member (see
+pipeline/config_io.py). Transforms are code; configs only select and
+parameterize them, so a new simulation or a new output store is a config
+change, not a code change.
 """
 
 import dataclasses
@@ -49,6 +52,15 @@ class StreamConfig:
             (e.g. 20 subsamples 6-hourly data to 5-daily block ends). The
             cross-stream time-alignment assertion then guarantees the
             subsample lands exactly on the shared time coordinate.
+        time_coarsen_factor: if set, average every N consecutive timesteps,
+            in N-step blocks aligned to the source store's raw time grid like
+            ``time_subsample_stride`` (e.g. 5 coarsens daily means to 5-day
+            means), labeling each block mean with its block's final
+            timestamp. NaN anywhere in a block propagates to the mean, so a
+            time-varying footprint still fails the wetmask assertion. N must
+            evenly divide the source store's time axis (a trailing partial
+            block raises rather than being dropped). Mutually exclusive with
+            ``time_subsample_stride``.
         full_cell_variables: variables additionally regridded with full-cell
             semantics — NaN filled with 0 over the whole grid (land
             included) and conservatively regridded without ocean-fraction
@@ -74,6 +86,7 @@ class StreamConfig:
     renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     time_subsample_stride: int | None = None
+    time_coarsen_factor: int | None = None
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
     postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
     face_mask_url: str | None = None
@@ -93,6 +106,17 @@ class StreamConfig:
                 f"time_subsample_stride must be >= 1; got "
                 f"{self.time_subsample_stride}"
             )
+        if self.time_coarsen_factor is not None:
+            if self.time_coarsen_factor < 1:
+                raise ValueError(
+                    f"time_coarsen_factor must be >= 1; got "
+                    f"{self.time_coarsen_factor}"
+                )
+            if self.time_subsample_stride is not None:
+                raise ValueError(
+                    f"stream {self.name!r} sets both time_subsample_stride and "
+                    "time_coarsen_factor; choose one"
+                )
         for name in self.full_cell_variables:
             if name not in self.variables:
                 raise ValueError(
@@ -183,9 +207,11 @@ class PipelineConfig:
             raise ValueError(f"stream names must be unique; got {names}")
 
 
-def load_config(path: str) -> PipelineConfig:
+def load_config(path: str, member: str | None = None) -> PipelineConfig:
+    """Load a config, substituting ``member`` for the ``{member}`` placeholder
+    (see pipeline.config_io.load_yaml for the substitution rules)."""
     return dacite.from_dict(
         data_class=PipelineConfig,
-        data=load_yaml(path),
+        data=load_yaml(path, member),
         config=dacite.Config(strict=True),
     )
