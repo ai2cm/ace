@@ -719,7 +719,7 @@ class XarrayDataset(DatasetABC):
     @property
     def properties(self) -> DatasetProperties:
         return DatasetProperties(
-            self._variable_metadata,
+            dict(self._variable_metadata),
             self._vertical_coordinate,
             self._horizontal_coordinates,
             self._spatial_mask_provider.copy(),

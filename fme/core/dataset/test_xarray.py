@@ -1079,9 +1079,9 @@ def test_xarray_concat_keeps_each_member_labels(mock_monthly_netcdfs):
     assert member_labels == [{label} for label in labels]
 
 
-def test_xarray_dataset_properties_labels_are_independent(mock_monthly_netcdfs):
-    """Updating the returned label set must not reach the dataset's own labels,
-    which every sample it returns carries.
+def test_xarray_dataset_properties_are_independent(mock_monthly_netcdfs):
+    """Updating the returned label set or metadata must not reach the dataset's
+    own, which every sample and later properties read carry.
     """
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir, labels=["amip"])
@@ -1090,8 +1090,12 @@ def test_xarray_dataset_properties_labels_are_independent(mock_monthly_netcdfs):
     properties = dataset.properties
     assert properties.all_labels is not None
     properties.all_labels.add("som")
+    properties.variable_metadata["extra"] = VariableMetadata(
+        units="K", long_name="extra"
+    )
 
     assert dataset.properties.all_labels == {"amip"}
+    assert "extra" not in dataset.properties.variable_metadata
     assert dataset[0][2] == {"amip"}
 
 
