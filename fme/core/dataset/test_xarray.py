@@ -23,6 +23,7 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
@@ -1366,6 +1367,34 @@ def test_dataset_properties_copy_masks_are_independent(mock_monthly_netcdfs):
 
     assert "mask_0" in copied.spatial_mask_provider.masks
     assert not data_properties.spatial_mask_provider.masks
+
+
+def _properties_with_labels(labels: set[str]) -> DatasetProperties:
+    return DatasetProperties(
+        variable_metadata={},
+        vertical_coordinate=NullVerticalCoordinate(),
+        horizontal_coordinates=LatLonCoordinates(
+            lon=torch.arange(0, 1), lat=torch.arange(0, 1)
+        ),
+        spatial_mask_provider=SpatialMaskProvider(),
+        timestep=None,
+        is_remote=False,
+        all_labels=labels,
+    )
+
+
+@pytest.mark.parametrize("method", ["update", "update_merged_dataset"])
+def test_dataset_properties_update_leaves_original_labels_alone(method):
+    """Merging labels must not mutate the label set the properties were built
+    with, since that set may be shared with the dataset which provided it.
+    """
+    original_labels = {"amip"}
+    properties = _properties_with_labels(original_labels)
+
+    getattr(properties, method)(_properties_with_labels({"som"}))
+
+    assert original_labels == {"amip"}
+    assert properties.all_labels == {"amip", "som"}
 
 
 def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):
