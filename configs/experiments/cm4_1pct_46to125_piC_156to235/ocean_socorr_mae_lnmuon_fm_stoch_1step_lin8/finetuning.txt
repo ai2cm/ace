@@ -1,0 +1,4 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Stage B: stochastic lin8 from the 1-step stage's best_ckpt (epoch 16; k8vh8z49, 01M597EQC8KB4H4CY7BY536B55).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step_lin8|rs2ep8|ace-samudra-cm4|k8vh8z49|best_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=0|01M597EQC8KB4H4CY7BY536B55|8h
