@@ -10,7 +10,6 @@ from torch import nn
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: ignore
     AtmoSphericNeuralOperatorNet,
 )
-from fme.core.compile import compile_module, is_compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
@@ -387,12 +386,12 @@ class FCN3Step(StepABC):
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
-        # not a replacement: state dict, device, train/eval still go via self.module.
-        # The discrete-continuous spherical convolutions use sparse tensors, which
-        # torch.compile cannot trace, so the compiled module has graph breaks
-        # around them.
-        self._forward_module = (
-            compile_module(self.module) if is_compile_enabled() else self.module
+        # Re-enable compilation (e.g. via fme.core.compile.compile_module) once
+        # an A/B benchmark shows a net win.
+        logging.info(
+            "torch.compile skipped, FCN3Step runs eagerly: its discrete-continuous "
+            "spherical convolutions use sparse tensors, which cause graph breaks, "
+            "and compiling has not been shown to be faster"
         )
         self._img_shape = dataset_info.img_shape
         self._config = config
@@ -461,9 +460,9 @@ class FCN3Step(StepABC):
             surface_tensor = self.surface_input_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            atmosphere_output_tensor, surface_output_tensor = wrapper(
-                self._forward_module
-            )(atmosphere_tensor, surface_tensor, forcing_tensor)
+            atmosphere_output_tensor, surface_output_tensor = wrapper(self.module)(
+                atmosphere_tensor, surface_tensor, forcing_tensor
+            )
             atmosphere_output = self.atmosphere_output_packer.unpack(
                 atmosphere_output_tensor, axis=self.CHANNEL_DIM
             )
