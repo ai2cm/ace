@@ -12,5 +12,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8|01M50
 # tensors zeroed (dataset 01M597KYSSGKRVXDNT4R8953DG, built from 01M51R87SKGM0TQEPY2ST1R1YG). FiLM is
 # x*(1+W_scale(noise))+W_bias(noise), so this is inference with the noise field at zero: the
 # finetuned backbone alone. Tests whether the late 1pct Arctic drop lives in the backbone weights.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8-film0|01M50Q5J94PCSWGNCSNSXSBSZA|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M597KYSSGKRVXDNT4R8953DG|ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8-film0|01M50Q5J94PCSWGNCSNSXSBSZA|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M597KYSSGKRVXDNT4R8953DG|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8-film0|01M50Q5J94PCSWGNCSNSXSBSZA|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M597KYSSGKRVXDNT4R8953DG|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8-film0|01M50Q5J94PCSWGNCSNSXSBSZA|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M597KYSSGKRVXDNT4R8953DG|ai2/ace|jupiter+titan
