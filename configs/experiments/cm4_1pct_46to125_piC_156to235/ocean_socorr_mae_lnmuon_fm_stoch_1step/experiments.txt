@@ -8,4 +8,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M5
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|running_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|running_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 # 4-member 1pct eval of best_ckpt (epoch 16): is the on-time Arctic drop robust across members?
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|run_1pct-ic0001-130yr-ens4|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|running_1pct-ic0001-130yr-ens4|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
