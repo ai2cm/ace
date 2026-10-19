@@ -1398,12 +1398,7 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
 
 
 def test_dataset_properties_copy_masks_are_independent(mock_monthly_netcdfs):
-    """A copy's masks can be updated without reaching the original's.
-
-    Callers which inject masks into properties they were handed - the coupled
-    inference dataset takes the ocean masks from the checkpoint this way - must
-    still see their own update, and must not change anyone else's masks.
-    """
+    """A copy's masks can be updated without reaching the original's."""
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
