@@ -1,11 +1,11 @@
-# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+# arg: --dataset 01M568VVDKT6SP0H2QZW1ZXRXS:/weights
 #
 # Stage 2 of the daily-step-on-6-hourly-samples arm: the paper model's 3-step
 # DETACHED fine-tune recipe exactly as in
 # configs/baselines/era5-ace2s-ablations/ace2s-finetune-rs1.yaml (seed 0 here),
-# warm-started from the arm's pretrain (ace2s-pretrain-daily-6hsamples.yaml;
-# replace PRETRAIN_RESULT_DATASET above with its beaker result dataset id once
-# it finishes). train_loader.dataset is the pretrain's time-coarsened 6-hourly
+# warm-started from the arm's pretrain (ace2s-pretrain-daily-6hsamples.yaml,
+# beaker 01M4W01KEJNZAGK42BTNA0B2F8, wandb t1zqy9ew, finished 2026-10-18; its
+# result dataset 01M568VVDKT6SP0H2QZW1ZXRXS is mounted at /weights). train_loader.dataset is the pretrain's time-coarsened 6-hourly
 # store (samples starting at every 6-hourly time, 3 daily steps each);
 # validation, inline inference and the 81-year rollout are the daily arms'.
 seed: 0
