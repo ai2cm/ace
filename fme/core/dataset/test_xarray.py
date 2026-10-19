@@ -1433,15 +1433,19 @@ def _properties_with_labels(labels: set[str]) -> DatasetProperties:
     )
 
 
-@pytest.mark.parametrize("method", ["update", "update_merged_dataset"])
-def test_dataset_properties_update_leaves_original_labels_alone(method):
+@pytest.mark.parametrize(
+    "merge",
+    [DatasetProperties.update, DatasetProperties.update_merged_dataset],
+    ids=["update", "update_merged_dataset"],
+)
+def test_dataset_properties_update_leaves_original_labels_alone(merge):
     """Merging labels must not mutate the label set the properties were built
     with, since that set may be shared with the dataset which provided it.
     """
     original_labels = {"amip"}
     properties = _properties_with_labels(original_labels)
 
-    getattr(properties, method)(_properties_with_labels({"som"}))
+    merge(properties, _properties_with_labels({"som"}))
 
     assert original_labels == {"amip"}
     assert properties.all_labels == {"amip", "som"}
