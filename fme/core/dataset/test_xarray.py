@@ -40,6 +40,7 @@ from fme.core.dataset.xarray import (
     _get_vertical_coordinate,
     _repeat_and_increment_time,
     get_xarray_dataset,
+    get_xarray_datasets,
 )
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
@@ -1075,6 +1076,48 @@ def test_xarray_concat_keeps_each_member_labels(mock_monthly_netcdfs):
     # label of the member it came from
     member_labels = [key for key, _ in itertools.groupby(sample_labels)]
     assert member_labels == [{label} for label in labels]
+
+
+def test_xarray_dataset_properties_labels_are_independent(mock_monthly_netcdfs):
+    """Updating the returned label set must not reach the dataset's own labels,
+    which every sample it returns carries.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir, labels=["amip"])
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
+
+    properties = dataset.properties
+    assert properties.all_labels is not None
+    properties.all_labels.add("som")
+
+    assert dataset.properties.all_labels == {"amip"}
+    assert dataset[0][2] == {"amip"}
+
+
+def test_get_xarray_datasets_leaves_first_member_properties_alone(
+    mock_monthly_netcdfs,
+):
+    """The combined properties must be built on a copy of the first member's
+    properties, so that merging the other members or injecting masks into the
+    result does not reach the first member.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    configs = [
+        XarrayDataConfig(data_path=mock_data.tmpdir, labels=[label])
+        for label in ["amip", "som"]
+    ]
+    datasets, properties = get_xarray_datasets(
+        configs, mock_data.var_names.all_names, IntSchedule.from_constant(2)
+    )
+    properties.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    )
+
+    assert properties.all_labels == {"amip", "som"}
+    assert "mask_0" in properties.spatial_mask_provider.masks
+    first_member_properties = datasets[0].properties
+    assert first_member_properties.all_labels == {"amip"}
+    assert not first_member_properties.spatial_mask_provider.masks
 
 
 def test__get_vertical_coordinate_raises():
