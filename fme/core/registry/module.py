@@ -179,6 +179,16 @@ class Module:
         return self._forward_module is not None
 
     @property
+    def is_conditional(self) -> bool:
+        """Whether this module consumes labels.
+
+        Labels also drive per-group normalization, which is independent of
+        conditioning, so callers must check this before forwarding labels
+        rather than assuming labels imply a conditional module.
+        """
+        return self._label_encoding is not None
+
+    @property
     def torch_module(self) -> nn.Module:
         return self._module
 
@@ -202,6 +212,8 @@ class Module:
             else:
                 self._label_encoding.conform_to_state(state.pop("label_encoding"))
         state.pop("label_encoding", None)
+        if self._label_encoding is None:
+            state = _drop_unused_label_weights(state, self._module.state_dict())
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
@@ -235,6 +247,30 @@ class Module:
             self._label_encoding,
             compile_unsupported_reason=self._compile_unsupported_reason,
         )
+
+
+def _drop_unused_label_weights(
+    state: dict[str, Any], expected: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Drop label weights an unconditional module no longer allocates.
+
+    Before unconditional modules were built without labels, some builders
+    (e.g. SwinTransformer used as a secondary decoder, which is never given
+    labels) allocated label weights from the dataset's labels. Those weights
+    never affected outputs, so dropping them keeps such checkpoints loadable.
+
+    Only keys the module does not expect are candidates, and of those only
+    the label-conditioning submodules, which are named ``*_labels`` (e.g.
+    ``W_scale_labels``, ``W_bias_labels``, ``adaln_labels``). Any other
+    unexpected key still fails the strict ``load_state_dict`` below.
+    """
+    unused = {k for k in state if k not in expected and "_labels." in k}
+    if unused:
+        logging.info(
+            f"Dropping {len(unused)} unused label weights from the state of an "
+            "unconditional module."
+        )
+    return {k: v for k, v in state.items() if k not in unused}
 
 
 @dataclasses.dataclass
@@ -315,7 +351,12 @@ class ModuleSelector:
         if self.conditional:
             label_encoding = LabelEncoding(sorted(list(dataset_info.all_labels)))
         else:
+            # Labels can be present for reasons other than conditioning, such
+            # as selecting per-group normalization constants. An unconditional
+            # module is never given them, so it is built as if the dataset had
+            # none rather than sizing dead label weights it cannot use.
             label_encoding = None
+            dataset_info = dataset_info.without_labels()
         module = self._instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
