@@ -10,7 +10,7 @@ from torch import nn
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: ignore
     AtmoSphericNeuralOperatorNet,
 )
-from fme.core.compile import is_compile_enabled
+from fme.core.compile import compile_module, is_compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
@@ -392,7 +392,7 @@ class FCN3Step(StepABC):
         # torch.compile cannot trace, so the compiled module has graph breaks
         # around them.
         self._forward_module = (
-            torch.compile(self.module) if is_compile_enabled() else self.module
+            compile_module(self.module) if is_compile_enabled() else self.module
         )
         self._img_shape = dataset_info.img_shape
         self._config = config

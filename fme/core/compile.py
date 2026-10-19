@@ -2,6 +2,10 @@ import contextlib
 import logging
 import os
 from collections.abc import Generator
+from typing import Any
+
+import torch
+from torch import nn
 
 from fme.core.device import get_device
 
@@ -20,6 +24,7 @@ def _parse_compile_env(value: str | None) -> bool | None:
 
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
 _LOGGED_AUTO_SKIP = False
+RECOMPILE_LIMIT = 32
 
 
 @contextlib.contextmanager
@@ -61,3 +66,34 @@ def is_compile_enabled() -> bool:
         )
         _LOGGED_AUTO_SKIP = True
     return False
+
+
+def _raise_recompile_limit(limit: int) -> None:
+    config = torch._dynamo.config
+    # older torch versions name it cache_size_limit
+    name = (
+        "recompile_limit" if hasattr(config, "recompile_limit") else "cache_size_limit"
+    )
+    if getattr(config, name) < limit:
+        setattr(config, name, limit)
+
+
+def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
+    """``torch.compile`` a module, first raising dynamo's recompile limit.
+
+    Without distributed data parallel every module is wrapped in the same
+    ``DummyWrapper``, so all compiled modules are traced through one
+    ``DummyWrapper.forward`` code object and share its recompile budget, which
+    defaults to 8 and is easily used up by the train, validation and inference
+    variants of several modules. This raises the process-global
+    ``torch._dynamo.config.recompile_limit`` to :data:`RECOMPILE_LIMIT`,
+    leaving any larger user-set value in place. When the limit is still hit,
+    dynamo logs a warning on the ``torch._dynamo`` logger and runs the
+    remaining variants eagerly.
+
+    Args:
+        module: The module to compile.
+        kwargs: Forwarded to ``torch.compile``.
+    """
+    _raise_recompile_limit(RECOMPILE_LIMIT)
+    return torch.compile(module, **kwargs)

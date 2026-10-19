@@ -10,7 +10,7 @@ import dacite
 import torch
 from torch import nn
 
-from fme.core.compile import is_compile_enabled
+from fme.core.compile import compile_module, is_compile_enabled
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoding
 
@@ -157,7 +157,7 @@ class Module:
         compilation is disabled (see :func:`fme.core.compile.is_compile_enabled`).
 
         Args:
-            kwargs: Forwarded to ``torch.compile``.
+            kwargs: Forwarded to :func:`fme.core.compile.compile_module`.
         """
         if self._compile_unsupported_reason is not None:
             logger.info(
@@ -170,7 +170,7 @@ class Module:
         return Module(
             self._module,
             self._label_encoding,
-            forward_module=torch.compile(self._module, **kwargs),
+            forward_module=compile_module(self._module, **kwargs),
             compile_unsupported_reason=self._compile_unsupported_reason,
         )
 
