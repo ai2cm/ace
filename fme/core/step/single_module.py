@@ -120,7 +120,8 @@ class SingleModuleStepConfig(StepConfigABC):
             training step, with the same mask broadcast across the whole
             batch. Applied only when gradients are enabled, so non-optimized
             rollout steps (e.g. all but the last under
-            ``optimize_last_step_only``, or the trailing steps under
+            ``optimize_last_step_only``, the leading ``pushforward_steps``,
+            or the trailing steps under
             ``evaluate_all_steps``) run unmasked, as does inference
             (eval mode).
     """
