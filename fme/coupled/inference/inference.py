@@ -166,6 +166,11 @@ class InferenceConfig:
             (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
+        use_ema_if_available: If True and a checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights. Applies to a single coupled checkpoint and to each
+            of two standalone component checkpoints.
         seed: If set, seeds the random state threaded through the rollout so that
             stochastic modules (e.g. NoiseConditionedSFNO) produce a
             reproducible noise sequence, independent of
@@ -190,6 +195,7 @@ class InferenceConfig:
     n_ensemble_per_ic: int = 1
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     seed: int | None = None
 
     def __post_init__(self):
@@ -213,6 +219,7 @@ class InferenceConfig:
             self.checkpoint_path,
             ocean_stepper_override=self.ocean_stepper_override,
             atmosphere_stepper_override=self.atmosphere_stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
         )
 
     def load_stepper_config(self) -> CoupledStepperConfig:
