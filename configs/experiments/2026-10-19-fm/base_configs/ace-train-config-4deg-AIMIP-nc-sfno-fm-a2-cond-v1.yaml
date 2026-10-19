@@ -505,7 +505,7 @@ inference:
       file_pattern: ic_0001.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: &id008
     step_means:
@@ -557,7 +557,7 @@ inference:
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id008
 - name: 10year_insample_varying_co2_c96
@@ -584,7 +584,7 @@ inference:
       file_pattern: ic_0001.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id008
 - name: 10year_insample_constant_co2_c96
@@ -611,7 +611,7 @@ inference:
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id008
 - name: weather_1994_ensemble_varying_co2_c96
@@ -638,7 +638,7 @@ inference:
       file_pattern: ic_0001.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: &id009
     step_means:
@@ -701,7 +701,7 @@ inference:
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id009
 - name: weather_2021_ensemble_varying_co2_c96
@@ -728,7 +728,7 @@ inference:
       file_pattern: ic_0001.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id009
 - name: weather_2021_ensemble_constant_co2_c96
@@ -755,7 +755,7 @@ inference:
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id009
 - name: long_43year_varying_co2_c96
@@ -782,7 +782,7 @@ inference:
       file_pattern: ic_0001.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: &id010
     step_means: []
@@ -834,7 +834,7 @@ inference:
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator: *id010
 - name: aimip_checkpoint_era5
@@ -910,7 +910,7 @@ inference:
       file_pattern: ic_0001.zarr
       engine: zarr
       labels:
-      - amip
+      - c96
     num_data_workers: 4
   aggregator:
     step_means:
@@ -957,7 +957,7 @@ train_loader:
         start_time: '1979-01-01'
         stop_time: '1993-12-31'
       labels:
-      - amip
+      - c96
     - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
@@ -965,7 +965,7 @@ train_loader:
         start_time: '1995-01-01'
         stop_time: '2008-12-31'
       labels:
-      - amip
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
       file_pattern: ramped-sst-1xCO2-random-perturbation.zarr
       engine: zarr
@@ -973,7 +973,7 @@ train_loader:
         start_time: '2020-01-01'
         stop_time: '2025-01-01'
       labels:
-      - ramped
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
       file_pattern: ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
       engine: zarr
@@ -981,7 +981,7 @@ train_loader:
         start_time: '2020-01-01'
         stop_time: '2025-01-01'
       labels:
-      - ramped
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
       file_pattern: ramped-sst-2xCO2-random-perturbation.zarr
       engine: zarr
@@ -989,7 +989,7 @@ train_loader:
         start_time: '2020-01-01'
         stop_time: '2025-01-01'
       labels:
-      - ramped
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
       file_pattern: ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
       engine: zarr
@@ -997,7 +997,7 @@ train_loader:
         start_time: '2020-01-01'
         stop_time: '2025-01-01'
       labels:
-      - ramped
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
       file_pattern: ramped-sst-4xCO2-random-perturbation.zarr
       engine: zarr
@@ -1005,7 +1005,7 @@ train_loader:
         start_time: '2020-01-01'
         stop_time: '2025-01-01'
       labels:
-      - ramped
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
       file_pattern: ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
       engine: zarr
@@ -1013,7 +1013,7 @@ train_loader:
         start_time: '2020-01-01'
         stop_time: '2025-01-01'
       labels:
-      - ramped
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
       file_pattern: 1xCO2-ic_0001.zarr
       engine: zarr
@@ -1021,7 +1021,7 @@ train_loader:
         start_time: '2031-01-02'
         stop_time: '2041-01-01'
       labels:
-      - som
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
       file_pattern: 2xCO2-ic_0001.zarr
       engine: zarr
@@ -1029,7 +1029,7 @@ train_loader:
         start_time: '2031-01-02'
         stop_time: '2041-01-01'
       labels:
-      - som
+      - c96
     - data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
       file_pattern: 4xCO2-ic_0001.zarr
       engine: zarr
@@ -1037,7 +1037,7 @@ train_loader:
         start_time: '2031-01-02'
         stop_time: '2041-01-01'
       labels:
-      - som
+      - c96
     - data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
       engine: zarr
@@ -1086,7 +1086,7 @@ validation:
           start_time: '1994-01-01'
           stop_time: '1994-12-31'
         labels:
-        - amip
+        - c96
       - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
         file_pattern: ic_0001.zarr
         engine: zarr
@@ -1094,7 +1094,7 @@ validation:
           start_time: '2014-01-01'
           stop_time: '2014-12-31'
         labels:
-        - amip
+        - c96
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
@@ -1141,13 +1141,7 @@ stepper:
           global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/scaling-residual.nc
         grouped:
           groups:
-            amip:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
-            ramped:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
-            som:
+            c96:
               global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
               global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
             era5:
