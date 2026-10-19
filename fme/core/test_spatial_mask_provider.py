@@ -117,6 +117,7 @@ def test_mask_provider_copy_is_independent():
 
     assert set(provider.masks) == {"mask_temp"}
     assert set(copied.masks) == {"mask_temp", "mask_humidity"}
+    assert torch.equal(copied.masks["mask_humidity"], torch.tensor([0, 1]))
     assert copied.masks["mask_temp"] is provider.masks["mask_temp"]
 
 

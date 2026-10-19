@@ -84,8 +84,6 @@ class DatasetProperties:
         if self.all_labels is not None:
             if other.all_labels is None:
                 raise RuntimeError("Checks above should prevent this case.")
-            # rebind rather than update in place: the set may be shared with the
-            # dataset which returns it with each sample.
             self.all_labels = self.all_labels | other.all_labels
 
     def update_merged_dataset(self, other: "DatasetProperties"):
@@ -103,6 +101,11 @@ class DatasetProperties:
         self.spatial_mask_provider.update(spatial_mask_provider)
 
     def copy(self) -> "DatasetProperties":
+        """Return a copy that can be updated or merged without affecting this one.
+
+        The metadata dict, label set and mask provider are copied; coordinates
+        and mask tensors are shared, not cloned.
+        """
         return DatasetProperties(
             dict(self.variable_metadata),
             self.vertical_coordinate,

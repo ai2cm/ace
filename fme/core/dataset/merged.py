@@ -109,8 +109,6 @@ class MergedXarrayDataset(DatasetABC):
         data_properties = None
         for dataset in self.datasets:
             if data_properties is None:
-                # copy: update_merged_dataset mutates, and these properties are
-                # the member's own.
                 data_properties = dataset.properties.copy()
             else:
                 data_properties.update_merged_dataset(dataset.properties)
@@ -281,8 +279,6 @@ class TimePaddedMergedDataset(DatasetABC):
         data_properties: DatasetProperties | None = None
         for dataset in self.datasets:
             if data_properties is None:
-                # copy: update_merged_dataset mutates, and these properties are
-                # the member's own.
                 data_properties = dataset.properties.copy()
             else:
                 data_properties.update_merged_dataset(dataset.properties)
