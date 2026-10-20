@@ -105,13 +105,9 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
 
 
 class AvgPool(torch.nn.Module):
-    """Average pooling by ``pooling`` in both axes.
-
-    Like ``torch.nn.AvgPool2d``, by default it drops the last rows or columns
-    of an axis whose size is not a multiple of ``pooling``. With ``pad_pool``
-    it instead pads that axis at its end up to the next multiple, latitude
-    with ``lat_pad`` (see ``pad_latitude``) and longitude with ``pad``, so
-    every row and column is pooled.
+    """Average pooling by ``pooling`` in both axes. Drops the remainder of an
+    axis not divisible by ``pooling`` unless ``pad_pool`` pads it up instead
+    (latitude with ``lat_pad``, longitude with ``pad``).
     """
 
     def __init__(

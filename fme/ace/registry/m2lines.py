@@ -39,13 +39,8 @@ class SamudraBuilder(ModuleConfig):
             network.
         lat_pad: Latitude padding mode: "constant" (default, zeros) or
             "pole" (continues across the pole). See ``Samudra``.
-        pad_pool: Pad an odd height or width by one row or column at the end
-            of the axis in each pool instead of dropping the last one, and crop
-            it off the decoder's upsample instead of refilling a dropped one,
-            so that no row or column is lost (180x360 reaches a 12x23
-            bottleneck rather than 11x22). The original cells keep their
-            pooling windows, so a checkpoint trained without it fine-tunes with
-            it on. Adds no parameters. See ``Samudra``.
+        pad_pool: Pad odd sizes before each pool instead of dropping the last
+            row or column. See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(

@@ -56,15 +56,10 @@ class Samudra(torch.nn.Module):
         periodic upsampler does not pad latitude. By default "constant", the
         original behavior. Adds no parameters, so checkpoints load across modes.
     pad_pool : bool, optional
-        If True, each pool pads an odd height or width by one row (with
-        ``lat_pad``) or column (with ``pad``) at the end of the axis instead
-        of dropping the last one (see ``AvgPool``), and the decoder crops that
-        row or column off the upsample instead of refilling a dropped one. No
-        row or column is then lost (180x360 reaches a 12x23 bottleneck rather
-        than 11x22), every block runs on its level's unpadded grid, and the
-        original cells keep the floor pooling's windows, so a checkpoint
-        trained without it fine-tunes with it on. By default False. Adds no
-        parameters.
+        If True, each pool pads an odd height or width (see ``AvgPool``) and
+        the decoder crops the padding off again, so no row or column is
+        dropped. By default False. Adds no parameters, so checkpoints load
+        either way.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -287,9 +282,8 @@ class Samudra(torch.nn.Module):
                     layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
                 ):
                     skip = temp[int(2 * self.num_steps - count - 1)]
-                    # fit the upsample to its skip: after a padded pool it is a
-                    # row or column long, cropped off the end here; after a
-                    # floor pool it is a row or column short, refilled below
+                    # crop what a padded pool added; the refill below covers
+                    # what a floor pool dropped
                     fts = fts[..., : skip.shape[-2], : skip.shape[-1]]
                     crop = np.array(fts.shape[2:])
                     shape = np.array(skip.shape[2:])

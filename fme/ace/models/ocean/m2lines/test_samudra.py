@@ -836,8 +836,8 @@ def test_samudra_pad_pool_loses_no_row_or_column(img_shape, dilation, bottleneck
 
 
 def test_samudra_pad_pool_with_noise_conditioning():
-    """The noise is not padded: each block area-averages it onto its own grid,
-    which pad_pool makes 9x15 and 5x8 here rather than 8x15 and 4x7."""
+    """pad_pool's grids (9x15 and 5x8 here) work with noise conditioning, which
+    area-averages the noise onto whatever grid each block has."""
     n_noise = 4
     model = _samudra(
         context_config=_noise_context_config(n_noise),
