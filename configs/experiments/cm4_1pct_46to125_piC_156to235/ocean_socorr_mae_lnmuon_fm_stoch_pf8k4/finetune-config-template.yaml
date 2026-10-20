@@ -1,0 +1,229 @@
+# Uncoupled STOCHASTIC pushforward stage (n_forward_steps 8, pushforward_steps 4) from the
+# socorr L1 Muon MEAN-FILL pretrain ocean_socorr_mae_lnmuon_fm rs2 at epoch 8 (wandb spgbrv0c,
+# result dataset 01M4ZBV5MZBWSC4RP3KDX9V2HV, best_inference_ckpt).
+#
+# Why: the 1pct Arctic sea-ice drop is on time after a 1-step stochastic stage (~yr 37) and late
+# after the 4-step stage (~48) and lin8 (~53). Every late stage trains on the model's own drifted
+# states. This arm fixes the rollout at 8 steps: 4 step(s) run without gradients on the model's
+# own output, then 4 step(s) are trained, so it isolates a 4-step warm-up followed by a 4-step trained tail.
+#
+# Recipe: identical to ../ocean_socorr_mae_lnmuon_fm_stoch_4step except n_forward_steps / pushforward_steps:
+# AdamW 1e-4, EnsembleLoss crps 0.9 / ES 0.1, n_ensemble 2, EMA 0.999, noise 32 on all blocks via
+# parameter_init.weights_submodule, 16 epochs, EMA checkpoints every 8, seed 0.
+#
+# job_runner/uncoupled_finetune.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235 ocean_socorr_mae_lnmuon_fm_stoch_pf8k4 \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+# with WANDB_USERNAME=elynnwu.
+
+experiment_dir: /results
+evaluate_before_training: true # epoch-0 reference for the noise-added init
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 16 # 1-step epochs are cheap; EMA checkpoints at 8 and 16
+ema_checkpoint_save_epochs:
+  step: 8
+inference:
+  - name: inference_1pct
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+        # (validation + training), never entering the 131-140 holdout
+        - '0041-01-01T00:00:00'
+        - '0051-01-01T00:00:00'
+        - '0061-01-01T00:00:00'
+        - '0071-01-01T00:00:00'
+        - '0081-01-01T00:00:00'
+        - '0091-01-01T00:00:00'
+        - '0101-01-01T00:00:00'
+        - '0111-01-01T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+  - name: inference_piC
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+        # 1-90, never entering the relative-year-91+ holdout. The first IC
+        # is the store's first 5-daily snapshot.
+        - '0151-01-06T00:00:00'
+        - '0161-01-01T00:00:00'
+        - '0171-01-01T00:00:00'
+        - '0181-01-01T00:00:00'
+        - '0191-01-01T00:00:00'
+        - '0201-01-01T00:00:00'
+        - '0211-01-01T00:00:00'
+        - '0221-01-01T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235: 80
+    # years each, 160 total. Neither window enters its run's validation years
+    # (1pctCO2 0041-0045 and 0126-0130, piControl 0236-0240) or holdout (1pctCO2
+    # 0131-0140, piControl 0241-0350). One concat list per store, both in the
+    # same simulation order so the merged members share sample start times.
+    merge:
+    - concat:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-06T00:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0156-01-06T00:00:00'
+          stop_time: '0236-01-01T00:00:00'
+    - concat:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-06T00:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0156-01-06T00:00:00'
+          stop_time: '0236-01-01T00:00:00'
+validation:
+  - name: val_1pct_early
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0041-01-06T00:00:00'
+            stop_time: '0046-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0041-01-06T00:00:00'
+            stop_time: '0046-01-01T00:00:00'
+  - name: val_1pct_late
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0126-01-06T00:00:00'
+            stop_time: '0131-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0126-01-06T00:00:00'
+            stop_time: '0131-01-01T00:00:00'
+  - name: val_piC
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0236-01-06T00:00:00'
+            stop_time: '0241-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0236-01-06T00:00:00'
+            stop_time: '0241-01-01T00:00:00'
+optimization:
+  max_grad_norm: 1.0
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001 # stage-2 recipe; AdamW, not the pretrain's Muon (decided 2026-10-12)
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_forward_steps: 8
+  pushforward_steps: 4 # first 4 step(s) under no_grad, last 4 optimized (ace #1551)
+  # stepper_training is not merged from the checkpoint: restate the objective.
+  n_ensemble: 2
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+  parameter_init:
+    weights_path: /ckpt.tar
+    # the checkpoint is deterministic Samudra; the destination wraps it
+    weights_submodule: conditional_model
+stepper:
+  step:
+    config:
+      builder:
+        config:
+          noise_embed_dim: 32
+          conditioned_blocks: all_blocks
+          # activation checkpointing, as mhaw9t6l. The ocean_ppad pretrain
+          # does not set it, and without it this recipe (n_ensemble 2, batch
+          # 4/GPU) OOMs a 4xH100 node in the first backward
+          # (01M4RVXMQMDE8GYVSY79WD46JY: 73 GiB allocated + 2.16 GiB asked).
+          checkpoint_strategy: all
+      corrector:
+        config:
+          # ocean_ppad pretrains with 1; a finetune must not re-disable the
+          # corrector for its first epoch
+          corrector_disabled_epochs: 0

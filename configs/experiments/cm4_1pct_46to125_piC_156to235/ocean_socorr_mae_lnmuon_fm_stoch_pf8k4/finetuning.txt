@@ -1,0 +1,4 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Stochastic pushforward stage (n 8, k 4) from ocean_socorr_mae_lnmuon_fm rs2 at epoch 8 (best_inference_ckpt).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_pf8k4|rs2ep8|ace-samudra-cm4|spgbrv0c|best_inference_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=0|01M4ZBV5MZBWSC4RP3KDX9V2HV|8h
