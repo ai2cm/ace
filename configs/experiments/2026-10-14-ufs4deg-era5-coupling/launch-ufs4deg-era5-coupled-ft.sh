@@ -6,7 +6,8 @@ OCEAN_CKPT_DS="${OCEAN_CKPT_DS:?ocean results dataset}"
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M39XBD8K0KB3GAQ79ETVN470}"   # 4deg-daily-ace2s-ft3-detached-rs0
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
-OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M4W3MH28S5HPAJ84R7AB4V3W}"   # CM4 4deg ocean stats + unaccounted_heating stats
+OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M5D5GG2FB3MWWDD5GGSH8QR2}"   # UFS 4deg stats + unaccounted_heating (+ CM4 placeholders); coupled stages use UFS ocean + ERA5 atmosphere stats (Troy 2026-10-20)
+OCEAN_STATS_SUBDIR="${OCEAN_STATS_SUBDIR:-}"   # "ocean" for the CM4 stats dataset 01M4W3MH28S5HPAJ84R7AB4V3W (the 2026-10-14 runs; CM4 stats are for pretraining only)
 OCEAN_DS="${OCEAN_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh
 ERA5_DS="${ERA5_DS:-01M4W630AM1HQRYKJ2AJ0JMNN1}"     # era5-4deg-8layer-daily-ufs-coupled-1994-2023-v2
 ERA5_ZARR=2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
@@ -30,7 +31,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=samudra-ufs4deg-era5-coupled-ft \
   --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-  --dataset "${OCEAN_STATS_DS}:ocean:/ocean_stats" \
+  --dataset "${OCEAN_STATS_DS}:${OCEAN_STATS_SUBDIR:+${OCEAN_STATS_SUBDIR}:}/ocean_stats" \
   --dataset "${OCEAN_CKPT_DS}:${OCEAN_CKPT_FILE}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar" \
   --dataset "${OCEAN_DS}:/ufs4deg/2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr" \
