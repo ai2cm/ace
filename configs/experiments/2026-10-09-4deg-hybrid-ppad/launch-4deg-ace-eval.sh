@@ -9,6 +9,7 @@ CKPT_DS="${CKPT_DS:?Beaker dataset holding the atmosphere checkpoint}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 TAG="${TAG:?short label for the atmosphere}"
 PRIORITY="${PRIORITY:-high}"
+MIN_RUNTIME="${MIN_RUNTIME:-}"   # e.g. 3h: ask Beaker not to preempt the job before this runtime (long evaluator rollouts restart from scratch when preempted)
 CLUSTERS="${CLUSTERS:-ai2/ceres ai2/jupiter ai2/titan ai2/rhea ai2/prometheus ai2/saturn ai2/neptune}"
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -19,7 +20,7 @@ JOB="ace4deg-${CFG}-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "ACE-only ${CFG} rollout of atmosphere ${TAG} (${CKPT_DS}:${CKPT_FILE})" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --preemptible ${MIN_RUNTIME:+--min-runtime "$MIN_RUNTIME"} \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \
