@@ -56,6 +56,7 @@ _LABEL = {
     "rco2rs2-spb-rco2rs2": "rco2 rs2, alternating coupled FT ep{ep} (lifted, EMA)",
     "rco2rs2-spb-rco2rs2-l2sp1e-2": "rco2 rs2, alternating coupled FT + weight anchor 0.01 ep{ep} (lifted, EMA)",
     "rco2rs2-spb-rco2rs2-l2sp1": "rco2 rs2, alternating coupled FT + weight anchor 1 ep{ep} (lifted, EMA)",
+    "rco2rs2-spb-rco2rs2-l2sp100": "rco2 rs2, alternating coupled FT + weight anchor 100 ep{ep} (lifted, EMA)",
     "rco2rs2-fta-lr1e-5": "rco2 rs2, FTA after FTO lr 1e-5 ep{ep} (lifted, EMA)",
     "rco2rs2-fta-lr7e-6": "rco2 rs2, FTA after FTO lr 7e-6 ep{ep} (lifted, EMA)",
     "rco2rs2-fta-lr1e-5-1yr": "rco2 rs2, FTA after FTO lr 1e-5, 1 yr per scenario ep{ep} (lifted, EMA)",
