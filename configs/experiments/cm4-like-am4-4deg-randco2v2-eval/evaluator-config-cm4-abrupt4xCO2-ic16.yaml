@@ -1,0 +1,33 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4-like-am4-4deg-randco2v2-eval
+# Atmosphere-only 89-day rollout against CM4 abrupt-4xCO2 ensemble member
+# ic_0016, starting from the first saved time (the branch-point state itself
+# is not saved, so 89 rather than 90 days).
+experiment_dir: /results
+n_forward_steps: 356 # 89 days
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+loader:
+  start_indices:
+    list:
+      - 0
+  dataset:
+    merge:
+      - data_path: /climate-default/2026-10-20-cm4-abrupt-4xCO2-ensemble-4deg-coupled
+        file_pattern: ic_0016-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg
+        file_pattern: ic_0016.zarr
+        engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
