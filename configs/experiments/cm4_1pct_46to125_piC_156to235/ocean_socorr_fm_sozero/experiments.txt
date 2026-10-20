@@ -8,3 +8,11 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs0|01M50DCHXZZCR1YRPPPJTZB
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs1|01M5BV658YPX870GNDC601MMPG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs2|01M5BV6E6NSQ6T0P0YHPQAXF4Z|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs1|01M5BV658YPX870GNDC601MMPG|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs2|01M5BV6E6NSQ6T0P0YHPQAXF4Z|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs1|01M5BV658YPX870GNDC601MMPG|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_sozero|rs2|01M5BV6E6NSQ6T0P0YHPQAXF4Z|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
