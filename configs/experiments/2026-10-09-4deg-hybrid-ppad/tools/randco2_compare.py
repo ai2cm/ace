@@ -53,6 +53,16 @@ _LABEL = {
     "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",
     "rco2rs2-replay": "rco2 rs2, coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
     "rco2rs2-replay-oceanonly": "rco2 rs2, ocean-only coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "rco2rs2-spb-rco2rs2": "rco2 rs2, alternating coupled FT ep{ep} (lifted, EMA)",
+    "rco2rs2-spb-rco2rs2-l2sp1e-2": "rco2 rs2, alternating coupled FT + weight anchor 0.01 ep{ep} (lifted, EMA)",
+    "rco2rs2-spb-rco2rs2-l2sp1": "rco2 rs2, alternating coupled FT + weight anchor 1 ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-lr1e-5": "rco2 rs2, FTA after FTO lr 1e-5 ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-lr7e-6": "rco2 rs2, FTA after FTO lr 7e-6 ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-lr1e-5-1yr": "rco2 rs2, FTA after FTO lr 1e-5, 1 yr per scenario ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-lr1e-5-10yr": "rco2 rs2, FTA after FTO lr 1e-5, 10 yr per scenario ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-encdec": "rco2 rs2, FTA after FTO, encoder+decoder only ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-lastblock": "rco2 rs2, FTA after FTO, last block+decoder only ep{ep} (lifted, EMA)",
+    "rco2rs2-fta-firstblock": "rco2 rs2, FTA after FTO, encoder+first block only ep{ep} (lifted, EMA)",
 }
 for _r in api.runs(
     PROJECT,
@@ -60,7 +70,10 @@ for _r in api.runs(
     order="-created_at",
 ):
     _m = _re.match(
-        r"ace4deg-randco2-(\d)xCO2-ic3-((" + "|".join(_LABEL) + r")-ep(\d+))$", _r.name
+        r"ace4deg-randco2-(\d)xCO2-ic3-(("
+        + "|".join(sorted(_LABEL, key=len, reverse=True))
+        + r")-ep(\d+))$",
+        _r.name,
     )
     if _m:
         _after[(_m.group(3), int(_m.group(4)))] = _m.group(2)
