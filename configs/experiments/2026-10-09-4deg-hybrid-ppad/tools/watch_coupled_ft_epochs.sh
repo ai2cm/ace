@@ -37,6 +37,7 @@ for j in e['jobs']:
     # epochs saved in this segment
     for N in $(beaker job logs "$JOB" 2>/dev/null | grep -o "Saving checkpoints for epoch [0-9]*" | awk '{print $5}' | sort -un); do
       grep -qx "$N" "$STATE" && continue
+      grep -qsx "$N" "$STATE.lost" && continue
       [ "$N" -ge 1 ] || continue
       log "epoch $N saved in segment $JOB (dataset $DS): fetching ckpt.tar"
       D="$WORK/ep$N"; rm -rf "$D"; mkdir -p "$D/src" "$D/upload/training_checkpoints"
@@ -48,8 +49,15 @@ for j in e['jobs']:
       log "epoch $N: $info"
       # the restart checkpoint is written at the end of train_one_epoch, BEFORE the epoch counter increments and before
       # the inline evaluation: the end-of-epoch-N file reads "epoch N-1, batches N*B (+B this epoch)"
-      if ! echo "$info" | grep -q "batches $((N * BATCHES_PER_EPOCH)) "; then
-        log "epoch $N: ckpt.tar is not the end-of-epoch-$N save (already overwritten or not yet uploaded); will retry"
+      got=$(echo "$info" | sed -n 's/.*batches \([0-9]*\) .*/\1/p')
+      want=$((N * BATCHES_PER_EPOCH))
+      if [ "${got:-0}" -ne "$want" ]; then
+        if [ "${got:-0}" -gt "$want" ]; then
+          log "epoch $N: ckpt.tar in $DS is already past epoch $N ($got > $want batches); checkpoint lost, not retrying"
+          echo "$N" >> "$STATE.lost"
+        else
+          log "epoch $N: ckpt.tar has $got batches, end of epoch $N is $want; not uploaded yet, will retry"
+        fi
         rm -rf "$D"; continue
       fi
       NAME="ace4deg-atmos-lifted-${TAG}-ep${N}"
@@ -78,7 +86,7 @@ for j in e['jobs']:
       "$SCRIPT_DIR/refresh_randco2_analysis.sh" 2>&1 | sed "s/^/  /" && echo "$N" >> "$STATE.refreshed"
     fi
   done
-  n_done=$(wc -l < "$STATE")
+  n_done=$(( $(wc -l < "$STATE") + $(cat "$STATE.lost" 2>/dev/null | wc -l) ))
   if [ "$n_done" -ge "$MAX_EPOCHS" ]; then log "all $MAX_EPOCHS epochs processed; exiting"; exit 0; fi
   if [ "$all_exited" = 1 ]; then log "experiment exited with $n_done epochs processed; exiting"; exit 0; fi
   sleep "$POLL"
