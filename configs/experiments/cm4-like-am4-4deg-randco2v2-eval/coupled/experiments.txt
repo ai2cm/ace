@@ -2,12 +2,12 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # Coupled fine-tunes from ai2cm/reports#179 (W&B project ace-samudra-coupled-cm4).
 # samudra-ppad4deg-ff-ohc-ppad-coupled-ft-jointens-rco2rs2 (W&B 3geasxik), finished: final best_inference_ckpt
-ppad4deg-cft-rco2rs2||01M50GDF55ZG0FQVEGSG9YAT3X|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M55F0G95DAZBNRM8T9MJ7WQ9|ai2/ace|titan
+ppad4deg-cft-rco2rs2|retry1|01M50GDF55ZG0FQVEGSG9YAT3X|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M55F0G95DAZBNRM8T9MJ7WQ9|ai2/ace|titan
 # samudra-ppad4deg-ff-ohc-ppad-coupled-ft-jointens (W&B bz0xzjjd), ordinary ACE2S rs0, finished: final best_inference_ckpt
-ppad4deg-cft-ord-rs0||01M4XW3ZCC2Y6J4B3CCAXGGC5D|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M50NHNN27F685A2RX9A9F4FS|ai2/ace|titan
+ppad4deg-cft-ord-rs0|retry1|01M4XW3ZCC2Y6J4B3CCAXGGC5D|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M50NHNN27F685A2RX9A9F4FS|ai2/ace|titan
 # samudra-ppad4deg-ff-ohc-ppad-coupled-ft-jointens-spb-rco2rs2-replay (W&B vktu8iuh), in progress: best_inference_ckpt at epoch 5,
 # dataset spencerc/2026-10-20-samudra-ppad4deg-ff-ohc-ppad-coupled-ft-jointens-spb-rco2rs2-replay-epoch5
-ppad4deg-cft-rco2rs2-replay-ep5||01M5AYT83Z476GGGT8YY906XY9|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M5DE061QCRXVGKYJHZC7C4PJ|ai2/ace|titan
+ppad4deg-cft-rco2rs2-replay-ep5|retry1|01M5AYT83Z476GGGT8YY906XY9|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M5DE061QCRXVGKYJHZC7C4PJ|ai2/ace|titan
 # samudra-ppad4deg-ff-ohc-ppad-coupled-ft-jointens-spb-rco2rs2-replay-oceanonly (W&B gdpqriiv), in progress: best_inference_ckpt at epoch 4,
 # dataset spencerc/2026-10-20-samudra-ppad4deg-ff-ohc-ppad-coupled-ft-jointens-spb-rco2rs2-replay-oceanonly-epoch4
-ppad4deg-cft-rco2rs2-replay-oo-ep4||01M5AYTE5ZBCHF4D6Y7F3GE90F|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M5DE06104QFWGGP1ES4XYPR8|ai2/ace|titan
+ppad4deg-cft-rco2rs2-replay-oo-ep4|retry1|01M5AYTE5ZBCHF4D6Y7F3GE90F|run_cm4-abrupt-4xCO2-ensemble|best_inference_ckpt|high|--min-runtime 1h||01M5DE06104QFWGGP1ES4XYPR8|ai2/ace|titan
