@@ -20,7 +20,7 @@ JOB="ace4deg-${CFG}-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "ACE-only ${CFG} rollout of atmosphere ${TAG} (${CKPT_DS}:${CKPT_FILE})" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible ${MIN_RUNTIME:+--min-runtime "$MIN_RUNTIME"} \
+  --workspace ai2/ace --priority "$PRIORITY" ${MIN_RUNTIME:+--min-runtime "$MIN_RUNTIME"} ${MIN_RUNTIME:---preemptible} \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \
