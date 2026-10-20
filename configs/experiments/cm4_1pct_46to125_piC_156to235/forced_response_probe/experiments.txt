@@ -3,8 +3,8 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Forced-response probe: piC control from 0201 (closest piC match to 1pct year 1), 45 yr, for the rs2 ep8 lineage.
 # --config-dir configs/experiments/cm4_eval/ocean
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|run_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|run_piC-ic0201-45yr|best_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_4step|rs2ep8|01M5AKTBMRPPWBS5J069KSNKAJ|run_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8|01M50Q5J94PCSWGNCSNSXSBSZA|run_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step_lin8|rs2ep8|01M5AFHJGSE988F2R4WW8ENTCG|run_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm|rs2|01M4XW2V0K4X6QWRTP6DT13DSR|running_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step|rs2ep8|01M597EQBZAFB8K62ZSGGD9AXV|running_piC-ic0201-45yr|best_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_4step|rs2ep8|01M5AKTBMRPPWBS5J069KSNKAJ|running_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_lin8|rs2ep8|01M50Q5J94PCSWGNCSNSXSBSZA|running_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_1step_lin8|rs2ep8|01M5AFHJGSE988F2R4WW8ENTCG|running_piC-ic0201-45yr|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter+titan
