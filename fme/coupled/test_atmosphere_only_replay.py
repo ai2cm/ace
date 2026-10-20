@@ -68,3 +68,44 @@ def test_coupled_batch_still_works_and_can_be_ocean_only():
         else:
             assert metrics["loss/atmosphere"] == 0
             assert metrics["loss/ocean"] > 0
+
+
+def test_anchor_penalty_is_added_on_coupled_batches():
+    from fme.core.optimization import OptimizationConfig
+    from fme.core.registry.module import ModuleSelector
+
+    class Atmos(torch.nn.Module):
+        # in: [surface_temperature, ocean_fraction] -> out: [surface_temperature]
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(2, 1, kernel_size=1)
+
+        def forward(self, x):
+            return self.conv(x)
+
+    config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE"), n_steps=1),
+        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE"), n_steps=2),
+        anchor_atmosphere_weights=1.0,
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=config,
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=2,
+        atmosphere_builder=ModuleSelector(type="prebuilt", config={"module": Atmos()}),
+    )
+    optimization = OptimizationConfig(lr=1e-2).build(
+        train_stepper.modules, max_epochs=1
+    )
+    out = train_stepper.train_on_batch(coupled_data.data, optimization)
+    key = [k for k in out.get_metrics() if "anchor_penalty" in k][0]
+    assert out.get_metrics()[key] == 0  # first batch: weights still at their anchor
+    out2 = train_stepper.train_on_batch(coupled_data.data, optimization)
+    assert out2.get_metrics()[key] > 0  # weights moved, the penalty is paid
+    assert torch.isfinite(out2.get_metrics()["loss"])

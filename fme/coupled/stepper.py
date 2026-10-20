@@ -1846,6 +1846,8 @@ class CoupledTrainStepperConfig:
         atmosphere_only: Optional replay of atmosphere-only batches from
             ``TrainConfig.train_loader_atmosphere_only`` (see
             AtmosphereOnlyTrainingConfig).
+        anchor_atmosphere_weights: Optional L2 penalty weight toward the atmosphere's
+            initial weights (L2-SP), added to every coupled batch's loss.
     """
 
     n_coupled_steps: int
@@ -1857,6 +1859,11 @@ class CoupledTrainStepperConfig:
         default_factory=lambda: CoupledParameterInitConfig()
     )
     atmosphere_only: AtmosphereOnlyTrainingConfig | None = None
+    # L2 penalty toward the atmosphere's initial (loaded) weights, added to every
+    # coupled batch's loss: weight * sum((theta - theta_0)^2) over trainable
+    # atmosphere parameters (prototype, Troy 2026-10-20: regularize how far the
+    # atmosphere moves during coupled fine-tuning)
+    anchor_atmosphere_weights: float | None = None
 
     def __post_init__(self):
         """Validate that parameter_init is not specified in conflicting ways.
@@ -2091,6 +2098,14 @@ class CoupledTrainStepper(
         self._stepper = stepper
         self._config = config
         self._loss = self._config._build_loss(stepper, config.n_coupled_steps)
+        self._anchor: list[tuple[torch.nn.Parameter, torch.Tensor]] = []
+        if config.anchor_atmosphere_weights is not None:
+            # snapshot of the loaded atmosphere weights the penalty pulls toward
+            self._anchor = [
+                (p, p.detach().clone())
+                for p in stepper.atmosphere.modules.parameters()
+                if p.requires_grad
+            ]
         self._atmosphere_only: TrainStepper | None = None
         if config.atmosphere_only is not None:
             # the same atmosphere Stepper object (shared weights, optimizer, EMA),
@@ -2369,6 +2384,16 @@ class CoupledTrainStepper(
                 evaluate_all_steps=evaluate_all_steps,
             )
 
+        if self._anchor:
+            weight = self._config.anchor_atmosphere_weights
+            assert weight is not None
+            penalty = torch.stack(
+                [((p - p0) ** 2).sum() for p, p0 in self._anchor]
+            ).sum()
+            optimization.accumulate_loss(weight * penalty)
+            metrics.add_metric(
+                "anchor_penalty", (weight * penalty).detach(), "atmosphere"
+            )
         loss = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
 
