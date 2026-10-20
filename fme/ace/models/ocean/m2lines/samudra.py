@@ -282,7 +282,7 @@ class Samudra(torch.nn.Module):
                     layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
                 ):
                     skip = temp[int(2 * self.num_steps - count - 1)]
-                    # crop what a padded pool added; the refill below covers
+                    # crop what a padded pool added; or add below
                     # what a floor pool dropped
                     fts = fts[..., : skip.shape[-2], : skip.shape[-1]]
                     crop = np.array(fts.shape[2:])
