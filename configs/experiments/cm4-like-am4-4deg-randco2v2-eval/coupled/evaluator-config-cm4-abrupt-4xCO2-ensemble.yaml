@@ -18,15 +18,15 @@ loader:
     ocean:
       merge:
         - data_path: /climate-default
-          file_pattern: 2026-07-22-om4-picontrol-4deg-coupled-ocean.zarr
+          file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
           engine: zarr
         - data_path: /climate-default
-          file_pattern: 2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
+          file_pattern: 2026-07-15-cm4-picontrol-4deg-ocean-5daily.zarr
           engine: zarr
     atmosphere:
       merge:
         - data_path: /climate-default
-          file_pattern: 2026-07-22-om4-picontrol-4deg-coupled-atmosphere.zarr
+          file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-atmosphere.zarr
           engine: zarr
         - data_path: /climate-default
           file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
