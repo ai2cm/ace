@@ -15,12 +15,13 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+if [ -n "$MIN_RUNTIME" ]; then PREEMPT_ARGS="--min-runtime $MIN_RUNTIME"; else PREEMPT_ARGS="--preemptible"; fi
 cd "$REPO_ROOT"
 JOB="ace4deg-${CFG}-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "ACE-only ${CFG} rollout of atmosphere ${TAG} (${CKPT_DS}:${CKPT_FILE})" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" ${MIN_RUNTIME:+--min-runtime "$MIN_RUNTIME"} ${MIN_RUNTIME:---preemptible} \
+  --workspace ai2/ace --priority "$PRIORITY" $PREEMPT_ARGS \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \
