@@ -34,11 +34,29 @@ MODELS = {
 df = pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).dropna(
     subset=["results_ds"]
 )
+SHOW = [int(e) for e in os.environ.get("RANDCO2_SHOW_EPOCHS", "3 8").split()]
+
+
+def _epoch(a):
+    return int(str(a).split(" ep")[1].split()[0])
+
+
 for a in sorted(
-    {a for a in df.atmosphere if str(a).startswith("rco2 rs2, after")},
-    key=lambda a: int(a.split("ep")[1].split()[0]),
+    {
+        a
+        for a in df.atmosphere
+        if (str(a).startswith("rco2 rs2, after") and _epoch(a) in SHOW)
+        or "replay" in str(a)
+    },
+    key=lambda a: (("replay" in a) + ("ocean-only" in a), _epoch(a)),
 ):
-    MODELS[f"random-CO$_2$ rs2\nafter coupled FT ep {a.split('ep')[1].split()[0]}"] = a
+    if "ocean-only" in a:
+        lab = f"random-CO$_2$ rs2 + replay\nocean-only coupled FT ep {_epoch(a)}"
+    elif "replay" in a:
+        lab = f"random-CO$_2$ rs2 + replay\ncoupled FT ep {_epoch(a)}"
+    else:
+        lab = f"random-CO$_2$ rs2\nafter coupled FT ep {_epoch(a)}"
+    MODELS[lab] = a
 time = xr.date_range(
     INITIAL_TIME, periods=7668, freq="6h", calendar=CALENDAR, use_cftime=True
 )

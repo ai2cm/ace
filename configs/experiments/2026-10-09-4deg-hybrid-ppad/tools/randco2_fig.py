@@ -21,14 +21,21 @@ HERE = os.environ.get("RANDCO2_OUT", os.path.dirname(os.path.abspath(__file__)))
 df = pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).dropna(
     subset=["results_ds"]
 )
-df = df[df.atmosphere.str.contains("before|after")]  # ours (have monthly files)
+df = df[df.atmosphere.str.contains("before|after|replay")]  # ours (have monthly files)
 ORDER = [
     "ace2sft-rs0 (never saw randCO2), before",
     "rco2 rs2 ep11, before",
 ]
 ORDER += sorted(
-    [a for a in set(df.atmosphere) if a.startswith("rco2 rs2, after")],
-    key=lambda a: int(a.split("ep")[1].split()[0]),
+    [
+        a
+        for a in set(df.atmosphere)
+        if (a.startswith("rco2 rs2, after") or "replay" in a)
+    ],
+    key=lambda a: (
+        ("replay" in a) + ("ocean-only" in a),
+        int(a.split(" ep")[1].split()[0]),
+    ),
 )
 _pal = [
     "#2a78d6",

@@ -37,17 +37,33 @@ MODELS = {  # legend label -> atmosphere name in randco2_compare.csv
     "ACE2S-ft rs0 (1pctCO$_2$ 46–125, piC 156–235; never saw random CO$_2$)": "ace2sft-rs0 (never saw randCO2), before",
     "random-CO$_2$ rs2, epoch 11 (Spencer's v2 1pct_46to125 arm), before coupling": "rco2 rs2 ep11, before",
 }
+SHOW = [
+    int(e) for e in os.environ.get("RANDCO2_SHOW_EPOCHS", "3 8").split()
+]  # plain-FT epochs drawn
+
+
+def _epoch(a):
+    return int(str(a).split(" ep")[1].split()[0])
+
+
+def _label(a):
+    if "ocean-only" in a:
+        return f"random-CO$_2$ rs2 + replay, ocean-only coupled FT epoch {_epoch(a)}"
+    if "replay" in a:
+        return f"random-CO$_2$ rs2 + replay, coupled FT epoch {_epoch(a)}"
+    return f"random-CO$_2$ rs2 after coupled FT epoch {_epoch(a)} (EMA, lifted out)"
+
+
 for _a in sorted(
     {
         a
         for a in pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).atmosphere
-        if str(a).startswith("rco2 rs2, after")
+        if (str(a).startswith("rco2 rs2, after") and _epoch(a) in SHOW)
+        or "replay" in str(a)
     },
-    key=lambda a: int(a.split("ep")[1].split()[0]),
+    key=lambda a: (("replay" in a) + ("ocean-only" in a), _epoch(a)),
 ):
-    MODELS[
-        f"random-CO$_2$ rs2 after coupled FT epoch {_a.split('ep')[1].split()[0]} (EMA, lifted out)"
-    ] = _a
+    MODELS[_label(_a)] = _a
 COLORS = {m: f"C{i}" for i, m in enumerate(MODELS)}
 YLIMITS = {"air_temperature_0": (210, 240), "TMP2m": (282, 301)}
 YLABELS = {"air_temperature_0": "Global mean T$_0$ [K]", "TMP2m": "Global mean T2m [K]"}
