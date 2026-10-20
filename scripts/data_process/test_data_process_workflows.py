@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 
@@ -27,12 +28,23 @@ COUPLED_ENTRY_POINTS = [
     os.path.join(DIRNAME, "upload_coupled_stats.py"),
 ]
 
-WORKFLOW_YAMLS = [
-    COUPLED_WORKFLOW,
-    os.path.join(DIRNAME, "compute_dataset_argo_workflow.yaml"),
+COMPUTE_DATASET_WORKFLOW = os.path.join(DIRNAME, "compute_dataset_argo_workflow.yaml")
+COMPUTE_DATASET_SUBMIT_SCRIPT = os.path.join(DIRNAME, "compute_dataset.sh")
+COMPUTE_DATASET_ENTRY_POINTS = [
+    os.path.join(DIRNAME, name)
+    for name in [
+        "compute_dataset.py",
+        "time_coarsen.py",
+        "get_stats.py",
+        "combine_stats.py",
+        "upload_stats.py",
+    ]
 ]
 
+WORKFLOW_YAMLS = [COUPLED_WORKFLOW, COMPUTE_DATASET_WORKFLOW]
+
 PARAMETER_REFERENCE = re.compile(r"\{\{workflow\.parameters\.([A-Za-z0-9_]+)\}\}")
+INPUT_REFERENCE = re.compile(r"\{\{inputs\.parameters\.([A-Za-z0-9_]+)\}\}")
 HEREDOC_OPENER = re.compile(
     r"cat\s*<<\s*(?P<quote>'?)(?P<delim>[A-Za-z0-9_]+)(?P=quote)\s*>\s*(?P<file>\S+)"
 )
@@ -106,8 +118,8 @@ def test_workflow_parameters_are_declared(path):
     assert referenced - declared == set()
 
 
-def _submitted_code_bundle() -> str:
-    result = _submit(*PAIR_FLAGS[:2])
+def _submitted_code_bundle(submit_script: str = COUPLED_SUBMIT_SCRIPT) -> str:
+    result = _submit(*SUBMIT_FLAGS[submit_script], submit_script=submit_script)
     assert result.returncode == 0
     (bundle,) = CODE_BUNDLE_FLAG.findall(result.stdout)
     return bundle
@@ -124,32 +136,49 @@ def _unpack(bundle: str) -> dict[str, str]:
         return files
 
 
-@pytest.mark.parametrize("entry_point", COUPLED_ENTRY_POINTS, ids=os.path.basename)
-def test_coupled_code_bundle_holds_every_local_import(entry_point):
-    files = _unpack(_submitted_code_bundle())
+requires_yq = pytest.mark.skipif(
+    shutil.which("yq") is None, reason="compute_dataset.sh reads its config with yq"
+)
+
+BUNDLED_ENTRY_POINTS = [
+    pytest.param(COUPLED_SUBMIT_SCRIPT, entry_point, id=os.path.basename(entry_point))
+    for entry_point in COUPLED_ENTRY_POINTS
+] + [
+    pytest.param(
+        COMPUTE_DATASET_SUBMIT_SCRIPT,
+        entry_point,
+        id=os.path.basename(entry_point),
+        marks=requires_yq,
+    )
+    for entry_point in COMPUTE_DATASET_ENTRY_POINTS
+]
+
+
+@pytest.mark.parametrize("submit_script, entry_point", BUNDLED_ENTRY_POINTS)
+def test_code_bundle_holds_every_local_import(submit_script, entry_point):
+    files = _unpack(_submitted_code_bundle(submit_script))
     for module in _sibling_import_closure(entry_point):
         filename = module + ".py"
         assert files.get(filename) == _read(os.path.join(DIRNAME, filename))
 
 
-def test_coupled_templates_unpack_the_code_bundle():
-    manifest = yaml.safe_load(_read(COUPLED_WORKFLOW))
+@pytest.mark.parametrize("path", WORKFLOW_YAMLS, ids=os.path.basename)
+def test_templates_unpack_the_code_bundle(path):
+    manifest = yaml.safe_load(_read(path))
     for template in manifest["spec"]["templates"]:
         if "container" in template:
             assert CODE_BUNDLE_UNPACK in "\n".join(template["container"]["args"])
     assert [
-        name
-        for name in _declared_parameters(COUPLED_WORKFLOW)
-        if name.endswith("_script")
+        name for name in _declared_parameters(path) if name.endswith("_script")
     ] == []
 
 
-def _largest_coupled_config() -> str:
+def _largest_config(key: str) -> str:
     configs = []
     for path in glob.glob(os.path.join(DIRNAME, "configs", "*.yaml")):
         text = _read(path)
         loaded = yaml.safe_load(text)
-        if isinstance(loaded, dict) and "coupled_datasets" in loaded:
+        if isinstance(loaded, dict) and key in loaded:
             configs.append(text)
     return max(configs, key=len)
 
@@ -163,35 +192,65 @@ def _resolved_template(template: dict, parameters: dict[str, str]) -> str:
     def escape(value: str) -> str:
         return json.dumps(value)[1:-1]
 
+    template = json.loads(json.dumps(template))
+    for parameter in template.get("inputs", {}).get("parameters", []):
+        if parameter["name"] in parameters:
+            parameter["value"] = parameters[parameter["name"]]
     text = json.dumps(template, separators=(",", ":"))
-    text = PARAMETER_REFERENCE.sub(
-        lambda m: escape(parameters[m.group(1)]), text
-    ).replace("{{inputs.parameters.config}}", escape(parameters["config"]))
+    text = PARAMETER_REFERENCE.sub(lambda m: escape(parameters[m.group(1)]), text)
+    text = INPUT_REFERENCE.sub(
+        lambda m: escape(parameters.get(m.group(1), m.group(0))), text
+    )
     for char in "<>&":
         text = text.replace(char, "\\u%04x" % ord(char))
     return text
 
 
-def test_coupled_templates_fit_the_argo_template_budget():
-    manifest = yaml.safe_load(_read(COUPLED_WORKFLOW))
-    parameters = {
+def _template_sizes(path: str, parameters: dict[str, str]) -> dict[str, int]:
+    manifest = yaml.safe_load(_read(path))
+    defaults = {
         p["name"]: p.get("value", "")
         for p in manifest["spec"]["arguments"]["parameters"]
     }
-    config = _largest_coupled_config()
-    parameters.update(
-        code_bundle=_submitted_code_bundle(), config=config, dependent_config=config
-    )
-    sizes = {
-        template["name"]: len(_resolved_template(template, parameters))
+    return {
+        template["name"]: len(_resolved_template(template, defaults | parameters))
         for template in manifest["spec"]["templates"]
         if "container" in template
     }
+
+
+def test_coupled_templates_fit_the_argo_template_budget():
+    config = _largest_config("coupled_datasets")
+    sizes = _template_sizes(
+        COUPLED_WORKFLOW,
+        dict(
+            code_bundle=_submitted_code_bundle(),
+            config=config,
+            dependent_config=config,
+        ),
+    )
     assert sizes and all(size < ARGO_TEMPLATE_BUDGET for size in sizes.values()), sizes
 
 
-def test_coupled_workflow_heredocs_quote_the_delimiter():
-    args = _container_args(COUPLED_WORKFLOW)
+@requires_yq
+def test_compute_dataset_templates_fit_the_argo_template_budget():
+    config = _largest_config("runs")
+    runs = yaml.safe_load(config)["runs"]
+    sizes = _template_sizes(
+        COMPUTE_DATASET_WORKFLOW,
+        dict(
+            code_bundle=_submitted_code_bundle(COMPUTE_DATASET_SUBMIT_SCRIPT),
+            config=config,
+            names=" ".join(runs),
+            run_directories=" ".join(runs.values()),
+        ),
+    )
+    assert sizes and all(size < ARGO_TEMPLATE_BUDGET for size in sizes.values()), sizes
+
+
+@pytest.mark.parametrize("path", WORKFLOW_YAMLS, ids=os.path.basename)
+def test_workflow_heredocs_quote_the_delimiter(path):
+    args = _container_args(path)
     unquoted = [
         opener.group("file")
         for opener in HEREDOC_OPENER.finditer(args)
@@ -264,9 +323,11 @@ def test_coupled_templates_read_config_from_inputs():
         assert "{{workflow.parameters.config}}" not in args
 
 
-def _submit(*flags: str) -> subprocess.CompletedProcess:
+def _submit(
+    *flags: str, submit_script: str = COUPLED_SUBMIT_SCRIPT
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", COUPLED_SUBMIT_SCRIPT, *flags, "--dry-run"],
+        ["bash", submit_script, *flags, "--dry-run"],
         cwd=DIRNAME,
         capture_output=True,
         text=True,
@@ -279,6 +340,16 @@ PAIR_FLAGS = (
     "--dependent-config",
     "configs/CM4-1pctCO2-coupled-1deg-1daily-140yr.yaml",
 )
+
+
+SUBMIT_FLAGS = {
+    COUPLED_SUBMIT_SCRIPT: PAIR_FLAGS[:2],
+    COMPUTE_DATASET_SUBMIT_SCRIPT: (
+        "--config",
+        "configs/shield-som-ensemble-c96-1deg-8layer.yaml",
+        "--dataset",
+    ),
+}
 
 
 def test_coupled_submit_script_passes_the_dependent_config():
