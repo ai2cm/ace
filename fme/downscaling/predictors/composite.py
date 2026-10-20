@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Literal
 
 import torch
 
@@ -40,12 +41,21 @@ class PatchPredictionConfig:
             composite_prediction=True. Larger coarse_horizontal_overlap values
             give smoother joins between patches at the cost of more model
             calls.
+        multidiffusion_sampler_dtype: dtype of the full-domain MultiDiffusion
+            sampler state and updates. Requires multidiffusion=True.
+        multidiffusion_sampler_state_on_cpu: if True, keep the full-domain
+            MultiDiffusion sampler state and per-patch conditioning in host
+            memory, moving each patch to the GPU only for its network call,
+            so GPU memory does not grow with the domain size. Requires
+            multidiffusion=True.
     """
 
     divide_generation: bool = False
     composite_prediction: bool = False
     coarse_horizontal_overlap: int = 1
     multidiffusion: bool = False
+    multidiffusion_sampler_dtype: Literal["float32", "float64"] = "float64"
+    multidiffusion_sampler_state_on_cpu: bool = False
 
     def __post_init__(self):
         if self.divide_generation and not self.composite_prediction:
@@ -60,6 +70,14 @@ class PatchPredictionConfig:
             raise ValueError(
                 "multidiffusion=True requires divide_generation=True and "
                 "composite_prediction=True."
+            )
+        if not self.multidiffusion and (
+            self.multidiffusion_sampler_dtype != "float64"
+            or self.multidiffusion_sampler_state_on_cpu
+        ):
+            raise ValueError(
+                "multidiffusion_sampler_dtype and multidiffusion_sampler_state_on_cpu "
+                "require multidiffusion=True."
             )
 
     @property
@@ -82,6 +100,8 @@ class PatchPredictor:
         model: DiffusionModel | DenoisingMoEPredictor,
         coarse_horizontal_overlap: int = 1,
         multidiffusion: bool = False,
+        sampler_dtype: torch.dtype = torch.float64,
+        sampler_state_on_cpu: bool = False,
     ):
         """
         Args:
@@ -91,6 +111,9 @@ class PatchPredictor:
             multidiffusion: if True, jointly denoise the full extent with
                 MultiDiffusion instead of averaging independently generated
                 patches. See PatchPredictionConfig.
+            sampler_dtype: MultiDiffusion sampler state dtype.
+            sampler_state_on_cpu: if True, keep the MultiDiffusion sampler
+                state in host memory.
         """
         self.model = model
         self.modules = self.model.modules
@@ -99,6 +122,22 @@ class PatchPredictor:
         self.downscale_factor = self.model.downscale_factor
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
         self.multidiffusion = multidiffusion
+        self.sampler_dtype = sampler_dtype
+        self.sampler_state_on_cpu = sampler_state_on_cpu
+
+    @classmethod
+    def from_config(
+        cls,
+        model: DiffusionModel | DenoisingMoEPredictor,
+        config: PatchPredictionConfig,
+    ) -> "PatchPredictor":
+        return cls(
+            model,
+            coarse_horizontal_overlap=config.coarse_horizontal_overlap,
+            multidiffusion=config.multidiffusion,
+            sampler_dtype=getattr(torch, config.multidiffusion_sampler_dtype),
+            sampler_state_on_cpu=config.multidiffusion_sampler_state_on_cpu,
+        )
 
     @property
     def coarse_shape(self) -> tuple[int, int]:
@@ -185,8 +224,13 @@ class PatchPredictor:
             coarse_yx_extent=coarse_yx_extent, fine_yx_extent=fine_yx_extent
         )
         if self.multidiffusion:
-            generated, _, _ = generate_multidiffusion(
-                self.model, batch, coarse_patches, n_samples
+            generated, _ = generate_multidiffusion(
+                self.model,
+                batch,
+                coarse_patches,
+                n_samples,
+                sampler_dtype=self.sampler_dtype,
+                sampler_state_on_cpu=self.sampler_state_on_cpu,
             )
             return generated
 
@@ -210,8 +254,13 @@ class PatchPredictor:
         n_samples: int,
     ) -> ModelOutputs:
         base_model = self.model.base_model
-        generated, generated_norm, latent_steps = generate_multidiffusion(
-            self.model, batch.coarse, coarse_patches, n_samples
+        generated, generated_norm = generate_multidiffusion(
+            self.model,
+            batch.coarse,
+            coarse_patches,
+            n_samples,
+            sampler_dtype=self.sampler_dtype,
+            sampler_state_on_cpu=self.sampler_state_on_cpu,
         )
         targets_norm = base_model.out_packer.pack(
             base_model.normalizer.fine.normalize(dict(batch.fine.data)),
@@ -225,7 +274,6 @@ class PatchPredictor:
             prediction=generated,
             target=target,
             loss=loss_component.loss.mean(),
-            latent_steps=latent_steps,
         )
 
 

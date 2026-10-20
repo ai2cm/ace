@@ -257,6 +257,9 @@ class DenoisingMoEPredictor:
         latents: torch.Tensor,
         inputs: torch.Tensor,
         wrap_denoiser: Callable[[Denoiser], Denoiser] | None = None,
+        record_latent_steps: bool = True,
+        compute_dtype: torch.dtype | None = None,
+        randn_like: Callable[[torch.Tensor], torch.Tensor] = torch.randn_like,
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Run the EDM sampler over the full sigma schedule, dispatching to
         experts by sigma, optionally wrapping the dispatching denoiser.
@@ -272,6 +275,9 @@ class DenoisingMoEPredictor:
             sigma_min=self._sigma_schedule_min,
             sigma_max=self._sigma_schedule_max,
             num_steps=self._num_diffusion_generation_steps,
+            record_latent_steps=record_latent_steps,
+            compute_dtype=compute_dtype,
+            randn_like=randn_like,
         )
 
     @torch.no_grad()

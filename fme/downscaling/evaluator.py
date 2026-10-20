@@ -207,11 +207,7 @@ class EvaluatorConfig:
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):
-            evaluator_model = PatchPredictor(
-                model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-                multidiffusion=self.patch.multidiffusion,
-            )
+            evaluator_model = PatchPredictor.from_config(model, self.patch)
         else:
             evaluator_model = model
 
@@ -245,11 +241,7 @@ class EvaluatorConfig:
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):
-            evaluator_model = PatchPredictor(
-                model=model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-                multidiffusion=self.patch.multidiffusion,
-            )
+            evaluator_model = PatchPredictor.from_config(model, self.patch)
         else:
             evaluator_model = model
 

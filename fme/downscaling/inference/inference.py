@@ -87,11 +87,7 @@ class Downscaler:
             return base_model
 
         logging.info(f"Using PatchPredictor for output: {output.name}")
-        return PatchPredictor(
-            model=base_model,
-            coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
-            multidiffusion=output.patch.multidiffusion,
-        )
+        return PatchPredictor.from_config(base_model, output.patch)
 
     def _on_device_generator(self, loader):
         for loaded_item in loader:

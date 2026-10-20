@@ -35,7 +35,9 @@ def test_MultiDiffusionDenoiser_averages_overlapping_patches():
     def net(x, x_lr, sigma):
         return x_lr.expand_as(x)
 
-    denoiser = MultiDiffusionDenoiser(net, slices, inputs, [None, None])
+    denoiser = MultiDiffusionDenoiser(
+        net, slices, inputs, [None, None], device=get_device()
+    )
     x = torch.zeros(2, 1, 1, 4)
     denoised = denoiser(x, x.new_empty(2, 0), torch.tensor(1.0))
     expected = torch.tensor([1.0, 2.0, 2.0, 3.0]).expand(2, 1, 1, 4)
@@ -52,7 +54,9 @@ def test_MultiDiffusionDenoiser_base_shift_round_trips():
     slices = [_slice(0, 3, 0, 4), _slice(1, 4, 0, 4)]
     inputs = [torch.zeros(2, 1, 3, 4)] * 2
     shifts: list[torch.Tensor | None] = [torch.randn(2, 1, 3, 4) for _ in slices]
-    denoiser = MultiDiffusionDenoiser(_identity_net, slices, inputs, shifts)
+    denoiser = MultiDiffusionDenoiser(
+        _identity_net, slices, inputs, shifts, device=get_device()
+    )
     x = torch.randn(2, 1, 4, 4)
     denoised = denoiser(x, x.new_empty(2, 0), torch.tensor(1.0))
     torch.testing.assert_close(denoised, x)
@@ -62,7 +66,9 @@ def test_MultiDiffusionDenoiser_raises_on_uncovered_domain():
     # corners (0, 3) and (3, 0) are covered by neither patch
     slices = [_slice(0, 3, 0, 3), _slice(1, 4, 1, 4)]
     inputs = [torch.zeros(2, 1, 3, 3)] * 2
-    denoiser = MultiDiffusionDenoiser(_identity_net, slices, inputs, [None, None])
+    denoiser = MultiDiffusionDenoiser(
+        _identity_net, slices, inputs, [None, None], device=get_device()
+    )
     x = torch.randn(2, 1, 4, 4)
     with pytest.raises(ValueError, match="do not cover"):
         denoiser(x, x.new_empty(2, 0), torch.tensor(1.0))
@@ -121,7 +127,7 @@ def test_generate_multidiffusion_single_patch_matches_generate(predict_residual)
     torch.manual_seed(0)
     expected = model.generate_on_batch_no_target(batch, n_samples=2)
     torch.manual_seed(0)
-    generated, _, _ = generate_multidiffusion(model, batch, patches, n_samples=2)
+    generated, _ = generate_multidiffusion(model, batch, patches, n_samples=2)
     torch.testing.assert_close(generated, expected)
 
 
@@ -169,7 +175,56 @@ def test_PatchPredictor_multidiffusion_generate_on_batch():
     assert outputs.prediction["x"].shape == (2, 2, *fine_shape)
     assert outputs.target["x"].shape == (2, 1, *fine_shape)
     assert outputs.loss.ndim == 0 and torch.isfinite(outputs.loss)
-    assert len(outputs.latent_steps) > 0
+    assert outputs.latent_steps == []
+
+
+def _multidiffusion_inputs():
+    full_coarse_shape = (12, 12)
+    model = _model(full_coarse_shape)
+    batch = _coarse_batch(full_coarse_shape)
+    patches = get_patches(full_coarse_shape, MODEL_COARSE_SHAPE, overlap=4)
+    return model, batch, patches
+
+
+def test_generate_multidiffusion_float32_sampler_close_to_float64():
+    # On the same device and seed, the two sampler dtypes draw the same noise,
+    # so their samples differ only by rounding.
+    model, batch, patches = _multidiffusion_inputs()
+    generated = {}
+    for dtype in (torch.float32, torch.float64):
+        torch.manual_seed(0)
+        generated[dtype], _ = generate_multidiffusion(
+            model, batch, patches, n_samples=2, sampler_dtype=dtype
+        )
+    torch.testing.assert_close(
+        generated[torch.float32], generated[torch.float64], rtol=1e-4, atol=1e-4
+    )
+
+
+def test_generate_multidiffusion_sampler_state_on_cpu():
+    model, batch, patches = _multidiffusion_inputs()
+    torch.manual_seed(0)
+    generated, generated_norm = generate_multidiffusion(
+        model, batch, patches, n_samples=2, sampler_state_on_cpu=True
+    )
+    assert generated_norm.device.type == get_device().type
+    assert generated["x"].shape == (2, 2, 24, 24)
+    assert torch.isfinite(generated["x"]).all()
+    if get_device().type == "cpu":
+        torch.manual_seed(0)
+        expected, _ = generate_multidiffusion(model, batch, patches, n_samples=2)
+        torch.testing.assert_close(generated, expected)
+
+
+def test_PatchPredictionConfig_multidiffusion_sampler_options_require_multidiffusion():
+    for kwargs in (
+        {"multidiffusion_sampler_dtype": "float32"},
+        {"multidiffusion_sampler_state_on_cpu": True},
+    ):
+        with pytest.raises(ValueError, match="require multidiffusion=True"):
+            PatchPredictionConfig(
+                divide_generation=True, composite_prediction=True, **kwargs
+            )
 
 
 def test_PatchPredictionConfig_multidiffusion_requires_divide_generation():

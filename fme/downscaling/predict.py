@@ -123,11 +123,7 @@ class EventDownscaler:
         )
         if base_model.coarse_shape == self.data.shape:
             return base_model
-        return PatchPredictor(
-            base_model,
-            coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-            multidiffusion=self.patch.multidiffusion,
-        )
+        return PatchPredictor.from_config(base_model, self.patch)
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
@@ -202,11 +198,7 @@ class Downscaler:
             name="downscaler output",
         )
         if self.patch.needs_patch_predictor:
-            return PatchPredictor(
-                model=base_model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-                multidiffusion=self.patch.multidiffusion,
-            )
+            return PatchPredictor.from_config(base_model, self.patch)
         return base_model
 
     def save_netcdf_data(self, ds: xr.Dataset):

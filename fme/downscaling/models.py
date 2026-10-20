@@ -620,6 +620,9 @@ class DiffusionModel:
         latents: torch.Tensor,
         inputs: torch.Tensor,
         wrap_denoiser: Callable[[Denoiser], Denoiser] | None = None,
+        record_latent_steps: bool = True,
+        compute_dtype: torch.dtype | None = None,
+        randn_like: Callable[[torch.Tensor], torch.Tensor] = torch.randn_like,
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         """Run the EDM sampler, optionally wrapping the denoiser it calls."""
         net: Denoiser = self.module
@@ -633,6 +636,9 @@ class DiffusionModel:
             sigma_min=self.config.sigma_min,
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
+            record_latent_steps=record_latent_steps,
+            compute_dtype=compute_dtype,
+            randn_like=randn_like,
         )
 
     def postprocess_generated(
