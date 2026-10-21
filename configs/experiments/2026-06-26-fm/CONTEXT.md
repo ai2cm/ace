@@ -55,7 +55,8 @@ numbers, no file inventory.
   present, no token containing `-` (e.g. `som-abrupt-4xCO2-ens-sstslab-eval`);
   see the plan's "Kind naming".
 - **Ocean mode** — where SST comes from at inference: `sstslab` (mixed-layer
-  ocean driven by the model's fluxes, SOM data only), `sstprescribed` (read
+  ocean driven by the model's fluxes, SOM data only), `sstslabq4deg` (the same
+  with Spencer's Q-flux re-derived at 4deg in place of the store's), `sstprescribed` (read
   from the data store as in training), `sstdata` (no model ran; data-only).
   "SST held at control while CO2 steps" is spelled by the data slot (`som`,
   a control store) plus the co2 slot (`4xCO2`), not by the ocean slot.

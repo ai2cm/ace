@@ -48,6 +48,9 @@ ocean
     ``prescribed_qflux`` and ``prescribed_mixed_layer_depth``;
     ``interpolate`` stays the training default (False) where the paper sets
     True, so the only change from training is the slab itself. SOM data only.
+    ``sstslabq4deg``: the same slab with the store's Q-flux replaced by
+    Spencer's re-derivation at 4deg (QFLUX_4DEG_DATASET, merged in front of
+    the store).
     ``sstprescribed``: read from the data store at every step, as in training
     (no ``stepper_override``). ``sstdata``: no model ran; the reference
     data's own (``dataonly`` mode).
@@ -99,6 +102,10 @@ Slab-ocean kinds (SHiELD-SOM)
 ``som-control-dataCO2-ens-sstslab-eval``
     The same slab ensemble with the 1xCO2 forcing as is (ours): ACE's own slab
     control, so the slab response of figures 8 and 10 is ACE minus ACE.
+``som-abrupt-4xCO2-ens-sstslabq4deg-eval``
+``som-control-dataCO2-ens-sstslabq4deg-eval``
+    The two above with the re-derived 4deg Q-flux (ours): how much of the
+    slab's cold drift the store's regridded Q-flux causes.
 ``somabruptens-abrupt-4xCO2-ens-sstdata-dataonly``
     SHiELD's 36-member abrupt-4xCO2 ensemble evaluated against itself. Needs
     the daily 4deg abrupt-4xCO2 ensemble dataset
@@ -407,6 +414,16 @@ SLAB_OCEAN_OVERRIDE = {
 }
 
 
+# Spencer's SHiELD-SOM Q-flux climatology re-derived at 4deg, as daily
+# ``prescribed_qflux`` on the SOM stores' time axis (build_qflux_4deg_store.py).
+# Merged in front of a SOM store, it replaces the store's Q-flux, which was
+# regridded from C96 and is off in partly-land coastal cells.
+QFLUX_4DEG_DATASET = (
+    "/climate-default/"
+    "2026-10-21-4deg-daily-c96-shield-som-qflux-rederived-at-4deg-fme-dataset"
+)
+
+
 class PrescribedSstDataset(NamedTuple):
     data_path: str
     file_pattern: str
@@ -498,6 +515,8 @@ KINDS = (
     "somabrupt-abrupt-4xCO2-10yr-sstdata-dataonly",
     "som-abrupt-4xCO2-ens-sstslab-eval",
     "som-control-dataCO2-ens-sstslab-eval",
+    "som-abrupt-4xCO2-ens-sstslabq4deg-eval",
+    "som-control-dataCO2-ens-sstslabq4deg-eval",
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
     "som-control-dataCO2-7day-sstslab-inference",
     "som-abrupt-4xCO2-7day-sstslab-inference",
@@ -588,6 +607,15 @@ def _member_dataset(climate: str, member: str, co2: float | None = None) -> dict
 def _control_dataset(co2: float | None = None) -> dict:
     """The 1xCO2 paper member, optionally with CO2 overwritten."""
     return _member_dataset(CONTROL_CLIMATE, CLIMATES[CONTROL_CLIMATE].member, co2)
+
+
+def _with_qflux_4deg(dataset: dict) -> dict:
+    """``dataset`` with its Q-flux replaced by the re-derived 4deg one: the
+    first source of a merge that has a variable supplies it.
+    """
+    return {
+        "merge": [_zarr_dataset(QFLUX_4DEG_DATASET, "qflux.zarr"), dataset],
+    }
 
 
 def _abrupt_dataset() -> dict:
@@ -943,6 +971,26 @@ def build_som_control_ens_slab_eval_configs() -> dict[str, dict]:
     }
 
 
+def build_som_abrupt_4xco2_ens_slab_q4deg_eval_configs() -> dict[str, dict]:
+    kind = "som-abrupt-4xCO2-ens-sstslabq4deg-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _with_qflux_4deg(_control_dataset(co2=CLIMATES[ABRUPT_CLIMATE].co2)),
+            ENSEMBLE_INITIAL_TIMES,
+            slab=True,
+        )
+    }
+
+
+def build_som_control_ens_slab_q4deg_eval_configs() -> dict[str, dict]:
+    kind = "som-control-dataCO2-ens-sstslabq4deg-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _with_qflux_4deg(_control_dataset()), ENSEMBLE_INITIAL_TIMES, slab=True
+        )
+    }
+
+
 def _abrupt_ensemble_member_configs(
     kind: str, data_only: bool, n_forward_steps: int = ABRUPT_ENSEMBLE_N_STEPS - 1
 ) -> dict[str, dict]:
@@ -1253,6 +1301,12 @@ BUILDERS = {
     ),
     "som-abrupt-4xCO2-ens-sstslab-eval": (build_som_abrupt_4xco2_ens_slab_eval_configs),
     "som-control-dataCO2-ens-sstslab-eval": (build_som_control_ens_slab_eval_configs),
+    "som-abrupt-4xCO2-ens-sstslabq4deg-eval": (
+        build_som_abrupt_4xco2_ens_slab_q4deg_eval_configs
+    ),
+    "som-control-dataCO2-ens-sstslabq4deg-eval": (
+        build_som_control_ens_slab_q4deg_eval_configs
+    ),
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly": (
         build_som_abrupt_4xco2_ens_data_only_configs
     ),
