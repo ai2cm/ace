@@ -17,8 +17,14 @@ The grid is copied from the template store; the climatology's must already
 match it exactly. Writes OUTPUT_STORE on GCS; copy it to WEKA_STORE with
 ``scripts/data_process/gcs_to_weka.sh OUTPUT_STORE WEKA_STORE``.
 
+``--abrupt-ensemble`` instead writes one store per member of SHiELD's
+abrupt-4xCO2 ensemble, each on that member's own 90-day time axis (member
+ic_00NN starts at its own initial month), to ABRUPT_ENSEMBLE_OUTPUT_DIR; a merge
+needs every source to share its sample times. Copy the directory to
+ABRUPT_ENSEMBLE_WEKA_DIR the same way.
+
 Usage:
-    python build_qflux_4deg_store.py [--dry-run]
+    python build_qflux_4deg_store.py [--abrupt-ensemble] [--dry-run]
 """
 
 import argparse
@@ -49,6 +55,22 @@ WEKA_STORE = (
     "2026-10-21-4deg-daily-c96-shield-som-qflux-rederived-at-4deg-fme-dataset/"
     "qflux.zarr"
 )
+ABRUPT_ENSEMBLE_STORE_DIR = (
+    "gs://vcm-ml-intermediate/"
+    "2026-09-21-vertically-resolved-4deg-daily-c96-shield-som-abrupt-4xCO2-"
+    "ensemble-fme-dataset"
+)
+ABRUPT_ENSEMBLE_OUTPUT_DIR = (
+    "gs://vcm-ml-scratch/alexeyy/"
+    "2026-10-21-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-qflux-rederived-"
+    "at-4deg-fme-dataset"
+)
+ABRUPT_ENSEMBLE_WEKA_DIR = (
+    "/climate-default/"
+    "2026-10-21-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-qflux-rederived-"
+    "at-4deg-fme-dataset"
+)
+ABRUPT_ENSEMBLE_N_MEMBERS = 36
 NAME = "prescribed_qflux"
 HALF_DAY = pd.Timedelta(hours=12)
 
@@ -92,9 +114,14 @@ def interpolate_climatology(
     return daily.assign_coords(time=labels.values)
 
 
-def build(storage_options: dict) -> xr.Dataset:
+def abrupt_ensemble_store_name(n: int) -> str:
+    return f"abrupt4xCO2-ic_{n:04d}.zarr"
+
+
+def build(storage_options: dict, template_store: str = TEMPLATE_STORE) -> xr.Dataset:
+    """The Q-flux store on the time axis and grid of ``template_store``."""
     climatology = xr.open_zarr(QFLUX_CLIMATOLOGY, storage_options=storage_options)
-    template = xr.open_zarr(TEMPLATE_STORE, storage_options=storage_options)
+    template = xr.open_zarr(template_store, storage_options=storage_options)
     for dim in ("grid_yt", "grid_xt"):
         if not np.array_equal(climatology[dim].values, template[dim].values):
             raise ValueError(f"{dim} of the climatology does not match the store")
@@ -124,10 +151,12 @@ def build(storage_options: dict) -> xr.Dataset:
         "calendar": template["time"].encoding["calendar"],
         "dtype": template["time"].encoding["dtype"],
     }
-    ds[NAME].encoding = {"chunks": (360, ds.sizes["grid_yt"], ds.sizes["grid_xt"])}
+    ds[NAME].encoding = {
+        "chunks": (min(360, ds.sizes["time"]), ds.sizes["grid_yt"], ds.sizes["grid_xt"])
+    }
     ds.attrs["history"] = (
         f"{QFLUX_CLIMATOLOGY} interpolated to the day centres of the time axis of "
-        f"{TEMPLATE_STORE} by configs/experiments/2026-06-26-fm/"
+        f"{template_store} by configs/experiments/2026-06-26-fm/"
         "build_qflux_4deg_store.py."
     )
     return ds
@@ -136,14 +165,30 @@ def build(storage_options: dict) -> xr.Dataset:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Build, do not write.")
+    parser.add_argument(
+        "--abrupt-ensemble",
+        action="store_true",
+        help="Write one store per abrupt-4xCO2 ensemble member, on its time axis.",
+    )
     args = parser.parse_args()
     storage_options = _storage_options()
-    ds = build(storage_options)
-    print(ds)
-    if args.dry_run:
-        return
-    ds.to_zarr(OUTPUT_STORE, mode="w-", storage_options=storage_options)
-    print(f"Wrote {OUTPUT_STORE}")
+    if args.abrupt_ensemble:
+        targets = [
+            (
+                f"{ABRUPT_ENSEMBLE_STORE_DIR}/{abrupt_ensemble_store_name(n)}",
+                f"{ABRUPT_ENSEMBLE_OUTPUT_DIR}/{abrupt_ensemble_store_name(n)}",
+            )
+            for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1)
+        ]
+    else:
+        targets = [(TEMPLATE_STORE, OUTPUT_STORE)]
+    for template_store, output_store in targets:
+        ds = build(storage_options, template_store)
+        print(ds)
+        if args.dry_run:
+            continue
+        ds.to_zarr(output_store, mode="w-", storage_options=storage_options)
+        print(f"Wrote {output_store}")
 
 
 if __name__ == "__main__":
