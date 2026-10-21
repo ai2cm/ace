@@ -212,10 +212,12 @@ def _cols(x0: int, x1: int) -> HorizontalSlice:
 
 def test_PatchAverager_averages_overlaps():
     # two 1x3 patches on a 1x4 domain, overlapping in columns 1-2, with
-    # leading dimensions carried through
+    # (batch, ensemble member) leading dimensions; each batch element and member
+    # is offset by a different amount, so each must be averaged on its own
     average = PatchAverager([_cols(0, 3), _cols(1, 4)], (1, 4), torch.device("cpu"))
-    patches = (torch.full((2, 3, 1, 3), value) for value in (1.0, 3.0))
-    expected = torch.tensor([1.0, 2.0, 2.0, 3.0]).expand(2, 3, 1, 4)
+    offsets = 10.0 * torch.arange(2 * 3).reshape(2, 3, 1, 1)
+    patches = (value + offsets.expand(2, 3, 1, 3) for value in (1.0, 3.0))
+    expected = torch.tensor([1.0, 2.0, 2.0, 3.0]) + offsets
     torch.testing.assert_close(average(patches), expected)
 
 
