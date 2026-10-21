@@ -8,7 +8,7 @@ import os
 import re
 import warnings
 from collections import namedtuple
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
@@ -642,6 +642,14 @@ class XarrayDataConfig(DatasetConfigABC):
 
     def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
         self.subset = subset
+
+    def get_available_names(self, file_names: Iterable[str]) -> set[str]:
+        """Names of the variables exposed by the dataset, given the names of
+        the variables stored in its files, i.e. after renaming and including
+        derived variables.
+        """
+        renamed = {self.renamed_variables.get(name, name) for name in file_names}
+        return renamed | set(self.derived_variables)
 
     def build(
         self,
