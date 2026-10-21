@@ -3,6 +3,7 @@ import logging
 import pdb
 import sys
 
+import cftime
 import click
 import dacite
 import pandas as pd
@@ -36,6 +37,8 @@ class WindowAvgDatasetConfig:
         first_timestamp: Optional start timestamp for time slicing,
             e.g. '2016-01-01T06:00:00'. The 'origin' used in resampling is
             one step (of size window_timedelta) earlier than first_timestamp.
+            If None, the first_window_end passed to get_window_avg is used
+            instead, and one of the two must be given.
         last_timestamp: Optional final timestamp in case of extra unneeded windows.
             Used after window averaging but before shifting timestamps.
         shift_timestamps_to_avg_interval_midpoint: If True, shift time axis labels
@@ -51,7 +54,9 @@ class WindowAvgDatasetConfig:
     time_dim: str = "time"
     subset_names: list[str] | None = None
 
-    def _compute_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
+    def _compute_window_avg(
+        self, ds: xr.Dataset, first_window_end: cftime.datetime | None
+    ) -> xr.Dataset:
         if self.subset_names is not None:
             ds = ds[self.subset_names]
 
@@ -68,7 +73,16 @@ class WindowAvgDatasetConfig:
 
         ds_time_varying = ds[time_varying_vars]
         dt = pd.Timedelta(self.window_timedelta).to_pytimedelta()
-        origin = ds_time_varying.time.sel(time=self.first_timestamp).item() - dt
+        if self.first_timestamp is not None:
+            first_window_end = ds_time_varying.time.sel(
+                time=self.first_timestamp
+            ).item()
+        elif first_window_end is None:
+            raise ValueError(
+                "Either first_timestamp must be configured or first_window_end "
+                "must be passed to get_window_avg."
+            )
+        origin = first_window_end - dt
         ds_time_varying_avg = (
             ds_time_varying.resample(
                 time=self.window_timedelta, closed="right", label="right", origin=origin
@@ -112,9 +126,18 @@ class WindowAvgDatasetConfig:
             )
         return ds
 
-    def get_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
+    def get_window_avg(
+        self, ds: xr.Dataset, first_window_end: cftime.datetime | None = None
+    ) -> xr.Dataset:
+        """Compute the window average of ds.
+
+        Args:
+            ds: Input dataset.
+            first_window_end: Right edge (and label) of the first window, used
+                only when first_timestamp is not configured.
+        """
         logging.info(f"Input time coord:\n {str(ds[self.time_dim])}")
-        ds = self._compute_window_avg(ds)
+        ds = self._compute_window_avg(ds, first_window_end)
         ds = self._shift_timestamps(ds)
         return ds
 
