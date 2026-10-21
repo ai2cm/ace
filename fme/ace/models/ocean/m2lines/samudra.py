@@ -1,12 +1,13 @@
 import dataclasses
 import functools
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, get_args
 
 import numpy as np
 import torch
 import torch.nn as nn
 
+from fme.ace.models.ocean.m2lines.activations import CappedGELU
 from fme.ace.models.ocean.m2lines.layers import (
     AvgPool,
     BilinearUpsample,
@@ -81,6 +82,10 @@ class Samudra(torch.nn.Module):
         original cells keep the floor pooling's windows, so a checkpoint
         trained without it fine-tunes with it on. By default False. Adds no
         parameters.
+    gelu_cap : float or None, optional
+        Maximum of the GELU in each ConvNeXt block, by default 1.0, the
+        original network. None uses an uncapped GELU; it has no ``cap``
+        buffer, so a checkpoint does not load across the two.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -125,6 +130,7 @@ class Samudra(torch.nn.Module):
         conditioned_blocks: ConditionedBlocks | None = None,
         lat_pad: LatPad = "constant",
         pad_pool: bool = False,
+        gelu_cap: float | None = 1.0,
     ):
         super().__init__()
 
@@ -152,6 +158,12 @@ class Samudra(torch.nn.Module):
             )
         self.lat_pad = lat_pad
         self.pad_pool = pad_pool
+        self.gelu_cap = gelu_cap
+        activation: Callable[[], torch.nn.Module] = (
+            torch.nn.GELU
+            if gelu_cap is None
+            else functools.partial(CappedGELU, cap_value=gelu_cap)
+        )
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
@@ -212,6 +224,7 @@ class Samudra(torch.nn.Module):
                     checkpoint_strategy=self.checkpoint_strategy,
                     context_config=block_context(),
                     lat_pad=self.lat_pad,
+                    activation=activation,
                 )
             )
             layers.append(
@@ -230,6 +243,7 @@ class Samudra(torch.nn.Module):
                 checkpoint_strategy=self.checkpoint_strategy,
                 context_config=block_context(),
                 lat_pad=self.lat_pad,
+                activation=activation,
             )
         )
         layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -250,6 +264,7 @@ class Samudra(torch.nn.Module):
                     checkpoint_strategy=self.checkpoint_strategy,
                     context_config=block_context(),
                     lat_pad=self.lat_pad,
+                    activation=activation,
                 )
             )
             layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -266,6 +281,7 @@ class Samudra(torch.nn.Module):
                 checkpoint_strategy=self.checkpoint_strategy,
                 context_config=block_context(),
                 lat_pad=self.lat_pad,
+                activation=activation,
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))

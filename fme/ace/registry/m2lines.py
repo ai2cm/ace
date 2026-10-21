@@ -65,6 +65,9 @@ class SamudraBuilder(ModuleConfig):
             bottleneck rather than 11x22). The original cells keep their
             pooling windows, so a checkpoint trained without it fine-tunes with
             it on. Adds no parameters. See ``Samudra``.
+        gelu_cap: Maximum of the GELU in each ConvNeXt block (default 1.0,
+            the original network), or None for an uncapped GELU. See
+            ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -80,6 +83,7 @@ class SamudraBuilder(ModuleConfig):
     zonally_periodic_upsample: bool = False
     lat_pad: LatPad = "constant"
     pad_pool: bool = False
+    gelu_cap: float | None = 1.0
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
@@ -152,6 +156,7 @@ class SamudraBuilder(ModuleConfig):
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             lat_pad=self.lat_pad,
             pad_pool=self.pad_pool,
+            gelu_cap=self.gelu_cap,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )
