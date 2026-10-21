@@ -349,6 +349,10 @@ stepper:
                   - VI
               zos_global_mean_correction:
                 reference_global_mean: -0.00013
+              ocean_salt_content_correction:
+                method: scaled_salinity
+                budget_config:
+                  type: sea_surface_height
             type: ocean_corrector
           builder:
             config:
@@ -370,7 +374,7 @@ stepper:
                 - 1
                 - 1
                 - 1
-              norm: instance
+              norm: layer
               zonally_periodic_upsample: true
               lat_pad: pole
             type: Samudra
@@ -405,7 +409,7 @@ stepper:
             - northward_surface_wind_stress
             - total_frozen_precipitation_rate
             - sst
-            - zos
+            - SSH
             - so_0
             - so_1
             - so_2
@@ -489,7 +493,7 @@ stepper:
             - VI
           out_names:
             - sst
-            - zos
+            - SSH
             - so_0
             - so_1
             - so_2
@@ -575,11 +579,11 @@ stepper:
             - tauuo
             - tauvo
             - wfo
-            - SSH
+            - zos
         type: single_module
       input_masking:
         mask_value: 0
-        fill_value: 0.0
+        fill_value: mean
         exclude_names_and_prefixes:
           - land_fraction
           - sea_surface_fraction
