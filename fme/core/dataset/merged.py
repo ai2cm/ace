@@ -447,7 +447,10 @@ def _infer_available_variables(config: XarrayDataConfig):
         engine=config.engine,
         chunks=None,
     ) as dataset:
-        return {config.renamed_variables.get(name, name) for name in dataset.data_vars}
+        available = {
+            config.renamed_variables.get(name, name) for name in dataset.data_vars
+        }
+    return available | set(config.derived_variables)
 
 
 def get_per_dataset_names(
