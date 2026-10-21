@@ -440,14 +440,17 @@ def _infer_available_variables(config: XarrayDataConfig):
         raise ValueError(
             f"No files found matching '{config.data_path}/{config.file_pattern}'."
         )
-    dataset = xr.open_dataset(
+    with xr.open_dataset(
         raw_paths[0],
         decode_times=False,
         decode_timedelta=False,
         engine=config.engine,
         chunks=None,
-    )
-    return dataset.data_vars
+    ) as dataset:
+        available = {
+            config.renamed_variables.get(name, name) for name in dataset.data_vars
+        }
+    return available | set(config.derived_variables)
 
 
 def get_per_dataset_names(
