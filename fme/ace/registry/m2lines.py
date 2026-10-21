@@ -39,6 +39,8 @@ class SamudraBuilder(ModuleConfig):
             network.
         lat_pad: Latitude padding mode: "constant" (default, zeros) or
             "pole" (continues across the pole). See ``Samudra``.
+        pad_pool: Pad odd sizes before each pool instead of dropping the last
+            row or column. See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -53,6 +55,7 @@ class SamudraBuilder(ModuleConfig):
     checkpoint_strategy: Literal["all", "simple"] | None = None
     zonally_periodic_upsample: bool = False
     lat_pad: LatPad = "constant"
+    pad_pool: bool = False
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
@@ -108,6 +111,7 @@ class SamudraBuilder(ModuleConfig):
             checkpoint_strategy=self.checkpoint_strategy,
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             lat_pad=self.lat_pad,
+            pad_pool=self.pad_pool,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )
