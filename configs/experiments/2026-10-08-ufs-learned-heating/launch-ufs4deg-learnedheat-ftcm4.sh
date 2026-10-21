@@ -25,7 +25,8 @@ for A in $ARMS; do
     *-ftcm4) SRC=resid-ohc-cap0005 ;;   # both arms start from the CM4 hybrid-residual anchor
     *) SRC=$A ;;
   esac
-  CKPT_DS=$(beaker experiment get "troya/samudra-anchor4deg-${SRC}" --format json | jq -r '.[0].jobs[-1].result.beaker')
+  if [ -n "${CKPT_DS_OVERRIDE:-}" ]; then CKPT_DS=$CKPT_DS_OVERRIDE; else   # e.g. the ufsvars CM4 pretraining's results dataset
+  CKPT_DS=$(beaker experiment get "troya/samudra-anchor4deg-${SRC}" --format json | jq -r '.[0].jobs[-1].result.beaker'); fi
   [ -n "$CKPT_DS" ] && [ "$CKPT_DS" != "null" ] || { echo "no results dataset for $SRC"; continue; }
   JOB="samudra-ufs4deg-${A}${JOB_SUFFIX}"
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
