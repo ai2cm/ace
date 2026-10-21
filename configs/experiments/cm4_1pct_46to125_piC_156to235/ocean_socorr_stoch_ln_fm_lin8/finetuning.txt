@@ -1,0 +1,4 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Stage 2: stochastic lin8 from the noise-from-scratch AdamW stage 1's best_ckpt (epoch 60; eyyybfgy, 01M5AKSQ2ZZCNWND7C0HE4E526).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_ln_fm_lin8|rs0|ace-samudra-cm4|eyyybfgy|best_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=0|01M5AKSQ2ZZCNWND7C0HE4E526|8h
