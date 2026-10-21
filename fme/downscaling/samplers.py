@@ -42,7 +42,8 @@ def stochastic_sampler(
     S_min: float = 0.0,
     S_max: float = float("inf"),
     S_noise: float = 1.0,
-) -> Tensor:
+    record_latent_steps: bool = True,
+) -> tuple[Tensor, list[Tensor]]:
     """
     Proposed EDM sampler (Algorithm 2) with minor changes to enable
     super-resolution and patch-based diffusion.
@@ -87,12 +88,18 @@ def stochastic_sampler(
         Maximum time step for applying churn. By default float("inf").
     S_noise : float
         Noise scaling factor applied during the churn step. By default 1.
+    record_latent_steps : bool
+        Whether to record the sampler state after each step. If False, the
+        returned list of latent steps is empty. By default True.
 
     Returns
     -------
     Tensor
         The final denoised image produced by the sampler. Same shape as
         `latents`: (batch_size, C_out, img_shape_y, img_shape_x).
+    list[Tensor]
+        The sampler state at initialization and after each step, or an empty
+        list if `record_latent_steps` is False.
 
     """
 
@@ -122,7 +129,7 @@ def stochastic_sampler(
 
     # Main sampling loop.
     x_next = latents.to(compute_dtype) * t_steps[0]
-    latent_steps = [x_next.to(latents.dtype)]
+    latent_steps = [x_next.to(latents.dtype)] if record_latent_steps else []
     for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):  # 0, ..., N-1
         x_cur = x_next
         # Increase noise temporarily.
@@ -160,5 +167,6 @@ def stochastic_sampler(
             ).to(compute_dtype)
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
-        latent_steps.append(x_next.to(latents.dtype))
+        if record_latent_steps:
+            latent_steps.append(x_next.to(latents.dtype))
     return x_next.to(latents.dtype), latent_steps
