@@ -25,6 +25,7 @@ OUTPUT_GRID_TEST_RUN ?= F90
 START_DATE_LOCAL ?= 2015-11-01
 END_DATE_LOCAL ?= 2015-11-07
 OUTPUT_PATH_LOCAL ?= /tmp/glorys-local-test.zarr
+OUTPUT_GRID_LOCAL ?= F90
 
 create_environment:
 	conda env create -f environment.yaml
@@ -80,8 +81,35 @@ glo12_local_debug:
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		python glorys-pipeline.py $(GLO12_OUTPUT_PATH_LOCAL) $(GLO12_START_DATE_LOCAL) \
 		$(GLO12_END_DATE_LOCAL) --product glo12 \
-		--output_grid F90 --runner DirectRunner --save_main_session \
+		--output_grid $(OUTPUT_GRID_LOCAL) --runner DirectRunner --save_main_session \
 		--job_server_timeout=3600 $(LOCAL_EXTRA_FLAGS)
+
+# 4-degree (F22.5) sets: the same pipeline from the 1/12-degree source, as
+# scripts/era5 builds its 4-degree set, rather than a coarsening of the
+# 1-degree stores. The grid selects its forcing store, reference mask, hfgeou,
+# and plume mask (GRID_INPUTS in the pipeline); only the weights are passed.
+OUTPUT_GRID_FOUR_DEGREE = F22.5
+REGRID_WEIGHTS_FOUR_DEGREE ?= gs://vcm-ml-intermediate/2026-09-17-GLORYS-trial-run/glorys-F22.5-weights.nc
+DATASET_NAME_FOUR_DEGREE ?= glorys12-ocean-4deg-19level-5day-1993-2025
+OUTPUT_PATH_FOUR_DEGREE = gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME_FOUR_DEGREE).zarr
+GLO12_DATASET_NAME_FOUR_DEGREE ?= glo12-ocean-4deg-19level-5day-2022-2025
+GLO12_OUTPUT_PATH_FOUR_DEGREE = gs://vcm-ml-intermediate/$(DATE)-$(GLO12_DATASET_NAME_FOUR_DEGREE).zarr
+
+.PHONY: glorys_dataflow_four_degree
+glorys_dataflow_four_degree:
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-dataflow.sh DataflowRunner \
+		$(OUTPUT_PATH_FOUR_DEGREE) $(OUTPUT_GRID_FOUR_DEGREE) $(START_DATE) $(END_DATE) \
+		--regrid_weights $(REGRID_WEIGHTS_FOUR_DEGREE) $(DATAFLOW_EXTRA_FLAGS)
+
+.PHONY: glo12_dataflow_four_degree
+glo12_dataflow_four_degree:
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-dataflow.sh DataflowRunner \
+		$(GLO12_OUTPUT_PATH_FOUR_DEGREE) $(OUTPUT_GRID_FOUR_DEGREE) $(GLO12_START_DATE) $(GLO12_END_DATE) \
+		--product glo12 --regrid_weights $(REGRID_WEIGHTS_FOUR_DEGREE) $(DATAFLOW_EXTRA_FLAGS)
 
 .PHONY: glorys_dataflow_test_run
 glorys_dataflow_test_run:
@@ -102,7 +130,7 @@ glorys_local_debug:
 	cd pipeline && \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		python glorys-pipeline.py $(OUTPUT_PATH_LOCAL) $(START_DATE_LOCAL) $(END_DATE_LOCAL) \
-		--output_grid F90 --runner DirectRunner --save_main_session \
+		--output_grid $(OUTPUT_GRID_LOCAL) --runner DirectRunner --save_main_session \
 		--job_server_timeout=3600 $(LOCAL_EXTRA_FLAGS)
 
 # Normalization stats (incl. the residual/tendency stats the hybrid ocean uses)

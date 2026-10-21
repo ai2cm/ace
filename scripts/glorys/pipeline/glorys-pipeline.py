@@ -1,5 +1,6 @@
 """xarray-beam pipeline: GLORYS12V1 ocean reanalysis + ERA5 forcing -> SamudrACE
-training zarr (1 degree Gaussian grid, 19 CM4-matched levels, 5-day cadence).
+training zarr (1- or 4-degree Gaussian grid, 19 CM4-matched levels, 5-day
+cadence).
 
 Follows the runner/infrastructure pattern of ``scripts/ufs-replay/`` and
 ``scripts/era5/``. Read that pipeline's README first; only the differences
@@ -13,8 +14,8 @@ readable zarr v2 store on CloudFerro S3: 1/12 degree, 50 z-levels,
 1993-01-01 .. present (interim after 2021-06-30). Static geometry
 (``e3t``, ``deptho``, 3-D ``mask``) comes from the product's static
 datasets. Fluxes and stress are NOT published; the ten forcing fields
-come from the 1-degree ERA5 store built by ``scripts/era5/`` (already on
-the F90 grid), window-averaged over the 5-day interval that ENDS at each
+come from the ERA5 store built by ``scripts/era5/`` on the same output grid
+(see ``GRID_INPUTS``), window-averaged over the 5-day interval that ENDS at each
 output time (the same end-of-window labelling ``scripts/ufs-replay`` and
 the SHiELD-family ``time_coarsen`` configs use).
 
@@ -48,9 +49,10 @@ per-column thickness).
 Horizontal
 ----------
 Conservative regridding (xESMF) from the regular 1/12 degree grid to the
-Gaussian F90 grid: a 12x coarsening, versus 4x for CM4/UFS. GLORYS stops
-at 80S: the 10 southernmost F90 rows have no source cells and are written
-as land (mask 0, land_fraction 1).
+Gaussian F90 grid (1 degree: a 12x coarsening, versus 4x for CM4/UFS) or
+F22.5 grid (4 degree). GLORYS stops at 80S: the output rows wholly south of
+it (10 at F90) have no source cells and are written as land (mask 0,
+land_fraction 1).
 
 Variables
 ---------
@@ -68,6 +70,7 @@ its own input. Training configs must drop those four from ``out_names``.
 """
 
 import argparse
+import dataclasses
 import datetime
 import functools
 import logging
@@ -104,7 +107,6 @@ URL_COORDS = (
     f"{_S3}/mdl-arco-time-026/arco/{_PRODUCT}/{_STATIC}--ext--coords/static.zarr"
 )
 URL_BATHY = f"{_S3}/mdl-arco-time-026/arco/{_PRODUCT}/{_STATIC}--ext--bathy/static.zarr"
-URL_FORCING = "gs://vcm-ml-intermediate/2026-08-13-era5-1deg-8layer-1940-2025.zarr"
 # GLO12, the operational analysis (GLOBAL_ANALYSISFORECAST_PHY_001_024): the
 # same ORCA12 grid and 50 levels as GLORYS12, but each 3-D field in its own
 # store and the 2-D fields in a fourth, where GLORYS12 serves all of them from
@@ -130,31 +132,67 @@ PRODUCTS = ("glorys12", "glo12")
 # Every product's output states fall on this 5-day grid, so GLORYS12 and GLO12
 # states coincide wherever the records overlap.
 TIME_ORIGIN = "1993-01-01"
-# GLORYS publishes no geothermal heat flux, but the ocean corrector's
-# scaled_temperature heat-content correction requires it in every one of its
-# three flux branches. Take the static CM4 field, which is already on the
-# 1-degree output grid.
-URL_HFGEOU = "gs://vcm-ml-intermediate/2026-09-02-cm4-1pctCO2-1deg-ocean-1daily.zarr"
-# The fine-tune starts from a checkpoint pretrained on the UFS replay ocean, so
-# every conv kernel encodes that land-sea geometry. Intersecting the two masks
-# keeps the geometry fixed: cells that are ocean only in UFS have no GLORYS
-# data, and cells that are ocean only in GLORYS would be a cold start in
-# weights that never saw them. See --no_ufs_mask_intersection to disable.
-URL_UFS_MASK = (
-    "gs://vcm-ml-intermediate/"
-    "2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr"
-)
-# River-mouth cells, masked out because runoff is not one of the emulator's
-# inputs: GLORYS resolves discharge at 1/12 degree and the controlling variable
-# is simply absent from the model, so these cells are unpredictable by
-# construction rather than by lack of capacity. They also carry outsized
-# leverage on normalization. Built by make_plume_mask.py; see its docstring.
-# Cells fresh in GLORYS12 (2011-2020) or GLO12 (2023-2025), so both products
-# share one mask.
-URL_PLUME_MASK = (
-    "gs://vcm-ml-intermediate/2026-09-17-GLORYS-trial-run/"
-    "plume-mask-5psu-glorys12-glo12.zarr"
-)
+
+
+@dataclasses.dataclass(frozen=True)
+class GridInputs:
+    """The inputs that exist on one output grid only.
+
+    ``forcing``: the ERA5 6-hourly forcing store, already on the grid.
+
+    ``reference_mask``: the ocean dataset whose masks the output is
+    intersected with. The fine-tune starts from a checkpoint pretrained on
+    that dataset, so every conv kernel encodes its land-sea geometry; cells
+    that are ocean only there have no GLORYS data, and cells that are ocean
+    only in GLORYS would be a cold start in weights that never saw them. See
+    --no_mask_intersection to disable.
+
+    ``hfgeou``: a store with a static ``hfgeou`` on the grid. GLORYS publishes
+    no geothermal heat flux, but the ocean corrector's scaled_temperature
+    heat-content correction requires it in every one of its three flux
+    branches, so the CM4 field is copied.
+
+    ``plume_mask``: river-mouth cells, masked out because runoff is not one of
+    the emulator's inputs: GLORYS resolves discharge at 1/12 degree and the
+    controlling variable is absent from the model, so these cells are
+    unpredictable by construction rather than by lack of capacity. They also
+    carry outsized leverage on normalization. Built by make_plume_mask.py from
+    the cells fresh in GLORYS12 (2011-2020) or GLO12 (2023-2025), so both
+    products share one mask.
+    """
+
+    forcing: str
+    reference_mask: str
+    hfgeou: str
+    plume_mask: str
+
+
+_INTERMEDIATE = "gs://vcm-ml-intermediate"
+GRID_INPUTS = {
+    # 1 degree: the UFS replay ocean the 1-degree fine-tune chain starts from.
+    "F90": GridInputs(
+        forcing=f"{_INTERMEDIATE}/2026-08-13-era5-1deg-8layer-1940-2025.zarr",
+        reference_mask=(
+            f"{_INTERMEDIATE}/2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr"
+        ),
+        hfgeou=f"{_INTERMEDIATE}/2026-09-02-cm4-1pctCO2-1deg-ocean-1daily.zarr",
+        plume_mask=(
+            f"{_INTERMEDIATE}/2026-09-17-GLORYS-trial-run/"
+            "plume-mask-5psu-glorys12-glo12.zarr"
+        ),
+    ),
+    # 4 degree: there is no 4-degree UFS replay; the 4-degree ocean baseline is
+    # pretrained on CM4/OM4, so its OM4 masks (and hfgeou) are the reference.
+    "F22.5": GridInputs(
+        forcing=f"{_INTERMEDIATE}/2026-08-13-era5-4deg-8layer-1940-2025.zarr",
+        reference_mask=f"{_INTERMEDIATE}/2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr",
+        hfgeou=f"{_INTERMEDIATE}/2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr",
+        plume_mask=(
+            f"{_INTERMEDIATE}/2026-09-17-GLORYS-trial-run/"
+            "plume-mask-5psu-glorys12-glo12-F22.5.zarr"
+        ),
+    ),
+}
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {"F22.5": 22.5, "F45": 45, "F90": 90, "F360": 360}
@@ -279,9 +317,9 @@ def _open_glo12(variables: Sequence[str]) -> xr.Dataset:
     return ds.assign_coords(latitude=ref["latitude"], longitude=ref["longitude"])
 
 
-def open_forcing(times: pd.DatetimeIndex) -> xr.Dataset:
-    """ERA5 6-hourly forcing on the F90 grid, restricted to ``times``."""
-    ds = xr.open_zarr(_make_zarr_store(URL_FORCING), chunks=None)[list(FORCING_VARS)]
+def open_forcing(times: pd.DatetimeIndex, url: str) -> xr.Dataset:
+    """ERA5 6-hourly forcing from ``url``, restricted to ``times``."""
+    ds = xr.open_zarr(_make_zarr_store(url), chunks=None)[list(FORCING_VARS)]
     ds = ds.rename({"latitude": "lat", "longitude": "lon"})
     ds = ds.sel(time=times)
     if ds["lat"].values[0] > ds["lat"].values[-1]:
@@ -531,24 +569,24 @@ def _nn_fill(field: np.ndarray, ocean: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _geothermal_heat_flux(mask_2d: xr.DataArray) -> xr.DataArray:
-    """``hfgeou`` on the output grid, taken from the static CM4 field.
+def _geothermal_heat_flux(mask_2d: xr.DataArray, url: str) -> xr.DataArray:
+    """``hfgeou`` on the output grid, taken from the static CM4 field at ``url``.
 
     GLORYS publishes no geothermal heat flux. The CM4 field is already on the
-    1-degree grid, so this is a copy rather than a regrid -- but the two masks
+    output grid, so this is a copy rather than a regrid -- but the two masks
     differ, so cells that are ocean in GLORYS and land in CM4 arrive NaN and
     are filled with the CM4 ocean mean. The flux is order 0.1 W/m**2 against a
     surface forcing of order 100, so the filled cells carry no weight; they
     exist so the corrector never sees a NaN.
     """
-    cm4 = xr.open_zarr(_make_zarr_store(URL_HFGEOU))["hfgeou"].load()
+    cm4 = xr.open_zarr(_make_zarr_store(url))["hfgeou"].load()
     if cm4.sizes != mask_2d.sizes or not np.allclose(
         cm4["lat"].values, mask_2d["lat"].values
     ):
         raise ValueError(
             "the CM4 hfgeou grid does not match the output grid "
             f"({dict(cm4.sizes)} vs {dict(mask_2d.sizes)}); it can only be "
-            "copied onto the 1-degree F90 grid it was written on"
+            "copied onto the grid it was written on"
         )
     cm4 = cm4.assign_coords(lat=mask_2d["lat"], lon=mask_2d["lon"])
     ocean_mean = float(cm4.where(np.isfinite(cm4)).mean())
@@ -561,20 +599,20 @@ def _geothermal_heat_flux(mask_2d: xr.DataArray) -> xr.DataArray:
     return out
 
 
-def _ufs_masks(reference: xr.DataArray) -> dict[str, xr.DataArray]:
-    """The UFS replay ocean masks on the output grid, for intersection.
+def _reference_masks(url: str, reference: xr.DataArray) -> dict[str, xr.DataArray]:
+    """The reference dataset's ocean masks on the output grid, for intersection.
 
     Raises if the grids differ: the masks are copied cell-for-cell, so a
     mismatch would silently intersect the wrong cells.
     """
-    ufs = xr.open_zarr(_make_zarr_store(URL_UFS_MASK))
+    ufs = xr.open_zarr(_make_zarr_store(url))
     names = ["mask_2d"] + [f"mask_{k}" for k in range(N_LEVELS)]
     if not np.allclose(ufs["lat"].values, reference["lat"].values) or not np.allclose(
         ufs["lon"].values, reference["lon"].values
     ):
         raise ValueError(
-            "the UFS replay mask grid does not match the output grid; it can "
-            "only be intersected on the 1-degree F90 grid it was written on"
+            f"the reference mask grid at {url} does not match the output grid; "
+            "it can only be intersected on the grid it was written on"
         )
     out = {}
     for name in names:
@@ -677,7 +715,7 @@ def build_invariants(
     output_grid: str,
     weights: np.ndarray,
     weights_path: str | None,
-    intersect_ufs_mask: bool = True,
+    intersect_reference_mask: bool = True,
     plume_mask_url: str | None = None,
     product_mask_url: str | None = None,
     coverage_references: Sequence[xr.Dataset] = (),
@@ -688,8 +726,9 @@ def build_invariants(
     GLORYS cell contributing to that layer is ocean in any source cell of
     the target footprint (max over levels, then conservative regrid > 0),
     matching the UFS convention. ``sea_surface_fraction`` is the
-    conservatively regridded surface mask; F90 rows south of 80S get zero
-    overlap and come out as land.
+    conservatively regridded surface mask; output rows south of 80S get zero
+    overlap and come out as land. The grid's reference masks and ``hfgeou``
+    come from ``GRID_INPUTS[output_grid]``.
 
     ``coverage_references``, one state of the 3-D fields per product, further
     removes the cells where any of them has no data (see ``_coverage_masks``).
@@ -705,7 +744,12 @@ def build_invariants(
     frac = _regrid_dataset(
         native, output_grid, src, weights_path, skipna=True, na_thres=1.0
     )
-    ufs = _ufs_masks(frac["mask_2d"]) if intersect_ufs_mask else None
+    inputs = GRID_INPUTS[output_grid]
+    ufs = (
+        _reference_masks(inputs.reference_mask, frac["mask_2d"])
+        if intersect_reference_mask
+        else None
+    )
     plume = _plume_mask(plume_mask_url, frac["mask_2d"]) if plume_mask_url else None
     # A product's mask acts on the output grid, not the native one: intersected
     # at 1/12 degree it would change the conservative average of every coastal
@@ -766,7 +810,7 @@ def build_invariants(
     dep = frac["deptho"].where(mask_2d > 0).astype(np.float32)
     dep.attrs = {"long_name": "Sea Floor Depth Below Geoid", "units": "m"}
     inv["deptho"] = dep
-    inv["hfgeou"] = _geothermal_heat_flux(mask_2d)
+    inv["hfgeou"] = _geothermal_heat_flux(mask_2d, inputs.hfgeou)
 
     for i, d in enumerate(TARGET_INTERFACES):
         label = "Depth interface 0 (surface)" if i == 0 else f"Depth interface {i}"
@@ -907,9 +951,9 @@ def process_forcing(
     labelled with the output time whose window it closes."""
     logging.info("forcing key=%s", key)
     chunk = chunk.load()
-    assert chunk.sizes["time"] == steps, (
-        f"partial forcing window at {key}: {chunk.sizes['time']}"
-    )
+    assert (
+        chunk.sizes["time"] == steps
+    ), f"partial forcing window at {key}: {chunk.sizes['time']}"
     k = key.offsets["time"] // steps
     ds = chunk.mean("time", keep_attrs=True)
     ds = ds.assign_coords(lat=target_lat, lon=target_lon)
@@ -1046,16 +1090,20 @@ def _get_parser():
         "either way, intersected with GLO12's mask for glo12",
     )
     p.add_argument(
+        "--no_mask_intersection",
         "--no_ufs_mask_intersection",
+        dest="no_mask_intersection",
         action="store_true",
         help="keep GLORYS's own land-sea mask instead of intersecting it with "
-        "the UFS replay mask the fine-tune checkpoint was pretrained on",
+        "the grid's reference mask (the dataset the fine-tune checkpoint was "
+        "pretrained on; see GRID_INPUTS)",
     )
     p.add_argument(
         "--plume_mask",
-        default=URL_PLUME_MASK,
+        default=None,
         help="river-plume mask store to exclude (built by make_plume_mask.py); "
-        "pass an empty string to keep the river-mouth cells",
+        "defaults to the output grid's (see GRID_INPUTS); pass an empty string "
+        "to keep the river-mouth cells",
     )
     return p
 
@@ -1095,22 +1143,24 @@ def main():
     ]
     if args.product != "glorys12":
         coverage_references.append(ds_3d.isel(time=[0]))
+    inputs = GRID_INPUTS[args.output_grid]
+    plume_mask_url = inputs.plume_mask if args.plume_mask is None else args.plume_mask
     invariant_ds, source_grid = build_invariants(
         args.output_grid,
         weights,
         args.regrid_weights,
-        intersect_ufs_mask=not args.no_ufs_mask_intersection,
+        intersect_reference_mask=not args.no_mask_intersection,
         product_mask_url=URL_BATHY_GLO12 if args.product == "glo12" else None,
-        plume_mask_url=args.plume_mask or None,
+        plume_mask_url=plume_mask_url or None,
         coverage_references=coverage_references,
     )
 
     ds_2d = open_ocean(VARS_2D, out_times, args.product)
-    ds_forcing = open_forcing(forcing_times)
+    ds_forcing = open_forcing(forcing_times, inputs.forcing)
     n_missing = len(forcing_times) - ds_forcing.sizes["time"]
-    assert n_missing == 0, (
-        f"ERA5 store lacks {n_missing} forcing steps; shorten end_date"
-    )
+    assert (
+        n_missing == 0
+    ), f"ERA5 store lacks {n_missing} forcing steps; shorten end_date"
 
     template = make_template(
         out_times, invariant_ds, _output_attrs(ds_3d, ds_2d, ds_forcing)
