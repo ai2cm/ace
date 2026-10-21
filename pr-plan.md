@@ -34,11 +34,13 @@ class Samudra(torch.nn.Module):
         ...  # raise ValueError unless P divides fts.shape[-2] and fts.shape[-1]
 ```
 
-`__init__` raises `ValueError` when:
+`__init__` raises `ValueError` when `len(pooling) != len(ch_width)` or any factor is below 1.
+The grid checks need `H`, `W`, so they live in `validate_exact_pooling_grid(pooling, img_shape,
+lat_pad)`, called by `forward` on the input and by `SamudraBuilder.build` on the dataset grid. It
+raises `ValueError` when:
 
-- `len(pooling) != len(ch_width)`;
-- any factor is not a positive integer;
-- `lat_pad="pole"`, `pooling` is explicit, and any `W_ℓ` is odd.
+- `P` does not divide `H` or `W`;
+- `lat_pad="pole"` and any `W_ℓ` is odd.
 
 `f_ℓ = 1` is allowed: that level keeps its resolution. Under `exact_pooling`, `forward` raises
 instead of refilling when a decoder skip connection's shape differs from the upsampled tensor's.
@@ -57,7 +59,7 @@ class SamudraBuilder(ModuleConfig):
         ...  # (fme.ace.validate_config) catches them
 
     def build(self, n_in_channels, n_out_channels, dataset_info):  # CHANGED — forward pooling;
-        ...  # raise ValueError early when P does not divide dataset_info.img_shape
+        ...  # validate_exact_pooling_grid on dataset_info.img_shape
 ```
 
 When `dataset_info` has no horizontal shape (`img_shape` raises `MissingDatasetInfo`), `build`
