@@ -8,6 +8,7 @@ from collections.abc import Iterable, Sequence
 from typing import Literal
 
 import cftime
+import dacite
 import numpy as np
 import pandas as pd
 import pytest
@@ -22,6 +23,7 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
 )
 from fme.core.dataset.concat import XarrayConcat, get_dataset
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import (
     MergeDatasetConfig,
     MergedXarrayDataset,
@@ -33,6 +35,7 @@ from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
     GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD,
     OverwriteConfig,
+    VariableMetadataConfig,
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
@@ -1560,3 +1563,75 @@ def test_concat_cm4_like_with_other_dataset(tmp_path):
     # both datasets were written from the same values
     for name in names:
         torch.testing.assert_close(cm4_like_sample[name], other_sample[name])
+
+
+def test_variable_metadata_overrides_renamed_and_converted_variable(tmp_path):
+    config, _ = _write_cm4_like_data(tmp_path)
+    config = dataclasses.replace(
+        config,
+        renamed_variables={"carbon_dioxide": "global_mean_co2"},
+        overwrite=OverwriteConfig(multiply_scalar={"global_mean_co2": 1e-6}),
+        variable_metadata={
+            "global_mean_co2": VariableMetadataConfig(
+                units="volume mixing ratio", long_name="global mean CO2"
+            )
+        },
+    )
+    dataset = xarray_dataset_constructor(config, ["foo", "global_mean_co2"], 2)
+    assert dataset.properties.variable_metadata["global_mean_co2"] == (
+        VariableMetadata(units="volume mixing ratio", long_name="global mean CO2")
+    )
+
+
+def test_variable_metadata_overrides_only_given_fields(tmp_path):
+    config, _ = _write_cm4_like_data(tmp_path)
+    config = dataclasses.replace(
+        config,
+        variable_metadata={
+            "foo": VariableMetadataConfig(units="K", long_name="foo temperature"),
+            "carbon_dioxide": VariableMetadataConfig(long_name="CO2"),
+        },
+    )
+    dataset = xarray_dataset_constructor(config, ["foo", "carbon_dioxide"], 2)
+    metadata = dataset.properties.variable_metadata
+    assert metadata["foo"] == VariableMetadata(units="K", long_name="foo temperature")
+    assert metadata["carbon_dioxide"] == VariableMetadata(units="ppmv", long_name="CO2")
+
+
+def test_variable_metadata_raises_for_unknown_variable(tmp_path):
+    config, _ = _write_cm4_like_data(tmp_path)
+    config = dataclasses.replace(
+        config,
+        variable_metadata={"not_a_variable": VariableMetadataConfig(units="K")},
+    )
+    with pytest.raises(ValueError, match="not_a_variable"):
+        xarray_dataset_constructor(config, ["foo"], 2)
+
+
+def test_variable_metadata_keyed_by_name_before_renaming_raises():
+    with pytest.raises(ValueError, match="after renaming"):
+        XarrayDataConfig(
+            data_path="/",
+            renamed_variables={"carbon_dioxide": "global_mean_co2"},
+            variable_metadata={"carbon_dioxide": VariableMetadataConfig(units="K")},
+        )
+
+
+def test_variable_metadata_from_yaml_dict():
+    config = dacite.from_dict(
+        XarrayDataConfig,
+        {
+            "data_path": "/",
+            "variable_metadata": {"foo": {"units": "K"}},
+        },
+        config=dacite.Config(strict=True),
+    )
+    assert config.variable_metadata["foo"] == VariableMetadataConfig(units="K")
+
+
+def test_default_variable_metadata_is_read_from_file(tmp_path):
+    config, _ = _write_cm4_like_data(tmp_path)
+    dataset = xarray_dataset_constructor(config, ["foo", "carbon_dioxide"], 2)
+    assert dataset.properties.variable_metadata["carbon_dioxide"] == (
+        VariableMetadata(units="ppmv")
+    )

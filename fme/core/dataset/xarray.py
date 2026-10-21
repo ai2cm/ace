@@ -433,6 +433,28 @@ class OverwriteConfig:
         return set(self.constant.keys()) | set(self.multiply_scalar.keys())
 
 
+@dataclasses.dataclass
+class VariableMetadataConfig:
+    """Configuration to override the metadata of a variable in XarrayDataset.
+
+    Parameters:
+        units: Units of the variable. If None, the units in the dataset are kept.
+        long_name: Long name of the variable. If None, the long name in the
+            dataset is kept.
+    """
+
+    units: str | None = None
+    long_name: str | None = None
+
+    def apply(self, metadata: VariableMetadata) -> VariableMetadata:
+        return VariableMetadata(
+            units=self.units if self.units is not None else metadata.units,
+            long_name=(
+                self.long_name if self.long_name is not None else metadata.long_name
+            ),
+        )
+
+
 def _rename_variables(
     ds: xr.Dataset, renamed_variables: Mapping[str, str]
 ) -> xr.Dataset:
@@ -509,6 +531,12 @@ class XarrayDataConfig(DatasetConfigABC):
             variable is ``ocean_fraction``, computed as
             ``1 - land_fraction - sea_ice_fraction`` clamped to [0, 1], which
             is time-varying if either input is.
+        variable_metadata: Optional overrides of the metadata (units and long
+            name) of variables, keyed by the names exposed by the dataset, i.e.
+            after applying ``renamed_variables``. Fields left unset keep the
+            metadata in the files (or of the derived variable). For example, use
+            ``{"global_mean_co2": VariableMetadataConfig(units="volume mixing
+            ratio")}`` after converting CO2 from ppmv with ``overwrite``.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -542,6 +570,9 @@ class XarrayDataConfig(DatasetConfigABC):
     labels: list[str] | None = None
     renamed_variables: Mapping[str, str] = dataclasses.field(default_factory=dict)
     derived_variables: Sequence[str] = dataclasses.field(default_factory=list)
+    variable_metadata: Mapping[str, VariableMetadataConfig] = dataclasses.field(
+        default_factory=dict
+    )
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -590,6 +621,13 @@ class XarrayDataConfig(DatasetConfigABC):
             raise ValueError(
                 "renamed_variables must not rename multiple variables to the same "
                 f"name, got {self.renamed_variables}."
+            )
+        renamed_away = set(self.renamed_variables) - set(new_names)
+        old_names = sorted(renamed_away & set(self.variable_metadata))
+        if old_names:
+            raise ValueError(
+                "variable_metadata must use the names after renaming, got "
+                f"renamed variables {old_names}."
             )
         unknown = set(self.derived_variables) - set(DERIVED_VARIABLES)
         if unknown:
@@ -650,6 +688,7 @@ class XarrayDataset(DatasetABC):
         self._derived_variables = {
             name: DERIVED_VARIABLES[name] for name in config.derived_variables
         }
+        self._metadata_overrides = config.variable_metadata
         self._raw_paths = get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
@@ -671,6 +710,7 @@ class XarrayDataset(DatasetABC):
         )
         first_dataset = _rename_variables(first_file, self._renamed_variables)
         self._check_derived_variables(first_dataset)
+        self._check_metadata_overrides(first_dataset)
         self._spatial_mask_provider = _get_spatial_mask_provider(
             first_dataset, self.dtype
         )
@@ -746,6 +786,19 @@ class XarrayDataset(DatasetABC):
                     f"Inputs {missing} needed to derive variable '{name}' are "
                     "not in the dataset."
                 )
+
+    def _check_metadata_overrides(self, ds: xr.Dataset):
+        available = (
+            set(ds.data_vars)
+            | set(self._derived_variables)
+            | set(StaticDerivedData.names)
+        )
+        unknown = sorted(set(self._metadata_overrides) - available)
+        if unknown:
+            raise ValueError(
+                f"variable_metadata given for variables {unknown} which are not "
+                "in the dataset."
+            )
 
     def _get_derived_input_names(self, requested_names: Sequence[str]) -> list[str]:
         """Names of inputs of requested derived variables which are not
@@ -882,6 +935,8 @@ class XarrayDataset(DatasetABC):
                 result[name] = self._derived_variables[name].metadata
             else:
                 result[name] = VariableMetadata.from_attrs(ds[name].attrs)
+            if name in self._metadata_overrides:
+                result[name] = self._metadata_overrides[name].apply(result[name])
         self._variable_metadata = result
 
     def _get_files_stats(
