@@ -22,13 +22,16 @@ import argparse
 import importlib.util
 import logging
 import os
+import tempfile
 
+import xarray as xr
 import xesmf as xe
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location(
     "glorys_pipeline", os.path.join(_HERE, "pipeline", "glorys-pipeline.py")
 )
+assert _spec is not None and _spec.loader is not None
 gp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gp)
 
@@ -43,9 +46,7 @@ def main():
     # The source grid comes from the bathymetry store's coordinates, which is
     # what build_invariants regrids from; taking it from the same place keeps
     # the weights valid for every field the pipeline regrids.
-    bathy = gp.open_cmems(gp.URL_BATHY).rename(
-        {"latitude": "lat", "longitude": "lon"}
-    )
+    bathy = gp.open_cmems(gp.URL_BATHY).rename({"latitude": "lat", "longitude": "lon"})
     src = gp._make_source_grid(bathy["lat"].values, bathy["lon"].values)
     dst = gp._make_target_grid(args.output_grid)
     logging.info(
@@ -55,7 +56,17 @@ def main():
         args.output_grid,
     )
     regridder = xe.Regridder(src, dst, "conservative", periodic=True)
-    regridder.to_netcdf(args.output_path)
+    # The pipeline reads a gs:// weights file through a file object, which of
+    # xarray's backends only scipy accepts, and scipy reads netCDF3 only.
+    # xESMF writes netCDF4 whenever the netCDF4 library is installed, so write
+    # to a scratch file and rewrite it as netCDF3.
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = os.path.join(tmp, "weights.nc")
+        regridder.to_netcdf(scratch)
+        with xr.open_dataset(scratch) as ds:
+            ds.load().to_netcdf(
+                args.output_path, engine="scipy", format="NETCDF3_64BIT"
+            )
     size_mb = os.path.getsize(args.output_path) / 1e6
     logging.info("wrote %s (%.1f MB)", args.output_path, size_mb)
 
