@@ -6,3 +6,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs0|01M5AKT1CRYHWDK3E0ZVY7R1B2|training|best_inference_ckpt|normal|--min-runtime 8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs0|01M5AKT1CRYHWDK3E0ZVY7R1B2|pending_piC-ic0151-200yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs0|01M5AKT1CRYHWDK3E0ZVY7R1B2|pending_1pct-ic0001-130yr|best_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs1|01M5G2Q94WQRWPT2B3985H2DZK|training|best_inference_ckpt|normal|--min-runtime 8h
