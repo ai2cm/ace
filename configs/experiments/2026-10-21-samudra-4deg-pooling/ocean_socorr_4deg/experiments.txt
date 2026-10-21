@@ -5,3 +5,5 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0|01M5G4FPZDAZ2
 cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0|01M5G4G1QKWQXGAF5JXAW0S374|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0|01M5G4GC9VV2BZKHDDQ6JCS5P0|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQASV51XJHBCHVRN2MC2|training|best_inference_ckpt|normal|--min-runtime 8h
