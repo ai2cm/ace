@@ -164,9 +164,15 @@ run_training "ace2s-pretrain-embed1024.yaml" "1deg-daily-ace2s-embed1024-pretrai
 # embed_dim=384 pretrain (matching ACE2-ERA5's latent dim, added 2026-10-12).
 run_training "ace2s-pretrain-n384.yaml" "1deg-daily-ace2s-n384-pretrain-rs0" 8
 
+# embed_dim=384 fine-tune (added 2026-10-21).
+run_training "ace2s-finetune-n384.yaml" "1deg-daily-ace2s-n384-ft3-detached-rs0" 8
+
 # 6h pretrain on 1/4 training data (18/70 years); tests whether daily model's
 # weather skill loss is from fewer samples. Added 2026-10-13.
 run_training "ace2s-pretrain-6hourly-quarter-data.yaml" "1deg-6h-ace2s-quarter-data-pretrain-rs0" 8
+
+# 6h quarter-data fine-tune (added 2026-10-21).
+run_training "ace2s-finetune-6hourly-quarter-data.yaml" "1deg-6h-ace2s-quarter-data-ft3-detached-rs0" 8
 
 # Shared temperature normalization arm (added 2026-10-01).
 run_training "ace2s-pretrain-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-pretrain-rs0" 8
