@@ -1,6 +1,7 @@
 import dataclasses
 import functools
-from collections.abc import Mapping
+import math
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, get_args
 
 import numpy as np
@@ -19,6 +20,46 @@ from fme.ace.models.ocean.m2lines.utils import pairwise
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
 ConditionedBlocks = Literal["bottleneck", "all_blocks"]
+
+
+def validate_pooling_factors(pooling: Sequence[int], n_levels: int) -> None:
+    """Raise ValueError unless ``pooling`` holds one positive integer per level."""
+    if len(pooling) != n_levels:
+        raise ValueError(
+            f"pooling has {len(pooling)} factors, expected one per level "
+            f"({n_levels}, the length of ch_width)"
+        )
+    for factor in pooling:
+        if factor < 1:
+            raise ValueError(
+                f"pooling factors must be positive integers, got {list(pooling)}"
+            )
+
+
+def validate_exact_pooling_grid(
+    pooling: Sequence[int], img_shape: tuple[int, int], lat_pad: LatPad
+) -> None:
+    """Raise ValueError unless every level of ``pooling`` divides ``img_shape``
+    exactly, and, under ``lat_pad="pole"``, every level's width is even so the
+    pole continuation rotates by exactly 180 degrees of longitude.
+    """
+    height, width = img_shape
+    product = math.prod(pooling)
+    if height % product != 0 or width % product != 0:
+        raise ValueError(
+            f"the product of pooling factors {list(pooling)} is {product}, which "
+            f"does not divide the grid shape {tuple(img_shape)}"
+        )
+    if lat_pad == "pole":
+        level_width = width
+        for factor in pooling:
+            level_width //= factor
+            if level_width % 2 != 0:
+                raise ValueError(
+                    f'lat_pad="pole" needs an even width at every level, but '
+                    f"pooling {list(pooling)} on width {width} gives width "
+                    f"{level_width}"
+                )
 
 
 class Samudra(torch.nn.Module):
@@ -64,6 +105,18 @@ class Samudra(torch.nn.Module):
         Which ConvNeXt blocks are conditioned. ``"bottleneck"`` conditions only
         the block at the coarsest resolution. ``"all_blocks"`` conditions every block.
         Required when ``context_config`` is given.
+    pooling : List[int], optional
+        Pooling factor of each level of the U-Net, applied to both axes, one
+        per entry of ``ch_width``; each decoder level upsamples by the factor
+        its encoder level pooled by. A factor of 1 keeps that level's
+        resolution. When given, the product of the factors must divide both
+        grid dimensions, so every level pools and upsamples exactly, with no
+        row or column dropped or refilled; ``forward`` raises otherwise. Under
+        ``lat_pad="pole"`` every level's width must also be even. By default
+        None: a factor of 2 at every level, floor-pooling grids that 2 does not
+        divide and refilling the dropped rows and columns in the decoder.
+        Adds no parameters, so checkpoints load across settings at equal
+        ``ch_width``.
 
     Example:
     --------
@@ -98,6 +151,7 @@ class Samudra(torch.nn.Module):
         context_config: ContextConfig | None = None,
         conditioned_blocks: ConditionedBlocks | None = None,
         lat_pad: LatPad = "constant",
+        pooling: list[int] | None = None,
     ):
         super().__init__()
 
@@ -118,6 +172,12 @@ class Samudra(torch.nn.Module):
         if lat_pad not in get_args(LatPad):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
         self.lat_pad = lat_pad
+        self.exact_pooling = pooling is not None
+        if pooling is None:
+            self.pooling = [2] * len(ch_width)
+        else:
+            validate_pooling_factors(pooling, len(ch_width))
+            self.pooling = list(pooling)
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
@@ -180,7 +240,7 @@ class Samudra(torch.nn.Module):
                     lat_pad=self.lat_pad,
                 )
             )
-            layers.append(AvgPool())
+            layers.append(AvgPool(pooling=self.pooling[i]))
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -196,7 +256,10 @@ class Samudra(torch.nn.Module):
                 lat_pad=self.lat_pad,
             )
         )
-        layers.append(upsample_cls(in_channels=b, out_channels=b))
+        pooling_reversed = self.pooling[::-1]
+        layers.append(
+            upsample_cls(in_channels=b, out_channels=b, upsampling=pooling_reversed[0])
+        )
         ch_width_with_input_reversed = ch_width_with_input[::-1]
         dilation_reversed = self.dilation[::-1]
         n_layers_reversed = self.n_layers[::-1]
@@ -216,7 +279,11 @@ class Samudra(torch.nn.Module):
                     lat_pad=self.lat_pad,
                 )
             )
-            layers.append(upsample_cls(in_channels=b, out_channels=b))
+            layers.append(
+                upsample_cls(
+                    in_channels=b, out_channels=b, upsampling=pooling_reversed[i + 1]
+                )
+            )
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -243,6 +310,10 @@ class Samudra(torch.nn.Module):
         self.num_steps = int(len(ch_width_with_input) - 1)
 
     def forward(self, fts, context: Context | None = None):
+        if self.exact_pooling:
+            validate_exact_pooling_grid(
+                self.pooling, (fts.shape[-2], fts.shape[-1]), self.lat_pad
+            )
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:
@@ -272,16 +343,23 @@ class Samudra(torch.nn.Module):
                 if isinstance(
                     layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
                 ):
-                    crop = np.array(fts.shape[2:])
-                    shape = np.array(
-                        temp[int(2 * self.num_steps - count - 1)].shape[2:]
-                    )
-                    pads = shape - crop
-                    pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
-                    fts = pad_latitude(
-                        fts, pads[0] // 2, pads[0] - pads[0] // 2, self.lat_pad
-                    )
-                    fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
-                    fts += temp[int(2 * self.num_steps - count - 1)]
+                    skip = temp[int(2 * self.num_steps - count - 1)]
+                    if self.exact_pooling:
+                        if fts.shape != skip.shape:
+                            raise ValueError(
+                                f"upsampled shape {tuple(fts.shape)} differs from "
+                                f"the skip connection's {tuple(skip.shape)} under "
+                                f"exact pooling {self.pooling}"
+                            )
+                    else:
+                        crop = np.array(fts.shape[2:])
+                        shape = np.array(skip.shape[2:])
+                        pads = shape - crop
+                        pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
+                        fts = pad_latitude(
+                            fts, pads[0] // 2, pads[0] - pads[0] // 2, self.lat_pad
+                        )
+                        fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
+                    fts += skip
                     count += 1
         return fts
