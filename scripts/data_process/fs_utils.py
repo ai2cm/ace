@@ -4,7 +4,10 @@ The filesystem is resolved from the path's URL scheme via fsspec, so callers
 use a single code path for local paths and remote URLs (e.g. ``gs://``).
 """
 
+import io
+
 import fsspec
+import xarray as xr
 from fsspec.implementations.local import LocalFileSystem
 
 
@@ -54,3 +57,20 @@ def is_local(path: str) -> bool:
     """
     fs, _ = _fs_and_path(path)
     return isinstance(fs, LocalFileSystem)
+
+
+def load_netcdf(path: str) -> xr.Dataset:
+    """Load a small netCDF file, e.g. a stats file, fully into memory.
+
+    The file is fetched in a single read before parsing. Parsing a netCDF4
+    (HDF5) file directly from a remote file object instead issues a range
+    request for each of its many small, scattered metadata reads, which for a
+    file with hundreds of variables on GCS is tens of times slower.
+
+    The returned dataset's encoding["source"] is set to path.
+    """
+    with fsspec.open(path, "rb") as f:
+        data = f.read()
+    ds = xr.open_dataset(io.BytesIO(data), decode_timedelta=False).load()
+    ds.encoding["source"] = path
+    return ds

@@ -1,0 +1,312 @@
+# make cm4_abrupt_4xCO2_ensemble_coupled_4deg
+# Requires the ocean stats from make cm4_abrupt_4xCO2_ensemble_ocean_stats.
+version: "2026-10-20"
+family_name: cm4-abrupt-4xCO2-ensemble-4deg-coupled
+output_directory: gs://vcm-ml-intermediate
+
+coupled_datasets:
+  coupled_ts:
+    how: interpolate_sst
+  coupled_sea_surface:
+    precomputed_sea_ice_mask:
+      zarr_path: gs://vcm-ml-intermediate/2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
+    ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
+    ocean_extra_fill_values:
+      UI: 0.0
+      VI: 0.0
+    surface_flux_window_avg:
+      window_timedelta: 120h
+      # No first_timestamp or last_timestamp: the members start on different
+      # dates, so each member's flux windows are right-labeled at its own
+      # ocean timesteps, i.e. each window (t - 120h, t] ends at an ocean
+      # timestep t, starting from the ocean store's first timestamp.
+      subset_names:
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
+  coupled_sea_ice:
+    # No window_avg and no sea_ice input dataset: the sea ice fraction is
+    # sourced from the ocean store's native 5-daily fields and forward-filled
+    # onto the atmosphere's 6-hourly time index.
+    include_ts: true
+    use_atmosphere_sea_ice_fraction_fallback: false
+  output_writer:
+    n_dask_workers: 32
+    # Members span at most 1460 6-hourly steps, i.e. a few 360-step outer
+    # chunks, so the default 50 partitions would be mostly empty.
+    n_split: 1
+
+stats:
+  beaker_dataset: 2026-10-20-cm4-abrupt-4xCO2-ensemble-4deg-coupled-stats
+
+input_datasets:
+  climate_data_type: "CM4"
+  stats:
+    atmosphere_dir: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg-stats/combined
+    ocean_dir: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily-stats/combined
+  # Every member shares ic_0001's atmosphere and ocean settings (anchored
+  # below) and overrides only its zarr_path.
+  runs:
+    ic_0001:
+      atmosphere: &atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0001.zarr
+        time_chunk_size: 1460
+        extra_fields:
+          names_and_prefixes: ["ak_", "bk_"]
+      ocean: &ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0001.zarr
+        time_chunk_size: 73
+        extra_fields:
+          names_and_prefixes: ["idepth_", "mask_", "deptho"]
+    ic_0002:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0002.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0002.zarr
+    ic_0003:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0003.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0003.zarr
+    ic_0004:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0004.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0004.zarr
+    ic_0005:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0005.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0005.zarr
+    ic_0006:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0006.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0006.zarr
+    ic_0007:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0007.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0007.zarr
+    ic_0008:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0008.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0008.zarr
+    ic_0009:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0009.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0009.zarr
+    ic_0010:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0010.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0010.zarr
+    ic_0011:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0011.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0011.zarr
+    ic_0012:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0012.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0012.zarr
+    ic_0013:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0013.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0013.zarr
+    ic_0014:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0014.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0014.zarr
+    ic_0015:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0015.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0015.zarr
+    ic_0016:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0016.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0016.zarr
+    ic_0017:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0017.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0017.zarr
+    ic_0018:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0018.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0018.zarr
+    ic_0019:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0019.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0019.zarr
+    ic_0020:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0020.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0020.zarr
+    ic_0021:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0021.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0021.zarr
+    ic_0022:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0022.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0022.zarr
+    ic_0023:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0023.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0023.zarr
+    ic_0024:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0024.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0024.zarr
+    ic_0025:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0025.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0025.zarr
+    ic_0026:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0026.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0026.zarr
+    ic_0027:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0027.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0027.zarr
+    ic_0028:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0028.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0028.zarr
+    ic_0029:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0029.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0029.zarr
+    ic_0030:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0030.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0030.zarr
+    ic_0031:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0031.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0031.zarr
+    ic_0032:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0032.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0032.zarr
+    ic_0033:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0033.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0033.zarr
+    ic_0034:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0034.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0034.zarr
+    ic_0035:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0035.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0035.zarr
+    ic_0036:
+      atmosphere:
+        <<: *atmosphere
+        zarr_path: gs://vcm-ml-intermediate/2026-10-16-CM4-abrupt-4xCO2-ensemble-4deg/ic_0036.zarr
+      ocean:
+        <<: *ocean
+        zarr_path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/ic_0036.zarr
