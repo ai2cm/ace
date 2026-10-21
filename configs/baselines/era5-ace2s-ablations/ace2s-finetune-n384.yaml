@@ -1,4 +1,4 @@
-# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+# arg: --dataset 01M4W744JNAPHEMJDJX0HEQQED:/weights
 #
 # ACE2S-n384 fine-tune: 3-step detached, same recipe as the paper model.
 # Architecture and weights from the n384 pretrain checkpoint via

@@ -1,5 +1,5 @@
 # arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
-# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+# arg: --dataset 01M51MARFT9X1F2G82CX35G72W:/weights
 #
 # 6-hourly quarter-data arm, stage 2: fine-tune of the 6h quarter-data pretrain.
 # Replace PRETRAIN_RESULT_DATASET with the beaker result dataset of the
