@@ -2,6 +2,6 @@ group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|o
 
 cm4_1pct_46to125_piC_156to235-ocean_levpool|rs0|train|high|jupiter|4||3|ai2/ace|seed=0|8h
 
-cm4_1pct_46to125_piC_156to235-ocean_levpool_l4|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.builder.config.pooling='[2,2,3,1]' stepper.step.config.builder.config.ch_width='[280,380,480,520]' stepper.step.config.builder.config.dilation='[1,2,4,8]' stepper.step.config.builder.config.n_layers='[1,1,1,1]'|8h
+cm4_1pct_46to125_piC_156to235-ocean_levpool_p12|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.builder.config.pooling='[2,2,3,1]'|8h
 
-cm4_1pct_46to125_piC_156to235-ocean_levpool_p36|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.builder.config.pooling='[2,2,3,3]' stepper.step.config.builder.config.ch_width='[280,380,480,520]' stepper.step.config.builder.config.dilation='[1,2,4,4]' stepper.step.config.builder.config.n_layers='[1,1,1,1]'|8h
+cm4_1pct_46to125_piC_156to235-ocean_levpool_p36|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.builder.config.pooling='[2,2,3,3]' stepper.step.config.builder.config.dilation='[1,2,4,4]'|8h

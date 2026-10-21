@@ -1,7 +1,7 @@
 # job_runner/uncoupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_levpool . \
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 # Needs Samudra `pooling` from https://github.com/ai2cm/ace/pull/1590 (branch
-# feature/samudra-levpool), merged into this branch at PR commit 8a51a616a987a41c1ec614d186a35e349c8c7ce3.
+# feature/samudra-levpool), merged into this branch at PR commit 8e51a4343c6c5db1552274c7de5ef7eb94902dde.
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -198,17 +198,21 @@ stepper:
         config:
           pooling:
           - 2
-          - 2
           - 3
+          - 3
+          - 1
           ch_width:
           - 280
           - 380
           - 480
+          - 520
           dilation:
           - 1
           - 2
           - 4
+          - 8
           n_layers:
+          - 1
           - 1
           - 1
           - 1
