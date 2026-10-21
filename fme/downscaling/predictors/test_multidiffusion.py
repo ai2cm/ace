@@ -3,7 +3,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.data import BatchData, PairedBatchData
-from fme.downscaling.data.patching import PatchAverager, _HorizontalSlice, get_patches
+from fme.downscaling.data.patching import HorizontalSlice, PatchAverager, get_patches
 from fme.downscaling.models import DiffusionModel
 from fme.downscaling.predictors.composite import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.predictors.multidiffusion import (
@@ -22,8 +22,8 @@ DOWNSCALE_FACTOR = 2
 MODEL_COARSE_SHAPE = (8, 8)
 
 
-def _slice(y0, y1, x0, x1) -> _HorizontalSlice:
-    return _HorizontalSlice(y=slice(y0, y1), x=slice(x0, x1))
+def _slice(y0, y1, x0, x1) -> HorizontalSlice:
+    return HorizontalSlice(y=slice(y0, y1), x=slice(x0, x1))
 
 
 def _denoiser(net, slices, inputs, shifts, shape) -> MultiDiffusionDenoiser:

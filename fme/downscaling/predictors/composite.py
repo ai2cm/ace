@@ -7,9 +7,9 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import (
+    HorizontalSlice,
     Patch,
     PatchAverager,
-    _HorizontalSlice,
     get_patches,
 )
 from fme.downscaling.models import (
@@ -321,10 +321,10 @@ def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
     return y_max, x_max
 
 
-def _trimmed_region(patch: Patch) -> _HorizontalSlice:
+def _trimmed_region(patch: Patch) -> HorizontalSlice:
     """Region of the full domain covered by the patch's trimmed output."""
     in_slice, out_slice = patch.input_slice, patch.output_slice
-    return _HorizontalSlice(
+    return HorizontalSlice(
         y=slice(in_slice.y.start + (out_slice.y.start or 0), in_slice.y.stop),
         x=slice(in_slice.x.start + (out_slice.x.start or 0), in_slice.x.stop),
     )

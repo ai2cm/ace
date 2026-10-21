@@ -20,14 +20,14 @@ import torch
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData
-from fme.downscaling.data.patching import Patch, PatchAverager, _HorizontalSlice
+from fme.downscaling.data.patching import HorizontalSlice, Patch, PatchAverager
 from fme.downscaling.models import DiffusionModel, _repeat_batch_by_samples
 from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 from fme.downscaling.typing_ import Denoiser
 
 
-def _scale_slice(patch_slice: _HorizontalSlice, factor: int) -> _HorizontalSlice:
-    return _HorizontalSlice(
+def _scale_slice(patch_slice: HorizontalSlice, factor: int) -> HorizontalSlice:
+    return HorizontalSlice(
         y=slice(patch_slice.y.start * factor, patch_slice.y.stop * factor),
         x=slice(patch_slice.x.start * factor, patch_slice.x.stop * factor),
     )
@@ -143,7 +143,7 @@ def generate_multidiffusion(
     state_device = torch.device("cpu") if sampler_state_on_cpu else device
     full_base = base_model.get_base_prediction(batch.data)
 
-    fine_slices: list[_HorizontalSlice] = []
+    fine_slices: list[HorizontalSlice] = []
     patch_inputs: list[torch.Tensor] = []
     base_shifts: list[torch.Tensor | None] = []
     for patch, patch_batch in zip(

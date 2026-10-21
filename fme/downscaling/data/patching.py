@@ -6,7 +6,7 @@ import torch
 
 
 @dataclasses.dataclass
-class _HorizontalSlice:
+class HorizontalSlice:
     y: slice
     x: slice
 
@@ -21,8 +21,8 @@ class Patch:
     to keep a consistent overlap between patches.
     """
 
-    input_slice: _HorizontalSlice
-    output_slice: _HorizontalSlice
+    input_slice: HorizontalSlice
+    output_slice: HorizontalSlice
 
 
 def _get_patch_slices(full_coords_size: int, patch_slice: slice):
@@ -86,8 +86,8 @@ def get_patches(
         x_in_slice, x_out_slice = _get_patch_slices(yx_extent[1], x_sl)
         patches.append(
             Patch(
-                input_slice=_HorizontalSlice(y_in_slice, x_in_slice),
-                output_slice=_HorizontalSlice(y_out_slice, x_out_slice),
+                input_slice=HorizontalSlice(y_in_slice, x_in_slice),
+                output_slice=HorizontalSlice(y_out_slice, x_out_slice),
             )
         )
     return patches
@@ -121,7 +121,7 @@ class PatchAverager:
 
     def __init__(
         self,
-        regions: list[_HorizontalSlice],
+        regions: list[HorizontalSlice],
         shape: tuple[int, int],
         device: torch.device,
     ):
