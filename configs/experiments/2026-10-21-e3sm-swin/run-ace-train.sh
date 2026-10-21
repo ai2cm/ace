@@ -54,4 +54,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "${1:-train-config.yaml}" "${2:-e3sm-swin-era5-a1-2epoch}" "${3:-e3sm-swin}"
+run_training "${1:-train-config.yaml}" "${2:-e3sm-swin-era5-2epoch}" "${3:-e3sm-swin}"
