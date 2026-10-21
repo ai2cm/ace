@@ -203,7 +203,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
         """Names of variables provided in next_step_input_data."""
         result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
-            result = result.union(self.ocean.forcing_names)
+            result = result.union(self.ocean.target_names(self.out_names))
         return frozenset(result.union(self.prescribed_prognostic_names))
 
     @property

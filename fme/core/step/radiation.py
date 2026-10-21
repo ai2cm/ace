@@ -231,7 +231,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
         input_only_names = set(self.input_names).difference(self.output_names)
         if self.ocean is None:
             return frozenset(input_only_names)
-        return frozenset(input_only_names.union(self.ocean.forcing_names))
+        return frozenset(
+            input_only_names.union(self.ocean.target_names(self.output_names))
+        )
 
     @property
     def loss_names(self) -> list[str]:

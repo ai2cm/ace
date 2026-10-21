@@ -14,6 +14,7 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.atmosphere_data import AtmosphereData
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
@@ -24,7 +25,11 @@ from fme.core.normalizer import (
     NormalizationConfig,
     NormalizationGroupConfig,
 )
-from fme.core.ocean import OceanConfig
+from fme.core.ocean import (
+    OceanConfig,
+    SlabOceanConfig,
+    mixed_layer_temperature_tendency,
+)
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
@@ -50,6 +55,7 @@ from fme.core.testing import (
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
+from fme.core.testing.dataset_info import TIMESTEP
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
@@ -951,6 +957,80 @@ def _single_module_ocean_corrector_selector(
             ),
         ),
     )
+
+
+_SLAB_FLUX_NAMES = [
+    "DLWRFsfc",
+    "ULWRFsfc",
+    "DSWRFsfc",
+    "USWRFsfc",
+    "LHTFLsfc",
+    "SHTFLsfc",
+]
+
+
+def test_single_module_slab_ocean_data_surface_flux():
+    # The surface fluxes are model outputs and, with surface_flux_source="data",
+    # also read from next-step data by the slab. They must not become inputs,
+    # or they would be prognostic (and, here, residual-predicted).
+    normalization = get_network_and_loss_normalization_config(
+        names=["surface_temperature", "ocean_fraction", *_SLAB_FLUX_NAMES],
+    )
+    selector = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=["surface_temperature", "ocean_fraction"],
+                out_names=["surface_temperature", *_SLAB_FLUX_NAMES],
+                normalization=normalization,
+                residual_prediction=True,
+                ocean=OceanConfig(
+                    surface_temperature_name="surface_temperature",
+                    ocean_fraction_name="ocean_fraction",
+                    slab=SlabOceanConfig(
+                        mixed_layer_depth_name="mld",
+                        q_flux_name="qflux",
+                        surface_flux_source="data",
+                    ),
+                ),
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    assert step.input_names == {"surface_temperature", "ocean_fraction", "mld", "qflux"}
+    assert step.prognostic_names == {"surface_temperature"}
+    assert step.next_step_input_names == {
+        "ocean_fraction",
+        "mld",
+        "qflux",
+        *_SLAB_FLUX_NAMES,
+    }
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    next_step_input_data["ocean_fraction"] = torch.ones_like(
+        next_step_input_data["ocean_fraction"]
+    )
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    net_flux = AtmosphereData(
+        next_step_input_data
+    ).net_surface_energy_flux_without_frozen_precip
+    expected = input_data["surface_temperature"] + TIMESTEP.total_seconds() * (
+        mixed_layer_temperature_tendency(
+            net_flux, next_step_input_data["qflux"], next_step_input_data["mld"]
+        )
+    )
+    torch.testing.assert_close(result.output["surface_temperature"], expected)
 
 
 def test_step_boundary_disjointness_raises_on_ocean_overlap():
