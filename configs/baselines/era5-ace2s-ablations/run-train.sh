@@ -161,6 +161,9 @@ run_training "ace2s-pretrain-6hourly.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
 # embed_dim=1024 pretrain (Titan 8xB200, added 2026-10-09).
 run_training "ace2s-pretrain-embed1024.yaml" "1deg-daily-ace2s-embed1024-pretrain-rs0" 8 ai2/titan
 
+# embed_dim=1024 fine-tune (Titan 8xB200, added 2026-10-21).
+run_training "ace2s-finetune-embed1024.yaml" "1deg-daily-ace2s-embed1024-ft3-detached-rs0" 8 ai2/titan
+
 # embed_dim=384 pretrain (matching ACE2-ERA5's latent dim, added 2026-10-12).
 run_training "ace2s-pretrain-n384.yaml" "1deg-daily-ace2s-n384-pretrain-rs0" 8
 
