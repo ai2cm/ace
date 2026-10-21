@@ -399,6 +399,28 @@ class OverwriteConfig:
         return set(self.constant.keys()) | set(self.multiply_scalar.keys())
 
 
+def _rename_variables(
+    ds: xr.Dataset, renamed_variables: Mapping[str, str]
+) -> xr.Dataset:
+    """Rename variables in a dataset opened from file.
+
+    The returned dataset does not close the underlying file when closed, so the
+    caller should keep and close the originally opened dataset.
+    """
+    if len(renamed_variables) == 0:
+        return ds
+    missing = [name for name in renamed_variables if name not in ds.data_vars]
+    if missing:
+        raise ValueError(f"Variables to rename not found in dataset: {missing}.")
+    existing = [name for name in renamed_variables.values() if name in ds.variables]
+    if existing:
+        raise ValueError(
+            f"Cannot rename variables to names which already exist in the "
+            f"dataset: {existing}."
+        )
+    return ds.rename_vars(renamed_variables)
+
+
 @dataclasses.dataclass
 class XarrayDataConfig(DatasetConfigABC):
     """
@@ -435,6 +457,14 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        renamed_variables: Optional mapping from variable names in the files to
+            the names exposed by the dataset. Renaming is applied when the files
+            are opened, so all other options (e.g. ``overwrite``, ``fill_nans``)
+            and the requested variable names refer to the new names. For example,
+            to rename a CO2 variable stored in ppmv and convert it to a volume
+            mixing ratio, use ``renamed_variables={"carbon_dioxide":
+            "global_mean_co2"}`` with
+            ``overwrite=OverwriteConfig(multiply_scalar={"global_mean_co2": 1e-6})``.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -466,6 +496,7 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
+    renamed_variables: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -509,6 +540,12 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
+        new_names = list(self.renamed_variables.values())
+        if len(new_names) != len(set(new_names)):
+            raise ValueError(
+                "renamed_variables must not rename multiple variables to the same "
+                f"name, got {self.renamed_variables}."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -558,6 +595,7 @@ class XarrayDataset(DatasetABC):
         self.spatial_dimensions = config.spatial_dimensions
         self.fill_nans = config.fill_nans
         self.subset_config = config.subset
+        self._renamed_variables = config.renamed_variables
         self._raw_paths = get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
@@ -570,13 +608,14 @@ class XarrayDataset(DatasetABC):
             config.infer_timestep,
             max_sample_n_times=n_timesteps.max_value,
         )
-        first_dataset = xr.open_dataset(
+        first_file = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
             decode_timedelta=False,
             engine=self.engine,
             chunks=None,
         )
+        first_dataset = _rename_variables(first_file, self._renamed_variables)
         self._spatial_mask_provider = _get_spatial_mask_provider(
             first_dataset, self.dtype
         )
@@ -596,6 +635,11 @@ class XarrayDataset(DatasetABC):
             + list(self._static_derived_names)
         )
         self._missing_names = frozenset(set(names) - set(self._names))
+        # files are read per sample using the variable names stored in them
+        renamed_from = {new: old for old, new in self._renamed_variables.items()}
+        self._time_dependent_source_names = {
+            renamed_from.get(name, name): name for name in self._time_dependent_names
+        }
         self._get_variable_metadata(first_dataset)
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
@@ -616,7 +660,7 @@ class XarrayDataset(DatasetABC):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
-        first_dataset.close()
+        first_file.close()
         self._time_invariant_tensors = self._load_time_invariant_tensors()
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._labels = set(config.labels) if config.labels is not None else None
@@ -636,15 +680,15 @@ class XarrayDataset(DatasetABC):
             return {}
         # opened directly rather than via _open_file so that closing this
         # handle cannot close one shared through the file handle cache
-        ds = _open_xr_dataset(self.full_paths[0], engine=self.engine)
-        ds = ds.isel(**self.isel)
+        file = _open_xr_dataset(self.full_paths[0], engine=self.engine)
+        ds = _rename_variables(file, self._renamed_variables).isel(**self.isel)
         tensors = {}
         for name in self._time_invariant_names:
             variable = ds[name].variable
             if self.fill_nans is not None:
                 variable = variable.fillna(self.fill_nans.value)
             tensors[name] = as_alignable_tensor(variable, self.dims)
-        ds.close()
+        file.close()
         return tensors
 
     def _ensure_epoch_synchronized(self):
@@ -785,7 +829,8 @@ class XarrayDataset(DatasetABC):
         # Don't use open_mfdataset here, because it will give time-invariant
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
-        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as ds:
+        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as file:
+            ds = _rename_variables(file, self._renamed_variables)
             for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
@@ -931,7 +976,7 @@ class XarrayDataset(DatasetABC):
                     idx=start,
                     n_steps=n_steps,
                     path=self.full_paths[file_idx],
-                    names=self._time_dependent_names,
+                    names=list(self._time_dependent_source_names),
                     final_dims=self.dims,
                     final_shape=shape,
                     fill_nans=self.fill_nans,
@@ -944,15 +989,15 @@ class XarrayDataset(DatasetABC):
                     idx=start,
                     n_steps=n_steps,
                     ds=ds,
-                    names=self._time_dependent_names,
+                    names=list(self._time_dependent_source_names),
                     final_dims=self.dims,
                     final_shape=shape,
                     fill_nans=self.fill_nans,
                 )
                 ds.close()
                 del ds
-            for n in self._time_dependent_names:
-                arrays.setdefault(n, []).append(tensor_dict[n])
+            for source, n in self._time_dependent_source_names.items():
+                arrays.setdefault(n, []).append(tensor_dict[source])
 
         tensors: TensorDict = {}
         for n, tensor_list in arrays.items():

@@ -5,6 +5,7 @@ import datetime
 import os
 from collections import namedtuple
 from collections.abc import Iterable, Sequence
+from typing import Literal
 
 import cftime
 import numpy as np
@@ -21,7 +22,11 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
 )
 from fme.core.dataset.concat import XarrayConcat, get_dataset
-from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.merged import (
+    MergeDatasetConfig,
+    MergedXarrayDataset,
+    get_per_dataset_names,
+)
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
@@ -1358,3 +1363,112 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+def _write_cm4_like_data(
+    path, engine: Literal["netcdf4", "zarr"] = "netcdf4", cm4_like: bool = True
+) -> tuple[XarrayDataConfig, xr.Dataset]:
+    """Writes a dataset with CO2 and surface type fractions to path.
+
+    If cm4_like, CO2 is stored as ``carbon_dioxide`` in ppmv and there is no
+    ``ocean_fraction``, as in the CM4 datasets. Otherwise CO2 is stored as
+    ``global_mean_co2`` (a volume mixing ratio) alongside ``ocean_fraction``, as
+    in other ACE datasets.
+
+    Returns a config to load the written data and the data as written.
+    """
+    n_time, n_lat, n_lon = 8, 4, 8
+    rng = np.random.default_rng(0)
+    time = xr.date_range(
+        MOCK_DATA_START_DATE,
+        periods=n_time,
+        freq=MOCK_DATA_FREQ,
+        calendar="standard",
+        use_cftime=True,
+    )
+    co2_ppmv = np.linspace(280.0, 1120.0, n_time).astype(np.float32)
+    land_fraction = rng.uniform(size=(n_lat, n_lon)).astype(np.float32)
+    sea_ice_fraction = rng.uniform(size=(n_time, n_lat, n_lon)).astype(np.float32)
+    data_vars: dict[str, tuple] = {
+        "foo": (("time", "lat", "lon"), rng.normal(size=(n_time, n_lat, n_lon))),
+        "land_fraction": (("lat", "lon"), land_fraction),
+        "sea_ice_fraction": (("time", "lat", "lon"), sea_ice_fraction),
+    }
+    if cm4_like:
+        data_vars["carbon_dioxide"] = (("time",), co2_ppmv, {"units": "ppmv"})
+    else:
+        data_vars["global_mean_co2"] = (("time",), co2_ppmv * 1e-6)
+        data_vars["ocean_fraction"] = (
+            ("time", "lat", "lon"),
+            np.clip(1 - land_fraction - sea_ice_fraction, 0, 1),
+        )
+    ds = xr.Dataset(
+        data_vars,
+        coords={
+            "time": time,
+            "lat": np.arange(n_lat, dtype=np.float32),
+            "lon": np.arange(n_lon, dtype=np.float32),
+        },
+    )
+    if engine == "zarr":
+        file_pattern = "data.zarr"
+        ds.to_zarr(path / file_pattern)
+    else:
+        file_pattern = "data.nc"
+        ds.to_netcdf(path / file_pattern)
+    config = XarrayDataConfig(
+        data_path=str(path), file_pattern=file_pattern, engine=engine
+    )
+    return config, ds
+
+
+@pytest.mark.parametrize("engine", ["netcdf4", "zarr"])
+def test_renamed_variables_with_multiply_scalar(tmp_path, engine):
+    config, ds = _write_cm4_like_data(tmp_path, engine=engine)
+    config = dataclasses.replace(
+        config,
+        renamed_variables={"carbon_dioxide": "global_mean_co2"},
+        overwrite=OverwriteConfig(multiply_scalar={"global_mean_co2": 1e-6}),
+    )
+    n_timesteps = 3
+    dataset = xarray_dataset_constructor(
+        config, ["foo", "global_mean_co2"], n_timesteps
+    )
+    data = dataset[1][0]
+    assert set(data) == {"foo", "global_mean_co2"}
+    expected_co2 = torch.as_tensor(ds["carbon_dioxide"].values[1 : 1 + n_timesteps])
+    torch.testing.assert_close(data["global_mean_co2"][:, 0, 0], expected_co2 * 1e-6)
+
+
+def test_renamed_variables_raises_if_new_name_exists(tmp_path):
+    config, _ = _write_cm4_like_data(tmp_path)
+    config = dataclasses.replace(config, renamed_variables={"carbon_dioxide": "foo"})
+    with pytest.raises(ValueError, match="already exist"):
+        xarray_dataset_constructor(config, ["foo"], 2)
+
+
+def test_renamed_variables_raises_if_source_missing(tmp_path):
+    config, _ = _write_cm4_like_data(tmp_path)
+    config = dataclasses.replace(config, renamed_variables={"co2": "global_mean_co2"})
+    with pytest.raises(ValueError, match="not found"):
+        xarray_dataset_constructor(config, ["foo"], 2)
+
+
+def test_merged_dataset_reads_renamed_variable_from_its_source(
+    tmp_path, mock_monthly_netcdfs
+):
+    cm4_like_config, _ = _write_cm4_like_data(tmp_path)
+    cm4_like_config = dataclasses.replace(
+        cm4_like_config, renamed_variables={"carbon_dioxide": "global_mean_co2"}
+    )
+    other_config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    merged_config = MergeDatasetConfig(merge=[other_config, cm4_like_config])
+    per_dataset_names = get_per_dataset_names(
+        merged_config, ["foo", "bar", "global_mean_co2"]
+    )
+    assert per_dataset_names == [["foo", "bar"], ["global_mean_co2"]]
+
+
+def test_renamed_variables_duplicate_new_names_raises():
+    with pytest.raises(ValueError, match="same name"):
+        XarrayDataConfig(data_path="/", renamed_variables={"a": "c", "b": "c"})
