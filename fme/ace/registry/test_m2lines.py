@@ -231,3 +231,23 @@ def test_samudra_builder_gelu_cap():
     assert model.gelu_cap is None
     output = model(torch.randn(2, 5, 16, 32))
     assert output.shape == (2, 3, 16, 32)
+
+
+def test_samudra_builder_conservative_pool():
+    config = {
+        "ch_width": [4, 4],
+        "dilation": [1, 2],
+        "n_layers": [1, 1],
+        "lat_pad": "pole",
+        "conservative_pool": True,
+    }
+    model = (
+        ModuleSelector(type="Samudra", config=config)
+        .build(5, 3, DatasetInfo(img_shape=(15, 30)))
+        .torch_module
+    )
+    assert isinstance(model, Samudra)
+    assert model.conservative_pool
+    assert model(torch.randn(2, 5, 15, 30)).shape == (2, 3, 15, 30)
+    with pytest.raises(ValueError, match="neither pad_pool nor exact pooling"):
+        ModuleSelector(type="Samudra", config={**config, "pad_pool": True})

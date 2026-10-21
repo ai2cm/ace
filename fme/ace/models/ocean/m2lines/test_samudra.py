@@ -10,6 +10,8 @@ from fme.ace.models.ocean.m2lines.activations import CappedGELU
 from fme.ace.models.ocean.m2lines.layers import (
     AvgPool,
     BilinearUpsample,
+    ConservativePool,
+    ConservativeUpsample,
     ConvNeXtBlock,
     LatPad,
     MultiResolutionFiLM,
@@ -1060,3 +1062,79 @@ def test_samudra_gelu_cap():
     assert all(gelu(big) > 1.0 for gelu in gelus)
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     assert uncapped(x).shape == (2, 3, *_SMALL_SHAPE)
+
+
+def test_conservative_pool_is_area_exact():
+    """5x7 pools to 3x4 with no cell dropped or padded: every input cell has
+    the same weight, a constant stays constant, and on even sizes it is the
+    x2 average pool."""
+    x = torch.randn(1, 1, 5, 7, dtype=torch.float64, requires_grad=True)
+    pooled = ConservativePool()(x)
+    assert pooled.shape == (1, 1, 3, 4)
+    pooled.sum().backward()
+    assert x.grad is not None
+    torch.testing.assert_close(x.grad, torch.full_like(x.grad, 12 / 35))
+    ones = torch.ones(1, 1, 5, 7, dtype=torch.float64)
+    expected = torch.ones(1, 1, 3, 4, dtype=torch.float64)
+    torch.testing.assert_close(ConservativePool()(ones), expected)
+    even = torch.randn(2, 3, 8, 12)
+    torch.testing.assert_close(
+        ConservativePool()(even), torch.nn.functional.avg_pool2d(even, 2)
+    )
+
+
+@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
+def test_conservative_upsample_pools_back(lat_pad: LatPad):
+    """Pooling the upsampled field returns the coarse field exactly where the
+    cells nest (x2); at odd sizes the area mean and a constant are kept."""
+    up = ConservativeUpsample(lat_pad=lat_pad)
+    coarse = torch.randn(1, 2, 6, 12, dtype=torch.float64)
+    fine = up(coarse, (12, 24))
+    assert fine.shape == (1, 2, 12, 24)
+    torch.testing.assert_close(ConservativePool()(fine), coarse)
+
+    coarse = torch.randn(1, 2, 3, 6, dtype=torch.float64)
+    fine = up(coarse, (5, 11))
+    assert fine.shape == (1, 2, 5, 11)
+    torch.testing.assert_close(fine.mean(dim=(-2, -1)), coarse.mean(dim=(-2, -1)))
+    ones = torch.ones(1, 1, 3, 6, dtype=torch.float64)
+    torch.testing.assert_close(up(ones, (5, 11)), torch.ones(1, 1, 5, 11).double())
+
+
+def test_samudra_conservative_pool_on_the_4_degree_grid():
+    """On 45x90 every pool rounds up to a 3x6 bottleneck, every upsample
+    returns its skip connection's shape, and no parameter is added."""
+    torch.manual_seed(0)
+    kwargs: dict = dict(
+        input_channels=1,
+        output_channels=1,
+        ch_width=[2, 2, 2, 2],
+        dilation=[1, 2, 4, 2],
+        n_layers=[1, 1, 1, 1],
+        norm="batch",
+        upscale_factor=1,
+        zonally_periodic_upsample=True,
+        lat_pad="pole",
+    )
+    model = Samudra(conservative_pool=True, **kwargs)
+    pooled_shapes = []
+    for layer in model.layers:
+        if isinstance(layer, ConservativePool):
+            layer.register_forward_hook(
+                lambda module, args, out: pooled_shapes.append(tuple(out.shape[-2:]))
+            )
+    with torch.no_grad():
+        out = model(torch.randn(1, 1, 45, 90))
+    assert out.shape == (1, 1, 45, 90)
+    assert torch.isfinite(out).all()
+    assert pooled_shapes == [(23, 45), (12, 23), (6, 12), (3, 6)]
+    model.load_state_dict(Samudra(**kwargs).state_dict(), strict=True)
+
+
+def test_samudra_conservative_pool_validation():
+    with pytest.raises(ValueError, match="neither pad_pool nor exact pooling"):
+        _small_samudra(conservative_pool=True, pad_pool=True)
+    with pytest.raises(ValueError, match="neither pad_pool nor exact pooling"):
+        _small_samudra(conservative_pool=True, pooling=[2, 2, 2])
+    with pytest.raises(ValueError, match="needs pad='circular'"):
+        _small_samudra(conservative_pool=True, pad="constant")

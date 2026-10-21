@@ -12,6 +12,8 @@ from fme.ace.models.ocean.m2lines.activations import CappedGELU
 from fme.ace.models.ocean.m2lines.layers import (
     AvgPool,
     BilinearUpsample,
+    ConservativePool,
+    ConservativeUpsample,
     ConvNeXtBlock,
     LatPad,
     ZonallyPeriodicBilinearUpsample,
@@ -127,6 +129,15 @@ class Samudra(torch.nn.Module):
         divide and refilling the dropped rows and columns in the decoder.
         Adds no parameters, so checkpoints load across settings at equal
         ``ch_width``.
+    conservative_pool : bool, optional
+        If True, each pool is a conservative, area-exact average to
+        ``ceil(n / 2)`` cells per axis, with no padding (see
+        ``ConservativePool``), and each decoder upsample resizes to its skip
+        connection's shape by linear interpolation corrected so that pooling
+        it back returns the coarse field (see ``ConservativeUpsample``). It
+        replaces both upsamplers, so ``zonally_periodic_upsample`` has no
+        effect, and needs the circular longitude ``pad``. By default False.
+        Adds no parameters, so checkpoints load either way.
 
     Example:
     --------
@@ -164,6 +175,7 @@ class Samudra(torch.nn.Module):
         pad_pool: bool = False,
         pooling: list[int] | None = None,
         gelu_cap: float | None = 1.0,
+        conservative_pool: bool = False,
     ):
         super().__init__()
 
@@ -195,17 +207,33 @@ class Samudra(torch.nn.Module):
                     "pad_pool has nothing to pad under exact pooling factors"
                 )
             self.pooling = list(pooling)
+        if conservative_pool:
+            if pad_pool or pooling is not None:
+                raise ValueError(
+                    "conservative_pool replaces the pool, so it takes neither "
+                    "pad_pool nor exact pooling factors"
+                )
+            if pad != "circular":
+                raise ValueError(
+                    "conservative_pool upsamples periodically in longitude, so it "
+                    f"needs pad='circular', got {pad!r}"
+                )
+        self.conservative_pool = conservative_pool
         self.gelu_cap = gelu_cap
         activation: Callable[[], torch.nn.Module] = (
             torch.nn.GELU
             if gelu_cap is None
             else functools.partial(CappedGELU, cap_value=gelu_cap)
         )
-        upsample_cls = (
-            functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
-            if zonally_periodic_upsample
-            else BilinearUpsample
-        )
+        upsample_cls: Callable[..., torch.nn.Module]
+        if conservative_pool:
+            upsample_cls = functools.partial(ConservativeUpsample, lat_pad=lat_pad)
+        elif zonally_periodic_upsample:
+            upsample_cls = functools.partial(
+                ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad
+            )
+        else:
+            upsample_cls = BilinearUpsample
 
         if context_config is not None:
             if context_config.embed_dim_noise <= 0:
@@ -265,7 +293,9 @@ class Samudra(torch.nn.Module):
                 )
             )
             layers.append(
-                AvgPool(
+                ConservativePool()
+                if self.conservative_pool
+                else AvgPool(
                     pooling=self.pooling[i],
                     pad_pool=self.pad_pool,
                     pad=self.pad,
@@ -358,9 +388,13 @@ class Samudra(torch.nn.Module):
                     fts, (self.N_pad, self.N_pad, 0, 0), mode=self.pad
                 )
             # only the ConvNeXt blocks are conditionable; the pooling, upsample
-            # and final conv layers take the tensor alone
+            # and final conv layers take the tensor alone, except that the
+            # conservative upsample also takes its skip connection's shape
             if isinstance(layer, ConvNeXtBlock):
                 layer_args: tuple = (fts, context)
+            elif isinstance(layer, ConservativeUpsample):
+                skip_shape = temp[int(2 * self.num_steps - count - 1)].shape
+                layer_args = (fts, (skip_shape[-2], skip_shape[-1]))
             else:
                 layer_args = (fts,)
             if self.checkpoint_strategy == "all":
@@ -375,10 +409,15 @@ class Samudra(torch.nn.Module):
                     count += 1
             elif count >= self.num_steps:
                 if isinstance(
-                    layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
+                    layer,
+                    BilinearUpsample
+                    | ZonallyPeriodicBilinearUpsample
+                    | ConservativeUpsample,
                 ):
                     skip = temp[int(2 * self.num_steps - count - 1)]
-                    if self.exact_pooling:
+                    if self.conservative_pool:
+                        pass  # already resized to the skip connection's shape
+                    elif self.exact_pooling:
                         if fts.shape != skip.shape:
                             raise ValueError(
                                 f"upsampled shape {tuple(fts.shape)} differs from "

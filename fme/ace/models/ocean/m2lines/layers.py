@@ -1,3 +1,4 @@
+import functools
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
@@ -132,6 +133,100 @@ class AvgPool(torch.nn.Module):
                 x, (0, -width % self.pooling, 0, 0), mode=self.pad
             )
         return self.avgpool(x)
+
+
+@functools.cache
+def _overlap_weights(n_in: int, n_out: int) -> torch.Tensor:
+    """(n_out, n_in) area-exact averaging weights along one axis: the share of
+    output cell j that input cell i fills, with the output cells tiling the
+    axis evenly, so each row sums to 1.
+    """
+    edges = torch.arange(n_out + 1, dtype=torch.float64) * n_in / n_out
+    cells = torch.arange(n_in, dtype=torch.float64)
+    overlap = torch.minimum(edges[1:, None], cells + 1) - torch.maximum(
+        edges[:-1, None], cells
+    )
+    return overlap.clamp(min=0) / (n_in / n_out)
+
+
+@functools.cache
+def _linear_weights(n_coarse: int, n_fine: int) -> torch.Tensor:
+    """(n_fine, n_coarse + 2) linear interpolation weights from cell centres
+    padded by one cell on each side to the fine cells' centres.
+    """
+    centres = (torch.arange(n_fine, dtype=torch.float64) + 0.5) / n_fine * n_coarse
+    position = centres - 0.5
+    below = position.floor().long()
+    frac = position - below
+    weights = torch.zeros(n_fine, n_coarse + 2, dtype=torch.float64)
+    rows = torch.arange(n_fine)
+    weights[rows, below + 1] = 1 - frac
+    weights[rows, below + 2] = frac
+    return weights
+
+
+def _separable(rows: torch.Tensor, x: torch.Tensor, cols: torch.Tensor):
+    return torch.einsum("Hh,...hw,Ww->...HW", rows.to(x), x, cols.to(x))
+
+
+class ConservativePool(torch.nn.Module):
+    """Area-exact average pooling to ``ceil(n / pooling)`` cells per axis.
+
+    Each output cell averages the input cells it overlaps, weighted by the
+    overlap, so no cell is dropped or padded, every input cell carries the
+    same weight and a constant stays constant. Where ``pooling`` divides an
+    axis it is ``torch.nn.AvgPool2d``.
+    """
+
+    def __init__(self, pooling: int = 2):
+        super().__init__()
+        self.pooling = pooling
+
+    def forward(self, x):
+        height, width = x.shape[-2:]
+        return _separable(
+            _overlap_weights(height, -(-height // self.pooling)),
+            x,
+            _overlap_weights(width, -(-width // self.pooling)),
+        )
+
+
+class ConservativeUpsample(torch.nn.Module):
+    """Upsampling to a given shape that ``ConservativePool`` (nearly) undoes.
+
+    Linear interpolation between cell centres, with one row of ``lat_pad`` (the
+    edge row under "constant") and one circular column on each side, plus the
+    piecewise-constant spread of what conservatively pooling that field back
+    misses. Pooling the result returns the input exactly where the cells nest
+    and nearly elsewhere, and the area mean is kept. At an exact x2 its linear
+    part is ``ZonallyPeriodicBilinearUpsample``.
+    """
+
+    def __init__(self, lat_pad: LatPad = "constant", **kwargs):
+        super().__init__()
+        self.lat_pad = lat_pad
+
+    def forward(self, x, shape: tuple[int, int]):
+        height, width = x.shape[-2:]
+        fine_height, fine_width = shape
+        if self.lat_pad == "constant":
+            padded = torch.nn.functional.pad(x, (0, 0, 1, 1), mode="replicate")
+        else:
+            padded = pad_latitude(x, 1, 1, self.lat_pad)
+        padded = torch.nn.functional.pad(padded, (1, 1, 0, 0), mode="circular")
+        linear = _separable(
+            _linear_weights(height, fine_height),
+            padded,
+            _linear_weights(width, fine_width),
+        )
+        pool_rows = _overlap_weights(fine_height, height)
+        pool_cols = _overlap_weights(fine_width, width)
+        missed = x - _separable(pool_rows, linear, pool_cols)
+        return linear + _separable(
+            pool_rows.T * (fine_height / height),
+            missed,
+            pool_cols.T * (fine_width / width),
+        )
 
 
 class MultiResolutionFiLM(torch.nn.Module):

@@ -55,6 +55,10 @@ class SamudraBuilder(ModuleConfig):
         gelu_cap: Maximum of the GELU in each ConvNeXt block (default 1.0,
             the original network), or None for an uncapped GELU. See
             ``Samudra``.
+        conservative_pool: Pool conservatively to ``ceil(n / 2)`` cells per
+            axis with no padding, and upsample by corrected linear
+            interpolation to each skip connection's shape. Takes neither
+            ``pad_pool`` nor ``pooling``. See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -71,6 +75,7 @@ class SamudraBuilder(ModuleConfig):
     lat_pad: LatPad = "constant"
     pad_pool: bool = False
     gelu_cap: float | None = 1.0
+    conservative_pool: bool = False
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
     pooling: list[int] | None = None
@@ -102,6 +107,11 @@ class SamudraBuilder(ModuleConfig):
                 raise ValueError(
                     "pad_pool has nothing to pad under exact pooling factors"
                 )
+        if self.conservative_pool and (self.pad_pool or self.pooling is not None):
+            raise ValueError(
+                "conservative_pool replaces the pool, so it takes neither "
+                "pad_pool nor exact pooling factors"
+            )
 
     def build(
         self,
@@ -142,6 +152,7 @@ class SamudraBuilder(ModuleConfig):
             lat_pad=self.lat_pad,
             pad_pool=self.pad_pool,
             gelu_cap=self.gelu_cap,
+            conservative_pool=self.conservative_pool,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
             pooling=self.pooling,
