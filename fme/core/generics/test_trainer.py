@@ -49,6 +49,11 @@ from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 
+RESUME_MAX_EPOCHS = 2
+RESUME_N_TRAIN_BATCHES = 5
+RESUME_LAST_EPOCH_STEP = RESUME_MAX_EPOCHS * RESUME_N_TRAIN_BATCHES
+BATCH_LOG_KEY = "training_samples_per_second_on_rank_0"
+
 
 class PSType:
     pass
@@ -644,12 +649,6 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert len(stepper.loaded_state) == 2
 
 
-RESUME_MAX_EPOCHS = 2
-RESUME_N_TRAIN_BATCHES = 5
-RESUME_LAST_EPOCH_STEP = RESUME_MAX_EPOCHS * RESUME_N_TRAIN_BATCHES
-BATCH_LOG_KEY = "training_samples_per_second_on_rank_0"
-
-
 def _start_job(experiment_dir: str, **trainer_kwargs: Any) -> Trainer:
     """Configure logging and build a trainer, as a new training job does."""
     LoggingConfig(log_to_wandb=True)._configure_wandb(
@@ -678,16 +677,6 @@ def _metrics_dir(experiment_dir: str) -> str:
 
 def _disk_metrics(experiment_dir: str) -> dict[int, dict[str, Any]]:
     return read_metrics_by_step(_metrics_dir(experiment_dir), 0)
-
-
-def _discarded_steps(experiment_dir: str) -> list[int]:
-    metrics_dir = _metrics_dir(experiment_dir)
-    steps: list[int] = []
-    for name in os.listdir(metrics_dir):
-        if ".discarded." in name:
-            with open(os.path.join(metrics_dir, name)) as f:
-                steps.extend(json.loads(line)["step"] for line in f)
-    return steps
 
 
 def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str):
@@ -745,10 +734,16 @@ def test_resume_does_not_relog_steps_redone_after_periodic_checkpoint(tmp_path: 
             checkpoint_every_n_batches=checkpoint_every_n_batches,
         ).train()
         assert BATCH_LOG_KEY in wandb.get_logs()[checkpoint_every_n_batches]
-    records = read_metrics(_metrics_dir(tmp_path))
+    metrics_dir = _metrics_dir(tmp_path)
+    records = read_metrics(metrics_dir)
     batch_log_steps = [r["step"] for r in records if BATCH_LOG_KEY in r]
     assert batch_log_steps == list(range(1, RESUME_N_TRAIN_BATCHES + 1))
-    assert _discarded_steps(tmp_path) == [n_batches_before_interrupt]
+    discarded_steps: list[int] = []
+    for name in os.listdir(metrics_dir):
+        if ".discarded." in name:
+            with open(os.path.join(metrics_dir, name)) as f:
+                discarded_steps.extend(json.loads(line)["step"] for line in f)
+    assert discarded_steps == [n_batches_before_interrupt]
 
 
 def test_resume_recovers_last_batch_logs_before_preemption_checkpoint(
