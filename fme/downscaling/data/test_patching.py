@@ -5,10 +5,10 @@ import torch
 from fme.downscaling.data import PairedBatchData
 from fme.downscaling.data.datasets import patched_batch_gen_from_paired_loader
 from fme.downscaling.data.patching import (
+    HorizontalSlice,
     PatchAverager,
     _divide_into_slices,
     _get_patch_slices,
-    _HorizontalSlice,
     get_patches,
 )
 from fme.downscaling.predictors.test_composite import get_paired_test_data
@@ -206,8 +206,8 @@ def test_paired_patches_shuffle(shuffle):
         assert torch.equal(data0, data1)
 
 
-def _cols(x0: int, x1: int) -> _HorizontalSlice:
-    return _HorizontalSlice(y=slice(0, 1), x=slice(x0, x1))
+def _cols(x0: int, x1: int) -> HorizontalSlice:
+    return HorizontalSlice(y=slice(0, 1), x=slice(x0, x1))
 
 
 def test_PatchAverager_averages_overlaps():
