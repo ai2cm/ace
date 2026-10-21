@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # --config-dir configs/experiments/cm4_eval/ocean
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_levpool|rs0|01M5EEZNM0D98WS187VPWHV0FZ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_levpool_p12|rs0|01M5EF00YTVBZSB67Q6V9TS08N|training|best_inference_ckpt|normal|--min-runtime 8h
