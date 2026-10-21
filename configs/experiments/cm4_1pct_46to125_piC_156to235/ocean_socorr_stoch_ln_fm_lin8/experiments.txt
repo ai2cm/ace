@@ -1,3 +1,7 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_ln_fm_lin8|rs0|01M5ECJV9PZ95PED8D6RXQBQMX|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# --config-dir configs/experiments/cm4_eval/ocean
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_ln_fm_lin8|rs0|01M5ECJV9PZ95PED8D6RXQBQMX|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_ln_fm_lin8|rs0|01M5ECJV9PZ95PED8D6RXQBQMX|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
