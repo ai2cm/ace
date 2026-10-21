@@ -14,6 +14,8 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 # dilations [1, 1, 4, 8] instead of [1, 2, 4, 8].
 # ocean_socorr_fm_d1148: the same dilations on ocean_socorr_fm alone, without
 # pad_pool or pole_edge (lat_pad stays the config's pole).
+# ocean_socorr_fm_pool_d1148_nocap: ocean_socorr_fm_d1148 with pad_pool on and
+# the GELU uncapped (gelu_cap null), still without pole_edge.
 #
 # uncoupled_train.sh acts only on rows whose status is exactly "train".
 
@@ -29,3 +31,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|training|high|jupit
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|training|high|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge 'stepper.step.config.builder.config.dilation=[1,1,4,8]'|8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|training|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true stepper.step.config.builder.config.lat_pad=pole_edge 'stepper.step.config.builder.config.dilation=[1,1,4,8]'|8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_d1148|rs0|training|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean 'stepper.step.config.builder.config.dilation=[1,1,4,8]'|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.pad_pool=true 'stepper.step.config.builder.config.dilation=[1,1,4,8]' stepper.step.config.builder.config.gelu_cap=null|8h
