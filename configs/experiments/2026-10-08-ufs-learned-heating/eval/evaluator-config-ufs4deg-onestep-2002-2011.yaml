@@ -1,8 +1,8 @@
 # One-step (and up to 6-step) ocean-only predictions from 120 monthly starts in the untouched 2002-2011 decade, prediction files saved.
 # Troy 2026-10-21: single-time-step predictions in Samudra only for the out-of-sample period.
 experiment_dir: /results
-n_forward_steps: 6
-forward_steps_in_memory: 6
+n_forward_steps: 20  # the aggregator requires >= 20 steps for its step-20 metric; the single-step error is the first entry of the per-step series
+forward_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
