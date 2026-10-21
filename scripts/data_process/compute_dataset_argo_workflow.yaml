@@ -11,12 +11,11 @@ spec:
         secretName: gcp-key
   arguments:
     parameters:
-    - name: python_script
-    - name: get_stats_script
-    - name: combine_stats_script
-    - name: upload_stats_script
-    - name: time_coarsen_script
-    - name: fs_utils_script
+    # tar | gzip | base64 of every module in the transitive sibling-import
+    # closures of the entry points, unpacked into each container; compressed
+    # because argo passes each resolved template to argoexec as one env
+    # string, capped by the kernel at MAX_ARG_STRLEN
+    - name: code_bundle
     - name: config
     - name: names
     - name: run_directories
@@ -46,12 +45,6 @@ spec:
           template: time-coarsen
           arguments:
             parameters:
-            - name: python_script
-              value: "{{workflow.parameters.time_coarsen_script}}"
-            - name: stats_script
-              value: "{{workflow.parameters.get_stats_script}}"
-            - name: fs_utils_script
-              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
             - name: run
@@ -64,10 +57,6 @@ spec:
           template: get-stats
           arguments:
             parameters:
-            - name: python_script
-              value: "{{workflow.parameters.get_stats_script}}"
-            - name: fs_utils_script
-              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
             - name: run
@@ -80,8 +69,6 @@ spec:
           template: combine-stats
           arguments:
             parameters:
-            - name: python_script
-              value: "{{workflow.parameters.combine_stats_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
       - - name: upload-beaker-stats
@@ -89,12 +76,6 @@ spec:
           template: upload-beaker-stats
           arguments:
             parameters:
-            - name: python_script
-              value: "{{workflow.parameters.upload_stats_script}}"
-            - name: stats_script
-              value: "{{workflow.parameters.get_stats_script}}"
-            - name: fs_utils_script
-              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
     - name: compute-fme-dataset-individual
@@ -102,8 +83,8 @@ spec:
         - effect: NoSchedule
           key: dedicated
           value: highmem-sim-pool
-      # The scripts, config and run lists are read from the workflow parameters
-      # rather than passed as inputs: a template input is stored in the pod's
+      # The config and run lists are read from the workflow parameters rather
+      # than passed as inputs: a template input is stored in the pod's
       # ARGO_TEMPLATE both as the input and substituted into args, and with
       # many runs that string exceeds the 128 KiB argument limit ("exec
       # argoexec: argument list too long", seen with 36 runs).
@@ -122,19 +103,9 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << EOF > script.py
-            {{workflow.parameters.python_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
-            cat << EOF > get_stats.py
-            {{workflow.parameters.get_stats_script}}
-            EOF
-
-            cat << EOF > fs_utils.py
-            {{workflow.parameters.fs_utils_script}}
-            EOF
-
-            cat << EOF > config.yaml
+            cat << 'EOF' > config.yaml
             {{workflow.parameters.config}}
             EOF
 
@@ -148,7 +119,7 @@ spec:
 
             output_store=${output_directory}/${name}.zarr
 
-            python script.py --config config.yaml \
+            python compute_dataset.py --config config.yaml \
               --run-directory ${run_directory} \
               --output-store ${output_store}
         env:
@@ -165,10 +136,6 @@ spec:
             template: get-stats
             arguments:
               parameters:
-              - name: python_script
-                value: "{{workflow.parameters.get_stats_script}}"
-              - name: fs_utils_script
-                value: "{{workflow.parameters.fs_utils_script}}"
               - name: config
                 value: "{{workflow.parameters.config}}"
               - name: run
@@ -180,8 +147,6 @@ spec:
             template: combine-stats
             arguments:
               parameters:
-              - name: python_script
-                value: "{{workflow.parameters.combine_stats_script}}"
               - name: config
                 value: "{{workflow.parameters.config}}"
     - name: time-coarsen
@@ -191,9 +156,6 @@ spec:
           value: highmem-sim-pool
       inputs:
         parameters:
-          - name: python_script
-          - name: stats_script
-          - name: fs_utils_script
           - name: config
           - name: run
       container:
@@ -208,25 +170,15 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << EOF > script.py
-            {{inputs.parameters.python_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
-            cat << EOF > get_stats.py
-            {{inputs.parameters.stats_script}}
-            EOF
-
-            cat << EOF > fs_utils.py
-            {{inputs.parameters.fs_utils_script}}
-            EOF
-
-            cat << EOF > config.yaml
+            cat << 'EOF' > config.yaml
             {{inputs.parameters.config}}
             EOF
 
             run={{inputs.parameters.run}}
 
-            python script.py config.yaml ${run}
+            python time_coarsen.py config.yaml ${run}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json
@@ -242,8 +194,6 @@ spec:
           value: highmem-sim-pool
       inputs:
         parameters:
-          - name: python_script
-          - name: fs_utils_script
           - name: config
           - name: run
       container:
@@ -258,21 +208,15 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << EOF > script.py
-            {{inputs.parameters.python_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
-            cat << EOF > fs_utils.py
-            {{inputs.parameters.fs_utils_script}}
-            EOF
-
-            cat << EOF > config.yaml
+            cat << 'EOF' > config.yaml
             {{inputs.parameters.config}}
             EOF
 
             run={{inputs.parameters.run}}
 
-            python script.py config.yaml ${run}
+            python get_stats.py config.yaml ${run}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json
@@ -288,7 +232,6 @@ spec:
           value: med-sim-pool
       inputs:
         parameters:
-          - name: python_script
           - name: config
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
@@ -302,15 +245,13 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << EOF > script.py
-            {{inputs.parameters.python_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
-            cat << EOF > config.yaml
+            cat << 'EOF' > config.yaml
             {{inputs.parameters.config}}
             EOF
 
-            python script.py config.yaml
+            python combine_stats.py config.yaml
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json
@@ -326,9 +267,6 @@ spec:
           value: med-sim-pool
       inputs:
         parameters:
-          - name: python_script
-          - name: stats_script
-          - name: fs_utils_script
           - name: config
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
@@ -342,23 +280,13 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << EOF > script.py
-            {{inputs.parameters.python_script}}
-            EOF
+            echo '{{workflow.parameters.code_bundle}}' | base64 -d | tar -xzf -
 
-            cat << EOF > get_stats.py
-            {{inputs.parameters.stats_script}}
-            EOF
-
-            cat << EOF > fs_utils.py
-            {{inputs.parameters.fs_utils_script}}
-            EOF
-
-            cat << EOF > config.yaml
+            cat << 'EOF' > config.yaml
             {{inputs.parameters.config}}
             EOF
 
-            python script.py config.yaml
+            python upload_stats.py config.yaml
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

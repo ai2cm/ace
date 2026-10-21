@@ -41,7 +41,9 @@ streams:
     # the artifact flags them so they are not averaged into coastal centers.
     face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/om4-1pctco2-2026-06-19
     postprocess:
-      - kelvin_sst
+      - name: kelvin_sst
+        sources:
+          celsius_sst: tos
   # 1-day-mean surface fluxes/forcings, whose end-of-interval time labels
   # coincide with the snapshot instants (enforced by the time-alignment
   # assertion).

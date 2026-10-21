@@ -1,10 +1,14 @@
 #!/bin/bash
+# Submit compute_dataset_argo_workflow.yaml. Python module dependencies are
+# provided as a compressed code bundle to avoid exceeding the
+# MAX_ARG_STRLEN. Without this, the modules as they are now overflow it.
 
 set -e
 
 COMPUTE_DATASET=false
 COMPUTE_TIME_COARSEN=false
 COMPUTE_STATS=false
+DRY_RUN=false
 
 while [[ "$#" -gt 0 ]]
 do case $1 in
@@ -13,6 +17,7 @@ do case $1 in
     --dataset) COMPUTE_DATASET=true;;
     --time-coarsen) COMPUTE_TIME_COARSEN=true;;
     --stats) COMPUTE_STATS=true;;
+    --dry-run) DRY_RUN=true;;
     *) echo "Unknown parameter passed: $1"
     exit 1;;
 esac
@@ -37,22 +42,32 @@ output_directory=$(yq -r '.data_output_directory' ${CONFIG})
 runs_count=$(yq -r '.runs | length' ${CONFIG})
 runs_count_minus_one=$(($runs_count - 1))
 
-# Capture the output of the argo submit command
-output=$(argo submit compute_dataset_argo_workflow.yaml \
-    -p compute_dataset=${COMPUTE_DATASET} \
-    -p compute_time_coarsen=${COMPUTE_TIME_COARSEN} \
-    -p compute_stats=${COMPUTE_STATS} \
-    -p python_script="$(< compute_dataset.py)" \
-    -p get_stats_script="$(< get_stats.py)" \
-    -p combine_stats_script="$(< combine_stats.py)" \
-    -p upload_stats_script="$(< upload_stats.py)" \
-    -p time_coarsen_script="$(< time_coarsen.py)" \
-    -p fs_utils_script="$(< fs_utils.py)" \
-    -p config="$(< ${CONFIG})" \
-    -p names="${names[*]}" \
-    -p run_directories="${run_directories[*]}" \
-    -p output_directory="${output_directory}" \
+MODULES=(compute_dataset.py
+    time_coarsen.py
+    get_stats.py
+    combine_stats.py
+    upload_stats.py
+    fs_utils.py)
+
+args=(compute_dataset_argo_workflow.yaml
+    -p compute_dataset=${COMPUTE_DATASET}
+    -p compute_time_coarsen=${COMPUTE_TIME_COARSEN}
+    -p compute_stats=${COMPUTE_STATS}
+    -p code_bundle="$(tar -cf - "${MODULES[@]}" | gzip -9 | base64 | tr -d '\n')"
+    -p config="$(< "${CONFIG}")"
+    -p names="${names[*]}"
+    -p run_directories="${run_directories[*]}"
+    -p output_directory="${output_directory}"
     -p runs_count_minus_one=${runs_count_minus_one})
+
+if [[ "${DRY_RUN}" = true ]]
+then
+    echo "argo submit ${args[*]}"
+    exit 0
+fi
+
+# Capture the output of the argo submit command
+output=$(argo submit "${args[@]}")
 
 # Extract the job name from the output
 job_name=$(echo "$output" | grep 'Name:' | awk '{print $2}')

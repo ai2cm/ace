@@ -82,6 +82,10 @@ class RandomState:
     def pin_memory(self) -> "RandomState":
         return self
 
+    def select_sample_slice(self, sample_slice: slice) -> "RandomState":
+        """The generator is shared across samples, so slicing is a no-op."""
+        return self
+
     def broadcast_ensemble(self, n_ensemble: int) -> "RandomState":
         return self
 
