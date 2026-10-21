@@ -130,6 +130,8 @@ CLIMATE_IC_KINDS = (
 )
 ENSEMBLE_MEMBER_KINDS = (
     "somabruptens-abrupt-4xCO2-ens-sstprescribed-eval",
+    "somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval",
+    "somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval",
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
     "somabruptens-abrupt-4xCO2-7day-sstdata-dataonly",
 )

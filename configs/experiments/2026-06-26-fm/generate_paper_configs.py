@@ -51,6 +51,11 @@ ocean
     ``sstslabq4deg``: the same slab with the store's Q-flux replaced by
     Spencer's re-derivation at 4deg (QFLUX_4DEG_DATASET, merged in front of
     the store).
+    ``sstslabsfcdata``: the slab driven by the data store's own surface fluxes
+    (``surface_flux_source: data``) instead of the model's, still with the
+    store's Q-flux: the model's fluxes are left out of the SST, which then
+    differs from SHiELD's only through the slab and its Q-flux.
+    ``sstslabsfcdataq4deg``: the same with the re-derived 4deg Q-flux.
     ``sstprescribed``: read from the data store at every step, as in training
     (no ``stepper_override``). ``sstdata``: no model ran; the reference
     data's own (``dataonly`` mode).
@@ -106,6 +111,18 @@ Slab-ocean kinds (SHiELD-SOM)
 ``som-control-dataCO2-ens-sstslabq4deg-eval``
     The two above with the re-derived 4deg Q-flux (ours): how much of the
     slab's cold drift the store's regridded Q-flux causes.
+``som-control-dataCO2-ens-sstslabsfcdata-eval``
+``som-control-dataCO2-ens-sstslabsfcdataq4deg-eval``
+    The slab control driven by the 1xCO2 member's own surface fluxes, with the
+    store's and the re-derived Q-flux (ours): the drift left once ACE's flux
+    bias is taken out, for Spencer's prescribed-flux test.
+``somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval``
+``somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval``
+    One evaluator per member of SHiELD's abrupt-4xCO2 ensemble, as
+    ``somabruptens-abrupt-4xCO2-ens-sstprescribed-eval``, but with the slab
+    driven by that member's own surface fluxes (ours), with the member's
+    Q-flux and with the re-derived one on the member's time axis
+    (QFLUX_4DEG_ENSEMBLE_DATASET). 36 jobs per run each.
 ``somabruptens-abrupt-4xCO2-ens-sstdata-dataonly``
     SHiELD's 36-member abrupt-4xCO2 ensemble evaluated against itself. Needs
     the daily 4deg abrupt-4xCO2 ensemble dataset
@@ -310,6 +327,8 @@ MISSING_DATASETS = {
         kinds=(
             "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
             "somabruptens-abrupt-4xCO2-ens-sstprescribed-eval",
+            "somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval",
+            "somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval",
             "somabruptens-abrupt-4xCO2-7day-sstdata-dataonly",
         ),
         available=True,  # copied to weka 2026-09-21
@@ -414,6 +433,19 @@ SLAB_OCEAN_OVERRIDE = {
 }
 
 
+# The slab driven by the data's surface fluxes instead of the model's.
+SLAB_OCEAN_DATA_FLUX_OVERRIDE = {
+    "ocean": {
+        **SLAB_OCEAN_OVERRIDE["ocean"],
+        "slab": {
+            "mixed_layer_depth_name": "prescribed_mixed_layer_depth",
+            "q_flux_name": "prescribed_qflux",
+            "surface_flux_source": "data",
+        },
+    }
+}
+
+
 # Spencer's SHiELD-SOM Q-flux climatology re-derived at 4deg, as daily
 # ``prescribed_qflux`` on the SOM stores' time axis (build_qflux_4deg_store.py).
 # Merged in front of a SOM store, it replaces the store's Q-flux, which was
@@ -421,6 +453,13 @@ SLAB_OCEAN_OVERRIDE = {
 QFLUX_4DEG_DATASET = (
     "/climate-default/"
     "2026-10-21-4deg-daily-c96-shield-som-qflux-rederived-at-4deg-fme-dataset"
+)
+# The same Q-flux on the time axis of each abrupt-4xCO2 ensemble member, which
+# starts at its own initial month (``abrupt4xCO2-ic_00NN.zarr``).
+QFLUX_4DEG_ENSEMBLE_DATASET = (
+    "/climate-default/"
+    "2026-10-21-4deg-daily-c96-shield-som-abrupt-4xCO2-ensemble-qflux-rederived-"
+    "at-4deg-fme-dataset"
 )
 
 
@@ -517,6 +556,10 @@ KINDS = (
     "som-control-dataCO2-ens-sstslab-eval",
     "som-abrupt-4xCO2-ens-sstslabq4deg-eval",
     "som-control-dataCO2-ens-sstslabq4deg-eval",
+    "som-control-dataCO2-ens-sstslabsfcdata-eval",
+    "som-control-dataCO2-ens-sstslabsfcdataq4deg-eval",
+    "somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval",
+    "somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval",
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly",
     "som-control-dataCO2-7day-sstslab-inference",
     "som-abrupt-4xCO2-7day-sstslab-inference",
@@ -609,13 +652,14 @@ def _control_dataset(co2: float | None = None) -> dict:
     return _member_dataset(CONTROL_CLIMATE, CLIMATES[CONTROL_CLIMATE].member, co2)
 
 
-def _with_qflux_4deg(dataset: dict) -> dict:
+def _with_qflux_4deg(dataset: dict, qflux_store: dict | None = None) -> dict:
     """``dataset`` with its Q-flux replaced by the re-derived 4deg one: the
-    first source of a merge that has a variable supplies it.
+    first source of a merge that has a variable supplies it. ``qflux_store``
+    must share ``dataset``'s time axis; default the SOM stores' ten years.
     """
-    return {
-        "merge": [_zarr_dataset(QFLUX_4DEG_DATASET, "qflux.zarr"), dataset],
-    }
+    if qflux_store is None:
+        qflux_store = _zarr_dataset(QFLUX_4DEG_DATASET, "qflux.zarr")
+    return {"merge": [qflux_store, dataset]}
 
 
 def _abrupt_dataset() -> dict:
@@ -699,8 +743,14 @@ def _evaluator_config(
     prediction_dataset: dict | None = None,
     aggregator: dict | None = None,
     slab: bool = False,
+    slab_data_fluxes: bool = False,
     label: str = SOM_LABEL,
 ) -> dict:
+    """``slab_data_fluxes``: drive the slab (``slab`` must be set) with the
+    loader's surface fluxes instead of the model's.
+    """
+    if slab_data_fluxes and not slab:
+        raise ValueError("slab_data_fluxes needs slab")
     loader = {
         "dataset": loader_dataset,
         "start_indices": start_indices,
@@ -722,7 +772,9 @@ def _evaluator_config(
     if aggregator is not None:
         cfg["aggregator"] = aggregator
     if slab:
-        cfg["stepper_override"] = copy.deepcopy(SLAB_OCEAN_OVERRIDE)
+        cfg["stepper_override"] = copy.deepcopy(
+            SLAB_OCEAN_DATA_FLUX_OVERRIDE if slab_data_fluxes else SLAB_OCEAN_OVERRIDE
+        )
     return cfg
 
 
@@ -935,6 +987,7 @@ def _ensemble_evaluator_config(
     label: str = SOM_LABEL,
     n_forward_steps: int = ABRUPT_ENSEMBLE_N_STEPS,
     data_only: bool = False,
+    slab_data_fluxes: bool = False,
 ) -> dict:
     """The paper's 36-monthly-IC, 90-day ensemble evaluator (one job), or
     (data_only) the loader's store evaluated against itself at the same ICs.
@@ -947,6 +1000,7 @@ def _ensemble_evaluator_config(
         data_writer=_no_files(),
         prediction_dataset=copy.deepcopy(loader_dataset) if data_only else None,
         slab=slab,
+        slab_data_fluxes=slab_data_fluxes,
         label=label,
     )
 
@@ -992,13 +1046,29 @@ def build_som_control_ens_slab_q4deg_eval_configs() -> dict[str, dict]:
 
 
 def _abrupt_ensemble_member_configs(
-    kind: str, data_only: bool, n_forward_steps: int = ABRUPT_ENSEMBLE_N_STEPS - 1
+    kind: str,
+    data_only: bool,
+    n_forward_steps: int = ABRUPT_ENSEMBLE_N_STEPS - 1,
+    slab_data_fluxes: bool = False,
+    qflux_4deg: bool = False,
 ) -> dict[str, dict]:
-    """One evaluator per member of SHiELD's abrupt-4xCO2 ensemble."""
+    """One evaluator per member of SHiELD's abrupt-4xCO2 ensemble.
+
+    ``slab_data_fluxes``: run the slab driven by the member's own surface
+    fluxes; ``qflux_4deg``: with the re-derived Q-flux on the member's time
+    axis merged in front.
+    """
     configs = {}
     for n in range(1, ABRUPT_ENSEMBLE_N_MEMBERS + 1):
         member = f"ic_{n:04d}"
         dataset = _abrupt_ensemble_member_dataset(member)
+        if qflux_4deg:
+            dataset = _with_qflux_4deg(
+                dataset,
+                _zarr_dataset(
+                    QFLUX_4DEG_ENSEMBLE_DATASET, f"abrupt4xCO2-{member}.zarr"
+                ),
+            )
         configs[paper_config_filename(kind, member)] = _evaluator_config(
             n_forward_steps=n_forward_steps,
             forward_steps_in_memory=EVALUATOR_FORWARD_STEPS_IN_MEMORY,
@@ -1006,8 +1076,51 @@ def _abrupt_ensemble_member_configs(
             start_indices={"list": [0]},
             data_writer=_no_files(),
             prediction_dataset=copy.deepcopy(dataset) if data_only else None,
+            slab=slab_data_fluxes,
+            slab_data_fluxes=slab_data_fluxes,
         )
     return configs
+
+
+def build_som_control_ens_slab_sfc_data_eval_configs() -> dict[str, dict]:
+    kind = "som-control-dataCO2-ens-sstslabsfcdata-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _control_dataset(),
+            ENSEMBLE_INITIAL_TIMES,
+            slab=True,
+            slab_data_fluxes=True,
+        )
+    }
+
+
+def build_som_control_ens_slab_sfc_data_q4deg_eval_configs() -> dict[str, dict]:
+    kind = "som-control-dataCO2-ens-sstslabsfcdataq4deg-eval"
+    return {
+        paper_config_filename(kind): _ensemble_evaluator_config(
+            _with_qflux_4deg(_control_dataset()),
+            ENSEMBLE_INITIAL_TIMES,
+            slab=True,
+            slab_data_fluxes=True,
+        )
+    }
+
+
+def build_som_abrupt_4xco2_ens_slab_sfc_data_eval_configs() -> dict[str, dict]:
+    return _abrupt_ensemble_member_configs(
+        "somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval",
+        data_only=False,
+        slab_data_fluxes=True,
+    )
+
+
+def build_som_abrupt_4xco2_ens_slab_sfc_data_q4deg_eval_configs() -> dict[str, dict]:
+    return _abrupt_ensemble_member_configs(
+        "somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval",
+        data_only=False,
+        slab_data_fluxes=True,
+        qflux_4deg=True,
+    )
 
 
 def build_som_abrupt_4xco2_ens_data_only_configs() -> dict[str, dict]:
@@ -1306,6 +1419,18 @@ BUILDERS = {
     ),
     "som-control-dataCO2-ens-sstslabq4deg-eval": (
         build_som_control_ens_slab_q4deg_eval_configs
+    ),
+    "som-control-dataCO2-ens-sstslabsfcdata-eval": (
+        build_som_control_ens_slab_sfc_data_eval_configs
+    ),
+    "som-control-dataCO2-ens-sstslabsfcdataq4deg-eval": (
+        build_som_control_ens_slab_sfc_data_q4deg_eval_configs
+    ),
+    "somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval": (
+        build_som_abrupt_4xco2_ens_slab_sfc_data_eval_configs
+    ),
+    "somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval": (
+        build_som_abrupt_4xco2_ens_slab_sfc_data_q4deg_eval_configs
     ),
     "somabruptens-abrupt-4xCO2-ens-sstdata-dataonly": (
         build_som_abrupt_4xco2_ens_data_only_configs

@@ -19,6 +19,18 @@ the status section below against `argo list`, `beaker`, and the GCS paths
 
 ## Status (2026-10-21)
 
+- **2026-10-21, the slab driven by SHiELD's own surface fluxes (Spencer's
+  prescribed-flux test), in the loop.** `SlabOceanConfig.surface_flux_source:
+  data` makes the slab read the six surface flux variables from the data
+  instead of the model's prediction. Four kinds: the 1xCO2 slab control
+  (`som-control-dataCO2-ens-sstslabsfcdata-eval`, `…sstslabsfcdataq4deg-eval`)
+  and one evaluator per SHiELD abrupt-4xCO2 member
+  (`somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval`,
+  `…sstslabsfcdataq4deg-eval`, 36 each), each with the store's and the
+  re-derived Q-flux. The member stores start at their own initial month, so the
+  re-derived Q-flux is written per member on its time axis
+  (QFLUX_4DEG_ENSEMBLE_DATASET, `build_qflux_4deg_store.py
+  --abrupt-ensemble`). Submitted on nc-sfno fm-a1/a2/a3 only.
 - **2026-10-21, the slab's slow 4xCO2 response is a 1xCO2 cold drift, and two
   re-derived-Q-flux slab kinds are submitted.** Spencer reported the SOM
   abrupt-4xCO2 ensemble warming too slowly against SHiELD. Read as ACE slab 4x
@@ -240,6 +252,8 @@ marks experiments the paper does not have.
 | `run-ace-abrupt-4xCO2-ensemble-evaluator.sh` | `som-abrupt-4xCO2-ens-sstslab-eval` | SOM 1x member, CO2 → 4x | 2nd of each month 2031-01 … 2033-12 at 00Z, 90 steps | 1 | `som` | none | ✅ |
 | — slab control for the ensemble (ours) | `som-control-dataCO2-ens-sstslab-eval` | SOM 1x member as is | same | 1 | `som` | none | ✅ |
 | — both of the above with the re-derived 4deg Q-flux (ours) | `som-abrupt-4xCO2-ens-sstslabq4deg-eval`, `som-control-dataCO2-ens-sstslabq4deg-eval` | as above, `merge:` with QFLUX_4DEG_DATASET first | same | 1 + 1 | `som` | none | ✅ (submitted 2026-10-21) |
+| — the slab control driven by the store's surface fluxes, store's and re-derived Q-flux (ours) | `som-control-dataCO2-ens-sstslabsfcdata-eval`, `som-control-dataCO2-ens-sstslabsfcdataq4deg-eval` | SOM 1x member as is (q4deg: `merge:` with QFLUX_4DEG_DATASET first); slab `surface_flux_source: data` | same | 1 + 1 | `som` | none | ✅ nc-sfno fm-a1/a2/a3 only (submitted 2026-10-21) |
+| — slab per SHiELD abrupt-4xCO2 member driven by its surface fluxes, member's and re-derived Q-flux (ours) | `somabruptens-abrupt-4xCO2-ens-sstslabsfcdata-eval`, `somabruptens-abrupt-4xCO2-ens-sstslabsfcdataq4deg-eval` | D3 member (q4deg: `merge:` with the member's QFLUX_4DEG_ENSEMBLE_DATASET store first); slab `surface_flux_source: data` | 89 steps from each member's start | 36 + 36 (`--ens-member`) | `som` | none | ✅ nc-sfno fm-a1/a2/a3 only (submitted 2026-10-21) |
 | `run-ace-abrupt-4xCO2-ensemble-data-only-evaluator.sh` | `somabruptens-abrupt-4xCO2-ens-sstdata-dataonly` | D3 member vs itself | 89 steps from each member's start | 36 total (`--ens-member`) | `som` | none | ✅ |
 | `run-seven-day-1xCO2-and-abrupt-4xCO2-inference-ensemble.sh` | `som-control-dataCO2-7day-sstslab-inference`, `som-abrupt-4xCO2-7day-sstslab-inference` | SOM 1x member; CO2 as is / → 4x | same 36 starts, 7 steps | 1 + 1 | `som` | none | ✅ |
 | `figures-09-11-S09-S10.ipynb`'s SHiELD response (paper reads the raw zarrs) | `som-control-dataCO2-7day-sstdata-dataonly`, `somabruptens-abrupt-4xCO2-7day-sstdata-dataonly` | SOM 1x member vs itself at the 36 starts; D3 member vs itself | 7 steps (time mean over days 1–7, as the 7-day inference kinds) | 1 + 36 total | `som` | none | ✅ (not submitted) |
