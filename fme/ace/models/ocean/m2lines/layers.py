@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 import torch
@@ -237,7 +237,7 @@ class ConvNeXtBlock(torch.nn.Module):
         kernel_size: int = 3,
         dilation: int = 1,
         n_layers: int = 1,
-        activation: torch.nn.Module = CappedGELU,
+        activation: Callable[[], torch.nn.Module] = CappedGELU,
         pad: str = "circular",
         norm: str | None = "instance",
         norm_kwargs: Mapping[str, Any] | None = None,

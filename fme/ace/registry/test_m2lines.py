@@ -214,3 +214,20 @@ def test_samudra_builder_pooling():
     model = _two_level_builder([2, 3]).build(5, 3, DatasetInfo())
     with pytest.raises(ValueError, match="does not divide the grid shape"):
         model(torch.randn(1, 5, 16, 32))
+
+
+def test_samudra_builder_gelu_cap():
+    selector = ModuleSelector(
+        type="Samudra",
+        config={
+            "ch_width": [4, 4],
+            "dilation": [1, 2],
+            "n_layers": [1, 1],
+            "gelu_cap": None,
+        },
+    )
+    model = selector.build(5, 3, DatasetInfo(img_shape=(16, 32))).torch_module
+    assert isinstance(model, Samudra)
+    assert model.gelu_cap is None
+    output = model(torch.randn(2, 5, 16, 32))
+    assert output.shape == (2, 3, 16, 32)

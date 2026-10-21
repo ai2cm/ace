@@ -6,6 +6,7 @@ import os
 import pytest
 import torch
 
+from fme.ace.models.ocean.m2lines.activations import CappedGELU
 from fme.ace.models.ocean.m2lines.layers import (
     AvgPool,
     BilinearUpsample,
@@ -1043,3 +1044,19 @@ def test_samudra_exact_pooling_with_noise_conditioning():
 def test_samudra_rejects_pad_pool_with_exact_pooling():
     with pytest.raises(ValueError, match="nothing to pad"):
         _small_samudra(pooling=[2, 2, 2], pad_pool=True)
+
+
+def test_samudra_gelu_cap():
+    """By default every block's GELU is capped at 1; gelu_cap=None leaves it
+    uncapped, and the network still runs."""
+    capped = _small_samudra()
+    caps = [m.cap.item() for m in capped.modules() if isinstance(m, CappedGELU)]
+    assert len(caps) > 0 and all(cap == 1.0 for cap in caps)
+    uncapped = _small_samudra(gelu_cap=None)
+    gelus = [m for m in uncapped.modules() if isinstance(m, torch.nn.GELU)]
+    assert not any(isinstance(m, CappedGELU) for m in uncapped.modules())
+    assert len(gelus) == len(caps)
+    big = torch.tensor([5.0])
+    assert all(gelu(big) > 1.0 for gelu in gelus)
+    x = torch.randn(2, 2, *_SMALL_SHAPE)
+    assert uncapped(x).shape == (2, 3, *_SMALL_SHAPE)
