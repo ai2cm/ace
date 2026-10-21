@@ -5,10 +5,15 @@ from typing import Any, Literal
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
 from fme.ace.models.ocean.m2lines.layers import LatPad
-from fme.ace.models.ocean.m2lines.samudra import ConditionedBlocks, Samudra
+from fme.ace.models.ocean.m2lines.samudra import (
+    ConditionedBlocks,
+    Samudra,
+    validate_exact_pooling_grid,
+    validate_pooling_factors,
+)
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.models.conditional_sfno.layers import ContextConfig
 
 
@@ -41,6 +46,12 @@ class SamudraBuilder(ModuleConfig):
             "pole" (continues across the pole). See ``Samudra``.
         pad_pool: Pad odd sizes before each pool instead of dropping the last
             row or column. See ``Samudra``.
+        pooling: Pooling factor of each U-Net level, one per entry of
+            ``ch_width``. When given, the product of the factors must divide
+            both grid dimensions, so every level pools and upsamples exactly;
+            ``build`` checks this against the dataset's grid. None (the
+            default) pools by 2 at every level, floor-pooling grids 2 does not
+            divide. See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -58,6 +69,7 @@ class SamudraBuilder(ModuleConfig):
     pad_pool: bool = False
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
+    pooling: list[int] | None = None
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -80,6 +92,12 @@ class SamudraBuilder(ModuleConfig):
                 "conditioned_blocks requires a non-zero noise_embed_dim; without "
                 "it the network is deterministic and conditions on nothing."
             )
+        if self.pooling is not None:
+            validate_pooling_factors(self.pooling, len(self.ch_width))
+            if self.pad_pool:
+                raise ValueError(
+                    "pad_pool has nothing to pad under exact pooling factors"
+                )
 
     def build(
         self,
@@ -89,6 +107,13 @@ class SamudraBuilder(ModuleConfig):
     ):
         if len(dataset_info.all_labels) > 0:
             raise ValueError("Samudra does not support labels")
+        if self.pooling is not None:
+            try:
+                img_shape = dataset_info.img_shape
+            except MissingDatasetInfo:
+                pass  # Samudra.forward checks the grid instead
+            else:
+                validate_exact_pooling_grid(self.pooling, img_shape, self.lat_pad)
         if self.noise_embed_dim > 0:
             context_config: ContextConfig | None = ContextConfig(
                 embed_dim_scalar=0,
@@ -114,6 +139,7 @@ class SamudraBuilder(ModuleConfig):
             pad_pool=self.pad_pool,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
+            pooling=self.pooling,
         )
         if context_config is None:
             return samudra

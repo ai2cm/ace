@@ -13,6 +13,7 @@ from fme.ace.models.ocean.m2lines.layers import (
     LatPad,
     MultiResolutionFiLM,
     ZonallyPeriodicBilinearUpsample,
+    _rotate_half_longitude,
     pad_latitude,
 )
 from fme.ace.models.ocean.m2lines.samudra import Samudra
@@ -36,22 +37,23 @@ def test_zonally_periodic_upsample_matches_bilinear_shape(img_shape):
     assert periodic.shape == plain.shape
 
 
+@pytest.mark.parametrize("upsampling", [2, 3])
 @pytest.mark.parametrize("shift", [1, 3, 7])
-def test_zonally_periodic_upsample_is_zonally_periodic(shift):
+def test_zonally_periodic_upsample_is_zonally_periodic(shift, upsampling):
     """Upsampling commutes with circular shifts in longitude only if the
     upsampler is periodic along that axis. The plain bilinear upsampler is not,
     which is the source of the lon=0 seam.
     """
     x = torch.randn(2, 3, 8, 16)
-    periodic = ZonallyPeriodicBilinearUpsample()
+    periodic = ZonallyPeriodicBilinearUpsample(upsampling=upsampling)
     shifted_then_up = periodic(torch.roll(x, shifts=shift, dims=-1))
-    up_then_shifted = torch.roll(periodic(x), shifts=2 * shift, dims=-1)
+    up_then_shifted = torch.roll(periodic(x), shifts=upsampling * shift, dims=-1)
     assert torch.allclose(shifted_then_up, up_then_shifted, atol=1e-5)
 
-    plain = BilinearUpsample()
+    plain = BilinearUpsample(upsampling=upsampling)
     assert not torch.allclose(
         plain(torch.roll(x, shifts=shift, dims=-1)),
-        torch.roll(plain(x), shifts=2 * shift, dims=-1),
+        torch.roll(plain(x), shifts=upsampling * shift, dims=-1),
         atol=1e-5,
     )
 
@@ -849,3 +851,195 @@ def test_samudra_pad_pool_with_noise_conditioning():
     img_shape = (17, 30)
     out = model(torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape))
     assert out.shape == (2, 3, *img_shape)
+
+
+# each product divides both 180 and 360
+_EXACT_1DEG = [[2, 2, 3], [2, 3, 3], [2, 2, 3, 3], [2, 2, 3, 1]]
+_1DEG_SHAPE = (180, 360)
+
+
+def _exact_samudra(pooling: list[int], **kwargs) -> Samudra:
+    """One channel per level, dilations that fit every level of the 180x360
+    grid under each pooling in ``_EXACT_1DEG``."""
+    n_levels = len(pooling)
+    torch.manual_seed(0)
+    return Samudra(
+        input_channels=1,
+        output_channels=1,
+        ch_width=[2] * n_levels,
+        dilation=[1, 2, 4, 4][:n_levels],
+        n_layers=[1] * n_levels,
+        norm="batch",
+        upscale_factor=1,
+        pooling=pooling,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
+def test_samudra_explicit_twos_match_default_bitwise(
+    lat_pad, zonally_periodic_upsample
+):
+    """``pooling=[2] * L`` on a grid 2^L divides is the default network."""
+    default = _small_samudra(
+        lat_pad=lat_pad, zonally_periodic_upsample=zonally_periodic_upsample
+    )
+    explicit = _small_samudra(
+        lat_pad=lat_pad,
+        zonally_periodic_upsample=zonally_periodic_upsample,
+        pooling=[2, 2, 2],
+    )
+    explicit.load_state_dict(default.state_dict(), strict=True)
+    torch.manual_seed(1)
+    x = torch.randn(2, 2, 16, 32)
+    with torch.no_grad():
+        assert torch.equal(explicit(x), default(x))
+
+
+def test_samudra_pooling_validation():
+    with pytest.raises(ValueError, match="expected one per level"):
+        _small_samudra(pooling=[2, 2])
+    with pytest.raises(ValueError, match="positive integers"):
+        _small_samudra(pooling=[2, 0, 2])
+    with pytest.raises(ValueError, match="positive integers"):
+        _small_samudra(pooling=[2, -2, 2])
+    x = torch.randn(1, 2, *_SMALL_SHAPE)
+    with pytest.raises(ValueError, match="does not divide the grid shape"):
+        _small_samudra(pooling=[2, 2, 2])(x)
+    # 8 divides (16, 24); the bottleneck width 3 is odd
+    with pytest.raises(ValueError, match="even width at every level"):
+        _small_samudra(pooling=[2, 2, 2], lat_pad="pole")(torch.randn(1, 2, 16, 24))
+    with torch.no_grad():
+        out = _small_samudra(pooling=[2, 1, 2])(torch.randn(1, 2, 16, 24))
+    assert out.shape == (1, 3, 16, 24)
+
+
+@pytest.mark.parametrize("pooling", _EXACT_1DEG)
+def test_samudra_exact_pooling_level_shapes(pooling):
+    """Every encoder level has shape (H_l, W_l), and every decoder upsample
+    returns its skip connection's shape, so no row or column is refilled."""
+    model = _exact_samudra(pooling, lat_pad="pole", zonally_periodic_upsample=True)
+    blocks = [layer for layer in model.layers if isinstance(layer, ConvNeXtBlock)]
+    upsamplers = [
+        layer
+        for layer in model.layers
+        if isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample)
+    ]
+    shapes: dict[torch.nn.Module, tuple[int, ...]] = {}
+    handles = [
+        module.register_forward_hook(
+            lambda module, _, out: shapes.__setitem__(module, tuple(out.shape[2:]))
+        )
+        for module in blocks + upsamplers
+    ]
+    with torch.no_grad():
+        out = model(torch.randn(1, 1, *_1DEG_SHAPE))
+    for handle in handles:
+        handle.remove()
+    assert out.shape == (1, 1, *_1DEG_SHAPE)
+
+    height, width = _1DEG_SHAPE
+    level_shapes = [(height, width)]
+    for factor in pooling:
+        height, width = height // factor, width // factor
+        level_shapes.append((height, width))
+    n_levels = len(pooling)
+    encoder, bottleneck = blocks[:n_levels], blocks[n_levels]
+    assert [shapes[block] for block in encoder] == level_shapes[:-1]
+    assert shapes[bottleneck] == level_shapes[-1]
+    assert [shapes[up] for up in upsamplers] == level_shapes[-2::-1]
+
+
+def _pool_chain(model: Samudra):
+    pools = [layer for layer in model.layers if isinstance(layer, AvgPool)]
+
+    def chain(x: torch.Tensor) -> torch.Tensor:
+        for pool in pools:
+            x = pool(x)
+        return x
+
+    return chain
+
+
+@pytest.mark.parametrize("pooling", _EXACT_1DEG)
+def test_exact_pool_chain_value_properties(pooling):
+    """The pool chain of a built network averages disjoint P x P blocks that
+    tile the 180x360 grid: every input cell reaches the bottleneck with weight
+    1 / P^2, a constant field is preserved, the 180-degree rotation at the pole
+    is exact, and both polar bottleneck rows draw on P input rows."""
+    chain = _pool_chain(_exact_samudra(pooling))
+    product = math.prod(pooling)
+    height, width = _1DEG_SHAPE
+    dtype = torch.float64
+
+    x = torch.randn(1, 1, height, width, dtype=dtype, requires_grad=True)
+    chain(x).sum().backward()
+    assert x.grad is not None
+    # coverage and uniform weight
+    torch.testing.assert_close(
+        x.grad, torch.full_like(x.grad, 1.0 / product**2), rtol=0, atol=1e-15
+    )
+
+    # constant field
+    ones = torch.ones(1, 1, height, width, dtype=dtype)
+    torch.testing.assert_close(chain(ones), torch.ones_like(chain(ones)))
+
+    # pole roll: the bottleneck column centred at lon maps to lon + 180
+    lon = torch.deg2rad((torch.arange(width, dtype=dtype) + 0.5) * 360.0 / width)
+    for field in (torch.cos(lon), torch.sin(lon)):
+        pooled = chain(field.expand(1, 1, height, width))
+        torch.testing.assert_close(_rotate_half_longitude(pooled), -pooled)
+
+    # pole symmetry
+    for row, expected_rows in [
+        (0, range(product)),
+        (-1, range(height - product, height)),
+    ]:
+        x = torch.randn(1, 1, height, width, dtype=dtype, requires_grad=True)
+        chain(x)[..., row, :].sum().backward()
+        assert x.grad is not None
+        rows_used = torch.nonzero(x.grad[0, 0].abs().sum(dim=-1)).flatten()
+        assert rows_used.tolist() == list(expected_rows)
+
+
+@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
+@pytest.mark.parametrize("pooling", _EXACT_1DEG)
+def test_samudra_exact_pooling_is_zonally_equivariant(pooling, lat_pad):
+    """Rolling the input by P columns rolls the output by P columns."""
+    model = _exact_samudra(pooling, lat_pad=lat_pad, zonally_periodic_upsample=True)
+    product = math.prod(pooling)
+    torch.manual_seed(1)
+    x = torch.randn(1, 1, *_1DEG_SHAPE)
+    with torch.no_grad():
+        rolled_then_run = model(torch.roll(x, shifts=product, dims=-1))
+        run_then_rolled = torch.roll(model(x), shifts=product, dims=-1)
+    torch.testing.assert_close(rolled_then_run, run_then_rolled, rtol=0, atol=1e-5)
+
+
+def test_samudra_exact_pooling_state_dict_matches_default():
+    """Pooling adds no parameters: a default checkpoint loads strictly."""
+    default = _small_samudra()
+    exact = _small_samudra(pooling=[2, 3, 1])
+    assert {k: v.shape for k, v in default.state_dict().items()} == {
+        k: v.shape for k, v in exact.state_dict().items()
+    }
+    exact.load_state_dict(default.state_dict(), strict=True)
+
+
+def test_samudra_exact_pooling_with_noise_conditioning():
+    n_noise = 2
+    model = _exact_samudra(
+        [2, 2, 3],
+        lat_pad="pole",
+        zonally_periodic_upsample=True,
+        context_config=_noise_context_config(n_noise),
+        conditioned_blocks="all_blocks",
+    )
+    with torch.no_grad():
+        out = model(torch.randn(2, 1, *_1DEG_SHAPE), _context(n_noise, 2, _1DEG_SHAPE))
+    assert out.shape == (2, 1, *_1DEG_SHAPE)
+
+
+def test_samudra_rejects_pad_pool_with_exact_pooling():
+    with pytest.raises(ValueError, match="nothing to pad"):
+        _small_samudra(pooling=[2, 2, 2], pad_pool=True)

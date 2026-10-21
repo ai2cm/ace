@@ -188,3 +188,29 @@ def test_noise_conditioned_samudra_draws_independent_noise_per_sample():
         output = model(x)
     assert not torch.allclose(output[0], output[1])
     assert not torch.allclose(output[1], output[2])
+
+
+def _two_level_builder(pooling: list[int]) -> SamudraBuilder:
+    return SamudraBuilder(
+        ch_width=[4, 4], dilation=[1, 2], n_layers=[1, 1], pooling=pooling
+    )
+
+
+def test_samudra_builder_pooling():
+    model = _two_level_builder([2, 3]).build(5, 3, DatasetInfo(img_shape=(18, 36)))
+    assert isinstance(model, Samudra)
+    assert model.pooling == [2, 3]
+    assert model.exact_pooling
+    assert model(torch.randn(1, 5, 18, 36)).shape == (1, 3, 18, 36)
+
+    with pytest.raises(ValueError, match="expected one per level"):
+        _two_level_builder([2])
+    with pytest.raises(ValueError, match="positive integers"):
+        _two_level_builder([2, 0])
+    with pytest.raises(ValueError, match="does not divide the grid shape"):
+        _two_level_builder([2, 3]).build(5, 3, DatasetInfo(img_shape=(16, 32)))
+
+    # without a horizontal grid, build defers the check to forward
+    model = _two_level_builder([2, 3]).build(5, 3, DatasetInfo())
+    with pytest.raises(ValueError, match="does not divide the grid shape"):
+        model(torch.randn(1, 5, 16, 32))
