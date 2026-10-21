@@ -1,4 +1,7 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
 # Noise-from-scratch stochastic stage 1, socorr mean fill, Muon 3e-3, 15 epochs. See train-config.yaml.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs0|train|high|jupiter+titan|4||3|ai2/ace|seed=0|8h
+# rs1/rs2: seed variability of the Muon 1-step stage (2026-10-21)
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs0|skip|high|jupiter+titan|4||3|ai2/ace|seed=0|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs1|train|high|jupiter+titan|4||3|ai2/ace|seed=1|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm|rs2|train|high|jupiter+titan|4||3|ai2/ace|seed=2|8h
