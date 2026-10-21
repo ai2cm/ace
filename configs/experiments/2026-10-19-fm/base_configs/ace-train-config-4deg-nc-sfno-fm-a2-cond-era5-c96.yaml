@@ -887,7 +887,7 @@ inference:
     histogram:
       enabled: true
 - name: aimip_checkpoint_c96
-  weight: 1.0
+  weight: 0.0
   epochs:
     start: 0
     step: 1
