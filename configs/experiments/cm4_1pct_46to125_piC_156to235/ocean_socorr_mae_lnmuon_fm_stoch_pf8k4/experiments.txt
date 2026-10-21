@@ -5,4 +5,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_pf8k4|rs2ep8|01M5
 # --config-dir configs/experiments/cm4_eval/ocean
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_pf8k4|rs2ep8|01M5DQ3FK1CDRPBXG1Z6K6D4HN|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_pf8k4|rs2ep8|01M5DQ3FK1CDRPBXG1Z6K6D4HN|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_pf8k4|rs2ep8|01M5DQ3FK1CDRPBXG1Z6K6D4HN|running_1pct-ic0001-130yr|ema_ckpt_0008|high|--min-runtime 8h||01M5FQSXX7AGHRH5W95XYFB7S9|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_mae_lnmuon_fm_stoch_pf8k4|rs2ep8|01M5DQ3FK1CDRPBXG1Z6K6D4HN|run_1pct-ic0001-130yr|ema_ckpt_0008|high|--min-runtime 8h||01M5FQSXX7AGHRH5W95XYFB7S9|ai2/ace|jupiter+titan
