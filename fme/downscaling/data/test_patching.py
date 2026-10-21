@@ -5,8 +5,10 @@ import torch
 from fme.downscaling.data import PairedBatchData
 from fme.downscaling.data.datasets import patched_batch_gen_from_paired_loader
 from fme.downscaling.data.patching import (
+    PatchAverager,
     _divide_into_slices,
     _get_patch_slices,
+    _HorizontalSlice,
     get_patches,
 )
 from fme.downscaling.predictors.test_composite import get_paired_test_data
@@ -202,3 +204,27 @@ def test_paired_patches_shuffle(shuffle):
         assert not torch.equal(data0, data1)
     else:
         assert torch.equal(data0, data1)
+
+
+def _cols(x0: int, x1: int) -> _HorizontalSlice:
+    return _HorizontalSlice(y=slice(0, 1), x=slice(x0, x1))
+
+
+def test_PatchAverager_averages_overlaps():
+    # two 1x3 patches on a 1x4 domain, overlapping in columns 1-2, with
+    # leading dimensions carried through
+    average = PatchAverager([_cols(0, 3), _cols(1, 4)], (1, 4), torch.device("cpu"))
+    patches = (torch.full((2, 3, 1, 3), value) for value in (1.0, 3.0))
+    expected = torch.tensor([1.0, 2.0, 2.0, 3.0]).expand(2, 3, 1, 4)
+    torch.testing.assert_close(average(patches), expected)
+
+
+def test_PatchAverager_raises_on_uncovered_domain():
+    with pytest.raises(ValueError, match="do not cover"):
+        PatchAverager([_cols(0, 2), _cols(3, 4)], (1, 4), torch.device("cpu"))
+
+
+def test_PatchAverager_raises_on_patch_count_mismatch():
+    average = PatchAverager([_cols(0, 3), _cols(1, 4)], (1, 4), torch.device("cpu"))
+    with pytest.raises(ValueError):
+        average([torch.ones(1, 3)])

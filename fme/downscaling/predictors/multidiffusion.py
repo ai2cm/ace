@@ -20,7 +20,7 @@ import torch
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData
-from fme.downscaling.data.patching import Patch, _HorizontalSlice
+from fme.downscaling.data.patching import Patch, PatchAverager, _HorizontalSlice
 from fme.downscaling.models import DiffusionModel, _repeat_batch_by_samples
 from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 from fme.downscaling.typing_ import Denoiser
@@ -50,7 +50,9 @@ class MultiDiffusionDenoiser:
 
     Args:
         net: Denoiser called on each patch at the model's trained patch shape.
-        fine_slices: Region of the full fine domain covered by each patch.
+        average: Averages the denoised patches over the full fine domain; its
+            regions are the patches' regions of the domain, and its device is
+            the state's.
         patch_inputs: Conditioning input for each patch, as the model would
             build it for that patch on its own.
         base_shifts: Per-patch base shift, or None for each patch if the
@@ -61,17 +63,18 @@ class MultiDiffusionDenoiser:
     def __init__(
         self,
         net: Denoiser,
-        fine_slices: list[_HorizontalSlice],
+        average: PatchAverager,
         patch_inputs: list[torch.Tensor],
         base_shifts: list[torch.Tensor | None],
         device: torch.device,
     ):
-        if not (len(fine_slices) == len(patch_inputs) == len(base_shifts)):
+        if not (len(average.regions) == len(patch_inputs) == len(base_shifts)):
             raise ValueError(
-                "fine_slices, patch_inputs, and base_shifts must have the same length."
+                "average.regions, patch_inputs, and base_shifts must have the same "
+                "length."
             )
         self.net = net
-        self.fine_slices = fine_slices
+        self.average = average
         self.patch_inputs = patch_inputs
         self.base_shifts = base_shifts
         self.device = device
@@ -80,24 +83,28 @@ class MultiDiffusionDenoiser:
         self, x: torch.Tensor, x_lr: torch.Tensor, sigma: torch.Tensor
     ) -> torch.Tensor:
         # x_lr is unused: conditioning is per patch, held in patch_inputs
-        denoised_sum = torch.zeros_like(x)
-        count = torch.zeros_like(x[:1, :1])
+        if tuple(x.shape[-2:]) != tuple(self.average.count.shape):
+            raise ValueError(
+                f"State shape {tuple(x.shape[-2:])} does not match the patch "
+                f"layout's domain shape {tuple(self.average.count.shape)}."
+            )
         sigma = sigma.to(self.device)
-        for fine_slice, inputs, shift in zip(
-            self.fine_slices, self.patch_inputs, self.base_shifts
-        ):
-            x_patch = x[..., fine_slice.y, fine_slice.x].to(self.device)
-            if shift is not None:
-                shift = shift.to(self.device)
-                x_patch = x_patch + shift
-            denoised = self.net(x_patch, inputs.to(self.device), sigma).to(x.dtype)
-            if shift is not None:
-                denoised = denoised - shift
-            denoised_sum[..., fine_slice.y, fine_slice.x] += denoised.to(x.device)
-            count[..., fine_slice.y, fine_slice.x] += 1
-        if (count == 0).any():
-            raise ValueError("Patches do not cover the full domain.")
-        return denoised_sum / count
+
+        def denoised_patches():
+            for fine_slice, inputs, shift in zip(
+                self.average.regions, self.patch_inputs, self.base_shifts
+            ):
+                x_patch = x[..., fine_slice.y, fine_slice.x].to(self.device)
+                if shift is not None:
+                    shift = shift.to(self.device)
+                    x_patch = x_patch + shift
+                denoised = self.net(x_patch, inputs.to(self.device), sigma)
+                denoised = denoised.to(x.dtype)
+                if shift is not None:
+                    denoised = denoised - shift
+                yield denoised
+
+        return self.average(denoised_patches())
 
 
 @torch.no_grad()
@@ -173,9 +180,11 @@ def generate_multidiffusion(
     # the MultiDiffusion denoiser carries its own per-patch conditioning.
     unused_inputs = latents.new_empty(latents.shape[0], 0)
 
+    average = PatchAverager(fine_slices, fine_shape, device=state_device)
+
     def wrap_denoiser(net: Denoiser) -> Denoiser:
         return MultiDiffusionDenoiser(
-            net, fine_slices, patch_inputs, base_shifts, device=device
+            net, average, patch_inputs, base_shifts, device=device
         )
 
     def randn_like(x: torch.Tensor) -> torch.Tensor:

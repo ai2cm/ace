@@ -1,5 +1,8 @@
 import dataclasses
+from collections.abc import Iterable
 from itertools import product
+
+import torch
 
 
 @dataclasses.dataclass
@@ -102,3 +105,48 @@ def _divide_into_slices(full_size: int, patch_size: int, overlap: int) -> list[s
         slices.append(slice(next_start, next_stop))
         _stop = next_stop
     return slices
+
+
+class PatchAverager:
+    """
+    Average patch tensors into a full-domain tensor, dividing by the number
+    of patches covering each point. The count depends only on the patch
+    regions, so it is computed once and reused for every call.
+
+    Args:
+        regions: Region of the full domain each patch covers.
+        shape: Horizontal (y, x) shape of the full domain.
+        device: Device to accumulate on; patches are moved to it.
+    """
+
+    def __init__(
+        self,
+        regions: list[_HorizontalSlice],
+        shape: tuple[int, int],
+        device: torch.device,
+    ):
+        count = torch.zeros(shape, device=device)
+        for region in regions:
+            count[region.y, region.x] += 1
+        if (count == 0).any():
+            raise ValueError("Patches do not cover the full domain.")
+        self.regions = regions
+        self.count = count
+
+    def __call__(self, patches: Iterable[torch.Tensor]) -> torch.Tensor:
+        """
+        Args:
+            patches: One tensor per region, in the same order, with any
+                leading dimensions. Consumed one at a time, so a generator
+                never holds more than one patch.
+        """
+        total: torch.Tensor | None = None
+        for region, patch in zip(self.regions, patches, strict=True):
+            if total is None:
+                total = patch.new_zeros(
+                    *patch.shape[:-2], *self.count.shape, device=self.count.device
+                )
+            total[..., region.y, region.x] += patch.to(total.device)
+        if total is None:
+            raise ValueError("No patches to average.")
+        return total / self.count.to(total.dtype)

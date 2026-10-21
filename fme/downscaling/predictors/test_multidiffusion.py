@@ -3,7 +3,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.downscaling.data import BatchData, PairedBatchData
-from fme.downscaling.data.patching import _HorizontalSlice, get_patches
+from fme.downscaling.data.patching import PatchAverager, _HorizontalSlice, get_patches
 from fme.downscaling.models import DiffusionModel
 from fme.downscaling.predictors.composite import PatchPredictionConfig, PatchPredictor
 from fme.downscaling.predictors.multidiffusion import (
@@ -26,6 +26,12 @@ def _slice(y0, y1, x0, x1) -> _HorizontalSlice:
     return _HorizontalSlice(y=slice(y0, y1), x=slice(x0, x1))
 
 
+def _denoiser(net, slices, inputs, shifts, shape) -> MultiDiffusionDenoiser:
+    # state on CPU, network on the test device
+    average = PatchAverager(slices, shape, torch.device("cpu"))
+    return MultiDiffusionDenoiser(net, average, inputs, shifts, device=get_device())
+
+
 def test_MultiDiffusionDenoiser_averages_overlapping_patches():
     # two 1x3 patches on a 1x4 domain, overlapping in columns 1-2
     slices = [_slice(0, 1, 0, 3), _slice(0, 1, 1, 4)]
@@ -35,9 +41,7 @@ def test_MultiDiffusionDenoiser_averages_overlapping_patches():
     def net(x, x_lr, sigma):
         return x_lr.expand_as(x)
 
-    denoiser = MultiDiffusionDenoiser(
-        net, slices, inputs, [None, None], device=get_device()
-    )
+    denoiser = _denoiser(net, slices, inputs, [None, None], (1, 4))
     x = torch.zeros(2, 1, 1, 4)
     denoised = denoiser(x, x.new_empty(2, 0), torch.tensor(1.0))
     expected = torch.tensor([1.0, 2.0, 2.0, 3.0]).expand(2, 1, 1, 4)
@@ -54,23 +58,18 @@ def test_MultiDiffusionDenoiser_base_shift_round_trips():
     slices = [_slice(0, 3, 0, 4), _slice(1, 4, 0, 4)]
     inputs = [torch.zeros(2, 1, 3, 4)] * 2
     shifts: list[torch.Tensor | None] = [torch.randn(2, 1, 3, 4) for _ in slices]
-    denoiser = MultiDiffusionDenoiser(
-        _identity_net, slices, inputs, shifts, device=get_device()
-    )
+    denoiser = _denoiser(_identity_net, slices, inputs, shifts, (4, 4))
     x = torch.randn(2, 1, 4, 4)
     denoised = denoiser(x, x.new_empty(2, 0), torch.tensor(1.0))
     torch.testing.assert_close(denoised, x)
 
 
-def test_MultiDiffusionDenoiser_raises_on_uncovered_domain():
-    # corners (0, 3) and (3, 0) are covered by neither patch
-    slices = [_slice(0, 3, 0, 3), _slice(1, 4, 1, 4)]
-    inputs = [torch.zeros(2, 1, 3, 3)] * 2
-    denoiser = MultiDiffusionDenoiser(
-        _identity_net, slices, inputs, [None, None], device=get_device()
-    )
-    x = torch.randn(2, 1, 4, 4)
-    with pytest.raises(ValueError, match="do not cover"):
+def test_MultiDiffusionDenoiser_raises_on_state_shape_mismatch():
+    slices = [_slice(0, 3, 0, 4), _slice(1, 4, 0, 4)]
+    inputs = [torch.zeros(2, 1, 3, 4)] * 2
+    denoiser = _denoiser(_identity_net, slices, inputs, [None, None], (4, 4))
+    x = torch.randn(2, 1, 4, 5)
+    with pytest.raises(ValueError, match="does not match"):
         denoiser(x, x.new_empty(2, 0), torch.tensor(1.0))
 
 
