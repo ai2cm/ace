@@ -42,7 +42,8 @@ every budget.
 | Domain | global | **stops at 80°S**: output rows wholly south of it have zero source overlap and are written as land (`mask_* = 0`, `land_fraction = 1`) |
 | Diagnostic outputs | `hfds`, `hfds_total_area`, `wfo`, `tauuo`, `tauvo` | **none** — not published; drop these from `out_names` and keep the heat-content and salt correctors off |
 | `sst` | MOM6 top layer + 273.15 | `thetao` at 0.494 m + 273.15 |
-| Sea ice | FV3 `icec`/`icetk` | `siconc` → `ocean_sea_ice_fraction`, `sithick` → `HI`, `siconc·sithick` → `sea_ice_volume` |
+| Sea ice | FV3 `icec`/`icetk` | `siconc` → `ocean_sea_ice_fraction`, `sithick` → `HI`, `siconc·sithick` → `sea_ice_volume`, `usi`/`vsi` → `UI`/`VI` |
+| `hfgeou` | MOM6 static field | not published; copied from the CM4 (1°) or OM4 (4°) static field so configs that list it as an input carry over |
 | `zos` | MOM6 SSH | SSH above geoid tied to an assimilated mean dynamic topography — check the mean offset before use |
 
 ## Masks
@@ -53,8 +54,9 @@ A cell is ocean at a level only if all of these hold:
 - it is ocean in the grid's **reference mask** (`GRID_INPUTS`): the dataset
   the fine-tune checkpoint was pretrained on — the UFS replay at 1°, OM4 at 4°
   (no 4° UFS replay exists). `--no_mask_intersection` disables this;
-- it is not in the grid's **river-plume mask**: cells whose monthly-mean
-  surface salinity falls below 5 psu in any calendar month in GLORYS12
+- it is not in the grid's **river-plume mask**: cells whose climatological
+  surface salinity for some calendar month (the multi-year mean of the 15th
+  of that month) falls below 5 psu in GLORYS12
   (2011–2020) or GLO12 (2023–2025). Runoff is not a model input, so these cells
   are unpredictable by construction. Build with `make_plume_mask.py`
   (`--product`, `--union`, `--output_grid`);

@@ -6,15 +6,16 @@ DATASET_NAME ?= glorys12-ocean-1deg-19level-5day-1993-2025
 
 # Production run parameters.
 # GLORYS12 daily means: 1993-01-01 .. 2026-06-23 (reanalysis to 2021-06-30,
-# interim after). ERA5 1-degree forcing store ends 2025-12-31T18, and each
-# output state needs the 5-day forcing window ENDING at it, so the last
-# output state is the last stride-5 day <= 2025-12-31: 2025-12-27.
+# interim after). ERA5 forcing stores end 2025-12-31T18, and each output state
+# needs the 5-day forcing window ENDING at it (through state + 12 h). States
+# lie on the 1993-01-01 + 5-day grid, so END_DATE 2025-12-27 gives a last
+# state of 2025-12-24 (2410 states, as produced; 2025-12-29 would also fit).
 START_DATE=1993-01-01
 END_DATE=2025-12-27
 OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME).zarr
 OUTPUT_GRID_ONE_DEGREE=F90
 
-# Test run parameters (Dataflow): 2 months = 13 states
+# Test run parameters (Dataflow): 2 months = 12 states
 START_DATE_TEST_RUN ?= 2015-11-01
 END_DATE_TEST_RUN ?= 2015-12-31
 OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/$(DATE)-glorys-test/ocean-1deg.zarr
@@ -122,7 +123,7 @@ glorys_dataflow_test_run:
 # Minimal local test: 2 states, DirectRunner. Generating the 1/12-degree ->
 # F90 conservative weights takes minutes and several GB of RAM, and is the
 # largest term in peak memory; build them once with make_regrid_weights.py and
-# pass EXTRA_FLAGS="--regrid_weights <file>" to reuse them.
+# pass LOCAL_EXTRA_FLAGS="--regrid_weights <file>" to reuse them.
 LOCAL_EXTRA_FLAGS ?=
 .PHONY: glorys_local_debug
 glorys_local_debug:
@@ -133,8 +134,10 @@ glorys_local_debug:
 		--output_grid $(OUTPUT_GRID_LOCAL) --runner DirectRunner --save_main_session \
 		--job_server_timeout=3600 $(LOCAL_EXTRA_FLAGS)
 
-# Normalization stats (incl. the residual/tendency stats the hybrid ocean uses)
+# Normalization stats (incl. the residual/tendency stats the hybrid ocean uses).
+# STATS_CONFIG selects the set: configs/{glorys12,glo12}-ocean-{1deg,4deg}-19level-5day.yaml
+STATS_CONFIG ?= configs/glorys12-ocean-1deg-19level-5day.yaml
 .PHONY: compute_stats
 compute_stats:
 	cd ../data_process && \
-		./compute_stats.sh --config configs/glorys12-ocean-1deg-19level-5day.yaml
+		./compute_stats.sh --config $(STATS_CONFIG)

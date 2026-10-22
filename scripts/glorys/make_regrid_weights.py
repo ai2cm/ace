@@ -40,7 +40,9 @@ def main():
     logging.basicConfig(level=logging.INFO, force=True)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("output_path", help="netCDF file to write the weights to")
-    p.add_argument("--output_grid", default=gp.DEFAULT_OUTPUT_GRID)
+    p.add_argument(
+        "--output_grid", default=gp.DEFAULT_OUTPUT_GRID, choices=sorted(gp.GRID_INPUTS)
+    )
     args = p.parse_args()
 
     # The source grid comes from the bathymetry store's coordinates, which is

@@ -59,8 +59,8 @@ Variables
 Prognostic: thetao_k, so_k, uo_k, vo_k (k=0..18), sst (K, from the top
 level), ssu, ssv, zos, ocean_sea_ice_fraction (siconc), HI (sithick),
 sea_ice_volume (siconc * sithick), UI/VI (usi/vsi). Static: hfgeou, copied
-from the CM4 field because GLORYS publishes none and the corrector's
-scaled_temperature heat-content correction requires it. Forcing: DLWRFsfc,
+from the CM4/OM4 static field on the output grid, because GLORYS publishes
+none and the CM4/UFS training configs list it as an input. Forcing: DLWRFsfc,
 DSWRFsfc, ULWRFsfc, USWRFsfc, LHTFLsfc, SHTFLsfc, PRATEsfc,
 eastward/northward_surface_wind_stress,
 total_frozen_precipitation_rate. There is no hfds/wfo/tauuo/tauvo: the
@@ -147,10 +147,11 @@ class GridInputs:
     only in GLORYS would be a cold start in weights that never saw them. See
     --no_mask_intersection to disable.
 
-    ``hfgeou``: a store with a static ``hfgeou`` on the grid. GLORYS publishes
-    no geothermal heat flux, but the ocean corrector's scaled_temperature
-    heat-content correction requires it in every one of its three flux
-    branches, so the CM4 field is copied.
+    ``hfgeou``: a store with a static ``hfgeou`` on the grid (CM4 at 1 degree,
+    OM4 at 4 degrees). GLORYS publishes no geothermal heat flux, but the
+    CM4/UFS training configs list ``hfgeou`` as an input, so the field is
+    copied to let those configs carry over. (The ocean corrector does not
+    require it: ``OceanData.geothermal_heat_flux`` falls back to zeros.)
 
     ``plume_mask``: river-mouth cells, masked out because runoff is not one of
     the emulator's inputs: GLORYS resolves discharge at 1/12 degree and the
@@ -321,6 +322,12 @@ def open_forcing(times: pd.DatetimeIndex, url: str) -> xr.Dataset:
     """ERA5 6-hourly forcing from ``url``, restricted to ``times``."""
     ds = xr.open_zarr(_make_zarr_store(url), chunks=None)[list(FORCING_VARS)]
     ds = ds.rename({"latitude": "lat", "longitude": "lon"})
+    missing = times.difference(ds.indexes["time"])
+    if len(missing):
+        raise ValueError(
+            f"ERA5 store {url} lacks {len(missing)} forcing steps "
+            f"({missing[0]} .. {missing[-1]}); shorten end_date"
+        )
     ds = ds.sel(time=times)
     if ds["lat"].values[0] > ds["lat"].values[-1]:
         ds = ds.sortby("lat")
@@ -550,13 +557,31 @@ def remap_vertical(da: xr.DataArray, weights: np.ndarray, name: str) -> xr.Datas
 # ---------------------------------------------------------------------------
 
 
-def _nn_fill(field: np.ndarray, ocean: np.ndarray) -> np.ndarray:
-    """Fill NaN ocean cells of a 2-D field from the nearest valid cell."""
+# Above this share of ocean cells, NaN in a 2-D field is not residual coastal
+# NaN: the CloudFerro store answers 403 for a missing chunk, read as all-NaN
+# (see _CmemsHTTPFileSystem), and nearest-neighbour filling would hide a whole
+# dropped tile. The production runs fill none after the coverage mask.
+MAX_FILL_FRACTION = 0.01
+
+
+def _nn_fill(field: np.ndarray, ocean: np.ndarray, name: str) -> np.ndarray:
+    """Fill NaN ocean cells of a 2-D field from the nearest valid cell.
+
+    Raises if more than ``MAX_FILL_FRACTION`` of the ocean cells need filling.
+    """
     from scipy.ndimage import distance_transform_edt
 
     need = np.isnan(field) & ocean
     if not need.any():
         return field
+    n_need = int(need.sum())
+    fraction = n_need / max(int(ocean.sum()), 1)
+    if fraction > MAX_FILL_FRACTION:
+        raise ValueError(
+            f"{name}: {n_need} ocean cells ({fraction:.1%}) are NaN, more than "
+            "residual coastal NaN; a source chunk was probably dropped"
+        )
+    logging.info("%s: nearest-neighbour filled %d ocean cells", name, n_need)
     valid = ~np.isnan(field)
     _, idx = distance_transform_edt(~valid, return_distances=True, return_indices=True)
     out = field.copy()
@@ -570,21 +595,24 @@ def _nn_fill(field: np.ndarray, ocean: np.ndarray) -> np.ndarray:
 
 
 def _geothermal_heat_flux(mask_2d: xr.DataArray, url: str) -> xr.DataArray:
-    """``hfgeou`` on the output grid, taken from the static CM4 field at ``url``.
+    """``hfgeou`` on the output grid, taken from the static CM4/OM4 field at
+    ``url``.
 
-    GLORYS publishes no geothermal heat flux. The CM4 field is already on the
-    output grid, so this is a copy rather than a regrid -- but the two masks
-    differ, so cells that are ocean in GLORYS and land in CM4 arrive NaN and
-    are filled with the CM4 ocean mean. The flux is order 0.1 W/m**2 against a
-    surface forcing of order 100, so the filled cells carry no weight; they
-    exist so the corrector never sees a NaN.
+    GLORYS publishes no geothermal heat flux. The CM4/OM4 field is already on
+    the output grid, so this is a copy rather than a regrid -- but the two masks
+    differ, so cells that are ocean in GLORYS and land in CM4/OM4 arrive NaN
+    and are filled with the field's ocean mean. The flux is order 0.1 W/m**2
+    against a surface forcing of order 100, so the filled cells carry no
+    weight; they exist so the field has no NaN inside the ocean mask.
     """
     cm4 = xr.open_zarr(_make_zarr_store(url))["hfgeou"].load()
-    if cm4.sizes != mask_2d.sizes or not np.allclose(
-        cm4["lat"].values, mask_2d["lat"].values
+    if (
+        cm4.sizes != mask_2d.sizes
+        or not np.allclose(cm4["lat"].values, mask_2d["lat"].values)
+        or not np.allclose(cm4["lon"].values, mask_2d["lon"].values)
     ):
         raise ValueError(
-            "the CM4 hfgeou grid does not match the output grid "
+            f"the hfgeou grid at {url} does not match the output grid "
             f"({dict(cm4.sizes)} vs {dict(mask_2d.sizes)}); it can only be "
             "copied onto the grid it was written on"
         )
@@ -594,7 +622,7 @@ def _geothermal_heat_flux(mask_2d: xr.DataArray, url: str) -> xr.DataArray:
     out.attrs = {
         "long_name": "Upward geothermal heat flux at sea floor",
         "units": "W m-2",
-        "source": "CM4 static field (GLORYS publishes none)",
+        "source": f"CM4/OM4 static field from {url} (GLORYS publishes none)",
     }
     return out
 
@@ -605,10 +633,10 @@ def _reference_masks(url: str, reference: xr.DataArray) -> dict[str, xr.DataArra
     Raises if the grids differ: the masks are copied cell-for-cell, so a
     mismatch would silently intersect the wrong cells.
     """
-    ufs = xr.open_zarr(_make_zarr_store(url))
+    ref = xr.open_zarr(_make_zarr_store(url))
     names = ["mask_2d"] + [f"mask_{k}" for k in range(N_LEVELS)]
-    if not np.allclose(ufs["lat"].values, reference["lat"].values) or not np.allclose(
-        ufs["lon"].values, reference["lon"].values
+    if not np.allclose(ref["lat"].values, reference["lat"].values) or not np.allclose(
+        ref["lon"].values, reference["lon"].values
     ):
         raise ValueError(
             f"the reference mask grid at {url} does not match the output grid; "
@@ -616,7 +644,7 @@ def _reference_masks(url: str, reference: xr.DataArray) -> dict[str, xr.DataArra
         )
     out = {}
     for name in names:
-        m = ufs[name].load().astype(np.float32)
+        m = ref[name].load().astype(np.float32)
         out[name] = m.assign_coords(lat=reference["lat"], lon=reference["lon"])
     return out
 
@@ -745,7 +773,7 @@ def build_invariants(
         native, output_grid, src, weights_path, skipna=True, na_thres=1.0
     )
     inputs = GRID_INPUTS[output_grid]
-    ufs = (
+    ref = (
         _reference_masks(inputs.reference_mask, frac["mask_2d"])
         if intersect_reference_mask
         else None
@@ -773,8 +801,8 @@ def build_invariants(
         )
     inv = {}
     sea_fraction = frac["mask_2d"].fillna(0.0).clip(0, 1).astype(np.float32)
-    if ufs is not None:
-        sea_fraction = sea_fraction.where(ufs["mask_2d"] > 0, 0.0).astype(np.float32)
+    if ref is not None:
+        sea_fraction = sea_fraction.where(ref["mask_2d"] > 0, 0.0).astype(np.float32)
     if plume is not None:
         sea_fraction = sea_fraction.where(plume > 0, 0.0).astype(np.float32)
     if prod is not None:
@@ -785,8 +813,8 @@ def build_invariants(
         sea_fraction = sea_fraction.where(cover[0], 0.0).astype(np.float32)
     for k in range(N_LEVELS):
         m = (frac[f"mask_{k}"].fillna(0.0) > 0).astype(np.float32)
-        if ufs is not None:
-            m = (m * (ufs[f"mask_{k}"] > 0).astype(np.float32)).astype(np.float32)
+        if ref is not None:
+            m = (m * (ref[f"mask_{k}"] > 0).astype(np.float32)).astype(np.float32)
         if plume is not None:
             m = (m * (plume > 0).astype(np.float32)).astype(np.float32)
         if prod is not None:
@@ -843,7 +871,7 @@ def _mask_and_fill(ds: xr.Dataset, invariant_ds: xr.Dataset) -> xr.Dataset:
         if level.isdigit():
             ds[name] = ds[name].where(invariant_ds[f"mask_{level}"] > 0)
         else:
-            filled = _nn_fill(ds[name].values, ocean)
+            filled = _nn_fill(ds[name].values, ocean, name)
             ds[name] = xr.DataArray(
                 filled, dims=ds[name].dims, coords=ds[name].coords, attrs=ds[name].attrs
             )
@@ -968,7 +996,7 @@ def process_forcing(
 
 
 def _output_attrs(
-    ds_3d: xr.Dataset, ds_2d: xr.Dataset, ds_forcing: xr.Dataset
+    ds_3d: xr.Dataset, ds_forcing: xr.Dataset
 ) -> dict[str, dict[str, str]]:
     """``{name: attrs}`` for every time-varying output.
 
@@ -1002,7 +1030,7 @@ def _output_attrs(
     attrs["sea_ice_volume"] = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
     attrs["UI"] = {"long_name": "Sea ice eastward velocity", "units": "m s-1"}
     attrs["VI"] = {"long_name": "Sea ice northward velocity", "units": "m s-1"}
-    for src_name, out_name in FORCING_VARS.items():
+    for out_name in FORCING_VARS.values():
         src = ds_forcing[out_name].attrs if out_name in ds_forcing else {}
         attrs[out_name] = {
             "long_name": src.get("long_name", out_name),
@@ -1059,11 +1087,19 @@ def _get_parser():
     )
     p.add_argument("output_path", type=str)
     p.add_argument(
-        "start_date", type=str, help="first output state (YYYY-MM-DD), a GLORYS day"
+        "start_date",
+        type=str,
+        help="start of the window (YYYY-MM-DD); the first output state is the "
+        "first day of the TIME_ORIGIN + time_stride grid on or after it",
     )
-    p.add_argument("end_date", type=str, help="last output state (YYYY-MM-DD)")
     p.add_argument(
-        "--output_grid", default=DEFAULT_OUTPUT_GRID, choices=sorted(GAUSSIAN_GRID_N)
+        "end_date",
+        type=str,
+        help="end of the window (YYYY-MM-DD); the last output state is the last "
+        "grid day on or before it",
+    )
+    p.add_argument(
+        "--output_grid", default=DEFAULT_OUTPUT_GRID, choices=sorted(GRID_INPUTS)
     )
     p.add_argument(
         "--time_stride",
@@ -1157,14 +1193,8 @@ def main():
 
     ds_2d = open_ocean(VARS_2D, out_times, args.product)
     ds_forcing = open_forcing(forcing_times, inputs.forcing)
-    n_missing = len(forcing_times) - ds_forcing.sizes["time"]
-    assert (
-        n_missing == 0
-    ), f"ERA5 store lacks {n_missing} forcing steps; shorten end_date"
 
-    template = make_template(
-        out_times, invariant_ds, _output_attrs(ds_3d, ds_2d, ds_forcing)
-    )
+    template = make_template(out_times, invariant_ds, _output_attrs(ds_3d, ds_forcing))
     output_chunks = {"time": args.output_time_chunksize}
     output_shards = {"time": args.output_time_shardsize}
     output_store = _make_zarr_store(args.output_path, read_only=False)

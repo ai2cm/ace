@@ -10,11 +10,13 @@ standard deviation sets the loss weighting of every other cell.
 
 This writes a static mask of the cells to exclude. It is climatological by
 construction: plumes migrate seasonally, so a mask taken from one state would
-be wrong for most of the year. The criterion is the monthly-mean surface
-salinity in *any* calendar month, so a cell is masked if it is ever fresh.
+be wrong for most of the year. The criterion is each calendar month's
+climatological surface salinity -- the multi-year mean of the one day sampled
+per month (``--day``) -- in *any* calendar month, so a cell is masked if it is
+ever fresh.
 
     python make_plume_mask.py gs://bucket/plume-mask.zarr \
-        --start_year 2011 --end_year 2020 --threshold 20.0
+        --start_year 2011 --end_year 2020 --threshold 5.0
 
 The fine-tune chain runs GLORYS12 then GLO12 on one mask, and the products'
 river inputs differ: GLO12 holds the Ob and Yenisei gulfs near 0 psu where
@@ -76,8 +78,8 @@ def surface_salinity(
 def plume_mask(salinity: xr.DataArray, threshold: float) -> xr.Dataset:
     """1 where the cell is usable, 0 where it is river-influenced.
 
-    A cell is masked if its climatological monthly mean falls below the
-    threshold in any calendar month.
+    A cell is masked if, in any calendar month, the multi-year mean of its
+    sampled-day salinity falls below the threshold.
     """
     monthly = salinity.groupby("time.month").mean("time")
     lowest = monthly.min("month")
@@ -115,7 +117,7 @@ def main():
     p.add_argument(
         "--threshold",
         type=float,
-        default=20.0,
+        default=5.0,
         help="mask cells whose lowest climatological monthly-mean surface "
         "salinity falls below this (psu)",
     )
@@ -126,7 +128,9 @@ def main():
         help="an existing plume mask store; the output masks a cell masked "
         "there or here",
     )
-    p.add_argument("--output_grid", default=gp.DEFAULT_OUTPUT_GRID)
+    p.add_argument(
+        "--output_grid", default=gp.DEFAULT_OUTPUT_GRID, choices=sorted(gp.GRID_INPUTS)
+    )
     p.add_argument("--regrid_weights", default=None)
     args = p.parse_args()
 
@@ -143,7 +147,9 @@ def main():
     )
     if args.union:
         prior = xr.open_zarr(gp._make_zarr_store(args.union))
-        if not np.allclose(prior["lat"].values, out["lat"].values):
+        if not np.allclose(prior["lat"].values, out["lat"].values) or not np.allclose(
+            prior["lon"].values, out["lon"].values
+        ):
             raise ValueError(f"{args.union} is not on the output grid")
         prior_mask = prior["plume_mask"].load().values
         added = int(((out["plume_mask"].values == 0) & (prior_mask > 0)).sum())
@@ -154,7 +160,10 @@ def main():
         out["plume_mask"] = (out["plume_mask"] * (prior_mask > 0)).astype(np.float32)
         out["plume_mask"].attrs = attrs
         out["monthly_min_so_0"] = np.fmin(
-            out["monthly_min_so_0"], prior["monthly_min_so_0"].load()
+            out["monthly_min_so_0"],
+            prior["monthly_min_so_0"]
+            .load()
+            .assign_coords(lat=out["lat"], lon=out["lon"]),
         ).astype(np.float32)
         out["monthly_min_so_0"].attrs = prior["monthly_min_so_0"].attrs
     ocean = np.isfinite(out["monthly_min_so_0"].values)
