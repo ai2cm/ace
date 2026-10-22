@@ -141,11 +141,30 @@ while read RESUMING; do
         echo " - Override: ${OVERRIDE_ARGS}"
     fi
 
-    # Build checkpoint dataset args for resume - includes entire results dir + checkpoint
+    TMPDIR_RESUME=$(mktemp -d)
+    # Mount only what a resume reads, file by file: the whole results dataset
+    # also holds best/EMA checkpoints and any .tmp left by a save that was
+    # killed mid-write, which can multiply the download (and every retry's).
     CHECKPOINT_DATASET_ARGS=(
-        --dataset "$EXISTING_RESULTS_DATASET:/existing-results"
-        --dataset "$EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar"
+        --dataset "$EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/existing-results/training_checkpoints/ckpt.tar"
+        --dataset "$EXISTING_RESULTS_DATASET:wandb_run_id:/existing-results/wandb_run_id"
+        --dataset "$EXISTING_RESULTS_DATASET:config.yaml:/existing-results/config.yaml"
     )
+    RESULTS_LISTING=$(beaker dataset ls "$EXISTING_RESULTS_DATASET")
+    if grep -q "metrics/metrics.jsonl" <<<"$RESULTS_LISTING"; then
+        CHECKPOINT_DATASET_ARGS+=(
+            --dataset "$EXISTING_RESULTS_DATASET:metrics/metrics.jsonl:/existing-results/metrics/metrics.jsonl"
+        )
+    fi
+    # /ckpt.tar only when the resumed config loads it (a fine-tune's
+    # stepper_training.parameter_init.checkpoint_path)
+    beaker dataset fetch "$EXISTING_RESULTS_DATASET" --prefix config.yaml --output "$TMPDIR_RESUME" >/dev/null
+    if grep -q "/ckpt.tar" "$TMPDIR_RESUME/config.yaml"; then
+        CHECKPOINT_DATASET_ARGS+=(
+            --dataset "$EXISTING_RESULTS_DATASET:training_checkpoints/ckpt.tar:/ckpt.tar"
+        )
+    fi
+    rm -rf "$TMPDIR_RESUME"
 
     if [[ -n $EXISTING_RESULTS_ATMOS_DATASET ]]; then
         # this is unused but necessary for resuming coupled_train.sh runs
