@@ -42,26 +42,39 @@ SHOW = [
 ]  # plain-FT epochs drawn
 
 
-def _epoch(a):
-    return int(str(a).split(" ep")[1].split()[0])
+def _epoch(a):  # 99 = a selected (best-inference) checkpoint
+    return 99 if "selected ckpt" in str(a) else int(str(a).split(" ep")[1].split()[0])
 
 
 def _label(a):
+    ep = "selected checkpoint" if _epoch(a) == 99 else f"epoch {_epoch(a)}"
     if "ocean-only" in a:
-        return f"random-CO$_2$ rs2 + replay, ocean-only coupled FT epoch {_epoch(a)}"
+        return f"random-CO$_2$ rs2 + replay, ocean-only coupled FT {ep}"
     if "replay" in a:
-        return f"random-CO$_2$ rs2 + replay, coupled FT epoch {_epoch(a)}"
-    return f"random-CO$_2$ rs2 after coupled FT epoch {_epoch(a)} (EMA, lifted out)"
+        return f"random-CO$_2$ rs2 + replay, coupled FT {ep}"
+    if a.startswith("rco2 rs2, after"):
+        return f"random-CO$_2$ rs2 after coupled FT {ep} (EMA, lifted out)"
+    return a.replace("rco2 rs2, ", "random-CO$_2$ rs2, ").replace(" (lifted, EMA)", "")
 
 
+_all = {
+    str(a) for a in pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).atmosphere
+}
+_drawn_atm = {
+    a
+    for a in _all
+    if (a.startswith("rco2 rs2, after") and _epoch(a) in SHOW)
+    or ("replay" in a and _epoch(a) != 99)
+}
 for _a in sorted(
-    {
-        a
-        for a in pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).atmosphere
-        if (str(a).startswith("rco2 rs2, after") and _epoch(a) in SHOW)
-        or "replay" in str(a)
-    },
-    key=lambda a: (("replay" in a) + ("ocean-only" in a), _epoch(a)),
+    _drawn_atm, key=lambda a: (("replay" in a) + ("ocean-only" in a), _epoch(a))
+):
+    MODELS[_label(_a)] = _a
+DRAWN = set(
+    MODELS
+)  # the time-series figures draw these; the held-out table below covers every atmosphere
+for _a in sorted(
+    a for a in _all if a.startswith("rco2 rs2, ") and a not in MODELS.values()
 ):
     MODELS[_label(_a)] = _a
 COLORS = {m: f"C{i}" for i, m in enumerate(MODELS)}
@@ -144,13 +157,13 @@ def plot_time_series(climate):
     ax1.set_yticklabels(["0.25xCO$_2$", "1xCO$_2$", "4xCO$_2$", "16xCO$_2$"])
     handles = []
     for ax, v in zip((ax2, ax3), VARIABLES):
-        for m in present:
+        for m in [m for m in present if m in DRAWN]:
             if (m, climate) in gen:
                 gen[(m, climate)][v].plot(ax=ax, color=COLORS[m], lw=0.8)
         target[climate][v].plot(ax=ax, color="k", ls="--", lw=0.8)
         ax.set_ylim(YLIMITS[v])
         ax.set_ylabel(textwrap.fill(YLABELS[v], 25))
-    for m in present:
+    for m in [m for m in present if m in DRAWN]:
         if (m, climate) not in gen:
             continue
         r2 = [

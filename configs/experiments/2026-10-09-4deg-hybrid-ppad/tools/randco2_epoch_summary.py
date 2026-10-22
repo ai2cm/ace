@@ -37,7 +37,7 @@ ep = sorted(e for e in slopes.epoch.dropna().unique())
 
 
 def slope_series(field, col):
-    s = slopes[slopes.field == field].set_index("epoch")[col]
+    s = slopes[slopes.field == field].dropna(subset=["epoch"]).set_index("epoch")[col]
     c = slopes[(slopes.field == field) & (slopes.atmosphere == CONTROL)][col].iloc[0]
     t = slopes[slopes.field == field]["slope target"].iloc[0]
     return s.reindex(ep), c, t
