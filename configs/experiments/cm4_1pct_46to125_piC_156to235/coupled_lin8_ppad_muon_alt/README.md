@@ -29,7 +29,7 @@ There is one optimizer, so both components share one lr. Each row sets it.
 | 8x H100 | 0 | OOM in the first training steps (79 GiB) |
 | 8x B200 | 0 | 111-112 GB |
 | 4x B200 (2 samples/GPU) | 0 | ~200 GB estimated, over the 192 GB B200 |
-| 4x B200 (2 samples/GPU) | 3 (every SFNO block) | see the experiment record |
+| 4x B200 (2 samples/GPU) | 3 (every SFNO block) | 105-118 GB steady; single spikes to 161 / 176 GB; no OOM. ~14.8 s/batch vs 7.7-12.8 at 8x without checkpointing |
 
 The ocean already uses `checkpoint_strategy: all`. The atmosphere's lever is
 `stepper.atmosphere.stepper.step.config.builder.config.checkpointing` (0 none,
