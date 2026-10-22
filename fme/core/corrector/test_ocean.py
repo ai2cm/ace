@@ -919,6 +919,105 @@ def test_ocean_salt_content_correction_sea_surface_height_nan_over_land():
     assert torch.isfinite(expected_change).all()
 
 
+def _ssh_ice_states(
+    ocean_mask: torch.Tensor, land_ice_volume: float
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], torch.Tensor]:
+    """SSH states with a sea_ice_volume (m**3 per cell) that changes over the
+    step, set to ``land_ice_volume`` over land in the generated data, and the
+    total change over the ocean cells."""
+    nlat, nlon = ocean_mask.shape
+    land = ocean_mask.to(DEVICE) == 0
+    input_ssh = 0.5 * torch.randn(nlat, nlon, dtype=torch.float64)
+    gen_ssh = input_ssh + 1e-3 * torch.randn(nlat, nlon, dtype=torch.float64)
+    input_data, gen_data = _ssh_salt_states(ocean_mask, input_ssh, gen_ssh)
+    input_ice = 1e10 * torch.rand(nlat, nlon, dtype=torch.float64, device=DEVICE)
+    gen_ice = input_ice + 1e10 * torch.randn(
+        nlat, nlon, dtype=torch.float64, device=DEVICE
+    )
+    input_data["sea_ice_volume"] = input_ice.where(~land, float("nan"))
+    gen_data["sea_ice_volume"] = gen_ice.where(~land, land_ice_volume)
+    total_ice_change = (gen_ice - input_ice).where(~land, 0.0).sum()
+    return input_data, gen_data, total_ice_change
+
+
+@pytest.mark.parametrize("land_ice_volume", [float("nan"), 5e10])
+def test_ocean_salt_content_correction_sea_surface_height_budget_with_sea_ice(
+    land_ice_volume,
+):
+    # With sea_ice_salinity_psu, the salt the sea ice holds out of the ocean,
+    # S_ice * rho_ice per unit volume of ice grown, comes off the SSH budget.
+    # Only the total ice volume change over the cells the stepper keeps counts,
+    # so a land cell adds nothing whether it is NaN or not.
+    torch.manual_seed(0)
+    ocean_mask = _salt_ocean_mask()
+    nlat, nlon = ocean_mask.shape
+    layer_thickness = (10.0, 20.0)
+    dataset_info = _salt_dataset_info(ocean_mask, layer_thickness)
+    sea_ice_salinity = 3.0
+    corrector = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(
+                sea_ice_salinity_psu=sea_ice_salinity
+            ),
+        )
+    ).get_corrector(dataset_info)
+    input_data, gen_data, total_ice_change = _ssh_ice_states(
+        ocean_mask, land_ice_volume
+    )
+    sea_surface_fraction = torch.rand(nlat, nlon, dtype=torch.float64) * ocean_mask
+    sea_surface_fraction[0, :] = 1.0  # some wholly-ocean cells too
+    forcing_data = {"sea_surface_fraction": sea_surface_fraction.to(DEVICE)}
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+
+    sea_surface_area = (
+        _ocean_cell_area_m2(ocean_mask) * forcing_data["sea_surface_fraction"]
+    )
+    ssh_change = (gen_data["SSH"] - input_data["SSH"]).nan_to_num()
+    ssh_term = -35.0 * float((ssh_change * sea_surface_area).sum())
+    ice_term = -sea_ice_salinity * 905.0 * float(total_ice_change) / 1035.0
+    assert abs(ice_term) > 1e-3 * abs(ssh_term)
+    torch.testing.assert_close(
+        _total_salt_content(corrected, sea_surface_area, layer_thickness),
+        _total_salt_content(input_data, sea_surface_area, layer_thickness)
+        + ssh_term
+        + ice_term,
+        rtol=1e-12,
+        atol=0.0,
+    )
+
+
+def test_sea_surface_height_salt_budget_sea_ice_term_without_ice_volume():
+    torch.manual_seed(0)
+    ocean_mask = _salt_ocean_mask()
+    input_data, gen_data, _ = _ssh_ice_states(ocean_mask, float("nan"))
+    del input_data["sea_ice_volume"], gen_data["sea_ice_volume"]
+    corrector = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(sea_ice_salinity_psu=3.0),
+        )
+    ).get_corrector(_salt_dataset_info(ocean_mask, (10.0, 20.0)))
+    forcing_data = {"sea_surface_fraction": ocean_mask.to(DEVICE)}
+    with pytest.raises(ValueError, match="requires sea_ice_volume"):
+        corrector(input_data, gen_data, forcing_data, None)
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"sea_ice_salinity_psu": -1.0}, "must not be negative"),
+        ({"sea_ice_salinity_psu": 3.0, "sea_ice_density_kg_m3": 0.0}, "positive"),
+    ],
+)
+def test_sea_surface_height_salt_budget_config_rejects_bad_sea_ice(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(**kwargs),
+        )
+
+
 def test_ocean_salt_content_correction_sea_surface_height_budget_without_ssh():
     torch.manual_seed(0)
     ocean_mask = _salt_ocean_mask()

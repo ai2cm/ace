@@ -7,6 +7,8 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_ICE,
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
     REFERENCE_SALINITY,
@@ -21,6 +23,8 @@ from fme.core.corrector.registry import (
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
@@ -160,22 +164,69 @@ class SeaSurfaceHeightSaltBudgetConfig:
     -S_ref * sum((SSH_gen - SSH_input) * ssf * A). Requires ``SSH``, the height
     including its global mean, in the inputs and outputs.
 
+    With ``sea_ice_salinity_psu``, it also takes the salt that the sea ice
+    holds out of the ocean, a global stand-in for the sea ice basal salt flux
+    (sfdsi) computed from the change of the total sea ice volume,
+    -S_ice * rho_ice * sum(sea_ice_volume_gen - sea_ice_volume_input) / rho_0.
+    Only the global total enters the correction, so the term need not be right
+    cell by cell. Requires ``sea_ice_volume`` (m**3 per cell) in the inputs and
+    outputs, and no spatial parallelism.
+
     Parameters:
         reference_salinity_psu: Salinity at which the added water dilutes the
             salt, in psu.
+        sea_ice_salinity_psu: Salinity S_ice of the sea ice, in psu. None (the
+            default) leaves the sea ice term out.
+        sea_ice_density_kg_m3: Density rho_ice of the sea ice.
         type: Selects this budget.
     """
 
     reference_salinity_psu: float = REFERENCE_SALINITY
+    sea_ice_salinity_psu: float | None = None
+    sea_ice_density_kg_m3: float = DENSITY_OF_SEA_ICE
     type: Literal["sea_surface_height"] = "sea_surface_height"
 
     def validate(self, weight_by_sea_surface_fraction: bool) -> None:
         _require_sea_surface_fraction_weighting(
             self.type, weight_by_sea_surface_fraction
         )
+        if self.sea_ice_salinity_psu is not None and self.sea_ice_salinity_psu < 0:
+            raise ValueError(
+                "sea_ice_salinity_psu must not be negative, got "
+                f"{self.sea_ice_salinity_psu}."
+            )
+        if self.sea_ice_density_kg_m3 <= 0:
+            raise ValueError(
+                "sea_ice_density_kg_m3 must be positive, got "
+                f"{self.sea_ice_density_kg_m3}."
+            )
 
     def build(self, spatial_mask_provider: SpatialMaskProviderABC) -> SaltBudget:
-        return SeaSurfaceHeightSaltBudget(self.reference_salinity_psu)
+        if self.sea_ice_salinity_psu is None:
+            return SeaSurfaceHeightSaltBudget(self.reference_salinity_psu)
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "The sea ice term of the sea surface height salt budget sums "
+            "sea_ice_volume over the local spatial chunk only."
+        )
+        return SeaSurfaceHeightSaltBudget(
+            self.reference_salinity_psu,
+            sea_ice_salinity_psu=self.sea_ice_salinity_psu,
+            sea_ice_density_kg_m3=self.sea_ice_density_kg_m3,
+            sea_ice_volume_mask=_sea_ice_volume_output_mask(spatial_mask_provider),
+        )
+
+
+def _sea_ice_volume_output_mask(
+    spatial_mask_provider: SpatialMaskProviderABC,
+) -> torch.Tensor | None:
+    """Cells where the stepper keeps the sea_ice_volume prediction, or None for
+    every cell.
+    """
+    mask = spatial_mask_provider.get_mask_tensor_for("sea_ice_volume")
+    if mask is None:
+        return None
+    # rounded as the stepper's output masking does, so the two agree
+    return torch.round(mask.to(get_device())) != 0
 
 
 SaltBudgetConfig = SeaSurfaceHeightSaltBudgetConfig
@@ -744,14 +795,23 @@ def _force_conserve_ocean_heat_content(
 @dataclasses.dataclass
 class SeaSurfaceHeightSaltBudget:
     """Salt budget from the change of the sea surface height,
-    -S_ref * sum((SSH_gen - SSH_input) * ssf * A).
+    -S_ref * sum((SSH_gen - SSH_input) * ssf * A), plus the sea ice term of
+    ``SeaSurfaceHeightSaltBudgetConfig`` if ``sea_ice_salinity_psu`` is set.
 
     Parameters:
         reference_salinity_psu: Salinity at which the added water dilutes the
             salt, in psu.
+        sea_ice_salinity_psu: Salinity of the sea ice, in psu, or None to leave
+            the sea ice term out.
+        sea_ice_density_kg_m3: Density of the sea ice.
+        sea_ice_volume_mask: Cells whose sea_ice_volume change counts; None
+            counts every cell.
     """
 
     reference_salinity_psu: float
+    sea_ice_salinity_psu: float | None = None
+    sea_ice_density_kg_m3: float = DENSITY_OF_SEA_ICE
+    sea_ice_volume_mask: torch.Tensor | None = None
 
     def __call__(
         self,
@@ -774,7 +834,37 @@ class SeaSurfaceHeightSaltBudget:
         height_change = torch.nan_to_num(gen_height - input_height)  # m
         sea_surface_fraction = forcing.sea_surface_fraction.to(dtype)
         added_water_volume = global_total(height_change * sea_surface_fraction)  # m**3
-        return -self.reference_salinity_psu * added_water_volume
+        expected_change = -self.reference_salinity_psu * added_water_volume
+        if self.sea_ice_salinity_psu is not None:
+            try:
+                ice_volume_change = gen.sea_ice_volume.to(
+                    dtype
+                ) - input.sea_ice_volume.to(dtype)
+            except KeyError as err:
+                raise ValueError(
+                    "The sea ice term of the sea surface height salt budget "
+                    "requires sea_ice_volume in the input and generated data."
+                ) from err
+            # NaN over land; sea_ice_volume is per cell (m**3), so its total is
+            # a plain sum over the grid
+            ice_volume_change = torch.nan_to_num(ice_volume_change)
+            if self.sea_ice_volume_mask is not None:
+                ice_volume_change = torch.where(
+                    self.sea_ice_volume_mask,
+                    ice_volume_change,
+                    torch.zeros_like(ice_volume_change),
+                )
+            total_ice_volume_change = ice_volume_change.sum(
+                dim=(-2, -1), keepdim=True
+            )  # m**3
+            # g/kg * kg/m**3 * m**3 / (kg/m**3) = (g/kg) m**3 = psu m**3
+            expected_change = expected_change - (
+                self.sea_ice_salinity_psu
+                * self.sea_ice_density_kg_m3
+                * total_ice_volume_change
+                / DENSITY_OF_SEA_WATER_CM4
+            )
+        return expected_change
 
 
 def _force_conserve_ocean_salt_content(
