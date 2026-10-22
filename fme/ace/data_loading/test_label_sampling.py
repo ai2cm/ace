@@ -236,13 +236,6 @@ def test_validation_loader_rejects_label_sampling(tmp_path, validation_config):
         validation_config(loader=loader)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Concatenating labeled datasets merges every member's labels into the "
-        "first member's label set until #1588 lands, so the first member's "
-        "samples carry all labels."
-    )
-)
 @pytest.mark.parametrize("time_buffer", [0, 2])
 def test_gridded_data_draws_configured_label_fractions(tmp_path, time_buffer):
     config = DataLoaderConfig(
