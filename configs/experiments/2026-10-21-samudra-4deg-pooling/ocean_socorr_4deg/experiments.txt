@@ -40,5 +40,5 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0_jup|01M5G
 
 # conspool's piControl eval resubmitted (tag rs0_jup2): its rs0_jup job
 # (experiment 01M5J72R89JSS3EYAS46MEG0HJ) stuck initializing on its node and
-# was canceled while starting.
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0_jup2|01M5G4GC9VV2BZKHDDQ6JCS5P0|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|jupiter
+# was canceled while starting. Launched as 01M5J8E4WSH87GDCJR8D5K6H23.
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0_jup2|01M5G4GC9VV2BZKHDDQ6JCS5P0|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|jupiter
