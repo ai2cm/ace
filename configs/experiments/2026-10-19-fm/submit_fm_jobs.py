@@ -99,9 +99,9 @@ def main() -> None:
     )
     add_beaker_args(
         parser,
-        default_workspace="ai2/climate-titan",
-        default_cluster=["ai2/titan"],
-        default_priority="urgent",
+        default_workspace="ai2/ace",
+        default_cluster=["ai2/jupiter", "ai2/titan"],
+        default_priority="normal",
     )
     parser.add_argument(
         "--skip-if-in-wandb",
