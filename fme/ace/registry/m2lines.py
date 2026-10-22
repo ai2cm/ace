@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
+from fme.ace.models.ocean.m2lines.layers import LatPad
 from fme.ace.models.ocean.m2lines.samudra import ConditionedBlocks, Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
@@ -36,6 +37,8 @@ class SamudraBuilder(ModuleConfig):
             that strength is a learned constant, identical for every sample on
             every step. "layer" is the principled choice for a conditioned
             network.
+        lat_pad: Latitude padding mode: "constant" (default, zeros) or
+            "pole" (continues across the pole). See ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -49,8 +52,13 @@ class SamudraBuilder(ModuleConfig):
     upscale_factor: int = 4
     checkpoint_strategy: Literal["all", "simple"] | None = None
     zonally_periodic_upsample: bool = False
+    lat_pad: LatPad = "constant"
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
@@ -99,6 +107,7 @@ class SamudraBuilder(ModuleConfig):
             upscale_factor=self.upscale_factor,
             checkpoint_strategy=self.checkpoint_strategy,
             zonally_periodic_upsample=self.zonally_periodic_upsample,
+            lat_pad=self.lat_pad,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )
@@ -131,6 +140,10 @@ class FloeNetBuilder(ModuleConfig):
     processor_steps: int = 4
     residual: bool = True
     is_ocean: bool = True
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,

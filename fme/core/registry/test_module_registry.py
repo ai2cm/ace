@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import pathlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import dacite
@@ -33,12 +33,12 @@ class MockModule(torch.nn.Module):
 class MockModuleBuilder(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
 
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
     def build(self, n_in_channels, n_out_channels, dataset_info):
         return MockModule(self.param_shapes)
-
-    @classmethod
-    def from_state(cls, state):
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
     def get_state(self):
         return {
@@ -52,8 +52,75 @@ class MockModuleBuilderWithDefault(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
     pad: str = "reflect"
 
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
     def build(self, n_in_channels, n_out_channels, dataset_info):
         return MockModule(self.param_shapes)
+
+
+@ModuleSelector.register("mock_with_deprecation")
+@dataclasses.dataclass
+class MockModuleBuilderWithDeprecation(ModuleConfig):
+    """Mock builder whose hook drops one key and renames another."""
+
+    param_shapes: list[tuple[int, ...]]
+    new_name: str = "default"
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(state)
+        result.pop("old_dropped_key", None)
+        if "old_name" in result:
+            result["new_name"] = result.pop("old_name")
+        return result
+
+    def build(self, n_in_channels, n_out_channels, dataset_info):
+        return MockModule(self.param_shapes)
+
+
+def test_remove_deprecated_keys_drops_and_renames():
+    """A builder whose hook drops one deprecated key and renames another
+    should build successfully, applying the renamed value."""
+    config = {
+        "param_shapes": [(2, 3)],
+        "old_dropped_key": "garbage",
+        "old_name": "renamed_value",
+    }
+    selector = ModuleSelector(type="mock_with_deprecation", config=config)
+    module_config = selector.module_config
+    assert isinstance(module_config, MockModuleBuilderWithDeprecation)
+    assert module_config.new_name == "renamed_value"
+
+
+def test_remove_deprecated_keys_preserves_selector_config():
+    """ModuleSelector.config should be the raw dict passed in (after
+    normalization to defaults), not the cleaned dict."""
+    raw_config: dict[str, Any] = {
+        "param_shapes": [(2, 3)],
+        "old_dropped_key": "garbage",
+        "old_name": "renamed_value",
+    }
+    selector = ModuleSelector(type="mock_with_deprecation", config=raw_config)
+    # After __post_init__, selector.config is normalized from the built
+    # dataclass (dataclasses.asdict), so it should contain the current field
+    # names, not the deprecated ones.
+    assert "old_dropped_key" not in selector.config
+    assert "old_name" not in selector.config
+    assert selector.config["new_name"] == "renamed_value"
+
+
+def test_remove_deprecated_keys_does_not_mutate_input():
+    """The hook must not mutate the input mapping."""
+    original: dict[str, Any] = {
+        "param_shapes": [(2, 3)],
+        "old_dropped_key": "garbage",
+        "old_name": "renamed_value",
+    }
+    original_copy = dict(original)
+    ModuleSelector(type="mock_with_deprecation", config=original)
+    assert original == original_copy
 
 
 def test_module_selector_config_includes_defaults():
@@ -175,9 +242,7 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "filter_type": "linear",
             "use_mlp": True,
             "num_layers": 4,
-            "operator_type": "dhconv",
             "affine_norms": True,
-            "spectral_transform": "sht",
             "label_embed_dim": 3,
             "clip_latent_global_means": True,
         },
@@ -286,3 +351,58 @@ def test_latest_module_backwards_compatibility(selector_name: str):
         "to remove this error. In either case update the checkpoint "
         "(and configuration) as its own isolated commit."
     )
+
+
+def _ncsfno_config_with_legacy_keys() -> dict[str, Any]:
+    """Minimal config with all eight deprecated keys at their old defaults."""
+    return {
+        "embed_dim": 8,
+        "noise_embed_dim": 4,
+        "noise_type": "isotropic",
+        "filter_type": "linear",
+        "use_mlp": True,
+        "num_layers": 4,
+        "affine_norms": True,
+        # deprecated keys (old defaults)
+        "spectral_transform": "sht",
+        "operator_type": "dhconv",
+        "rank": 1.0,
+        "factorization": None,
+        "separable": False,
+        "complex_network": True,
+        "complex_activation": "real",
+        "spectral_layers": 1,
+    }
+
+
+def test_ncsfno_legacy_keys_load_successfully():
+    """A config dict carrying all eight deprecated keys at their old defaults
+    should load through ModuleSelector and build a module."""
+    config = _ncsfno_config_with_legacy_keys()
+    selector = ModuleSelector(type="NoiseConditionedSFNO", config=config)
+    dataset_info = DatasetInfo(img_shape=(9, 18))
+    module = selector.build(
+        n_in_channels=5, n_out_channels=6, dataset_info=dataset_info
+    )
+    assert isinstance(module, Module)
+
+
+def test_ncsfno_separable_true_raises():
+    config = _ncsfno_config_with_legacy_keys()
+    config["separable"] = True
+    with pytest.raises(ValueError, match="separable"):
+        ModuleSelector(type="NoiseConditionedSFNO", config=config)
+
+
+def test_ncsfno_factorization_non_none_raises():
+    config = _ncsfno_config_with_legacy_keys()
+    config["factorization"] = "dense"
+    with pytest.raises(ValueError, match="factorization"):
+        ModuleSelector(type="NoiseConditionedSFNO", config=config)
+
+
+def test_ncsfno_operator_type_non_dhconv_raises():
+    config = _ncsfno_config_with_legacy_keys()
+    config["operator_type"] = "fft"
+    with pytest.raises(ValueError, match="operator_type"):
+        ModuleSelector(type="NoiseConditionedSFNO", config=config)
