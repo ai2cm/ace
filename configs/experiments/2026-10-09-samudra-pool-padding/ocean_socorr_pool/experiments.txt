@@ -87,6 +87,14 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2
 # ckpt.tar at 38 epochs and 260 batches (28,000 batches, run on its EMA
 # weights), fetched from the running job's dataset 01M5FC4FWGJNHRM8VT23GEZRXH
 # and uploaded by the user as dataset 01M5HTMDHY16AC4C6M7DKF0QE4. pending_
-# until that upload commits.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|pending_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|pending_piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
+# until that upload commits. Superseded (never launched) by the epoch-45 rows
+# below, at the user's request.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|superseded_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|superseded_piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
+
+# Its epoch-45 EMA checkpoint, which the user downloaded from the running job,
+# uploaded as dataset 01M5JE9YQBXPS0W3SWZF2HTHR1 (training_checkpoints/
+# ema_ckpt_0045.tar), over 1pctCO2 and the standard piControl eval, on jupiter.
+# pending_ until that upload commits.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|pending_1pct_yearly_1deg|ema_ckpt_0045|high|--min-runtime 8h||01M5JE9YQBXPS0W3SWZF2HTHR1|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|pending_piC-ic0151-200yr|ema_ckpt_0045|high|--min-runtime 8h||01M5JE9YQBXPS0W3SWZF2HTHR1|ai2/ace|jupiter
