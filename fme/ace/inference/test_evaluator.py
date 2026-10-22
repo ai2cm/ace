@@ -346,7 +346,7 @@ def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: 
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
@@ -432,7 +432,7 @@ def inference_helper(
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -612,7 +612,7 @@ def test_inference_writer_boundaries(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -916,7 +916,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         inference_logs = wandb.get_logs()
 
@@ -1442,7 +1442,7 @@ def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -1628,7 +1628,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
