@@ -7,6 +7,7 @@ from get_pooled_stats import (
     Config,
     DatasetPair,
     _resolve_zarr_stores,
+    apply_transforms,
     compute_store_stats,
     pool_stats,
 )
@@ -140,3 +141,185 @@ def test_compute_store_stats_rejects_single_timestep(tmp_path):
     _write_store(store)
     with pytest.raises(ValueError, match="1 timesteps"):
         compute_store_stats(store, slice("2000-01-03", "2000-01-03"))
+
+
+def _write_cm4_like_store(path, n_time: int = 6) -> xr.Dataset:
+    """A store laid out like the CM4 stores: CO2 in ppmv under
+    `carbon_dioxide`, a static `land_fraction`, and no `ocean_fraction`."""
+    time = pd.date_range("2000-01-01", periods=n_time, freq="D")
+    ones = np.ones((1, 2, 2))
+    co2 = (300.0 + 10.0 * np.arange(n_time))[:, None, None] * ones
+    land = np.array([[0.0, 0.25], [0.5, 1.0]])
+    # Ice grows over time so that 1 - land - ice drops below 0 in the
+    # land-covered cell, exercising the clip.
+    ice = (0.1 * np.arange(n_time))[:, None, None] * ones
+    ds = xr.Dataset(
+        {
+            "carbon_dioxide": (("time", "lat", "lon"), co2),
+            "land_fraction": (("lat", "lon"), land),
+            "sea_ice_fraction": (("time", "lat", "lon"), ice),
+        },
+        coords={"time": time},
+    )
+    ds.to_zarr(path, mode="w")
+    return ds
+
+
+def _write_normal_store(path, n_time: int = 4) -> xr.Dataset:
+    """A store which already has `global_mean_co2` and `ocean_fraction`."""
+    time = pd.date_range("2000-01-01", periods=n_time, freq="D")
+    ones = np.ones((n_time, 2, 2))
+    ds = xr.Dataset(
+        {
+            "global_mean_co2": (("time", "lat", "lon"), 2e-4 * ones),
+            "ocean_fraction": (("time", "lat", "lon"), 0.5 * ones),
+        },
+        coords={"time": time},
+    )
+    ds.to_zarr(path, mode="w")
+    return ds
+
+
+def test_compute_store_stats_renames_and_scales(tmp_path):
+    pytest.importorskip("dask")
+    store = str(tmp_path / "cm4.zarr")
+    ds = _write_cm4_like_store(store)
+    pair = DatasetPair(
+        dataset=store,
+        renamed_variables={"carbon_dioxide": "global_mean_co2"},
+        multiply_scalar={"global_mean_co2": 1e-6},
+    )
+    stats = compute_store_stats(store, pair.time_slice, transforms=pair)
+    expected = ds["carbon_dioxide"] * 1e-6
+    assert "carbon_dioxide" not in stats["centering"]
+    np.testing.assert_allclose(stats["centering"]["global_mean_co2"], expected.mean())
+    np.testing.assert_allclose(
+        stats["scaling_full_field"]["global_mean_co2"], expected.std()
+    )
+    np.testing.assert_allclose(
+        stats["scaling_residual"]["global_mean_co2"], expected.diff("time").std()
+    )
+
+
+def test_compute_store_stats_derives_clipped_ocean_fraction(tmp_path):
+    pytest.importorskip("dask")
+    store = str(tmp_path / "cm4.zarr")
+    ds = _write_cm4_like_store(store)
+    pair = DatasetPair(dataset=store, derived_variables=["ocean_fraction"])
+    stats = compute_store_stats(store, pair.time_slice, transforms=pair)
+    expected = (1 - ds["land_fraction"] - ds["sea_ice_fraction"]).clip(0, 1)
+    assert float((1 - ds["land_fraction"] - ds["sea_ice_fraction"]).min()) < 0
+    np.testing.assert_allclose(stats["centering"]["ocean_fraction"], expected.mean())
+    np.testing.assert_allclose(
+        stats["scaling_full_field"]["ocean_fraction"], expected.std()
+    )
+    np.testing.assert_allclose(
+        stats["scaling_residual"]["ocean_fraction"], expected.diff("time").std()
+    )
+
+
+def test_derived_ocean_fraction_matches_fme(tmp_path):
+    torch = pytest.importorskip("torch")
+    from fme.core.dataset.xarray import DERIVED_VARIABLES
+
+    pytest.importorskip("dask")
+    store = str(tmp_path / "cm4.zarr")
+    ds = _write_cm4_like_store(store)
+    derived = DERIVED_VARIABLES["ocean_fraction"]
+    tensors = {
+        "land_fraction": torch.as_tensor(
+            ds["land_fraction"].broadcast_like(ds["sea_ice_fraction"]).values
+        ),
+        "sea_ice_fraction": torch.as_tensor(ds["sea_ice_fraction"].values),
+    }
+    expected = derived.compute(tensors).numpy()
+    transformed = apply_transforms(
+        xr.open_zarr(store),
+        DatasetPair(dataset=store, derived_variables=["ocean_fraction"]),
+    )
+    np.testing.assert_allclose(
+        transformed["ocean_fraction"].transpose("time", "lat", "lon").values, expected
+    )
+
+
+def test_pooling_cm4_like_store_includes_it_in_renamed_and_derived(tmp_path):
+    pytest.importorskip("dask")
+    cm4_store = str(tmp_path / "cm4.zarr")
+    normal_store = str(tmp_path / "normal.zarr")
+    cm4 = _write_cm4_like_store(cm4_store)
+    normal = _write_normal_store(normal_store)
+    # The same transforms as the CM4 entries of the training config.
+    cm4_pair = DatasetPair(
+        dataset=cm4_store,
+        renamed_variables={"carbon_dioxide": "global_mean_co2"},
+        multiply_scalar={"global_mean_co2": 1e-6},
+        derived_variables=["ocean_fraction"],
+    )
+    normal_pair = DatasetPair(dataset=normal_store)
+    pooled = pool_stats(
+        [
+            compute_store_stats(cm4_store, cm4_pair.time_slice, transforms=cm4_pair),
+            compute_store_stats(
+                normal_store, normal_pair.time_slice, transforms=normal_pair
+            ),
+        ]
+    )
+    co2 = np.concatenate(
+        [
+            (cm4["carbon_dioxide"] * 1e-6).values.ravel(),
+            normal["global_mean_co2"].values.ravel(),
+        ]
+    )
+    ocean = np.concatenate(
+        [
+            (1 - cm4["land_fraction"] - cm4["sea_ice_fraction"])
+            .clip(0, 1)
+            .values.ravel(),
+            normal["ocean_fraction"].values.ravel(),
+        ]
+    )
+    np.testing.assert_allclose(pooled["centering.nc"]["global_mean_co2"], co2.mean())
+    np.testing.assert_allclose(
+        pooled["scaling-full-field.nc"]["global_mean_co2"], co2.std()
+    )
+    np.testing.assert_allclose(pooled["centering.nc"]["ocean_fraction"], ocean.mean())
+    np.testing.assert_allclose(
+        pooled["scaling-full-field.nc"]["ocean_fraction"], ocean.std()
+    )
+
+
+def test_compute_store_stats_default_transforms_unchanged(tmp_path):
+    pytest.importorskip("dask")
+    store = str(tmp_path / "cm4.zarr")
+    _write_cm4_like_store(store)
+    pair = DatasetPair(dataset=store)
+    assert pair.renamed_variables == {}
+    assert pair.multiply_scalar == {}
+    assert pair.derived_variables == []
+    with_default = compute_store_stats(store, pair.time_slice, transforms=pair)
+    without = compute_store_stats(store, pair.time_slice)
+    for key in ["centering", "scaling_full_field", "scaling_residual"]:
+        xr.testing.assert_identical(with_default[key], without[key])
+    assert "carbon_dioxide" in with_default["centering"]
+    assert "ocean_fraction" not in with_default["centering"]
+
+
+def test_dataset_pair_rejects_unknown_derived_variable():
+    with pytest.raises(ValueError, match="Unknown derived_variables"):
+        DatasetPair(dataset="a", derived_variables=["not_a_variable"])
+
+
+def test_dataset_pair_rejects_duplicate_rename_targets():
+    with pytest.raises(ValueError, match="same name"):
+        DatasetPair(dataset="a", renamed_variables={"x": "z", "y": "z"})
+
+
+def test_apply_transforms_rejects_existing_derived_variable(tmp_path):
+    pytest.importorskip("dask")
+    store = str(tmp_path / "normal.zarr")
+    _write_normal_store(store)
+    with pytest.raises(ValueError, match="already exists"):
+        apply_transforms(
+            xr.open_zarr(store),
+            DatasetPair(dataset=store, derived_variables=["ocean_fraction"]),
+        )

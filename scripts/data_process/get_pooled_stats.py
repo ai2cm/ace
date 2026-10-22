@@ -18,6 +18,11 @@
 # moments and written to `groups/{name}/`. This gives every grouping strategy of
 # an experiment from a single pass over the data.
 #
+# Entries may also rename, derive and rescale variables before their stats are
+# computed, mirroring the same-named `XarrayDataConfig` options used at training
+# time (`renamed_variables`, `derived_variables`, `overwrite.multiply_scalar`),
+# so that every store contributes to the stats of the variables training sees.
+#
 # The dependencies of this script are installed in the "fv3net" conda
 # environment (same as get_stats.py / combine_stats.py).
 #
@@ -38,9 +43,13 @@ import tempfile
 
 import dacite
 import fsspec
+import numpy as np
+import torch
 import xarray as xr
 import yaml
 from fs_utils import is_local, makedirs
+
+from fme.core.dataset.xarray import DERIVED_VARIABLES, _rename_variables
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT_REL = pathlib.Path(__file__).resolve().relative_to(REPO_ROOT)
@@ -137,6 +146,16 @@ class DatasetPair:
             fine-grained "amip" group and a coarse "c96" group), in which case
             list them under `groups` instead.
         groups: Names of the groups this entry's stores belong to.
+        renamed_variables: Mapping from variable names in the stores to the
+            names to use instead, as `XarrayDataConfig.renamed_variables`.
+        multiply_scalar: Scalars to multiply variables by, keyed by the names
+            after renaming, as `XarrayDataConfig.overwrite.multiply_scalar`.
+        derived_variables: Names of variables to compute from other variables,
+            each a key of fme's `DERIVED_VARIABLES`, as
+            `XarrayDataConfig.derived_variables`.
+
+    The transforms are applied as at training time: variables are renamed,
+    then derived, then scaled.
     """
 
     dataset: str
@@ -144,10 +163,30 @@ class DatasetPair:
     end_time: str | None = None
     group: str | None = None
     groups: list[str] | None = None
+    renamed_variables: dict[str, str] = dataclasses.field(default_factory=dict)
+    multiply_scalar: dict[str, float] = dataclasses.field(default_factory=dict)
+    derived_variables: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.group is not None and self.groups is not None:
             raise ValueError(f"{self.dataset}: set only one of group/groups, not both.")
+        new_names = list(self.renamed_variables.values())
+        if len(new_names) != len(set(new_names)):
+            raise ValueError(
+                f"{self.dataset}: renamed_variables must not rename multiple "
+                f"variables to the same name, got {self.renamed_variables}."
+            )
+        unknown = set(self.derived_variables) - set(DERIVED_VARIABLES)
+        if unknown:
+            raise ValueError(
+                f"{self.dataset}: Unknown derived_variables {sorted(unknown)}, "
+                f"must be one of {sorted(DERIVED_VARIABLES)}."
+            )
+        if len(self.derived_variables) != len(set(self.derived_variables)):
+            raise ValueError(
+                f"{self.dataset}: derived_variables has duplicates, got "
+                f"{self.derived_variables}."
+            )
 
     @property
     def time_slice(self) -> slice:
@@ -232,10 +271,56 @@ def _reduction_dims(ds: xr.Dataset) -> list[str]:
     return ["time"] + dims
 
 
-def compute_store_stats(store: str, time_slice: slice) -> dict:
+def _derive_variable(ds: xr.Dataset, name: str) -> xr.DataArray:
+    """Compute a derived variable lazily with fme's own `DERIVED_VARIABLES`
+    function, applied blockwise to the (time-broadcast) input arrays."""
+    derived = DERIVED_VARIABLES[name]
+    # Static inputs (e.g. land_fraction) are broadcast over time, as at training.
+    inputs = xr.broadcast(*[ds[input_name] for input_name in derived.inputs])
+    dtype = np.result_type(*[da.dtype for da in inputs])
+
+    def _compute(*arrays: np.ndarray) -> np.ndarray:
+        tensors = {
+            input_name: torch.as_tensor(np.ascontiguousarray(array))
+            for input_name, array in zip(derived.inputs, arrays)
+        }
+        return derived.compute(tensors).numpy()
+
+    return xr.apply_ufunc(_compute, *inputs, dask="parallelized", output_dtypes=[dtype])
+
+
+def apply_transforms(ds: xr.Dataset, pair: DatasetPair) -> xr.Dataset:
+    """Rename, derive and scale variables as `XarrayDataset` does at training
+    time: renaming happens when files are opened, derived variables are computed
+    from the loaded (renamed) variables, and `overwrite` is applied last."""
+    ds = _rename_variables(ds, pair.renamed_variables)
+    for name in pair.derived_variables:
+        if name in ds.variables:
+            raise ValueError(
+                f"Cannot derive variable '{name}' which already exists in the "
+                "dataset."
+            )
+        missing = [i for i in DERIVED_VARIABLES[name].inputs if i not in ds]
+        if missing:
+            raise ValueError(
+                f"Inputs {missing} needed to derive variable '{name}' are not in "
+                "the dataset."
+            )
+        ds = ds.assign({name: _derive_variable(ds, name)})
+    scaled = {
+        var: ds[var] * multiplier for var, multiplier in pair.multiply_scalar.items()
+    }
+    return ds.assign(scaled)
+
+
+def compute_store_stats(
+    store: str, time_slice: slice, transforms: DatasetPair | None = None
+) -> dict:
     """Open one zarr store, slice it in time, and return its centering /
     full-field / residual stats plus the timestep count used as the pooling
-    weight."""
+    weight. If `transforms` is given, its renamed / derived / scaled variables
+    are applied first, so all three stats (including the time-difference
+    residual) are of the transformed variables."""
     # Imported here, not at module level, so the Config can be loaded (e.g. by
     # scripts/data_process/test_config.py) without dask installed.
     import dask
@@ -243,6 +328,8 @@ def compute_store_stats(store: str, time_slice: slice) -> dict:
     with dask.config.set({"array.chunk-size": "128MiB"}):
         ds = xr.open_zarr(store, chunks={"time": "auto"})
 
+    if transforms is not None:
+        ds = apply_transforms(ds, transforms)
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
     ds = ds.sel(time=time_slice)
 
@@ -360,7 +447,7 @@ def compute(config_yaml: str, output_directory: str):
             if stores != [pair.dataset.rstrip("/")]:
                 logging.info(f"Resolved {pair.dataset} -> {stores}")
             for store in stores:
-                stats = compute_store_stats(store, pair.time_slice)
+                stats = compute_store_stats(store, pair.time_slice, transforms=pair)
                 stats["groups"] = pair.group_names
                 per_pair.append(stats)
                 subdir = pair.output_subdir(index, store)
@@ -375,8 +462,11 @@ def compute(config_yaml: str, output_directory: str):
         total_samples = sum(p["n_samples"] for p in per_pair)
         pooled = pool_stats(per_pair)
 
-        for name, da in pooled.items():
-            logging.info(f"{name}:\n{da}")
+        # Show every variable, not just the first and last few, so the pooled
+        # values can be read from the job logs.
+        with xr.set_options(display_max_rows=10_000):
+            for name, da in pooled.items():
+                logging.info(f"{name}:\n{da}")
 
         write_stats(pooled, output_directory, config_yaml, n_samples=total_samples)
 
