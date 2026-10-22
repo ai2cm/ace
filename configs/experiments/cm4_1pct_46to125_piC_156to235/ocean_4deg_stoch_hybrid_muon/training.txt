@@ -5,6 +5,6 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 # Launched 2026-10-22 from configs/experiments/2026-10-22-4deg-stoch-hybrid/ocean_stoch_hybrid_muon, so the beaker/wandb job names carry the old
 # 2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon-<tag>-train prefix; moved here to the cm4_1pct_46to125_piC_156to235-ocean_* convention. Those three failed at build (pole padding (4,4) > the
 # 2-row bottleneck: the cherry-pick took Troy's config before his dilation fix 43f9525d1) and were relaunched from here.
-cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu1e-3|train|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.001|3h
-cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu3e-3|train|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.003|3h
-cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu1e-2|train|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.01|3h
+cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu1e-3|skip|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.001|3h
+cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu3e-3|skip|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.003|3h
+cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu1e-2|skip|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.01|3h
