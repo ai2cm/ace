@@ -1,0 +1,83 @@
+# ACE2.2-ERA5 training seed 3, the AIMIP submission: control.
+# AIMIP 1978-10 to 2024-12 rollout from the production r1 initial condition, writing
+# monthly means of the surface energy and moisture budget terms and 6-hourly
+# snapshots for 2000. See README.md.
+checkpoint_path: /ckpt.tar
+experiment_dir: /results
+n_forward_steps: 67576
+forward_steps_in_memory: 40
+initial_condition:
+  path: /climate-default/2026-08-24-aimip-evaluation/aimip-evaluation-ics/1978-09-30_IC0.nc
+  start_indices:
+    times:
+    - '1978-09-30T18:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-08-24-aimip-evaluation
+    file_pattern: 2026-08-25-aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+  files:
+  - label: monthly_mean
+    names:
+    - surface_temperature
+    - PRESsfc
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - DLWRFsfc
+    - ULWRFsfc
+    - DSWRFsfc
+    - USWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - tendency_of_total_water_path_due_to_advection
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    - eastward_wind_7
+    - northward_wind_7
+    time_coarsen:
+      method: monthly_mean
+    save_reference: false
+  - label: 6hourly_2000
+    names:
+    - surface_temperature
+    - PRESsfc
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - air_temperature_7
+    - specific_total_water_7
+    - eastward_wind_7
+    - northward_wind_7
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    time_selection:
+      start_time: '2000-01-01T00:00:00'
+      stop_time: '2000-12-31T18:00:00'
+    save_reference: false
