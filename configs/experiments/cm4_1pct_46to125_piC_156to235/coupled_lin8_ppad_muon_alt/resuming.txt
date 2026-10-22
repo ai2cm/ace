@@ -1,0 +1,19 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config|extra_env
+
+# job_runner/resume.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_lin8_ppad_muon_alt . \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+#
+# 2026-10-22: both pretraining.txt arms moved from 8x to 4x B200 (8-GPU titan
+# jobs are discouraged). Each resumes its own run (same wandb id, same name) from
+# the cancelled 8-GPU job's results dataset, with atmosphere activation
+# checkpointing on (level 3 = every SFNO block): 8x B200 measured 111-112 GB/GPU
+# at 1 sample/GPU, so ~200 GB at 4x without it. Global batch stays 8, so the
+# math is unchanged; the original 8x experiments were renamed ...-train-8xb200 so
+# these reuse the job (= WANDB_NAME) names. Blank config = resume the dumped
+# /existing-results/config.yaml; the ocean/atmos datasets only satisfy the
+# weights_path mounts, the restore overwrites them.
+#
+# lr 7e-5: 8x job 01M5H9WWCCQWHKYARAEXR9B8ZE, ckpt.tar = end of epoch 1
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr7e-5|o0a0rs0|ace-samudra-coupled-cm4|8sa0stqb|train|normal|titan|4||3|ai2/ace|resume_results.resume_wandb=true stepper.atmosphere.stepper.step.config.builder.config.checkpointing=3|01M5H9WW909CD434P1ZS338JR4|01M5BNVEW8GRRFZYKBGES6ZEN1|01M0VTG1SJQK69WWN5A651RXZY|8h||MALLOC_ARENA_MAX=4
+# lr 1e-5: 8x job 01M5H9XC255WRXXRN04XH5NCNN, ckpt.tar = epoch 1 + 540 batches
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr1e-5|o0a0rs0|ace-samudra-coupled-cm4|5u1qu4e7|train|normal|titan|4||3|ai2/ace|resume_results.resume_wandb=true stepper.atmosphere.stepper.step.config.builder.config.checkpointing=3|01M5H9XBYTH4FECE592BG2GZ3M|01M5BNVEW8GRRFZYKBGES6ZEN1|01M0VTG1SJQK69WWN5A651RXZY|8h||MALLOC_ARENA_MAX=4
