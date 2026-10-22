@@ -7,3 +7,5 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr1e-5|o0a0rs0|01M5H9XBYJKRN18ANB0T5BN42T|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr7e-5|o0a0rs0|01M5JC0P3X9WQ9RQSFS3FX06G8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr1e-5|o0a0rs0|01M5JC0Y7V4W2A4RSXHYJWPEE5|training|best_inference_ckpt|normal|--min-runtime 8h
