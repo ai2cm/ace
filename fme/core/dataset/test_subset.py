@@ -1,7 +1,11 @@
 import torch
 
 from fme.core.dataset.subset import SubsetDataset
-from fme.core.dataset.testing import MockDataset, assert_dataset_item_length
+from fme.core.dataset.testing import (
+    MockDataset,
+    assert_dataset_item_length,
+    assert_sample_labels_match_items,
+)
 
 
 def test_subset_dataset_first_last_time():
@@ -54,3 +58,13 @@ def test_subset_dataset_len():
     subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
 
     assert len(subset) == 4
+
+
+def test_subset_dataset_sample_labels():
+    dataset = MockDataset.new(
+        n_times=20, varnames=["var1"], sample_n_times=2, labels={"src_a"}
+    )
+
+    subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
+
+    assert_sample_labels_match_items(subset)

@@ -5,8 +5,9 @@ import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
+from fme.ace.data_loading.label_sampling import LabelSamplingConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.dataset import DatasetItem
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
@@ -48,12 +49,15 @@ class CollateFn:
 
 
 def _get_sampler(
-    dataset: torch.utils.data.Dataset,
+    dataset: DatasetABC,
     sample_with_replacement_dataset_size: int | None,
+    label_sampling: LabelSamplingConfig | None,
     train: bool,
 ) -> torch.utils.data.Sampler:
     dist = Distributed.get_instance()
-    if sample_with_replacement_dataset_size is not None:
+    if label_sampling is not None:
+        sampler: torch.utils.data.Sampler = label_sampling.build_sampler(dataset)
+    elif sample_with_replacement_dataset_size is not None:
         dist.require_no_spatial_parallelism(
             "sample_with_replacement is not supported with spatial "
             "parallelism. Spatial co-ranks would draw different samples, "
@@ -104,7 +108,9 @@ def get_gridded_data(
 
     dist = Distributed.get_instance()
 
-    sampler = _get_sampler(dataset, config.sample_with_replacement, train)
+    sampler = _get_sampler(
+        dataset, config.sample_with_replacement, config.label_sampling, train
+    )
 
     if _force_forkserver or (config.zarr_engine_used and config.num_data_workers > 0):
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver

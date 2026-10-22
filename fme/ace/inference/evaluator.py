@@ -143,6 +143,12 @@ class ValidationConfig:
                 "TimeLengthSchedule for validation within inference evaluator jobs. "
                 "Use TimeLengthProbabilities or an int instead."
             )
+        if self.loader.label_sampling is not None:
+            raise ValueError(
+                "label_sampling is only supported for the training loader, "
+                "but it is set on the validation loader of an inference "
+                "evaluator job"
+            )
 
     def get_n_forward_steps(self) -> int:
         """Resolve the effective number of forward steps for validation.

@@ -94,6 +94,11 @@ class InlineValidationConfig:
             raise ValueError(
                 f"InlineValidationConfig weight must be non-negative, got {self.weight}"
             )
+        if self.loader.label_sampling is not None:
+            raise ValueError(
+                "label_sampling is only supported for the training loader, "
+                "but it is set on a validation loader"
+            )
 
     @property
     def using_labels(self) -> bool:

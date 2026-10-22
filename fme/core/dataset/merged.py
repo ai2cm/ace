@@ -97,6 +97,18 @@ class MergedXarrayDataset(DatasetABC):
         return self._sample_start_times
 
     @property
+    def sample_labels(self) -> list[set[str] | None]:
+        merged: list[set[str] | None] = [None] * len(self)
+        for dataset in self.datasets:
+            for i, ds_labels in enumerate(dataset.sample_labels):
+                labels = merged[i]
+                if labels is None:
+                    merged[i] = ds_labels
+                elif ds_labels is not None:
+                    merged[i] = labels.union(ds_labels)
+        return merged
+
+    @property
     def sample_n_times(self) -> int:
         return self._sample_n_times
 
@@ -264,6 +276,11 @@ class TimePaddedMergedDataset(DatasetABC):
     def sample_start_times(self) -> xr.CFTimeIndex:
         self._ensure_epoch_synchronized()
         return self._sample_start_times
+
+    @property
+    def sample_labels(self) -> list[set[str] | None]:
+        self._ensure_epoch_synchronized()
+        return self.datasets[self._canonical_idx].sample_labels
 
     @property
     def sample_n_times(self) -> int:
