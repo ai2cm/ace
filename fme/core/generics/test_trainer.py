@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
+from fme.core.distributed.shutdown import POST_ABORT_CALLBACK_BUDGET
 from fme.core.ema import EMAConfig, EMATracker, load_ema_params_if_available
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -733,6 +734,63 @@ def test_resume_after_interrupted_training_during_epoch(
     assert set(stepper.train_batches_seen).intersection(repeated_batches) == set(
         repeated_batches
     )
+
+
+def _get_mid_epoch_trainer_and_terminate_callback(tmp_path: str, monkeypatch):
+    """A trainer mid-epoch with its registered post-abort callback, which the
+    listener would invoke after the abort (see
+    test_resume_after_interrupted_training_during_epoch).
+    """
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
+    config, trainer = get_trainer(tmp_path)
+    trainer._started_training = True
+    trainer._current_epoch_num_batches_seen = 1
+    (save_on_terminate,) = registered_callbacks
+    return CheckpointPaths(config.checkpoint_dir), trainer, save_on_terminate
+
+
+def test_restart_checkpoint_skipped_when_last_full_save_exceeds_budget(
+    tmp_path: str, monkeypatch, capfd
+):
+    paths, trainer, save_on_terminate = _get_mid_epoch_trainer_and_terminate_callback(
+        tmp_path, monkeypatch
+    )
+    trainer._last_full_save_seconds = POST_ABORT_CALLBACK_BUDGET + 1.0
+    save_on_terminate()
+    assert not os.path.exists(paths.latest_checkpoint_path)
+    assert os.listdir(paths.checkpoint_dir) == []  # no partial .tmp either
+    stderr = capfd.readouterr().err
+    assert f"{POST_ABORT_CALLBACK_BUDGET + 1.0:.1f}s" in stderr
+    assert f"{POST_ABORT_CALLBACK_BUDGET:.1f}s" in stderr
+
+
+@pytest.mark.parametrize("last_full_save_seconds", [None, 1.0])
+def test_restart_checkpoint_saved_when_last_full_save_fits_budget(
+    tmp_path: str, monkeypatch, last_full_save_seconds: float | None
+):
+    paths, trainer, save_on_terminate = _get_mid_epoch_trainer_and_terminate_callback(
+        tmp_path, monkeypatch
+    )
+    trainer._last_full_save_seconds = last_full_save_seconds
+    save_on_terminate()
+    assert os.path.exists(paths.latest_checkpoint_path)
+
+
+def test_save_checkpoint_records_full_save_time(tmp_path: str):
+    config, trainer = get_trainer(tmp_path)
+    paths = CheckpointPaths(config.checkpoint_dir)
+    mock_time = unittest.mock.MagicMock()
+    mock_time.monotonic.side_effect = [10.0, 17.5, 20.0, 21.0]
+    with unittest.mock.patch("fme.core.generics.trainer.time", mock_time):
+        trainer.save_checkpoint(paths.latest_checkpoint_path, include_optimization=True)
+        assert trainer._last_full_save_seconds == 7.5
+        # a save without optimization state does not stand in for a restart one
+        trainer.save_checkpoint(paths.best_checkpoint_path)
+        assert trainer._last_full_save_seconds == 7.5
 
 
 @pytest.mark.parametrize("ema_decay", [0.05, 0.99])

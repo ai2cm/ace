@@ -64,7 +64,11 @@ import torch
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
-from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
+from fme.core.distributed.shutdown import (
+    POST_ABORT_CALLBACK_BUDGET,
+    add_post_abort_callback,
+    write_stderr,
+)
 from fme.core.ema import EMA_CHECKPOINT_KEY, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -318,6 +322,9 @@ class Trainer:
         self._validation_callback: ValidationCallback = validation_callback
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
+        # wall time of the last save that included optimization state, the
+        # size of a restart checkpoint; None until the first one
+        self._last_full_save_seconds: float | None = None
 
         def save_restart_checkpoints_on_terminate():
             """Preserve mid-epoch progress when the job is preempted.
@@ -342,6 +349,18 @@ class Trainer:
                     write_stderr(
                         "Not saving restart checkpoints as training has "
                         "not started\n"
+                    )
+                elif (
+                    self._last_full_save_seconds is not None
+                    and self._last_full_save_seconds > POST_ABORT_CALLBACK_BUDGET
+                ):
+                    # SIGKILL would land mid-write, leaving a partial .tmp
+                    # file in the results and no restart checkpoint
+                    write_stderr(
+                        "Not saving restart checkpoint: the last full "
+                        f"checkpoint save took {self._last_full_save_seconds:.1f}s, "
+                        f"more than the {POST_ABORT_CALLBACK_BUDGET:.1f}s left "
+                        "before SIGKILL\n"
                     )
                 else:
                     write_stderr(
@@ -699,6 +718,7 @@ class Trainer:
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
+        start_time = time.monotonic()
         try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
@@ -715,6 +735,8 @@ class Trainer:
                 data["optimization"] = self.optimization.get_state()
             torch.save(data, temporary_location)
             os.replace(temporary_location, checkpoint_path)
+            if include_optimization:
+                self._last_full_save_seconds = time.monotonic() - start_time
         finally:
             if os.path.exists(temporary_location):
                 os.remove(temporary_location)

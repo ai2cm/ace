@@ -100,6 +100,21 @@ DEFAULT_PARK_DEADLINE = 5.0
 # on a wedged 8-GPU node, so this is a generous cover.
 DEFAULT_SETTLE_PERIOD = 1.0
 
+# torchrun's SIGTERM-to-SIGKILL timeout, the budget every constant above must
+# fit (`PContext.close`'s default timeout,
+# torch/distributed/elastic/agent/server/local_elastic_agent.py).
+TORCHRUN_SIGKILL_TIMEOUT = 30.0
+
+# The longest a post-abort callback can expect to run before the SIGKILL: what
+# remains of torchrun's budget after a parked rank's abort time (park deadline
+# plus settle period), less a margin for the abort itself (under a second) and
+# for run-to-run variation in the callback's duration. A callback whose work
+# is known to take longer, such as a large restart checkpoint, should skip it:
+# a SIGKILL mid-write leaves a partial file behind and finishes nothing.
+POST_ABORT_CALLBACK_BUDGET = (
+    TORCHRUN_SIGKILL_TIMEOUT - DEFAULT_PARK_DEADLINE - DEFAULT_SETTLE_PERIOD - 4.0
+)
+
 _post_abort_callbacks: list[Callable[[], None]] = []
 
 
