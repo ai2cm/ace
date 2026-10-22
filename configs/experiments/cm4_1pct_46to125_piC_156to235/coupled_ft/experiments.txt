@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_ft-oppfm_a2sLR|o0a2rs0|01M5JV3HN5FT3J3QH8BCHQFDJ5|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_ft_lr7e-5-oppfm_a2sLR|o0a2rs0|01M5JV4ASK63TQKMESF04B374D|training|best_inference_ckpt|normal|--min-runtime 8h
