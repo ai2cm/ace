@@ -84,9 +84,12 @@ for _r in api.runs(
         )
 for _kind, _order in sorted(_after):
     _pat, _ep = _after[(_kind, _order)]
-    RUNS[_LABEL[_kind].format(ep=("best (selected)" if _ep == "best" else _ep[2:]))] = (
-        "ace4deg-randco2-{x}xCO2-ic3-" + _pat
+    _lab = (
+        _LABEL[_kind].replace("ep{ep}", "selected ckpt")
+        if _ep == "best"
+        else _LABEL[_kind].format(ep=_ep[2:])
     )
+    RUNS[_lab] = "ace4deg-randco2-{x}xCO2-ic3-" + _pat
 runs = {}
 for r in api.runs(
     PROJECT, filters={"jobType": "inference"}, order="-created_at", per_page=600
