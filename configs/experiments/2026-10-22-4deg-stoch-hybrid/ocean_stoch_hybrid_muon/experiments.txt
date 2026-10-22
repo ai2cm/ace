@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu1e-3|01M5JZ8VTYE7MHCZJ4C6V8X088|training|best_inference_ckpt|normal|--min-runtime 8h
 
 2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu3e-3|01M5JZ94BMBK91MHYPHVY0AKFM|training|best_inference_ckpt|normal|--min-runtime 8h
+
+2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu1e-2|01M5JZ9D1RERHJ805EJ6QSPGPE|training|best_inference_ckpt|normal|--min-runtime 8h
