@@ -12,11 +12,14 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQA
 # 34 for floor, padpool, conspool and exact3311), over 1pctCO2 and the
 # standard piControl eval at 4 degrees (eval/ configs; run evaluate.sh with
 # --config-dir configs/experiments/2026-10-21-samudra-4deg-pooling/eval).
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0|01M5G4G1QKWQXGAF5JXAW0S374|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0|01M5G4G1QKWQXGAF5JXAW0S374|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0|01M5G4GC9VV2BZKHDDQ6JCS5P0|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0|01M5G4GC9VV2BZKHDDQ6JCS5P0|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQASV51XJHBCHVRN2MC2|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|a100
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQASV51XJHBCHVRN2MC2|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|a100
+# Launched 2026-10-22 on saturn, in row order: 01M5J5E5QYMJTX6WWTSKH0KWAH, 01M5J5EFGXCDTA5NKVRCAEHAAQ,
+# 01M5J5ERQQZYEDJ5QW3VM9SFZX, 01M5J5F2D89226HVK946MK60ZV, 01M5J5FDJ4A0Y3YEP6T2PSYR8C,
+# 01M5J5FRQNH1HGEDMVS15TZ9WA, 01M5J5G37BTXX6CZ4DQWXQB5Z1, 01M5J5GDJAE73E3XGPREKXM9EW.
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0|01M5G4G1QKWQXGAF5JXAW0S374|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0|01M5G4G1QKWQXGAF5JXAW0S374|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0|01M5G4GC9VV2BZKHDDQ6JCS5P0|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0|01M5G4GC9VV2BZKHDDQ6JCS5P0|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQASV51XJHBCHVRN2MC2|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQASV51XJHBCHVRN2MC2|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|a100
