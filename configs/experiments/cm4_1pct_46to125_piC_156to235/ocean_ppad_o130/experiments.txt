@@ -1,0 +1,6 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# --config-dir configs/experiments/cm4_eval/ocean
+
+# coupled-ace-sst-representation issue 25e (O130): 130-yr ocean-only eval; results_dataset holds the ocean component of the coupled checkpoint 01M501632YXQHMZCDD4BE9JTJ0
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto-ocean|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/25e-O130/1pct-ic0001-130yr-maps|01M5GVTXVSDTVW1TFWT3RTXDMD|ai2/ace|titan
