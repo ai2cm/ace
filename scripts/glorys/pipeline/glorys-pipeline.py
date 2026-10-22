@@ -182,11 +182,13 @@ GRID_INPUTS = {
             "plume-mask-5psu-glorys12-glo12.zarr"
         ),
     ),
-    # 4 degree: there is no 4-degree UFS replay; the 4-degree ocean baseline is
-    # pretrained on CM4/OM4, so its OM4 masks (and hfgeou) are the reference.
+    # 4 degree: the 4-degree UFS replay set, for fine-tunes from UFS-pretrained
+    # checkpoints; it has no hfgeou, so that comes from OM4.
     "F22.5": GridInputs(
         forcing=f"{_INTERMEDIATE}/2026-08-13-era5-4deg-8layer-1940-2025.zarr",
-        reference_mask=f"{_INTERMEDIATE}/2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr",
+        reference_mask=(
+            f"{_INTERMEDIATE}/2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr"
+        ),
         hfgeou=f"{_INTERMEDIATE}/2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr",
         plume_mask=(
             f"{_INTERMEDIATE}/2026-09-17-GLORYS-trial-run/"
@@ -202,6 +204,34 @@ GAUSSIAN_GRID_N = {"F22.5": 22.5, "F45": 45, "F90": 90, "F360": 360}
 VARS_3D = ("thetao", "so", "uo", "vo")
 # 2-D ocean / sea-ice variables read from the same store
 VARS_2D = ("zos", "siconc", "sithick", "usi", "vsi")
+# How sea_ice_volume is written. "thickness": the thickness over the ice-covered
+# part (equal to HI), which is what the UFS replay set stores under that name
+# and so what UFS-pretrained checkpoints read. "per_area": concentration x HI,
+# the ice volume per unit cell area.
+SEA_ICE_VOLUME_CONVENTIONS = ("thickness", "per_area")
+# Diagnostic outputs of the UFS-trained ocean configs that GLORYS12/GLO12 cannot
+# supply (no fluxes are published). Written as all-NaN with
+# --diagnostic_placeholders so those configs keep their output channels; the
+# loss ignores NaN targets.
+PLACEHOLDER_ATTRS = {
+    "hfds_total_area": {
+        "long_name": "Net downward heat flux into sea water per unit cell area "
+        "(not available from this product; all NaN)",
+        "units": "W m-2",
+    },
+    "tauuo": {
+        "long_name": "Eastward ocean surface stress (not available; all NaN)",
+        "units": "N m-2",
+    },
+    "tauvo": {
+        "long_name": "Northward ocean surface stress (not available; all NaN)",
+        "units": "N m-2",
+    },
+    "wfo": {
+        "long_name": "Water flux into sea water (not available; all NaN)",
+        "units": "kg m-2 s-1",
+    },
+}
 
 # Target layer interfaces (metres), identical to the idepth_0..19 of the CM4
 # and UFS-replay training sets (read from the UFS store 2026-09-08).
@@ -926,44 +956,88 @@ def process_ocean_2d(
     source_grid: xr.Dataset,
     invariant_ds: xr.Dataset,
     weights_path: str | None,
+    sea_ice_volume: str = "thickness",
+    diagnostic_placeholders: bool = False,
 ):
-    """One time element of the 2-D fields: zos, siconc, sithick -> zos,
-    ocean_sea_ice_fraction, HI, sea_ice_volume."""
+    """One time element of the 2-D fields: zos, siconc, sithick, usi, vsi ->
+    zos, ocean_sea_ice_fraction, HI, sea_ice_volume, UI, VI.
+
+    The native thickness and ice velocities are means over the ice-covered part
+    of each cell, and open water is 0 in GLO12 but NaN in GLORYS12. Averaging
+    concentration and thickness separately and multiplying them is wrong where
+    cover is partial: zeros averaged into the thickness thin it, and NaN dropped
+    from the concentration inflates it. So open ocean is set to 0, the
+    concentration-weighted quantities are averaged, and HI and UI/VI are those
+    averages divided by the averaged concentration.
+    """
     logging.info("ocean 2-D key=%s", key)
     ds = chunk.squeeze("time", drop=True).load()
     time_value = chunk["time"].values[0]
-    ds = _regrid_dataset(ds, output_grid, source_grid, weights_path)
+    ocean = np.isfinite(ds["zos"])
+    conc = ds["siconc"].fillna(0.0).where(ocean)
+    native = xr.Dataset(
+        {
+            "zos": ds["zos"],
+            "conc": conc,
+            "volume": conc * ds["sithick"].fillna(0.0).where(ocean),
+            "u_flux": conc * ds["usi"].fillna(0.0).where(ocean),
+            "v_flux": conc * ds["vsi"].fillna(0.0).where(ocean),
+        }
+    )
+    ds = _regrid_dataset(native, output_grid, source_grid, weights_path)
     out = xr.Dataset()
     out["zos"] = ds["zos"]
     out["zos"].attrs = {"long_name": "Sea Surface Height", "units": "m"}
-    sic = ds["siconc"].fillna(0.0).clip(0, 1)
+    sic = ds["conc"].fillna(0.0).clip(0, 1)
     sic.attrs = {"long_name": "sea ice fraction over ocean", "units": "fraction"}
     out["ocean_sea_ice_fraction"] = sic
-    hi = ds["sithick"].fillna(0.0).where(sic > 0, 0.0)
-    hi.attrs = {
-        "long_name": "Sea Ice Thickness (mean over ice-covered area)",
-        "units": "m",
-    }
+    # UI/VI and the ice fields must be zero (not NaN) wherever there is no ice:
+    # the ocean corrector's sea_ice_fraction_correction lists them in
+    # zero_where_ice_free_names.
+    has_ice = sic > 0
+    divisor = sic.where(has_ice, 1.0)
+    hi = (ds["volume"].fillna(0.0) / divisor).where(has_ice, 0.0)
+    hi.attrs = _ice_attrs()["HI"]
     out["HI"] = hi
-    siv = sic * hi
-    siv.attrs = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
-    out["sea_ice_volume"] = siv
-    # Sea ice velocities. The ocean corrector's sea_ice_fraction_correction
-    # lists UI/VI in zero_where_ice_free_names, so they must be zero (not NaN)
-    # wherever there is no ice, matching the HI/sea_ice_volume treatment above.
-    for src, dst, direction in (("usi", "UI", "eastward"), ("vsi", "VI", "northward")):
-        vel = ds[src].fillna(0.0).where(sic > 0, 0.0)
-        vel.attrs = {
-            "long_name": f"Sea ice {direction} velocity",
-            "units": "m s-1",
-        }
+    out["sea_ice_volume"] = hi.copy() if sea_ice_volume == "thickness" else sic * hi
+    out["sea_ice_volume"].attrs = _ice_attrs(sea_ice_volume)["sea_ice_volume"]
+    for flux, dst, direction in (
+        ("u_flux", "UI", "eastward"),
+        ("v_flux", "VI", "northward"),
+    ):
+        vel = (ds[flux].fillna(0.0) / divisor).where(has_ice, 0.0)
+        vel.attrs = {"long_name": f"Sea ice {direction} velocity", "units": "m s-1"}
         out[dst] = vel
     out = _mask_and_fill(out, invariant_ds)
+    if diagnostic_placeholders:
+        # after _mask_and_fill: an all-NaN field would trip its fill guard
+        nan = xr.full_like(out["zos"], np.nan, dtype=np.float32)
+        for name, attrs in PLACEHOLDER_ATTRS.items():
+            out[name] = nan.copy()
+            out[name].attrs = dict(attrs)
     out = _finalize(out, time_value)
     new_key = key.replace(
         offsets={"time": key.offsets["time"]}, vars=frozenset(out.data_vars)
     )
     return new_key, out
+
+
+def _ice_attrs(sea_ice_volume: str = "thickness") -> dict[str, dict[str, str]]:
+    attrs = {
+        "HI": {
+            "long_name": "Sea Ice Thickness (mean over ice-covered area)",
+            "units": "m",
+        },
+    }
+    if sea_ice_volume == "thickness":
+        attrs["sea_ice_volume"] = {
+            "long_name": "Sea Ice Thickness (mean over ice-covered area); the UFS "
+            "replay convention for sea_ice_volume",
+            "units": "m",
+        }
+    else:
+        attrs["sea_ice_volume"] = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
+    return attrs
 
 
 def process_forcing(
@@ -996,7 +1070,10 @@ def process_forcing(
 
 
 def _output_attrs(
-    ds_3d: xr.Dataset, ds_forcing: xr.Dataset
+    ds_3d: xr.Dataset,
+    ds_forcing: xr.Dataset,
+    sea_ice_volume: str = "thickness",
+    diagnostic_placeholders: bool = False,
 ) -> dict[str, dict[str, str]]:
     """``{name: attrs}`` for every time-varying output.
 
@@ -1023,11 +1100,7 @@ def _output_attrs(
         "long_name": "sea ice fraction over ocean",
         "units": "fraction",
     }
-    attrs["HI"] = {
-        "long_name": "Sea Ice Thickness (mean over ice-covered area)",
-        "units": "m",
-    }
-    attrs["sea_ice_volume"] = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
+    attrs.update(_ice_attrs(sea_ice_volume))
     attrs["UI"] = {"long_name": "Sea ice eastward velocity", "units": "m s-1"}
     attrs["VI"] = {"long_name": "Sea ice northward velocity", "units": "m s-1"}
     for out_name in FORCING_VARS.values():
@@ -1036,6 +1109,8 @@ def _output_attrs(
             "long_name": src.get("long_name", out_name),
             "units": src.get("units", ""),
         }
+    if diagnostic_placeholders:
+        attrs.update({k: dict(v) for k, v in PLACEHOLDER_ATTRS.items()})
     return attrs
 
 
@@ -1043,6 +1118,7 @@ def make_template(
     out_times: pd.DatetimeIndex,
     invariant_ds: xr.Dataset,
     attrs: dict[str, dict[str, str]] | None = None,
+    diagnostic_placeholders: bool = False,
 ) -> xr.Dataset:
     """Analytic template: every time-varying output is (time, lat, lon) float32."""
     attrs = attrs or {}
@@ -1059,6 +1135,8 @@ def make_template(
         "VI",
     ]
     names += list(FORCING_VARS.values())
+    if diagnostic_placeholders:
+        names += list(PLACEHOLDER_ATTRS)
     lat, lon = invariant_ds["lat"], invariant_ds["lon"]
     zeros = xr.DataArray(
         np.zeros((len(lat), len(lon)), dtype=np.float32),
@@ -1141,6 +1219,19 @@ def _get_parser():
         "defaults to the output grid's (see GRID_INPUTS); pass an empty string "
         "to keep the river-mouth cells",
     )
+    p.add_argument(
+        "--sea_ice_volume",
+        default="thickness",
+        choices=SEA_ICE_VOLUME_CONVENTIONS,
+        help="thickness: sea_ice_volume equals HI, the UFS replay convention "
+        "UFS-pretrained checkpoints read; per_area: concentration x HI",
+    )
+    p.add_argument(
+        "--diagnostic_placeholders",
+        action="store_true",
+        help="also write all-NaN " + ", ".join(PLACEHOLDER_ATTRS) + " so configs "
+        "that predict them keep their output channels",
+    )
     return p
 
 
@@ -1194,7 +1285,14 @@ def main():
     ds_2d = open_ocean(VARS_2D, out_times, args.product)
     ds_forcing = open_forcing(forcing_times, inputs.forcing)
 
-    template = make_template(out_times, invariant_ds, _output_attrs(ds_3d, ds_forcing))
+    template = make_template(
+        out_times,
+        invariant_ds,
+        _output_attrs(
+            ds_3d, ds_forcing, args.sea_ice_volume, args.diagnostic_placeholders
+        ),
+        diagnostic_placeholders=args.diagnostic_placeholders,
+    )
     output_chunks = {"time": args.output_time_chunksize}
     output_shards = {"time": args.output_time_shardsize}
     output_store = _make_zarr_store(args.output_path, read_only=False)
@@ -1228,7 +1326,14 @@ def main():
             p
             | "2d_DatasetToChunks" >> xbeam.DatasetToChunks(ds_2d, chunks={"time": 1})
             | "2d_Process"
-            >> beam.MapTuple(functools.partial(process_ocean_2d, **common))
+            >> beam.MapTuple(
+                functools.partial(
+                    process_ocean_2d,
+                    sea_ice_volume=args.sea_ice_volume,
+                    diagnostic_placeholders=args.diagnostic_placeholders,
+                    **common,
+                )
+            )
             | "2d_Consolidate" >> xbeam.ConsolidateChunks(output_shards)
             | "2d_ToZarr"
             >> xbeam.ChunksToZarr(

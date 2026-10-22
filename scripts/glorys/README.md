@@ -52,8 +52,8 @@ A cell is ocean at a level only if all of these hold:
 
 - some native wet cell contributes to it (the UFS convention);
 - it is ocean in the grid's **reference mask** (`GRID_INPUTS`): the dataset
-  the fine-tune checkpoint was pretrained on — the UFS replay at 1°, OM4 at 4°
-  (no 4° UFS replay exists). `--no_mask_intersection` disables this;
+  the fine-tune checkpoint was pretrained on — the UFS replay at 1° and at 4°.
+  `--no_mask_intersection` disables this;
 - it is not in the grid's **river-plume mask**: cells whose climatological
   surface salinity for some calendar month (the multi-year mean of the 15th
   of that month) falls below 5 psu in GLORYS12
@@ -65,6 +65,24 @@ A cell is ocean at a level only if all of these hold:
   bottom cells the bathymetry mask calls ocean, so without this NaN would sit
   inside the mask. Land is fixed in time, so one reference state per product
   finds every such cell.
+
+## Sea ice
+
+The native thickness (`sithick`) and ice velocities (`usi`, `vsi`) are means over
+the ice-covered part of each cell; open water is 0 in GLO12 and NaN in GLORYS12.
+The pipeline sets open ocean to 0, averages concentration and concentration ×
+thickness/velocity, and divides by the averaged concentration, so `HI` stays the
+thickness over the ice-covered part where cover is partial. Averaging thickness
+on its own would average open-water zeros into it.
+
+`sea_ice_volume` follows the UFS replay convention by default (`--sea_ice_volume
+thickness`): it equals `HI`, which is what UFS-pretrained checkpoints read under
+that name. `--sea_ice_volume per_area` writes concentration × `HI` instead.
+
+`--diagnostic_placeholders` adds all-NaN `hfds_total_area`, `tauuo`, `tauvo` and
+`wfo` (not published by either product), so configs that predict them keep their
+output channels; the loss ignores NaN targets, and those configs should
+normalize with the pretraining set's stats. The GLO12 Makefile targets pass it.
 
 ## Access gotchas (both verified 2026-09-16)
 

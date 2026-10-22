@@ -4,11 +4,11 @@
 # (DATE-GLO12_DATASET_NAME_FOUR_DEGREE); update it whenever the pipeline is
 # re-run. Same stats window as the 1-degree GLO12 set (2025 is held out).
 runs:
-  2026-10-21-glo12-ocean-4deg-19level-5day-2022-2025: ""
+  2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025: ""
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   output_directory: gs://vcm-ml-intermediate/glo12-ocean-4deg-19level-5day-stats
-  beaker_dataset: glo12-ocean-4deg-19level-5day-stats
+  beaker_dataset: glo12-ocean-4deg-19level-5day-stats-v2
   data_type: UFS_REPLAY  # same variable set and layout as the UFS replay ocean
   start_date: "2022-06-01"
   end_date: "2024-12-31"

@@ -73,7 +73,7 @@ glo12_dataflow:
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		./run-dataflow.sh DataflowRunner \
 		$(GLO12_OUTPUT_PATH) $(OUTPUT_GRID_ONE_DEGREE) $(GLO12_START_DATE) $(GLO12_END_DATE) \
-		--product glo12 $(DATAFLOW_EXTRA_FLAGS)
+		--product glo12 --diagnostic_placeholders $(DATAFLOW_EXTRA_FLAGS)
 
 .PHONY: glo12_local_debug
 glo12_local_debug:
@@ -81,7 +81,7 @@ glo12_local_debug:
 	cd pipeline && \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		python glorys-pipeline.py $(GLO12_OUTPUT_PATH_LOCAL) $(GLO12_START_DATE_LOCAL) \
-		$(GLO12_END_DATE_LOCAL) --product glo12 \
+		$(GLO12_END_DATE_LOCAL) --product glo12 --diagnostic_placeholders \
 		--output_grid $(OUTPUT_GRID_LOCAL) --runner DirectRunner --save_main_session \
 		--job_server_timeout=3600 $(LOCAL_EXTRA_FLAGS)
 
@@ -110,7 +110,7 @@ glo12_dataflow_four_degree:
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		./run-dataflow.sh DataflowRunner \
 		$(GLO12_OUTPUT_PATH_FOUR_DEGREE) $(OUTPUT_GRID_FOUR_DEGREE) $(GLO12_START_DATE) $(GLO12_END_DATE) \
-		--product glo12 --regrid_weights $(REGRID_WEIGHTS_FOUR_DEGREE) $(DATAFLOW_EXTRA_FLAGS)
+		--product glo12 --diagnostic_placeholders --regrid_weights $(REGRID_WEIGHTS_FOUR_DEGREE) $(DATAFLOW_EXTRA_FLAGS)
 
 .PHONY: glorys_dataflow_test_run
 glorys_dataflow_test_run:
