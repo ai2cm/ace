@@ -82,3 +82,11 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKY
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_d1148|rs0|01M5DBN7QBBDBDEJ0TZCWCEQYH|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# The uncapped-GELU d1148 pool run's latest checkpoint while it trains: its
+# ckpt.tar at 38 epochs and 260 batches (28,000 batches, run on its EMA
+# weights), fetched from the running job's dataset 01M5FC4FWGJNHRM8VT23GEZRXH
+# and uploaded by the user as dataset 01M5HTMDHY16AC4C6M7DKF0QE4. pending_
+# until that upload commits.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|pending_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|pending_piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
