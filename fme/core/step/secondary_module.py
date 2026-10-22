@@ -11,6 +11,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -352,6 +353,9 @@ class SecondaryModuleStep(StepABC):
 
     @property
     def normalizer(self) -> StandardNormalizer:
+        return self._normalizer
+
+    def network_normalizer(self, labels: BatchLabels | None) -> StandardNormalizer:
         return self._normalizer
 
     @property
