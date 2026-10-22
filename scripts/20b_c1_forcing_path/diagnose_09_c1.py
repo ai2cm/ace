@@ -4,7 +4,7 @@
 
     python diagnose_09_c1.py omega <omega.nc>                                    # local, ace-tools env
     PYTHONPATH=<copy of W/fme at f7718ac> python diagnose_09_c1.py run <arm> <config.yaml> <ckpt> <out.nc> \
-        [--swap-from <C.nc> --swap-forcing v,.. --swap-ic v,..] [--n-windows N] [--record v,..]  # Beaker GPU (fme env)
+        [--swap-from <C.nc> --swap-forcing v,.. --swap-ic v,.. [--swap-mask ocean|land]] [--n-windows N] [--record v,..]  # Beaker GPU (fme env)
     PYTHONPATH=... python diagnose_09_c1.py compare <C.nc> <T.nc> <omega.nc> <out.yaml> [<label>=<T_swap.nc> ...]
 
 W = ace-exper-worktrees/exper-2026-10-21-coupled-sst-09-pilot/. `run` executes fme's own evaluator (arm T:
@@ -13,7 +13,8 @@ length (`--n-windows` ocean steps), checkpoint and data paths, writers and wandb
 atmosphere call: `in__<v>` (args.input), `next__<v>` (args.next_step_input_data), `out__<v>` (output), dim `k`
 (k = 1 is the first inner step). Swaps replace T's inputs by C's recorded ones: forcing names at every k,
 IC names at the first inner step of each window
-(where C's `_prescribe_ic_sst` acts).
+(where C's `_prescribe_ic_sst` acts). Issue 25q: `--swap-mask ocean` takes C's values only where M = land_fraction < 1
+(T's own input; = 25f's sea_surface_fraction > 0) and keeps T's elsewhere; `land` the complement.
 """
 
 import argparse
@@ -74,11 +75,19 @@ def _record(swap: dict | None, keep: set[str] | None = None):
             for v in names:
                 for d, pre in ((inp, "in__"), (nxt, "next__")):
                     if v in d:
-                        d[v] = torch.as_tensor(
+                        c = torch.as_tensor(
                             src[pre + v].isel(k=k).values,
                             dtype=d[v].dtype,
                             device=d[v].device,
                         )
+                        if swap["mask"]:
+                            m = a.input["land_fraction"] < 1
+                            c = (
+                                torch.where(m, c, d[v])
+                                if swap["mask"] == "ocean"
+                                else torch.where(m, d[v], c)
+                            )
+                        d[v] = c
             a = StepArgs(
                 input=inp,
                 next_step_input_data=nxt,
@@ -118,6 +127,7 @@ def run(
     swap_ic: str,
     n_windows: int,
     record: str = "",
+    swap_mask: str = "",
 ) -> None:
     cfg = _adapt(
         yaml.safe_load(open(config)),
@@ -132,6 +142,7 @@ def run(
             "ds": xr.open_dataset(swap_from),
             "forcing": [v for v in swap_forcing.split(",") if v],
             "ic": [v for v in swap_ic.split(",") if v],
+            "mask": swap_mask,
         }
     rec = _record(swap, {v for v in record.split(",") if v} or None)
     cfg_path = pathlib.Path(cfg["experiment_dir"]) / "config.yaml"
@@ -161,6 +172,7 @@ def run(
         swap_from=swap_from or "",
         swap_forcing=swap_forcing,
         swap_ic=swap_ic,
+        swap_mask=swap_mask,
     )
     ds.to_netcdf(out)
 
@@ -497,6 +509,9 @@ if __name__ == "__main__":
     r.add_argument("--swap-from")
     r.add_argument("--swap-forcing", default="")
     r.add_argument("--swap-ic", default="")
+    r.add_argument(
+        "--swap-mask", choices=["", "ocean", "land"], default=""
+    )  # issue 25q
     r.add_argument("--n-windows", type=int, default=2)
     # issue 25f: comma list of variables kept; empty = all
     r.add_argument("--record", default="")
@@ -520,4 +535,5 @@ if __name__ == "__main__":
             a.swap_ic,
             a.n_windows,
             a.record,
+            a.swap_mask,
         )
