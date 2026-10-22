@@ -150,6 +150,9 @@ class ValidationConfig:
                 "TimeLengthSchedule for validation within inference evaluator jobs. "
                 "Use TimeLengthProbabilities or an int instead."
             )
+        self.loader.validate_for_validation(
+            "the validation loader of an inference evaluator job"
+        )
 
     def get_n_forward_steps(self) -> int:
         """Resolve the effective number of forward steps for validation.

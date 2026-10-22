@@ -32,6 +32,7 @@ from fme.core.dataset.merged import (
 )
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
+from fme.core.dataset.testing import assert_sample_labels_match_items
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
@@ -944,6 +945,17 @@ def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
     # Check that the subset length matches the expected number of intervals
     expected_length = boolean_mask.sum().item()
     assert len(subset) == expected_length
+
+
+@pytest.mark.parametrize("labels", [None, set(), {"src_a"}])
+def test_xarray_dataset_and_subset_sample_labels(mock_monthly_netcdfs, labels):
+    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir, labels=labels)
+    names = mock_monthly_netcdfs.var_names.all_names
+    dataset = xarray_dataset_constructor(config, names, 1)
+    assert_sample_labels_match_items(dataset)
+    assert dataset.sample_labels[0] == labels
+    subset = XarraySubset(dataset, np.arange(len(dataset)) % 3 == 0)
+    assert_sample_labels_match_items(subset)
 
 
 def test_multi_source_xarray_dataset_has_no_duplicates(

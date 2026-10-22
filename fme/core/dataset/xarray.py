@@ -1071,6 +1071,11 @@ class XarrayDataset(DatasetABC):
         return self._sample_start_times
 
     @property
+    def sample_labels(self) -> list[set[str] | None]:
+        labels = set(self._labels) if self._labels is not None else None
+        return [labels] * len(self)
+
+    @property
     def all_times(self) -> xr.CFTimeIndex:
         """
         Like sample_start_times, but includes all times in the dataset, including
@@ -1290,6 +1295,11 @@ class XarraySubset(DatasetABC):
     @property
     def sample_start_times(self):
         return self._sample_start_times
+
+    @property
+    def sample_labels(self) -> list[set[str] | None]:
+        labels = self._wrapped_dataset.sample_labels
+        return [labels[i] for i in self._dataset.indices]
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
