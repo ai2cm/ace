@@ -2,9 +2,16 @@
 
 Reads native-grid 0.25 degree tripolar OM4/CM4 output stores, applies
 per-chunk transforms (C-grid to tracer-center interpolation, vector rotation,
-wetmask-normalized conservative regridding to a Gaussian grid, level
-splitting), and writes one templated, sharded zarr v3 store per invocation,
-driven by a YAML config (see pipeline/om4/config.py and configs/).
+conservative regridding to a Gaussian grid with weights in native MOM6 cell
+areas, level splitting), and writes one templated, sharded zarr v3 store per
+invocation, driven by a YAML config (see pipeline/om4/config.py and
+configs/).
+
+One stored value per field class (pipeline.native_area): 3D variables per
+ocean volume (weight m_k Δz_k, Δz_k from native deptho), other 2D variables
+per ocean area (weight m_0), ``full_cell_variables`` per full cell. Values
+stay float64 until the ``OUTPUT_DTYPE`` cast, where the step-5 identities of
+pipeline.native_area run (rule ``|lhs − rhs| ≤ rtol · S``).
 
 Run locally on a subset with the DirectRunner (see the om4.mk smoke_test
 target), or on Google Cloud Dataflow by passing the corresponding beam
@@ -13,8 +20,8 @@ pipeline options after the script's own arguments.
 Masking conventions of the output store:
 
 - Every time-varying field is NaN over land. This falls out of the
-  wetmask-normalized regrid: target cells with ocean fraction <=
-  OCEAN_FRACTION_THRESHOLD are NaN.
+  normalized regrid: target cells with ocean fraction <=
+  OCEAN_FRACTION_THRESHOLD (3D: zero ocean volume) are NaN.
 - Per-level binary masks ``mask_0..N`` (and ``mask_2d``, equal to
   ``mask_0``) mark the regridded wetmask footprint: 1 where a target cell
   overlaps any ocean source area, else 0. The NaN pattern of every
@@ -39,8 +46,9 @@ Masking conventions of the output store:
   is per total cell area, land counted as zero — with land-NaN applied
   after; their wetmask-normalized (per-ocean-area) twins are written under
   renamed outputs (e.g. ``ocean_sea_ice_fraction``).
-- Masks, ``idepth_*``, ``areacello``, and ``sea_surface_fraction`` are
-  exempt from land-NaN by explicit list (see land_nan_exempt_names).
+- Masks, ``idepth_*``, ``areacello``, ``sftof``, ``sea_surface_fraction``
+  and ``h_prime_*`` are exempt from land-NaN by explicit list (see
+  land_nan_exempt_names); they are 0 on land, ``idepth_*`` aside.
 """
 
 import argparse
@@ -53,7 +61,20 @@ import xarray as xr
 import xarray_beam as xbeam
 from apache_beam.options.pipeline_options import PipelineOptions
 
-from ..grids import make_target_grid
+from ..native_area import (
+    LEVEL_DIM,
+    NATIVE_AREA_CHECKS,
+    Z_STAR_DEFINITION,
+    assert_native_statics,
+    check_extensive_identities,
+    check_field_identities,
+    check_static_identities,
+    level_thickness,
+    native_area_statics,
+    regrid_full_cell,
+    regrid_thickness_weighted,
+    z_star_residual,
+)
 from ..ocean_emulators_port import (
     OCEAN_FRACTION_THRESHOLD,
     interpolate_to_cell_centers,
@@ -62,11 +83,21 @@ from ..ocean_emulators_port import (
 )
 from ..postprocess import (
     DERIVATION_ATTR,
+    SEA_ICE_FRACTION,
     ChunkContext,
+    PostprocessConfig,
+    add_provenance_args,
     assert_postprocess_inputs,
+    check_provenance_args,
     provenance_attrs,
+    provenance_run_attrs,
 )
-from ..weights import get_regridder, open_source_grid
+from ..weights import (
+    get_regridder,
+    open_areacello,
+    open_source_grid,
+    read_artifact_attrs,
+)
 from ..zarr_io import (
     OUTPUT_DTYPE,
     TIME_DIM,
@@ -82,8 +113,6 @@ from .face_masks import count_masked_candidate_faces, get_face_masks
 
 logger = logging.getLogger(__name__)
 
-LEVEL_DIM = "z_l"
-
 # Tracer-center dimension for each staggered (right/north-edge) dimension.
 STAGGERED_TO_TRACER_DIM = {"xq": "xh", "yq": "yh"}
 
@@ -98,7 +127,8 @@ def land_nan_exempt_names(level_count: int) -> list[str]:
         [f"mask_{k}" for k in range(level_count)]
         + ["mask_2d"]
         + [f"idepth_{k}" for k in range(level_count + 1)]
-        + ["areacello", "sea_surface_fraction"]
+        + ["areacello", "sftof", "sea_surface_fraction"]
+        + [f"h_prime_{k}" for k in range(level_count)]
     )
 
 
@@ -210,18 +240,6 @@ def _get_angle(weights_url: str) -> xr.DataArray:
     return _ANGLE_CACHE[weights_url]
 
 
-# One exact cell-area array per target grid per worker process.
-_AREACELLO_CACHE: dict[str, xr.DataArray] = {}
-
-
-def _get_areacello(target_grid_name: str) -> xr.DataArray:
-    if target_grid_name not in _AREACELLO_CACHE:
-        _AREACELLO_CACHE[target_grid_name] = make_target_grid(target_grid_name)[
-            "areacello"
-        ]
-    return _AREACELLO_CACHE[target_grid_name]
-
-
 def _conform_to_wetmask(
     ds: xr.Dataset,
     wetmask: xr.DataArray,
@@ -330,6 +348,26 @@ def _rotate_pairs(
     return ds
 
 
+def _sea_ice_fraction_source(stream: StreamConfig) -> str | None:
+    """The full-cell sea-ice fraction the stream's ``sea_ice`` transform
+    reads, or None if the stream does not list ``sea_ice``."""
+    for entry in stream.postprocess:
+        selection = PostprocessConfig(entry) if isinstance(entry, str) else entry
+        if selection.name == "sea_ice":
+            name = selection.sources.get("sea_ice_fraction", SEA_ICE_FRACTION)
+            if name not in stream.full_cell_variables:
+                raise ValueError(
+                    f"stream {stream.name!r}: sea_ice reads {name!r}, which is "
+                    "not a full_cell_variable"
+                )
+            return name
+    return None
+
+
+# Output name a postprocess transform reads, for each checked output.
+EXTENSIVE_SOURCES = {"hfds_total_area": "hfds"}
+
+
 def _process_chunk(
     ds: xr.Dataset,
     stream: StreamConfig,
@@ -337,15 +375,20 @@ def _process_chunk(
     weights_url: str,
     target_grid_name: str,
     level_index: int | None,
+    native_areacello: xr.DataArray,
+    dz: xr.DataArray | None,
 ) -> xr.Dataset:
     """Transform one in-memory chunk: conform to the wetmask, rotate, check
-    footprints, regrid, and (for 3D chunks) split the level into suffixed 2D
+    footprints, regrid in float64 with the native-area weights, check the
+    step-5 identities, and (for 3D chunks) split the level into suffixed 2D
     variables.
 
-    Every variable's footprint is asserted equal to the reference-time
-    wetmask and masked to it (see _conform_to_wetmask), and the regrid is
-    normalized by it — so the output NaN pattern equals the ``mask_k``
-    statics at every timestep.
+    3D chunks (``level_index`` set) are regridded per ocean volume with the
+    level's Δz (``dz``); 2D chunks per ocean area, and ``full_cell_variables``
+    per full cell. Every variable's footprint is asserted equal to the
+    reference-time wetmask and masked to it (see _conform_to_wetmask), so
+    the output NaN pattern equals the ``mask_k`` statics at every timestep.
+    Values stay float64 until the ``OUTPUT_DTYPE`` cast.
     """
     context = f"stream {stream.name!r}"
     if level_index is not None:
@@ -357,13 +400,45 @@ def _process_chunk(
             {LEVEL_DIM: level_index if level_index is not None else 0}, drop=True
         )
 
+    ds = ds.astype(np.float64)
     ds = _conform_to_wetmask(ds, wetmask, context)
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
     for name in ds.data_vars:
         assert_footprint(ds[name], wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
-    regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
+    area = open_areacello(weights_url, target_grid_name)
+    if level_index is None:
+        regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
+        per_volume, per_ocean_area = xr.Dataset(), regridded
+    else:
+        if dz is None:
+            raise ValueError(f"{context}: a 3D chunk needs Δz")
+        regridded, ocean_fraction = regrid_thickness_weighted(
+            ds, regridder, wetmask, dz
+        )
+        per_volume, per_ocean_area = regridded, xr.Dataset()
+
+    full_cell = xr.Dataset()
+    for name in stream.full_cell_variables:
+        if name in ds.data_vars:
+            full_cell[name] = regrid_full_cell(
+                regridder, ds[name], wetmask, ocean_fraction
+            )
+
+    check_field_identities(
+        ds,
+        regridder,
+        wetmask,
+        area,
+        ocean_fraction,
+        native_areacello,
+        context,
+        per_volume=per_volume,
+        per_ocean_area=per_ocean_area,
+        full_cell=full_cell,
+        dz=dz,
+    )
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
@@ -371,7 +446,10 @@ def _process_chunk(
         derivation = da.attrs.get(DERIVATION_ATTR)
         if level_index is not None:
             depth = float(ds[LEVEL_DIM].item())
-            level_note = f"level {level_index} (depth {depth:g} m) of {name}"
+            level_note = (
+                f"level {level_index} (depth {depth:g} m) of {name}, "
+                "ocean-volume weighted (m_k Δz_k)"
+            )
             derivation = f"{level_note}; {derivation}" if derivation else level_note
             da = da.squeeze(LEVEL_DIM, drop=True)
             out_name = f"{out_name}_{level_index}"
@@ -379,31 +457,49 @@ def _process_chunk(
             provenance_attrs(stream.store, name, derivation)
         )
 
-    for name in stream.full_cell_variables:
-        if name not in ds.data_vars:
-            continue
-        full = regridder(ds[name].fillna(0.0), keep_attrs=True)
-        full = full.where(ocean_fraction > OCEAN_FRACTION_THRESHOLD)
+    for name, full in full_cell.data_vars.items():
         output[name] = full.assign_attrs(
             provenance_attrs(
                 stream.store,
                 name,
-                "NaN filled with 0 over the full grid (land included) and "
-                "conservatively regridded without ocean-fraction "
-                "normalization, giving the per-total-cell-area quantity; "
-                "NaN over land applied after",
+                "zeroed over land (wetmask) and conservatively regridded "
+                "without ocean-fraction normalization, giving the "
+                "per-total-cell-area quantity; NaN over land applied after",
             )
         )
 
     if stream.postprocess:
+        ice_fraction = _sea_ice_fraction_source(stream)
+        native_terms = {}
+        ice_volume = None
+        if ice_fraction is not None and ice_fraction in ds.data_vars:
+            native_terms["sea_ice_volume"] = ds["HI"] * ds[ice_fraction]
+            ice_volume = regrid_full_cell(
+                regridder, native_terms["sea_ice_volume"], wetmask, ocean_fraction
+            )
         chunk_context = ChunkContext(
             ocean_fraction=ocean_fraction,
-            areacello=_get_areacello(target_grid_name),
+            areacello=area,
+            ice_volume_per_cell_area=ice_volume,
             store=stream.store,
         )
         for spec in stream.postprocess_specs():
             if all(v in output.data_vars for v in spec.requires):
                 output = spec.fn(output, chunk_context)
+
+        source_names = {stream.renaming.get(n, n): n for n in ds.data_vars}
+        for name, read in EXTENSIVE_SOURCES.items():
+            if name in output.data_vars:
+                native_terms[name] = ds[source_names[read]]
+        check_extensive_identities(
+            output,
+            native_terms,
+            wetmask,
+            area,
+            ocean_fraction,
+            native_areacello,
+            context,
+        )
 
     for name in output.data_vars:
         output[name] = output[name].astype(OUTPUT_DTYPE)
@@ -418,14 +514,27 @@ def process_chunk(
     wetmask: xr.DataArray | None = None,
     weights_url: str | None = None,
     target_grid_name: str | None = None,
+    native_areacello: xr.DataArray | None = None,
+    native_deptho: xr.DataArray | None = None,
 ) -> tuple[xbeam.Key, xr.Dataset]:
-    """Beam entry point: process one (time, level) chunk of a stream."""
+    """Beam entry point: process one (time, level) chunk of a stream.
+
+    ``native_areacello``, ``native_deptho``: the native statics on the
+    wetmask's grid (see load_native_statics); Δz of a 3D chunk's level is
+    formed here from ``native_deptho`` and the wetmask's ``z_l``."""
     assert stream is not None
     assert wetmask is not None
     assert weights_url is not None
     assert target_grid_name is not None
+    assert native_areacello is not None
+    assert native_deptho is not None
     level_index = key.offsets.get(LEVEL_DIM)
+    dz = None
     if level_index is not None:
+        interfaces = _interface_depths(wetmask[LEVEL_DIM].values)
+        dz = level_thickness(
+            native_deptho, interfaces[level_index : level_index + 2]
+        ).isel({LEVEL_DIM: 0}, drop=True)
         wetmask = wetmask.isel({LEVEL_DIM: level_index}, drop=True)
     elif LEVEL_DIM in wetmask.dims:
         # 2D (surface) variables are checked and normalized against the
@@ -438,6 +547,8 @@ def process_chunk(
         weights_url,
         target_grid_name,
         level_index,
+        native_areacello,
+        dz,
     )
     new_key = xbeam.Key(
         {TIME_DIM: key.offsets[TIME_DIM], "lat": 0, "lon": 0},
@@ -466,50 +577,123 @@ def _interface_depths(level_centers: np.ndarray) -> np.ndarray:
     return interfaces
 
 
+# Read by fixed name from statics.store, outside statics.variables.
+NATIVE_STATIC_NAMES = ["areacello", "sftof", "deptho"]
+
+
+def load_native_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
+    """Native ``areacello`` (a_i, m²), ``sftof`` (%), ``deptho`` (H_i, m)
+    from ``config.statics.store``, float64, on the wetmask's grid."""
+    source = xr.open_zarr(
+        make_zarr_store(config.statics.store), chunks=None, decode_timedelta=False
+    )
+    missing = set(NATIVE_STATIC_NAMES) - set(source.data_vars)
+    if missing:
+        raise AssertionError(
+            f"native statics missing from {config.statics.store}: {sorted(missing)}"
+        )
+    native = source[NATIVE_STATIC_NAMES].load().astype(np.float64)
+    xr.align(wetmask, native, join="exact")
+    return native
+
+
 def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
-    """Eagerly build all static output fields on the target grid."""
+    """Eagerly build all static output fields on the target grid.
+
+    Areas, fractions, masks and ``h_prime_<k>`` come from the artifact's ŵ and
+    A_J and the native ``areacello``, ``sftof``, ``deptho``
+    (native_area.native_area_statics). Built and checked in float64, cast
+    to ``OUTPUT_DTYPE`` last."""
+    if OCEAN_FRACTION_THRESHOLD != 0:
+        raise AssertionError(
+            f"OCEAN_FRACTION_THRESHOLD = {OCEAN_FRACTION_THRESHOLD}; mask_Jk = "
+            "1[V'_Jk > 0] equals today's mask only at 0"
+        )
     regridder = get_regridder(config.weights_url, config.target_grid)
+    source = xr.open_zarr(
+        make_zarr_store(config.statics.store), chunks=None, decode_timedelta=False
+    )
+    missing = set(config.statics.variables) - set(source.data_vars)
+    if missing:
+        raise AssertionError(
+            f"static variables missing from {config.statics.store}: {sorted(missing)}"
+        )
+    native = load_native_statics(config, wetmask)
+
+    interfaces = _interface_depths(wetmask[LEVEL_DIM].values)
+    assert_native_statics(
+        wetmask, native["deptho"], interfaces, native["areacello"], native["sftof"]
+    )
+    dz = level_thickness(native["deptho"], interfaces)
+    area_statics = native_area_statics(
+        regridder,
+        open_areacello(config.weights_url, config.target_grid),
+        wetmask,
+        dz,
+        native["sftof"],
+    )
+    area_fields = area_statics.stored
+    level_count = wetmask.sizes[LEVEL_DIM]
     statics = xr.Dataset()
 
-    # Per-level ocean fraction and binary masks from the regridded wetmask.
-    level_count = wetmask.sizes[LEVEL_DIM]
-    surface_fraction = None
+    volume_note = (
+        "V'_Jk = A_J · regrid(m_k Δz_k), the level-{k} ocean volume in native "
+        f"cell areas (A_J, ŵ: {config.weights_url}; m_k: NaN pattern of "
+        f"{config.wetmask.variable}; Δz_k from deptho)"
+    )
     for k in range(level_count):
-        fraction = regridder(
-            wetmask.isel({LEVEL_DIM: k}, drop=True).astype("float64"), keep_attrs=False
-        ).fillna(0.0)
-        if k == 0:
-            surface_fraction = fraction
-        mask = (fraction > OCEAN_FRACTION_THRESHOLD).astype(OUTPUT_DTYPE)
-        statics[f"mask_{k}"] = mask.assign_attrs(
+        statics[f"mask_{k}"] = area_fields[f"mask_{k}"].assign_attrs(
             long_name=f"ocean mask level-{k}",
             units="0 if land, 1 if ocean",
             **provenance_attrs(
                 config.wetmask.store,
                 config.wetmask.variable,
-                f"1 where the regridded level-{k} wetmask (NaN pattern of "
-                f"{config.wetmask.variable}) exceeds "
-                f"{OCEAN_FRACTION_THRESHOLD:g}, else 0",
+                f"1 where {volume_note.format(k=k)} is > 0, else 0",
             ),
         )
     statics["mask_2d"] = statics["mask_0"].copy()
 
-    assert surface_fraction is not None
-    statics["sea_surface_fraction"] = surface_fraction.astype(
-        OUTPUT_DTYPE
-    ).assign_attrs(
-        long_name="fraction of cell area overlapping ocean source cells",
+    statics["sea_surface_fraction"] = area_fields["sea_surface_fraction"].assign_attrs(
+        long_name="ocean fraction of cell area, in native cell areas",
         units="0-1",
         **provenance_attrs(
-            config.wetmask.store,
-            config.wetmask.variable,
-            "conservative regrid of the surface wetmask (NaN pattern of "
-            f"{config.wetmask.variable}); usable to weight coastal cells",
+            config.statics.store,
+            "sftof",
+            "sftof / 100 = W'_J0 / A_J; usable to weight coastal cells",
         ),
     )
+    statics["sftof"] = area_fields["sftof"].assign_attrs(
+        long_name="ocean area percentage, regridded with native-area overlaps O",
+        units="%",
+        **provenance_attrs(
+            config.statics.store,
+            "sftof",
+            "Σ_i O_Ji sftof_i / A_J = 100 W'_J0 / A_J over the full cell "
+            f"(ŵ, A_J: {config.weights_url}); 0 on land and unmapped cells",
+        ),
+    )
+    statics["areacello"] = area_fields["areacello"].assign_attrs(
+        long_name="cell area covered by native ocean-model cells",
+        units="m2",
+        **provenance_attrs(
+            config.weights_url,
+            "areacello",
+            "A_J = Σ_i O_Ji over native cells wet and dry, in native "
+            f"(MOM6) cell areas from {config.statics.store}; 0 on unmapped cells",
+        ),
+    )
+    for k in range(level_count):
+        statics[f"h_prime_{k}"] = area_fields[f"h_prime_{k}"].assign_attrs(
+            long_name=f"ocean volume per ocean area, level-{k}",
+            units="m",
+            **provenance_attrs(
+                config.statics.store,
+                "deptho",
+                f"V'_Jk / W'_J0 where mask_{k} = 1, else 0; "
+                f"{volume_note.format(k=k)}; W'_J0 = A_J · regrid(m_0)",
+            ),
+        )
 
-    # Interface depths from the level-center coordinate.
-    interfaces = _interface_depths(wetmask[LEVEL_DIM].values)
     for k, depth in enumerate(interfaces):
         statics[f"idepth_{k}"] = xr.DataArray(
             depth,
@@ -525,45 +709,33 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
             },
         )
 
-    # Exact Gaussian-quadrature cell areas, not regridded from the source.
-    target_grid = make_target_grid(config.target_grid)
-    statics["areacello"] = (
-        target_grid["areacello"]
-        .astype(OUTPUT_DTYPE)
-        .assign_attrs(
-            provenance_attrs(
-                "analytic",
-                "areacello",
-                f"exact {config.target_grid} Gaussian-quadrature cell areas "
-                "(mean Earth radius 6371.0 km); differs by ~0.5% from stores "
-                "whose areas used the polar radius",
-            )
-        )
-    )
-
-    # Regriddable static source fields, wetmask-normalized like the streams.
-    source = xr.open_zarr(
-        make_zarr_store(config.statics.store), chunks=None, decode_timedelta=False
-    )
-    missing = set(config.statics.variables) - set(source.data_vars)
-    if missing:
-        raise AssertionError(
-            f"static variables missing from {config.statics.store}: {sorted(missing)}"
-        )
-    fields = source[config.statics.variables].load()
+    # Regriddable static source fields, per ocean area like the streams.
+    fields = source[config.statics.variables].load().astype(np.float64)
     surface_wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)
     regridded, _ = regrid_normalized(fields, regridder, surface_wetmask)
     for name, da in regridded.data_vars.items():
-        statics[name] = da.astype(OUTPUT_DTYPE).assign_attrs(
-            provenance_attrs(config.statics.store, name)
-        )
+        statics[name] = da.assign_attrs(provenance_attrs(config.statics.store, name))
+    deptho = (
+        regridded["deptho"]
+        if "deptho" in regridded
+        else regrid_normalized(native[["deptho"]], regridder, surface_wetmask)[0][
+            "deptho"
+        ]
+    )
+
+    check_static_identities(
+        area_statics, regridder, wetmask, native["areacello"], native["deptho"], deptho
+    )
 
     # Enforce the land-NaN convention on everything not explicitly exempt.
     exempt = set(land_nan_exempt_names(level_count))
     land = statics["mask_2d"] == 0
     for name in statics.data_vars:
-        if name not in exempt and statics[name].ndim > 0:
+        if statics[name].ndim == 0:
+            continue
+        if name not in exempt:
             statics[name] = statics[name].where(~land)
+        statics[name] = statics[name].astype(OUTPUT_DTYPE)
     return statics
 
 
@@ -586,9 +758,14 @@ def build_template(
     wetmask: xr.DataArray,
     output_time: xr.DataArray,
     input_urls: list[str],
+    native: xr.Dataset,
+    run_attrs: dict,
 ) -> xr.Dataset:
     """Eagerly process the first timestep of every stream to build the
-    output template, with statics stamped in for the driver to write."""
+    output template, with statics stamped in for the driver to write.
+
+    ``native``: load_native_statics, for the chunk side inputs;
+    ``run_attrs``: root attrs added to the store."""
     logger.info("[template] processing first timestep of each stream")
     streams_by_name = {stream.name: stream for stream in config.streams}
     pieces = []
@@ -605,6 +782,8 @@ def build_template(
                 wetmask,
                 config.weights_url,
                 config.target_grid,
+                native["areacello"],
+                native["deptho"],
             )
             pieces.append(out)
         for k in range(ds_3d.sizes.get(LEVEL_DIM, 0)):
@@ -616,6 +795,8 @@ def build_template(
                 wetmask,
                 config.weights_url,
                 config.target_grid,
+                native["areacello"],
+                native["deptho"],
             )
             pieces.append(out)
     merged = xr.merge(pieces).squeeze(TIME_DIM, drop=True)
@@ -632,7 +813,70 @@ def build_template(
         "Dataset computed by ace/scripts/gfdl_om4/pipeline, using the "
         f"following input sources: {input_urls}."
     )
+    template.attrs.update(run_attrs)
     return template
+
+
+# Stored names the z* residual reads: η, and the X of cont_k.
+Z_STAR_ETA = "SSH"
+Z_STAR_FIELDS = ("thetao", "so")
+
+
+def _stored_source(
+    config: PipelineConfig, stream_datasets: dict[str, xr.Dataset], stored_name: str
+) -> xr.DataArray:
+    """The native variable a stream stores as ``stored_name`` (after
+    ``renaming``)."""
+    found = [
+        ds[name]
+        for stream in config.streams
+        for ds in [stream_datasets[stream.name]]
+        for name in ds.data_vars
+        if stream.renaming.get(name, name) == stored_name
+    ]
+    if len(found) != 1:
+        raise AssertionError(
+            f"{len(found)} streams store {stored_name!r}; the z* residual needs one"
+        )
+    return found[0]
+
+
+def native_area_checks(
+    config: PipelineConfig,
+    stream_datasets: dict[str, xr.Dataset],
+    wetmask: xr.DataArray,
+    native: xr.Dataset,
+    output_time: xr.DataArray,
+) -> dict:
+    """Report-only root attr ``native_area_checks`` (no gate): the artifact's
+    a/ã spread, and the z* residual at the first and last output times."""
+    regridder = get_regridder(config.weights_url, config.target_grid)
+    area = open_areacello(config.weights_url, config.target_grid)
+    dz = level_thickness(native["deptho"], _interface_depths(wetmask[LEVEL_DIM].values))
+    eta = _stored_source(config, stream_datasets, Z_STAR_ETA)
+    fields = {
+        name: _stored_source(config, stream_datasets, name) for name in Z_STAR_FIELDS
+    }
+    snapshots = {}
+    for t in sorted({0, output_time.sizes[TIME_DIM] - 1}):
+        snapshot = {TIME_DIM: t}
+        snapshots[str(output_time.values[t])] = z_star_residual(
+            regridder,
+            area,
+            wetmask,
+            dz,
+            native["areacello"],
+            native["deptho"],
+            eta.isel(snapshot, drop=True).load(),
+            xr.Dataset(
+                {name: x.isel(snapshot, drop=True) for name, x in fields.items()}
+            ).load(),
+        )
+    spread = read_artifact_attrs(config.weights_url)["a_over_a_tilde_spread"]
+    return {
+        "a_over_a_tilde_spread": spread,
+        "z_star_residual": {"definition": Z_STAR_DEFINITION, "snapshots": snapshots},
+    }
 
 
 def _expected_output_names(
@@ -696,12 +940,14 @@ def _get_parser() -> argparse.ArgumentParser:
             "test run can cross a shard boundary within a few source chunks"
         ),
     )
+    add_provenance_args(parser)
     return parser
 
 
 def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
+    check_provenance_args(parser, args, pipeline_args)
 
     config = load_config(args.config)
     if args.start_time is not None:
@@ -764,13 +1010,28 @@ def main():
 
     logger.info("[statics] building static fields")
     statics = build_statics(config, wetmask)
+    native = load_native_statics(config, wetmask)
+    logger.info("[%s] a/ã spread and z* residual (report only)", NATIVE_AREA_CHECKS)
+    run_attrs = {
+        NATIVE_AREA_CHECKS: native_area_checks(
+            config, stream_datasets, wetmask, native, output_time
+        ),
+        **provenance_run_attrs(args.ace_commit, args.image_tag),
+    }
 
     input_urls = sorted(
         {stream.store for stream in config.streams}
         | {config.statics.store, config.wetmask.store, config.weights_url}
     )
     template = build_template(
-        config, stream_datasets, statics, wetmask, output_time, input_urls
+        config,
+        stream_datasets,
+        statics,
+        wetmask,
+        output_time,
+        input_urls,
+        native,
+        run_attrs,
     )
     expected = _expected_output_names(config, stream_datasets) | set(statics.data_vars)
     if expected != set(template.data_vars):
@@ -846,6 +1107,8 @@ def main():
                         wetmask=wetmask,
                         weights_url=config.weights_url,
                         target_grid_name=config.target_grid,
+                        native_areacello=native["areacello"],
+                        native_deptho=native["deptho"],
                     )
                     | f"{label}_write"
                     >> WriteShardedZarr(

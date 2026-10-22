@@ -2,11 +2,15 @@
 # random-CO2 ensemble. `{member}` is filled from --member (see
 # pipeline/config_io.py); the nine members are listed in randco2.mk.
 target_grid: F90
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F90
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v1/om4-tripolar-0.25deg-to-F90
 output:
   path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/{member}.zarr
   time_chunk_size: 1
   time_shard_size: 365
+# Native cell area and wet fraction, read by fixed name: same tripolar grid
+# and wet mask as the OM4 piControl ocean statics.
+statics:
+  store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_static.zarr
 # The source store is its own mask reference: both its variables are NaN on
 # exactly the land cells, so the first timestep's NaN pattern is the 2D
 # tracer wetmask.
