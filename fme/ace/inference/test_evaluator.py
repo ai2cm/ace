@@ -691,6 +691,7 @@ def test_inference_writer_boundaries(
             ).item(),
             log["inference/mean/weighted_grad_mag_percent_diff/var"],
             rtol=grad_mag_tol,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),

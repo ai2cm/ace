@@ -1,7 +1,9 @@
 """Secondary decoder for computing additional diagnostic variables."""
 
+import copy
 import dataclasses
 from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch import nn
@@ -88,8 +90,31 @@ class SecondaryDecoder:
     def wrap_module(
         self, wrapper: Callable[[nn.Module], nn.Module]
     ) -> "SecondaryDecoder":
-        self._module = self._module.wrap_module(wrapper)
-        return self
+        """Return a decoder whose module is wrapped by ``wrapper``.
+
+        This decoder is left unchanged: steps call this on every forward pass
+        with per-call wrappers (e.g. activation checkpointing, which returns a
+        plain function rather than an nn.Module), so wrapping in place would
+        replace the module after a single call.
+        """
+        wrapped = copy.copy(self)
+        wrapped._module = self._module.wrap_module(wrapper)
+        return wrapped
+
+    def compile(self, **kwargs: Any) -> "SecondaryDecoder":
+        """Return a decoder whose forward pass runs through ``torch.compile``.
+
+        This decoder is left unchanged, mirroring :meth:`wrap_module`. Call
+        after any distributed wrapping so the compiled graph includes it. The
+        underlying parameters and state dict are unchanged, so checkpoints are
+        unaffected.
+
+        Args:
+            kwargs: Forwarded to ``torch.compile``.
+        """
+        compiled = copy.copy(self)
+        compiled._module = self._module.compile(**kwargs)
+        return compiled
 
     def to(self, device) -> "SecondaryDecoder":
         """Move the module to the specified device."""
@@ -139,6 +164,10 @@ class NoSecondaryDecoder:
         self, wrapper: Callable[[nn.Module], nn.Module]
     ) -> "NoSecondaryDecoder":
         """No-op for wrapping module."""
+        return self
+
+    def compile(self, **kwargs: Any) -> "NoSecondaryDecoder":
+        """No-op: there is no module to compile."""
         return self
 
     @property

@@ -8,6 +8,7 @@ import pytest
 import torch
 import xdist
 
+from fme.core.compile import compile_enabled
 from fme.core.distributed.distributed import Distributed
 
 
@@ -177,6 +178,14 @@ def pytest_runtest_call(item):
         yield
     except TimeoutException:
         pytest.fail("Test failed due to timeout")
+
+
+@pytest.fixture(autouse=True)
+def compile_disabled():
+    # inductor takes tens of seconds per network, so tests run eagerly unless
+    # their module opts back in by importing fme.core.testing.dynamo_hygiene
+    with compile_enabled(False):
+        yield
 
 
 @pytest.fixture(autouse=True)
