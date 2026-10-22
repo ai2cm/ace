@@ -1,7 +1,0 @@
-group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
-
-# 4deg stochastic hybrid-residual stage 1 (1 step, noise from epoch 0), Muon lr bracket, adamw_lr fixed 3e-4.
-# 2 GPUs at global batch 16 (Troy's deterministic hybrid trained on 1 GPU, same batch). See train-config.yaml.
-2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu1e-3|train|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.001|3h
-2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu3e-3|train|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.003|3h
-2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu1e-2|train|high|jupiter+titan|2||3|ai2/ace|seed=0 optimization.lr=0.01|3h

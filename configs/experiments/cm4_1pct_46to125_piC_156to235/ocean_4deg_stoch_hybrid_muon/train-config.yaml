@@ -6,7 +6,7 @@
 # Muon (adamw_lr 3e-4 on biases/norm affines) at constant lr, 15 epochs.
 # Muon lr is bracketed per training.txt row (1e-3 / 3e-3 / 1e-2): no Muon run exists at 4deg and the
 # residual-normalized loss weights deep thetao 1e3-1e5x. Stage 2 (lin8 40 ep) starts from best_ckpt.
-# job_runner/uncoupled_train.sh configs/experiments/2026-10-22-4deg-stoch-hybrid ocean_stoch_hybrid_muon \
+# job_runner/uncoupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235 ocean_4deg_stoch_hybrid_muon \
 #   --coupled_stats elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats   (WANDB_USERNAME=elynnwu)
 experiment_dir: /results
 save_checkpoint: true
