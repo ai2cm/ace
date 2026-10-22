@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+2026-10-22-4deg-stoch-hybrid-ocean_stoch_hybrid_muon|mu1e-3|01M5JZ8VTYE7MHCZJ4C6V8X088|training|best_inference_ckpt|normal|--min-runtime 8h
