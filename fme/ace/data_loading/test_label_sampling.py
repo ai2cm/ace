@@ -18,6 +18,8 @@ from fme.ace.train.train_config import InlineValidationConfig
 from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat
 from fme.core.dataset.testing import MockDataset
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.distributed import Distributed
+from fme.core.rand import set_seed
 
 
 def _make_sampler(
@@ -252,3 +254,35 @@ def test_gridded_data_draws_configured_label_fractions(tmp_path, time_buffer):
             counts[batch.labels.names[int(row.argmax())]] += 1
     n_per_window = time_buffer + 1
     assert counts == {"big": 10 * n_per_window, "small": 10 * n_per_window}
+
+
+@pytest.mark.parallel
+def test_sampler_spatial_co_ranks_draw_identical_samples():
+    set_seed(0)
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    n_per_label = {"a": 10 * n_dp, "b": 2 * n_dp}
+    dataset = XarrayConcat(
+        [
+            MockDataset.new(
+                n_times=n, varnames=["var"], sample_n_times=1, labels={label}
+            )
+            for label, n in n_per_label.items()
+        ]
+    )
+    sampler = LabelSamplingConfig(weights={"a": 1.0, "b": 1.0}).build_sampler(dataset)
+    sampler.set_epoch(3)
+    gathered = dist.gather_object((dist.data_parallel_rank, list(sampler)))
+    if dist.is_root():
+        assert gathered is not None
+        by_dp_rank: dict[int, list[int]] = {}
+        for dp_rank, indices in gathered:
+            # spatial co-ranks share a data-parallel rank and must agree
+            assert by_dp_rank.setdefault(dp_rank, indices) == indices
+        assert sorted(by_dp_rank) == list(range(n_dp))
+        counts = collections.Counter(
+            "a" if i < n_per_label["a"] else "b"
+            for indices in by_dp_rank.values()
+            for i in indices
+        )
+        assert counts == {"a": 6 * n_dp, "b": 6 * n_dp}
