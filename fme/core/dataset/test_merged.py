@@ -9,6 +9,7 @@ from fme.core.dataset.testing import (
     assert_dataset_item_length,
     assert_sample_labels_match_items,
 )
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 def test_merged_contains_all_data():
@@ -49,6 +50,58 @@ def test_merged_propagates_metadata():
     assert labels == {"label_a", "label_b"}
     assert epoch == 5
     assert missing_names == frozenset({"missing_0", "missing_1"})
+
+
+@pytest.mark.parametrize("cls", [MergedXarrayDataset, TimePaddedMergedDataset])
+def test_merged_properties_leave_member_properties_alone(cls):
+    """Accumulating properties must not mutate a member's own properties.
+
+    The property is read more than once over a run, so a member picking up
+    the other members' metadata would compound on each read.
+    """
+    datasets = [
+        MockDataset.new(
+            n_times=10,
+            varnames=[f"var_{i}"],
+            sample_n_times=3,
+            labels={f"label_{i}"},
+        )
+        for i in range(2)
+    ]
+    merged_dataset = cls(datasets)
+    merged_properties = merged_dataset.properties
+    assert set(merged_properties.variable_metadata) == {"var_0", "var_1"}
+    assert merged_properties.all_labels == {"label_0", "label_1"}
+    for i, dataset in enumerate(datasets):
+        assert set(dataset.properties.variable_metadata) == {f"var_{i}"}
+        assert dataset.properties.all_labels == {f"label_{i}"}
+    # reading the property again must give the same result as the first read
+    assert set(merged_dataset.properties.variable_metadata) == {"var_0", "var_1"}
+    assert merged_dataset.properties.all_labels == {"label_0", "label_1"}
+
+
+@pytest.mark.parametrize("cls", [MergedXarrayDataset, TimePaddedMergedDataset])
+def test_merged_properties_leave_member_masks_alone(cls):
+    """Merging masks must not write them into a member's own mask provider."""
+    datasets = [
+        MockDataset.new(n_times=10, varnames=[f"var_{i}"], sample_n_times=3)
+        for i in range(2)
+    ]
+    for i, dataset in enumerate(datasets):
+        dataset.properties.spatial_mask_provider.update(
+            SpatialMaskProvider(masks={f"mask_{i}": torch.ones(1, 1)})
+        )
+    merged_dataset = cls(datasets)
+
+    merged_masks = merged_dataset.properties.spatial_mask_provider.masks
+    assert set(merged_masks) == {"mask_0", "mask_1"}
+    for i, dataset in enumerate(datasets):
+        assert set(dataset.properties.spatial_mask_provider.masks) == {f"mask_{i}"}
+    # reading the property again must give the same result as the first read
+    assert set(merged_dataset.properties.spatial_mask_provider.masks) == {
+        "mask_0",
+        "mask_1",
+    }
 
 
 def test_merged_set_epoch():

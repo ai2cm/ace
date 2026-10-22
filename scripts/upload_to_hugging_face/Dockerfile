@@ -15,6 +15,10 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # Running without both results in roughly 10x slower peak upload throughput for
 # the same store on ai2/phobos.
+#
+# HF_XET_HIGH_PERFORMANCE is a default that can be overridden at runtime (e.g.
+# via gantry `--env HF_XET_HIGH_PERFORMANCE=0`); its aggressive parallelism can
+# cause upload timeouts on stores with multiple large (>4GB) files.
 ENV HF_XET_HIGH_PERFORMANCE=1
 ENV HF_XET_SHARD_CACHE_SIZE_LIMIT=40GiB
 

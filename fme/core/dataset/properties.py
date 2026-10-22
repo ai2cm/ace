@@ -29,13 +29,13 @@ class DatasetProperties:
     def to_device(self) -> "DatasetProperties":
         device = get_device()
         return DatasetProperties(
-            self.variable_metadata,
+            dict(self.variable_metadata),
             self.vertical_coordinate.to(device),
             self.horizontal_coordinates.to(device),
             self.spatial_mask_provider.to(device),
             self.timestep,
             self.is_remote,
-            self.all_labels,
+            set(self.all_labels) if self.all_labels is not None else None,
         )
 
     def localize(self) -> "DatasetProperties":
@@ -43,13 +43,13 @@ class DatasetProperties:
         spatial chunk based on the current distributed layout.
         """
         return DatasetProperties(
-            self.variable_metadata,
+            dict(self.variable_metadata),
             self.vertical_coordinate,
             self.horizontal_coordinates.localize(),
             self.spatial_mask_provider.localize(),
             self.timestep,
             self.is_remote,
-            self.all_labels,
+            set(self.all_labels) if self.all_labels is not None else None,
         )
 
     def update(self, other: "DatasetProperties", strict: bool = True):
@@ -84,7 +84,7 @@ class DatasetProperties:
         if self.all_labels is not None:
             if other.all_labels is None:
                 raise RuntimeError("Checks above should prevent this case.")
-            self.all_labels.update(other.all_labels)
+            self.all_labels = self.all_labels | other.all_labels
 
     def update_merged_dataset(self, other: "DatasetProperties"):
         if isinstance(self.variable_metadata, dict):
@@ -101,11 +101,16 @@ class DatasetProperties:
         self.spatial_mask_provider.update(spatial_mask_provider)
 
     def copy(self) -> "DatasetProperties":
+        """Return a copy that can be updated or merged without affecting this one.
+
+        The metadata dict, label set and mask provider are copied; coordinates
+        and mask tensors are shared, not cloned.
+        """
         return DatasetProperties(
             dict(self.variable_metadata),
             self.vertical_coordinate,
             self.horizontal_coordinates,
-            self.spatial_mask_provider,
+            self.spatial_mask_provider.copy(),
             self.timestep,
             self.is_remote,
             set(self.all_labels) if self.all_labels is not None else None,

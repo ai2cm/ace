@@ -42,6 +42,7 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    apply_stepper_override_to_stepper_config,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -612,6 +613,99 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     else:
         assert len(optimization.accumulate_loss.call_args_list) == n_steps
         assert all(forward_calls_grad_enabled)
+
+
+@pytest.mark.parametrize("pushforward_steps", [0, 1, 3])
+def test_train_on_batch_pushforward_steps(pushforward_steps: int):
+    torch.manual_seed(0)
+
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        pushforward_steps=pushforward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    n_optimized = n_steps - pushforward_steps
+    assert len(optimization.accumulate_loss.call_args_list) == n_optimized
+    assert not any(forward_calls_grad_enabled[:pushforward_steps])
+    assert all(forward_calls_grad_enabled[pushforward_steps:])
+    # every step's loss is reported, but only optimized steps are accumulated
+    expected_loss = sum(
+        stepped.metrics[f"loss_step_{i}"] for i in range(pushforward_steps, n_steps)
+    )
+    torch.testing.assert_close(stepped.metrics["loss"], expected_loss)
+    for i in range(n_steps):
+        assert f"loss_step_{i}" in stepped.metrics
+
+
+def test_train_on_batch_pushforward_steps_must_leave_a_loss_step():
+    n_steps = 2
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    stepper = _get_train_stepper(
+        _get_stepper_config(["a", "b"], ["a", "b"]),
+        pushforward_steps=n_steps,
+    )
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"pushforward_steps": -1},
+        {"pushforward_steps": 1, "optimize_last_step_only": True},
+        {"pushforward_steps": 2, "n_forward_steps": 2},
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthSchedule(
+                start_value=3,
+                milestones=[TimeLengthMilestone(epoch=2, value=4)],
+            ),
+        },
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=2, probability=0.5),
+                    TimeLengthProbability(steps=3, probability=0.5),
+                ]
+            ),
+        },
+    ],
+)
+def test_train_stepper_config_invalid_pushforward_steps(kwargs):
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        TrainStepperConfig(**kwargs)
+
+
+def test_train_stepper_config_valid_pushforward_steps():
+    TrainStepperConfig(pushforward_steps=1, n_forward_steps=2)
 
 
 def test_per_channel_losses_bounded_by_accumulated_loss():
@@ -2339,6 +2433,19 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
     torch.testing.assert_close(output.data["var"], expected_var)
 
 
+def test_apply_stepper_override_to_stepper_config():
+    config = _get_stepper_config(["a", "b"], ["a"])
+    assert config.get_prescribed_prognostic_names() == []
+    apply_stepper_override_to_stepper_config(
+        config, StepperOverrideConfig(prescribed_prognostic_names=["a"])
+    )
+    assert config.get_prescribed_prognostic_names() == ["a"]
+    with pytest.raises(ValueError, match="multi_call cannot be applied"):
+        apply_stepper_override_to_stepper_config(
+            config, StepperOverrideConfig(multi_call=None)
+        )
+
+
 def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
     """Run one eval-mode step from a constant input and return the predicted
     "var"."""
@@ -3093,6 +3200,7 @@ def _get_ocean_data_for_predict_paired(
     n_steps: int,
     in_names: list[str],
     out_names: list[str],
+    sea_surface_fraction: float,
     n_samples: int = 2,
     img_shape: tuple[int, int] = (5, 5),
 ) -> tuple[PrognosticState, BatchData]:
@@ -3102,6 +3210,8 @@ def _get_ocean_data_for_predict_paired(
         n_steps: Number of forward steps.
         in_names: Input variable names.
         out_names: Output variable names.
+        sea_surface_fraction: Value of sea_surface_fraction, or of
+            1 - land_fraction, everywhere.
         n_samples: Number of samples in batch.
         img_shape: Shape of spatial dimensions.
 
@@ -3149,12 +3259,16 @@ def _get_ocean_data_for_predict_paired(
             (n_samples, total_timesteps, *img_shape), 0.05, device=DEVICE
         )
     if "sea_surface_fraction" in data_dict:
-        data_dict["sea_surface_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["sea_surface_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            sea_surface_fraction,
+            device=DEVICE,
         )
     if "land_fraction" in data_dict:
-        data_dict["land_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["land_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            1 - sea_surface_fraction,
+            device=DEVICE,
         )
 
     time = xr.DataArray(
@@ -3175,24 +3289,27 @@ def _get_ocean_data_for_predict_paired(
 
 
 @pytest.mark.parametrize(
-    "in_names,out_names,hfds_role",
+    "in_names,out_names,hfds_role,sea_surface_fraction",
     [
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "hfgeou", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing_no_hfgeou",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "land_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.0,
             id="hfds_next_step_forcing_land_fraction",
         ),
         pytest.param(
@@ -3205,6 +3322,7 @@ def _get_ocean_data_for_predict_paired(
             ],
             ["thetao_0", "thetao_1", "hfds"],
             "diagnostic",
+            0.5,
             id="hfds_diagnostic",
         ),
     ],
@@ -3213,6 +3331,7 @@ def test_ocean_derived_variables_integration(
     in_names,
     out_names,
     hfds_role,
+    sea_surface_fraction,
 ):
     next_step_forcing_names = []
     if hfds_role == "next_step_forcing":
@@ -3228,6 +3347,7 @@ def test_ocean_derived_variables_integration(
         n_steps=n_steps,
         in_names=in_names,
         out_names=out_names,
+        sea_surface_fraction=sea_surface_fraction,
     )
     derived_data = data.compute_derived_variables(
         derive_func=stepper.derive_func, forcing_data=data
@@ -3283,13 +3403,17 @@ def test_ocean_derived_variables_integration(
     )
     # check imbalance for forward steps
     for i in range(n_steps):
-        expected_pred_imbalance = pred_tendency[:, i] - pred_flux[:, i]
+        expected_pred_imbalance = (
+            sea_surface_fraction * pred_tendency[:, i] - pred_flux[:, i]
+        )
         torch.testing.assert_close(
             pred_imbalance[:, i],
             expected_pred_imbalance,
             msg=f"Unexpected pred OHC imbalance at step {i + 1}",
         )
-        expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
+        expected_ref_imbalance = (
+            sea_surface_fraction * ref_tendency[:, i] - ref_flux[:, i]
+        )
         torch.testing.assert_close(
             ref_imbalance[:, i],
             expected_ref_imbalance,
