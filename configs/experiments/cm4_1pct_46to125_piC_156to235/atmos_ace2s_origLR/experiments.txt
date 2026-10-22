@@ -11,3 +11,7 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254R
 cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs0|01M3A53BWMKB71VGWYBS1ECF2G|trained|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR|rs1|01M3A53WACSCQKQCGBJF9DRC7S|trained|best_inference_ckpt|normal|--min-runtime 8h
+
+# issue 09 stage 1 pilot (arms A, T), job j=1; results_dataset holds 2zvyd9x6's checkpoint
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j01-A|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/A/j01|01M326W4K8VKWEXBVR5YM60YQH
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j01-T|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/T/j01|01M326W4K8VKWEXBVR5YM60YQH
