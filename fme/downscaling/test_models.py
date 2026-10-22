@@ -17,6 +17,7 @@ from fme.downscaling.data import (
     StaticInput,
     StaticInputs,
 )
+from fme.downscaling.metrics_and_maths import InterpolationConfig, interpolate
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModel,
@@ -210,6 +211,7 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
+    interpolation: InterpolationConfig | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -231,6 +233,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
+        interpolation=interpolation or InterpolationConfig(),
     ).build(
         coarse_shape,
         downscale_factor,
@@ -279,6 +282,34 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
 
     assert torch.all(
         generated_outputs[0].prediction["x"] != generated_outputs[1].prediction["x"]
+    )
+
+
+def test_diffusion_model_uses_interpolation_config():
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    interpolation = InterpolationConfig(mode="bilinear", align_corners=False)
+    model = _get_diffusion_model(
+        full_fine_coords=fine_coords,
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+        interpolation=interpolation,
+    )
+    batch = make_paired_batch_data(coarse_shape, fine_shape, 2)
+    inputs = model._get_input_from_coarse(batch.coarse.data, None)
+    expected = interpolate(batch.coarse.data["x"].unsqueeze(-3), 2, interpolation)
+    torch.testing.assert_close(inputs, expected)
+
+    state = model.get_state()
+    assert DiffusionModel.from_state(state).config.interpolation == interpolation
+    # checkpoints saved before the interpolation option load with the
+    # original bicubic, align_corners=True behavior
+    del state["config"]["interpolation"]
+    assert DiffusionModel.from_state(state).config.interpolation == (
+        InterpolationConfig(mode="bicubic", align_corners=True)
     )
 
 

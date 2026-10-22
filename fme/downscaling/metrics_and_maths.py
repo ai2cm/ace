@@ -1,6 +1,8 @@
 """Pure functions, e.g. metrics and math functions that are useful for downscaling."""
 
+import dataclasses
 from collections.abc import Callable, Collection
+from typing import Literal
 
 import torch
 
@@ -252,12 +254,34 @@ def compute_zonal_power_spectrum(tensor: torch.Tensor) -> torch.Tensor:
     return power.mean(dim=-2)
 
 
-def interpolate(tensor: torch.Tensor, scale_factor: int) -> torch.Tensor:
+@dataclasses.dataclass
+class InterpolationConfig:
+    """
+    Configuration for interpolating coarse fields onto the fine grid.
+
+    Parameters:
+        mode: Interpolation method.
+        align_corners: If True, the centers of the corner coarse and fine cells
+            are aligned, which stretches the fine grid relative to a
+            cell-centered layout. If False, each coarse cell covers exactly
+            ``scale_factor`` x ``scale_factor`` fine cells.
+    """
+
+    mode: Literal["bicubic", "bilinear"] = "bicubic"
+    align_corners: bool = True
+
+
+def interpolate(
+    tensor: torch.Tensor,
+    scale_factor: int,
+    config: InterpolationConfig | None = None,
+) -> torch.Tensor:
+    config = config or InterpolationConfig()
     return torch.nn.functional.interpolate(
         tensor,
         scale_factor=[scale_factor, scale_factor],
-        mode="bicubic",
-        align_corners=True,
+        mode=config.mode,
+        align_corners=config.align_corners,
     )
 
 

@@ -4,11 +4,13 @@ import pytest
 import torch
 
 from fme.downscaling.metrics_and_maths import (
+    InterpolationConfig,
     compute_crps,
     compute_psnr,
     compute_ssim,
     compute_zonal_power_spectrum,
     filter_tensor_mapping,
+    interpolate,
     map_tensor_mapping,
     min_max_normalization,
 )
@@ -173,3 +175,27 @@ def test_filter_tensor_mapping():
     non_existent_keys = {"e", "f"}
     result = filter_tensor_mapping(tensor_mapping, non_existent_keys)
     assert len(result) == 0
+
+
+@pytest.mark.parametrize("mode", ["bicubic", "bilinear"])
+@pytest.mark.parametrize("align_corners", [True, False])
+def test_interpolate_preserves_constant(mode, align_corners):
+    tensor = torch.full((1, 1, 4, 6), 3.0)
+    config = InterpolationConfig(mode=mode, align_corners=align_corners)
+    result = interpolate(tensor, 2, config)
+    assert result.shape == (1, 1, 8, 12)
+    torch.testing.assert_close(result, torch.full_like(result, 3.0))
+
+
+def test_interpolate_without_align_corners_is_cell_centered():
+    # A linear ramp sampled at coarse cell centers should be reproduced at
+    # fine cell centers, away from the edges where padding takes effect.
+    scale_factor = 4
+    n_coarse = 6
+    coarse_centers = torch.arange(n_coarse) + 0.5
+    fine_centers = (torch.arange(n_coarse * scale_factor) + 0.5) / scale_factor
+    tensor = coarse_centers.expand(1, 1, 3, n_coarse).clone()
+    config = InterpolationConfig(mode="bilinear", align_corners=False)
+    result = interpolate(tensor, scale_factor, config)[0, 0, 0]
+    interior = slice(scale_factor, -scale_factor)
+    torch.testing.assert_close(result[interior], fine_centers[interior])

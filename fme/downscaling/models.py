@@ -26,7 +26,11 @@ from fme.downscaling.data import (
     load_coords_from_path,
     roll_lon_coords,
 )
-from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
+from fme.downscaling.metrics_and_maths import (
+    InterpolationConfig,
+    filter_tensor_mapping,
+    interpolate,
+)
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
@@ -170,6 +174,9 @@ class DiffusionModelConfig:
         p_std: The std of the noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
             This is kept for backwards compatibility.
+        interpolation: How coarse fields are interpolated onto the fine grid,
+            both for the network input and, with predict_residual, for the
+            base prediction.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -192,6 +199,9 @@ class DiffusionModelConfig:
     ) = None
     p_mean: float | None = None
     p_std: float | None = None
+    interpolation: InterpolationConfig = dataclasses.field(
+        default_factory=InterpolationConfig
+    )
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -469,7 +479,9 @@ class DiffusionModel:
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
         )
-        interpolated = interpolate(normalized, self.downscale_factor)
+        interpolated = interpolate(
+            normalized, self.downscale_factor, self.config.interpolation
+        )
 
         if self.config.use_fine_topography and static_inputs is not None:
             expected_shape = interpolated.shape[-2:]
@@ -519,6 +531,7 @@ class DiffusionModel:
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
+                self.config.interpolation,
             )
             targets_norm = targets_norm - base_prediction
 
@@ -608,6 +621,7 @@ class DiffusionModel:
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
+                self.config.interpolation,
             )
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
