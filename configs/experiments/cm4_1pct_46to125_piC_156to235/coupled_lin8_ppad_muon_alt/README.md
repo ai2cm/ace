@@ -60,9 +60,15 @@ All commands are run from the repo root on `exp/muon-ppad-stoch` with
    3. Overrides: `resume_results.resume_wandb=true` (the default is a new wandb
       run) plus `...builder.config.checkpointing=3`. Leave `config` blank to
       resume from the dumped `/existing-results/config.yaml`.
-   4. `results_dataset_ocean` / `_atmos` are the original init datasets. They
-      only satisfy the `weights_path` mounts; restoring the checkpoint
-      overwrites them.
+   4. Mount only what is needed. Leave `results_dataset_ocean` / `_atmos`
+      blank, and override
+      `stepper_training.{ocean,atmosphere}.parameter_init.weights_path=null`:
+      restoring the checkpoint overwrites the init weights anyway, and those
+      mounts add ~16 GiB. `resume.sh` mounts only `ckpt.tar`, `wandb_run_id`,
+      `config.yaml` and `metrics/metrics.jsonl` from `results_dataset`, plus
+      `/ckpt.tar` when the resumed config loads it. Mounting the whole dataset
+      instead pulled ~69 GiB per job, including spare checkpoints and a 9 GiB
+      `.tmp`, and every preemption retry downloads it again.
    5. `resume.sh` does not validate. Validate by hand instead: fetch
       `config.yaml` from the results dataset, then run
       `python -m fme.coupled.validate_config config.yaml --config_type train --override <same overrides>`.
