@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import logging
+from collections.abc import Collection
 from typing import Literal
 
 import torch
@@ -70,6 +71,12 @@ class GlobalMeanRemoval(abc.ABC):
     Threading the state explicitly (rather than caching it on the
     instance) makes the transform stateless and order-independent.
 
+    The climatological means and stds are read from the normalizer passed
+    to ``forward_transform``, which must be the one normalizing the
+    network's inputs. Its constants may be scalars or per-sample tensors
+    of shape ``[batch, 1, ...]``; with per-sample constants, each sample
+    is shifted to its own climatology.
+
     Optional synthetic input channels (when ``append_as_input=True``) are
     produced by ``forward_transform`` already in *normalized* space and
     exposed via ``extras_normalized(state)`` as a name -> tensor mapping
@@ -114,8 +121,16 @@ class GlobalMeanRemoval(abc.ABC):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
+        normalizer: StandardNormalizer,
     ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         """Remove global means from denormalized input fields.
+
+        Args:
+            input: Denormalized input fields.
+            data_mask: Optional per-variable, per-sample validity masks.
+            normalizer: The normalizer applied to the network's inputs,
+                which supplies the climatological means and stds. Its
+                constants may be scalars or per-sample tensors.
 
         Returns:
             ``(shifted_input, state)``.  ``state`` is an opaque value
@@ -159,6 +174,7 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
+        normalizer: StandardNormalizer,
     ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         return dict(input), GlobalMeanRemovalState(shifts={}, extras={})
 
@@ -195,14 +211,10 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         reference_field: str,
         field_names: frozenset[str],
         append_as_input: bool,
-        reference_mean: torch.Tensor,
-        reference_std: torch.Tensor,
     ):
         self._reference_field = reference_field
         self._field_names = field_names
         self._append_as_input = append_as_input
-        self._reference_mean = reference_mean
-        self._reference_std = reference_std
 
     @property
     def extra_channel_names(self) -> list[str]:
@@ -214,6 +226,7 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
+        normalizer: StandardNormalizer,
     ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         ref_name = self._reference_field
         if ref_name not in input:
@@ -228,12 +241,13 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
                 )
         ref = input[ref_name]
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
-        offset = self._reference_mean - sample_mean
+        # reshape(-1): a scalar constant becomes [1], a per-sample one [batch].
+        offset = normalizer.means[ref_name].reshape(-1) - sample_mean
         spatial_shape = tuple(ref.shape[1:])
 
         extras: TensorDict = {}
         if self._append_as_input:
-            normalized_mean = -offset / self._reference_std
+            normalized_mean = -offset / normalizer.stds[ref_name].reshape(-1)
             extras[_extra_channel_name(ref_name)] = _broadcast_to_spatial(
                 normalized_mean, spatial_shape
             )
@@ -283,13 +297,9 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         field_names: list[str],
         append_as_input: bool,
-        means: TensorDict,
-        stds: TensorDict,
     ):
         self._field_names = field_names
         self._append_as_input = append_as_input
-        self._means = means
-        self._stds = stds
 
     @property
     def extra_channel_names(self) -> list[str]:
@@ -301,6 +311,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
         self,
         input: TensorMapping,
         data_mask: TensorMapping | None,
+        normalizer: StandardNormalizer,
     ) -> tuple[TensorDict, GlobalMeanRemovalState]:
         result = dict(input)
         shifts: dict[str, torch.Tensor] = {}
@@ -313,7 +324,8 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             if spatial_shape is None:
                 spatial_shape = tuple(t.shape[1:])
             sample_mean = t.mean(dim=tuple(range(1, t.ndim)))
-            shift = self._means[name] - sample_mean
+            # reshape(-1): a scalar constant becomes [1], a per-sample one [batch].
+            shift = normalizer.means[name].reshape(-1) - sample_mean
             if data_mask is not None and name in data_mask:
                 mask = data_mask[name]
                 shift = torch.where(mask, shift, torch.zeros_like(shift))
@@ -326,7 +338,7 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             for name in self._field_names:
                 if name not in shifts:
                     continue
-                normalized = -shifts[name] / self._stds[name]
+                normalized = -shifts[name] / normalizer.stds[name].reshape(-1)
                 extras[_extra_channel_name(name)] = _broadcast_to_spatial(
                     normalized, spatial_shape
                 )
@@ -396,17 +408,43 @@ class SharedGlobalMeanRemovalConfig:
                     name,
                 )
 
-    def build(
-        self,
-        normalizer: StandardNormalizer,
-        in_names: list[str],
-    ) -> SharedGlobalMeanRemoval:
+    def validate_pinned_variables(
+        self, pinned_names: Collection[str], all_names: Collection[str]
+    ) -> None:
+        """Reject a reference field pinned differently from a shifted field.
+
+        Every field is shifted to the reference field's climatology under
+        the reference field's own normalization constants. Under grouped
+        normalization, a field pinned differently from the reference is
+        normalized against the other set of constants, which would leave
+        a per-group constant bias on the network's input.
+
+        Args:
+            pinned_names: Variables normalized with the pooled constants
+                under grouped normalization.
+            all_names: The step's input and output names; listed fields
+                outside them have no effect and are not checked.
+        """
+        reference_pinned = self.reference_field in pinned_names
+        mismatched = sorted(
+            name
+            for name in set(self.field_names).intersection(all_names)
+            if (name in pinned_names) != reference_pinned
+        )
+        if mismatched:
+            raise ValueError(
+                f"global_mean_removal fields {mismatched} are "
+                f"{'not ' if reference_pinned else ''}in pinned_variables, "
+                f"while reference_field '{self.reference_field}' is"
+                f"{'' if reference_pinned else ' not'}. Pin the reference "
+                "field and every field it shifts consistently."
+            )
+
+    def build(self, in_names: list[str]) -> SharedGlobalMeanRemoval:
         return SharedGlobalMeanRemoval(
             reference_field=self.reference_field,
             field_names=frozenset(self.field_names),
             append_as_input=self.append_as_input,
-            reference_mean=normalizer.means[self.reference_field],
-            reference_std=normalizer.stds[self.reference_field],
         )
 
 
@@ -453,17 +491,17 @@ class PerChannelGlobalMeanRemovalConfig:
                 elif name not in in_names:
                     raise ValueError(f"field_name '{name}' not in in_names: {in_names}")
 
-    def build(
-        self,
-        normalizer: StandardNormalizer,
-        in_names: list[str],
-    ) -> PerChannelGlobalMeanRemoval:
-        names = self._resolve_names(in_names)
+    def validate_pinned_variables(
+        self, pinned_names: Collection[str], all_names: Collection[str]
+    ) -> None:
+        """No-op: each field is shifted using its own normalization constants,
+        so any combination of pinned and per-group fields is consistent.
+        """
+
+    def build(self, in_names: list[str]) -> PerChannelGlobalMeanRemoval:
         return PerChannelGlobalMeanRemoval(
-            field_names=names,
+            field_names=self._resolve_names(in_names),
             append_as_input=self.append_as_input,
-            means={n: normalizer.means[n] for n in names},
-            stds={n: normalizer.stds[n] for n in names},
         )
 
 
