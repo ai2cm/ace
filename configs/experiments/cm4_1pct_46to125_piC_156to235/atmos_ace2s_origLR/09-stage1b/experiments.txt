@@ -1,0 +1,10 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# --config-dir configs/experiments/cm4_eval/atmos
+# issue 09 stage 1b (jobs j = 4, 7, 10; issue 25j): copies of the j01 rows in ../experiments.txt
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j04-A|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/A/j04|01M326W4K8VKWEXBVR5YM60YQH
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j04-T|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/T/j04|01M326W4K8VKWEXBVR5YM60YQH
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j07-A|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/A/j07|01M326W4K8VKWEXBVR5YM60YQH
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j07-T|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/T/j07|01M326W4K8VKWEXBVR5YM60YQH
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j10-A|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/A/j10|01M326W4K8VKWEXBVR5YM60YQH
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-09pilot-j10-T|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-pilot/T/j10|01M326W4K8VKWEXBVR5YM60YQH

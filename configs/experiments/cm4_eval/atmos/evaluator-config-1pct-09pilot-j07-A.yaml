@@ -1,0 +1,59 @@
+# job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/atmos_ace2s_origLR/09-stage1b . \
+#   --config-dir configs/experiments/cm4_eval/atmos
+# ICs: 13's rule Y_m = round(2 + 38 m / 23), i = 2j-1, 2j -> first 5-daily stamp of month j.
+# Arm A of the stage-1b pilot expansion (issue 09), job j=7: evaluator-config-1pct-ic0001-130yr.yaml at 2 ICs,
+# 60 days (12 coupled steps x 20 inner steps), per-step writer.
+experiment_dir: /results
+n_forward_steps: 240
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+seed: 0  # same in arms A, T, O, C
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0022-07-05T00:00:00'
+    - '0023-07-05T00:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  zonal_mean:
+    enabled: false
+  power_spectrum:
+     enabled: false
+  enso_coefficient:
+    enabled: false
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: per_step
+    names:
+    - DSWRFsfc
+    - USWRFsfc
+    - DLWRFsfc
+    - ULWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - net_energy_flux_sfc_into_atmosphere
+    - surface_temperature
+    save_reference: false
+    format:
+      name: zarr

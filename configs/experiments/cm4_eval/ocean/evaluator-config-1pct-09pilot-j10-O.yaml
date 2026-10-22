@@ -1,0 +1,46 @@
+# job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_ppad/09-stage1b . \
+#   --config-dir configs/experiments/cm4_eval/ocean
+# ICs: 13's rule Y_m = round(2 + 38 m / 23), i = 2j-1, 2j -> first 5-daily stamp of month j.
+# Arm O of the stage-1b pilot expansion (issue 09), job j=10: evaluator-config-1pct-ic0001-130yr-maps.yaml at 2 ICs,
+# 60 days (12 ocean steps), per-step writer. /ckpt.tar is the ocean component of the
+# coupled checkpoint (row results_dataset).
+experiment_dir: /results
+n_forward_steps: 12
+forward_steps_in_memory: 6  # same ocean windows as arm C's coupled_steps_in_memory
+checkpoint_path: /ckpt.tar
+seed: 0  # same in arms A, T, O, C
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0032-10-03T00:00:00'
+    - '0033-10-03T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+aggregator:
+  log_histograms: true
+  log_nino34_index: true
+  log_ipo_index: true
+  log_step_means:  # default step 20 exceeds n_forward_steps
+  - step: 12
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+    - label: per_step
+      names: [sst, hfds_total_area, ocean_sea_ice_fraction, ocean_heat_content, implied_tendency_of_ocean_heat_content_due_to_advection]
+      save_reference: false
+      format:
+        name: zarr
