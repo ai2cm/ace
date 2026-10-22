@@ -11,10 +11,17 @@ hidden behind the first one become visible.
 It only reads data (times, coordinates, masks and attributes); nothing is
 written.
 
-Usage (from the repo root, with the training data paths mounted):
+Usage (from the repo root, with the training data paths mounted; set
+PYTHONPATH to the repo root so `fme` resolves to this checkout):
 
     python configs/experiments/2026-10-19-fm/diagnose_dataset_properties.py \
         configs/experiments/2026-10-19-fm/base_configs/<train-config>.yaml
+
+    # or read the GCS copies of the weka stores with a gcloud access token:
+    python configs/experiments/2026-10-19-fm/diagnose_dataset_properties.py \
+        <train-config>.yaml --gcloud-token \
+        --path-map /climate-default/=gs://vcm-ml-intermediate/ \
+        /climate-default/<era5>.zarr=gs://vcm-ml-intermediate/<era5-dir>/<era5>.zarr
 
     # or submit as a CPU beaker job with weka mounted:
     python configs/experiments/2026-10-19-fm/diagnose_dataset_properties.py \
@@ -312,9 +319,68 @@ def report(entries: list[Entry]):
             print(f"    all: {next(iter(distinct))}")
 
 
-def run(config_path: str):
+def _map_paths(node: Any, path_map: list[tuple[str, str]]) -> Any:
+    """Rewrite each dataset's `data_path/file_pattern` with the first matching
+    `OLD=NEW` prefix replacement (longest OLD first), e.g. to read GCS copies of
+    weka stores.
+    """
+    if isinstance(node, list):
+        return [_map_paths(item, path_map) for item in node]
+    if not isinstance(node, dict):
+        return node
+    node = {key: _map_paths(value, path_map) for key, value in node.items()}
+    if "data_path" in node and "file_pattern" in node:
+        full = f"{str(node['data_path']).rstrip('/')}/{node['file_pattern']}"
+        for old, new in sorted(path_map, key=lambda pair: -len(pair[0])):
+            if full.startswith(old):
+                mapped = new + full[len(old) :]
+                node["data_path"], node["file_pattern"] = mapped.rsplit("/", 1)
+                logging.info(f"Mapped {full} -> {mapped}")
+                break
+    return node
+
+
+def _use_gcloud_token():
+    """Authenticate gs:// reads with `gcloud auth print-access-token`, for when
+    Python application-default credentials are expired. fme passes
+    token="google_default" explicitly and also opens the first file without
+    storage options, so both paths are patched.
+    """
+    import fsspec
+    from google.oauth2.credentials import Credentials
+
+    import fme.core.dataset.xarray as fme_xarray
+
+    token = subprocess.run(
+        ["gcloud", "auth", "print-access-token"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    credentials = Credentials(token=token)
+    fsspec.config.conf["gs"] = {"token": credentials}
+    original = fme_xarray._get_fs_protocol_kwargs
+
+    def _kwargs(path):
+        kwargs = original(path)
+        if fme_xarray._get_protocol(path) == "gs":
+            kwargs["token"] = credentials
+        return kwargs
+
+    fme_xarray._get_fs_protocol_kwargs = _kwargs
+
+
+def run(
+    config_path: str,
+    path_map: list[tuple[str, str]] | None = None,
+    gcloud_token: bool = False,
+):
     logging.basicConfig(level=logging.INFO)
+    if gcloud_token:
+        _use_gcloud_token()
     config_data = prepare_config(config_path)
+    if path_map:
+        config_data = _map_paths(config_data, path_map)
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
@@ -373,12 +439,29 @@ def main():
     parser.add_argument("--name", default="diagnose-dataset-properties")
     parser.add_argument("--cluster", nargs="+", default=["ai2/phobos"])
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--path-map",
+        nargs="+",
+        default=[],
+        metavar="OLD=NEW",
+        help="Prefix replacements for dataset paths, e.g. "
+        "/climate-default/=gs://vcm-ml-intermediate/ (longest match wins).",
+    )
+    parser.add_argument(
+        "--gcloud-token",
+        action="store_true",
+        help="Read gs:// with the token from `gcloud auth print-access-token`.",
+    )
     args = parser.parse_args()
+    path_map = []
+    for item in args.path_map:
+        old, new = item.split("=", 1)
+        path_map.append((old, new))
     if args.submit:
         submit(args.config_yaml, args.name, args.cluster, args.dry_run)
     else:
         with Distributed.context():
-            run(args.config_yaml)
+            run(args.config_yaml, path_map, args.gcloud_token)
 
 
 if __name__ == "__main__":
