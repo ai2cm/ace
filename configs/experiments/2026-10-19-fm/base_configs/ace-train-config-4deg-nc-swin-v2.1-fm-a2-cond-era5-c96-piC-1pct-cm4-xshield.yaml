@@ -1,17 +1,41 @@
+# nc-swin-v3: a noise-conditioned Swin U-Net for foundation-model training,
+# sized between nc-swin-v2 (264M params, 925 GFLOP/sample) and nc-swin-v2.1
+# (15.5M, 45 GFLOP). In the 2026-06-26 norm ablation v2 had the best weather
+# skill but overfit (train 0.071 vs val 0.101), and v2.1 was capacity-limited
+# (train ~= val ~= 0.118). This one is ~130M params at ~176 GFLOP/sample
+# (nc-sfno: 14.5M, ~99 GFLOP without FFTs).
+#
+# Differences from the SFNO twin (same data, inference and loss):
+# - residual_prediction: false. Residual prediction made every Swin rollout
+#   blow up in year 2 while one-step validation stayed healthy (H1/H2/H4
+#   diagnostics, 2026-09-28); numerics were ruled out.
+# - num_levels: 2 (#1544) runs the bottleneck stages on a 12x24 token grid
+#   instead of 24x48, so each 4x8 window covers ~1/9 of the globe and the
+#   FLOPs roughly halve. The 48x96 padded grid is already a multiple of
+#   2**2 * window_size, so no extra padding is needed.
+# - depth_multiplier 2 with embed_dim 256, head dim 64 throughout.
+# - skip_projection (#1544) keeps the decoder at embed_dim.
+# - drop_path_rate 0.2 and weight_decay 0.05 (Swin defaults) to close v2's
+#   train/val gap.
+# - float32_matmul_precision: high (#1539) for TF32 attention/MLP matmuls;
+#   torch.compile is on by default on CUDA (#1514).
+# - Warmup-stable-decay LR: 8-epoch linear warmup (transformers are unstable
+#   at full LR from init), constant, then an 8-epoch sqrt decay to 0, the
+#   same schedule the nc-swin-v2/v2.1 cells used.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
-max_epochs: 2
+max_epochs: 150
 ema:
   decay: 0.999
 inference:
 - name: long_46year_constant_co2_era5
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 16794
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -115,8 +139,8 @@ inference:
 - name: 10year_oosample_varying_co2_era5
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -167,8 +191,8 @@ inference:
 - name: 10year_oosample_constant_co2_era5
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -196,8 +220,8 @@ inference:
 - name: 10year_insample_varying_co2_era5
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -223,8 +247,8 @@ inference:
 - name: 10year_insample_constant_co2_era5
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -252,8 +276,8 @@ inference:
 - name: weather_2024_ensemble_varying_co2_era5
   weight: 0.0
   epochs: &id005
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -315,8 +339,8 @@ inference:
 - name: weather_1994_ensemble_varying_co2_era5
   weight: 0.0
   epochs: &id003
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -457,8 +481,8 @@ inference:
 - name: long_46year_varying_co2_era5
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 16794
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -484,8 +508,8 @@ inference:
 - name: 10year_oosample_varying_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -536,8 +560,8 @@ inference:
 - name: 10year_oosample_constant_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -563,8 +587,8 @@ inference:
 - name: 10year_insample_varying_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -590,8 +614,8 @@ inference:
 - name: 10year_insample_constant_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -617,8 +641,8 @@ inference:
 - name: weather_1994_ensemble_varying_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -680,8 +704,8 @@ inference:
 - name: weather_1994_ensemble_constant_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -707,8 +731,8 @@ inference:
 - name: weather_2021_ensemble_varying_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -734,8 +758,8 @@ inference:
 - name: weather_2021_ensemble_constant_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -761,8 +785,8 @@ inference:
 - name: long_43year_varying_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 15683
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -813,8 +837,8 @@ inference:
 - name: long_43year_constant_co2_c96
   weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 10
   n_forward_steps: 15683
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -840,8 +864,8 @@ inference:
 - name: aimip_checkpoint_era5
   weight: 1.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 1
   n_forward_steps: 1825
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -887,10 +911,10 @@ inference:
     histogram:
       enabled: true
 - name: aimip_checkpoint_c96
-  weight: 1.0
+  weight: 0.0
   epochs:
-    start: 1
-    stop: 2
+    start: 0
+    step: 1
   n_forward_steps: 1825
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -1054,6 +1078,176 @@ train_loader:
         stop_time: '2008-12-31'
       labels:
       - era5
+    - data_path: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-4deg-8layer-200yr-daily
+      file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2025-06-18-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr-daily
+      file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-1xCO2-ic_0001.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-1xCO2-ic_0002.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-1xCO2-ic_0003.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-2xCO2-ic_0001.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-2xCO2-ic_0002.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-2xCO2-ic_0003.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-4xCO2-ic_0001.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-4xCO2-ic_0002.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-4deg-daily
+      file_pattern: random-CO2-4xCO2-ic_0003.zarr
+      engine: zarr
+      labels:
+      - cm4
+      renamed_variables:
+        carbon_dioxide: global_mean_co2
+      overwrite:
+        multiply_scalar:
+          global_mean_co2: 1.0e-06
+      variable_metadata:
+        global_mean_co2:
+          units: volume mixing ratio
+      derived_variables:
+      - ocean_fraction
+    - data_path: /climate-default/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset
+      file_pattern: 2025-09-11-X-SHiELD-AMIP-4deg-8layer-11yr.zarr
+      engine: zarr
+      labels:
+      - xshield
 validation:
   loader:
     batch_size: 32
@@ -1101,7 +1295,28 @@ optimization:
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   kwargs:
-    weight_decay: 0.01
+    weight_decay: 0.05
+  scheduler:
+    schedulers:
+    - type: LinearLR
+      kwargs:
+        start_factor: 0.01
+        end_factor: 1.0
+        total_iters: 8
+      step_each_iteration: false
+    - type: ConstantLR
+      kwargs:
+        factor: 1.0
+        total_iters: 134
+      step_each_iteration: false
+    - type: PolynomialLR
+      kwargs:
+        power: 0.5
+        total_iters: 8
+      step_each_iteration: false
+    milestones:
+    - 8
+    - 142
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
@@ -1115,38 +1330,62 @@ stepper:
   step:
     type: single_module
     config:
-      residual_prediction: true
+      residual_prediction: false
+      float32_matmul_precision: high
       builder:
-        type: NoiseConditionedSFNO
+        type: NoiseConditionedSwinTransformer
         config:
-          embed_dim: 512
+          embed_dim: 256
           noise_embed_dim: 32
-          noise_type: isotropic
-          filter_type: linear
-          affine_norms: true
-          normalize_big_skip: true
-          filter_num_groups: 16
-          spectral_ratio: 0.125
-          use_mlp: true
-          num_layers: 8
-          operator_type: dhconv
-          clip_latent_global_means: true
+          depth_multiplier: 2
+          num_heads:
+          - 4
+          - 8
+          - 8
+          - 4
+          window_size:
+          - 4
+          - 8
+          patch_size:
+          - 1
+          - 1
+          num_levels: 2
+          mlp_ratio: 4.0
+          drop_path_rate: 0.2
+          use_skip: true
+          skip_projection: true
+          mlp_layer: swiglu
+          padding_conf:
+            activate: true
+            mode: earth
+            pad_lat:
+            - 2
+            - 1
+            pad_lon:
+            - 3
+            - 3
         conditional: true
       normalization:
         network:
-          global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/centering.nc
-          global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/scaling-full-field.nc
+          global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/centering.nc
+          global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/centering.nc
-          global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/scaling-residual.nc
+          global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/centering.nc
+          global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/scaling-residual.nc
         grouped:
           groups:
             c96:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/c96/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/c96/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/c96/scaling-full-field.nc
             era5:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/era5/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/fm/groups/era5/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/era5/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/era5/scaling-full-field.nc
+            cm4:
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/cm4/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/cm4/scaling-full-field.nc
+            xshield:
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/xshield/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/xshield/scaling-full-field.nc
           default_label: era5
           pinned_variables:
           - global_mean_co2
