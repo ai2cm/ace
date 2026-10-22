@@ -73,14 +73,19 @@ for _r in api.runs(
     _m = _re.match(
         r"ace4deg-randco2-(\d)xCO2-ic3-(("
         + "|".join(sorted(_LABEL, key=len, reverse=True))
-        + r")-ep(\d+))$",
+        + r")-(ep\d+|best))$",
         _r.name,
     )
     if _m:
-        _after[(_m.group(3), int(_m.group(4)))] = _m.group(2)
-for _kind, _ep in sorted(_after):
-    RUNS[_LABEL[_kind].format(ep=_ep)] = (
-        "ace4deg-randco2-{x}xCO2-ic3-" + _after[(_kind, _ep)]
+        _ep = _m.group(4)
+        _after[(_m.group(3), 99 if _ep == "best" else int(_ep[2:]))] = (
+            _m.group(2),
+            _ep,
+        )
+for _kind, _order in sorted(_after):
+    _pat, _ep = _after[(_kind, _order)]
+    RUNS[_LABEL[_kind].format(ep=("best (selected)" if _ep == "best" else _ep[2:]))] = (
+        "ace4deg-randco2-{x}xCO2-ic3-" + _pat
     )
 runs = {}
 for r in api.runs(

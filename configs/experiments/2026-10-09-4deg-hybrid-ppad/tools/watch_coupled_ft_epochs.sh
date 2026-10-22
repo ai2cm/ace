@@ -31,10 +31,15 @@ while true; do
 import json,sys
 e=json.load(sys.stdin)[0]
 for j in e['jobs']:
-    s=j['status']; print(j['id'], j.get('result',{}).get('beaker'), 'exited' if s.get('exited') else 'running')") || { log "beaker experiment get failed"; sleep "$POLL"; continue; }
+    s=j['status']
+    # 'finished' only when the segment exited cleanly (code 0); a preempted segment (non-zero exit) is
+    # resumed by Beaker a little later, so it must not count as the experiment having ended
+    state='finished' if s.get('exited') and s.get('exitCode')==0 else ('exited' if s.get('exited') else 'running')
+    print(j['id'], j.get('result',{}).get('beaker'), state)") || { log "beaker experiment get failed"; sleep "$POLL"; continue; }
+  if [ -z "$segs" ]; then log "no segments returned (transient?); retrying"; sleep "$POLL"; continue; fi
   all_exited=1
   while read -r JOB DS STATE_J; do
-    [ "$STATE_J" = exited ] || all_exited=0
+    [ "$STATE_J" = finished ] || all_exited=0
     # epochs saved in this segment
     for N in $(beaker job logs "$JOB" 2>/dev/null | grep -o "Saving checkpoints for epoch [0-9]*" | awk '{print $5}' | sort -un); do
       grep -qx "$N" "$STATE" && continue
@@ -89,6 +94,6 @@ for j in e['jobs']:
   done
   n_done=$(( $(wc -l < "$STATE") + $(cat "$STATE.lost" 2>/dev/null | wc -l) ))
   if [ "$n_done" -ge "$MAX_EPOCHS" ]; then log "all $MAX_EPOCHS epochs processed; exiting"; exit 0; fi
-  if [ "$all_exited" = 1 ]; then log "experiment exited with $n_done epochs processed; exiting"; exit 0; fi
+  if [ "$all_exited" = 1 ]; then log "experiment finished (last segment exit 0) with $n_done epochs processed; exiting"; exit 0; fi
   sleep "$POLL"
 done
