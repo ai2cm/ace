@@ -25,7 +25,7 @@ loader:
       - data_path: /climate-default
         file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr  # surface_temperature blended with ocean store's sst
         engine: zarr
-        fill_nans:  # sea_ice_fraction is NaN here where the sea_ice store has 0
+        fill_nans:  # only sea_ice_fraction has NaN here, outside mask_sea_ice_fraction; set to 0 even where the sea_ice store has ice
           value: 0.0
       - data_path: /climate-default
         file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
