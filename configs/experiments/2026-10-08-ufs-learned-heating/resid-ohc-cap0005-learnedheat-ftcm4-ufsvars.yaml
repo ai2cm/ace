@@ -1,7 +1,7 @@
 # resid-ohc-cap0005-learnedheat-ftcm4-ufsvars: learned unaccounted heating on the UFS 4deg replay, fine-tuned from the CM4 pretraining of
 # the UFS-compatible variable set (samudra-ppad4deg-resid-ohc-cap0005-ppad-ufsvars: ppad recipe without UI, VI, sfdsi, hfgeou), with the
 # UFS + unaccounted_heating statistics (no CM4 placeholder fields). Stepper block = the ppad-ufsvars pretraining's (pole padding, diagnostic
-# SSH, zos correction with the UFS store's own reference -2.327e-01, prescribed_open_ocean flux) + unaccounted_heating output and
+# SSH, zos correction with reference 0.0 (the store zos is demeaned; the earlier -2.327e-01 was wrong), prescribed_open_ocean flux) + unaccounted_heating output and
 # corrector source; data, validation, inference, epochs and lr as resid-ohc-cap0005-learnedheat-ftcm4.yaml. Troy 2026-10-20.
 experiment_dir: /results
 save_checkpoint: true
@@ -163,7 +163,7 @@ stepper:
             zero_where_ice_free_names:
             - sea_ice_volume
           zos_global_mean_correction:
-            reference_global_mean: -0.232651
+            reference_global_mean: 0.0  # the 4deg store zos is already demeaned (ssf-weighted mean 0.000); -0.232651 was wrong and gave a -0.21 m bias
       residual_prediction:
         normalized: true
         names:
