@@ -117,7 +117,7 @@ def _combine_datasets(
         ds, prop = build_one(coupled_data_config)
         datasets.append(ds)
         if properties is None:
-            properties = prop
+            properties = prop.copy()
         elif not strict:
             try:
                 properties.update(prop)

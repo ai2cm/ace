@@ -145,6 +145,16 @@ class CoupledDatasetProperties:
             atmosphere=self.atmosphere.to_device(),
         )
 
+    def copy(self) -> "CoupledDatasetProperties":
+        """Return a copy that can be updated or merged without affecting this one.
+
+        Each component's properties are copied as by ``DatasetProperties.copy``.
+        """
+        return CoupledDatasetProperties(
+            ocean=self.ocean.copy(),
+            atmosphere=self.atmosphere.copy(),
+        )
+
     def update(self, other: "CoupledDatasetProperties"):
         if self.vertical_coordinate != other.vertical_coordinate:
             raise ValueError("Vertical coordinates must be the same for both datasets.")

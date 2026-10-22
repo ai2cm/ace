@@ -1270,7 +1270,7 @@ def test_localize_properties():
     local = props.localize()
 
     # Unchanged fields
-    assert local.variable_metadata is metadata
+    assert local.variable_metadata == metadata
     assert local.vertical_coordinate is vertical
     assert local.timestep == timestep
 

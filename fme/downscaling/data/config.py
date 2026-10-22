@@ -224,7 +224,7 @@ def build_from_config_sequence(
         ds, prop = config.build(names, n_timesteps)
         datasets.append(ds)
         if properties is None:
-            properties = prop
+            properties = prop.copy()
         else:
             properties.update(prop, strict=strict_ensemble)
     if properties is None:
