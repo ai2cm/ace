@@ -4,7 +4,7 @@
 
     python diagnose_09_c1.py omega <omega.nc>                                    # local, ace-tools env
     PYTHONPATH=<copy of W/fme at f7718ac> python diagnose_09_c1.py run <arm> <config.yaml> <ckpt> <out.nc> \
-        [--swap-from <C.nc> --swap-forcing v,.. --swap-ic v,..]                  # james-vm, fme env, CPU
+        [--swap-from <C.nc> --swap-forcing v,.. --swap-ic v,..] [--n-windows N] [--record v,..]  # Beaker GPU (fme env)
     PYTHONPATH=... python diagnose_09_c1.py compare <C.nc> <T.nc> <omega.nc> <out.yaml> [<label>=<T_swap.nc> ...]
 
 W = ace-exper-worktrees/exper-2026-10-21-coupled-sst-09-pilot/. `run` executes fme's own evaluator (arm T:
@@ -36,20 +36,23 @@ def _adapt(cfg: dict, arm: str, ckpt: str, exp_dir: str, n_windows: int) -> dict
     cfg = yaml.safe_load(yaml.safe_dump(cfg).replace(*CLIMATE_DEFAULT))
     cfg.update(experiment_dir=exp_dir, checkpoint_path=ckpt)
     cfg["logging"].update(log_to_wandb=False, log_to_file=False)
-    if arm == "C":
-        cfg.update(n_coupled_steps=n_windows, coupled_steps_in_memory=n_windows)
-        for realm in ("ocean", "atmosphere"):
-            cfg["data_writer"][realm]["files"] = []
-    else:
-        cfg.update(
-            n_forward_steps=n_windows * N_INNER,
-            forward_steps_in_memory=n_windows * N_INNER,
-        )
-        cfg["data_writer"]["files"] = []
+    n, keys = (
+        (n_windows, ("n_coupled_steps", "coupled_steps_in_memory"))
+        if arm == "C"
+        else (n_windows * N_INNER, ("n_forward_steps", "forward_steps_in_memory"))
+    )
+    # issue 25f: keep the config's in-memory chunk
+    cfg.update({keys[0]: n, keys[1]: min(n, cfg.get(keys[1], n))})
+    for files in (
+        [cfg["data_writer"][r] for r in ("ocean", "atmosphere")]
+        if arm == "C"
+        else [cfg["data_writer"]]
+    ):
+        files["files"] = []
     return cfg
 
 
-def _record(swap: dict | None):
+def _record(swap: dict | None, keep: set[str] | None = None):
     import torch
 
     from fme.ace.stepper import single_module
@@ -86,9 +89,14 @@ def _record(swap: dict | None):
         result = orig(self, a, wrapper)
         rec.append(
             {
-                **{"in__" + n: t for n, t in a.input.items()},
-                **{"next__" + n: t for n, t in a.next_step_input_data.items()},
-                **{"out__" + n: t for n, t in result.output.items()},
+                pre + n: t.detach().cpu()
+                for pre, d in (
+                    ("in__", a.input),
+                    ("next__", a.next_step_input_data),
+                    ("out__", result.output),
+                )
+                for n, t in d.items()
+                if keep is None or n in keep
             }
         )
         print(
@@ -109,6 +117,7 @@ def run(
     swap_forcing: str,
     swap_ic: str,
     n_windows: int,
+    record: str = "",
 ) -> None:
     cfg = _adapt(
         yaml.safe_load(open(config)),
@@ -124,7 +133,7 @@ def run(
             "forcing": [v for v in swap_forcing.split(",") if v],
             "ic": [v for v in swap_ic.split(",") if v],
         }
-    rec = _record(swap)
+    rec = _record(swap, {v for v in record.split(",") if v} or None)
     cfg_path = pathlib.Path(cfg["experiment_dir"]) / "config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg))
     if arm == "C":
@@ -145,6 +154,7 @@ def run(
         coords={"k": np.arange(1, len(rec) + 1)},
     )
     ds.attrs.update(
+        record=record,
         arm=arm,
         config=config,
         checkpoint=ckpt,
@@ -488,6 +498,8 @@ if __name__ == "__main__":
     r.add_argument("--swap-forcing", default="")
     r.add_argument("--swap-ic", default="")
     r.add_argument("--n-windows", type=int, default=2)
+    # issue 25f: comma list of variables kept; empty = all
+    r.add_argument("--record", default="")
     a = p.parse_args()
     if a.cmd == "omega":
         omega(a.out)
@@ -507,4 +519,5 @@ if __name__ == "__main__":
             a.swap_forcing,
             a.swap_ic,
             a.n_windows,
+            a.record,
         )
