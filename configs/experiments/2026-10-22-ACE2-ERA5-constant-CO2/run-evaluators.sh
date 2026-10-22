@@ -15,7 +15,7 @@ if [[ ${#TAGS[@]} -eq 0 ]]; then
 fi
 
 # since we use a service account API key for wandb, we use the beaker username to set the wandb username
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+BEAKER_USERNAME=spencerc_ai2
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"  # so config paths are valid no matter where we are running this script
 
