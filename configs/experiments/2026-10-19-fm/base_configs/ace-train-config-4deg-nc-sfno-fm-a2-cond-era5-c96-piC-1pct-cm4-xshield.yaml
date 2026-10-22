@@ -1304,25 +1304,25 @@ stepper:
         conditional: true
       normalization:
         network:
-          global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/centering.nc
-          global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/scaling-full-field.nc
+          global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/centering.nc
+          global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/centering.nc
-          global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/scaling-residual.nc
+          global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/centering.nc
+          global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/scaling-residual.nc
         grouped:
           groups:
             c96:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/c96/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/c96/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/c96/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/c96/scaling-full-field.nc
             era5:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/era5/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/era5/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/era5/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/era5/scaling-full-field.nc
             cm4:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/cm4/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/cm4/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/cm4/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/cm4/scaling-full-field.nc
             xshield:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/xshield/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets/groups/xshield/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/xshield/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-22-fm-all-datasets-v2/groups/xshield/scaling-full-field.nc
           default_label: era5
           pinned_variables:
           - global_mean_co2
