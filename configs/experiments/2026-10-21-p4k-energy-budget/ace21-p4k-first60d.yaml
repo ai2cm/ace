@@ -1,0 +1,63 @@
+# ACE2.1-ERA5, the AIMIP submission (2024 ERA5 build): +4 K uniform SST.
+# First 60 days (240 steps) of the same rollout, writing 6-hourly snapshots of the
+# budget terms and all model layers from the first step. See README.md.
+checkpoint_path: /ckpt.tar
+experiment_dir: /results
+n_forward_steps: 240
+forward_steps_in_memory: 40
+initial_condition:
+  path: /climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC0.nc
+  start_indices:
+    times:
+    - '1978-09-30T18:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2025-09-12-aimip-evaluation
+    file_pattern: aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
+    engine: zarr
+  num_data_workers: 8
+  perturbations:
+    sst:
+    - type: constant
+      config:
+        amplitude: 4.0
+logging:
+  project: ace
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+  files:
+  - label: 6hourly_first60d
+    names:
+    - surface_temperature
+    - PRESsfc
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - DLWRFsfc
+    - ULWRFsfc
+    - DSWRFsfc
+    - USWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_2
+    - air_temperature_3
+    - air_temperature_4
+    - air_temperature_5
+    - air_temperature_6
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_2
+    - specific_total_water_3
+    - specific_total_water_4
+    - specific_total_water_5
+    - specific_total_water_6
+    - specific_total_water_7
+    save_reference: false

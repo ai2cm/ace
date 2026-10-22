@@ -12,7 +12,9 @@ consistent with the surface fluxes, and whether the energy budget holds.
 | `ace21ec` | ACE2.1 recipe trained with the energy corrector (`ace2-1-aimip-era5-energy-corrector-*-rs0`) | `59a8a3e46` |
 
 Outputs per run: `monthly_mean` (full rollout) and `6hourly_2000` (instantaneous snapshots for
-2000, for flux calculations that need sub-monthly covariances).
+2000, for flux calculations that need sub-monthly covariances). The `*-first60d` configs rerun
+the first 60 days with 6-hourly snapshots from the first step, for the adjustment to the
+perturbation (`EXPERIMENTS="control-first60d p4k-first60d"`).
 
 Constraints:
 
