@@ -53,7 +53,10 @@ All commands are run from the repo root on `exp/muon-ppad-stoch` with
       (`beaker experiment rename`). This frees its name: the job name becomes
       `WANDB_NAME`, and reusing the name keeps the wandb display name unchanged.
    2. Copy the stopped job's results dataset into `results_dataset`. Check that
-      the dataset has `training_checkpoints/ckpt.tar` and `wandb_run_id`.
+      the dataset has `training_checkpoints/ckpt.tar` and `wandb_run_id`. A
+      stopped job leaves its results dataset uncommitted, and gantry won't mount
+      it (`BeakerError: uncommitted dataset`). Run `beaker dataset commit <id>`
+      first. This also applies to step 3.
    3. Overrides: `resume_results.resume_wandb=true` (the default is a new wandb
       run) plus `...builder.config.checkpointing=3`. Leave `config` blank to
       resume from the dumped `/existing-results/config.yaml`.
