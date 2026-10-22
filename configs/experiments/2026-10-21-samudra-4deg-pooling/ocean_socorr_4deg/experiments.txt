@@ -26,11 +26,14 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0|01M5G4GQA
 
 # The same eight evals resubmitted on jupiter (tag rs0_jup), as saturn had no
 # free slots and the rows above sat queued; the user cancels those.
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0_jup|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0_jup|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0_jup|01M5G4G1QKWQXGAF5JXAW0S374|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0_jup|01M5G4G1QKWQXGAF5JXAW0S374|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0_jup|01M5G4GC9VV2BZKHDDQ6JCS5P0|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0_jup|01M5G4GC9VV2BZKHDDQ6JCS5P0|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0_jup|01M5G4GQASV51XJHBCHVRN2MC2|run_1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0_jup|01M5G4GQASV51XJHBCHVRN2MC2|run_piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|jupiter
+# Launched in row order: 01M5J71DE67GFG45J83FEK553B, 01M5J71NJMZF9JJDN7D77R50HA,
+# 01M5J71XVEJ4Z9GEQ0GFR1EEMN, 01M5J726H5QVR878GQFA7CPEHM, 01M5J72EHW5XKVPDNA967EC487,
+# 01M5J72R89JSS3EYAS46MEG0HJ, 01M5J730ERTPJS2ZKV40FM34K0, 01M5J738RTAAKARRR1MHECK54H.
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0_jup|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_floor|rs0_jup|01M5G4FPZDAZ2ZNEWAXFCJ9FX1|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4FPZM24NVXKBM13FCBX5G|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0_jup|01M5G4G1QKWQXGAF5JXAW0S374|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_padpool|rs0_jup|01M5G4G1QKWQXGAF5JXAW0S374|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4G1R39HX1QYDQ6MFFWC36|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0_jup|01M5G4GC9VV2BZKHDDQ6JCS5P0|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_conspool|rs0_jup|01M5G4GC9VV2BZKHDDQ6JCS5P0|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GCAAA9JGZBY4N6BBVHBB|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0_jup|01M5G4GQASV51XJHBCHVRN2MC2|1pct_yearly_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235_4deg-ocean_socorr_fm_nocap_exact3311|rs0_jup|01M5G4GQASV51XJHBCHVRN2MC2|piC-ic0151-200yr_4deg|best_inference_ckpt|high|--min-runtime 8h||01M5G4GQB4E4PH4HMH15THWZDX|ai2/ace|jupiter
