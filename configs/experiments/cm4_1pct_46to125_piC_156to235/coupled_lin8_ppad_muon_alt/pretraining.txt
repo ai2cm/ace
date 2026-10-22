@@ -1,0 +1,13 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|extra_env
+
+# job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_lin8_ppad_muon_alt . \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+#
+# socorr lnmuon_fm lin8 ocean (3ly4s80y, best_inference_ckpt) + ACE2S j0ng1tw3,
+# both trained with alternating updates; the paired FTO is
+# ../coupled_lin8_ppad_muon socorrlnmuonfm_a2s-fto (l0fc6hg8). lr is shared.
+#
+# lr 7e-5 (the FTO's): pinned to jupiter first as the 8x H100 memory probe
+# (est. ~94 GB/GPU vs 80); the 1e-5 row's cluster follows from it.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr7e-5|o0a0rs0|ace-samudra-cm4|3ly4s80y|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter|8||3|ai2/ace|seed=0 optimization.lr=7.0e-05|8h|MALLOC_ARENA_MAX=4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr1e-5|o0a0rs0|ace-samudra-cm4|3ly4s80y|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter+titan|8||3|ai2/ace|seed=0 optimization.lr=1.0e-05|8h|MALLOC_ARENA_MAX=4
