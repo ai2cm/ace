@@ -9,3 +9,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu1e-3|01M5JZYP565B3EW9MEJT538X7Z|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu3e-3|01M5JZYZCGPK85Q1CTSVYJMTYS|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon|mu1e-2|01M5JZZ8PJE93C3131DSAGARRF|training|best_inference_ckpt|normal|--min-runtime 8h
