@@ -31,6 +31,9 @@ generate_weights_four_degree:
 
 SMOKE_NUM_TIMESTEPS ?= 6
 
+test:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pytest --confcutdir=. pipeline
+
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
 	docker run --rm --entrypoint python $(IMAGE_NAME) -c "import pipeline.om4.run, pipeline.randco2.run, xesmf"
@@ -59,6 +62,6 @@ check_dataflow_image:
 
 .PHONY: create_environment generate_weights generate_weights_one_degree \
 	generate_weights_four_degree build_dataflow push_dataflow enter \
-	check_dataflow_image
+	check_dataflow_image test
 
 include om4.mk randco2.mk

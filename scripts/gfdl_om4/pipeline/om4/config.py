@@ -12,7 +12,7 @@ import dataclasses
 
 import dacite
 
-from ..config_io import OutputConfig, WetmaskConfig, load_yaml
+from ..config_io import OutputConfig, StaticsConfig, WetmaskConfig, load_yaml
 from ..postprocess import (
     Postprocess,
     PostprocessConfig,
@@ -126,19 +126,6 @@ class StreamConfig:
         return resolve_postprocess(
             POSTPROCESS, self.postprocess, f"stream {self.name!r}"
         )
-
-
-@dataclasses.dataclass
-class StaticsConfig:
-    """Static (time-invariant) fields for the output store.
-
-    Attributes:
-        store: URL of the static source zarr store.
-        variables: tracer-point fields to regrid onto the target grid.
-    """
-
-    store: str
-    variables: list[str]
 
 
 @dataclasses.dataclass
