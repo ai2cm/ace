@@ -927,6 +927,12 @@ train_loader:
   prefetch_factor: 4
   time_buffer: 8
   time_buffer_pool_size: 32
+  label_sampling:
+    weights:
+      cm4: 0.40
+      c96: 0.25
+      era5: 0.25
+      xshield: 0.10
   dataset:
     strict: false
     concat:
