@@ -13,6 +13,11 @@ An artifact is a GCS prefix containing:
   extracted from the MOM6 supergrid; enough to reconstruct the regridder
   (and rotate vectors) without reading the much larger ocean_hgrid.nc.
 - ``weights.nc`` — xESMF-format sparse conservative weights.
+- ``areacello.nc`` — target cell areas ``A_J`` (native-area artifacts only;
+  see :mod:`pipeline.native_area_weights`).
+
+:func:`get_regridder` loads only native-area artifacts: it refuses a
+``weights.nc`` lacking any attr of :data:`pipeline.native_area.ARTIFACT_ATTRS`.
 
 Precomputed weights are raw conservative weights: xESMF's ``skipna``
 renormalization only exists at weight-computation time, so masking must be
@@ -33,10 +38,12 @@ import os
 import tempfile
 
 import fsspec
+import numpy as np
 import xarray as xr
 import xesmf as xe
 
 from .grids import make_target_grid
+from .native_area import ARTIFACT_ATTRS, Triplets
 from .ocean_emulators_port import convert_supergrid
 
 logger = logging.getLogger(__name__)
@@ -49,6 +56,7 @@ REGRIDDER_KWARGS = dict(
 )
 SOURCE_GRID_FILENAME = "source_grid.nc"
 WEIGHTS_FILENAME = "weights.nc"
+AREACELLO_FILENAME = "areacello.nc"
 
 
 def _upload(local_path: str, url: str) -> None:
@@ -113,8 +121,43 @@ def generate_weights(
     logger.info("Weight artifact complete")
 
 
-# One regridder per (artifact, target grid) per worker process.
+# One regridder per (artifact, target grid) and one A_J per artifact, per
+# worker process.
 _REGRIDDER_CACHE: dict[tuple[str, str], xe.Regridder] = {}
+_AREACELLO_CACHE: dict[str, xr.DataArray] = {}
+
+
+def _artifact_url(weights_url: str, filename: str) -> str:
+    return f"{weights_url.rstrip('/')}/{filename}"
+
+
+def _assert_artifact_attrs(weights_path: str, url: str) -> None:
+    """Raise unless ``weights.nc`` carries every native-area artifact attr."""
+    with xr.open_dataset(weights_path) as ds:
+        missing = [name for name in ARTIFACT_ATTRS if name not in ds.attrs]
+    if missing:
+        raise ValueError(
+            f"{url} is not a native-area weight artifact: weights.nc lacks "
+            f"attrs {missing}. Build one with pipeline.native_area_weights."
+        )
+
+
+def read_weights(weights_url: str) -> Triplets:
+    """Raw xESMF triplets ``(S, row, col)`` of the artifact at the
+    ``weights_url`` prefix, 0-based, NaN markers kept."""
+    with fsspec.open(_artifact_url(weights_url, WEIGHTS_FILENAME)) as f:
+        ds = xr.open_dataset(f).load()
+    return ds.S.values, ds.row.values - 1, ds.col.values - 1
+
+
+def open_areacello(weights_url: str) -> xr.DataArray:
+    """Target cell areas ``A_J`` (m², float64, 0 on unmapped rows) stored
+    with the native-area artifact at the ``weights_url`` prefix; cached."""
+    if weights_url not in _AREACELLO_CACHE:
+        with fsspec.open(_artifact_url(weights_url, AREACELLO_FILENAME)) as f:
+            area = xr.open_dataset(f).load()["areacello"]
+        _AREACELLO_CACHE[weights_url] = area.astype(np.float64)
+    return _AREACELLO_CACHE[weights_url]
 
 
 def open_source_grid(weights_url: str) -> xr.Dataset:
@@ -125,8 +168,10 @@ def open_source_grid(weights_url: str) -> xr.Dataset:
 
 
 def get_regridder(weights_url: str, target_grid_name: str) -> xe.Regridder:
-    """Load the weight artifact at the ``weights_url`` prefix into a cached
-    conservative regridder for the named Gaussian target grid."""
+    """Load the native-area weight artifact at the ``weights_url`` prefix
+    into a cached conservative regridder for the named Gaussian target grid.
+
+    Raises ``ValueError`` on an artifact lacking any native-area attr."""
     key = (weights_url, target_grid_name)
     if key not in _REGRIDDER_CACHE:
         logger.info(f"Loading regridding weights from {weights_url}")
@@ -134,7 +179,8 @@ def get_regridder(weights_url: str, target_grid_name: str) -> xe.Regridder:
         target_grid = make_target_grid(target_grid_name)
         with tempfile.TemporaryDirectory() as tmpdir:
             weights_path = os.path.join(tmpdir, WEIGHTS_FILENAME)
-            _download(f"{weights_url.rstrip('/')}/{WEIGHTS_FILENAME}", weights_path)
+            _download(_artifact_url(weights_url, WEIGHTS_FILENAME), weights_path)
+            _assert_artifact_attrs(weights_path, weights_url)
             _REGRIDDER_CACHE[key] = xe.Regridder(
                 source_grid,
                 target_grid,
