@@ -1,7 +1,7 @@
 LOCAL_ENVIRONMENT ?= gfdl-om4-ingestion
 
 # One worker image for both pipelines (om4.mk, randco2.mk).
-VERSION ?= 2026-09-29-gfdl-om4-xrbeam-pipeline
+VERSION ?= 2026-10-22-gfdl-om4-native-area
 IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/gfdl-om4-ingest-dataflow:$(VERSION)
 
 # Durable pipeline inputs (static grid files, regridding weights, face masks)
@@ -50,6 +50,10 @@ native_area_weights_four_degree:
 		--output-url $(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-F22.5
 
 SMOKE_NUM_TIMESTEPS ?= 6
+
+# Recorded in each store's root attrs (D22(a)): every run passes
+# --ace-commit; Dataflow launches also pass --image-tag $(IMAGE_TAG).
+ACE_COMMIT ?= $(shell git rev-parse HEAD)
 
 test:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pytest --confcutdir=. pipeline

@@ -43,7 +43,7 @@ import xarray as xr
 import xesmf as xe
 
 from .grids import make_target_grid
-from .native_area import ARTIFACT_ATTRS, Triplets
+from .native_area import ARTIFACT_ATTRS, F64_RTOL, Triplets, assert_close
 from .ocean_emulators_port import convert_supergrid
 
 logger = logging.getLogger(__name__)
@@ -121,10 +121,9 @@ def generate_weights(
     logger.info("Weight artifact complete")
 
 
-# One regridder per (artifact, target grid) and one A_J per artifact, per
-# worker process.
+# One regridder and one A_J per (artifact, target grid), per worker process.
 _REGRIDDER_CACHE: dict[tuple[str, str], xe.Regridder] = {}
-_AREACELLO_CACHE: dict[str, xr.DataArray] = {}
+_AREACELLO_CACHE: dict[tuple[str, str], xr.DataArray] = {}
 
 
 def _artifact_url(weights_url: str, filename: str) -> str:
@@ -150,14 +149,50 @@ def read_weights(weights_url: str) -> Triplets:
     return ds.S.values, ds.row.values - 1, ds.col.values - 1
 
 
-def open_areacello(weights_url: str) -> xr.DataArray:
+def read_artifact_attrs(weights_url: str) -> dict:
+    """The ``ARTIFACT_ATTRS`` of the artifact's ``weights.nc``, as Python
+    scalars."""
+    with fsspec.open(_artifact_url(weights_url, WEIGHTS_FILENAME)) as f:
+        with xr.open_dataset(f) as ds:
+            return {name: np.asarray(ds.attrs[name]).item() for name in ARTIFACT_ATTRS}
+
+
+def open_areacello(weights_url: str, target_grid_name: str) -> xr.DataArray:
     """Target cell areas ``A_J`` (m², float64, 0 on unmapped rows) stored
-    with the native-area artifact at the ``weights_url`` prefix; cached."""
-    if weights_url not in _AREACELLO_CACHE:
+    with the native-area artifact at the ``weights_url`` prefix, on the
+    ``lat``, ``lon`` of the named target grid; cached.
+
+    Raises unless the stored coords match the target grid's to ``F64_RTOL``:
+    the stored ones may differ in the last bits (F90), and an inner join on
+    them would drop rows of ``A_J`` times regridder output."""
+    key = (weights_url, target_grid_name)
+    if key not in _AREACELLO_CACHE:
         with fsspec.open(_artifact_url(weights_url, AREACELLO_FILENAME)) as f:
-            area = xr.open_dataset(f).load()["areacello"]
-        _AREACELLO_CACHE[weights_url] = area.astype(np.float64)
-    return _AREACELLO_CACHE[weights_url]
+            area = xr.open_dataset(f).load()["areacello"].astype(np.float64)
+        _AREACELLO_CACHE[key] = _on_target_grid(
+            area, make_target_grid(target_grid_name), weights_url
+        )
+    return _AREACELLO_CACHE[key]
+
+
+def _on_target_grid(area: xr.DataArray, grid: xr.Dataset, url: str) -> xr.DataArray:
+    """``area`` with ``grid``'s ``lat``, ``lon``; coords in degrees, checked
+    to ``F64_RTOL · 360``."""
+    for name in ("lat", "lon"):
+        stored, ref = area[name], grid[name]
+        if stored.dims != ref.dims or stored.shape != ref.shape:
+            raise ValueError(
+                f"{url}/{AREACELLO_FILENAME}: {name} {dict(stored.sizes)} is not "
+                f"the target grid's {dict(ref.sizes)}"
+            )
+        assert_close(
+            stored.values,
+            ref.values,
+            rtol=F64_RTOL,
+            scale=360.0,
+            context=f"{url}/{AREACELLO_FILENAME}: {name} vs target grid",
+        )
+    return area.assign_coords(lat=grid["lat"], lon=grid["lon"])
 
 
 def open_source_grid(weights_url: str) -> xr.Dataset:

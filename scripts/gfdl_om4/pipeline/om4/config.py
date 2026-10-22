@@ -50,11 +50,11 @@ class StreamConfig:
             cross-stream time-alignment assertion then guarantees the
             subsample lands exactly on the shared time coordinate.
         full_cell_variables: variables additionally regridded with full-cell
-            semantics — NaN filled with 0 over the whole grid (land
-            included) and conservatively regridded without ocean-fraction
-            normalization — written under their source name, with NaN over
-            land applied after. Each must also have a ``renaming`` entry so
-            its wetmask-normalized twin doesn't collide.
+            semantics — zeroed over land (wetmask) and conservatively
+            regridded without ocean-fraction normalization — written under
+            their source name, with NaN over land applied after. Each must
+            also have a ``renaming`` entry so its wetmask-normalized twin
+            doesn't collide.
         postprocess: post-regrid transforms to apply per chunk, in order
             (see pipeline/om4/postprocess.py): a registry name, or a
             :class:`~pipeline.postprocess.PostprocessConfig` naming the

@@ -83,7 +83,7 @@ def test_get_regridder_refuses_missing_attr(tmp_path, monkeypatch, attr):
 def test_open_areacello_cached(tmp_path, monkeypatch):
     url, _, _, target = _built_artifact(tmp_path)
     _fresh_caches(monkeypatch, target)
-    area = weights.open_areacello(url)
+    area = weights.open_areacello(url, "target")
     assert area.dtype == np.float64
     assert area.dims == target.lat.dims
     source_lat = weights.open_source_grid(url).lat
@@ -91,7 +91,7 @@ def test_open_areacello_cached(tmp_path, monkeypatch):
     assert regridded.dims == area.dims
 
     os.remove(os.path.join(url, AREACELLO_FILENAME))
-    assert weights.open_areacello(url) is area
+    assert weights.open_areacello(url, "target") is area
 
 
 def test_build_artifact_contents(tmp_path):
