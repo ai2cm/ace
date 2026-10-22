@@ -1,0 +1,6 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config|extra_env
+
+# Resume the 24-ep rs1/rs2 lin8 runs to 40 epochs under the same wandb runs (constant lr, so equivalent to a fresh 40-ep run).
+# results_dataset is each run's first job; if a retry finished the run, use the final job's dataset instead.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|ace-samudra-cm4|p2h489vs|skip|high|jupiter+titan|4||3|ai2/ace|max_epochs=40 resume_results.resume_wandb=True|01M5GYYMACBC6C41MC7MKB581F|||8h||
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|ace-samudra-cm4|gsho6l01|skip|high|jupiter+titan|4||3|ai2/ace|max_epochs=40 resume_results.resume_wandb=True|01M5GTB1GPG1RZRT39VFJV0ZXT|||8h||
