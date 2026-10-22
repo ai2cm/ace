@@ -56,6 +56,8 @@ def _get_sampler(
 ) -> torch.utils.data.Sampler:
     dist = Distributed.get_instance()
     if label_sampling is not None:
+        if not train:
+            raise ValueError("label_sampling is only supported for training data")
         sampler: torch.utils.data.Sampler = label_sampling.build_sampler(dataset)
     elif sample_with_replacement_dataset_size is not None:
         dist.require_no_spatial_parallelism(

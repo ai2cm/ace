@@ -204,6 +204,15 @@ def test_data_loader_config_rejects_label_sampling_with_replacement(tmp_path):
         )
 
 
+def test_data_loader_config_rejects_weights_not_matching_labels(tmp_path):
+    with pytest.raises(ValueError, match="exactly the dataset's labels"):
+        DataLoaderConfig(
+            dataset=_labeled_concat(tmp_path, {"a": 4, "b": 4}),
+            batch_size=1,
+            label_sampling=LabelSamplingConfig(weights={"a": 1.0}),
+        )
+
+
 def test_data_loader_config_rejects_label_sampling_without_labels(tmp_path):
     _save_dataset(tmp_path / "a", 4)
     with pytest.raises(ValueError, match="labeled dataset"):

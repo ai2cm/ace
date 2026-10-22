@@ -8,6 +8,7 @@ import xarray as xr
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.dummy import DummyDataset
 from fme.core.dataset.schedule import IntSchedule
+from fme.core.dataset.testing import assert_sample_labels_match_items
 
 
 def test_dummy_dataset_has_expected_information():
@@ -32,3 +33,18 @@ def test_dummy_dataset_has_expected_information():
     assert dataset.all_times[-1] == end_time
     assert len(dataset) == 8
     assert dataset[0][0]["__dummy__"].shape == (3, 12, 6)
+
+
+def test_dummy_dataset_sample_labels():
+    dataset = DummyDataset(
+        start_time=cftime.DatetimeGregorian(2000, 1, 1),
+        end_time=cftime.DatetimeGregorian(2000, 1, 5),
+        timestep=datetime.timedelta(days=1),
+        n_timesteps=IntSchedule.from_constant(2),
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.Tensor(np.arange(2)), lon=torch.Tensor(np.arange(4))
+        ),
+        labels={"src_a"},
+    )
+    assert_sample_labels_match_items(dataset)
+    assert dataset.sample_labels[0] == {"src_a"}

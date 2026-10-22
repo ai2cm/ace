@@ -57,6 +57,10 @@ class LabelSamplingConfig:
                 f"got {self.samples_per_epoch}"
             )
 
+    def validate_labels(self, available: set[str]):
+        """Raise if the weights do not name exactly the ``available`` labels."""
+        _validate_label_names(set(self.weights), available)
+
     def build_sampler(self, dataset: DatasetABC) -> "LabelBalancedSampler":
         """
         Build a sampler for the given dataset on this data-parallel rank.
@@ -90,13 +94,17 @@ def _get_single_labels(dataset: DatasetABC, expected: set[str]) -> list[str]:
         (label,) = labels
         available.add(label)
         single_labels.append(label)
-    if available != expected:
+    _validate_label_names(expected, available)
+    return single_labels
+
+
+def _validate_label_names(weighted: set[str], available: set[str]):
+    if weighted != available:
         raise ValueError(
             "label_sampling weights must name exactly the dataset's labels, "
-            f"got weights for {sorted(expected)} but dataset labels "
+            f"got weights for {sorted(weighted)} but dataset labels "
             f"{sorted(available)}"
         )
-    return single_labels
 
 
 def _get_quotas(weights: Mapping[str, float], total: int) -> dict[str, int]:
@@ -120,7 +128,7 @@ def _get_quotas(weights: Mapping[str, float], total: int) -> dict[str, int]:
         positive, key=lambda label: exact[label] - quotas[label], reverse=True
     )
     shortfall = total - sum(quotas.values())
-    for label in by_remainder[:shortfall]:
+    for label in by_remainder[: max(shortfall, 0)]:
         quotas[label] += 1
     # Bumping labels up to 1 sample can overshoot the total; take the excess
     # from the labels furthest above their exact share.

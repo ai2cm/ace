@@ -126,6 +126,20 @@ class DataLoaderConfig:
                 )
             if self.available_labels is None:
                 raise ValueError("label_sampling requires a labeled dataset")
+            self.label_sampling.validate_labels(self.available_labels)
+
+    def validate_for_validation(self, context: str):
+        """
+        Raise if this loader sets options that only apply to training data.
+
+        Args:
+            context: Description of where this loader is used, for the error.
+        """
+        if self.label_sampling is not None:
+            raise ValueError(
+                "label_sampling is only supported for the training loader, "
+                f"but it is set on {context}"
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
