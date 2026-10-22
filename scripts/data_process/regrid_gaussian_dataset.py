@@ -35,11 +35,16 @@ import os
 import shutil
 import time
 
-import click
-import dask.array as da
-import numpy as np
-import xarray as xr
-import zarr
+# This script parallelizes over processes, so use a single BLAS thread in each
+# to avoid oversubscribing the CPUs. This must be set before importing numpy.
+for _name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_name, "1")
+
+import click  # noqa: E402
+import dask.array as da  # noqa: E402
+import numpy as np  # noqa: E402
+import xarray as xr  # noqa: E402
+import zarr  # noqa: E402
 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {
@@ -307,6 +312,8 @@ def main(
         f"{len(time_varying)} variables with {n_workers} workers"
     )
     initial_time = time.time()
+    # Similarly limit the threads each worker uses for zarr codecs.
+    zarr.config.set({"threading.max_workers": 1})
     with multiprocessing.get_context("fork").Pool(n_workers) as pool:
         for i, _ in enumerate(pool.imap_unordered(_regrid_block, tasks), start=1):
             if i % 10 == 0 or i == len(tasks):
