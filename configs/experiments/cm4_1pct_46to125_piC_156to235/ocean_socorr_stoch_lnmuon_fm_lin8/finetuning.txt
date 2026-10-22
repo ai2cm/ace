@@ -2,5 +2,7 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 
 # Stage 2: stochastic lin8 from the noise-from-scratch Muon stage 1's best_ckpt (epoch 15; 1v9dg8f0, 01M5AKT1D7KN11VB8YKSJXT5PN).
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs0|ace-samudra-cm4|1v9dg8f0|best_ckpt|skip|high|jupiter+titan|4||3|ai2/ace|seed=0|01M5AKT1D7KN11VB8YKSJXT5PN|8h
-# rs2: same protocol from the rs2 stage 1's best_ckpt (epoch 15; nex5e068, 01M5G2QKRTWQDMVHC7VZT55882). rs1 follows once its stage 1 finishes.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|ace-samudra-cm4|nex5e068|best_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=2|01M5G2QKRTWQDMVHC7VZT55882|8h
+# rs2: same protocol from the rs2 stage 1's best_ckpt (epoch 15; nex5e068, 01M5G2QKRTWQDMVHC7VZT55882).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|ace-samudra-cm4|nex5e068|best_ckpt|skip|high|jupiter+titan|4||3|ai2/ace|seed=2|01M5G2QKRTWQDMVHC7VZT55882|8h
+# rs1: same protocol from the rs1 stage 1's best_ckpt (epoch 15; jm9k3zhv, 01M5G2Q9595DXXCN75Y7B3EA2D).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|ace-samudra-cm4|jm9k3zhv|best_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=1|01M5G2Q9595DXXCN75Y7B3EA2D|8h
