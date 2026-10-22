@@ -1,0 +1,53 @@
+# ACE-only (prescribed SST + sea ice) 5.25-year rollout on the held-out member ic_0003 of the 4xCO2 random-CO2 ensemble
+# (CM4-like AM4, 1deg, 2026-10-11 stores). Copy of Spencer's
+# configs/experiments/cm4-like-am4-4deg-randco2v2-eval/evaluator-config-randco2-4xCO2-ic3.yaml (exper/2026-07-16-jamesd @ 49a24e2),
+# plus monthly files of a few global diagnostics and the carbon_dioxide forcing so the CO2 response can be regressed offline.
+# 1deg twin of the 4deg ppad evaluators; launched by launch-1deg-ace-randco2-evals.sh
+experiment_dir: /results
+n_forward_steps: 7667
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+loader:
+  start_indices:
+    times:
+      - "0152-10-01T06:00:00"
+  dataset:
+    merge:
+      - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
+        file_pattern: random-CO2-4xCO2-ic_0003-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
+        file_pattern: random-CO2-4xCO2-ic_0003.zarr
+        engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names:
+    - carbon_dioxide
+    - TMP2m
+    - surface_temperature
+    - air_temperature_7
+    - air_temperature_0
+    - ULWRFtoa
+    - USWRFtoa
+    - DSWRFtoa
+    - ULWRFsfc
+    - DLWRFsfc
+    - DSWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - specific_total_water_7
+    - specific_total_water_0
+    - h500
+    - TMP850

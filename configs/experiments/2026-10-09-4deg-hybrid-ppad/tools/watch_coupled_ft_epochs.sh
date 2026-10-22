@@ -19,6 +19,7 @@ BATCHES_PER_EPOCH="${BATCHES_PER_EPOCH:-1460}"   # 160 yr x 73 ocean steps / bat
 WORK="${WORK:-/home/troya/ace-randco2-figs/watchdog-work}"
 STATE="${STATE:-/home/troya/ace-randco2-figs/watchdog-${TAG}.done}"
 export CLUSTERS="${CLUSTERS:-ai2/rhea ai2/prometheus ai2/ceres ai2/jupiter ai2/titan ai2/saturn ai2/neptune}"
+EVAL_LAUNCHER="${EVAL_LAUNCHER:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/launch-4deg-ace-randco2-evals.sh}"   # the ACE-only evaluator launcher to run per epoch
 REPO_ROOT=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p "$WORK"; touch "$STATE"
@@ -67,7 +68,7 @@ for j in e['jobs']:
       fi
       LIFTED=$(beaker dataset get "$(beaker account whoami --format=json | jq -r '.[0].name')/$NAME" --format json | jq -r '.[0].id')
       log "epoch $N: lifted atmosphere dataset $LIFTED; launching random-CO2 evals"
-      (cd "$SCRIPT_DIR/.." && CKPT_DS="$LIFTED" TAG="${TAG}-ep${N}" ./launch-4deg-ace-randco2-evals.sh 2>&1 | sed "s/^/  /")
+      (cd "$(dirname "$EVAL_LAUNCHER")" && CKPT_DS="$LIFTED" TAG="${TAG}-ep${N}" "./$(basename "$EVAL_LAUNCHER")" 2>&1 | sed "s/^/  /")
       echo "$N" >> "$STATE"
       rm -rf "$D/src"
     done
@@ -77,7 +78,7 @@ for j in e['jobs']:
     grep -qx "$N" "$STATE.refreshed" 2>/dev/null && continue
     n_ok=0
     for X in 1 2 4; do
-      beaker experiment get "troya/ace4deg-randco2-${X}xCO2-ic3-${TAG}-ep${N}" --format json 2>/dev/null \
+      beaker experiment get "troya/${EVAL_JOB_PREFIX:-ace4deg-randco2}-${X}xCO2-ic3-${TAG}-ep${N}" --format json 2>/dev/null \
         | python3 -c "import json,sys; s=json.load(sys.stdin)[0]['jobs'][-1]['status']; sys.exit(0 if s.get('exited') and s.get('exitCode')==0 else 1)" \
         && n_ok=$((n_ok+1))
     done
