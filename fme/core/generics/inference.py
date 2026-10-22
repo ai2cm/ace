@@ -222,17 +222,21 @@ def run_segments(
 ) -> None:
     """Run inference as a sequence of resumable segments.
 
-    Each segment runs ``n_steps_per_segment`` steps into a subdirectory of
-    ``experiment_dir`` labeled by its start time, and gets its own wandb run
-    named ``WANDB_NAME`` with the segment label appended. A segment counts as
-    complete once its restart files exist, so re-running the same configuration
-    skips finished segments. Restart files are written before the data writer's
-    final flush, so a segment interrupted in that window counts as complete
-    despite having incomplete diagnostics.
+    Each segment runs ``n_steps_per_segment`` steps, is labeled by its start
+    time, and gets its own wandb run named ``WANDB_NAME`` with the segment label
+    appended. The callbacks map the label to the segment's directories. A
+    segment counts as complete once its restart files exist (checked with
+    :func:`fme.core.cloud.exists`, so they may be on a remote output
+    directory), so re-running the same configuration skips finished segments.
+    Since restart files live under the output directory, changing the output
+    directory between resubmissions reruns all segments from scratch. Restart
+    files are written before the data writer's final flush, so a segment
+    interrupted in that window counts as complete despite having incomplete
+    diagnostics.
 
     Args:
         segments: Total number of segments; only missing ones are run.
-        experiment_dir: Directory holding the per-segment subdirectories.
+        experiment_dir: Job directory holding the top-level log file.
         logging_config: Logging configuration. Applied at the top level with
             wandb disabled, since each segment opens its own run.
         logging_config_dict: Full run configuration, logged to wandb.
@@ -242,9 +246,9 @@ def run_segments(
         n_steps_per_segment: Steps per segment, used to compute segment labels.
         get_initialization: Returns the run's start time and timestep. Called
             once, since it may be expensive.
-        get_restart_paths: Maps a segment directory to the restart files that
+        get_restart_paths: Maps a segment label to the restart files that
             segment writes on completion.
-        run_segment: Runs one segment into the given directory.
+        run_segment: Runs the segment with the given label.
         set_initial_condition: Points the next segment at the given restarts.
         description: Run description for the opening log message.
     """
@@ -278,8 +282,7 @@ def run_segments(
             segment,
             n_steps_per_segment,
         )
-        segment_dir = os.path.join(experiment_dir, segment_label)
-        restart_paths = get_restart_paths(segment_dir)
+        restart_paths = get_restart_paths(segment_label)
         if all(exists(path) for path in restart_paths):
             logging.info(f"Skipping segment {segment} because it has already been run.")
         else:
@@ -287,7 +290,7 @@ def run_segments(
             if original_wandb_name is not None:
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
             with GlobalTimer():
-                run_segment(segment_dir)
+                run_segment(segment_label)
             # Finish so the next segment starts a fresh wandb run.
             WandB.get_instance().finish()
         # Under multi-GPU, root writes the restart; barrier ensures all ranks

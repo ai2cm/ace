@@ -51,6 +51,12 @@ from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
+from fme.core.output_dir import (
+    is_separate_output_dir,
+    resolve_output_dir,
+    validate_output_dir,
+)
+from fme.core.provenance import write_provenance
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -171,28 +177,16 @@ class InferenceEvaluatorConfig:
     Configuration for running inference including comparison to reference data.
 
     Parameters:
-        experiment_dir: Directory to save results to. This can be a local
-            directory, like ``/results``, or a remote directory prefixed with a
-            protocol recognized by ``fsspec``, like ``gs://bucket/results``.
-
-            .. note::
-                While most types of output can be written to a remote
-                ``experiment_dir``, there are some limitations:
-
-                - To write raw or time-coarsened data, the zarr writer must be
-                  used. See the ``files`` parameter of the
-                  :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Monthly coarsened data configured through
-                  ``files`` can be written to zarr. The legacy
-                  ``save_monthly_files`` option remains netCDF-only.
-                - Piping logging output to a file in the ``experiment_dir``
-                  is not supported. To silence the warning related to this, set
-                  ``log_to_file`` to ``False`` in the
-                  :class:`fme.ace.LoggingConfig`.
-
-                There are no restrictions on the types of output that can be
-                written to a local ``experiment_dir``.
-
+        experiment_dir: Job directory, holding the config, logs and wandb state.
+            Must be on a local filesystem when ``output_dir`` is set. When
+            ``output_dir`` is unset, it also receives the data output and may
+            then be a remote directory, with the same limitations as a remote
+            ``output_dir``; in that case logging to a file and writing scalar
+            metrics to disk are not supported (to silence the related warning
+            about the log file, set ``log_to_file`` to ``False`` in the
+            :class:`fme.ace.LoggingConfig`). To keep both while writing data
+            remotely, use a local ``experiment_dir`` and a remote
+            ``output_dir``.
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
@@ -228,6 +222,16 @@ class InferenceEvaluatorConfig:
             noise sequence, independent of forward_steps_in_memory. Leave unset
             (None) for the default non-reproducible behavior. Only affects the
             stepper rollout (not the prediction_loader comparison path).
+        output_dir: Directory for data writer outputs (including restart files)
+            and aggregator diagnostics. Defaults to ``experiment_dir``. This
+            can be a local directory, like ``/results``, or a remote directory
+            prefixed with a protocol recognized by ``fsspec``, like
+            ``gs://bucket/results``. Writing raw or time-coarsened data to a
+            remote directory requires the zarr writer (see the ``files``
+            parameter of :class:`fme.ace.DataWriterConfig`); the legacy
+            ``save_monthly_files`` option remains netCDF-only. When set to a
+            directory other than ``experiment_dir``, a copy of the effective config
+            and a ``provenance.json`` pointing back to the job are written there.
     """
 
     experiment_dir: str
@@ -250,12 +254,19 @@ class InferenceEvaluatorConfig:
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
     seed: int | None = None
+    output_dir: str | None = None
 
     def __post_init__(self):
         self.data_writer.validate_time_coarsen(
             self.forward_steps_in_memory,
             self.n_forward_steps,
         )
+        validate_output_dir(self.experiment_dir, self.output_dir)
+
+    @property
+    def resolved_output_dir(self) -> str:
+        """Directory receiving data writer outputs and diagnostics."""
+        return resolve_output_dir(self.experiment_dir, self.output_dir)
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -287,7 +298,7 @@ class InferenceEvaluatorConfig:
         # initial_condition_times from data.initial_time already has one entry per
         # sample (n_ic * n_ensemble_per_ic); do not repeat by n_ensemble_per_ic again.
         return self.data_writer.build_paired(
-            experiment_dir=self.experiment_dir,
+            experiment_dir=self.resolved_output_dir,
             initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
             timestep=timestep,
@@ -345,7 +356,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     with timer.context("initialization"):
         makedirs(config.experiment_dir, exist_ok=True)
+        makedirs(config.resolved_output_dir, exist_ok=True)
         config.configure_logging(log_filename="inference_out.log")
+        if is_separate_output_dir(config.experiment_dir, config.output_dir):
+            write_provenance(config.resolved_output_dir, config, config.experiment_dir)
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
@@ -427,7 +441,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
                 save_diagnostics=True,
-                output_dir=os.path.join(config.experiment_dir, "validation"),
+                output_dir=os.path.join(config.resolved_output_dir, "validation"),
                 channel_mean_names=stepper.loss_names,
             )
         run_validation(
@@ -448,7 +462,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             initial_time=initial_time,
             channel_mean_names=stepper.loss_names,
             normalize=stepper.normalizer.normalize,
-            output_dir=config.experiment_dir,
+            output_dir=config.resolved_output_dir,
             n_ensemble_per_ic=config.n_ensemble_per_ic,
         )
 
