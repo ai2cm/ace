@@ -238,7 +238,7 @@ stepper_training:
   # Required, not incidental: the ocean's stochasticity is supplied by the
   # atmosphere, so the ensemble must run through both realms.
   n_ensemble: 2
-  optimize_single_component_per_batch: false
+  optimize_single_component_per_batch: true  # default for joint_ft
   ocean:
     parameter_init:
       weights_path: null # null required alongside checkpoint_path
