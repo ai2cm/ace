@@ -1,0 +1,8 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# --config-dir configs/experiments/cm4_eval/coupled
+# issue 09 stage 2 (jobs j = 1, 4, 7, 10; 365 days; issue 25m): copies of the 09-stage1b rows with 09pilot -> 09stage2
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j01-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/C/j01|01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j04-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/C/j04|01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j07-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/C/j07|01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j10-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/C/j10|01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan

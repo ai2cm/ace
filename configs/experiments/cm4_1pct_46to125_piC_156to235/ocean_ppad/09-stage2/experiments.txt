@@ -1,0 +1,8 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# --config-dir configs/experiments/cm4_eval/ocean
+# issue 09 stage 2 (jobs j = 1, 4, 7, 10; 365 days; issue 25m): copies of the 09-stage1b rows with 09pilot -> 09stage2
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto-ocean|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j01-O|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/O/j01|01M5GVTXVSDTVW1TFWT3RTXDMD
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto-ocean|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j04-O|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/O/j04|01M5GVTXVSDTVW1TFWT3RTXDMD
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto-ocean|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j07-O|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/O/j07|01M5GVTXVSDTVW1TFWT3RTXDMD
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto-ocean|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|run_1pct-09stage2-j10-O|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/09-stage2/O/j10|01M5GVTXVSDTVW1TFWT3RTXDMD
