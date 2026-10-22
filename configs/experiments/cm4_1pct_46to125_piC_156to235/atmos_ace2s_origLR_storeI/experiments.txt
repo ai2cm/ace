@@ -2,4 +2,4 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # --config-dir configs/experiments/cm4_eval/atmos
 # issue 25d (coupled-ace-sst-representation): 2zvyd9x6 with DSWRFtoa from the store; results_dataset holds 2zvyd9x6's checkpoint
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|ran_1pct-ic0001-130yr-storeI|best_inference_ckpt|high|--min-runtime 6h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|run_1pct-ic0001-130yr-storeI|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace|jupiter+titan
