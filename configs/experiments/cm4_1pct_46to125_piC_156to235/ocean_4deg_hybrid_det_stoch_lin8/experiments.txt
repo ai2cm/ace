@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_1pct_46to125_piC_156to235-ocean_4deg_hybrid_det_stoch_lin8|rs0|01M5MTX72MMA5MWVBH86XV2DFR|training|best_inference_ckpt|normal|--min-runtime 8h
