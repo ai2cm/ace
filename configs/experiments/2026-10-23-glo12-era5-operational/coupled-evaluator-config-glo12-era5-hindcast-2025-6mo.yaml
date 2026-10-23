@@ -1,0 +1,43 @@
+# coupled-evaluator-config-glo12-era5-hindcast-2025-6mo: 2025 (held out) operational-forecast test of the GLO12 coupled fine-tune: coupled
+# rollouts of 36 five-day steps from 6 monthly initializations in 2025 on the GLO12 4deg store + ERA5 GLO12-period
+# store, single coupled checkpoint at /ckpt.tar, monthly outputs for Nino3.4 scoring. Troy 2026-10-23.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_coupled_steps: 36
+coupled_steps_in_memory: 8
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /glo12
+      file_pattern: 2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5glo
+      file_pattern: 2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2025-01-03T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-06-02T00:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  atmosphere:
+    save_monthly_files: false
+    save_prediction_files: false
+  ocean:
+    names:
+    - sst
+    save_prediction_files: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
