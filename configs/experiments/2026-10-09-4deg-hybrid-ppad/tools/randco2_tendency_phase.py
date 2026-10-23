@@ -37,8 +37,8 @@ df = pd.read_csv(os.path.join(HERE, "randco2_compare.csv")).dropna(
 SHOW = [int(e) for e in os.environ.get("RANDCO2_SHOW_EPOCHS", "3 8").split()]
 
 
-def _epoch(a):
-    return int(str(a).split(" ep")[1].split()[0])
+def _epoch(a):  # 99 = a selected (best-inference) checkpoint, not drawn here
+    return 99 if "selected ckpt" in str(a) else int(str(a).split(" ep")[1].split()[0])
 
 
 for a in sorted(
@@ -46,7 +46,7 @@ for a in sorted(
         a
         for a in df.atmosphere
         if (str(a).startswith("rco2 rs2, after") and _epoch(a) in SHOW)
-        or "replay" in str(a)
+        or ("replay" in str(a) and _epoch(a) != 99)
     },
     key=lambda a: (("replay" in a) + ("ocean-only" in a), _epoch(a)),
 ):
