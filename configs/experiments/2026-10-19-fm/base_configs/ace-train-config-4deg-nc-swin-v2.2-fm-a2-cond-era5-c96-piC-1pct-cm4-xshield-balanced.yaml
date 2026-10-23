@@ -2,17 +2,20 @@
 # sized between nc-swin-v2 (264M params, 925 GFLOP/sample) and nc-swin-v2.1
 # (15.5M, 45 GFLOP). In the 2026-06-26 norm ablation v2 had the best weather
 # skill but overfit (train 0.071 vs val 0.101), and v2.1 was capacity-limited
-# (train ~= val ~= 0.118). This one is ~130M params at ~176 GFLOP/sample
+# (train ~= val ~= 0.118). This one is ~120M params at ~343 GFLOP/sample
 # (nc-sfno: 14.5M, ~99 GFLOP without FFTs).
 #
 # Differences from the SFNO twin (same data, inference and loss):
 # - residual_prediction: false. Residual prediction made every Swin rollout
 #   blow up in year 2 while one-step validation stayed healthy (H1/H2/H4
 #   diagnostics, 2026-09-28); numerics were ruled out.
-# - num_levels: 2 (#1544) runs the bottleneck stages on a 12x24 token grid
-#   instead of 24x48, so each 4x8 window covers ~1/9 of the globe and the
-#   FLOPs roughly halve. The 48x96 padded grid is already a multiple of
-#   2**2 * window_size, so no extra padding is needed.
+# - num_levels: 1 (the nc-swin-v2/v2.1 shape): the bottleneck stages run on
+#   the 24x48 token grid. The first submission used num_levels: 2 (12x24
+#   bottleneck, ~130M params, ~176 GFLOP/sample); with fp32 matmuls and the
+#   non-finite guard its 2-epoch diagnostic still skipped 5 isolated NaN
+#   batches in 15k steps (~1 per 3k, vs 0-2 per 1.1M for v2), so the extra
+#   level is the prime suspect. num_levels: 1 roughly doubles FLOPs per sample
+#   (176 -> 343 GFLOP forward, measured with 2x mask-input channels).
 # - depth_multiplier 2 with embed_dim 256, head dim 64 throughout.
 # - skip_projection (#1544) keeps the decoder at embed_dim.
 # - drop_path_rate 0.2, which the builder divides by depth_multiplier, so the
@@ -1365,7 +1368,7 @@ stepper:
           patch_size:
           - 1
           - 1
-          num_levels: 2
+          num_levels: 1
           mlp_ratio: 4.0
           drop_path_rate: 0.2
           use_skip: true
