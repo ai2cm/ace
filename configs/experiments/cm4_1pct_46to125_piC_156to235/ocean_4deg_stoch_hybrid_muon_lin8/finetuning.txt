@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Stage 2: lin8 40 ep from each finite stage-1 arm's best_ckpt. mu1e-2 (adjphfi4) NaN'd inline every epoch and is not carried.
+# mu1e-3: stage 1 0au55xf7, beaker 01M5JZYP565B3EW9MEJT538X7Z, result dataset 01M5JZYP5E6S5384ZXA5TE4SH9.
+cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon_lin8|mu1e-3|ace-samudra-cm4|0au55xf7|best_ckpt|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M5JZYP5E6S5384ZXA5TE4SH9|8h
+# mu3e-3: stage 1 dx1n2ofh, beaker 01M5JZYZCGPK85Q1CTSVYJMTYS, result dataset 01M5JZYZCVQRR9M9A93VSCWPT4.
+cm4_1pct_46to125_piC_156to235-ocean_4deg_stoch_hybrid_muon_lin8|mu3e-3|ace-samudra-cm4|dx1n2ofh|best_ckpt|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M5JZYZCVQRR9M9A93VSCWPT4|8h
