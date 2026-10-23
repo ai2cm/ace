@@ -10,7 +10,7 @@ CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M39XBD8K0KB3GAQ79ETVN470}"   # 4deg-daily-ace2s-ft3-detached-rs0 (Jeremy, wandb 1r7oyu58)
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
-OCEAN_DS="${OCEAN_DS:-01M5K92VSR43C7KBSJBTCRPF9C}"   # derived GLO12 4deg store
+OCEAN_DS="${OCEAN_DS:-01M5N081CN8106EXJSXF8MP6VB}"   # derived GLO12 4deg store v2 (zero placeholders + zero-filled unsupervised channels)
 ERA5_DS="${ERA5_DS:-01M5K93RXH7XB0MJM1H41X2BE1}"   # era5-4deg-8layer-daily-glo12-coupled-2022-2025
 ERA5_ZARR=2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2025.zarr
 CFG="${CFG:-coupled-evaluator-config-glo12-era5-hindcast-2025-6mo.yaml}"
@@ -34,7 +34,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   ${OCEAN_CKPT_DS:+--dataset "${OCEAN_CKPT_DS}:${OCEAN_CKPT_FILE}:/ocean_ckpt.tar"} \
   ${OCEAN_CKPT_DS:+--dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar"} \
   ${CKPT_DS:+--dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar"} \
-  --dataset "${OCEAN_DS}:/glo12/2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars.zarr" \
+  --dataset "${OCEAN_DS}:/glo12/2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars-v2.zarr" \
   --dataset "${ERA5_DS}:/era5glo/${ERA5_ZARR}" \
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \

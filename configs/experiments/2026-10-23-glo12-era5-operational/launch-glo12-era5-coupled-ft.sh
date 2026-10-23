@@ -7,9 +7,9 @@ OCEAN_CKPT_DS="${OCEAN_CKPT_DS:-01M5MT2QD751XNNY94JB6JKMZV}"   # ocean lifted fr
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M5MT6MCQ7Q0JTK2YKWJ5G0CM}"   # atmosphere lifted from the same coupled FT
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-best_inference_ckpt.tar}"
-OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M5K93QN20V8BPRWDEFF550RP}"   # GLO12 2022-06..2024-12 ocean stats (+ UFS placeholder entries)
+OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M5N09430NXGCJFXZ3G7GTCDR}"   # GLO12 2022-06..2024-12 ocean stats v2 (+ UFS placeholder entries)
 OCEAN_STATS_SUBDIR="${OCEAN_STATS_SUBDIR:-}"
-OCEAN_DS="${OCEAN_DS:-01M5K92VSR43C7KBSJBTCRPF9C}"   # derived GLO12 4deg store (zero placeholders sfdsi/UI/VI)
+OCEAN_DS="${OCEAN_DS:-01M5N081CN8106EXJSXF8MP6VB}"   # derived GLO12 4deg store v2 (zero placeholders + zero-filled unsupervised channels)
 ERA5_DS="${ERA5_DS:-01M5K93RXH7XB0MJM1H41X2BE1}"   # era5-4deg-8layer-daily-glo12-coupled-2022-2025
 ERA5_ZARR=2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2025.zarr
 CFG="${CFG:-glo12-era5-coupledft-spb}"
@@ -35,7 +35,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${OCEAN_STATS_DS}:${OCEAN_STATS_SUBDIR:+${OCEAN_STATS_SUBDIR}:}/ocean_stats" \
   --dataset "${OCEAN_CKPT_DS}:${OCEAN_CKPT_FILE}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar" \
-  --dataset "${OCEAN_DS}:/glo12/2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars.zarr" \
+  --dataset "${OCEAN_DS}:/glo12/2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars-v2.zarr" \
   --dataset "${ERA5_DS}:/era5glo/${ERA5_ZARR}" \
   --gpus "$N_GPUS" --shared-memory 200GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \

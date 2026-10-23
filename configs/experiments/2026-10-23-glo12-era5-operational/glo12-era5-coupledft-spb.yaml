@@ -106,6 +106,12 @@ stepper_training:
       kwargs:
         crps_weight: 0.9
         energy_score_weight: 0.1
+      weights:
+        hfds_total_area: 0.0
+        tauuo: 0.0
+        tauvo: 0.0
+        wfo: 0.0
+        unaccounted_heating: 0.0
     loss_weight: 1.0
     n_steps: 4
     optimize_last_step_only: false
@@ -449,6 +455,11 @@ stepper:
           - sfdsi
           - UI
           - VI
+          - hfds_total_area
+          - tauuo
+          - tauvo
+          - wfo
+          - unaccounted_heating
   atmosphere:
     timedelta: 1D
     stepper:

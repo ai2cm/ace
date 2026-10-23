@@ -5,7 +5,8 @@
   states, 2022-06-03..2025-12-24, stamps 00Z).
 - Adds/overwrites the three placeholder channels the UFS-trained ocean reads and writes (sfdsi, UI, VI) as zeros over ocean, NaN
   over land, exactly as the cm4vars-uh UFS training store carries them (zero over ocean, NaN on land).
-- hfds_total_area / tauuo / tauvo / wfo stay all-NaN (dropped from out_names in the fine-tune); unaccounted_heating is not added.
+- hfds_total_area / tauuo / tauvo / wfo / unaccounted_heating are zero over ocean (NaN land): parameter_init cannot shrink the
+  output layer (dest 83 < loaded 88), so the fine-tune keeps all 88 outputs and gives these five a loss weight of 0.
 - Stats: GLO12 2022-06-01..2024-12-31 (the training years; 2025 untouched), same formulas as scripts/data_process/get_stats.py
   (centering = mean over time/lat/lon, scaling-full-field = std, scaling-residual = std of the 5-day difference,
   time-mean = mean over time); placeholder + unaccounted_heating entries copied from the UFS stats bundle
@@ -22,8 +23,8 @@ S = pathlib.Path(
     "/tmp/claude-1002/-home-troya-reports/72506aa0-f488-4bce-a119-3cb27f1b358f/scratchpad/glo12"
 )
 SRC = "gs://vcm-ml-intermediate/2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025.zarr"
-OUT = S / "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars.zarr"
-STATS = S / "stats"
+OUT = S / "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars-v2.zarr"
+STATS = S / "stats-v2"
 STATS.mkdir(exist_ok=True)
 
 g = xr.open_zarr(fsspec.get_mapper(SRC), consolidated=True).load()
@@ -33,6 +34,11 @@ for v in [
     "sfdsi",
     "UI",
     "VI",
+    "hfds_total_area",
+    "tauuo",
+    "tauvo",
+    "wfo",
+    "unaccounted_heating",
 ]:  # GLO12 carries real UI/VI (usi/vsi); the UFS-trained ocean only ever saw zeros, so they are overwritten
     g[v] = xr.zeros_like(g["thetao_0"]).where(ocean).astype("float32")
 g["sfdsi"].attrs = {
@@ -73,7 +79,16 @@ ufs = {
     for n in ["centering", "scaling-full-field", "scaling-residual"]
 }
 ufs_tm = xr.open_dataset(S / "ufs_stats" / "time-mean.nc")
-copy = ["sfdsi", "UI", "VI", "unaccounted_heating"]
+copy = [
+    "sfdsi",
+    "UI",
+    "VI",
+    "unaccounted_heating",
+    "hfds_total_area",
+    "tauuo",
+    "tauvo",
+    "wfo",
+]  # zero-filled in the store (loss weight 0 in the FT); stats from the UFS bundle so the checkpoint keeps its normalization
 for name, ds, src in [
     ("centering", centering, ufs["centering"]),
     ("scaling-full-field", scaling_ff, ufs["scaling-full-field"]),
@@ -84,20 +99,8 @@ for name, ds, src in [
     ds.attrs["history"] = (
         f"GLO12 stats 2022-06-01..2024-12-31 from {OUT.name}; {copy} copied from UFS stats 01M5D5GG2FB3MWWDD5GGSH8QR2"
     )
-    bad = [
-        v
-        for v in ds.data_vars
-        if not np.isfinite(ds[v].values).all()
-        and v not in ("hfds_total_area", "tauuo", "tauvo", "wfo")
-    ]
-    print(
-        name,
-        "n",
-        len(ds.data_vars),
-        "non-finite (expected only the 4 NaN diagnostics):",
-        bad,
-        flush=True,
-    )
+    bad = [v for v in ds.data_vars if not np.isfinite(ds[v].values).all()]
+    print(name, "n", len(ds.data_vars), "non-finite (expected none):", bad, flush=True)
     ds.to_netcdf(STATS / f"{name}.nc")
 for v in copy:
     if v in ufs_tm:
