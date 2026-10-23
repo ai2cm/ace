@@ -2,9 +2,9 @@
 # GLO12 operational coupled fine-tune: UFS-trained SamudrACE ocean + ERA5 4deg ACE2S (both lifted from the alternating UFS coupled FT) on the GLO12 4deg 5-day store with ERA5, 2022-06..2024-12 (2025 held out).
 #   ./launch-glo12-era5-coupled-ft.sh   (defaults = the lifted spb-ufsstats components, GLO12 derived store, GLO12 stats, GLO12-period ERA5 store)
 set -euo pipefail
-OCEAN_CKPT_DS="${OCEAN_CKPT_DS:-01M5K8R9X3V9VFAC6YAT1N9T52}"   # ocean lifted from the alternating UFS coupled FT
+OCEAN_CKPT_DS="${OCEAN_CKPT_DS:-01M5MT2QD751XNNY94JB6JKMZV}"   # ocean lifted from the alternating UFS coupled FT
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-best_inference_ckpt.tar}"
-ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M5K8RAGJDHM3X81FD42FXS4K}"   # atmosphere lifted from the same coupled FT
+ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M5MT6MCQ7Q0JTK2YKWJ5G0CM}"   # atmosphere lifted from the same coupled FT
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-best_inference_ckpt.tar}"
 OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M5K93QN20V8BPRWDEFF550RP}"   # GLO12 2022-06..2024-12 ocean stats (+ UFS placeholder entries)
 OCEAN_STATS_SUBDIR="${OCEAN_STATS_SUBDIR:-}"
