@@ -22,7 +22,7 @@ ACE_GIT_REF="49ccc95df19c218c97064f41dcf4304597aaf894"
 IMAGE="oliverwm/fme-deps-only-54045d546"
 
 CONFIG_COMMIT=$(git -C "$SCRIPT_DIR" rev-parse HEAD)
-if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain -- .)" ]]; then
+if [[ -n "$(git -C "$SCRIPT_DIR" -c core.fileMode=false status --porcelain -- .)" ]]; then
     CONFIG_COMMIT="$CONFIG_COMMIT-dirty"
 fi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
@@ -48,9 +48,10 @@ launch () {
     local CONFIG_PATH=$2
     local MOUNT=$3
     local COMMAND=$4
-    local CONFIG_B64
+    local CONFIG_B64 JOB_TYPE=inference
+    [[ "$COMMAND" == *fme.ace.train* ]] && JOB_TYPE=training
     CONFIG_B64=$(base64 < "$CONFIG_PATH" | tr -d '\n')
-    echo "launch $JOB_NAME"
+    echo "launch $JOB_NAME ($JOB_TYPE)"
     gantry run \
         --remote https://github.com/ai2cm/ace \
         --ref "$ACE_GIT_REF" \
@@ -65,6 +66,7 @@ launch () {
         --cluster ai2/titan-cirrascale \
         --env WANDB_USERNAME=$WANDB_IDENTITY \
         --env WANDB_NAME="$JOB_NAME" \
+        --env WANDB_JOB_TYPE="$JOB_TYPE" \
         --env WANDB_RUN_GROUP="$NAME_PREFIX" \
         --env EXPERIMENT_CONFIG_COMMIT="$CONFIG_COMMIT" \
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
