@@ -12,4 +12,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3stoch_a2s-fto|
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto|o0a0rs0|01M5EGZJ30Y0VTBG1K096SQEFS|training|best_inference_ckpt|normal|--min-runtime 8h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto||01M5EGZJ30Y0VTBG1K096SQEFS|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto||01M5EGZJ30Y0VTBG1K096SQEFS|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto|z|01M5EGZJ30Y0VTBG1K096SQEFS|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M5NCSK1BZHRDP5EFR76A5W6K|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto|z|01M5EGZJ30Y0VTBG1K096SQEFS|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M5NCSK1BZHRDP5EFR76A5W6K|ai2/ace|jupiter+titan
