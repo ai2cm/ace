@@ -1,7 +1,12 @@
 import torch
 
+from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.subset import SubsetDataset
-from fme.core.dataset.testing import MockDataset, assert_dataset_item_length
+from fme.core.dataset.testing import (
+    MockDataset,
+    assert_dataset_item_length,
+    assert_sample_labels_match_items,
+)
 
 
 def test_subset_dataset_first_last_time():
@@ -54,3 +59,19 @@ def test_subset_dataset_len():
     subset = SubsetDataset(dataset, indices=[2, 3, 5, 7])
 
     assert len(subset) == 4
+
+
+def test_subset_dataset_sample_labels():
+    dataset = XarrayConcat(
+        [
+            MockDataset.new(
+                n_times=10, varnames=["var1"], sample_n_times=2, labels={label}
+            )
+            for label in ["a", "b"]
+        ]
+    )
+
+    subset = SubsetDataset(dataset, indices=[0, 9, 10, 2])
+
+    assert_sample_labels_match_items(subset)
+    assert subset.sample_labels == [{"a"}, {"b"}, {"b"}, {"a"}]

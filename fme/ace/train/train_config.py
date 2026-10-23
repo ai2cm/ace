@@ -94,6 +94,7 @@ class InlineValidationConfig:
             raise ValueError(
                 f"InlineValidationConfig weight must be non-negative, got {self.weight}"
             )
+        self.loader.validate_for_validation("a validation loader")
 
     @property
     def using_labels(self) -> bool:

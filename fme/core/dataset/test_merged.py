@@ -4,7 +4,11 @@ import pytest
 import torch
 
 from fme.core.dataset.merged import MergedXarrayDataset, TimePaddedMergedDataset
-from fme.core.dataset.testing import MockDataset, assert_dataset_item_length
+from fme.core.dataset.testing import (
+    MockDataset,
+    assert_dataset_item_length,
+    assert_sample_labels_match_items,
+)
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
@@ -368,3 +372,32 @@ def test_time_padded_merged_raises_on_different_epochs():
 def test_time_padded_merged_empty_raises():
     with pytest.raises(ValueError, match="at least one dataset"):
         TimePaddedMergedDataset([])
+
+
+@pytest.mark.parametrize(
+    "labels, expected",
+    [
+        (({"a"}, {"b"}), {"a", "b"}),
+        ((None, {"b"}), {"b"}),
+        ((None, None), None),
+    ],
+)
+def test_merged_sample_labels(labels, expected):
+    datasets = [
+        MockDataset.new(
+            n_times=10, varnames=[f"var_{i}"], sample_n_times=3, labels=ds_labels
+        )
+        for i, ds_labels in enumerate(labels)
+    ]
+    merged_dataset = MergedXarrayDataset(datasets)
+    assert_sample_labels_match_items(merged_dataset)
+    assert merged_dataset.sample_labels[0] == expected
+
+
+def test_time_padded_merged_sample_labels():
+    short_ds, long_ds = _make_aligned_pair(short_n=2, long_n=3)
+    short_ds.labels = {"x"}
+    long_ds.labels = {"y"}
+    merged = TimePaddedMergedDataset([short_ds, long_ds])
+    assert_sample_labels_match_items(merged)
+    assert merged.sample_labels[0] == {"y"}

@@ -30,6 +30,14 @@ def assert_dataset_item_length(item: DatasetItem):
         )
 
 
+def assert_sample_labels_match_items(dataset: DatasetABC):
+    """Assert ``dataset.sample_labels`` matches the labels of every item."""
+    sample_labels = dataset.sample_labels
+    assert len(sample_labels) == len(dataset)
+    for i, labels in enumerate(sample_labels):
+        assert labels == dataset[i][2], f"sample {i}"
+
+
 class MockDataset(DatasetABC):
     START_DATE = "2000-01-01"
     START_DATE_CF = cftime.DatetimeGregorian(2000, 1, 1)
@@ -116,6 +124,10 @@ class MockDataset(DatasetABC):
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
         return self.time[: len(self.time) - self._sample_n_times + 1]
+
+    @property
+    def sample_labels(self) -> list[set[str] | None]:
+        return [self.labels] * len(self)
 
     @property
     def sample_n_times(self) -> int:

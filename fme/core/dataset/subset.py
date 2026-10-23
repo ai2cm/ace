@@ -22,6 +22,11 @@ class SubsetDataset(DatasetABC):
         return self._dataset.sample_start_times[self._indices]
 
     @property
+    def sample_labels(self) -> list[set[str] | None]:
+        labels = self._dataset.sample_labels
+        return [labels[i] for i in self._indices]
+
+    @property
     def all_times(self) -> xr.CFTimeIndex:
         """
         Like sample_start_times, but includes all times in the dataset, including

@@ -45,6 +45,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.ace.data_loading.label_sampling import LabelSamplingConfig
 from fme.ace.data_loading.perturbation import (
     ConstantConfig,
     GreensFunctionConfig,
