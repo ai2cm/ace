@@ -34,7 +34,7 @@ BASE = (
 OUT = HERE / "glo12-era5-coupledft-spb.yaml"
 OCEAN_DIR, OCEAN_ZARR = (
     "/glo12",
-    "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars.zarr",
+    "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars-v2.zarr",
 )
 ATM_DIR, ATM_ZARR = (
     "/era5glo",
