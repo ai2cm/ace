@@ -51,6 +51,10 @@ corr["corrector_disabled_epochs"] = (
 cfg = copy.deepcopy(template)
 cfg["stepper"]["ocean"]["stepper"] = ocean
 cfg["stepper"]["atmosphere"]["stepper"] = atmos
+# Elynn's template trains with activation checkpointing in both networks; the component configs come from runs that
+# did not need it. Without these the 1deg pair OOMs on an 80 GiB GPU in the first validation pass (2026-10-23).
+ocean["step"]["config"]["builder"]["config"]["checkpoint_strategy"] = "all"
+atmos["step"]["config"]["builder"]["config"]["checkpointing"] = 3
 sic = corr["sea_ice_fraction_correction"]["sea_ice_fraction_name"]
 cfg["stepper"]["ocean_fraction_prediction"]["sea_ice_fraction_name"] = sic
 st = cfg["stepper_training"]

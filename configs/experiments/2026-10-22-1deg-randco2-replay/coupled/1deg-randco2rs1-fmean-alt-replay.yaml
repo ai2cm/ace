@@ -396,6 +396,7 @@ stepper:
               norm: instance
               zonally_periodic_upsample: true
               lat_pad: pole
+              checkpoint_strategy: all
           normalization:
             network:
               global_means_path: /ocean_stats/centering.nc
@@ -665,6 +666,7 @@ stepper:
               spectral_transform: sht
               affine_norms: true
               normalize_big_skip: true
+              checkpointing: 3
           normalization:
             network:
               global_means_path: /atmos_stats/centering.nc
