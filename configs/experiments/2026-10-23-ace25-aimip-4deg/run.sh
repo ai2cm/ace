@@ -14,7 +14,8 @@ export GRPC_VERBOSITY=ERROR
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 NAME_PREFIX="ace25-aimip-4deg"
-SEED=0
+# Seed 0 came first; seeds 1-3 measure the seed spread of the in-sample trend.
+SEEDS="0 1 2 3"
 
 # Jeremy's 4-degree paper arm ran at f001ebb06 (pretrain) and efc6c39cc (fine-tune); fme/ is
 # the same tree there and at 49ccc95, which holds the configs these are derived from.
@@ -102,16 +103,22 @@ stage () {
     launch "$JOB_NAME" "$SCRIPT_DIR/$CONFIG" "$MOUNT" "$COMMAND"
 }
 
-PRETRAIN="$NAME_PREFIX-pretrain-rs$SEED"
-FINETUNE="$NAME_PREFIX-finetune-rs$SEED"
-stage "$PRETRAIN" pretrain.yaml "" "" "python -m fme.ace.train"
-stage "$FINETUNE" finetune.yaml "$PRETRAIN" "/weights" "python -m fme.ace.train"
 # The evaluated model is the fine-tune's epoch-10 EMA checkpoint, as in the paper.
 CKPT="training_checkpoints/ema_ckpt_0010.tar:/ckpt.tar"
-stage "$NAME_PREFIX-evaluate-control-rs$SEED" evaluate-control.yaml "$FINETUNE" "$CKPT" \
-    "python -m fme.ace.evaluator"
-# The +4 K pair uses fme.ace.inference: the evaluator at this ref cannot apply SST perturbations.
-for EXP in control p4k; do
-    stage "$NAME_PREFIX-inference-$EXP-rs$SEED" "inference-$EXP.yaml" "$FINETUNE" "$CKPT" \
-        "python -m fme.ace.inference"
+for SEED in $SEEDS; do
+    PRETRAIN="$NAME_PREFIX-pretrain-rs$SEED"
+    FINETUNE="$NAME_PREFIX-finetune-rs$SEED"
+    stage "$PRETRAIN" pretrain.yaml "" "" "python -m fme.ace.train"
+    stage "$FINETUNE" finetune.yaml "$PRETRAIN" "/weights" "python -m fme.ace.train"
+    # Seed 0 only: an evaluation against ERA5 that no comparison uses.
+    if [[ "$SEED" == 0 ]]; then
+        stage "$NAME_PREFIX-evaluate-control-rs$SEED" evaluate-control.yaml "$FINETUNE" "$CKPT" \
+            "python -m fme.ace.evaluator"
+    fi
+    # The +4 K pair uses fme.ace.inference: the evaluator at this ref cannot apply SST
+    # perturbations.
+    for EXP in control p4k; do
+        stage "$NAME_PREFIX-inference-$EXP-rs$SEED" "inference-$EXP.yaml" "$FINETUNE" "$CKPT" \
+            "python -m fme.ace.inference"
+    done
 done

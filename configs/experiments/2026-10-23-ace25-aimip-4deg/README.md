@@ -15,7 +15,7 @@ Changes from the 4-degree paper arm:
 |---|---|---|
 | pretrain | `pretrain.yaml` | 40 epochs, 1-step |
 | fine-tune | `finetune.yaml` | 10 epochs, 3-step detached, from the pretrain's `best_ckpt.tar` |
-| evaluate | `evaluate-control.yaml` | the fine-tune's `ema_ckpt_0010.tar` against ERA5; 4 years from 1979-01-01 |
+| evaluate | `evaluate-control.yaml` | seed 0 only: the fine-tune's `ema_ckpt_0010.tar` against ERA5; 4 years from 1979-01-01 |
 | +4 K | `inference-{control,p4k}.yaml` | the same checkpoint and window, run with `fme.ace.inference`, which can perturb SST; same window as `im4ecamc`'s +4 K run (wandb `muu8pjbc`), without its initial-condition perturbation |
 
 Constraints:
@@ -23,5 +23,9 @@ Constraints:
 - Nothing may train on, validate on, or be selected using 2015 onward (AIMIP holdout).
 - All stages run at ace `49ccc95` with image `oliverwm/fme-deps-only-54045d546`, as the paper
   arm did; the configs are passed to the jobs inline.
+
+Four seeds (0-3) run the full chain; the in-sample trend is read from each fine-tune's epoch-10
+`long_36year` rollout. The matching seed replicates of `im4ecamc`'s recipe are in
+`../2026-10-23-im4ecamc-seeds/`.
 
 Launch with `bash run.sh`. It is safe to rerun: each run launches whatever stage has become ready.
