@@ -12,6 +12,7 @@ ATMOS_DS="${ATMOS_DS:-01M55CYWQKSFSB8GBCVM6WK59P}"                # random-CO2 A
 ATMOS_CKPT="${ATMOS_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
 N_GPUS="${N_GPUS:-4}"
 PRIORITY="${PRIORITY:-high}"
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # guaranteed time before Beaker may preempt (gantry --min-runtime; 0 = any time)
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -22,7 +23,7 @@ JOB="1deg-randco2rs1-fmean-${ARM}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "1deg coupled FT (${ARM}) of the random-CO2 ACE2S rs1 with the ocean_ppad_fmean Samudra" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \
