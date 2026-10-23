@@ -15,7 +15,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-if [ -n "$MIN_RUNTIME" ]; then PREEMPT_ARGS="--min-runtime $MIN_RUNTIME"; else PREEMPT_ARGS="--preemptible"; fi
+if [ -n "$MIN_RUNTIME" ]; then PREEMPT_ARGS="--min-runtime $MIN_RUNTIME"; else PREEMPT_ARGS="--min-runtime "$MIN_RUNTIME""; fi
 cd "$REPO_ROOT"
 JOB="ace4deg-${CFG}-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \

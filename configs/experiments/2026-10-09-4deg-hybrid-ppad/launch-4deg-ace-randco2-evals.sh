@@ -6,6 +6,7 @@
 #   CKPT_DS=01M4Z3CQXD8BF13S4X6462XVNH TAG=rco2rs2-before ./launch-4deg-ace-randco2-evals.sh
 #   CKPT_DS=<lifted atmosphere dataset> TAG=rco2rs2-after-jointens-ep<N> ./launch-4deg-ace-randco2-evals.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:?Beaker dataset holding the atmosphere checkpoint}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 TAG="${TAG:?short label for the atmosphere, e.g. rco2rs2-before}"
@@ -24,7 +25,7 @@ for X in $CO2S; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "ACE-only random-CO2 ${X}xCO2 ic_0003 5.25-yr rollout of atmosphere ${TAG} (${CKPT_DS}:${CKPT_FILE})" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
