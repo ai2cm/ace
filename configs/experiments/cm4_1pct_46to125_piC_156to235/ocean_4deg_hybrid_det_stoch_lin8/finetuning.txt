@@ -1,0 +1,4 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Quick check: stochastic lin8 (16 ep) from Troy's deterministic 4deg hybrid qt9gvoti (beaker 01M4HKBRFNH1T2PZ7N990F1V7C), best_inference_ckpt.
+cm4_1pct_46to125_piC_156to235-ocean_4deg_hybrid_det_stoch_lin8|rs0|ace-samudra-cm4|qt9gvoti|best_inference_ckpt|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M4M4N9PVJ60PSCJPJNXQBASY|8h
