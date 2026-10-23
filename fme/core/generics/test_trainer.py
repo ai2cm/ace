@@ -49,6 +49,11 @@ from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 
+RESUME_MAX_EPOCHS = 2
+RESUME_N_TRAIN_BATCHES = 5
+RESUME_LAST_EPOCH_STEP = RESUME_MAX_EPOCHS * RESUME_N_TRAIN_BATCHES
+BATCH_LOG_KEY = "training_samples_per_second_on_rank_0"
+
 
 class PSType:
     pass
@@ -214,7 +219,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         compute_derived_variables: bool = False,
         evaluate_all_steps: bool = False,
     ) -> TrainOutput:
-        optimization.accumulate_loss(torch.tensor(float("inf")))
+        # a finite placeholder loss, since Optimization.accumulate_loss
+        # rejects non-finite losses by default
+        optimization.accumulate_loss(torch.tensor(1.0))
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
             self.validation_batches_seen.append(batch.i)
@@ -642,12 +649,6 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert stepper.loaded_state["foo"] == "bar"
     assert "modules" in stepper.loaded_state
     assert len(stepper.loaded_state) == 2
-
-
-RESUME_MAX_EPOCHS = 2
-RESUME_N_TRAIN_BATCHES = 5
-RESUME_LAST_EPOCH_STEP = RESUME_MAX_EPOCHS * RESUME_N_TRAIN_BATCHES
-BATCH_LOG_KEY = "training_samples_per_second_on_rank_0"
 
 
 def _start_job(experiment_dir: str, **trainer_kwargs: Any) -> Trainer:
@@ -2167,3 +2168,9 @@ class TestBuildInferenceCallback:
             callback(epoch=1)
             callback(epoch=2)
         assert factory.call_count == 2
+
+
+def test_train_logs_skipped_non_finite_batches(tmp_path: str):
+    with mock_wandb() as wandb:
+        _start_job(tmp_path).train()
+        assert wandb.get_logs()[1]["skipped_non_finite_batches"] == 0
