@@ -1,0 +1,31 @@
+# +4 K response of the AIMIP-mode 4-degree paper recipe: +4 K uniform SST.
+# Runs with fme.ace.inference, because the evaluator at this code version does not pass the
+# ocean configuration that SST perturbations need. Same window as im4ecamc's +4 K run (wandb
+# muu8pjbc): 4 years from 1979-01-01, one initial condition, forcing from the training store.
+# Unlike that run, the initial condition itself is not perturbed.
+experiment_dir: /results
+n_forward_steps: 1460
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  project: ace
+initial_condition:
+  path: /climate-default/2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+    - '1979-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    engine: zarr
+    file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+  num_data_workers: 4
+  perturbations:
+    sst:
+    - type: constant
+      config:
+        amplitude: 4.0
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true

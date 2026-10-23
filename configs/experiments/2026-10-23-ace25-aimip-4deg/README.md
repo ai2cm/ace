@@ -15,7 +15,8 @@ Changes from the 4-degree paper arm:
 |---|---|---|
 | pretrain | `pretrain.yaml` | 40 epochs, 1-step |
 | fine-tune | `finetune.yaml` | 10 epochs, 3-step detached, from the pretrain's `best_ckpt.tar` |
-| evaluate | `evaluate-{control,p4k}.yaml` | the fine-tune's `ema_ckpt_0010.tar`; 4 years from 1979-01-01, matching the `im4ecamc` harness (wandb `muu8pjbc`) |
+| evaluate | `evaluate-control.yaml` | the fine-tune's `ema_ckpt_0010.tar` against ERA5; 4 years from 1979-01-01 |
+| +4 K | `inference-{control,p4k}.yaml` | the same checkpoint and window, run with `fme.ace.inference`, which can perturb SST; same window as `im4ecamc`'s +4 K run (wandb `muu8pjbc`), without its initial-condition perturbation |
 
 Constraints:
 

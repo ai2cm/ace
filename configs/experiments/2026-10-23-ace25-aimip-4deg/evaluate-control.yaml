@@ -1,6 +1,6 @@
-# +4 K response of the AIMIP-mode 4-degree paper recipe: control.
-# Matched to the im4ecamc perturbation harness (wandb muu8pjbc): 4 years from
-# 1979-01-01, one initial condition, forcing from the training store.
+# Evaluation of the AIMIP-mode 4-degree paper recipe against ERA5: 4 years from 1979-01-01,
+# one initial condition, forcing from the training store. The +4 K response comes from the
+# inference-{control,p4k}.yaml pair instead.
 experiment_dir: /results
 n_forward_steps: 1460
 forward_steps_in_memory: 73

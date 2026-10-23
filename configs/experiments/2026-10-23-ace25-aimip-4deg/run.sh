@@ -107,7 +107,11 @@ FINETUNE="$NAME_PREFIX-finetune-rs$SEED"
 stage "$PRETRAIN" pretrain.yaml "" "" "python -m fme.ace.train"
 stage "$FINETUNE" finetune.yaml "$PRETRAIN" "/weights" "python -m fme.ace.train"
 # The evaluated model is the fine-tune's epoch-10 EMA checkpoint, as in the paper.
+CKPT="training_checkpoints/ema_ckpt_0010.tar:/ckpt.tar"
+stage "$NAME_PREFIX-evaluate-control-rs$SEED" evaluate-control.yaml "$FINETUNE" "$CKPT" \
+    "python -m fme.ace.evaluator"
+# The +4 K pair uses fme.ace.inference: the evaluator at this ref cannot apply SST perturbations.
 for EXP in control p4k; do
-    stage "$NAME_PREFIX-evaluate-$EXP-rs$SEED" "evaluate-$EXP.yaml" "$FINETUNE" \
-        "training_checkpoints/ema_ckpt_0010.tar:/ckpt.tar" "python -m fme.ace.evaluator"
+    stage "$NAME_PREFIX-inference-$EXP-rs$SEED" "inference-$EXP.yaml" "$FINETUNE" "$CKPT" \
+        "python -m fme.ace.inference"
 done
