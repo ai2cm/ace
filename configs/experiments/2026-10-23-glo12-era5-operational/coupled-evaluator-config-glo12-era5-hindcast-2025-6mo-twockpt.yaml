@@ -21,7 +21,7 @@ checkpoint_path:
     eastward_surface_wind_stress: -1.0
     northward_surface_wind_stress: -1.0
 n_coupled_steps: 36
-coupled_steps_in_memory: 8
+coupled_steps_in_memory: 4
 loader:
   num_data_workers: 2
   dataset:

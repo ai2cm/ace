@@ -3,8 +3,8 @@
 # store, single coupled checkpoint at /ckpt.tar, monthly outputs for Nino3.4 scoring. Troy 2026-10-23.
 experiment_dir: /results
 checkpoint_path: /ckpt.tar
-n_coupled_steps: 71
-coupled_steps_in_memory: 8
+n_coupled_steps: 70
+coupled_steps_in_memory: 10
 loader:
   num_data_workers: 2
   dataset:

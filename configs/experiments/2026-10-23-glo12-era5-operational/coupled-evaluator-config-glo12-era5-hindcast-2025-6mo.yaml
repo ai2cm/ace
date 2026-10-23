@@ -4,7 +4,7 @@
 experiment_dir: /results
 checkpoint_path: /ckpt.tar
 n_coupled_steps: 36
-coupled_steps_in_memory: 8
+coupled_steps_in_memory: 4
 loader:
   num_data_workers: 2
   dataset:

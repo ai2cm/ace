@@ -20,8 +20,8 @@ checkpoint_path:
   atmosphere_output_scale:
     eastward_surface_wind_stress: -1.0
     northward_surface_wind_stress: -1.0
-n_coupled_steps: 71
-coupled_steps_in_memory: 8
+n_coupled_steps: 70
+coupled_steps_in_memory: 10
 loader:
   num_data_workers: 2
   dataset:
