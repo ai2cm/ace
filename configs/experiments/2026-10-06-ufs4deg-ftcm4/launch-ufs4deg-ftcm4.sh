@@ -5,6 +5,7 @@
 # Beaker dataset DATA_DS (the GCS store plus hfgeou from CM4 and zero sfdsi/UI/VI so the CM4 variable set loads).
 #   ARMS="resid-ohc resid-ohc-cap0005 resid-noohc" ./launch-ufs4deg-ftcm4.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-resid-ohc resid-ohc-cap0005 resid-noohc}"
 DATA_DS="${DATA_DS:-01M4BV9103G4C330XQM7R17RPT}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars (regenerated store)
 STATS_DS="${STATS_DS:-01KY8D816E67NXHP2EB29FHBJM}"   # CM4 4deg stats: the checkpoints' own normalization
@@ -28,7 +29,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "UFS 4deg replay: ${A} fine-tuned from CM4 ${SRC} best_inference_ckpt" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

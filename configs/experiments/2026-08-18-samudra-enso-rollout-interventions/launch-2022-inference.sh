@@ -5,6 +5,7 @@
 # rollouts run past the end of the ocean dataset, so verification comes later
 # from an observational SST product instead of from paired targets.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:-01M2GMQC7S44NCJN3NCS3CFEVV}"
 CKPT_FILE="${CKPT_FILE:-best_inference_ckpt.tar}"
 BLOCKS="${BLOCKS:-01 02 03 04 05 06 07 08 09 10 11 12}"
@@ -19,7 +20,7 @@ JOB="samudra-ufs-cplft7-fc2022-blk${B}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "Coupled inference, 2022-2023 initializations, block ${B}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority high --preemptible \
+  --workspace ai2/ace --priority high --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \

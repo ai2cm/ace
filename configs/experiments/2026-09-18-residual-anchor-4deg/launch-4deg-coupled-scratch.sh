@@ -5,6 +5,7 @@
 #   ARMS="ff-ohc resid-ohc resid-anomohc" ./launch-4deg-coupled-scratch.sh
 #   VARIANT=scratch-trueocean ./launch-4deg-coupled-scratch.sh   # atmosphere forced by the true ocean surface
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-ff-ohc resid-ohc resid-anomohc}"
 VARIANT="${VARIANT:-scratch}"   # scratch | scratch-trueocean (atmosphere forced by the true ocean surface in training)
 COUPLED_STATS="${COUPLED_STATS:-01KY8D816E67NXHP2EB29FHBJM}"   # 4deg cm4 coupled stats: coupled_atmosphere/ + ocean/
@@ -24,7 +25,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg anchor arm ${A}: ocean trained from scratch inside the coupled system (frozen stochastic ACE2S atmosphere), variant ${VARIANT}" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

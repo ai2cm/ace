@@ -22,6 +22,7 @@
 #   DRY_RUN=1 ./launch-wave1.sh                       # print only
 
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 
 if [[ $# -gt 0 ]]; then
   echo "ERROR: arms are selected via the ARMS env var, not positional args" >&2
@@ -319,7 +320,7 @@ launch() {
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority "$PRIORITY" \
-    --min-runtime "${MIN_RUNTIME:-8h}" \
+    --min-runtime "$MIN_RUNTIME" \
     "${clusters[@]}" \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

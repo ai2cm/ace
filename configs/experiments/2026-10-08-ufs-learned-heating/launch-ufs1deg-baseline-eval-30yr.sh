@@ -1,6 +1,7 @@
 #!/bin/bash
 # Full-record rollout of the July 2026 1deg UFS baseline checkpoint (weka store), for comparison with the 4deg arms.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:-01KX6MCJ53X0VCK5T880P6TEG1}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 NAME="${NAME:-ufs1deg-baseline-jul2026}"
@@ -14,7 +15,7 @@ JOB="samudra-${NAME}-eval-30yr-1994"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "UFS 1deg July-2026 baseline: full-record ocean-only rollout from 1994 with monthly outputs" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ufs4deg-eval-10yr \

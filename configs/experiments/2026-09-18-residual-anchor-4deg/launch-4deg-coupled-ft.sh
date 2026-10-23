@@ -5,6 +5,7 @@
 # compare against the no-FT coupled control from launch-4deg-coupled-evals.sh).
 #   ARMS="ff-ohc resid-ohc resid-anomohc" ./launch-4deg-coupled-ft.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-ff-ohc resid-ohc resid-anomohc}"
 VARIANT="${VARIANT:-}"   # e.g. "-ens": use coupled/<arm>-coupled-ft-ens.yaml and name the job ...-coupled-ft-ens
 OCEAN_ARM_SUFFIX="${OCEAN_ARM_SUFFIX:-}"   # e.g. "-stoch": take the ocean checkpoint from samudra-anchor4deg-<arm>-stoch
@@ -28,7 +29,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg anchor arm ${A}: coupled fine-tune (ocean MSE, atmosphere frozen) with the 4deg ACE2S atmosphere" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

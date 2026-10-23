@@ -5,6 +5,7 @@
 # Ocean-only, 1 GPU per arm.
 #   ARMS="ff-ohc resid-ohc resid-anomohc" ./launch-4deg-ft8.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 STATS_DS="${STATS_DS:-01KY8D816E67NXHP2EB29FHBJM}"   # 4deg cm4 coupled stats
 ARMS="${ARMS:-ff-ohc resid-ohc resid-anomohc}"
 PRIORITY="${PRIORITY:-high}"
@@ -22,7 +23,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg anchor arm ${A}: 10-epoch 8-step fine-tune from its best_ckpt" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

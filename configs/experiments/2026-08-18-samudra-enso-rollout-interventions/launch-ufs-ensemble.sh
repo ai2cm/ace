@@ -3,6 +3,7 @@
 # atmosphere-noise seeds. SYSTEM selects the checkpoint; existing unseeded
 # runs are member 0, seeds 101-107 add 7 more members (8 total).
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 SYSTEM="${SYSTEM:?cplft7 or julyft}"
 case "$SYSTEM" in
   cplft7) DS=01M2GMQC7S44NCJN3NCS3CFEVV; FILE=best_inference_ckpt.tar;;
@@ -22,7 +23,7 @@ JOB="samudra-ufs-${SYSTEM}ens-s${S}-yr${Y}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "ensemble member seed ${S}, ${SYSTEM}, year ${Y}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority high --preemptible \
+  --workspace ai2/ace --priority high --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \

@@ -5,6 +5,7 @@
 # sea ice improves when the shortwave it gets over ice is right.
 #   ./launch-4deg-coupled-uswrfdata-evals.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 PRIORITY="${PRIORITY:-high}"
 declare -A CKPT=([ff-ohc-stoch-coupled-ft-ens]=01M496CVVRB95TPACAB9JT7CS3 [resid-ohc-coupled-ft]=01M496J0TK06AG107611GDFPM9)
 SCENARIOS="${SCENARIOS:-1pct}"
@@ -25,7 +26,7 @@ for A in "${!CKPT[@]}"; do
     out=$(gantry run --name "$JOB" --task-name "$JOB" \
       --description "4deg ${A}: coupled ${TAG} with USWRFsfc read from CM4 data (ocean_forcings_from_data)" \
       --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-      --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+      --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
       --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
       --weka climate-default:/climate-default \
       --env PYTORCH_ALLOC_CONF=expandable_segments:True \

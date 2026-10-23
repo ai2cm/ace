@@ -4,6 +4,7 @@
 # the temperature field each recipe's corrector supplies, and what the network does unaided.
 #   ARMS="ff-ohc ff-ohc-precorr resid-ohc resid-anomohc" MODES="on noohc" ./launch-4deg-corrdiag-evals.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-ff-ohc ff-ohc-precorr ff-ohc-regL1w1 resid-ohc resid-anomohc resid-anomohc-precorr}"
 MODES="${MODES:-on noohc}"
 PRIORITY="${PRIORITY:-high}"
@@ -23,7 +24,7 @@ for A in $ARMS; do
     out=$(gantry run --name "$JOB" --task-name "$JOB" \
       --description "4deg arm ${A}: 20-yr piC with corrector diagnostics, OHC correction ${M}" \
       --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-      --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+      --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
       --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
       --weka climate-default:/climate-default \
       --env PYTORCH_ALLOC_CONF=expandable_segments:True \

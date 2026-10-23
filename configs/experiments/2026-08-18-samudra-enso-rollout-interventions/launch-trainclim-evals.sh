@@ -6,6 +6,7 @@
 # verification hindcasts, so the climatology they define is directly
 # applicable to them.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:-01M2GMQC7S44NCJN3NCS3CFEVV}"
 CKPT_FILE="${CKPT_FILE:-best_inference_ckpt.tar}"
 YEARS="${YEARS:-1994 1995 1996 1997 1998 1999 2000 2001 2012 2013 2014 2015 2016 2017 2018 2019 2020 2021}"
@@ -20,7 +21,7 @@ JOB="samudra-ufs-cplft7-trainclim-yr${Y}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "Training-period drift climatology hindcasts, year ${Y}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority high --preemptible \
+  --workspace ai2/ace --priority high --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \

@@ -6,6 +6,7 @@
 #   ./launch-ufs4deg-learnedheat-ftcm4.sh   (ARMS=... to pick; default stats = UFS + unaccounted_heating; the 2026-10-14 arms
 #   ran with STATS_DS=01M4W3MH28S5HPAJ84R7AB4V3W STATS_SUBDIR=ocean, the CM4 stats, which is wrong for a UFS fine-tune)
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-resid-ohc-cap0005-learnedheat-ftcm4 resid-ohc-cap0005-const0-ftcm4}"
 DATA_DS="${DATA_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # cm4vars-uh store (CM4 variable set + unaccounted_heating target)
 STATS_DS="${STATS_DS:-01M4E83B1B83CB8DV9YEQTGA4G}"   # UFS 4deg 2026-10-06 stats + unaccounted_heating stats (files at the dataset root)
@@ -32,7 +33,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "UFS 4deg replay: ${A} fine-tuned from CM4 ${SRC} best_inference_ckpt" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

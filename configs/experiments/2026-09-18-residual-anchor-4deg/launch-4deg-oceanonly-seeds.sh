@@ -4,6 +4,7 @@
 # collapses happen without ACE and whether their timing is stochastic.
 #   CKPT_DS=<dataset> NAME=ffstoch-pretrain SEEDS="0 1 2" ./launch-4deg-oceanonly-seeds.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:?checkpoint dataset}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 NAME="${NAME:?short arm name for the job}"
@@ -22,7 +23,7 @@ for SEED in $SEEDS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg ${NAME}: 50-yr 1pct ocean-only rollout, CM4 atmosphere prescribed, seed ${SEED}" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \

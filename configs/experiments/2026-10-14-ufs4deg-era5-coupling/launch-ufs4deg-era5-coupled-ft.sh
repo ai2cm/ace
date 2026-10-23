@@ -2,6 +2,7 @@
 # Coupled fine-tune of a UFS 4deg ocean with the frozen ERA5 4deg daily ACE2S atmosphere (configs from make_coupled_ft_config.py).
 #   OCEAN_CKPT_DS=<ocean results ds> CFG=learnedheat-ftcm4-era5-coupled-ft-ens ./launch-ufs4deg-era5-coupled-ft.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 OCEAN_CKPT_DS="${OCEAN_CKPT_DS:?ocean results dataset}"
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M39XBD8K0KB3GAQ79ETVN470}"   # 4deg-daily-ace2s-ft3-detached-rs0
@@ -23,7 +24,7 @@ JOB="samudra-ufs4deg-era5-${CFG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "UFS 4deg ocean + frozen ERA5 4deg daily ACE2S: coupled fine-tune ${CFG}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-8h}" \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \

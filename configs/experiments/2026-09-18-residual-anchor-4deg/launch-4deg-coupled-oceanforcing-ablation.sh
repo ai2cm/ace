@@ -8,6 +8,7 @@
 #   VARIANTS="all free rad" ./launch-4deg-coupled-oceanforcing-ablation.sh
 #   FORM=two OCEAN_DS=<pretrain results> VARIANTS="free all" ./launch-4deg-coupled-oceanforcing-ablation.sh   # ocean before coupled FT
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 PRIORITY="${PRIORITY:-high}"
 CKPT_DS="${CKPT_DS:-01M3W6QQ0HTJF39CJ8MK5GQW2S}"   # samudra-anchor4deg-ff-ohc-stoch-coupled-ft-ens results
 FORM="${FORM:-single}"                              # single: one coupled checkpoint; two: ocean pretrain + frozen atmosphere
@@ -53,7 +54,7 @@ for V in $VARIANTS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg ${NAME_TAG}: 50-yr 1pct with ocean forcings [${FORCINGS[$V]:-none}] read from CM4 data" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

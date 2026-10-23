@@ -9,6 +9,7 @@
 # CKPT_FILE selects which checkpoint inside the dataset (default: the
 # inference-selected one).
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 OCEAN_CKPT_DS="${OCEAN_CKPT_DS:?set to the training results dataset}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01KJ70WK2NH4T2T4AVAAPYFSHA}"
@@ -39,7 +40,7 @@ for Y in $YEARS; do
     --dataset "${OCEAN_CKPT_DS}:${CKPT_FILE}:/ocean_ckpt.tar" \
     --dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar" \
     --gpus 1 --shared-memory 400GiB --budget ai2/atec-climate \
-    --min-runtime "${MIN_RUNTIME:-8h}" \
+    --min-runtime "$MIN_RUNTIME" \
     --allow-dirty --system-python --install "pip install --no-deps ." \
     -- python -I -m fme.coupled.evaluator \
        "${SCRIPT_PATH}/wave1_eval_configs/zeroshot240/yr${Y}.yaml" 2>&1)

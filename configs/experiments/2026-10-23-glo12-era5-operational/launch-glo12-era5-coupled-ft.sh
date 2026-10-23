@@ -2,6 +2,7 @@
 # GLO12 operational coupled fine-tune: UFS-trained SamudrACE ocean + ERA5 4deg ACE2S (both lifted from the alternating UFS coupled FT) on the GLO12 4deg 5-day store with ERA5, 2022-06..2024-12 (2025 held out).
 #   ./launch-glo12-era5-coupled-ft.sh   (defaults = the lifted spb-ufsstats components, GLO12 derived store, GLO12 stats, GLO12-period ERA5 store)
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 OCEAN_CKPT_DS="${OCEAN_CKPT_DS:-01M5MT2QD751XNNY94JB6JKMZV}"   # ocean lifted from the alternating UFS coupled FT
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M5MT6MCQ7Q0JTK2YKWJ5G0CM}"   # atmosphere lifted from the same coupled FT
@@ -23,7 +24,7 @@ JOB="samudra-${CFG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "GLO12 4deg ocean + ERA5 4deg daily ACE2S (lifted from the UFS alternating coupled FT): coupled fine-tune ${CFG}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-8h}" \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \

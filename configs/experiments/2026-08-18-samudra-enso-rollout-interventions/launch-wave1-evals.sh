@@ -2,6 +2,7 @@
 # Score finished wave-1 arms: free-running coupled rollout on the scouting ICs.
 # One job per (arm, year). ARM_DATASETS maps arm -> its training result dataset.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 
 ARMS="${ARMS:?set ARMS, e.g. ARMS=\"wint5 noohc\"}"
 YEARS="${YEARS:-233 246 250}"
@@ -35,7 +36,7 @@ for arm in $ARMS; do
       --name "$job" --task-name "$job" \
       --description "Wave-1 arm ${arm}: scouting-IC coupled rollout eval, year ${ys}" \
       --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-      --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+      --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
       --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan --weka climate-default:/climate-default \
       --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$job" \
       --env WANDB_JOB_TYPE=evaluation --env WANDB_RUN_GROUP=samudra-enso-w1-evals \

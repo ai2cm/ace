@@ -5,6 +5,7 @@
 # (the prescribed wind stress carries ENSO information).
 # CKPT_DS / CKPT_FILE select the checkpoint (default: 199b epoch-40 best_inference).
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:-01M28WK7RSGR0DRJCNFCF4DQZ7}"
 CKPT_FILE="${CKPT_FILE:-best_inference_ckpt.tar}"
 YEARS="${YEARS:-2002 2003 2004 2005 2006 2007 2008 2009 2010}"
@@ -20,7 +21,7 @@ gantry run \
   --name "$JOB" --task-name "$JOB" \
   --description "UFS FT epoch-40 holdout hindcasts, year ${Y} ICs, ocean-only, prescribed forcing" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=evaluation --env WANDB_RUN_GROUP=samudra-enso-ufs-evals \

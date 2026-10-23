@@ -4,6 +4,7 @@
 # MODE=true mounts the training store (cm4vars-uh superset, true replay forcing); MODE=clim mounts the
 # climatological-forcing copy (CLIM_DS). Arm -> checkpoint results dataset in ARM_CKPT below (best_inference_ckpt).
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 MODE="${MODE:-true}"
 TRUE_DS="${TRUE_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh
 CLIM_DS="${CLIM_DS:-01M4HGTKEM1ZA770N6XYKBBKTG}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh-climforcing
@@ -36,7 +37,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "UFS 4deg ENSO hindcasts, ${A}, ${MODE} forcing: 120 monthly ICs 2002-2011 x 128 steps, ocean-only" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
     --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ufs4deg-hindcasts \

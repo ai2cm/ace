@@ -4,6 +4,7 @@
 #   ARM=ff-ohc-coupled-scratch CKPT_DS=<dataset> [CKPT_FILE=training_checkpoints/best_inference_ckpt.tar]
 #   [JOB_SUFFIX=-snap0928] SCENARIOS="piC 1pct" ./launch-4deg-coupled-snapshot-evals.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARM="${ARM:?arm name for the job}"
 CKPT_DS="${CKPT_DS:?snapshot dataset}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
@@ -27,7 +28,7 @@ for S in $SCENARIOS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg ${ARM}${JOB_SUFFIX}: ${TAG} coupled rollout from a snapshot coupled checkpoint" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

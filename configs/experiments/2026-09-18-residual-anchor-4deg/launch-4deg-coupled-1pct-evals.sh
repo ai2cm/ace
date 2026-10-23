@@ -6,6 +6,7 @@
 #   ft   : the coupled fine-tune's own best_inference_ckpt (single-checkpoint config)
 # Usage: ARMS="ff-ohc resid-ohc resid-anomohc" FORMS="noft ft" ./launch-4deg-coupled-1pct-evals.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-ff-ohc resid-ohc resid-anomohc}"
 FORMS="${FORMS:-noft ft}"
 PRIORITY="${PRIORITY:-high}"
@@ -34,7 +35,7 @@ for A in $ARMS; do
     out=$(gantry run --name "$JOB" --task-name "$JOB" \
       --description "4deg anchor arm ${A} (${F}): 130-yr 1pctCO2 coupled rollout" \
       --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-      --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+      --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
       --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
       --weka climate-default:/climate-default \
       --env PYTORCH_ALLOC_CONF=expandable_segments:True \

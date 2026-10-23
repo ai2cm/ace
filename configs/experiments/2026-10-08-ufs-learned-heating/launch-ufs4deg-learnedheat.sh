@@ -2,6 +2,7 @@
 # UFS 4deg from-scratch oceans that LEARN the unaccounted column heating (see plan.md).
 #   DATA_DS=<…-cm4vars-uh> STATS_DS=<…-stats-2026-10-06-uh> ./launch-ufs4deg-learnedheat.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-resid-cap0005-learnedheat ff-ohc-learnedheat}"
 DATA_DS="${DATA_DS:?training dataset with unaccounted_heating fields (…-cm4vars-uh)}"
 STATS_DS="${STATS_DS:?stats dataset with the unaccounted_heating entries (…-stats-2026-10-06-uh)}"
@@ -19,7 +20,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "UFS 4deg replay: ${A} trained from scratch on UFS only" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

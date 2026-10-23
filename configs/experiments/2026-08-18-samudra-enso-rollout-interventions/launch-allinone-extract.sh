@@ -2,6 +2,7 @@
 # CPU job: strided snapshot extraction of atmosphere fields onto the ocean's
 # 5-day axis, for the all-in-one arm. Pure indexing, no averaging.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 SCRIPT_PATH="configs/experiments/2026-08-18-samudra-enso-rollout-interventions"
@@ -17,7 +18,7 @@ gantry run \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
   --workspace ai2/ace \
   --priority "${PRIORITY:-normal}" \
-  --preemptible \
+  --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres \
   --cluster ai2/jupiter \
   --cluster ai2/titan \

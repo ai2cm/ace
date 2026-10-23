@@ -3,6 +3,7 @@
 # team's shared configs (configs/experiments/cm4_eval/coupled/ @fd29e2cac, copied under eval/).
 #   CKPT_DS=<dataset> CKPT_PATH=training_checkpoints/best_inference_ckpt.tar JOB_PREFIX=<name> ./launch-coupled-evals-1deg.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 : "${CKPT_DS:?set CKPT_DS}"; : "${JOB_PREFIX:?set JOB_PREFIX}"
 CKPT_PATH="${CKPT_PATH:-training_checkpoints/best_inference_ckpt.tar}"
 SCENARIOS="${SCENARIOS:-piC 1pct}"
@@ -23,7 +24,7 @@ for S in $SCENARIOS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "1deg coupled rollout ${TAG} of ${JOB_PREFIX} (team protocol)" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

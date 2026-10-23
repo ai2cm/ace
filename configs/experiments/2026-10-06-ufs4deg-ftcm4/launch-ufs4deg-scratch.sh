@@ -2,6 +2,7 @@
 # From-scratch UFS 4deg oceans (UFS-native variable set, UFS stats): the control for the CM4-fine-tuned arms.
 #   ARMS="scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc" ./launch-ufs4deg-scratch.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-scratch-ff-ohc scratch-resid-ohc-cap0005 scratch-resid-noohc}"
 DATA_DS="${DATA_DS:-01M4BV9103G4C330XQM7R17RPT}"     # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars (regenerated store: FV3 stress, zos = SSH minus ocean mean)
 STATS_DS="${STATS_DS:-01M4C171K2J619BXZH9CSVM43N}"   # ufs-replay-ocean-4deg-19level-5day-stats-2026-10-06 (regenerated store; files at the root)
@@ -19,7 +20,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "UFS 4deg replay: ${A} trained from scratch on UFS only" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

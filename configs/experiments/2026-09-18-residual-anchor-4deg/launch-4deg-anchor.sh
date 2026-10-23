@@ -2,6 +2,7 @@
 # Residual-anchor ablation at 4deg, ocean-only, 1 GPU per arm.
 # Five arms differing by one thing each; see the header of any config.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 STATS_DS="${STATS_DS:-01KY8D816E67NXHP2EB29FHBJM}"   # elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
 ARMS="${ARMS:-ff-ohc resid-ohc resid-noohc split-ohc split-noohc}"
 N_GPUS="${N_GPUS:-1}"
@@ -17,7 +18,7 @@ JOB="samudra-anchor4deg-${A}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "4deg residual-anchor ablation, arm ${A}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \

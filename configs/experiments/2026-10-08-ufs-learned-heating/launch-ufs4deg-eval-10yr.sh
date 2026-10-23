@@ -3,6 +3,7 @@
 # full record from 1994 (CFG=evaluator-config-ufs4deg-30yr-1994.yaml TAG=30yr-1994).
 #   CKPT_DS=<results dataset> NAME=resid-cap0005-learnedheat [DATA_DS=<training dataset>] ./launch-ufs4deg-eval-10yr.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 CKPT_DS="${CKPT_DS:?results dataset holding training_checkpoints/best_inference_ckpt.tar}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 NAME="${NAME:?arm name}"
@@ -20,7 +21,7 @@ JOB="samudra-ufs4deg-${NAME}-eval-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "UFS 4deg ${NAME}: 10-yr ocean-only rollouts from 2012 and 2013 with monthly outputs" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ufs4deg-eval-10yr \

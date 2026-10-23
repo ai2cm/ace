@@ -3,6 +3,7 @@
 # steps (~21 months), one job per year. TRUE forecast skill: the atmosphere
 # is the ERA5-trained ACE2S, not prescribed forcing.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 OCEAN_CKPT_DS="${OCEAN_CKPT_DS:-01M28WK7RSGR0DRJCNFCF4DQZ7}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01KWD8DZVJFKYC5A9PNW8259GH}"
 YEARS="${YEARS:-2002 2003 2004 2005 2006 2007 2008 2009 2010}"
@@ -17,7 +18,7 @@ gantry run \
   --name "$JOB" --task-name "$JOB" \
   --description "Zero-shot coupled UFS+ERA5 hindcasts, year ${Y} ICs" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority urgent --preemptible \
+  --workspace ai2/ace --priority urgent --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \

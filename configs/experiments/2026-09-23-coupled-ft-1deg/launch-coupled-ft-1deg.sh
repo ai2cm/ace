@@ -3,6 +3,7 @@
 # (see make_coupled_ft_config_1deg.py). Mounts mirror the team's coupled jobs exactly.
 #   VARIANTS="ens mse" ./launch-coupled-ft-1deg.sh
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 VARIANTS="${VARIANTS:-ens mse}"
 PRIORITY="${PRIORITY:-high}"
 STATS_DS="${STATS_DS:-01KXNT0RA6VX2YTZ8WJ936Q5RS}"      # 1deg CM4 coupled stats (ocean/, coupled_atmosphere/)
@@ -21,7 +22,7 @@ for V in $VARIANTS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "1deg coupled FT of the piC+1pct hybrid-residual ocean, ${V} loss (team recipe)" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

@@ -2,6 +2,7 @@
 # OHC corrector_loss ablation at 4deg: pre-corrector optimization and delta regularization on the three bounded anchor arms.
 # Eight arms = {ff-ohc, resid-ohc, resid-anomohc} x {precorr, regL1w1[, regL1w100]}; configs differ from the base arm only in stepper_training.corrector_loss.
 set -euo pipefail
+MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 STATS_DS="${STATS_DS:-01KY8D816E67NXHP2EB29FHBJM}"   # elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
 ARMS="${ARMS:-ff-ohc-precorr ff-ohc-regL1w1 ff-ohc-regL1w100 resid-ohc-precorr resid-ohc-regL1w1 resid-ohc-regL1w100 resid-anomohc-precorr resid-anomohc-regL1w1}"
 N_GPUS="${N_GPUS:-1}"
@@ -17,7 +18,7 @@ JOB="samudra-anchor4deg-${A}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "4deg anchor arm ${A}: OHC corrector_loss (pre-corrector optimization or delta regularization)" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \
