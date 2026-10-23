@@ -22,3 +22,4 @@ listed here.
 | [#1588](https://github.com/ai2cm/ace/pull/1588) | Stop dataset properties from aliasing member labels and masks | yyexela |
 | [#1592](https://github.com/ai2cm/ace/pull/1592) | Add renamed_variables, derived_variables, and variable_metadata to XarrayDataConfig | yyexela |
 | [#1597](https://github.com/ai2cm/ace/pull/1597) | Add label-balanced sampling for multi-source training | yyexela |
+| [#1600](https://github.com/ai2cm/ace/pull/1600) | Let training skip a bounded run of non-finite-loss batches | yyexela |

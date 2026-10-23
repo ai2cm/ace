@@ -20,8 +20,14 @@
 # - weight_decay 0.01, as in the SFNO twin and the nc-swin-v2 cells: v2's
 #   fm-a2-cond val loss kept falling through epoch 140 at 0.01, so there is
 #   no overfit for a larger decay to close.
-# - float32_matmul_precision: high (#1539) for TF32 attention/MLP matmuls;
-#   torch.compile is on by default on CUDA (#1514).
+# - Full fp32 matmuls (no float32_matmul_precision override); torch.compile is
+#   on by default on CUDA (#1514). The first submission (2026-10-22) used TF32
+#   (float32_matmul_precision: high) and 18 of 20 runs died on a NaN loss
+#   within the first ~1-8k steps, at a warmup lr of 1e-6 with a healthy loss,
+#   i.e. a forward-pass blow-up on some batches rather than divergence.
+# - max_consecutive_non_finite_losses: 5 (#1600) skips an isolated
+#   non-finite-loss batch instead of killing the run, as the nc-swin-v2/v2.1
+#   cells did; skipped_non_finite_batches is logged to check how often.
 # - Warmup-stable-decay LR: 2-epoch linear warmup (transformers are unstable
 #   at full LR from init), constant, then a 15-epoch sqrt decay to 0. An epoch
 #   here is ~25k steps, ~3.4x the 2026-06-26 cells, so this is ~50k warmup
@@ -1300,6 +1306,7 @@ validation:
         labels:
         - c96
 optimization:
+  max_consecutive_non_finite_losses: 5
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: FusedAdam
@@ -1342,7 +1349,6 @@ stepper:
     config:
       include_channel_mask_inputs: true
       residual_prediction: false
-      float32_matmul_precision: high
       builder:
         type: NoiseConditionedSwinTransformer
         config:
