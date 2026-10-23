@@ -256,9 +256,10 @@ class Optimization(OptimizationABC):
         if skip:
             logging.warning(
                 "Skipping optimizer step: loss was non-finite (NaN or inf) on at "
-                f"least one rank. This batch is the "
-                f"{self._consecutive_non_finite_losses} in a row with a non-finite "
-                f"loss, and the {self._skipped_non_finite_batches} skipped in total."
+                "least one rank. Consecutive non-finite batches: "
+                f"{self._consecutive_non_finite_losses} (limit "
+                f"{self._max_consecutive_non_finite_losses}); total skipped: "
+                f"{self._skipped_non_finite_batches}."
             )
             if (
                 self._consecutive_non_finite_losses
@@ -332,6 +333,7 @@ class Optimization(OptimizationABC):
             "gscaler_state_dict": (
                 self.gscaler.state_dict() if self.gscaler is not None else None
             ),
+            "skipped_non_finite_batches": self._skipped_non_finite_batches,
         }
         return state
 
@@ -343,6 +345,8 @@ class Optimization(OptimizationABC):
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
+        # absent from checkpoints saved before this counter existed
+        self._skipped_non_finite_batches = state.get("skipped_non_finite_batches", 0)
 
     def _validate_loss(self, loss: torch.Tensor):
         """Check the loss for NaN or inf values.
@@ -398,7 +402,8 @@ class OptimizationConfig:
             first one. When greater than zero, a batch whose loss is non-finite
             on any rank contributes no optimizer step (its gradients are
             discarded), a warning is logged, and the total number of skipped
-            batches is exposed as ``Optimization.skipped_non_finite_batches``;
+            batches is exposed as ``Optimization.skipped_non_finite_batches``
+            (saved with the optimization state, so it survives a resume);
             the consecutive count resets on the next finite batch, and a
             ``ValueError`` naming the count is raised once it exceeds this
             limit. The per-iteration learning rate scheduler is still stepped on

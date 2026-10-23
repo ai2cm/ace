@@ -1045,3 +1045,23 @@ def test_tolerating_non_finite_losses_uses_all_reduce(monkeypatch):
     assert len(calls) == 1
     assert calls[0].item() == 1.0
     assert optimization.skipped_non_finite_batches == 1
+
+
+def test_skipped_non_finite_batches_survives_state_round_trip():
+    """The cumulative skip count is saved with the optimization state, so a
+    resumed job keeps logging the true total; old states without it load as 0."""
+    torch.manual_seed(0)
+    model = nn.Linear(2, 1).to(fme.get_device())
+    optimization = _build_non_finite_optimization(
+        model, max_consecutive_non_finite_losses=1
+    )
+    x = torch.ones(1, 2).to(fme.get_device())
+    optimization.accumulate_loss(_non_finite_loss(model, x, float("nan")))
+    optimization.step_weights()
+    state = optimization.get_state()
+    resumed = _build_non_finite_optimization(model, max_consecutive_non_finite_losses=1)
+    resumed.load_state(state)
+    assert resumed.skipped_non_finite_batches == 1
+    del state["skipped_non_finite_batches"]
+    resumed.load_state(state)
+    assert resumed.skipped_non_finite_batches == 0
