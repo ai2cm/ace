@@ -31,7 +31,7 @@ for A in $ARMS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg ppad arm ${A}: coupled fine-tune (ocean MSE, atmosphere frozen) with the 4deg ACE2S atmosphere" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-8h}" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \

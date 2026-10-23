@@ -28,7 +28,7 @@ for Y in $YEARS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg 240-IC coupled forecast verification, piControl year ${Y} (${NAME_PREFIX})" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-2h}" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
