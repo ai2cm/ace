@@ -37,8 +37,37 @@ class SamudraBuilder(ModuleConfig):
             that strength is a learned constant, identical for every sample on
             every step. "layer" is the principled choice for a conditioned
             network.
-        lat_pad: Latitude padding mode: "constant" (default, zeros) or
-            "pole" (continues across the pole). See ``Samudra``.
+        lat_pad: Padding of the latitude axis. What each mode puts beyond the
+            latitude edges at each site:
+
+            ======================================  ========  ========
+            site                                    constant  pole
+            ======================================  ========  ========
+            block and final convolutions            zeros     antipode
+            decoder refill (``pad_pool`` off)       zeros     antipode
+            row before an odd pool (``pad_pool``)   zeros     antipode
+            upsampler, zonally periodic             edge row  antipode
+            upsampler, default                      edge row  raises
+            ======================================  ========  ========
+
+            "constant" (the default) is the original network. "pole_edge" pads
+            like "pole" with the antipode taken at a cell edge, so a
+            period-two zonal ripple cancels in the pad. "pole" is exact for
+            scalar fields only and, like "pole_edge", requires
+            ``zonally_periodic_upsample``;
+            a pad longer than a level's height (the 4 degree bottleneck's 3
+            rows under a dilation of 4) continues past the far pole. See
+            ``Samudra``.
+        pad_pool: Pad an odd height or width by one row or column at the end
+            of the axis in each pool instead of dropping the last one, and crop
+            it off the decoder's upsample instead of refilling a dropped one,
+            so that no row or column is lost (180x360 reaches a 12x23
+            bottleneck rather than 11x22). The original cells keep their
+            pooling windows, so a checkpoint trained without it fine-tunes with
+            it on. Adds no parameters. See ``Samudra``.
+        gelu_cap: Maximum of the GELU in each ConvNeXt block (default 1.0,
+            the original network), or None for an uncapped GELU. See
+            ``Samudra``.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -53,18 +82,36 @@ class SamudraBuilder(ModuleConfig):
     checkpoint_strategy: Literal["all", "simple"] | None = None
     zonally_periodic_upsample: bool = False
     lat_pad: LatPad = "constant"
+    pad_pool: bool = False
+    gelu_cap: float | None = 1.0
     noise_embed_dim: int = 0
     conditioned_blocks: ConditionedBlocks | None = None
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(state)
+        state = dict(state)
+        # Runs launched while this experiment branch briefly had a
+        # pole_pad_vector_names option store it even when unused; a checkpoint
+        # that used it needs the code of exp/2026-10-15-samudra-vo-banding-fixes.
+        if "pole_pad_vector_names" in state:
+            if state["pole_pad_vector_names"] is not None:
+                raise ValueError(
+                    "this checkpoint negates the pole pad of vector channels "
+                    "(pole_pad_vector_names), which this code does not support"
+                )
+            del state["pole_pad_vector_names"]
+        return state
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have num_features")
         if "normalized_shape" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have normalized_shape")
+        if self.lat_pad in ("pole", "pole_edge") and not self.zonally_periodic_upsample:
+            raise ValueError(
+                f"lat_pad {self.lat_pad!r} requires zonally_periodic_upsample: "
+                "the default upsampler always replicates the latitude edge"
+            )
         if self.noise_embed_dim < 0:
             raise ValueError("noise_embed_dim must not be negative")
         if self.noise_embed_dim > 0 and self.conditioned_blocks is None:
@@ -108,6 +155,8 @@ class SamudraBuilder(ModuleConfig):
             checkpoint_strategy=self.checkpoint_strategy,
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             lat_pad=self.lat_pad,
+            pad_pool=self.pad_pool,
+            gelu_cap=self.gelu_cap,
             context_config=context_config,
             conditioned_blocks=self.conditioned_blocks,
         )

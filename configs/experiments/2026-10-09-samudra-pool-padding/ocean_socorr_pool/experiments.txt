@@ -1,0 +1,120 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs0|01M4XY9G5EY27Q0F6JWQ3FSFA3|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool|rs1|01M4YN3NV2C0Q4XT85XT0G2H5P|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_vsign|rs0|01M507AEKGJ14Z1FPMTVS6WB7H|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1|01M50HYENVB3HNA7Q4T3G1FT5H|canceled|best_inference_ckpt|normal|--min-runtime 8h
+
+# 1pct yearly evals of pole_edge rs0 from its first job's result dataset (the
+# job was preempted after epoch 16): best_inference_ckpt is epoch 16, ckpt is
+# 16 epochs and 320 batches. First submitted as 01M52FSN33VDTMHT3N535AKSAV and
+# 01M52FSWZPZ7WQNS8CWZMHS2XZ, which failed to load the checkpoint (its builder
+# config carries pole_pad_vector_names); resubmitted after e2fec8ce6.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M507A3ZD23Y6PBQRTR5DDM7X|ai2/ace|jupiter
+#
+# The epoch-30 EMA checkpoint of pole_edge rs0, from its retry job's result
+# dataset, on saturn's A100s. Held until that dataset committed when the
+# retry was preempted (beaker can't mount the dataset of a running job). Launched as
+# 01M52ZXY9QNM3SPF6M2NGKV1GT.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0030|high|--min-runtime 8h||01M51FYD2K8FA2ZEHQ9ZRH3QVR|ai2/ace|a100
+#
+# The epoch-45 EMA checkpoint of pole_edge rs0, from its third job's result
+# dataset (committed when that job was preempted), on saturn's A100s. Launched
+# as 01M54WEKS1VT8XMKBTA7JNS2JF.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0045|high|--min-runtime 8h||01M52ZST2Z15YQPJ4WNAVXTZJ4|ai2/ace|a100
+#
+# pole_edge rs0 after training finished (fourth job, dataset committed): the
+# final epoch-60 EMA checkpoint, and the final best inference checkpoint,
+# epoch 50 (tagged rs0_ep50 as the epoch-16 best_inference_ckpt eval holds
+# the rs0 name), each over 1pctCO2 and piControl. Launched as
+# 01M5629FKES8NJK6K7CB50D8X4, 01M5629Q2X8NTMH74K6HGP2M6E,
+# 01M5629Z2S3R7V12GJFQ104WZ0 and 01M562A6FFSD6FX3ECENVDWH59 (row order).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|piC_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|piC_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+#
+# The same two rs0 checkpoints over James's standard 200-year piControl eval
+# (cm4_eval/ocean, the ocean twin of the coupled piC evals). Launched as
+# 01M563BNMWPHZJ7Y0SK3VB78WF and 01M563BX4PMM8PH8KC1HSNBJ9G.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0|01M507A3Z1FS1K8NH8S6WHY91D|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs0_ep50|01M507A3Z1FS1K8NH8S6WHY91D|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M54F5XCC44YVVKKF0YA23CNH|ai2/ace|a100
+#
+# d1148 rs1's latest checkpoint (ckpt.tar, run on its EMA weights) from its
+# third job's result dataset, over 1pctCO2 and the standard piControl eval.
+# Held until that job was preempted (2026-10-18 00:00Z, 46 epochs and 420
+# batches) and the dataset committed. Launched as 01M568D0M6GMQK2AJH1SJ7GQ6R
+# and 01M568D85HDZAE54JB65C5SBQC.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M554A3NK19ZTVDKDTPABG6VA|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M554A3NK19ZTVDKDTPABG6VA|ai2/ace|a100
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Final best inference checkpoints, from each finished run's last result
+# dataset, over 1pctCO2 and the standard piControl eval: d1148 rs1 at epoch 32
+# (0.1178; later epochs drift up to 0.137), pole_edge rs1b at epoch 12
+# (0.146; it degraded after epoch 25 and blew up from epoch 52). pole_edge
+# rs0's epoch-50 best is evaluated above (rs0_ep50).
+# Launched as 01M5A2NSHX4P9ZVARXGN5YASB6, 01M5A2P1FD58GYJHCSQ5XC491Y,
+# 01M5A2P9GVNDPEC77DJZVWCEYM and 01M5A2PHBHTJC6N3ZQNH46JMNQ (row order).
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M564A9ZX566P2EME05FMNZYR|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge|rs1b|01M554D89C47H5X2DZDY4ZGPQC|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M564A9ZX566P2EME05FMNZYR|ai2/ace|a100
+
+# d1148 rs1's final checkpoint, the epoch-60 EMA checkpoint, over 1pctCO2 and
+# the standard piControl eval. The training run's epoch-60 inference error
+# (0.1365) comes from these weights, as it validates with the EMA.
+# Launched as 01M5A39BFGZ4EN0A4945486E73 and 01M5A39KHSB2RPFWNPPY3HKXS7.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs1|01M52K0KSQAFKYEVCXBAVPGN9R|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M564A9FQKBCF2ZFJ1WB2FM3C|ai2/ace|a100
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_d1148|rs0|01M5DBN7QBBDBDEJ0TZCWCEQYH|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# The uncapped-GELU d1148 pool run's latest checkpoint while it trains: its
+# ckpt.tar at 38 epochs and 260 batches (28,000 batches, run on its EMA
+# weights), fetched from the running job's dataset 01M5FC4FWGJNHRM8VT23GEZRXH
+# and uploaded by the user as dataset 01M5HTMDHY16AC4C6M7DKF0QE4. pending_
+# until that upload commits. Superseded (never launched) by the epoch-45 rows
+# below, at the user's request.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|superseded_1pct_yearly_1deg|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|superseded_piC-ic0151-200yr|ckpt|high|--min-runtime 8h||01M5HTMDHY16AC4C6M7DKF0QE4|ai2/ace|a100
+
+# Its epoch-45 EMA checkpoint, which the user downloaded from the running job,
+# uploaded as dataset 01M5JE9YQBXPS0W3SWZF2HTHR1 (training_checkpoints/
+# ema_ckpt_0045.tar), over 1pctCO2 and the standard piControl eval, on jupiter.
+# Held until that upload committed (2026-10-22 18:43Z). Launched as
+# 01M5JEW3QH3PNYJJD74550TW0H and 01M5JEWCCJ21AXV9WMN4XZ9SXY.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|1pct_yearly_1deg|ema_ckpt_0045|high|--min-runtime 8h||01M5JE9YQBXPS0W3SWZF2HTHR1|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|piC-ic0151-200yr|ema_ckpt_0045|high|--min-runtime 8h||01M5JE9YQBXPS0W3SWZF2HTHR1|ai2/ace|jupiter
+
+# Best and final checkpoints of the two finished d1148 runs without evals, over
+# 1pctCO2 and the standard piControl eval, on jupiter: the uncapped-GELU pool
+# run (best inference epoch 12, 0.1300; epoch 60 0.1419) and pole_edge d1148
+# rs0 (best epoch 29, 0.1191; epoch 60 0.1233). The no-fixes d1148 control
+# (01M5DBN7QBBDBDEJ0TZCWCEQYH) diverged and was canceled, so it is left out.
+# Launched 2026-10-23 in row order: 01M5K4EE240WB4E8TJBQP8XRG9, 01M5K4EN9PK4CNEAJ2RT1283ZC,
+# 01M5K4EWD5BJWDV3QA6HFVWWDD, 01M5K4F4T8YP2DZ4YHS80QQK26, 01M5K4FC08K71NG2N1RSBN89Z6,
+# 01M5K4FKJ8ZVB29CQWQHDN778F, 01M5K4FV4EXNDXR7JRZJ9SC3DH, 01M5K4G3JM9V5ERV1VR2VF65AZ.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M5FC4FWGJNHRM8VT23GEZRXH|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M5FC4FWGJNHRM8VT23GEZRXH|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M5FC4FWGJNHRM8VT23GEZRXH|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap|rs0|01M5FC4FVVQC2JFAB94XBMXJQ2|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M5FC4FWGJNHRM8VT23GEZRXH|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M59YA826YNX891VJ1RCSYD1X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M59YA826YNX891VJ1RCSYD1X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M59YA826YNX891VJ1RCSYD1X|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M59YA826YNX891VJ1RCSYD1X|ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|training|best_inference_ckpt|normal|--min-runtime 8h

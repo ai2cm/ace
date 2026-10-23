@@ -1,0 +1,13 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs0|01M4R4943SBY9B9ZGJ872TM91Q|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs0|01M4R4943SBY9B9ZGJ872TM91Q|1pct_yearly_1deg|best_inference_ckpt|urgent|--min-runtime 8h||01M4R49442TGQ7JT3QGC254NHJ|ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs1|01M4S7BEA619EVHE8A9Y7SF5NT|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs2|01M4S7BVZMVT90RWCCEMP82C9X|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_nopad|rs0|01M4S7CA27FWNCJ9X9PBTE8R32|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs1|01M4S7BEA619EVHE8A9Y7SF5NT|1pct_yearly_1deg|best_inference_ckpt|normal|--min-runtime 8h||01M4S7BEAE0TKGE569B2G9T165|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_pool|rs2|01M4S7BVZMVT90RWCCEMP82C9X|1pct_yearly_1deg|best_inference_ckpt|normal|--min-runtime 8h||01M4S7BW014ZKCJJB3D4ATEQGN|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_ppad-ft_nopad|rs0|01M4S7CA27FWNCJ9X9PBTE8R32|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M4S7CA2FCJ1ZVZYJARFAT3Q7|ai2/ace|jupiter
