@@ -91,7 +91,7 @@ def main() -> None:
     add_beaker_args(
         parser,
         default_workspace="ai2/ace",
-        default_cluster=["ai2/jupiter", "ai2/titan"],
+        default_cluster=["ai2/jupiter", "ai2/titan", "ai2/saturn"],
         default_priority="normal",
     )
     parser.add_argument(
