@@ -10,7 +10,7 @@
 #
 # Recipe: identical to ../ocean_socorr_mae_lnmuon_fm_stoch_1step_lin8 (AdamW
 # 1e-4, EnsembleLoss crps 0.9 / ES 0.1, n_ensemble 2, optimize_last_step_only,
-# lin8, 24 epochs, EMA 0.999, EMA checkpoints every 8). The init is already a
+# lin8, 40 epochs, EMA 0.999, EMA checkpoints every 8). The init is already a
 # NoiseConditionedModel: parameter_init loads the whole module.
 #
 # job_runner/uncoupled_finetune.sh \
@@ -24,7 +24,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 24 # as the mu3e-3 lin8 run (ezqzx1z3)
+max_epochs: 40 # 24 was too short for seeds rs1/rs2 (inline rollouts reach rs0's epoch-24 skill only by ~36)
 ema_checkpoint_save_epochs:
   step: 8
 inference:

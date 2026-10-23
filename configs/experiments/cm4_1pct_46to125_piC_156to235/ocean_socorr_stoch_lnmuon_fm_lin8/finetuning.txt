@@ -5,4 +5,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs0|ace-samudra-
 # rs2: same protocol from the rs2 stage 1's best_ckpt (epoch 15; nex5e068, 01M5G2QKRTWQDMVHC7VZT55882).
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|ace-samudra-cm4|nex5e068|best_ckpt|skip|high|jupiter+titan|4||3|ai2/ace|seed=2|01M5G2QKRTWQDMVHC7VZT55882|8h
 # rs1: same protocol from the rs1 stage 1's best_ckpt (epoch 15; jm9k3zhv, 01M5G2Q9595DXXCN75Y7B3EA2D).
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|ace-samudra-cm4|jm9k3zhv|best_ckpt|train|high|jupiter+titan|4||3|ai2/ace|seed=1|01M5G2Q9595DXXCN75Y7B3EA2D|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|ace-samudra-cm4|jm9k3zhv|best_ckpt|skip|high|jupiter+titan|4||3|ai2/ace|seed=1|01M5G2Q9595DXXCN75Y7B3EA2D|8h
