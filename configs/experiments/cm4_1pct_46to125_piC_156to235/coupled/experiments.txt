@@ -46,3 +46,5 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
 
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-fto|o0a2rs0|01M5N1DGJ3RFYEQEPFM9N9F4CH|training|best_inference_ckpt|normal|--min-runtime 8h
