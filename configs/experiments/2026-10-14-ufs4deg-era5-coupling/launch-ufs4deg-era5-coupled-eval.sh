@@ -25,7 +25,7 @@ JOB="samudra-ufs4deg-era5-coupled-${NAME}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "UFS 4deg ocean + ERA5 4deg daily ACE2S, coupled evaluator: ${NAME}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-2h}" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ufs4deg-era5-coupled \

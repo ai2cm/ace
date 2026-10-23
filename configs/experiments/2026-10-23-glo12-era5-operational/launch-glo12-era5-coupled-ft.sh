@@ -23,7 +23,7 @@ JOB="samudra-${CFG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "GLO12 4deg ocean + ERA5 4deg daily ACE2S (lifted from the UFS alternating coupled FT): coupled fine-tune ${CFG}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-8h}" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --weka climate-default:/climate-default \
   --env PYTORCH_ALLOC_CONF=expandable_segments:True \
