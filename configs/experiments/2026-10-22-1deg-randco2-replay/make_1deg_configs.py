@@ -63,6 +63,10 @@ st["ocean"]["parameter_init"] = {"weights_path": "/ocean_ckpt.tar"}
 st["atmosphere"]["parameter_init"] = {"weights_path": "/atmos_ckpt.tar"}
 assert st["optimize_single_component_per_batch"] is True
 cfg["logging"]["project"] = "ace-samudra-coupled-cm4"
+# main (2026-10-22, "Recover wandb metrics lost to preemption") requires a relative metrics_log_dir; Elynn's template
+# predates it and says /results/metrics
+if str(cfg["logging"].get("metrics_log_dir", "")).startswith("/"):
+    cfg["logging"]["metrics_log_dir"] = "metrics"
 cfg.pop("resume_results", None)
 
 # replay data: the random-CO2 members of the rs1 fine-tune's training loader (atmosphere + sea_ice stores)
