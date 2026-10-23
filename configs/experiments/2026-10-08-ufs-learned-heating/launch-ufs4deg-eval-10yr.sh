@@ -20,7 +20,7 @@ JOB="samudra-ufs4deg-${NAME}-eval-${TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "UFS 4deg ${NAME}: 10-yr ocean-only rollouts from 2012 and 2013 with monthly outputs" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-  --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+  --workspace ai2/ace --priority "$PRIORITY" --min-runtime "${MIN_RUNTIME:-2h}" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ufs4deg-eval-10yr \
