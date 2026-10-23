@@ -1,0 +1,8 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# --config-dir configs/experiments/cm4_eval/coupled
+# issue 34: 09-stage2 arm C rows with the 8xx0pife checkpoint (training beaker 01M5AR9ZMHXQPCNK2W8N18YQBS)
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-09stage2-j01-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/34-8xx0pife/C/j01|01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-09stage2-j04-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/34-8xx0pife/C/j04|01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-09stage2-j07-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/34-8xx0pife/C/j07|01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-09stage2-j10-C|best_inference_ckpt|normal|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-20-2117-coupled-ace-sst-representation/34-8xx0pife/C/j10|01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace|jupiter+titan
