@@ -49,7 +49,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_randco2-fto|o2a2rs0|ace-samudr
 
 # coupled_clip-oppfm_a2sLR
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|trained|high|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|8h
 
 # coupled_clip-oppfm_randco2v2
 
