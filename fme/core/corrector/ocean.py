@@ -296,9 +296,15 @@ class SeaIceFractionCorrection:
 
 @dataclasses.dataclass
 class SurfaceEnergyFluxCorrection:
-    """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
+    """Correction that adjusts hfds using atmosphere-derived surface fluxes.
+
+    Where the spatial mask of the input sea ice fraction is 0, the sea ice
+    fraction is set to 0 before computing ocean_fraction: input masking fills
+    those cells with a normalization mean, not a physical fraction.
+    """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+    spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
 
     def __call__(
         self,
@@ -313,7 +319,7 @@ class SurfaceEnergyFluxCorrection:
             correction (the net downward surface heat flux, ``hfds``).
         """
         corrected = _correct_hfds(
-            input_data,
+            _zero_masked_sea_ice(input_data, self.spatial_mask_provider),
             gen_data,
             forcing_data,
             method=self.method,
@@ -551,7 +557,10 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             )
         if self.surface_energy_flux_correction is not None:
             corrections.append(
-                SurfaceEnergyFluxCorrection(self.surface_energy_flux_correction.method)
+                SurfaceEnergyFluxCorrection(
+                    self.surface_energy_flux_correction.method,
+                    spatial_mask_provider,
+                )
             )
         if self.ocean_heat_content_correction is not None:
             corrections.append(
@@ -618,6 +627,20 @@ def _compute_ocean_net_surface_energy_flux(
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
     return base_flux + mass_heat_flux
+
+
+def _zero_masked_sea_ice(
+    input_data: TensorMapping, spatial_mask_provider: SpatialMaskProviderABC
+) -> TensorMapping:
+    """Set sea ice fractions to 0 where their spatial mask is 0, as the
+    coupler does for the NaN it receives there.
+    """
+    out = dict(input_data)
+    for name in ("sea_ice_fraction", "ocean_sea_ice_fraction"):
+        mask = spatial_mask_provider.get_mask_tensor_for(name)
+        if name in out and mask is not None:
+            out[name] = torch.where(mask == 0, 0.0, out[name])
+    return out
 
 
 def _correct_hfds(

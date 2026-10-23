@@ -455,6 +455,53 @@ def test_surface_energy_flux_correction_prescribed_open_ocean(hfds_name):
     torch.testing.assert_close(corrected[hfds_name][-1, :], gen_hfds[-1, :])
 
 
+def test_surface_energy_flux_correction_prescribed_open_ocean_sea_ice_mask():
+    """Where the sea-ice mask is 0, the input sea ice is a mean fill, not a
+    physical fraction, so the cell is ice-free ocean and hfds is prescribed.
+    """
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean"
+        ),
+    )
+    mask = torch.ones(IMG_SHAPE, device=DEVICE)
+    mask[:, 0] = 0.0
+    masks = {"mask_ocean_sea_ice_fraction": mask}
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE), SpatialMaskProvider(masks))
+    corrector = config._build(
+        ops,
+        None,
+        datetime.timedelta(seconds=3600),
+        spatial_mask_provider=SpatialMaskProvider(masks),
+    )
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    mean_fill = 0.1
+    ocean_sea_ice_fraction = torch.where(mask == 0, mean_fill, 0.0)
+    ocean_sea_ice_fraction[1, 1:] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    gen_data = {"sst": sst, "hfds": gen_hfds}
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {
+        **forcing_data,
+        **gen_data,
+        "ocean_sea_ice_fraction": ocean_sea_ice_fraction,
+    }
+
+    net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    # masked column: mean fill ignored, hfds prescribed
+    torch.testing.assert_close(corrected["hfds"][:, 0], net_flux[:, 0])
+    # unmasked sea ice still keeps gen_hfds
+    torch.testing.assert_close(corrected["hfds"][1, 1:], gen_hfds[1, 1:])
+    # unmasked ice-free ocean is prescribed
+    torch.testing.assert_close(corrected["hfds"][0, 1:], net_flux[0, 1:])
+
+
 @pytest.mark.parametrize(
     "hfds_type",
     [
