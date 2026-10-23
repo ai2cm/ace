@@ -1,7 +1,7 @@
-"""Submit a gantry training job for each foundation model (fm) training config.
+"""Submit a gantry training job for each foundation model (fm) run config.
 
-Each config in this directory is submitted via run-ace-train.sh, which
-validates the config and calls gantry.
+Each config in run_configs/ (written by create_fm_jobs.py) is submitted via
+run-ace-train.sh, which validates the config and calls gantry.
 
 Usage:
     python submit_fm_jobs.py [--version {v1,v2,v3}]
@@ -26,8 +26,8 @@ from _submit_common import (
 from _version_select import add_version_arg, stem_matches_version
 
 HERE = pathlib.Path(__file__).parent
-BASE_CONFIGS_DIR = HERE / "base_configs"
-BASE_CONFIGS_DIRNAME = BASE_CONFIGS_DIR.name
+RUN_CONFIGS_DIR = HERE / "run_configs"
+RUN_CONFIGS_DIRNAME = RUN_CONFIGS_DIR.name
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
 WANDB_ENTITY = "ai2cm"
@@ -35,17 +35,10 @@ WANDB_PROJECT = "FM"
 WANDB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-2026-10-19"
 CONFIG_PREFIX = "ace-train-config-4deg-"
-# Dataset tag stripped from job names so that
-# ace-train-config-4deg-AIMIP-nc-sfno-v3.yaml -> ace2-fm-nc-sfno-v3 and
-# ace-train-config-4deg-AIMIP-nc-swin-v2-fm-random-v1.yaml ->
-# ace2-fm-nc-swin-v2-fm-random-v1. Configs without the tag keep their full
-# suffix.
-DATASET_TAG = "AIMIP-"
-
-# Architecture tags appearing in config filenames, directly after the dataset
-# tag. Matching is exact-tag, so `nc-swin-v2` never selects a `nc-swin-v2.1`
-# config (or vice versa), and the untagged `...-AIMIP-sfno.yaml` is excluded.
-ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1")
+# Architecture tags appearing in config filenames, directly after
+# CONFIG_PREFIX. Matching is exact-tag, so `nc-swin-v2` never selects a
+# `nc-swin-v2.2` config (or vice versa).
+ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1", "nc-swin-v2.2")
 
 
 def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
@@ -53,10 +46,10 @@ def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
     # from scratch, and eval suites use a different prefix. `-diag` configs
     # are one-off diagnostics submitted by hand via run-ace-train.sh; they
     # are short runs that would waste a slot here.
-    arch_prefixes = tuple(f"{CONFIG_PREFIX}{DATASET_TAG}{arch}-" for arch in archs)
+    arch_prefixes = tuple(f"{CONFIG_PREFIX}{arch}-" for arch in archs)
     return sorted(
         path.name
-        for path in BASE_CONFIGS_DIR.glob("*.yaml")
+        for path in RUN_CONFIGS_DIR.glob("*.yaml")
         if path.name.startswith(arch_prefixes)
         and stem_matches_version(path.stem, version)
         and not path.name.endswith("-finetune.yaml")
@@ -67,12 +60,10 @@ def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
 
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-AIMIP-nc-sfno-fm-0.1-v1.yaml
-    # → ace2-fm-nc-sfno-fm-0.1-v1
-    # ace-train-config-4deg-AIMIP-nc-sfno-c96-v1.yaml → ace2-fm-nc-sfno-c96-v1
+    # ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-s0-maskon.yaml
+    # → ace2-fm-nc-sfno-fm-a2-cond-era5-c96-s0-maskon
     stem = pathlib.Path(config_filename).stem  # strip .yaml
-    suffix = stem.removeprefix(CONFIG_PREFIX).removeprefix(DATASET_TAG)
-    return f"{WANDB_PREFIX}{suffix}"
+    return f"{WANDB_PREFIX}{stem.removeprefix(CONFIG_PREFIX)}"
 
 
 def wandb_run_names() -> set[str]:
@@ -92,8 +83,8 @@ def main() -> None:
         default=list(ARCH_CHOICES),
         help=(
             "Restrict submission to configs whose filename carries one of these "
-            "architecture tags, e.g. 'nc-swin-v2.1' selects "
-            f"{CONFIG_PREFIX}{DATASET_TAG}nc-swin-v2.1-*.yaml only. Defaults to "
+            "architecture tags, e.g. 'nc-swin-v2.2' selects "
+            f"{CONFIG_PREFIX}nc-swin-v2.2-*.yaml only. Defaults to "
             "all architectures."
         ),
     )
@@ -119,7 +110,7 @@ def main() -> None:
         select_configs(args.version, args.arch), config_to_job_name, args
     )
     if not args.dry_run:
-        check_configs_at_head([BASE_CONFIGS_DIR / name for name in configs])
+        check_configs_at_head([RUN_CONFIGS_DIR / name for name in configs])
     for config_filename in configs:
         job_name = config_to_job_name(config_filename)
         if job_name in existing_runs:
@@ -127,7 +118,7 @@ def main() -> None:
             continue
         submit_job(
             RUN_SCRIPT,
-            [f"{BASE_CONFIGS_DIRNAME}/{config_filename}", job_name, WANDB_GROUP],
+            [f"{RUN_CONFIGS_DIRNAME}/{config_filename}", job_name, WANDB_GROUP],
             wandb_project=WANDB_PROJECT,
             args=args,
             cwd=HERE,

@@ -1,27 +1,3 @@
-# nc-swin-v3: a noise-conditioned Swin U-Net for foundation-model training,
-# sized between nc-swin-v2 (264M params, 925 GFLOP/sample) and nc-swin-v2.1
-# (15.5M, 45 GFLOP). In the 2026-06-26 norm ablation v2 had the best weather
-# skill but overfit (train 0.071 vs val 0.101), and v2.1 was capacity-limited
-# (train ~= val ~= 0.118). This one is ~130M params at ~176 GFLOP/sample
-# (nc-sfno: 14.5M, ~99 GFLOP without FFTs).
-#
-# Differences from the SFNO twin (same data, inference and loss):
-# - residual_prediction: false. Residual prediction made every Swin rollout
-#   blow up in year 2 while one-step validation stayed healthy (H1/H2/H4
-#   diagnostics, 2026-09-28); numerics were ruled out.
-# - num_levels: 2 (#1544) runs the bottleneck stages on a 12x24 token grid
-#   instead of 24x48, so each 4x8 window covers ~1/9 of the globe and the
-#   FLOPs roughly halve. The 48x96 padded grid is already a multiple of
-#   2**2 * window_size, so no extra padding is needed.
-# - depth_multiplier 2 with embed_dim 256, head dim 64 throughout.
-# - skip_projection (#1544) keeps the decoder at embed_dim.
-# - drop_path_rate 0.2 and weight_decay 0.05 (Swin defaults) to close v2's
-#   train/val gap.
-# - float32_matmul_precision: high (#1539) for TF32 attention/MLP matmuls;
-#   torch.compile is on by default on CUDA (#1514).
-# - Warmup-stable-decay LR: 8-epoch linear warmup (transformers are unstable
-#   at full LR from init), constant, then an 8-epoch sqrt decay to 0, the
-#   same schedule the nc-swin-v2/v2.1 cells used.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -971,6 +947,12 @@ train_loader:
   prefetch_factor: 4
   time_buffer: 8
   time_buffer_pool_size: 32
+  label_sampling:
+    weights:
+      cm4: 0.40
+      c96: 0.25
+      era5: 0.25
+      xshield: 0.10
   dataset:
     strict: false
     concat:
@@ -1295,28 +1277,7 @@ optimization:
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
   kwargs:
-    weight_decay: 0.05
-  scheduler:
-    schedulers:
-    - type: LinearLR
-      kwargs:
-        start_factor: 0.01
-        end_factor: 1.0
-        total_iters: 8
-      step_each_iteration: false
-    - type: ConstantLR
-      kwargs:
-        factor: 1.0
-        total_iters: 134
-      step_each_iteration: false
-    - type: PolynomialLR
-      kwargs:
-        power: 0.5
-        total_iters: 8
-      step_each_iteration: false
-    milestones:
-    - 8
-    - 142
+    weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
@@ -1330,40 +1291,26 @@ stepper:
   step:
     type: single_module
     config:
+      include_channel_mask_inputs: true
+      input_dropout:
+        default:
+          max_masked_vars: 10
       residual_prediction: false
-      float32_matmul_precision: high
       builder:
-        type: NoiseConditionedSwinTransformer
+        type: NoiseConditionedSFNO
         config:
-          embed_dim: 256
+          embed_dim: 512
           noise_embed_dim: 32
-          depth_multiplier: 2
-          num_heads:
-          - 4
-          - 8
-          - 8
-          - 4
-          window_size:
-          - 4
-          - 8
-          patch_size:
-          - 1
-          - 1
-          num_levels: 2
-          mlp_ratio: 4.0
-          drop_path_rate: 0.2
-          use_skip: true
-          skip_projection: true
-          mlp_layer: swiglu
-          padding_conf:
-            activate: true
-            mode: earth
-            pad_lat:
-            - 2
-            - 1
-            pad_lon:
-            - 3
-            - 3
+          noise_type: isotropic
+          filter_type: linear
+          affine_norms: true
+          normalize_big_skip: true
+          filter_num_groups: 16
+          spectral_ratio: 0.125
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          clip_latent_global_means: true
         conditional: true
       normalization:
         network:

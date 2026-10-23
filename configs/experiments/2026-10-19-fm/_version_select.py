@@ -22,7 +22,7 @@ VERSION_CHOICES = ("v1", "v2", "v3")
 # of `nc-swin-v2` is not read as the config version `v2`. Order matters: tags
 # which are prefixes of other tags must come last, so that `nc-swin-v2.1` is
 # stripped whole rather than leaving a dangling `.1` behind `nc-swin-v2`.
-ARCH_TAGS = ("nc-swin-v2.1", "nc-swin-v2")
+ARCH_TAGS = ("nc-swin-v2.2", "nc-swin-v2.1", "nc-swin-v2")
 
 
 def add_version_arg(parser: argparse.ArgumentParser) -> None:
