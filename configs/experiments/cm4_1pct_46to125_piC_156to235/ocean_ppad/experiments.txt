@@ -14,6 +14,10 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|ra
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|ran_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/ocean/1pct-ic0001-130yr-maps
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0|01M4HEFPANCBNHNH0FC5A8V4HV|ran_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/ocean/piC-ic0151-200yr-maps
 
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0-hfds-m-si|01M4HEFPANCBNHNH0FC5A8V4HV|run_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 1h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/ocean/1pct-ic0001-130yr-maps
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0-hfds-m-si|01M4HEFPANCBNHNH0FC5A8V4HV|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/ocean/piC-ic0151-200yr-maps
+
+
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs1|01M4HEG18G10GVQB6ZAMZ10PH0|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs1|01M4HEG18G10GVQB6ZAMZ10PH0|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
