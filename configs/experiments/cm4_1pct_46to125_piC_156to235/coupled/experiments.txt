@@ -32,7 +32,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4S
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|ran_1pct-ic0001-130yr-maps|best_inference_ckpt|normal|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/1pct-ic0001-130yr-maps|01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-rerun|01M4SZFVA0A9XBQC502PPC217Q|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/piC-ic0151-200yr-maps
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-rerun|01M4SZFVA0A9XBQC502PPC217Q|running_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/piC-ic0151-200yr-maps
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-ep4|01M50HQ3S2858MCF7E4Z0XZREZ|ran_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 8h||01M4YD7ATDAZ65TFEGAZZ9TJM4
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-ep4|01M50HQDCV27C3WJHTH27QD8PJ|ran_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 8h||01M4YD7ATDAZ65TFEGAZZ9TJM4
@@ -41,6 +41,10 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-ep4|0
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/1pct-ic0001-130yr-maps
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|running_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/1pct-ic0001-130yr-maps
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|running_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0-hfds-m-si|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/1pct-ic0001-130yr-maps
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0-hfds-m-si|01M5AR9ZMHXQPCNK2W8N18YQBS|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
