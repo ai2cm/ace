@@ -1,0 +1,7 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+
+# Launched 2026-10-23: piC 01M5P32DYQV13YR92PY2HGNJ1Q, 1pct 01M5P32MVENSE040V7PPN2YZSW.
+# Century evals of Troy's deterministic hybrid samudra-ppad4deg-resid-ohc-cap0005-ppad-fmean (wandb qt9gvoti), the init of ocean_4deg_hybrid_det_stoch_lin8; --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_4deg_eval
+cm4_1pct_46to125_piC_156to235-ocean_4deg_resid_ohc_cap0005_ppad_fmean_det|rs0|01M4HKBRFNH1T2PZ7N990F1V7C|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_resid_ohc_cap0005_ppad_fmean_det|rs0|01M4HKBRFNH1T2PZ7N990F1V7C|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
