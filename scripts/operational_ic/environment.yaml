@@ -1,0 +1,29 @@
+# Environment for scripts/operational_ic: the GLORYS/GLO12 pipeline's
+# dependencies (scripts/glorys/environment.yaml; xESMF needs conda's esmpy)
+# plus a CPU torch for the ERA5T spectral transform (torch_harmonics) and
+# netCDF writers for the initial-condition files.
+name: samudrace-oper
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - esmpy
+  - xesmf>=0.8
+  - pip
+  - pip:
+    - --extra-index-url https://download.pytorch.org/whl/cpu
+    - apache_beam[gcp]==2.71.0
+    - cftime
+    - dask
+    - gcsfs
+    - h5netcdf
+    - netCDF4
+    - numpy
+    - obstore
+    - pyyaml
+    - scipy
+    - torch==2.8.0
+    - torch-harmonics==0.8.0
+    - xarray==2026.2.0
+    - xarray_beam==0.11.5
+    - zarr==3.1.5
