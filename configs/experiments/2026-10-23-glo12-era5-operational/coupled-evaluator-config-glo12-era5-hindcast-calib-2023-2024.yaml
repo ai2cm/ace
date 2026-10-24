@@ -1,0 +1,109 @@
+# coupled-evaluator-config-glo12-era5-hindcast-calib-2023-2024: drift-calibration hindcasts INSIDE the training years: 18 monthly starts
+# Jan 2023 .. Jun 2024 x 4 noise members, 36 five-day steps, same protocol as the 2025 test. Gives the model's mean Nino3.4
+# drift by lead (and coarsely by start month) to correct the 2025 forecasts; in-sample for the ocean, so an optimistic estimate.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_coupled_steps: 36
+coupled_steps_in_memory: 4
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /glo12
+      file_pattern: 2026-10-22-glo12-ocean-4deg-19level-5day-2022-2025-cm4vars-v2.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5glo
+      file_pattern: 2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2023-01-04T00:00:00'
+    - '2023-01-04T00:00:00'
+    - '2023-01-04T00:00:00'
+    - '2023-01-04T00:00:00'
+    - '2023-02-03T00:00:00'
+    - '2023-02-03T00:00:00'
+    - '2023-02-03T00:00:00'
+    - '2023-02-03T00:00:00'
+    - '2023-03-05T00:00:00'
+    - '2023-03-05T00:00:00'
+    - '2023-03-05T00:00:00'
+    - '2023-03-05T00:00:00'
+    - '2023-04-04T00:00:00'
+    - '2023-04-04T00:00:00'
+    - '2023-04-04T00:00:00'
+    - '2023-04-04T00:00:00'
+    - '2023-05-04T00:00:00'
+    - '2023-05-04T00:00:00'
+    - '2023-05-04T00:00:00'
+    - '2023-05-04T00:00:00'
+    - '2023-06-03T00:00:00'
+    - '2023-06-03T00:00:00'
+    - '2023-06-03T00:00:00'
+    - '2023-06-03T00:00:00'
+    - '2023-07-03T00:00:00'
+    - '2023-07-03T00:00:00'
+    - '2023-07-03T00:00:00'
+    - '2023-07-03T00:00:00'
+    - '2023-08-02T00:00:00'
+    - '2023-08-02T00:00:00'
+    - '2023-08-02T00:00:00'
+    - '2023-08-02T00:00:00'
+    - '2023-09-01T00:00:00'
+    - '2023-09-01T00:00:00'
+    - '2023-09-01T00:00:00'
+    - '2023-09-01T00:00:00'
+    - '2023-10-01T00:00:00'
+    - '2023-10-01T00:00:00'
+    - '2023-10-01T00:00:00'
+    - '2023-10-01T00:00:00'
+    - '2023-11-05T00:00:00'
+    - '2023-11-05T00:00:00'
+    - '2023-11-05T00:00:00'
+    - '2023-11-05T00:00:00'
+    - '2023-12-05T00:00:00'
+    - '2023-12-05T00:00:00'
+    - '2023-12-05T00:00:00'
+    - '2023-12-05T00:00:00'
+    - '2024-01-04T00:00:00'
+    - '2024-01-04T00:00:00'
+    - '2024-01-04T00:00:00'
+    - '2024-01-04T00:00:00'
+    - '2024-02-03T00:00:00'
+    - '2024-02-03T00:00:00'
+    - '2024-02-03T00:00:00'
+    - '2024-02-03T00:00:00'
+    - '2024-03-04T00:00:00'
+    - '2024-03-04T00:00:00'
+    - '2024-03-04T00:00:00'
+    - '2024-03-04T00:00:00'
+    - '2024-04-03T00:00:00'
+    - '2024-04-03T00:00:00'
+    - '2024-04-03T00:00:00'
+    - '2024-04-03T00:00:00'
+    - '2024-05-03T00:00:00'
+    - '2024-05-03T00:00:00'
+    - '2024-05-03T00:00:00'
+    - '2024-05-03T00:00:00'
+    - '2024-06-02T00:00:00'
+    - '2024-06-02T00:00:00'
+    - '2024-06-02T00:00:00'
+    - '2024-06-02T00:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  atmosphere:
+    save_monthly_files: false
+    save_prediction_files: false
+  ocean:
+    names:
+    - sst
+    save_prediction_files: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
