@@ -803,6 +803,7 @@ stepper:
           - eastward_surface_wind_stress
           - northward_surface_wind_stress
 seed: 0
+checkpoint_every_n_batches: 250
 train_loader_atmosphere_only:
   batch_size: 8
   num_data_workers: 4

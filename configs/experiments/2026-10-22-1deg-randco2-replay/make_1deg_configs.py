@@ -68,6 +68,9 @@ cfg["logging"]["project"] = "ace-samudra-coupled-cm4"
 if str(cfg["logging"].get("metrics_log_dir", "")).startswith("/"):
     cfg["logging"]["metrics_log_dir"] = "metrics"
 cfg.pop("resume_results", None)
+cfg["checkpoint_every_n_batches"] = (
+    250  # a preempted segment loses at most ~1 h of training (was 1000)
+)
 
 # replay data: the random-CO2 members of the rs1 fine-tune's training loader (atmosphere + sea_ice stores)
 rc = []
@@ -116,3 +119,13 @@ for tag, (c, header) in arms.items():
     )
     out.write_text(hdr + yaml.safe_dump(c, sort_keys=False, width=110))
     print("wrote", out)
+    # twin that continues a previous submission's results (mounted at /existing-results by the launcher when
+    # EXISTING_RESULTS_DS is set): same run, new Beaker job spec (e.g. to add --min-runtime)
+    r = copy.deepcopy(c)
+    r["resume_results"] = {"existing_dir": "/existing-results", "resume_wandb": True}
+    out_r = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}-resume.yaml"
+    out_r.write_text(
+        hdr.replace("Launch:", "Resume-launch (EXISTING_RESULTS_DS=<results dataset>):")
+        + yaml.safe_dump(r, sort_keys=False, width=110)
+    )
+    print("wrote", out_r)

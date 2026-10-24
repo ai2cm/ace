@@ -35,7 +35,8 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${COUPLED_STATS}:ocean:/ocean_stats" \
   --dataset "${OCEAN_DS}:${OCEAN_CKPT}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_DS}:${ATMOS_CKPT}:/atmos_ckpt.tar" \
+  ${EXISTING_RESULTS_DS:+--dataset "${EXISTING_RESULTS_DS}:/existing-results"} \
   --gpus "$N_GPUS" --shared-memory 840GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
-  -- torchrun --nproc_per_node="${N_GPUS}" -m fme.coupled.train "${SCRIPT_PATH}/coupled/1deg-randco2rs1-fmean-${ARM}.yaml" 2>&1) || true
+  -- torchrun --nproc_per_node="${N_GPUS}" -m fme.coupled.train "${SCRIPT_PATH}/coupled/1deg-randco2rs1-fmean-${ARM}${EXISTING_RESULTS_DS:+-resume}.yaml" 2>&1) || true
 echo "$out" | grep -qm1 "beaker.org/ex/" && echo "launched $JOB: $(echo "$out" | grep -om1 'https://beaker.org/ex/[A-Z0-9]*')" || { echo "FAILED $JOB: $(echo "$out" | tail -3)"; exit 1; }

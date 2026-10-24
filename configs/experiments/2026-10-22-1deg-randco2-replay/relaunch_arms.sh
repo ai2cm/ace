@@ -8,8 +8,11 @@ TOOLS=$(cd "$SCRIPT_DIR/../2026-10-09-4deg-hybrid-ppad/tools" && pwd)
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate fme
 log() { echo "$(date -u +%FT%TZ) $*"; }
 cd "$SCRIPT_DIR"
+# To continue a previous submission's run, export EXISTING_alt=<results dataset> and/or EXISTING_alt_replay=<...>:
+# the launcher then mounts it at /existing-results and uses the -resume config (resume_results + resume_wandb).
 for ARM in alt alt-replay; do
-  ATMOS_DS="$ATMOS" ARM=$ARM ./launch-1deg-coupled-ft.sh 2>&1 | tail -2
+  var="EXISTING_${ARM//-/_}"
+  EXISTING_RESULTS_DS="${!var:-}" ATMOS_DS="$ATMOS" ARM=$ARM ./launch-1deg-coupled-ft.sh 2>&1 | tail -2
   sleep 20
   beaker experiment get "troya/1deg-randco2rs1-fmean-$ARM" --format json >/dev/null 2>&1 || { log "launch of $ARM failed; no watchdog"; continue; }
   B=1460; [ "$ARM" = alt-replay ] && B=2190
