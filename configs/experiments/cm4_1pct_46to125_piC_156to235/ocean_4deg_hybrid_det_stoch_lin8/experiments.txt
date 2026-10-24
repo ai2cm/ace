@@ -2,5 +2,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 
 # Century evals of best_inference_ckpt, held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_4deg_eval
-cm4_1pct_46to125_piC_156to235-ocean_4deg_hybrid_det_stoch_lin8|rs0|01M5MTX72MMA5MWVBH86XV2DFR|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_hybrid_det_stoch_lin8|rs0|01M5MTX72MMA5MWVBH86XV2DFR|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_hybrid_det_stoch_lin8|rs0|01M5MTX72MMA5MWVBH86XV2DFR|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_hybrid_det_stoch_lin8|rs0|01M5MTX72MMA5MWVBH86XV2DFR|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
