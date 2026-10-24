@@ -36,14 +36,14 @@ def extend(ds, start, shift_days, note):
 g2 = extend(
     g,
     "2025-01-01",
-    365,
-    "2026 = 2025 states relabelled +365 d: placeholders for the forcing loader, NOT data",
+    360,
+    "2026 = 2025 states relabelled +360 d (72 five-day steps, keeps the 5-day stamps uniform; 5-day calendar offset): placeholders for the forcing loader, NOT data",
 )
 e2 = extend(
     e,
     "2025-01-01",
-    365,
-    "2026 = 2025 relabelled +365 d: only insolation/CO2/static fields are used as forcing beyond 2025-12-30",
+    364,
+    "2026 = 2025 relabelled +364 d (keeps the daily stamps uniform after 2025-12-30; 1-day calendar offset): only insolation/CO2/static fields are used as forcing beyond 2025-12-30",
 )
 # nudge CO2 in the synthetic year by the last observed annual increment
 co2 = e2["global_mean_co2"]
@@ -54,14 +54,21 @@ m = co2.time >= np.datetime64("2026-01-01")
 e2["global_mean_co2"] = co2.where(~m, co2 + inc)
 print("co2 2024/2025 means", y24, y25, "increment applied to 2026", inc)
 g2.chunk({"time": 73}).to_zarr(
-    S / "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2026ext-cm4vars-v2.zarr",
+    S / "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2026ext-cm4vars-v3.zarr",
     mode="w",
     consolidated=True,
 )
 e2.chunk({"time": 73}).to_zarr(
-    S / "era5" / "2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2026ext.zarr",
+    S / "era5" / "2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2026ext-v2.zarr",
     mode="w",
     consolidated=True,
+)
+import numpy as _np
+
+print(
+    "uniform steps ocean/era5:",
+    len(set(_np.diff(g2.time.values).astype("timedelta64[h]").tolist())) == 1,
+    len(set(_np.diff(e2.time.values).astype("timedelta64[h]").tolist())) == 1,
 )
 print(
     "ocean",
