@@ -106,7 +106,9 @@ error). Run it after any change to the pipelines this one reuses.
 
 Cost on an 8-CPU VM: about 7 min per GLO12 day (download bound), 1.5-3.5 min
 for the atmosphere (ERA5T path; the first run builds the Legendre tables),
-1.5 min for the forcing; peak memory about 7 GB after the first run.
+1.5 min for the forcing; the ERA5T atmosphere stage peaks at 8.5 GB of RSS
+once the tables are cached (the first build of the vector table peaks near
+14 GB).
 
 ## Conventions the files follow (do not change without retraining)
 
