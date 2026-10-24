@@ -1,10 +1,9 @@
-# coupled-evaluator-config-glo12-era5-hindcast-2025-6mo: 2025 (held out) operational-forecast test of the GLO12 coupled fine-tune: coupled EIGHT-MEMBER ensemble version (n_ensemble_per_ic 8).
+# coupled-evaluator-config-glo12-era5-hindcast-2025-6mo: 2025 (held out) operational-forecast test of the GLO12 coupled fine-tune: coupled EIGHT-MEMBER ensemble version: each start repeated 8x in start_indices (the stochastic atmosphere draws fresh noise per sample).
 # rollouts of 36 five-day steps from 6 monthly initializations in 2025 on the GLO12 4deg store + ERA5 GLO12-period
 # store, single coupled checkpoint at /ckpt.tar, monthly outputs for Nino3.4 scoring. Troy 2026-10-23.
 experiment_dir: /results
 checkpoint_path: /ckpt.tar
 n_coupled_steps: 36
-n_ensemble_per_ic: 8  # eight noise-seed members per start (the UFS ensemble protocol) to tame the 6-start sampling noise
 coupled_steps_in_memory: 4
 loader:
   num_data_workers: 2
@@ -20,10 +19,52 @@ loader:
   start_indices:
     times:
     - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-01-03T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-02-02T00:00:00'
+    - '2025-02-02T00:00:00'
     - '2025-02-02T00:00:00'
     - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-03-04T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-04-03T00:00:00'
+    - '2025-04-03T00:00:00'
     - '2025-04-03T00:00:00'
     - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-05-03T00:00:00'
+    - '2025-06-02T00:00:00'
+    - '2025-06-02T00:00:00'
+    - '2025-06-02T00:00:00'
+    - '2025-06-02T00:00:00'
+    - '2025-06-02T00:00:00'
+    - '2025-06-02T00:00:00'
+    - '2025-06-02T00:00:00'
     - '2025-06-02T00:00:00'
 aggregator:
   log_zonal_mean_images: false
