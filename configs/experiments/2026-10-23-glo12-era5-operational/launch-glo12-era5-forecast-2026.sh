@@ -10,9 +10,9 @@ CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 OCEAN_CKPT_FILE="${OCEAN_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M39XBD8K0KB3GAQ79ETVN470}"   # 4deg-daily-ace2s-ft3-detached-rs0 (Jeremy, wandb 1r7oyu58)
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
-OCEAN_DS="${OCEAN_DS:-01M5NXCM8FMBKHHDFBDF9076S5}"   # derived GLO12 store extended through 2026 (2025 relabelled)
-ERA5_DS="${ERA5_DS:-01M5NXDX5SK7CT7PH3EZ22F85D}"   # ERA5 GLO12-period store extended through 2026
-ERA5_ZARR=2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2026ext-v2.zarr
+OCEAN_DS="${OCEAN_DS:-01M5NZDEM4F59X5BT4RAN6PAVV}"   # derived GLO12 store extended through 2026 (2025 relabelled)
+ERA5_DS="${ERA5_DS:-01M5NZEKBSRVPZ7H8VT9V27CCA}"   # ERA5 GLO12-period store extended through 2026
+ERA5_ZARR=2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2026ext-v3.zarr
 CFG="${CFG:-coupled-evaluator-config-glo12-era5-forecast-2026.yaml}"
 NAME="${NAME:-forecast-2026}"
 PRIORITY="${PRIORITY:-high}"
@@ -34,7 +34,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   ${OCEAN_CKPT_DS:+--dataset "${OCEAN_CKPT_DS}:${OCEAN_CKPT_FILE}:/ocean_ckpt.tar"} \
   ${OCEAN_CKPT_DS:+--dataset "${ATMOS_CKPT_DS}:${ATMOS_CKPT_FILE}:/atmos_ckpt.tar"} \
   ${CKPT_DS:+--dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar"} \
-  --dataset "${OCEAN_DS}:/glo12/2026-10-22-glo12-ocean-4deg-19level-5day-2026-10-22-glo12-ocean-4deg-19level-5day-2022-2026ext-cm4vars-v3.zarr" \
+  --dataset "${OCEAN_DS}:/glo12/2026-10-22-glo12-ocean-4deg-19level-5day-2026-10-22-glo12-ocean-4deg-19level-5day-2022-2026ext-cm4vars-v4.zarr" \
   --dataset "${ERA5_DS}:/era5glo/${ERA5_ZARR}" \
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \

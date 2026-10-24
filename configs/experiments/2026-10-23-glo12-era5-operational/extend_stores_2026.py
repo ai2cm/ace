@@ -27,7 +27,9 @@ def extend(ds, start, shift_days, note):
     tail = ds.sel(time=slice(start, None))
     tail = tail.assign_coords(time=tail.time + pd.Timedelta(days=shift_days))
     tail.attrs["note_2026"] = note
-    out = xr.concat([ds, tail], dim="time")
+    out = xr.concat(
+        [ds, tail], dim="time", data_vars="minimal", coords="minimal", compat="override"
+    )  # static fields (masks, fractions, bathymetry) must stay time-independent
     for v in list(out.variables):
         out[v].encoding = {}
     return out
@@ -54,12 +56,12 @@ m = co2.time >= np.datetime64("2026-01-01")
 e2["global_mean_co2"] = co2.where(~m, co2 + inc)
 print("co2 2024/2025 means", y24, y25, "increment applied to 2026", inc)
 g2.chunk({"time": 73}).to_zarr(
-    S / "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2026ext-cm4vars-v3.zarr",
+    S / "2026-10-22-glo12-ocean-4deg-19level-5day-2022-2026ext-cm4vars-v4.zarr",
     mode="w",
     consolidated=True,
 )
 e2.chunk({"time": 73}).to_zarr(
-    S / "era5" / "2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2026ext-v2.zarr",
+    S / "era5" / "2026-10-23-era5-4deg-8layer-daily-glo12-coupled-2022-2026ext-v3.zarr",
     mode="w",
     consolidated=True,
 )
@@ -69,6 +71,12 @@ print(
     "uniform steps ocean/era5:",
     len(set(_np.diff(g2.time.values).astype("timedelta64[h]").tolist())) == 1,
     len(set(_np.diff(e2.time.values).astype("timedelta64[h]").tolist())) == 1,
+)
+print(
+    "static mask_0 dims:",
+    g2["mask_0"].dims,
+    "| land_fraction dims era5:",
+    e2["land_fraction"].dims,
 )
 print(
     "ocean",
