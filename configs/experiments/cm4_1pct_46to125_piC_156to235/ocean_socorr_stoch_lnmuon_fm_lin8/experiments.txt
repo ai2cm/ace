@@ -15,7 +15,7 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|01M5KNTZHQJ6
 cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|01M5KNV67NCE51F1QY0FJ5W4YG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 # --config-dir configs/experiments/cm4_eval/ocean (40-ep resumes' best_inference_ckpt)
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|01M5KNTZHQJ6SVB1TFWJRR7JWW|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|01M5KNTZHQJ6SVB1TFWJRR7JWW|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|01M5KNV67NCE51F1QY0FJ5W4YG|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|01M5KNV67NCE51F1QY0FJ5W4YG|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|01M5KNTZHQJ6SVB1TFWJRR7JWW|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs1|01M5KNTZHQJ6SVB1TFWJRR7JWW|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|01M5KNV67NCE51F1QY0FJ5W4YG|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_socorr_stoch_lnmuon_fm_lin8|rs2|01M5KNV67NCE51F1QY0FJ5W4YG|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
