@@ -1,0 +1,10 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# job_runner/coupled_finetune.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_lin8_ppad_muon_alt_fto . \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+#
+# FTO-FTalt: 3-epoch alternating FT of the socorrlnmuonfm_a2s-fto coupled FTO
+# (wandb l0fc6hg8, best_inference_ckpt). results_dataset is the FTO's final
+# (exit 0) job result, pinned. checkpointing=3 is restated as an override
+# because the stepper merge lets the checkpoint's config win.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt_fto-socorrlnmuonfm_a2s-ftoftalt_lr1e-5|o0a0rs0|ace-samudra-coupled-cm4|l0fc6hg8|best_inference_ckpt|train|high|titan|4||3|ai2/ace|seed=0 stepper.atmosphere.stepper.step.config.builder.config.checkpointing=3|01M5JPAQAG21FRNCMMMMF40KMS|8h
