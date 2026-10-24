@@ -8,7 +8,9 @@
 # inference_config.yaml to the container paths, and runs
 # fme.coupled.inference on one GPU with the team's --min-runtime template
 # (never --preemptible: minRuntime 0 sits unscheduled for hours).
+# DRY_RUN=1 skips the dataset upload and passes --dry-run to gantry.
 set -euo pipefail
+DRY_RUN="${DRY_RUN:-0}"
 IC_DIR="${IC_DIR:?set IC_DIR to the make_ic.py output directory}"
 DATE="${DATE:?set DATE to the issue day (YYYY-MM-DD)}"
 CKPT_DS="${CKPT_DS:-01M5N1GVAVA2GEEPVDQ8VPT98W}"   # samudra-glo12-era5-coupledft-spb results
@@ -32,7 +34,10 @@ sed -e "s#${IC_DIR%/}#/ic#g" -e "s#experiment_dir: .*#experiment_dir: /results#"
     -e "s#log_to_wandb: .*#log_to_wandb: ${WANDB}#" "${IC_DIR}/inference_config.yaml" > "$CFG"
 grep -q "/ic/" "$CFG" || { echo "config rewrite failed: no /ic/ paths in $CFG"; exit 1; }
 
-if [ -z "$IC_DS" ]; then
+if [ "$DRY_RUN" = "1" ]; then
+  IC_DS="${IC_DS:-00000000000000000000000000}"
+  echo "dry run: config $CFG, IC dataset placeholder $IC_DS"
+elif [ -z "$IC_DS" ]; then
   IC_DS_NAME="samudrace-operational-ic-${DATE}-$(date -u +%Y%m%dT%H%M%S)"
   beaker dataset create --workspace ai2/ace --name "$IC_DS_NAME" "$IC_DIR" > /dev/null
   IC_DS=$(beaker dataset get "ai2/${IC_DS_NAME}" --format json | jq -r '.[0].id')
@@ -53,5 +58,6 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${IC_DS}:/ic" \
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
+  $([ "$DRY_RUN" = "1" ] && echo --dry-run) \
   -- python -I -m fme.coupled.inference "$CFG" 2>&1) || true
 echo "$out" | grep -qm1 "beaker.org/ex/" && echo "launched $JOB" || { echo "FAILED $JOB: $(echo "$out" | tail -5)"; exit 1; }

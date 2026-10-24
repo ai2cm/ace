@@ -95,10 +95,18 @@ python make_ic.py --date 2025-12-24 --out /tmp/ic-check --forcing-steps 0
 python verify_ic.py --date 2025-12-24 --ic-dir /tmp/ic-check
 ```
 
-compares the ocean state with the GLO12 training store (expected: float32
-noise) and the atmosphere sample with the reference daily ERA5 store (final
-path: float32 noise; ERA5T path: the transform error, reported). Run it after
-any change to the pipelines this one reuses.
+compares the ocean state with the GLO12 training store and the atmosphere
+sample with the reference daily ERA5 store. Measured 2026-10-24 for
+2025-12-24: the ocean matches on all 127 variables to float32 noise (largest
+relative RMSE 6e-6, salinity); the final-ERA5 atmosphere matches bitwise on
+every 3-D field (TOA insolation 1e-7 relative); the ERA5T atmosphere matches
+the final-ERA5 sample to within 0.5% relative RMSE on every variable (worst:
+top-layer winds, RMSE 0.02 m/s, max 0.2 m/s; the spectral/N320 transform
+error). Run it after any change to the pipelines this one reuses.
+
+Cost on an 8-CPU VM: about 7 min per GLO12 day (download bound), 1.5-3.5 min
+for the atmosphere (ERA5T path; the first run builds the Legendre tables),
+1.5 min for the forcing; peak memory about 7 GB after the first run.
 
 ## Conventions the files follow (do not change without retraining)
 
