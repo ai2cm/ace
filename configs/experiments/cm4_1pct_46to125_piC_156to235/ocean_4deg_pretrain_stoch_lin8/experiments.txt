@@ -6,11 +6,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 
 # Century evals of best_inference_ckpt, held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_4deg_eval
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep30|01M5RFKY3808S89NEN170X4D21|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep30|01M5RFKY3808S89NEN170X4D21|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_adamw_ep30|01M5RFM88YCG1R9GAHJM0ZEX4C|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_adamw_ep30|01M5RFM88YCG1R9GAHJM0ZEX4C|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_muon_ep10|01M5RFMKRXEG11KWMWDA9EQ6YY|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_muon_ep10|01M5RFMKRXEG11KWMWDA9EQ6YY|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep15|01M5RFMYYYWM1YF7A0HS1A06BE|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep15|01M5RFMYYYWM1YF7A0HS1A06BE|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep30|01M5RFKY3808S89NEN170X4D21|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep30|01M5RFKY3808S89NEN170X4D21|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_adamw_ep30|01M5RFM88YCG1R9GAHJM0ZEX4C|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_adamw_ep30|01M5RFM88YCG1R9GAHJM0ZEX4C|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_muon_ep10|01M5RFMKRXEG11KWMWDA9EQ6YY|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_muon_ep10|01M5RFMKRXEG11KWMWDA9EQ6YY|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep15|01M5RFMYYYWM1YF7A0HS1A06BE|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep15|01M5RFMYYYWM1YF7A0HS1A06BE|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
