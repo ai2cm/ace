@@ -27,9 +27,10 @@ cd "$REPO_ROOT"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 JOB="samudra-glo12-era5-operational-${NAME}"
 
-# the config with container paths (the IC dataset is mounted at /ic)
-CFG="${SCRIPT_PATH}/configs/inference-${NAME}.yaml"
-mkdir -p "${SCRIPT_PATH}/configs"
+# the config with container paths, written INTO the IC directory so the
+# uploaded dataset carries it (a config in the repo would need the launch
+# commit pushed first: the job checks out the pushed ref)
+CFG="${IC_DIR}/inference_config_beaker.yaml"
 sed -e "s#${IC_DIR%/}#/ic#g" -e "s#experiment_dir: .*#experiment_dir: /results#" \
     -e "s#log_to_wandb: .*#log_to_wandb: ${WANDB}#" "${IC_DIR}/inference_config.yaml" > "$CFG"
 grep -q "/ic/" "$CFG" || { echo "config rewrite failed: no /ic/ paths in $CFG"; exit 1; }
@@ -61,5 +62,5 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
   $([ "$DRY_RUN" = "1" ] && echo --dry-run) \
-  -- python -I -m fme.coupled.inference "$CFG" 2>&1) || true
+  -- python -I -m fme.coupled.inference /ic/inference_config_beaker.yaml 2>&1) || true
 echo "$out" | grep -qm1 "beaker.org/ex/" && echo "launched $JOB" || { echo "FAILED $JOB: $(echo "$out" | tail -5)"; exit 1; }
