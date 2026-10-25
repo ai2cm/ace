@@ -18,4 +18,10 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-mu3e3stoch_a2s-fto|
 # already noise-conditioned. Ocean wandb id 3ly4s80y (best_inference_ckpt,
 # epoch 24, from beaker 01M5BNVEVVW2Z32NE9H6JB1VV0). First socorr ocean
 # (salt-content corrector) in the coupled stage.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto|o0a0rs0|ace-samudra-cm4|3ly4s80y|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-fto|o0a0rs0|ace-samudra-cm4|3ly4s80y|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|skip|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
+
+# socorr noise-from-scratch Muon arm, ocean seed rs2: ../ocean_socorr_stoch_lnmuon_fm_lin8
+# rs2 (wandb gsho6l01, 40 ep; best_inference_ckpt from the resume, beaker
+# 01M5KNV67NCE51F1QY0FJ5W4YG). Same config as the rs0 row above. Group name
+# kept short so the eval job names stay under 128 chars.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfmrs2_a2s-fto|o0a0rs0|ace-samudra-cm4|gsho6l01|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
