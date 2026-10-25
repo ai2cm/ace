@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Stochastic lin8 24 ep from the 4deg pretrain wave (ocean_4deg_hybrid_pretrain); 2 GPUs as eclbf2mn.
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep30|ace-samudra-cm4|cztgcey4|ema_ckpt_0030|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M5P9QPS0NQN1G2Z0JRZZ3WRX|8h
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_adamw_ep30|ace-samudra-cm4|awlezn2j|ema_ckpt_0030|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M5P9QZP9R4A2P85X0T7D1MQQ|8h
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_muon_ep10|ace-samudra-cm4|5inytle6|ema_ckpt_0010|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M5P9R8V9WFRVQ6GBRME1P9FK|8h
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep15|ace-samudra-cm4|cztgcey4|ema_ckpt_0015|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0|01M5P9QPS0NQN1G2Z0JRZZ3WRX|8h
