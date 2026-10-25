@@ -40,7 +40,9 @@ if [ "$DRY_RUN" = "1" ]; then
 elif [ -z "$IC_DS" ]; then
   IC_DS_NAME="samudrace-operational-ic-${DATE}-$(date -u +%Y%m%dT%H%M%S)"
   beaker dataset create --workspace ai2/ace --name "$IC_DS_NAME" "$IC_DIR" > /dev/null
-  IC_DS=$(beaker dataset get "ai2/${IC_DS_NAME}" --format json | jq -r '.[0].id')
+  # named datasets resolve as <author>/<name>; create prints no id when piped
+  IC_DS=$(beaker dataset get "${BEAKER_USERNAME}/${IC_DS_NAME}" --format json \
+    | jq -r 'if type == "array" then .[0].id else .id end')
   n_files=$(beaker dataset ls "$IC_DS" --format json | jq 'length')
   [ "$n_files" -gt 0 ] || { echo "dataset $IC_DS is empty"; exit 1; }
   echo "IC dataset $IC_DS ($n_files files)"
