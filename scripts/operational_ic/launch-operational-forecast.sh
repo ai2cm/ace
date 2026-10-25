@@ -1,7 +1,7 @@
 #!/bin/bash
 # Launch a coupled SamudrACE forecast from an initial condition built by make_ic.py.
 #
-#   IC_DIR=/path/to/ic DATE=2026-10-16 ./launch-operational-forecast.sh
+#   ACE_REPO=/path/to/ace-checkout IC_DIR=/path/to/ic DATE=2026-10-16 ./launch-operational-forecast.sh
 #
 # Uploads the IC directory as a Beaker dataset (unless IC_DS is given), mounts
 # it at /ic together with the deployed checkpoint, rewrites the local paths of
@@ -20,10 +20,16 @@ NAME="${NAME:-forecast-${DATE}}"
 MIN_RUNTIME="${MIN_RUNTIME:-3h}"
 PRIORITY="${PRIORITY:-high}"
 WANDB="${WANDB:-true}"
+# The job installs fme from the checkout it ships, so ACE_REPO must be a
+# pushed checkout of the branch the checkpoint was trained with (the GLO12
+# fine-tune: troya/2026-08-18-enso-rollout-interventions); a release-era main
+# does not know the coupled stepper fields in the checkpoint config.
+ACE_REPO="${ACE_REPO:-$(git rev-parse --show-toplevel)}"
+cd "$ACE_REPO"
 REPO_ROOT=$(git rev-parse --show-toplevel)
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
-cd "$REPO_ROOT"
+git fetch -q origin 2>/dev/null || true
+git branch -r --contains HEAD 2>/dev/null | grep -q origin/ || { echo "HEAD of $REPO_ROOT is not pushed; the job would check out a missing ref"; exit 1; }
+echo "shipping $REPO_ROOT @ $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD))"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 JOB="samudra-glo12-era5-operational-${NAME}"
 
