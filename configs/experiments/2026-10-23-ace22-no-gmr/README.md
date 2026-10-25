@@ -16,11 +16,18 @@ with the clip disabled, so the one run separates GMR's effect from the clip's.
 
 Constraints:
 
-- Nothing may train on, validate on, or be selected using 2015 onward (AIMIP holdout). Stage 1's
-  zero-weight 2015 inline rollout is look-only, as in ACE2.2-ERA5. Checkpoints and the
+- Nothing may train on, validate on, or be selected using 2015 onward (AIMIP holdout). Stage 1
+  keeps ACE2.2-ERA5's three zero-weight inline rollouts that reach the holdout (`10year` from
+  2015, `long_46year` through 2024, `weather_2024`); they are ignored, and the long rollout is
+  read only through 2014. Stage 2 has none. Checkpoints and the
   comparison with ACE2.2-ERA5 are decided on 1979-2014. The 2015-2024 response is examined only
   after that.
 - Both stages run at ace `394e41b5e` with image `oliverwm/fme-deps-only-c82095065`, as ACE2.2-ERA5
   did.
+
+`run-long36.sh` scores a stage-2 checkpoint on the 1979-2014 rollout used for ACE2.2-ERA5's
+seeds (`long36-evaluator-config.yaml`, copied unchanged from
+`../2026-08-28-ace22-variants/long36-backfill/`). While stage 2 is still running, first copy
+the checkpoint out with `snapshot-ckpt.sh`, since Beaker will not mount a running job's results.
 
 Launch with `bash run.sh`. It is safe to rerun: each run launches whatever stage has become ready.
