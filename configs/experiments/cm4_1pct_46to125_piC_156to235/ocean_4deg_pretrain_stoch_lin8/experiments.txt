@@ -4,3 +4,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mse_ep30|01M5RFKY3808S89NEN170X4D21|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_adamw_ep30|01M5RFM88YCG1R9GAHJM0ZEX4C|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_4deg_pretrain_stoch_lin8|mae_muon_ep10|01M5RFMKRXEG11KWMWDA9EQ6YY|training|best_inference_ckpt|normal|--min-runtime 8h
