@@ -10,8 +10,8 @@ if [[ "$JOB_NAME" != *test* ]]; then
   echo "job name must contain 'test'" >&2
   exit 1
 fi
-SCRIPT_DIR=$(git rev-parse --show-prefix)
-REPO_ROOT=$(git rev-parse --show-toplevel)
+SCRIPT_DIR=configs/experiments/2026-10-19-fm/swin_speed/
+REPO_ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter"}
 cd "$REPO_ROOT"
 
