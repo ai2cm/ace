@@ -1,14 +1,13 @@
 import copy
-import inspect
 import math
 from typing import Any
 
 import pytest
 import torch
 import torch.nn as nn
-from torch.optim import _muon as torch_muon
 
 import fme
+from fme.core import muon as fme_muon
 from fme.core.muon import Muon
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
@@ -266,45 +265,58 @@ def test_muon_invalid_adjust_lr_fn_raises():
         Muon([nn.Parameter(torch.randn(3, 3))], [], lr=0.02, adjust_lr_fn="spectral")
 
 
-def test_torch_muon_private_api():
-    """fme.core.muon calls torch's private functional Muon; fail here, not in
-    a training run, if a torch upgrade moves or changes it."""
-    muon_params = inspect.signature(torch_muon.muon).parameters
-    for name in [
-        "params",
-        "grads",
-        "muon_momentum_bufs",
-        "lr",
-        "weight_decay",
-        "momentum",
-        "nesterov",
-        "ns_coefficients",
-        "ns_steps",
-        "eps",
-        "adjust_lr_fn",
-        "has_complex",
-    ]:
-        assert name in muon_params, name
-    assert list(inspect.signature(torch_muon._adjust_lr).parameters) == [
-        "lr",
-        "adjust_lr_fn",
-        "param_shape",
-    ]
-    shape = torch.Size([4, 18])
-    assert torch_muon._adjust_lr(1.0, None, shape) == 1.0
-    assert torch_muon._adjust_lr(1.0, "original", torch.Size([18, 4])) == (
-        pytest.approx(math.sqrt(18 / 4))
+@pytest.mark.parametrize("nesterov", [True, False])
+@pytest.mark.parametrize("adjust_lr_fn", [None, "match_rms_adamw"])
+def test_copied_muon_matches_torch(nesterov: bool, adjust_lr_fn: str | None):
+    """fme.core.muon.muon is a copy of torch's functional Muon; where torch
+    ships it (torch >= 2.9), the two give identical updates."""
+    torch_muon = pytest.importorskip("torch.optim._muon")
+    assert (
+        torch_muon.DEFAULT_A,
+        torch_muon.DEFAULT_B,
+        torch_muon.DEFAULT_C,
+        torch_muon.DEFAULT_NS_STEPS,
+        torch_muon.EPS,
+    ) == (
+        fme_muon.DEFAULT_A,
+        fme_muon.DEFAULT_B,
+        fme_muon.DEFAULT_C,
+        fme_muon.DEFAULT_NS_STEPS,
+        fme_muon.EPS,
     )
-    assert torch_muon._adjust_lr(1.0, "match_rms_adamw", shape) == (
-        pytest.approx(0.2 * math.sqrt(18))
+    torch.manual_seed(0)
+    device = fme.get_device()
+    shapes = [(4, 27), (24, 6), (6, 24)]
+    params = [torch.randn(shape, device=device) for shape in shapes]
+    bufs = [torch.randn_like(p) for p in params]
+    copies = {
+        name: ([p.clone() for p in params], [b.clone() for b in bufs])
+        for name in ("fme", "torch")
+    }
+    kwargs: dict[str, Any] = dict(
+        lr=0.02,
+        weight_decay=0.1,
+        momentum=0.9,
+        nesterov=nesterov,
+        ns_coefficients=(
+            fme_muon.DEFAULT_A,
+            fme_muon.DEFAULT_B,
+            fme_muon.DEFAULT_C,
+        ),
+        ns_steps=fme_muon.DEFAULT_NS_STEPS,
+        eps=fme_muon.EPS,
+        adjust_lr_fn=adjust_lr_fn,
     )
-    assert (torch_muon.DEFAULT_A, torch_muon.DEFAULT_B, torch_muon.DEFAULT_C) == (
-        3.4445,
-        -4.7750,
-        2.0315,
-    )
-    assert torch_muon.DEFAULT_NS_STEPS == 5
-    assert torch_muon.EPS == 1e-7
+    for _ in range(3):
+        grads = [torch.randn_like(p) for p in params]
+        fme_params, fme_bufs = copies["fme"]
+        fme_muon.muon(fme_params, grads, fme_bufs, **kwargs)
+        torch_params, torch_bufs = copies["torch"]
+        torch_muon.muon(torch_params, grads, torch_bufs, **kwargs, has_complex=False)
+    for fme_t, torch_t in zip(
+        copies["fme"][0] + copies["fme"][1], copies["torch"][0] + copies["torch"][1]
+    ):
+        torch.testing.assert_close(fme_t, torch_t, rtol=0, atol=0)
 
 
 def _reference_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
@@ -324,12 +336,12 @@ def _reference_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
     return X
 
 
-def _torch_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
-    return torch_muon._zeropower_via_newtonschulz(
+def _copied_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
+    return fme_muon._zeropower_via_newtonschulz(
         G,
-        (torch_muon.DEFAULT_A, torch_muon.DEFAULT_B, torch_muon.DEFAULT_C),
+        (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
         steps,
-        torch_muon.EPS,
+        fme_muon.EPS,
     )
 
 
@@ -357,13 +369,13 @@ def _reference_muon_step(
 _EQUIVALENCE_SHAPES = [(4, 3, 3, 3), (24, 6), (6, 24)]
 
 
-@pytest.mark.parametrize("newton_schulz", ["vendored", "torch"])
+@pytest.mark.parametrize("newton_schulz", ["vendored", "copied"])
 @pytest.mark.parametrize("nesterov", [True, False])
 def test_muon_matches_vendored_reference(nesterov: bool, newton_schulz: str):
-    """With the default adjust_lr_fn the torch-backed optimizer reproduces the
+    """With the default adjust_lr_fn the optimizer reproduces the
     previously vendored update.
 
-    With torch's Newton-Schulz kernel in the reference, the match is exact.
+    With the copied torch Newton-Schulz kernel in the reference, the match is exact.
     The vendored kernel computes the same bfloat16 iteration with unfused
     matmuls, so its updates differ from torch's by bfloat16 rounding (a few
     percent of the update RMS per step).
@@ -385,7 +397,7 @@ def test_muon_matches_vendored_reference(nesterov: bool, newton_schulz: str):
         nesterov=nesterov,
         weight_decay=weight_decay,
     )
-    ns = {"vendored": _reference_newtonschulz5, "torch": _torch_newtonschulz5}
+    ns = {"vendored": _reference_newtonschulz5, "copied": _copied_newtonschulz5}
     for _ in range(n_steps):
         grads = [torch.randn_like(p) for p in params]
         for p, g in zip(params, grads):
@@ -399,7 +411,7 @@ def test_muon_matches_vendored_reference(nesterov: bool, newton_schulz: str):
         buf = optimizer.state[p]["momentum_buffer"]
         assert buf.shape == p.shape
         torch.testing.assert_close(buf, ref_buf)
-        if newton_schulz == "torch":
+        if newton_schulz == "copied":
             torch.testing.assert_close(p.detach(), ref)
         else:
             delta, ref_delta = p.detach() - p0, ref - p0
@@ -495,7 +507,7 @@ def test_muon_loads_vendored_layout_state_dict():
         momentum=0.95,
         nesterov=True,
         weight_decay=0.0,
-        newton_schulz=_torch_newtonschulz5,
+        newton_schulz=_copied_newtonschulz5,
     )
     for p in model.parameters():
         p.grad = torch.randn_like(p)
@@ -505,7 +517,7 @@ def test_muon_loads_vendored_layout_state_dict():
 
 
 def test_muon_bfloat16_without_nesterov_raises():
-    """torch's Newton-Schulz normalizes a bfloat16 input in place, which
+    """The Newton-Schulz kernel normalizes a bfloat16 input in place, which
     without Nesterov is the momentum buffer itself."""
     p = nn.Parameter(torch.randn(4, 6, dtype=torch.bfloat16))
     p.grad = torch.randn_like(p)

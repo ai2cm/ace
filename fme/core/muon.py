@@ -1,40 +1,195 @@
 """Muon optimizer with an auxiliary AdamW parameter group.
 
 The Muon math (momentum, Newton-Schulz orthogonalization, learning-rate
-adjustment, decoupled weight decay) is delegated to torch's functional
-``torch.optim._muon.muon``. ``torch.optim.Muon`` itself is not used directly
-because its constructor rejects parameters with ``ndim != 2`` (conv kernels
-are 4D) and it has no AdamW group for the remaining parameters. This module
-is the thin layer around the functional call:
+adjustment, decoupled weight decay) is copied from PyTorch's
+``torch/optim/_muon.py`` at v2.10.0 [*] (BSD-3-Clause, notice below), so ace
+does not require torch >= 2.9 or import a private torch module. The copied
+functions are unchanged apart from dropping torch's dynamo and tensor-``lr``
+wrappers. ``torch.optim.Muon`` itself would not fit even where available: its
+constructor rejects parameters with ``ndim != 2`` (conv kernels are 4D) and
+it has no AdamW group for the remaining parameters. The ``Muon`` class here
+is the layer around the copied functional update:
 
-- Parameters with ``ndim > 2`` are passed to torch as ``(shape[0], -1)``
-  views, so updates write through to the parameter (a non-contiguous
-  parameter is updated through a contiguous copy that is copied back). The
-  momentum buffer is stored in the parameter's own shape, as in the
-  previously vendored implementation, so its checkpoints load unchanged.
+- Parameters with ``ndim > 2`` are updated as ``(shape[0], -1)`` views, so
+  updates write through to the parameter (a non-contiguous parameter is
+  updated through a contiguous copy that is copied back). The momentum
+  buffer is stored in the parameter's own shape, as in the previously
+  vendored implementation, so its checkpoints load unchanged.
 - Parameters with ``grad=None`` are skipped; gradients are not modified.
 - An AdamW group (defaults match ``torch.optim.AdamW``: betas
   ``(0.9, 0.999)``, eps ``1e-8``) updates the non-Muon parameters.
 - ``load_state_dict`` refuses a state dict whose parameter groups are not
   Muon/AdamW groups of the same layout (e.g. one saved by plain AdamW).
 
-torch's Newton-Schulz iteration fuses its bfloat16 matmuls (``addmm``), so
-its updates differ from the previously vendored kernel's by bfloat16
+The copied Newton-Schulz iteration fuses its bfloat16 matmuls (``addmm``),
+so its updates differ from the previously vendored kernel's by bfloat16
 rounding (about 3% of the update RMS); runs resumed from vendored-era
 checkpoints are not bitwise reproducible.
 
 Muon is single-device: under DDP the gradients are already all-reduced
 before ``step``, so every rank computes the same Newton-Schulz update.
+
+[*] https://github.com/pytorch/pytorch/blob/v2.10.0/torch/optim/_muon.py
 """
 
+# The functions marked "copied from PyTorch" below carry this notice:
+#
+# Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
+# Copyright (c) 2014-     Facebook, Inc            (Soumith Chintala)
+# Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
+# Copyright (c) 2012-2014 Deepmind Technologies    (Koray Kavukcuoglu)
+# Copyright (c) 2011-2012 NEC Laboratories America (Koray Kavukcuoglu)
+# Copyright (c) 2011-2013 NYU                      (Clement Farabet)
+# Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou, Iain Melvin, Jason Weston)  # noqa: E501
+# Copyright (c) 2006      Idiap Research Institute (Samy Bengio)
+# Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert, Samy Bengio, Johnny Mariethoz)  # noqa: E501
+#
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# 3. Neither the names of Facebook, Deepmind Technologies, NYU, NEC Laboratories
+#    America and IDIAP Research Institute nor the names of its contributors may
+#    be used to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 import torch
-from torch.optim import _muon as torch_muon
 
 _MUON_FLAG = "use_muon"
 ADJUST_LR_FNS = (None, "original", "match_rms_adamw")
+
+# Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
+# Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
+EPS = 1e-7
+DEFAULT_A = 3.4445
+DEFAULT_B = -4.7750
+DEFAULT_C = 2.0315
+DEFAULT_NS_STEPS = 5
+
+
+def _zeropower_via_newtonschulz(
+    grad: torch.Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> torch.Tensor:
+    """Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
+
+    Newton-Schulz iteration to compute the zeroth power / orthogonalization of
+    G. We opt to use a quintic iteration whose coefficients are selected to
+    maximize the slope at zero. For the purpose of minimizing steps, it turns
+    out to be empirically effective to keep increasing the slope at zero even
+    beyond the point where the iteration no longer converges all the way to one
+    everywhere on the interval. This iteration therefore does not produce UV^T
+    but rather something like US'V^T where S' is diagonal with
+    S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model performance
+    at all relative to UV^T, where USV^T = G is the SVD.
+
+    Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
+    with suggestions by @jxbz, @leloykun, and @YouJiacheng.
+    """
+    if ns_steps >= 100:
+        raise ValueError(
+            "Number of steps must be less than 100 for computational efficiency"
+        )
+    if len(grad.shape) != 2:
+        raise ValueError("Input tensor gradient must be a 2D matrix")
+    if len(ns_coefficients) != 3:
+        raise ValueError("Coefficients must be a tuple of exactly 3 values")
+    a, b, c = ns_coefficients
+    ortho_grad = grad.bfloat16()
+    if grad.size(0) > grad.size(1):
+        ortho_grad = ortho_grad.T
+    # Ensure spectral norm is at most 1
+    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
+    # Perform the NS iterations
+    for _ in range(ns_steps):
+        gram_matrix = ortho_grad @ ortho_grad.T
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+
+    if grad.size(0) > grad.size(1):
+        ortho_grad = ortho_grad.T
+    return ortho_grad
+
+
+def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
+    """Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
+
+    Default learning rate adjustment used by Muon.
+    """
+    A, B = param_shape[:2]
+
+    if adjust_lr_fn is None or adjust_lr_fn == "original":
+        adjusted_ratio = math.sqrt(max(1, A / B))
+    elif adjust_lr_fn == "match_rms_adamw":
+        adjusted_ratio = 0.2 * math.sqrt(max(A, B))
+    else:
+        adjusted_ratio = 1.0
+    return lr * adjusted_ratio
+
+
+def muon(
+    params: list[torch.Tensor],
+    grads: list[torch.Tensor],
+    muon_momentum_bufs: list[torch.Tensor],
+    *,
+    lr: float,
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+) -> None:
+    """Copied from PyTorch (``_single_tensor_muon`` in torch/optim/_muon.py,
+    v2.10.0), without the complex-parameter flag and tensor-``lr`` handling.
+
+    Functional Muon update of 2D ``params`` in place, from their ``grads``
+    and ``muon_momentum_bufs`` (also updated in place).
+    """
+    for i, param in enumerate(params):
+        grad = grads[i]
+        if grad.ndim != 2:
+            raise ValueError("Param gradient must be a 2D matrix")
+
+        buf = muon_momentum_bufs[i]
+        buf.lerp_(grad, 1 - momentum)
+        update = grad.lerp(buf, momentum) if nesterov else buf
+
+        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
+
+        param.mul_(1 - lr * weight_decay)
+        param.add_(update, alpha=-adjusted_lr)
 
 
 def _as_matrix(t: torch.Tensor) -> tuple[torch.Tensor, bool]:
@@ -120,7 +275,7 @@ class Muon(torch.optim.Optimizer):
         momentum: float = 0.95,
         nesterov: bool = True,
         weight_decay: float = 0.0,
-        ns_steps: int = torch_muon.DEFAULT_NS_STEPS,
+        ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
         adamw_lr: float = 3e-4,
         adamw_betas: tuple[float, float] = (0.9, 0.999),
@@ -206,13 +361,13 @@ class Muon(torch.optim.Optimizer):
                     p, memory_format=torch.contiguous_format
                 )
             if not group["nesterov"] and p.dtype == torch.bfloat16:
-                # torch's Newton-Schulz casts its input with .bfloat16() and
+                # _zeropower_via_newtonschulz casts its input with .bfloat16() and
                 # then normalizes it in place; without Nesterov that input is
                 # the momentum buffer itself, which would be overwritten.
                 raise ValueError(
                     "Muon with nesterov=False does not support bfloat16 " "parameters."
                 )
-            # torch's muon reads the gradient only, so a copy is fine.
+            # muon reads the gradient only, so a copy is fine.
             grads.append(p.grad.reshape(p.shape[0], -1))
             for t, out in ((p, params), (state["momentum_buffer"], bufs)):
                 matrix, is_copy = _as_matrix(t)
@@ -221,7 +376,7 @@ class Muon(torch.optim.Optimizer):
                     write_back.append((t, matrix))
         if len(params) == 0:
             return
-        torch_muon.muon(
+        muon(
             params,
             grads,
             bufs,
@@ -229,15 +384,10 @@ class Muon(torch.optim.Optimizer):
             weight_decay=group["weight_decay"],
             momentum=group["momentum"],
             nesterov=group["nesterov"],
-            ns_coefficients=(
-                torch_muon.DEFAULT_A,
-                torch_muon.DEFAULT_B,
-                torch_muon.DEFAULT_C,
-            ),
+            ns_coefficients=(DEFAULT_A, DEFAULT_B, DEFAULT_C),
             ns_steps=group["ns_steps"],
-            eps=torch_muon.EPS,
+            eps=EPS,
             adjust_lr_fn=group["adjust_lr_fn"],
-            has_complex=False,
         )
         for t, matrix in write_back:
             t.copy_(matrix.view(t.shape))
