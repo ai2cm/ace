@@ -13,7 +13,6 @@ from fme.core.compile import (
     is_compile_enabled,
 )
 from fme.core.device import force_cpu
-from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse in this module
 
 
 def test_compile_enabled_restores_previous_setting():
@@ -109,13 +108,17 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
     """Falling back to eager at the limit costs speed, so it must be visible.
     Dynamo warns on the ``torch._dynamo`` logger, which writes to stderr with
     its own handler and does not propagate to the root logger, so caplog's
-    handler is attached to it directly."""
+    handler is attached to it directly. The suite-wide ``dynamo_hygiene``
+    fixture makes hitting the limit raise, so this test turns that off to
+    exercise the production fallback."""
     net = torch.nn.Linear(2, 2)
     module = compile_module(net, backend="eager")
     dynamo_logger = logging.getLogger("torch._dynamo")
     dynamo_logger.addHandler(caplog.handler)
     try:
-        with torch._dynamo.config.patch(recompile_limit=1):
+        with torch._dynamo.config.patch(
+            recompile_limit=1, fail_on_recompile_limit_hit=False
+        ):
             # a change in rank always recompiles, even with dynamic shapes
             for shape in [(2,), (3, 2), (4, 3, 2)]:
                 x = torch.randn(*shape)

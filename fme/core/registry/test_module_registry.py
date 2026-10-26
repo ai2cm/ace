@@ -18,10 +18,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
 from fme.core.registry.module import Module
-from fme.core.testing import (  # noqa: F401  autouse in this module
-    compile_on,
-    dynamo_hygiene,
-)
+from fme.core.testing import compile_on  # noqa: F401  autouse in this module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
 

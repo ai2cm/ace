@@ -1,13 +1,4 @@
-"""Helpers for tests that exercise ``torch.compile``.
-
-The ``dynamo_hygiene`` fixture lives here rather than in a ``conftest.py`` so
-that test modules in any package (``fme/core``, ``fme/ace``, ...) can opt into
-it with a single import; pytest picks up an autouse fixture from the test
-module's own namespace, so importing this name into a test module makes it
-autouse for that module and that module only. A ``conftest.py`` fixture would
-either apply to unrelated tests in the same directory or need to be duplicated
-per package.
-"""
+"""Helpers for tests that exercise ``torch.compile``."""
 
 import contextlib
 from collections.abc import Iterator
@@ -63,19 +54,28 @@ def compile_on() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def dynamo_hygiene() -> Iterator[None]:
-    """Isolate a test module's dynamo state from the rest of the suite.
+    """Isolate each test's dynamo state from the rest of the suite.
+
+    The root ``conftest.py`` imports this fixture, making it autouse for every
+    test.
 
     Dynamo's compilation cache is keyed on code objects and is process-global,
     so compiled functions and guards leak between tests sharing an xdist
     worker; ``torch._dynamo.reset()`` before and after each test keeps a
-    compile in one test from being served (or invalidated) by another.
+    compile in one test from being served (or invalidated) by another. Every
+    compiled module is traced through the same ``DummyWrapper.forward`` code
+    object, so without a reset the recompile budget of that code object is
+    shared by the whole worker, and later tests would silently run eagerly once
+    it is used up.
 
-    Import this name into a test module to make it autouse for that module::
-
-        from fme.core.testing import dynamo_hygiene  # noqa: F401
+    Within a test, hitting the recompile limit raises instead of falling back
+    to eager, so that tests cannot pass while claiming to exercise compiled
+    code they never ran. Tests of the production fallback patch
+    ``torch._dynamo.config.fail_on_recompile_limit_hit`` back off.
     """
     torch._dynamo.reset()
     try:
-        yield
+        with torch._dynamo.config.patch(fail_on_recompile_limit_hit=True):
+            yield
     finally:
         torch._dynamo.reset()

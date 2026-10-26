@@ -11,7 +11,6 @@ import torch
 from fme.ace.stepper.test_single_module import get_regression_stepper_and_data
 from fme.core.optimization import OptimizationConfig
 from fme.core.step.single_module import SingleModuleStep
-from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse in this module
 
 
 @pytest.mark.slow

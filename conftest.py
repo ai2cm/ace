@@ -9,6 +9,7 @@ import torch
 import xdist
 
 from fme.core.distributed.distributed import Distributed
+from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse for every test
 
 
 def pytest_addoption(parser):
