@@ -26,6 +26,9 @@ def _parse_compile_env(value: str | None) -> bool | None:
 
 
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
+# Optional torch.compile mode (e.g. "reduce-overhead" for CUDA graphs); an
+# empty or unset FME_COMPILE_MODE uses torch's default mode.
+_COMPILE_MODE: str | None = os.environ.get("FME_COMPILE_MODE") or None
 _LOGGED_AUTO_SKIP = False
 RECOMPILE_LIMIT = 32
 
@@ -92,11 +95,16 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     ``torch._dynamo.config.recompile_limit`` to :data:`RECOMPILE_LIMIT`,
     leaving any larger user-set value in place. When the limit is still hit,
     dynamo logs a warning on the ``torch._dynamo`` logger and runs the
-    remaining variants eagerly.
+    remaining variants eagerly. The ``FME_COMPILE_MODE`` environment
+    variable, when set, is passed as ``torch.compile``'s ``mode`` unless
+    ``kwargs`` already sets one.
 
     Args:
         module: The module to compile.
         kwargs: Forwarded to ``torch.compile``.
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
+    if _COMPILE_MODE is not None and "mode" not in kwargs:
+        logger.info(f"torch.compile mode from FME_COMPILE_MODE: {_COMPILE_MODE}")
+        kwargs["mode"] = _COMPILE_MODE
     return torch.compile(module, **kwargs)
