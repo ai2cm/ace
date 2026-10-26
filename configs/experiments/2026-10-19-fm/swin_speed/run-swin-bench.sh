@@ -1,23 +1,29 @@
 #!/bin/bash
-# Submit the Swin training-step microbenchmark (bench_swin.py) as a 1-GPU
-# Beaker job. Usage: ./run-swin-bench.sh <job_name containing "test"> [bench args...]
+# Submit a Swin speed benchmark (bench_swin.py or bench_real.py) as a 1-GPU
+# Beaker job. Usage:
+#   ./run-swin-bench.sh <job_name containing "test"> <script.py> <cluster|all> [args...]
+# e.g. cluster "ai2/titan"; "all" allows titan, jupiter and saturn.
 
 set -e
 command -v gantry >/dev/null || export PATH="$HOME/mamba/envs/fme/bin:$PATH"
 
 JOB_NAME="$1"
-shift
+BENCH_SCRIPT="$2"
+CLUSTERS="$3"
+shift 3
 if [[ "$JOB_NAME" != *test* ]]; then
   echo "job name must contain 'test'" >&2
   exit 1
 fi
 SCRIPT_DIR=configs/experiments/2026-10-19-fm/swin_speed/
 REPO_ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter ai2/saturn"}
+if [[ "$CLUSTERS" == all ]]; then
+  CLUSTERS="ai2/titan ai2/jupiter ai2/saturn"
+fi
 cd "$REPO_ROOT"
 
 cluster_args=()
-for cluster in $BEAKER_CLUSTER; do
+for cluster in $CLUSTERS; do
   cluster_args+=(--cluster "$cluster")
 done
 
@@ -30,9 +36,10 @@ gantry run \
   --priority "${BEAKER_PRIORITY:-normal}" \
   "${cluster_args[@]}" \
   --gpus 1 \
-  --shared-memory 50GiB \
+  --shared-memory 100GiB \
+  --weka climate-default:/climate-default \
   --budget ai2/atec-climate \
   --system-python \
   --install "pip install --no-deps ." \
   --allow-dirty \
-  -- python "${SCRIPT_DIR}bench_swin.py" "$@"
+  -- python "${SCRIPT_DIR}${BENCH_SCRIPT}" "$@"
