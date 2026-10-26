@@ -1,9 +1,9 @@
 """End-to-end coverage of the default ``torch.compile`` path on CUDA.
 
-The suite runs eagerly (see the root ``conftest.py``), and the other compile
-tests substitute the ``aot_eager`` backend to stay within timeouts, so this
-module is the one place a stepper trains and predicts through the inductor
-backend that steps compile with by default on CUDA.
+The rest of the suite also compiles with inductor when run on CUDA, but only
+this module asserts that a stepper trains and predicts through the compiled
+path; the other compile tests substitute the ``aot_eager`` backend to stay
+within timeouts.
 """
 
 import pytest

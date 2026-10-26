@@ -46,12 +46,11 @@ def compile_backend(backend: str) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def compile_on(compile_disabled: None) -> Iterator[None]:
+def compile_on() -> Iterator[None]:
     """Enable compilation for every test in a test module, on any device.
 
-    The suite's ``compile_disabled`` fixture runs every test eagerly; this
-    fixture depends on it so that it re-enables compilation afterwards. Use it
-    in modules where every test compiles; elsewhere, :func:`compile_backend`
+    By default tests compile only on CUDA; use this in modules where every
+    test compiles, including on CPU. Elsewhere, :func:`compile_backend`
     enables compilation for the steps it builds.
 
     Import this name into a test module to make it autouse for that module::
