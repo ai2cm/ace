@@ -2,6 +2,7 @@ import dataclasses
 from collections.abc import Sequence
 
 from fme.ace.data_loading.augmentation import AugmentationConfig
+from fme.ace.data_loading.label_sampling import LabelSamplingConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.dataset import DatasetABC
 from fme.core.dataset.merged import MergeDatasetConfig
@@ -40,6 +41,10 @@ class DataLoaderConfig:
             Each pool slot holds one window of
             ``batch_size * (time_buffer + n_timesteps)`` tensors in memory.
             Requires ``time_buffer > 0``.
+        label_sampling: If provided, each epoch draws a fixed fraction of its
+            samples from each dataset label, instead of sampling in proportion
+            to each label's number of samples. Only supported for training
+            data, and cannot be combined with ``sample_with_replacement``.
 
     Note:
         Setting `time_buffer` to a value greater than 0 results in pre-loading
@@ -66,6 +71,7 @@ class DataLoaderConfig:
     sample_with_replacement: int | None = None
     time_buffer: int = 0
     time_buffer_pool_size: int = 1
+    label_sampling: LabelSamplingConfig | None = None
 
     @property
     def using_labels(self) -> bool:
@@ -112,6 +118,27 @@ class DataLoaderConfig:
                 "time_buffer_pool_size > 1 requires time_buffer > 0. "
                 f"Got time_buffer={self.time_buffer}, "
                 f"time_buffer_pool_size={self.time_buffer_pool_size}"
+            )
+        if self.label_sampling is not None:
+            if self.sample_with_replacement is not None:
+                raise ValueError(
+                    "label_sampling and sample_with_replacement cannot both be set"
+                )
+            if self.available_labels is None:
+                raise ValueError("label_sampling requires a labeled dataset")
+            self.label_sampling.validate_labels(self.available_labels)
+
+    def validate_for_validation(self, context: str):
+        """
+        Raise if this loader sets options that only apply to training data.
+
+        Args:
+            context: Description of where this loader is used, for the error.
+        """
+        if self.label_sampling is not None:
+            raise ValueError(
+                "label_sampling is only supported for the training loader, "
+                f"but it is set on {context}"
             )
 
     @property

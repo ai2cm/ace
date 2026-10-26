@@ -4,7 +4,11 @@ import pytest
 import torch
 
 from fme.core.dataset.concat import XarrayConcat
-from fme.core.dataset.testing import MockDataset, assert_dataset_item_length
+from fme.core.dataset.testing import (
+    MockDataset,
+    assert_dataset_item_length,
+    assert_sample_labels_match_items,
+)
 
 
 def test_concat_set_epoch():
@@ -68,3 +72,14 @@ def test_concat_strict(strict, context):
     datasets = [dataset, new_dataset]
     with context:
         _ = XarrayConcat(datasets, strict=strict)
+
+
+def test_concat_sample_labels():
+    datasets = [
+        MockDataset.new(n_times=10, varnames=["var1"], sample_n_times=3, labels=labels)
+        for labels in [{"a"}, {"b"}, set()]
+    ]
+    concat = XarrayConcat(datasets)
+    assert_sample_labels_match_items(concat)
+    assert concat.sample_labels[0] == {"a"}
+    assert concat.sample_labels[-1] == set()

@@ -40,6 +40,14 @@ class XarrayConcat(DatasetABC):
         return self._sample_start_times
 
     @property
+    def sample_labels(self) -> list[set[str] | None]:
+        return [
+            labels
+            for dataset in self._wrapped_datasets
+            for labels in dataset.sample_labels
+        ]
+
+    @property
     def all_times(self) -> xr.CFTimeIndex:
         """
         Like sample_start_times, but includes all times in the dataset, including

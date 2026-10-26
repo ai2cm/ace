@@ -63,6 +63,10 @@ class DummyDataset(DatasetABC):
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
 
+    @property
+    def sample_labels(self) -> list[set[str] | None]:
+        return [self._labels] * len(self)
+
     def _apply_sample_n_times(self, sample_n_times: int):
         total_timesteps = len(self._all_times)
         self._sample_n_times = sample_n_times

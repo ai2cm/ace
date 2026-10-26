@@ -33,6 +33,15 @@ class DatasetABC(GenericDataset[DatasetItem], abc.ABC):
         """
         pass
 
+    @property
+    @abc.abstractmethod
+    def sample_labels(self) -> list[set[str] | None]:
+        """
+        The labels of each sample, as returned by ``__getitem__``, without
+        loading any data.
+        """
+        pass
+
     @abc.abstractmethod
     def __getitem__(self, index) -> DatasetItem:
         pass
