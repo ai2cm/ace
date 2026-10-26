@@ -123,11 +123,14 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0
 # 0.1266; epoch 60 0.1638): best and final checkpoints over 1pctCO2 and the
 # standard piControl eval, as trained and with the SSH salt correction added at
 # inference (_sshsalt configs), on jupiter.
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg_sshsalt|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr_sshsalt|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+# Launched 2026-10-26 in row order: 01M5W3EJR72EWRND1SX4KN3QY2, 01M5W3ETCC6S0A6AGZ2HFMVPYQ,
+# 01M5W3F1ST2D0EAEZVJN41XD01, 01M5W3F915HNKZ0EJ1R4REB580, 01M5W3FGGKDPKPVC90P32JQRGF,
+# 01M5W3FQTD1Y0KS5JNG09FYH6J, 01M5W3FZ1ND27NE8W6F0FXAS9M, 01M5W3G71J79CBM4ECC33GQVD8.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|1pct_yearly_1deg_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|piC-ic0151-200yr_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|1pct_yearly_1deg_sshsalt|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|piC-ic0151-200yr_sshsalt|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
