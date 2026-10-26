@@ -339,6 +339,7 @@ class Trainer:
         if self.epoch_checkpoint_path is not None:
             logging.info(f"Saving latest checkpoint")
             _save_checkpoint(self, self.epoch_checkpoint_path)
+            WandB.get_instance().mark_checkpoint()
             with self._ema_context():
                 _save_checkpoint(self, self.ema_checkpoint_path)
         else:

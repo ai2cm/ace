@@ -25,6 +25,11 @@ def is_local(path: str | Path) -> bool:
     return isinstance(fs, fsspec.implementations.local.LocalFileSystem)
 
 
+def is_relative(path: str | Path) -> bool:
+    """Check if path is a relative path, i.e. neither absolute nor a URL."""
+    return not os.path.isabs(path) and "://" not in str(path)
+
+
 def makedirs(path: str | Path, exist_ok: bool = False):
     """Create directories on any filesystem assuming fsspec conventions."""
     fs, _ = fsspec.url_to_fs(path)

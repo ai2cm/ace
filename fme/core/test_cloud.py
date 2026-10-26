@@ -9,6 +9,7 @@ from fme.core.cloud import (
     exists,
     inter_filesystem_copy,
     is_local,
+    is_relative,
     makedirs,
     open_dataset_via_inter_filesystem_copy,
     to_netcdf_via_inter_filesystem_copy,
@@ -28,6 +29,21 @@ from fme.core.cloud import (
 )
 def test_is_local(path: str | Path, expected: bool):
     assert is_local(path) == expected
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("metrics", True),
+        ("nested/metrics", True),
+        pytest.param(Path("metrics"), True, id="Path object"),
+        ("/absolute/metrics", False),
+        ("gs://bucket/metrics", False),
+        ("file:///absolute/metrics", False),
+    ],
+)
+def test_is_relative(path: str | Path, expected: bool):
+    assert is_relative(path) == expected
 
 
 @pytest.mark.parametrize("use_str_input", [True, False])

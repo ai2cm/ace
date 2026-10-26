@@ -467,7 +467,7 @@ def get_mock_writer() -> unittest.mock.MagicMock:
     ],
 )
 def test_run_inference_simple(
-    n_ic_timesteps: int, n_forward_steps: int, n_iterations: int
+    tmp_path, n_ic_timesteps: int, n_forward_steps: int, n_iterations: int
 ):
     mock_derive_func = unittest.mock.MagicMock(
         side_effect=lambda batch_data, forcing_data: batch_data
@@ -491,7 +491,9 @@ def test_run_inference_simple(
 
     with GlobalTimer(), torch.no_grad():
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=True)
+            wandb.configure(
+                log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics")
+            )
             record_logs = unittest.mock.MagicMock(
                 side_effect=get_record_to_wandb("inference").log
             )  # this init must be within mock_wandb context
@@ -522,9 +524,9 @@ def test_run_inference_simple(
         )  # +1 for the initial condition
 
 
-def test_wandb_step_logger_with_label():
+def test_wandb_step_logger_with_label(tmp_path):
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         logger = WandBStepLogger(label="inference")
         logger.log([{"a": 1}, {"b": 2}])
         assert logger.step == 2
@@ -536,9 +538,9 @@ def test_wandb_step_logger_with_label():
         assert logs[2] == {"inference/c": 3}
 
 
-def test_wandb_step_logger_without_label():
+def test_wandb_step_logger_without_label(tmp_path):
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         logger = WandBStepLogger(label="")
         logger.log([{"a": 1}, {"b": 2}])
         assert logger.step == 2
@@ -547,10 +549,10 @@ def test_wandb_step_logger_without_label():
         assert logs[1] == {"b": 2}
 
 
-def test_wandb_step_logger_label_override():
+def test_wandb_step_logger_label_override(tmp_path):
     """log() with an explicit label overrides the default."""
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         logger = WandBStepLogger(label="inference")
         logger.log([{"a": 1}])
         logger.log([{"b": 2}], label="")
@@ -562,10 +564,10 @@ def test_wandb_step_logger_label_override():
         assert logs[2] == {"val/c": 3}
 
 
-def test_wandb_step_logger_skips_empty_logs():
+def test_wandb_step_logger_skips_empty_logs(tmp_path):
     """Empty dicts don't produce wandb.log calls, but step still advances."""
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         logger = WandBStepLogger(label="inference")
         logger.log([{}, {"a": 1}, {}])
         assert logger.step == 3
@@ -575,9 +577,9 @@ def test_wandb_step_logger_skips_empty_logs():
         assert logs[1] == {"inference/a": 1}
 
 
-def test_get_record_to_wandb_returns_step_logger():
+def test_get_record_to_wandb_returns_step_logger(tmp_path):
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         logger = get_record_to_wandb(label="test")
         assert isinstance(logger, WandBStepLogger)
         assert logger.step == 0
