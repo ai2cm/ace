@@ -38,6 +38,11 @@ class SpatialMaskProviderABC(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def copy(self: SelfType) -> SelfType:
+        """Return a copy whose ``update`` does not affect this provider."""
+        ...
+
+    @abc.abstractmethod
     def get_state(self) -> dict[str, Any]: ...
 
 
@@ -49,6 +54,10 @@ class _NullSpatialMaskProvider(SpatialMaskProviderABC):
         return self
 
     def localize(self) -> "_NullSpatialMaskProvider":
+        return self
+
+    def copy(self) -> "_NullSpatialMaskProvider":
+        """Return this same instance, since it holds no state to update."""
         return self
 
     def update(self, other: SpatialMaskProviderABC) -> None:
@@ -142,13 +151,21 @@ class SpatialMaskProvider(SpatialMaskProviderABC):
 
     def localize(self) -> "SpatialMaskProvider":
         if not self._masks:
-            return self
+            return self.copy()
         return SpatialMaskProvider(
             {
                 k: v[Distributed.get_instance().get_local_slices(v.shape)].contiguous()
                 for k, v in self._masks.items()
             },
         )
+
+    def copy(self) -> "SpatialMaskProvider":
+        """Return a new provider with its own mask mapping.
+
+        Adding masks to the copy does not affect this provider. The mask tensors
+        themselves are shared, not cloned.
+        """
+        return SpatialMaskProvider(self._masks)
 
     def update(self, other: "SpatialMaskProvider") -> None:
         """Update masks with masks from another SpatialMaskProvider.

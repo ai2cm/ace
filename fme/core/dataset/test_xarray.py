@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import itertools
 import os
 from collections import namedtuple
 from collections.abc import Iterable, Sequence
@@ -21,7 +22,9 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
 )
 from fme.core.dataset.concat import XarrayConcat, get_dataset
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
@@ -38,6 +41,7 @@ from fme.core.dataset.xarray import (
     _get_vertical_coordinate,
     _repeat_and_increment_time,
     get_xarray_dataset,
+    get_xarray_datasets,
 )
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
@@ -1046,6 +1050,83 @@ def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
     assert concat.sample_start_times.equals(expected)
 
 
+def test_xarray_concat_keeps_each_member_labels(mock_monthly_netcdfs):
+    """Accumulating properties must not mutate a member's own label set.
+
+    Each concatenated member must keep returning only its own labels, so a
+    grouped normalizer can resolve each sample to exactly one group.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    n_timesteps = 2
+    names = mock_data.var_names.all_names
+    labels = ["amip", "ramped", "som"]
+    configs = [
+        XarrayDataConfig(
+            data_path=mock_data.tmpdir,
+            subset=TimeSlice(f"2003-0{i + 3}-01", f"2003-0{i + 3}-01"),
+            labels=[label],
+        )
+        for i, label in enumerate(labels)
+    ]
+    concat, properties = get_dataset(
+        configs, names, IntSchedule(start_value=n_timesteps, milestones=[])
+    )
+    assert properties.all_labels == set(labels)
+    sample_labels = [concat[i][2] for i in range(len(concat))]
+    # members are concatenated in config order, each sample carrying only the
+    # label of the member it came from
+    member_labels = [key for key, _ in itertools.groupby(sample_labels)]
+    assert member_labels == [{label} for label in labels]
+
+
+def test_xarray_dataset_properties_are_independent(mock_monthly_netcdfs):
+    """Updating the returned label set or metadata must not reach the dataset's
+    own, which every sample and later properties read carry.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir, labels=["amip"])
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
+
+    properties = dataset.properties
+    assert properties.all_labels is not None
+    properties.all_labels.add("som")
+    properties.variable_metadata["extra"] = VariableMetadata(
+        units="K", long_name="extra"
+    )
+
+    assert dataset.properties.all_labels == {"amip"}
+    assert "extra" not in dataset.properties.variable_metadata
+    assert dataset[0][2] == {"amip"}
+
+
+def test_get_xarray_datasets_leaves_first_member_properties_alone(
+    mock_monthly_netcdfs,
+):
+    """End to end: merging the other members' labels into the combined
+    properties, or injecting masks into them, must not reach the first
+    member's properties. This holds through ``XarrayDataset.properties``
+    returning a fresh copy, so it does not pin the extra ``.copy()`` in
+    ``get_xarray_datasets`` on its own.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    configs = [
+        XarrayDataConfig(data_path=mock_data.tmpdir, labels=[label])
+        for label in ["amip", "som"]
+    ]
+    datasets, properties = get_xarray_datasets(
+        configs, mock_data.var_names.all_names, IntSchedule.from_constant(2)
+    )
+    properties.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    )
+
+    assert properties.all_labels == {"amip", "som"}
+    assert "mask_0" in properties.spatial_mask_provider.masks
+    first_member_properties = datasets[0].properties
+    assert first_member_properties.all_labels == {"amip"}
+    assert not first_member_properties.spatial_mask_provider.masks
+
+
 def test__get_vertical_coordinate_raises():
     data = xr.Dataset({"ak_0": 1.0, "bk_0": 0.5, "idepth_0": 1.0})
     with pytest.raises(ValueError, match="Dataset contains both hybrid"):
@@ -1307,14 +1388,93 @@ def test_parallel__get_raw_times(tmpdir):
 
 
 def test_dataset_properties_update_masks(mock_monthly_netcdfs):
+    """Masks injected into the returned properties must land on them without
+    reaching the dataset's own properties.
+    """
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
     data_properties = dataset.properties
     assert not data_properties.spatial_mask_provider.masks
-    existing_mask = SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
-    data_properties.update_spatial_mask_provider(existing_mask)
-    assert "mask_0" in dataset.properties.spatial_mask_provider.masks
+
+    data_properties.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    )
+
+    assert "mask_0" in data_properties.spatial_mask_provider.masks
+    assert not dataset.properties.spatial_mask_provider.masks
+
+
+def test_dataset_properties_copy_masks_are_independent(mock_monthly_netcdfs):
+    """A copy's masks can be updated without reaching the original's."""
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
+    data_properties = dataset.properties
+    copied = data_properties.copy()
+
+    copied.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    )
+
+    assert "mask_0" in copied.spatial_mask_provider.masks
+    assert not data_properties.spatial_mask_provider.masks
+
+
+def _properties_with_labels(labels: set[str]) -> DatasetProperties:
+    return DatasetProperties(
+        variable_metadata={},
+        vertical_coordinate=NullVerticalCoordinate(),
+        horizontal_coordinates=LatLonCoordinates(
+            lon=torch.arange(0, 1), lat=torch.arange(0, 1)
+        ),
+        spatial_mask_provider=SpatialMaskProvider(),
+        timestep=None,
+        is_remote=False,
+        all_labels=labels,
+    )
+
+
+@pytest.mark.parametrize(
+    "merge",
+    [DatasetProperties.update, DatasetProperties.update_merged_dataset],
+    ids=["update", "update_merged_dataset"],
+)
+def test_dataset_properties_update_leaves_original_labels_alone(merge):
+    """Merging labels must not mutate the label set the properties were built
+    with, since that set may be shared with the dataset which provided it.
+    """
+    original_labels = {"amip"}
+    properties = _properties_with_labels(original_labels)
+
+    merge(properties, _properties_with_labels({"som"}))
+
+    assert original_labels == {"amip"}
+    assert properties.all_labels == {"amip", "som"}
+
+
+@pytest.mark.parametrize(
+    "derive",
+    [DatasetProperties.to_device, DatasetProperties.localize],
+    ids=["to_device", "localize"],
+)
+def test_dataset_properties_derived_copy_is_independent(derive):
+    """Updating properties derived by to_device or localize must not reach
+    the properties they were derived from.
+    """
+    properties = _properties_with_labels({"amip"})
+    derived = derive(properties)
+
+    assert derived.all_labels is not None
+    derived.all_labels.add("som")
+    derived.variable_metadata["a"] = VariableMetadata(units="K", long_name="a")
+    derived.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(1, 1)})
+    )
+
+    assert properties.all_labels == {"amip"}
+    assert properties.variable_metadata == {}
+    assert not properties.spatial_mask_provider.masks
 
 
 def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):
