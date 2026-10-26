@@ -30,4 +30,4 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfmrs2_a2s-
 # row but against the a2sLR atmosphere (atmos_ace2s_origLR-ft seed 2, wgz8np8z),
 # James's clip-oppfm FTO atmosphere: an atmosphere-matched comparison to
 # coupled_clip-oppfm_a2sLR-fto. Group shortened so eval job names stay < 128.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfm_a2sLR-fto|o0a2rs0|ace-samudra-cm4|3ly4s80y|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|train|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfm_a2sLR-fto|o0a2rs0|ace-samudra-cm4|3ly4s80y|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|skip|high|jupiter+titan|8||3|ai2/ace|seed=0|8h|MALLOC_ARENA_MAX=4
