@@ -171,7 +171,21 @@ def inference_config(
             },
         },
         "data_writer": {
-            "atmosphere": {"save_prediction_files": False, "save_monthly_files": False},
+            "atmosphere": {
+                "names": [
+                    "PRATEsfc",
+                    "TMP2m",
+                    "PRESsfc",
+                    "UGRD10m",
+                    "VGRD10m",
+                    "h500",
+                    "TMP850",
+                    "total_frozen_precipitation_rate",
+                    "surface_temperature",
+                ],
+                "save_prediction_files": False,
+                "save_monthly_files": True,
+            },
             "ocean": {
                 "names": ["sst", "thetao_0", "thetao_5", "ocean_sea_ice_fraction"],
                 "save_prediction_files": True,
