@@ -74,6 +74,22 @@ def test_check_input_shape_supported_raises_when_larger_without_patching():
         check_input_shape_supported((16, 16), (32, 32), _NO_PATCH)
 
 
+def test_check_input_shape_supported_larger_with_full_extent():
+    """A larger extent is supported when single-pass generation is opted in to."""
+    check_input_shape_supported(
+        (16, 16), (28, 65), PatchPredictionConfig(generate_full_extent=True)
+    )
+
+
+def test_full_extent_cannot_combine_with_divide_generation():
+    with pytest.raises(ValueError, match="generate_full_extent"):
+        PatchPredictionConfig(
+            divide_generation=True,
+            composite_prediction=True,
+            generate_full_extent=True,
+        )
+
+
 class DummyModel:
     def __init__(self, coarse_shape, downscale_factor):
         self.coarse_shape = coarse_shape

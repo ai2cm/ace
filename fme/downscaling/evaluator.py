@@ -205,8 +205,9 @@ class EvaluatorConfig:
             name="evaluator",
         )
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
-        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
-            dataset.coarse_shape[1] > model.coarse_shape[1]
+        if self.patch.needs_patch_predictor and (
+            (dataset.coarse_shape[0] > model.coarse_shape[0])
+            or (dataset.coarse_shape[1] > model.coarse_shape[1])
         ):
             evaluator_model = PatchPredictor(
                 model,
@@ -242,8 +243,9 @@ class EvaluatorConfig:
             self.patch,
             name=f"event {event_config.name}",
         )
-        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
-            dataset.coarse_shape[1] > model.coarse_shape[1]
+        if self.patch.needs_patch_predictor and (
+            (dataset.coarse_shape[0] > model.coarse_shape[0])
+            or (dataset.coarse_shape[1] > model.coarse_shape[1])
         ):
             evaluator_model = PatchPredictor(
                 model=model,

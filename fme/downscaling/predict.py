@@ -121,7 +121,10 @@ class EventDownscaler:
             self.patch,
             name=f"event {self.event_name}",
         )
-        if base_model.coarse_shape == self.data.shape:
+        if (
+            base_model.coarse_shape == self.data.shape
+            or not self.patch.needs_patch_predictor
+        ):
             return base_model
         return PatchPredictor(
             base_model,
