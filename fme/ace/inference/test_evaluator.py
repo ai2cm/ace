@@ -351,7 +351,7 @@ def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: 
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
@@ -437,7 +437,7 @@ def inference_helper(
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -617,7 +617,7 @@ def test_inference_writer_boundaries(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -649,10 +649,13 @@ def test_inference_writer_boundaries(
     # check time mean metrics
     tol = 1e-4  # relative tolerance
     grad_mag_tol = tol
+    grad_mag_atol = 0.0
     if using_gpu():
         # GPU test cases have higher error
         tol = 5e-4
         grad_mag_tol = 3e-3
+        # the percent diff can be near zero, where float32 noise exceeds any rtol
+        grad_mag_atol = 1e-4
     np.testing.assert_allclose(
         metrics.root_mean_squared_error(
             tar_time_mean, gen_time_mean, area_weights
@@ -696,6 +699,7 @@ def test_inference_writer_boundaries(
             ).item(),
             log["inference/mean/weighted_grad_mag_percent_diff/var"],
             rtol=grad_mag_tol,
+            atol=grad_mag_atol,
         )
         np.testing.assert_allclose(
             metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
@@ -921,7 +925,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         inference_logs = wandb.get_logs()
 
@@ -1486,7 +1490,7 @@ def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -1672,7 +1676,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 

@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import os
 import pathlib
 
 import cftime
@@ -272,7 +273,10 @@ def _run_inference_main(config: InferenceConfig, yaml_path: pathlib.Path) -> Non
     with open(yaml_path, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(
+            log_to_wandb=True,
+            metrics_log_dir=os.path.join(config.experiment_dir, "metrics"),
+        )
         main(yaml_config=str(yaml_path))
 
 
@@ -423,7 +427,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path, n_ensemble_per_ic: int):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
