@@ -2,3 +2,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 
 cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E4ZWBEP8MT5E558E8FS|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8|01M5VD1W4N0HN3BMXQ2JZFBTWK|training|best_inference_ckpt|normal|--min-runtime 8h
