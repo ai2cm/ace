@@ -1,0 +1,41 @@
+name: minimum-deps
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  cpu:
+    # Verifies the lower bounds declared in pyproject.toml by running the test
+    # suite with each bounded dependency pinned to its minimum version, on the
+    # minimum supported python.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set environment variables
+        run: |
+          echo "CURRENT_WEEK=$(date +'%Y-%U')" >> $GITHUB_ENV
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.pythonLocation }}
+          key: v1-minimum-deps-${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('pyproject.toml') }}-${{ hashFiles('requirements-healpix.txt') }}
+      - name: Install dependencies
+        run: |
+          python -m pip install uv packaging
+          python .github/scripts/minimum_constraints.py dev graphcast > minimum-constraints.txt
+          cat minimum-constraints.txt
+          # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
+          uv venv --python 3.11
+          uv pip install -c minimum-constraints.txt -e .[dev,graphcast]
+          uv pip install --no-build-isolation -c minimum-constraints.txt -r requirements-healpix.txt
+      - name: Run unit tests
+        run: |
+          source .venv/bin/activate
+          make test
