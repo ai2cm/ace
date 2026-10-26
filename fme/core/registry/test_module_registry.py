@@ -402,6 +402,18 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
         compiled.to(fme.get_device())
 
 
+def test_compiled_module_wrap_module_calls_wrapper_once():
+    """A per-call wrapper (e.g. activation checkpointing) is applied once, to
+    the compiled forward callable, and leaves the parameter-owning module as is.
+    """
+    module = Module(_LinearNet(), label_encoding=None)
+    compiled = module.compile(backend="aot_eager")
+    wrapper = mock.MagicMock(side_effect=lambda m: m)
+    wrapped = compiled.wrap_module(wrapper)
+    wrapper.assert_called_once_with(compiled.forward_module)
+    assert wrapped.torch_module is module.torch_module
+
+
 @ModuleSelector.register("mock_compile_unsupported")
 @dataclasses.dataclass
 class MockModuleBuilderCompileUnsupported(ModuleConfig):
