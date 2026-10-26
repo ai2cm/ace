@@ -71,7 +71,11 @@ def main():
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--ema-impl", choices=["repo", "foreach"], default="repo")
     parser.add_argument("--compile-mode", default=None)
+    parser.add_argument("--batch", type=int, default=4, help="global batch size")
+    parser.add_argument("--no-optimize-ddp", action="store_true")
     args = parser.parse_args()
+    if args.no_optimize_ddp:
+        torch._dynamo.config.optimize_ddp = False
     if args.ema_impl == "foreach":
         from fme.core.ema import EMATracker
 
@@ -81,7 +85,7 @@ def main():
 
     os.environ.setdefault("WANDB_MODE", "offline")
     overrides = [
-        "train_loader.batch_size=4",
+        f"train_loader.batch_size={args.batch}",
         f"experiment_dir={tempfile.mkdtemp()}",
         "logging.log_to_wandb=true",
         *args.set,
@@ -144,6 +148,8 @@ def main():
         overrides=args.set,
         ema_impl=args.ema_impl,
         compile_mode=args.compile_mode,
+        optimize_ddp=not args.no_optimize_ddp,
+        world_size=int(os.environ.get("WORLD_SIZE", 1)),
         gpu=torch.cuda.get_device_name(),
         compile_s=round(compile_s),
         ms_per_step=round(free_ms, 1),
