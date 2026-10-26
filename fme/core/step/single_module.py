@@ -889,6 +889,7 @@ def step_with_adjustments(
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
         nan_debug.check_stage("gmr_inverse", output)
+    nan_debug.note_pre_corrector(output, normalizer, input)
     diagnostics = CorrectorDiagnostics()
     if corrector is not None:
         corrector_state: CorrectorState | None = (

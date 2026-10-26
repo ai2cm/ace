@@ -88,6 +88,56 @@ def record_call(
     _records.append(rec)
 
 
+_pre: dict[str, Any] = {}
+
+_PRE_NAMES = ("PRATEsfc", "LHTFLsfc", "tendency_of_total_water_path_due_to_advection")
+
+
+def note_pre_corrector(output: Any, normalizer: Any, input: Any = None) -> None:
+    """Keep references to the pre-corrector output and normalizer."""
+    if not ENABLED or not torch.is_grad_enabled():
+        return
+    _pre["output"] = output
+    _pre["normalizer"] = normalizer
+    _pre["input"] = input
+
+
+def _per_sample(t: torch.Tensor) -> str:
+    t = t.detach().float()
+    if t.dim() < 3:
+        return f"scalar-ish {t.flatten().tolist()[:16]}"
+    flat = t.reshape(t.shape[0], -1)
+    rows = []
+    for b in range(flat.shape[0]):
+        r = flat[b]
+        rows.append(
+            f"[b{b} mean={r.mean().item():.4g} min={r.min().item():.4g} "
+            f"max={r.max().item():.4g} frac>0={(r > 0).float().mean().item():.3f}]"
+        )
+    return " ".join(rows)
+
+
+def _log_pre_corrector() -> None:
+    out = _pre.get("output")
+    norm = _pre.get("normalizer")
+    if out is None:
+        return
+    for name in _PRE_NAMES:
+        if name in out:
+            logger.warning(f"NAN_DEBUG: pre-corrector {name}: {_per_sample(out[name])}")
+        if norm is not None:
+            m = norm.means.get(name)
+            sd = norm.stds.get(name)
+            if m is not None:
+                logger.warning(
+                    f"NAN_DEBUG: normalizer {name} mean={m.detach().flatten().tolist()} "
+                    f"std={sd.detach().flatten().tolist()}"
+                )
+    inp = _pre.get("input")
+    if inp is not None and "PRATEsfc" in inp:
+        logger.warning(f"NAN_DEBUG: input PRATEsfc: {_per_sample(inp['PRATEsfc'])}")
+
+
 def check_stage(stage: str, data: Any) -> None:
     """Record which variables are non-finite after a stage."""
     if not ENABLED or not torch.is_grad_enabled():
@@ -106,6 +156,12 @@ def check_stage(stage: str, data: Any) -> None:
     _stage_flags.append({"stage": stage, "bad": bad})
     if bad:
         logger.warning(f"NAN_DEBUG: stage {stage} non-finite vars: {bad}")
+        for name, value in items.items():
+            if name in bad and isinstance(value, torch.Tensor) and value.dim() >= 3:
+                per = (~torch.isfinite(value)).reshape(value.shape[0], -1).sum(-1)
+                logger.warning(f"NAN_DEBUG: {name} non-finite per sample {per.tolist()}")
+        if stage == "corrected":
+            _log_pre_corrector()
 
 
 def _unwrap(m: nn.Module) -> nn.Module:
