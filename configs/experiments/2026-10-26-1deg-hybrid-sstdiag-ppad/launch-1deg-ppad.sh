@@ -1,10 +1,10 @@
 #!/bin/bash
 # 1deg ocean-only pretrain(s) on James's ocean_ppad baseline, resources as his rs0 runs (4 GPUs, 747 GiB shared memory, 8h min runtime).
-#   ARMS="resid-ohc-cap0005-ppad-sstdiag-fmean-1deg" ./launch-1deg-ppad.sh
+#   ARMS="resid-ohc-ppad-sstdiag-fmean-1deg" ./launch-1deg-ppad.sh
 set -euo pipefail
 MIN_RUNTIME="${MIN_RUNTIME:-8h}"   # beaker minimum guaranteed runtime (James's 1deg pretrains: 8h)
 STATS_DS="${STATS_DS:-01KXNT0RA6VX2YTZ8WJ936Q5RS}"   # 1deg cm4 coupled stats (ocean/: centering, scaling-full-field, scaling-residual)
-ARMS="${ARMS:-resid-ohc-cap0005-ppad-sstdiag-fmean-1deg}"
+ARMS="${ARMS:-resid-ohc-ppad-sstdiag-fmean-1deg}"
 N_GPUS="${N_GPUS:-4}"
 PRIORITY="${PRIORITY:-high}"
 CLUSTERS="${CLUSTERS:-ai2/jupiter ai2/titan ai2/ceres}"

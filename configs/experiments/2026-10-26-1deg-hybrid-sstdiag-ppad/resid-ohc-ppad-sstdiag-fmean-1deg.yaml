@@ -1,13 +1,11 @@
-# resid-ohc-cap0005-ppad-sstdiag-fmean-1deg: James's 1deg ocean_ppad_fmean rs0 pretrain (exp 01M4HEFPANCBNHNH0FC5A8V4HV, wandb
+# resid-ohc-ppad-sstdiag-fmean-1deg: James's 1deg ocean_ppad_fmean rs0 pretrain (exp 01M4HEFPANCBNHNH0FC5A8V4HV, wandb
 # mnh7jo06; the ocean of the 1deg coupled job 01M5WSYB6ZAXPJCVW5X7PF9A8B), changed from full-field to the hybrid residual with
-# SST diagnosed (Troy 2026-10-26, the paper-1 decision run). The config is the results-dataset config.yaml of that run (overrides
-# seed=0 and fill_value=mean already applied) with exactly five changes, all copied from the 4deg
-# 2026-10-09-4deg-hybrid-ppad/resid-ohc-cap0005-ppad-sstdiag-fmean.yaml arm:
+# SST diagnostic (Troy 2026-10-26, the paper-1 decision run). The config is the results-dataset config.yaml of that run
+# (overrides seed=0 and fill_value=mean already applied) with exactly three changes:
 #   residual_prediction: thetao_0..18 as normalized residuals (normalization.residual = CM4 1deg scaling-residual.nc)
-#   ocean_heat_content_correction.max_scaled_contraction: 0.005
-#   copied_outputs: sst = thetao_0 + 273.15 after the corrector at every step (store sst is in K, thetao_0 in degC)
-#   stepper_training.loss.weights.sst: 0 (the unused sst head gets no gradient)
-# Everything else (Samudra ch_width/dilation, mean fill, CM4 1deg stats, MSE 4-step, 75 epochs, bs 16, zos reference) is James's.
+#   sst removed from in_names: an output-only diagnostic channel the ACE way, like hfds_total_area / tauuo / tauvo / wfo / SSH
+# Everything else (Samudra ch_width/dilation, mean fill, uncapped OHC corrector, CM4 1deg stats, MSE 4-step, 75 epochs, bs 16,
+# zos reference) is James's.
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -179,8 +177,6 @@ stepper_training:
   n_forward_steps: 4
   loss:
     type: MSE
-    weights:
-      sst: 0.0
 stepper:
   input_masking:
     mask_value: 0
@@ -225,7 +221,6 @@ stepper:
           corrector_disabled_epochs: 1
           ocean_heat_content_correction:
             method: scaled_temperature
-            max_scaled_contraction: 0.005
           surface_energy_flux_correction:
             method: prescribed_open_ocean
           force_positive_names:
@@ -286,7 +281,6 @@ stepper:
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
       - total_frozen_precipitation_rate
-      - sst
       - zos
       - so_0
       - so_1
@@ -480,8 +474,4 @@ stepper:
         - thetao_16
         - thetao_17
         - thetao_18
-      copied_outputs:
-      - name: sst
-        source: thetao_0
-        offset: 273.15
 seed: 0
