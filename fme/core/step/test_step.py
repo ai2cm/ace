@@ -32,6 +32,7 @@ from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    CopiedOutputConfig,
     ResidualPredictionConfig,
     SingleModuleStep,
     SingleModuleStepConfig,
@@ -792,6 +793,100 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         wrapper=lambda x: x,
     ).output
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
+
+
+def test_step_copied_output_follows_its_source():
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                prescribed_prognostic_names=["diagnostic_rad"],
+                copied_outputs=[
+                    CopiedOutputConfig(
+                        name="diagnostic_main",
+                        source="diagnostic_rad",
+                        scale=2.0,
+                        offset=273.15,
+                    )
+                ],
+            ),
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 2
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    prescribed_value = torch.full(
+        (n_samples,) + img_shape, 1.5, device=fme.get_device()
+    )
+    next_step_input_data["diagnostic_rad"] = prescribed_value
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    ).output
+    # the copy is taken after the prescription of its source
+    torch.testing.assert_close(
+        output["diagnostic_main"], 2.0 * prescribed_value + 273.15
+    )
+
+
+@pytest.mark.parametrize(
+    "copied, message",
+    [
+        ([("missing", "diagnostic_rad")], "must be in out_names"),
+        ([("diagnostic_main", "missing")], "must be in out_names"),
+        ([("diagnostic_main", "diagnostic_main")], "copies from itself"),
+        (
+            [
+                ("diagnostic_main", "diagnostic_rad"),
+                ("diagnostic_rad", "diagnostic_main"),
+            ],
+            "is itself a copied output",
+        ),
+        (
+            [
+                ("diagnostic_main", "diagnostic_rad"),
+                ("diagnostic_main", "diagnostic_rad"),
+            ],
+            "repeat",
+        ),
+    ],
+)
+def test_copied_outputs_validation(copied, message):
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "diagnostic_main", "diagnostic_rad"],
+    )
+    with pytest.raises(ValueError, match=message):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["forcing_shared"],
+            out_names=["diagnostic_main", "diagnostic_rad"],
+            normalization=normalization,
+            copied_outputs=[CopiedOutputConfig(name=n, source=s) for n, s in copied],
+        )
 
 
 def test_corrector_deltas_stay_attached():
