@@ -1,10 +1,10 @@
-# arg: --env FME_COMPILE=0
 # nc-swin-v2.2: a noise-conditioned Swin U-Net for foundation-model training,
 # sized between nc-swin-v2 (264M params, 925 GFLOP/sample) and nc-swin-v2.1
 # (15.5M, 45 GFLOP). In the 2026-06-26 norm ablation v2 had the best weather
 # skill but overfit (train 0.071 vs val 0.101), and v2.1 was capacity-limited
-# (train ~= val ~= 0.118). This one is ~130M params at ~176 GFLOP/sample
-# (nc-sfno: 14.5M, ~99 GFLOP without FFTs).
+# (train ~= val ~= 0.118). This one is compute-matched to the SFNO twin:
+# ~74M params at ~101 GFLOP/sample forward (nc-sfno: 14.6M, ~99 GFLOP
+# without FFTs; measured with the 2x mask-input channels).
 #
 # Differences from the SFNO twin (same data, inference and loss):
 # - residual_prediction: false. Residual prediction made every Swin rollout
@@ -14,22 +14,23 @@
 #   instead of 24x48, so each 4x8 window covers ~1/9 of the globe and the
 #   FLOPs roughly halve. The 48x96 padded grid is already a multiple of
 #   2**2 * window_size, so no extra padding is needed.
-# - depth_multiplier 2 with embed_dim 256, head dim 64 throughout.
+# - depth_multiplier 2 with embed_dim 192 (heads 3/6/6/3), head dim 64
+#   throughout. Compute-matched by narrowing rather than halving depth: an
+#   earlier embed_dim 256 version (~130M, ~177 GFLOP) cost 1.8x the SFNO's
+#   compute. Keeping depth keeps the shifted-window receptive field and the
+#   per-block drop_path (which scales with depth_multiplier) unchanged.
 # - skip_projection (#1544) keeps the decoder at embed_dim.
 # - drop_path_rate 0.2, which the builder divides by depth_multiplier, so the
 #   per-block maximum is 0.1 (v2: 0.05, v2.1: 0.1).
 # - weight_decay 0.01, as in the SFNO twin and the nc-swin-v2 cells: v2's
 #   fm-a2-cond val loss kept falling through epoch 140 at 0.01, so there is
 #   no overfit for a larger decay to close.
-# - torch.compile OFF (FME_COMPILE=0, set via the `# arg:` line below) and
-#   full fp32 matmuls. The first submission (2026-10-22: compiled, TF32) lost
-#   18 of 20 runs to a NaN loss within ~1-8k steps, at a warmup lr of 1e-6
-#   with a healthy loss: a forward-pass blow-up on some batches, not
-#   divergence. 2-epoch diagnostics with the non-finite guard then skipped
-#   isolated NaN batches at ~1 per 3k steps with fp32 matmuls (so not TF32)
-#   and ~1 per 1k with num_levels: 1 (so not the extra U-Net level). The
-#   compiled Swin kernels are the remaining suspect; the SFNO cells compile
-#   fine on the same data.
+# - float32_matmul_precision: high (#1539) for TF32 attention/MLP matmuls;
+#   torch.compile is on by default on CUDA (#1514). Both are on for speed:
+#   with them off (FME_COMPILE=0, fp32), the 2026-10-24 suite trained at
+#   ~11.5 samples/s/GPU vs ~21 compiled, ~2.8 h/epoch. Compiled runs skip an
+#   isolated non-finite-loss batch about once per ~3k steps (2026-10-23
+#   diagnostics; eager was ~1 per 36k), which the guard below absorbs.
 # - max_consecutive_non_finite_losses: 5 (#1600) skips an isolated
 #   non-finite-loss batch instead of killing the run, as the nc-swin-v2/v2.1
 #   cells did; skipped_non_finite_batches is logged to check how often.
@@ -1357,17 +1358,18 @@ stepper:
         default:
           max_masked_vars: 10
       residual_prediction: false
+      float32_matmul_precision: high
       builder:
         type: NoiseConditionedSwinTransformer
         config:
-          embed_dim: 256
+          embed_dim: 192
           noise_embed_dim: 32
           depth_multiplier: 2
           num_heads:
-          - 4
-          - 8
-          - 8
-          - 4
+          - 3
+          - 6
+          - 6
+          - 3
           window_size:
           - 4
           - 8
