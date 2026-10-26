@@ -212,10 +212,10 @@ class WindowAttention2D(nn.Module):
 class ColumnMixer(nn.Module):
     """Pointwise ``Linear(dim, dim)`` applied at every spatial location.
 
-    The 2D equivalent of ArchesWeather's cross-level attention (``axis_attn``).
-    It has no normalization and no residual of its own; its output is folded
-    into the window-attention output before the gated shortcut (see
-    ``SwinTransformerBlock``).
+    Used when the latent has no vertical axis, in which case there is no
+    column to attend over. It has no normalization and no residual of its
+    own; its output is folded into the window-attention output before the
+    gated shortcut (see ``SwinTransformerBlock``).
     """
 
     def __init__(self, dim: int):
@@ -224,6 +224,70 @@ class ColumnMixer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc(x)
+
+
+class CrossLevelAttention(nn.Module):
+    """Multi-head self-attention along the vertical axis of each column.
+
+    ArchesWeather's ``axis_attn``: at every spatial location the ``n_levels``
+    latent levels attend to each other, independently of all other locations.
+    Because window attention uses a vertical window of 1, this is the only
+    path through which levels interact.
+
+    Input and output are ``(B * n_levels, H, W, C)`` — the vertical axis is
+    folded into the leading dimension so that the surrounding 2D machinery
+    (window partitioning, patch merging, ``ConditionalLayerNorm``) is
+    unaffected. This module unfolds it, attends, and folds it back.
+
+    A learned per-level positional embedding is added before attention,
+    matching ArchesWeather's ``AxialPositionalEmbedding``.
+
+    Args:
+        dim: Number of channels.
+        n_levels: Size of the vertical axis (levels plus the surface token).
+        num_heads: Number of attention heads. Must divide ``dim``.
+        qkv_bias: Whether to add a learnable bias to query/key/value.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        n_levels: int,
+        num_heads: int = 8,
+        qkv_bias: bool = True,
+    ):
+        super().__init__()
+        if dim % num_heads != 0:
+            raise ValueError(
+                f"dim ({dim}) must be divisible by num_heads ({num_heads})"
+            )
+        self.dim = dim
+        self.n_levels = n_levels
+        self.num_heads = num_heads
+        self.scale = (dim // num_heads) ** -0.5
+        self.pos_embed = nn.Parameter(torch.zeros(n_levels, dim))
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.proj = nn.Linear(dim, dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        BZ, H, W, C = x.shape
+        Z = self.n_levels
+        B = BZ // Z
+        # (B*Z, H, W, C) -> (B*H*W, Z, C): one sequence per column.
+        x = x.view(B, Z, H * W, C).transpose(1, 2).reshape(B * H * W, Z, C)
+        x = x + self.pos_embed
+        qkv = (
+            self.qkv(x)
+            .reshape(B * H * W, Z, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        attn = (q * self.scale) @ k.transpose(-2, -1)
+        attn = attn.softmax(dim=-1)
+        x = (attn @ v).transpose(1, 2).reshape(B * H * W, Z, C)
+        x = self.proj(x)
+        return x.view(B, H * W, Z, C).transpose(1, 2).reshape(BZ, H, W, C)
 
 
 class ChannelMixer(nn.Module):
@@ -335,6 +399,10 @@ class SwinTransformerBlock(nn.Module):
             ``ConditionalLayerNorm``-based noise conditioning.
         context_config: Required when ``conditioning="cln"``; passed to each
             ``ConditionalLayerNorm``.
+        n_levels: Size of the vertical axis folded into the batch dimension.
+            When greater than 1, cross-level attention replaces the pointwise
+            ``ColumnMixer``, giving levels a genuine attention path.
+        column_num_heads: Number of heads for cross-level attention.
     """
 
     def __init__(
@@ -352,6 +420,8 @@ class SwinTransformerBlock(nn.Module):
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
+        n_levels: int = 1,
+        column_num_heads: int = 8,
     ):
         super().__init__()
         self.dim = dim
@@ -380,7 +450,13 @@ class SwinTransformerBlock(nn.Module):
             cpb_hidden_dim=cpb_hidden_dim,
             qkv_bias=qkv_bias,
         )
-        self.column_mixer = ColumnMixer(dim)
+        self.column_mixer: nn.Module = (
+            CrossLevelAttention(
+                dim, n_levels=n_levels, num_heads=column_num_heads, qkv_bias=qkv_bias
+            )
+            if n_levels > 1
+            else ColumnMixer(dim)
+        )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.mlp = _build_mlp(mlp_layer, dim, int(dim * mlp_ratio))
 
@@ -564,6 +640,9 @@ class BasicLayer(nn.Module):
         conditioning: ``"adaln"`` (default) or ``"cln"``.
         context_config: Required when ``conditioning="cln"``; forwarded to each
             block's ``ConditionalLayerNorm``.
+        n_levels: Size of the vertical axis folded into the batch dimension;
+            greater than 1 enables cross-level attention in each block.
+        column_num_heads: Number of heads for cross-level attention.
     """
 
     def __init__(
@@ -582,6 +661,8 @@ class BasicLayer(nn.Module):
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
+        n_levels: int = 1,
+        column_num_heads: int = 8,
     ):
         super().__init__()
         if len(drop_path) != depth:
@@ -605,6 +686,8 @@ class BasicLayer(nn.Module):
                     context_config=context_config,
                     cpb_hidden_dim=cpb_hidden_dim,
                     lat_coords=lat_coords,
+                    n_levels=n_levels,
+                    column_num_heads=column_num_heads,
                 )
                 for i in range(depth)
             ]
