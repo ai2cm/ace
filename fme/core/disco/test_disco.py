@@ -129,3 +129,44 @@ def test_backward_pass():
     y.sum().backward()
     assert conv.weight.grad is not None
     assert conv.bias.grad is not None
+
+
+def _skip_if_no_inductor_cpu_toolchain():
+    try:
+        torch.compile(lambda t: t + 1, backend="inductor", fullgraph=True)(
+            torch.zeros(2)
+        )
+    except Exception as err:  # no C++ compiler / OpenMP for inductor's CPU codegen
+        pytest.skip(f"inductor CPU codegen unavailable: {err}")
+
+
+def test_inductor_compiled_forward_matches_eager_on_cpu():
+    """The forward compiles with inductor on CPU and matches eager.
+
+    Regression test: the irfft input is a non-contiguous einsum output, for
+    which inductor's CPU stride prediction of ``aten._fft_c2r`` disagrees with
+    the real kernel output, failing with "expected size ..., stride ...".
+    """
+    _skip_if_no_inductor_cpu_toolchain()
+    torch._dynamo.reset()
+    torch.manual_seed(0)
+    img_shape = (8, 16)
+    conv = DiscreteContinuousConvS2(
+        2,
+        2,
+        in_shape=img_shape,
+        out_shape=img_shape,
+        kernel_shape=(3, 3),
+        basis_type="morlet",
+        basis_norm_mode="mean",
+        grid_in="equiangular",
+        grid_out="equiangular",
+        bias=True,
+        theta_cutoff=0.5,
+    )
+    x = torch.randn(2, 2, *img_shape)
+    compiled = torch.compile(conv, backend="inductor", fullgraph=True)
+    with torch.no_grad():
+        y_eager = conv(x)
+        y_compiled = compiled(x)
+    torch.testing.assert_close(y_compiled, y_eager)
