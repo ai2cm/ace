@@ -49,6 +49,11 @@ Verified against the scheduler source (allenai/beaker, `scheduling/internal/sort
   jobs, the other clusters they could land on.
 - A job with `status.scheduled` set but no `status.started` has a node and is starting (image
   pull, setup); it is no longer waiting on the queue.
+- Each queued job's `FailedScheduling` events (`beaker job events <job>`) give the scheduler's own
+  reason, counted in nodes across every cluster the job can use: nodes without enough free slots,
+  cordoned nodes, nodes excluded by an allocation slot limit, and nodes waiting for a job higher in
+  the queue to be scheduled, named by job ID. That job can be from any budget, so the budget's own
+  tables cannot show it.
 
 ## Reporting
 
@@ -57,8 +62,10 @@ decay-weighted standing against target over the scheduler's lookback window (app
 two tables: the
 budget's allocated jobs running on the cluster with their minimum runtime left, and its allocated
 jobs scheduled or queued in scheduling order. With `--include-unallocated` the same two tables
-follow for the budget's backfill jobs. The logged-in user's jobs are marked `*`. Relay all the
-tables as they are. Add at most a short paragraph answering the user's actual
+follow for the budget's backfill jobs. Jobs are named by experiment, as the Beaker UI lists
+them. Under a queued table, a list gives each job that Beaker says must be scheduled first on
+this cluster, from any budget, and the queued jobs it is ahead of. The logged-in user's jobs are
+marked `*`. Relay all the tables and that list as they are. Add at most a short paragraph answering the user's actual
 question (is the budget at quota, what is ahead of their job, can their running job be preempted);
 do not restate the tables in prose. Times are already local. When the header says
 `beaker job list --cluster` is failing, queued jobs come only from the users it names;

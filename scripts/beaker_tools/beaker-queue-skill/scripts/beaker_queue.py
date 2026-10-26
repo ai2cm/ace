@@ -43,18 +43,27 @@ Output (markdown): a header with the budget's standing and use, then the budget'
 allocated jobs running on the cluster with their minimum runtime left (blank =
 interruptible), and its allocated jobs scheduled or queued, in scheduling order.
 --include-unallocated adds the same two tables for the budget's unallocated jobs. Jobs
-of the logged-in user are marked with *. Times are local.
+are named by experiment, as the Beaker UI lists them, falling back to the task name.
+Below each queued table, a list gives the jobs, from any budget and able to run on this
+cluster, that Beaker says must be scheduled before the queued ones, taken from each
+queued job's latest FailedScheduling event (`beaker job events`). Jobs of the logged-in
+user are marked with *. Times are local.
 """
 
 import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 HOUR_NS = 3.6e12
+NAME_WIDTH = 60
+QUEUE_BLOCKERS = re.compile(r"higher in the queue to be scheduled \(([^)]*)\)")
+JOB_ID = re.compile(r"\b[0-9A-Z]{26}\b")
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "beaker-queue")
 REPORT_TIMEOUT_S = 25
 PRIORITY_RANK = {
@@ -278,6 +287,24 @@ def job_gpus(job, spec):
     return resources.get("gpuCount") or (job.get("requests") or {}).get("gpuCount") or 0
 
 
+def experiment_names(ids):
+    """Experiment name by ID, which is how the Beaker UI lists jobs; empty when the
+    lookup fails, so the callers keep task names."""
+    ids = sorted({i for i in ids if i})
+    if not ids:
+        return {}
+    try:
+        return {e["id"]: e.get("name") for e in beaker("experiment", "get", *ids)}
+    except BeakerError:
+        return {}
+
+
+def name_by_experiment(rows):
+    names = experiment_names(r["experiment"] for r in rows)
+    for r in rows:
+        r["name"] = names.get(r["experiment"]) or r["task"]
+
+
 def authors_cache_path(budget_id):
     return os.path.join(CACHE_DIR, f"authors_{budget_id}.json")
 
@@ -384,7 +411,8 @@ def active_jobs(cluster, budget_id, now, node_ids, authors):
                 allocated=min_runtime > 0,
                 author=(j.get("author") or {}).get("name", "?"),
                 workspace=workspace_names[ws],
-                name=j.get("name") or j.get("id"),
+                experiment=(j.get("execution") or {}).get("experiment"),
+                task=j.get("name") or j.get("id"),
                 id=j.get("id"),
                 gpus=job_gpus(j, spec),
                 priority=ctx.get("priority") or "?",
@@ -395,7 +423,94 @@ def active_jobs(cluster, budget_id, now, node_ids, authors):
                 other_clusters=[c for c in clusters if c != cluster],
             )
         )
+    name_by_experiment(rows)
     return rows, queried_authors
+
+
+def scheduling_wait(job_id):
+    """The IDs of the jobs that Beaker says must be scheduled before this one, and when
+    it last said so, from the job's latest FailedScheduling event."""
+    try:
+        events = beaker("job", "events", job_id)
+    except BeakerError:
+        return [], None
+    failed = [e for e in events if e.get("status") == "FailedScheduling"]
+    if not failed:
+        return [], None
+    latest = max(failed, key=lambda e: e.get("latestOccurrence") or "")
+    match = QUEUE_BLOCKERS.search(latest.get("latestMessage") or "")
+    ids = JOB_ID.findall(match.group(1)) if match else []
+    return ids, latest.get("latestOccurrence")
+
+
+def job_state(st):
+    if st.get("finalized") or st.get("exitCode") is not None or st.get("canceled"):
+        return "finished"
+    if st.get("started"):
+        return "running"
+    return "scheduled" if st.get("scheduled") else "queued"
+
+
+def budget_names(ids, known):
+    names = dict(known)
+    for i in set(ids) - set(names):
+        try:
+            names[i] = first(beaker("budget", "get", i)).get("fullName", i)
+        except BeakerError:
+            names[i] = i
+    return names
+
+
+def blocker_rows(ids, known_budgets):
+    """The jobs with these IDs, from any budget, by ID."""
+    if not ids:
+        return {}
+    try:
+        listed = beaker("job", "get", *ids)
+    except BeakerError:
+        return {}
+    budgets = budget_names((j.get("budget") for j in listed), known_budgets)
+    rows = []
+    for j in listed:
+        spec = (j.get("execution") or {}).get("spec") or {}
+        rows.append(
+            dict(
+                id=j["id"],
+                author=(j.get("author") or {}).get("name", "?"),
+                budget=budgets.get(j.get("budget"), j.get("budget")),
+                gpus=job_gpus(j, spec),
+                priority=(spec.get("context") or {}).get("priority") or "?",
+                state=job_state(j.get("status") or {}),
+                clusters=(spec.get("constraints") or {}).get("cluster") or [],
+                experiment=(j.get("execution") or {}).get("experiment"),
+                task=j.get("name") or j["id"],
+            )
+        )
+    name_by_experiment(rows)
+    return {r["id"]: r for r in rows}
+
+
+def add_blockers(jobs, cluster, known_budgets):
+    """Set `blocked_by`, the jobs Beaker says must be scheduled first, and
+    `blocked_as_of` on each queued job. A job's event covers every cluster it can
+    use, so a blocker that cannot run on this cluster is left out: it holds nodes
+    elsewhere."""
+    queued = [r for r in jobs if r["state"] == "queued"]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        waits = list(pool.map(lambda r: scheduling_wait(r["id"]), queued))
+    blockers = blocker_rows(sorted({i for ids, _ in waits for i in ids}), known_budgets)
+    for r, (ids, as_of) in zip(queued, waits):
+        found = [blockers.get(i) or dict(id=i) for i in ids]
+        r["blocked_by"] = [b for b in found if cluster in b.get("clusters", [cluster])]
+        r["blocked_as_of"] = as_of
+
+
+def shorten(name, width=NAME_WIDTH):
+    """Cut the middle of a long name, keeping both ends, which tell runs apart."""
+    if len(name) <= width:
+        return name
+    head = (width - 1) // 2
+    return f"{name[:head]}…{name[head + 1 - width:]}"
 
 
 def mark(r, me):
@@ -448,7 +563,7 @@ def running_rows(jobs, me, allocated, over=None, interruptible=True):
         cells.append(
             (mark(r, me), r["author"], r["gpus"], r["priority"])
             + runtime
-            + (local(r["time"]), r["name"][:60])
+            + (local(r["time"]), shorten(r["name"]))
         )
     return cells, rows
 
@@ -462,14 +577,14 @@ def waiting_rows(jobs, me, allocated):
         cells.append(
             (mark(r, me), r["state"], r["author"], r["gpus"], r["priority"])
             + runtime
-            + (local(r["created"]), ", ".join(r["other_clusters"]), r["name"][:60])
+            + (local(r["created"]), ", ".join(r["other_clusters"]), shorten(r["name"]))
         )
     return cells, rows
 
 
 def running_header(allocated):
     runtime = ("min runtime", "min runtime left", "preemptible by") if allocated else ()
-    return ["", "user", "GPUs", "priority", *runtime, "started", "name"]
+    return ["", "user", "GPUs", "priority", *runtime, "started", "experiment"]
 
 
 def waiting_header(allocated):
@@ -483,7 +598,7 @@ def waiting_header(allocated):
         *runtime,
         "created",
         "also eligible for",
-        "name",
+        "experiment",
     ]
 
 
@@ -550,6 +665,47 @@ def print_allocated(jobs, me, interruptible, sort_keys, over):
         "clusters may start there instead.\n"
     )
     table(waiting_header(True), cells)
+    print_blockers(rows, me)
+
+
+def describe_blocker(b):
+    if "state" not in b:
+        return f"job `{b['id']}` (details unavailable)"
+    return (
+        f"`{b['name']}` ({b['author']}, {b['budget']}; job `{b['id']}`): "
+        f"{b['gpus']} GPUs, {b['priority']}, {b['state']}, "
+        f"eligible for {', '.join(b['clusters'])}"
+    )
+
+
+def held_up(rows, me):
+    counts = Counter(r["author"] for r in rows)
+    return ", ".join(
+        f"{a}{mark(dict(author=a), me)} ×{n}" for a, n in sorted(counts.items())
+    )
+
+
+def as_of(rows):
+    times = sorted(local(r["blocked_as_of"]) for r in rows)
+    return times[0] if times[0] == times[-1] else f"{times[0]} to {times[-1][-5:]}"
+
+
+def print_blockers(rows, me):
+    behind: dict[str, tuple[dict, list[dict]]] = {}
+    for r in rows:
+        for b in r.get("blocked_by") or []:
+            behind.setdefault(b["id"], (b, []))[1].append(r)
+    if not behind:
+        return
+    print(
+        "\nJobs Beaker says must be scheduled first, from each queued job's latest "
+        "FailedScheduling event:\n"
+    )
+    for b, waiting in behind.values():
+        print(
+            f"- {describe_blocker(b)}. Ahead of {len(waiting)} queued: "
+            f"{held_up(waiting, me)} (as of {as_of(waiting)})."
+        )
 
 
 def print_unallocated(jobs, me):
@@ -565,6 +721,7 @@ def print_unallocated(jobs, me):
         f"{gpu_total(rows)} GPUs; a separate queue, sorted by age)\n"
     )
     table(waiting_header(False), cells)
+    print_blockers(rows, me)
 
 
 def main():
@@ -611,7 +768,9 @@ def main():
         )
         me, usage = me_f.result(), usage_f.result()
         jobs, authors = jobs_f.result()
+        blockers_f = pool.submit(add_blockers, jobs, a.cluster, {bid: bname})
         clause, over = clause_f.result()
+        blockers_f.result()
     if a.json:
         print(json.dumps(dict(user=me, jobs=jobs, queued_authors=authors), indent=1))
         return
