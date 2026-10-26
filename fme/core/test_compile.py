@@ -83,6 +83,33 @@ def test_compile_module_keeps_larger_user_recompile_limit():
         assert torch._dynamo.config.recompile_limit == RECOMPILE_LIMIT + 1
 
 
+@pytest.mark.parametrize(
+    "env_mode, kwargs, expected",
+    [
+        (None, {}, None),
+        ("reduce-overhead", {}, "reduce-overhead"),
+        ("reduce-overhead", {"mode": "default"}, "default"),
+    ],
+)
+def test_compile_module_uses_env_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    env_mode: str | None,
+    kwargs: dict,
+    expected: str | None,
+):
+    """FME_COMPILE_MODE sets torch.compile's mode unless the caller sets one."""
+    monkeypatch.setattr(fme.core.compile, "_COMPILE_MODE", env_mode)
+    seen: dict = {}
+
+    def fake_compile(module, **compile_kwargs):
+        seen.update(compile_kwargs)
+        return module
+
+    monkeypatch.setattr(torch, "compile", fake_compile)
+    compile_module(torch.nn.Linear(1, 1), **kwargs)
+    assert seen.get("mode") == expected
+
+
 def test_hitting_recompile_limit_warns_and_runs_eagerly(
     caplog: pytest.LogCaptureFixture,
 ):
