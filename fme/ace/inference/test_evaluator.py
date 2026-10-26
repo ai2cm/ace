@@ -656,10 +656,7 @@ def test_inference_writer_boundaries(
     # check time mean metrics
     tol = 1e-4  # relative tolerance
     grad_mag_tol = tol
-    # The random test data occasionally makes the grad-mag percent diff near
-    # zero, where it is a difference of two nearly-equal float32 means with
-    # absolute error ~100 * float32 eps that rtol alone cannot absorb.
-    grad_mag_atol = 1e-3  # percent
+    grad_mag_atol = 0.0
     if using_gpu():
         # GPU test cases have higher error
         tol = 5e-4
