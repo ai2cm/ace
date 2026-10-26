@@ -97,6 +97,19 @@ VARIANTS: dict[str, Variant] = {
     "dm1_e256_bf16": _swin(
         amp=True, depth_multiplier=1, embed_dim=256, num_heads=[4, 8, 8, 4]
     ),
+    "dm1_e256_s8": _swin(
+        samples=8, depth_multiplier=1, embed_dim=256, num_heads=[4, 8, 8, 4]
+    ),
+    "dm1_e256_cg": _swin(
+        mode="max-autotune", depth_multiplier=1, embed_dim=256, num_heads=[4, 8, 8, 4]
+    ),
+    "dm1_e256_ro": _swin(
+        mode="reduce-overhead",
+        depth_multiplier=1,
+        embed_dim=256,
+        num_heads=[4, 8, 8, 4],
+    ),
+    "base_ro": _swin(mode="reduce-overhead"),
     "dm1_e288": _swin(depth_multiplier=1, embed_dim=288, num_heads=[3, 6, 6, 3]),
     # patch 2x2: top level on a 24x48 token grid
     "p2_nl1_e256": _swin(
@@ -213,13 +226,34 @@ def _categorize(kernel: str) -> str:
 
 
 def time_variant(
-    name: str, v: Variant, device: torch.device, steps: int, profile: bool
+    name: str,
+    v: Variant,
+    device: torch.device,
+    steps: int,
+    profile: bool,
+    ema: str = "none",
+    hooks: bool = False,
 ) -> dict[str, Any]:
     torch._dynamo.reset()
     torch.manual_seed(0)
     net = build(v, device)
     net.train()
     opt = torch.optim.AdamW(net.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
+    params = [p for p in net.parameters() if p.requires_grad]
+    if ema == "repo":
+        from fme.core.ema import EMATracker
+
+        tracker = EMATracker(net, decay=0.999, faster_decay_at_start=True)
+    ema_params = [p.detach().clone() for p in params]
+    n_hook_calls = [0]
+    if hooks:  # stand-in for wandb.watch's per-parameter gradient hooks
+
+        def _hook(grad):
+            n_hook_calls[0] += 1
+            return None
+
+        for p in params:
+            p.register_hook(_hook)
     compiled = torch.compile(net, mode=v.compile_mode)
     x, labels, target = _inputs(v, device)
 
@@ -230,6 +264,11 @@ def time_variant(
         loss.backward()
         opt.step()
         opt.zero_grad(set_to_none=True)
+        if ema == "repo":
+            tracker(net)
+        elif ema == "foreach":
+            with torch.no_grad():
+                torch._foreach_lerp_(ema_params, params, 1.0 - 0.999)
         return loss
 
     t0 = time.time()
@@ -254,6 +293,8 @@ def time_variant(
         samples_per_gpu_step=v.samples,
         amp=v.amp,
         mode=v.compile_mode,
+        ema=ema,
+        hooks=hooks,
         ms_per_step=round(ms, 1),
         samples_per_s=round(v.samples / (ms / 1000), 1),
         peak_mem_GB=round(torch.cuda.max_memory_allocated() / 1e9, 1),
@@ -297,6 +338,8 @@ def main():
     parser.add_argument("--flops-only", action="store_true")
     parser.add_argument("--profile", action="store_true")
     parser.add_argument("--steps", type=int, default=20)
+    parser.add_argument("--ema", choices=["none", "repo", "foreach"], default="none")
+    parser.add_argument("--hooks", action="store_true")
     args = parser.parse_args()
     names = args.variants or list(VARIANTS)
     if args.flops_only:
@@ -311,7 +354,15 @@ def main():
         try:
             info = flops(name, VARIANTS[name], device)
             info.update(
-                time_variant(name, VARIANTS[name], device, args.steps, args.profile)
+                time_variant(
+                    name,
+                    VARIANTS[name],
+                    device,
+                    args.steps,
+                    args.profile,
+                    ema=args.ema,
+                    hooks=args.hooks,
+                )
             )
             print("RESULT " + json.dumps(info), flush=True)
             torch.cuda.empty_cache()
