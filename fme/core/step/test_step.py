@@ -2430,25 +2430,38 @@ def test_single_module_step_config_loads_legacy_residual_prediction_bool(
     state = _residual_names_config().get_state()
     state["residual_prediction"] = legacy
     config = SingleModuleStepConfig.from_state(state)
-    assert (config.residual_prediction is not None) == legacy
+    assert (config._residual_prediction_config is not None) == legacy
     assert config.residual_names == expected_names
 
 
 def test_residual_prediction_names_must_not_be_empty():
-    """[] would silently disable residual prediction; only None means "all"."""
+    """[] would silently disable residual prediction; only None means "all".
+
+    The from_state case also pins the error's quality: this must be validated
+    through the parent config, because dacite would mask a ValueError raised
+    inside ResidualPredictionConfig itself (a union member) behind a generic
+    UnionMatchError that names neither the field nor the problem.
+    """
     with pytest.raises(ValueError, match="must not be empty"):
-        ResidualPredictionConfig(names=[])
+        _residual_names_config(residual_prediction=ResidualPredictionConfig(names=[]))
+    state = _residual_names_config().get_state()
+    state["residual_prediction"] = {"names": []}
+    with pytest.raises(ValueError, match="must not be empty"):
+        SingleModuleStepConfig.from_state(state)
 
 
 @pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
 def test_single_module_step_config_accepts_legacy_bool_directly(legacy):
-    """The config is public API (exported from fme.ace), so the deprecated bool
+    """The config is public API (exported from fme.ace), so the bool spelling
     must keep working for direct construction, not only for serialized state."""
     config = _residual_names_config(residual_prediction=legacy)
+    # the public field keeps the given spelling; internal readers use the
+    # normalized private attribute
+    assert config.residual_prediction is legacy
     if legacy:
-        assert config.residual_prediction == ResidualPredictionConfig()
+        assert config._residual_prediction_config == ResidualPredictionConfig()
     else:
-        assert config.residual_prediction is None
+        assert config._residual_prediction_config is None
 
 
 def test_multi_call_loss_scaling_follows_wrapped_residual_names():

@@ -1,4 +1,6 @@
 import contextlib
+import copy
+import json
 import os
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
@@ -8,7 +10,13 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.ema import EMAConfig, EMATracker
+from fme.core.disk_metric_logger import (
+    CHECKPOINT_MARK_FILENAME,
+    DiskMetricLogger,
+    read_metrics,
+    read_metrics_by_step,
+)
+from fme.core.ema import EMAConfig, EMATracker, load_ema_params_if_available
 from fme.core.generics.aggregator import (
     AggregatorABC,
     AggregatorSummary,
@@ -40,6 +48,11 @@ from fme.core.optimization import NullOptimization, Optimization, OptimizationCo
 from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
+
+RESUME_MAX_EPOCHS = 2
+RESUME_N_TRAIN_BATCHES = 5
+RESUME_LAST_EPOCH_STEP = RESUME_MAX_EPOCHS * RESUME_N_TRAIN_BATCHES
+BATCH_LOG_KEY = "training_samples_per_second_on_rank_0"
 
 
 class PSType:
@@ -634,6 +647,173 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     assert stepper.loaded_state["foo"] == "bar"
     assert "modules" in stepper.loaded_state
     assert len(stepper.loaded_state) == 2
+
+
+def _start_job(experiment_dir: str, **trainer_kwargs: Any) -> Trainer:
+    """Configure logging and build a trainer, as a new training job does."""
+    LoggingConfig(log_to_wandb=True)._configure_wandb(
+        experiment_dir=experiment_dir, config={}, resumable=True
+    )
+    trainer_kwargs = {
+        "max_epochs": RESUME_MAX_EPOCHS,
+        "n_train_batches": RESUME_N_TRAIN_BATCHES,
+        **trainer_kwargs,
+    }
+    _, trainer = get_trainer(experiment_dir, **trainer_kwargs)
+    return trainer
+
+
+def _train_until_last_epoch_checkpoints(trainer: Trainer):
+    """Train through the last epoch's end-of-epoch logs but stop before its
+    checkpoints are saved, as a job preempted at that point would.
+    """
+    with fail_after_calls_patch(trainer, "save_all_checkpoints", RESUME_MAX_EPOCHS):
+        trainer.train()
+
+
+def _metrics_dir(experiment_dir: str) -> str:
+    return os.path.join(experiment_dir, "metrics")
+
+
+def _disk_metrics(experiment_dir: str) -> dict[int, dict[str, Any]]:
+    return read_metrics_by_step(_metrics_dir(experiment_dir), 0)
+
+
+def test_resume_recovers_wandb_logs_lost_before_upload(tmp_path: str):
+    with mock_wandb() as wandb:
+        _start_job(tmp_path).train()
+        last_epoch_logs = wandb.get_logs()[RESUME_LAST_EPOCH_STEP]
+        assert last_epoch_logs["epoch"] == RESUME_MAX_EPOCHS
+        # the job is killed after its last log, before wandb uploads it
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        _start_job(tmp_path).train()
+        assert wandb.get_logs()[RESUME_LAST_EPOCH_STEP] == last_epoch_logs
+
+
+def test_resume_merges_recovered_batch_logs_with_redone_epoch_logs(tmp_path: str):
+    with mock_wandb() as wandb:
+        _train_until_last_epoch_checkpoints(_start_job(tmp_path))
+        # wandb never received the last epoch's step, which has both the last
+        # batch's logs and the end-of-epoch logs
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        trainer = _start_job(tmp_path)
+        with unittest.mock.patch.object(
+            trainer, "_validation_callback", wraps=trainer._validation_callback
+        ) as validation_callback:
+            trainer.train()
+        validation_callback.assert_called_once()
+        wandb_logs = wandb.get_logs()[RESUME_LAST_EPOCH_STEP]
+        assert wandb_logs["epoch"] == RESUME_MAX_EPOCHS
+        assert BATCH_LOG_KEY in wandb_logs
+    disk_logs = _disk_metrics(tmp_path)[RESUME_LAST_EPOCH_STEP]
+    assert disk_logs.keys() == wandb_logs.keys()
+
+
+def test_resume_does_not_relog_steps_redone_after_periodic_checkpoint(tmp_path: str):
+    checkpoint_every_n_batches = 2
+    n_batches_before_interrupt = 3
+    with mock_wandb() as wandb:
+        trainer = _start_job(
+            tmp_path,
+            max_epochs=1,
+            checkpoint_every_n_batches=checkpoint_every_n_batches,
+        )
+        # + 1 for the call _log_first_batch_metrics makes before training,
+        # + 1 for the call that raises
+        with fail_after_calls_patch(
+            trainer.stepper, "train_on_batch", n_batches_before_interrupt + 2
+        ):
+            trainer.train()
+        # wandb never received the checkpoint's step or the batch after it
+        wandb.drop_logs_after(checkpoint_every_n_batches - 1)
+        # the resumed job logs the batch after the checkpoint again; the mock
+        # rejects it if that batch's lost logs were re-logged and committed
+        _start_job(
+            tmp_path,
+            max_epochs=1,
+            checkpoint_every_n_batches=checkpoint_every_n_batches,
+        ).train()
+        assert BATCH_LOG_KEY in wandb.get_logs()[checkpoint_every_n_batches]
+    metrics_dir = _metrics_dir(tmp_path)
+    records = read_metrics(metrics_dir)
+    batch_log_steps = [r["step"] for r in records if BATCH_LOG_KEY in r]
+    assert batch_log_steps == list(range(1, RESUME_N_TRAIN_BATCHES + 1))
+    discarded_steps: list[int] = []
+    for name in os.listdir(metrics_dir):
+        if ".discarded." in name:
+            with open(os.path.join(metrics_dir, name)) as f:
+                discarded_steps.extend(json.loads(line)["step"] for line in f)
+    assert discarded_steps == [n_batches_before_interrupt]
+
+
+def test_resume_recovers_last_batch_logs_before_preemption_checkpoint(
+    tmp_path: str, monkeypatch
+):
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
+    n_batches_before_interrupt = 3
+    with mock_wandb() as wandb:
+        trainer = _start_job(tmp_path, max_epochs=1)
+        # + 1 for the call _log_first_batch_metrics makes before training,
+        # + 1 for the call that raises
+        with fail_after_calls_patch(
+            trainer.stepper, "train_on_batch", n_batches_before_interrupt + 2
+        ):
+            trainer.train()
+        # invoke the trainer's registered callback as the termination listener
+        # would after the abort, as
+        # test_resume_after_interrupted_training_during_epoch does
+        (save_on_terminate,) = registered_callbacks
+        save_on_terminate()
+        last_batch_logs = wandb.get_logs()[n_batches_before_interrupt]
+        # wandb holds the last logged step until a later one is logged, so the
+        # process exiting from the listener thread loses it
+        wandb.drop_logs_after(n_batches_before_interrupt - 1)
+        _start_job(tmp_path, max_epochs=1).train()
+        assert wandb.get_logs()[n_batches_before_interrupt] == last_batch_logs
+
+
+def test_resume_recovers_logs_after_two_preemptions(tmp_path: str):
+    with mock_wandb() as wandb:
+        _train_until_last_epoch_checkpoints(_start_job(tmp_path))
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        _start_job(tmp_path).train()
+        last_epoch_logs = wandb.get_logs()[RESUME_LAST_EPOCH_STEP]
+        # the resumed job is also killed before wandb uploads its last step
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        _start_job(tmp_path).train()
+        assert wandb.get_logs()[RESUME_LAST_EPOCH_STEP] == last_epoch_logs
+
+
+def test_resume_without_checkpoint_mark_does_not_recover_logs(tmp_path: str):
+    with mock_wandb() as wandb:
+        _start_job(tmp_path).train()
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        # a job started before checkpoints were marked
+        os.remove(os.path.join(_metrics_dir(tmp_path), CHECKPOINT_MARK_FILENAME))
+        _start_job(tmp_path).train()
+        assert len(wandb.get_logs()) == RESUME_LAST_EPOCH_STEP
+    assert _disk_metrics(tmp_path) == {}
+
+
+def test_resume_does_not_recover_disk_logs_from_previous_run(tmp_path: str):
+    # a previous run in this directory left metrics on disk but no checkpoint
+    previous_run = DiskMetricLogger(_metrics_dir(tmp_path))
+    for step in range(RESUME_LAST_EPOCH_STEP + 1):
+        previous_run.log({"previous_run_loss": 1.0}, step=step)
+    previous_run.close()
+
+    with mock_wandb() as wandb:
+        _start_job(tmp_path).train()
+        last_epoch_logs = wandb.get_logs()[RESUME_LAST_EPOCH_STEP]
+        # the job is killed after its last log, before wandb uploads it
+        wandb.drop_logs_after(RESUME_LAST_EPOCH_STEP - 1)
+        _start_job(tmp_path).train()
+        assert wandb.get_logs()[RESUME_LAST_EPOCH_STEP] == last_epoch_logs
+    assert all("previous_run_loss" not in r for r in _disk_metrics(tmp_path).values())
 
 
 def get_batch_indices(batches) -> list[int]:
@@ -1510,6 +1690,31 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         stage2_trainer.optimization.scheduler.state_dict()
         == fresh_scheduler.state_dict()
     )
+
+
+@pytest.mark.parametrize("include_optimization", [True, False])
+def test_saved_checkpoint_ema_params_load_into_model(
+    tmp_path: str, include_optimization: bool
+):
+    """EMA weights in a checkpoint written by the Trainer can be loaded into a
+    model, and only when the checkpoint includes the optimization state."""
+    _, trainer = get_trainer(tmp_path, ema_decay=0.5)
+    modules = trainer.stepper.modules
+    modules[0].weight.data.fill_(1.0)
+    trainer._ema(model=modules)
+    with trainer._ema.applied_params(modules):
+        ema_weight = modules[0].weight.detach().clone()
+    stepper_weight = modules[0].weight.detach().clone()
+    assert not torch.equal(ema_weight, stepper_weight)
+    checkpoint_path = os.path.join(tmp_path, "ckpt.tar")
+    trainer.save_checkpoint(checkpoint_path, include_optimization=include_optimization)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    loaded = copy.deepcopy(modules)
+    loaded.load_state_dict(checkpoint["stepper"]["modules"])
+    loaded_ema = load_ema_params_if_available(checkpoint, loaded, checkpoint_path)
+    assert loaded_ema == include_optimization
+    expected = ema_weight if include_optimization else stepper_weight
+    torch.testing.assert_close(loaded[0].weight, expected)
 
 
 def test_finetune_ema_checkpoint_loads_ema_state(tmp_path: str):

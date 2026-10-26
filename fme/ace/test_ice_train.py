@@ -449,7 +449,7 @@ def test_train_and_inference(tmp_path):
             assert np.isnan(ds[var].values).any()
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         inference_evaluator_main(yaml_config=inference_config)
         wandb_logs = wandb.get_logs()
 
