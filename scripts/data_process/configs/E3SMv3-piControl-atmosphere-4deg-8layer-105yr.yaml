@@ -1,0 +1,99 @@
+# Daily coarsening of the 6-hourly 4deg E3SMv3 piControl atmosphere dataset
+# (conservatively regridded by regrid_gaussian_dataset.py; the 6-hourly source
+# dataset was not produced by compute_dataset.py, so only time_coarsen.py is
+# run with this config). Variables keep their E3SM names; renaming and
+# rescaling to the fme names happen in the training config.
+#
+# The input is sliced to start at 06:00 so that, as for CM4, each daily
+# snapshot is the 00:00 state and each window variable (6-hourly means
+# labeled at the end of their interval) averages the preceding 24 hours.
+# This drops the 0425-01-01T00:00 initial record and gives 38,690 days
+# from 0425-01-02 to 0531-01-01.
+#
+# global_mean_co2 is appended afterwards by
+# configs/experiments/2026-10-19-fm/e3sm/add_constant_co2.py.
+runs:
+  2026-10-22-E3SMv3-piControl-atmosphere-105yr-6H-4deg: gs://vcm-ml-intermediate/2026-10-22-E3SMv3-piControl-atmosphere-105yr-6H-4deg.zarr
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  # unused by time_coarsen.py; pooled stats are computed by get_pooled_stats.py
+  output_directory: gs://vcm-ml-intermediate/2026-10-22-E3SMv3-piControl-atmosphere-105yr-4deg-daily-stats
+  data_type: E3SMV2
+time_coarsen:
+  factor: 4
+  data_output_directory: gs://vcm-ml-intermediate/2026-10-22-E3SMv3-piControl-atmosphere-105yr-4deg-daily
+  stats_output_directory: gs://vcm-ml-intermediate/2026-10-22-E3SMv3-piControl-atmosphere-105yr-4deg-daily-stats
+  output_names:
+    2026-10-22-E3SMv3-piControl-atmosphere-105yr-6H-4deg: 2026-10-22-E3SMv3-piControl-atmosphere-105yr-4deg-daily
+  n_split: 20
+  input_time_slice:
+    start: "0425-01-01T06:00:00"
+  snapshot_names:
+    - ICEFRAC
+    - OCNFRAC
+    - PS
+    - QREFHT
+    - Qat2m
+    - STW_0
+    - STW_1
+    - STW_2
+    - STW_3
+    - STW_4
+    - STW_5
+    - STW_6
+    - STW_7
+    - STWat2m
+    - TREFHT
+    - TS
+    - T_0
+    - T_1
+    - T_2
+    - T_3
+    - T_4
+    - T_5
+    - T_6
+    - T_7
+    - Tat2m
+    - U_0
+    - U_1
+    - U_2
+    - U_3
+    - U_4
+    - U_5
+    - U_6
+    - U_7
+    - Uat10m
+    - V_0
+    - V_1
+    - V_2
+    - V_3
+    - V_4
+    - V_5
+    - V_6
+    - V_7
+    - Vat10m
+  window_names:
+    - DTENDTTW
+    - FLDS
+    - FLNS
+    - FLNT
+    - FLUS
+    - FLUT
+    - FSDS
+    - FSNS
+    - FSNTOA
+    - FSUS
+    - FSUTOA
+    - LHFLX
+    - SHFLX
+    - SOLIN
+    - TAUX
+    - TAUY
+    - frozen_precipitation_rate
+    - surface_precipitation_rate
+  constant_prefixes:
+    - LANDFRAC
+    - P0
+    - PHIS
+    - ak_
+    - bk_
