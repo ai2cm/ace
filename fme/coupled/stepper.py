@@ -14,7 +14,7 @@ from torch import nn
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.requirements import DataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import (
     Stepper,
     TrainOutput,
@@ -737,10 +737,23 @@ class CoupledStepperConfig:
         self,
     ) -> CoupledPrognosticStateDataRequirements:
         """Get the PrognosticStateDataRequirements for the ocean and atmosphere."""
+        ocean = self.ocean.stepper.get_prognostic_state_data_requirements()
         return CoupledPrognosticStateDataRequirements(
-            ocean=self.ocean.stepper.get_prognostic_state_data_requirements(),
+            ocean=PrognosticStateDataRequirements(
+                names=self.ocean_ic_names, n_timesteps=ocean.n_timesteps
+            ),
             atmosphere=self.atmosphere.stepper.get_prognostic_state_data_requirements(),
         )
+
+    @property
+    def ocean_ic_names(self) -> list[str]:
+        """Ocean variables carried in the coupled state between coupled steps:
+        the ocean's prognostic variables plus the SST, which the atmosphere
+        reads from the ocean state at every coupled step and which may be an
+        output-only diagnostic of the ocean (then it is taken from the ocean's
+        previous output, or from the data at the initial condition).
+        """
+        return sorted(set(self.ocean.stepper.prognostic_names) | {self.sst_name})
 
     def get_forcing_window_data_requirements(
         self, n_coupled_steps: int
@@ -1477,7 +1490,7 @@ class CoupledStepper:
             ),
             CoupledPrognosticState(
                 ocean_data=gen_data.ocean_data.get_end(
-                    self.ocean.prognostic_names,
+                    self._config.ocean_ic_names,
                     self.n_ic_timesteps,
                 ),
                 atmosphere_data=gen_data.atmosphere_data.get_end(
@@ -1500,7 +1513,7 @@ class CoupledStepper:
             ),
             CoupledPrognosticState(
                 ocean_data=gen_data.ocean_data.get_end(
-                    self.ocean.prognostic_names,
+                    self._config.ocean_ic_names,
                     self.n_ic_timesteps,
                 ),
                 atmosphere_data=gen_data.atmosphere_data.get_end(
@@ -2222,7 +2235,7 @@ class CoupledTrainStepper(
                 self.atmosphere.prognostic_names, self.n_ic_timesteps
             ),
             ocean_data=data_ensemble.ocean_data.get_start(
-                self.ocean.prognostic_names, self.n_ic_timesteps
+                self._stepper.config.ocean_ic_names, self.n_ic_timesteps
             ),
         )
         output_generator = self._stepper.get_prediction_generator(

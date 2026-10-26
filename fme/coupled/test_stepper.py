@@ -23,6 +23,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.rand import randn_like
@@ -30,10 +31,6 @@ from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
-from fme.core.normalizer import (
-    NetworkAndLossNormalizationConfig,
-    NormalizationConfig,
-)
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
@@ -1510,8 +1507,7 @@ def get_stepper_config(
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
-    assert sst_name_in_ocean_data in ocean_in_names
-    assert sst_name_in_ocean_data in ocean_out_names
+    assert sst_name_in_ocean_data in ocean_out_names  # may be output-only (diagnostic)
     assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
     assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
     assert ocean_fraction_name in atmosphere_in_names
@@ -2786,3 +2782,30 @@ def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
         assert {len(keys) for keys in atmos_key_sets} == {1, 4}
         for keys in atmos_key_sets:
             assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
+
+
+def test_output_only_sst_is_carried_in_the_ocean_state():
+    """sst as an ocean diagnostic (output-only, like the hybrid ocean with SST
+    diagnosed from the top layer) still forces the atmosphere: the coupled
+    state carries it at the initial condition, through training, and in the
+    state returned after a prediction window."""
+    train_stepper, coupled_data, config, dataset_info = get_train_stepper_and_batch(
+        ocean_in_names=["thetao_0", "mask_0"],
+        ocean_out_names=["thetao_0", "sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=2,
+    )
+    assert "sst" not in config.ocean.stepper.prognostic_names
+    assert config.ocean_ic_names == ["sst", "thetao_0"]
+    output = train_stepper.train_on_batch(
+        data=coupled_data.data, optimization=NullOptimization()
+    )
+    assert "sst" in output.ocean.gen_data
+    coupler = config.get_stepper(dataset_info)
+    ic = coupled_data.data.get_start(config.get_prognostic_state_data_requirements())
+    assert "sst" in ic.ocean_data.as_batch_data().data
+    _, state = coupler.predict_paired(initial_condition=ic, forcing=coupled_data.data)
+    assert set(state.ocean_data.as_batch_data().data) == {"sst", "thetao_0"}
