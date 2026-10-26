@@ -26,7 +26,33 @@ def _parse_compile_env(value: str | None) -> bool | None:
     )
 
 
+DEFAULT_COMPILE_BACKEND = "inductor"
+"""The backend modules compile with unless overridden: ``torch.compile``'s own
+default, so production compiles exactly as a bare ``torch.compile`` would."""
+
+
+def _validate_backend(backend: str, source: str) -> str:
+    # list_backends hides debug backends such as aot_eager unless asked for all
+    available = torch._dynamo.list_backends(exclude_tags=())
+    if backend not in available:
+        raise ValueError(
+            f"{source} must name a torch.compile backend, got {backend!r}; "
+            f"available backends are {available}."
+        )
+    return backend
+
+
+def _parse_compile_backend_env(value: str | None) -> str | None:
+    # an empty value (FME_COMPILE_BACKEND=) is treated as unset
+    if value is None or value == "":
+        return None
+    return _validate_backend(value, "FME_COMPILE_BACKEND")
+
+
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
+_BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
+    os.environ.get("FME_COMPILE_BACKEND")
+)
 _LOGGED_AUTO_SKIP = False
 _LOGGED_LONGITUDE_SPLIT_SKIP = False
 RECOMPILE_LIMIT = 32
@@ -46,6 +72,42 @@ def compile_enabled(enabled: bool = True) -> Generator[None, None, None]:
         yield
     finally:
         _COMPILE_OVERRIDE = previous
+
+
+@contextlib.contextmanager
+def compile_backend(backend: str) -> Generator[None, None, None]:
+    """Set the ``torch.compile`` backend that :func:`compile_module` uses
+    within the context, overriding ``FME_COMPILE_BACKEND``.
+
+    This selects only the backend; whether modules compile at all is still
+    decided by :func:`is_compile_enabled`.
+
+    Args:
+        backend: A registered ``torch.compile`` backend, e.g. ``"inductor"``
+            or ``"aot_eager"``.
+    """
+    global _BACKEND_OVERRIDE
+    _validate_backend(backend, "compile_backend")
+    previous = _BACKEND_OVERRIDE
+    try:
+        _BACKEND_OVERRIDE = backend
+        yield
+    finally:
+        _BACKEND_OVERRIDE = previous
+
+
+def get_compile_backend() -> str:
+    """The ``torch.compile`` backend that :func:`compile_module` uses.
+
+    This is :data:`DEFAULT_COMPILE_BACKEND` (inductor) unless the
+    ``FME_COMPILE_BACKEND`` environment variable names another registered
+    backend, e.g. ``aot_eager``, which traces with dynamo and AOTAutograd but
+    runs the traced graph eagerly instead of generating kernels, so it compiles
+    much faster. :func:`compile_backend` overrides both within a context.
+    """
+    if _BACKEND_OVERRIDE is not None:
+        return _BACKEND_OVERRIDE
+    return DEFAULT_COMPILE_BACKEND
 
 
 def is_compile_enabled() -> bool:
@@ -110,9 +172,15 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     dynamo logs a warning on the ``torch._dynamo`` logger and runs the
     remaining variants eagerly.
 
+    The backend is :func:`get_compile_backend` unless ``kwargs`` names one
+    explicitly, in which case the explicit backend wins: a caller that asks for
+    a particular backend needs that backend, while the configured one is only a
+    default.
+
     Args:
         module: The module to compile.
         kwargs: Forwarded to ``torch.compile``.
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
+    kwargs.setdefault("backend", get_compile_backend())
     return torch.compile(module, **kwargs)

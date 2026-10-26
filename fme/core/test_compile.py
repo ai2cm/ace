@@ -1,15 +1,21 @@
+import inspect
 import logging
 import os
+from unittest import mock
 
 import pytest
 import torch
 
 import fme.core.compile
 from fme.core.compile import (
+    DEFAULT_COMPILE_BACKEND,
     RECOMPILE_LIMIT,
+    _parse_compile_backend_env,
     _parse_compile_env,
+    compile_backend,
     compile_enabled,
     compile_module,
+    get_compile_backend,
     is_compile_enabled,
 )
 from fme.core.device import force_cpu
@@ -129,3 +135,82 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
         record.levelno == logging.WARNING and "recompile_limit" in record.getMessage()
         for record in caplog.records
     )
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [(None, None), ("", None), ("aot_eager", "aot_eager"), ("inductor", "inductor")],
+)
+def test_parse_compile_backend_env(value: str | None, expected: str | None):
+    assert _parse_compile_backend_env(value) == expected
+
+
+@pytest.mark.parametrize("value", ["not_a_backend", " ", "Inductor"])
+def test_parse_compile_backend_env_rejects_unknown_backends(value: str):
+    """A typo must fail at startup rather than at the first compile, which may
+    be well into a run."""
+    with pytest.raises(ValueError, match="FME_COMPILE_BACKEND must name"):
+        _parse_compile_backend_env(value)
+
+
+def test_production_default_backend_is_torch_compile_default(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """With nothing overriding it, modules compile with the backend a bare
+    ``torch.compile`` call uses, i.e. inductor."""
+    monkeypatch.setattr(fme.core.compile, "_BACKEND_OVERRIDE", None)
+    torch_default = inspect.signature(torch.compile).parameters["backend"].default
+    assert get_compile_backend() == DEFAULT_COMPILE_BACKEND == torch_default
+    assert DEFAULT_COMPILE_BACKEND == "inductor"
+
+
+def test_compile_backend_restores_previous_setting():
+    previous = get_compile_backend()
+    with compile_backend("eager"):
+        assert get_compile_backend() == "eager"
+        with compile_backend("inductor"):
+            assert get_compile_backend() == "inductor"
+        assert get_compile_backend() == "eager"
+    assert get_compile_backend() == previous
+
+
+def test_compile_backend_rejects_unknown_backend():
+    previous = get_compile_backend()
+    with pytest.raises(ValueError, match="compile_backend must name"):
+        with compile_backend("not_a_backend"):
+            pass
+    assert get_compile_backend() == previous
+
+
+def test_compile_module_uses_configured_backend():
+    net = torch.nn.Linear(2, 2)
+    with (
+        compile_backend("eager"),
+        mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile,
+    ):
+        compile_module(net)
+    mock_compile.assert_called_once_with(net, backend="eager")
+
+
+def test_compile_module_explicit_backend_wins():
+    """A caller asking for a particular backend gets it; the configured backend
+    is only the default."""
+    net = torch.nn.Linear(2, 2)
+    with (
+        compile_backend("eager"),
+        mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile,
+    ):
+        compile_module(net, backend="aot_eager", fullgraph=True)
+    mock_compile.assert_called_once_with(net, backend="aot_eager", fullgraph=True)
+
+
+def test_compile_module_runs_with_configured_backend():
+    """The configured backend reaches dynamo: the compiled module runs and
+    matches eager."""
+    torch.manual_seed(0)
+    net = torch.nn.Linear(2, 2)
+    with compile_backend("aot_eager"):
+        module = compile_module(net)
+    x = torch.randn(3, 2)
+    torch.testing.assert_close(module(x), net(x))
+    assert torch._dynamo.utils.counters["stats"]["unique_graphs"] > 0
