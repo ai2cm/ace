@@ -649,9 +649,7 @@ def test_inference_writer_boundaries(
         # GPU test cases have higher error
         tol = 5e-4
         grad_mag_tol = 3e-3
-        # The gradient magnitude percent diff can be near zero for some random
-        # data, where float32 roundoff (scaled by 100 into percent) dominates
-        # any relative tolerance.
+        # the percent diff can be near zero, where float32 noise exceeds any rtol
         grad_mag_atol = 1e-4
     np.testing.assert_allclose(
         metrics.root_mean_squared_error(
