@@ -5,6 +5,7 @@ from collections.abc import Generator
 from typing import Any
 
 import torch
+import torch_harmonics.distributed as thd
 from torch import nn
 
 from fme.core.device import get_device
@@ -27,6 +28,7 @@ def _parse_compile_env(value: str | None) -> bool | None:
 
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
 _LOGGED_AUTO_SKIP = False
+_LOGGED_LONGITUDE_SPLIT_SKIP = False
 RECOMPILE_LIMIT = 32
 
 
@@ -55,8 +57,22 @@ def is_compile_enabled() -> bool:
     disables compilation everywhere, and setting it to ``1`` forces it on any
     device, in which case any compiler failure on that device is the user's to
     resolve. :func:`compile_enabled` overrides both within a context.
+
+    Regardless of these settings, modules are never compiled when spatial
+    parallelism splits longitude, where the compiled distributed inverse SHT
+    fails.
     """
-    global _LOGGED_AUTO_SKIP
+    global _LOGGED_AUTO_SKIP, _LOGGED_LONGITUDE_SPLIT_SKIP
+    # TODO: remove this gate once the distributed inverse SHT compiles with
+    # longitude split (https://github.com/ai2cm/ace/pull/1602)
+    if thd.azimuth_group_size() > 1:
+        if not _LOGGED_LONGITUDE_SPLIT_SKIP:
+            logger.info(
+                "torch.compile skipped: spatial parallelism splits longitude, "
+                "where the compiled distributed inverse SHT fails"
+            )
+            _LOGGED_LONGITUDE_SPLIT_SKIP = True
+        return False
     if _COMPILE_OVERRIDE is not None:
         return _COMPILE_OVERRIDE
     device = get_device()

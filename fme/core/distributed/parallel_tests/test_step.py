@@ -425,7 +425,9 @@ def test_compiled_step_matches_eager(
     """Compiling a step leaves its outputs unchanged under every parallel
     decomposition. The step compiles after distributed wrapping, so the
     compiled graph contains the distributed wrapper and, under spatial
-    parallelism, the decomposed network's collectives."""
+    parallelism, the decomposed network's collectives. When longitude is
+    split, compilation is skipped (see
+    :func:`fme.core.compile.is_compile_enabled`) and both steps run eagerly."""
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
     n_samples = 2

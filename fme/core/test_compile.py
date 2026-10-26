@@ -1,4 +1,5 @@
 import logging
+import os
 
 import pytest
 import torch
@@ -64,6 +65,30 @@ def test_auto_skips_and_logs_once_off_cuda(
 def test_override_compiles_off_cuda():
     with force_cpu(), compile_enabled(True):
         assert is_compile_enabled()
+
+
+def test_longitude_split_skips_compile_and_logs_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """Splitting longitude disables compilation even when it is forced on."""
+    monkeypatch.setattr(fme.core.compile.thd, "azimuth_group_size", lambda: 2)
+    monkeypatch.setattr(fme.core.compile, "_LOGGED_LONGITUDE_SPLIT_SKIP", False)
+    with compile_enabled(True), caplog.at_level(logging.INFO):
+        assert not is_compile_enabled()
+        assert not is_compile_enabled()
+    assert caplog.text.count("spatial parallelism splits longitude") == 1
+
+
+@pytest.mark.parallel
+def test_compile_skipped_only_when_longitude_split():
+    """Under the parallel test matrix, forced compilation stays on unless the
+    model backend splits longitude."""
+    splits_longitude = (
+        os.environ.get("FME_DISTRIBUTED_BACKEND") == "model"
+        and int(os.environ.get("FME_DISTRIBUTED_W", "1")) > 1
+    )
+    with compile_enabled(True):
+        assert is_compile_enabled() == (not splits_longitude)
 
 
 def test_compile_module_raises_recompile_limit():
