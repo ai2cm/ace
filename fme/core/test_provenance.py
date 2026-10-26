@@ -54,7 +54,7 @@ def test_write_provenance(tmp_path, monkeypatch, kind):
 
 
 def test_write_provenance_non_root_writes_nothing(tmp_path, monkeypatch):
-    monkeypatch.setattr(Distributed, "is_root", lambda self: False)
+    monkeypatch.setattr(Distributed.get_instance(), "is_root", lambda: False)
     output_dir = tmp_path / "output"
     config = _Config(experiment_dir=str(tmp_path / "job"))
     write_provenance(str(output_dir), config, config.experiment_dir)
