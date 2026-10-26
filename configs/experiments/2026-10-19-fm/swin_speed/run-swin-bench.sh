@@ -3,6 +3,7 @@
 # Beaker job. Usage: ./run-swin-bench.sh <job_name containing "test"> [bench args...]
 
 set -e
+command -v gantry >/dev/null || export PATH="$HOME/mamba/envs/fme/bin:$PATH"
 
 JOB_NAME="$1"
 shift
