@@ -22,7 +22,7 @@ from fme.ace.aggregator.inference import (
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
-from fme.ace.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.data_loading.inference import InferenceDataLoaderConfig, local_ic_range
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.default_metadata import get_default_variable_metadata
@@ -47,6 +47,7 @@ from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
@@ -206,6 +207,10 @@ class InferenceEvaluatorConfig:
         aggregator: Configuration for inference evaluator aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights.
         allow_incompatible_dataset: If True, allow the forcing dataset used
             for inference to be incompatible with the dataset used for stepper training.
             This should be used with caution, as it may allow the stepper to make
@@ -240,6 +245,7 @@ class InferenceEvaluatorConfig:
         | LegacyFlagInferenceEvaluatorAggregatorConfig
     ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
@@ -259,7 +265,11 @@ class InferenceEvaluatorConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper(
+            self.checkpoint_path,
+            self.stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
@@ -339,6 +349,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
+
+        dist = Distributed.get_instance()
+        n_ic = config.loader.n_initial_conditions
+        # Validate divisibility (raises ValueError if not divisible).
+        local_ic_range(n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks)
 
         stepper_config = config.load_stepper_config()
         logging.info("Initializing data loader")

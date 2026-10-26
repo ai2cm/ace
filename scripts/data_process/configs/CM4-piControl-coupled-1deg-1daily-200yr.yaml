@@ -1,5 +1,5 @@
 # make cm4_piControl_coupled_1daily RESOLUTION=1deg
-version: "2026-09-09"
+version: "2026-09-02"
 family_name: cm4-piControl-1deg-coupled-1daily
 output_directory: gs://vcm-ml-intermediate
 
@@ -12,6 +12,8 @@ coupled_datasets:
     ocean_extra_fill_values:
       UI: 0.0
       VI: 0.0
+    # the ocean store is 1-daily; the default (120h) is for 5-daily stores
+    timedelta: 24h
     surface_flux_window_avg:
       window_timedelta: 24h
       # The ocean store labels its 1-day intervals at the interval end, so the
@@ -54,3 +56,5 @@ input_datasets:
   stats:
     atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats/combined
     ocean_dir: gs://vcm-ml-intermediate/2026-09-02-cm4-piControl-1deg-ocean-1daily-stats/2026-09-02-cm4-piControl-1deg-ocean-1daily
+stats:
+  beaker_dataset: 2026-09-02-cm4-piControl-1deg-coupled-1daily-stats
