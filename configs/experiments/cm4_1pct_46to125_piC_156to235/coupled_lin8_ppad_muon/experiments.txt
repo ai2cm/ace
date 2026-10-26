@@ -16,3 +16,5 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmuonfm_a2s-
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfmrs2_a2s-fto|o0a0rs0|01M5RFNVMWPNWVN43BR3VFZS9D|training|best_inference_ckpt|normal|--min-runtime 8h
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfmrs2_a2s-fto||01M5RFNVMWPNWVN43BR3VFZS9D|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfmrs2_a2s-fto||01M5RFNVMWPNWVN43BR3VFZS9D|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon-socorrlnmfm_a2sLR-fto|o0a2rs0|01M5WQXMRWCTBR6444WF0JV1Z6|training|best_inference_ckpt|normal|--min-runtime 8h
