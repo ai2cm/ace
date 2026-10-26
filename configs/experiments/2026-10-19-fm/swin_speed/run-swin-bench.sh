@@ -13,7 +13,7 @@ if [[ "$JOB_NAME" != *test* ]]; then
 fi
 SCRIPT_DIR=configs/experiments/2026-10-19-fm/swin_speed/
 REPO_ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter"}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter ai2/saturn"}
 cd "$REPO_ROOT"
 
 cluster_args=()
