@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from fme.ace.models.ocean.m2lines.layers import ConvNeXtBlock, MultiResolutionFiLM
+from fme.ace.models.ocean.m2lines.layers import (
+    AvgPool,
+    ConvNeXtBlock,
+    MultiResolutionFiLM,
+)
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.m2lines import SamudraBuilder
 from fme.ace.registry.registry import ModuleSelector
@@ -49,6 +53,38 @@ def test_samudra_builder_lat_pad_options():
     )
     output = model(torch.randn(2, 5, *img_shape))
     assert output.shape == (2, 3, *img_shape)
+
+
+def test_samudra_builder_pad_pool():
+    selector = ModuleSelector(
+        type="Samudra",
+        config={
+            "ch_width": [4, 4],
+            "dilation": [1, 2],
+            "n_layers": [1, 1],
+            "zonally_periodic_upsample": True,
+            "lat_pad": "pole",
+            "pad_pool": True,
+        },
+    )
+    img_shape = (18, 30)
+    module = selector.build(5, 3, DatasetInfo(img_shape=img_shape))
+    model = module.torch_module
+    assert isinstance(model, Samudra)
+    assert model.pad_pool
+    assert all(
+        pool.pad_pool and pool.lat_pad == "pole"
+        for pool in model.layers
+        if isinstance(pool, AvgPool)
+    )
+    output = model(torch.randn(2, 5, *img_shape))
+    assert output.shape == (2, 3, *img_shape)
+
+
+@pytest.mark.parametrize("lat_pad", ["pole", "pole_edge"])
+def test_samudra_builder_rejects_pole_lat_pad_with_the_default_upsampler(lat_pad):
+    with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
+        SamudraBuilder(lat_pad=lat_pad)
 
 
 @pytest.mark.parametrize("conditioned_blocks", ["bottleneck", "all_blocks"])
@@ -158,3 +194,42 @@ def test_noise_conditioned_samudra_draws_independent_noise_per_sample():
         output = model(x)
     assert not torch.allclose(output[0], output[1])
     assert not torch.allclose(output[1], output[2])
+
+
+def test_samudra_builder_loads_an_unused_pole_pad_vector_names_key():
+    """Checkpoints from runs launched while this branch had the option store
+    pole_pad_vector_names as None; they load, and one that used it raises."""
+    config = {
+        "ch_width": [4, 4],
+        "dilation": [1, 2],
+        "n_layers": [1, 1],
+        "zonally_periodic_upsample": True,
+        "lat_pad": "pole_edge",
+    }
+    selector = ModuleSelector(
+        type="Samudra", config={**config, "pole_pad_vector_names": None}
+    )
+    model = selector.build(5, 3, DatasetInfo(img_shape=(16, 32))).torch_module
+    assert isinstance(model, Samudra)
+    assert model.lat_pad == "pole_edge"
+    with pytest.raises(ValueError, match="pole_pad_vector_names"):
+        ModuleSelector(
+            type="Samudra", config={**config, "pole_pad_vector_names": ["uo_"]}
+        )
+
+
+def test_samudra_builder_gelu_cap():
+    selector = ModuleSelector(
+        type="Samudra",
+        config={
+            "ch_width": [4, 4],
+            "dilation": [1, 2],
+            "n_layers": [1, 1],
+            "gelu_cap": None,
+        },
+    )
+    model = selector.build(5, 3, DatasetInfo(img_shape=(16, 32))).torch_module
+    assert isinstance(model, Samudra)
+    assert model.gelu_cap is None
+    output = model(torch.randn(2, 5, 16, 32))
+    assert output.shape == (2, 3, 16, 32)

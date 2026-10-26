@@ -1,0 +1,6 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# uncoupled_finetune.sh appends the fine-tune's "training" row here. To
+# evaluate it once it has finished, set its status to run_piC-ic0151-5yr and
+# run evaluate.sh with --config-dir configs/experiments/2026-10-09-samudra-pool-padding,
+# which holds evaluator-config-piC-ic0151-5yr.yaml.

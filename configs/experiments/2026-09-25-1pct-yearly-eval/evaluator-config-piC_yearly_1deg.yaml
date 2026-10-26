@@ -1,0 +1,36 @@
+# piControl twin of evaluator-config-1pct_yearly_1deg.yaml: identical except
+# for the dataset stores, the 1deg OM4 piControl zarrs, and the time axis.
+# Those stores hold 14600 steps, 0151-01-06..0351-01-01 (training subsets from
+# 0156-01-06 land on index 365), so the IC is the first year boundary,
+# 0152-01-01 (index 72), and the run covers the remaining 199 years to the
+# last step, as the 1pct config starts at 0002-01-01 and runs to 0141-01-01.
+# Keep the files in sync when changing anything other than the dataset.
+experiment_dir: /results
+n_forward_steps: 14527 # 199 years of 73 steps
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0152-01-01T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  save_step_diagnostics: true
+  time_coarsen:
+    coarsen_factor: 73

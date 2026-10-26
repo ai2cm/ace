@@ -1,4 +1,3 @@
-import itertools
 import json
 import math
 import os
@@ -6,7 +5,9 @@ import os
 import pytest
 import torch
 
+from fme.ace.models.ocean.m2lines.activations import CappedGELU
 from fme.ace.models.ocean.m2lines.layers import (
+    AvgPool,
     BilinearUpsample,
     ConvNeXtBlock,
     LatPad,
@@ -522,9 +523,9 @@ def _reference_samudra_forward(
     model: Samudra, fts: torch.Tensor, lat_pad: LatPad
 ) -> torch.Tensor:
     """Samudra.forward with ``lat_pad`` written out at every site: block convs,
-    the final conv, the upsampler, and the decoder refill. Under "constant" it
-    is the original forward, since zero rows pad the same before or after
-    the longitude padding."""
+    the final conv, the upsampler, the decoder refill and, under ``pad_pool``,
+    the row before an odd pool. Under "constant" it is the original forward,
+    since zero rows pad the same before or after the longitude padding."""
     temp: list[torch.Tensor] = []
     count = 0
     for layer in model.layers:
@@ -537,6 +538,13 @@ def _reference_samudra_forward(
             fts = _reference_convnext_forward(layer, fts, lat_pad)
         elif isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample):
             fts = _reference_upsample(fts, model.zonally_periodic_upsample, lat_pad)
+        elif isinstance(layer, AvgPool):
+            if model.pad_pool:
+                fts = pad_latitude(fts, 0, fts.shape[2] % 2, lat_pad)
+                fts = torch.nn.functional.pad(
+                    fts, (0, fts.shape[3] % 2, 0, 0), mode=model.pad
+                )
+            fts = torch.nn.functional.avg_pool2d(fts, 2)
         else:
             fts = layer(fts)
         if count < model.num_steps:
@@ -545,6 +553,7 @@ def _reference_samudra_forward(
                 count += 1
         elif isinstance(layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample):
             skip = temp[2 * model.num_steps - count - 1]
+            fts = fts[..., : skip.shape[2], : skip.shape[3]]
             pad_h = skip.shape[2] - fts.shape[2]
             pad_w = skip.shape[3] - fts.shape[3]
             fts = pad_latitude(fts, pad_h // 2, pad_h - pad_h // 2, lat_pad)
@@ -593,19 +602,15 @@ def test_samudra_default_lat_pad_matches_original_forward_bitwise(
         assert torch.equal(explicit(x), reference)
 
 
-@pytest.mark.parametrize("zonally_periodic_upsample", [False, True])
-def test_samudra_pole_lat_pad_matches_reference_forward_bitwise(
-    zonally_periodic_upsample: bool,
-):
+@pytest.mark.parametrize("lat_pad", ["pole", "pole_edge"])
+def test_samudra_pole_lat_pad_matches_reference_forward_bitwise(lat_pad: LatPad):
     """Pole padding reaches every site: block convs, the final conv, the
     decoder refill, and the periodic upsampler."""
-    model = _small_samudra(
-        zonally_periodic_upsample=zonally_periodic_upsample, lat_pad="pole"
-    )
+    model = _small_samudra(zonally_periodic_upsample=True, lat_pad=lat_pad)
     torch.manual_seed(1)
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
-        assert torch.equal(model(x), _reference_samudra_forward(model, x, "pole"))
+        assert torch.equal(model(x), _reference_samudra_forward(model, x, lat_pad))
 
 
 def test_pad_latitude_pole_rows():
@@ -623,11 +628,13 @@ def test_pad_latitude_pole_rows():
     assert padded[6, 0].item() == 33.0
 
 
-def test_pad_latitude_pole_is_the_continuation_across_the_pole():
+@pytest.mark.parametrize("n_pad", [2, 9])
+def test_pad_latitude_pole_is_the_continuation_across_the_pole(n_pad: int):
     """Pole padding of the cell centers' Cartesian coordinates matches the
     coordinates evaluated past the pole (latitude -90 - d, longitude L is
-    the point -90 + d, L + 180)."""
-    n_lat, n_lon, n_pad = 6, 8, 2
+    the point -90 + d, L + 180). 9 rows on a 6-row grid run past the far pole
+    and back onto the original meridian."""
+    n_lat, n_lon = 6, 8
 
     def cartesian(lat_deg: torch.Tensor, lon_deg: torch.Tensor) -> torch.Tensor:
         lat = torch.deg2rad(lat_deg)[:, None]
@@ -650,6 +657,32 @@ def test_pad_latitude_pole_is_the_continuation_across_the_pole():
     torch.testing.assert_close(padded, cartesian(lat_extended, lon))
 
 
+def test_pad_latitude_pole_edge_averages_the_two_columns_at_the_antipode_edge():
+    """At an even width "pole_edge" takes the mean of the two columns either
+    side of the antipode's cell edge, as "pole" does at an odd width."""
+    x = torch.arange(6, dtype=torch.float32)[None, :].expand(2, -1)
+    padded = pad_latitude(x[None, None], 1, 0, "pole_edge")[0, 0]
+    expected = 0.5 * (torch.roll(x[0], 3) + torch.roll(x[0], 4))
+    torch.testing.assert_close(padded[0], expected)
+    torch.testing.assert_close(padded[1:], x)
+
+
+def test_pad_latitude_pole_edge_cancels_a_period_two_ripple():
+    """A ripple alternating from column to column comes back in phase from the
+    "pole" pad at an even width, and cancels in the "pole_edge" pad, which
+    keeps the smooth part."""
+    width = 8
+    ripple = (-1.0) ** torch.arange(width, dtype=torch.float32)
+    smooth = torch.full((width,), 2.0)
+    x = (ripple + smooth)[None, :].expand(3, -1)[None, None]
+    torch.testing.assert_close(
+        pad_latitude(x, 0, 2, "pole")[0, 0, 3:], (ripple + smooth).expand(2, -1)
+    )
+    torch.testing.assert_close(
+        pad_latitude(x, 0, 2, "pole_edge")[0, 0, 3:], smooth.expand(2, -1)
+    )
+
+
 def test_pad_latitude_pole_odd_width_averages_the_two_antipodal_columns():
     x = torch.arange(5, dtype=torch.float32)[None, :].expand(2, -1)
     padded = pad_latitude(x[None, None], 1, 0, "pole")[0, 0]
@@ -664,12 +697,13 @@ def test_pad_latitude_constant():
     assert torch.equal(constant[..., [0, 1, -1], :], torch.zeros(1, 1, 3, 4))
 
 
-def test_pad_latitude_pole_rejects_padding_beyond_the_height():
-    with pytest.raises(ValueError, match="exceeds the height"):
-        pad_latitude(torch.zeros(1, 1, 2, 4), 3, 0, "pole")
-
-
-_LAT_PAD_COMBINATIONS = list(itertools.product(["constant", "pole"], [False, True]))
+# "pole" requires the zonally periodic upsampler
+_LAT_PAD_COMBINATIONS = [
+    ("constant", False),
+    ("constant", True),
+    ("pole", True),
+    ("pole_edge", True),
+]
 
 
 @pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
@@ -710,18 +744,22 @@ def test_samudra_lat_pad_options_keep_output_shape_on_1deg_grid(
 def test_samudra_pole_lat_pad_changes_the_output():
     x = torch.randn(2, 2, *_SMALL_SHAPE)
     with torch.no_grad():
-        default = _small_samudra()(x)
-        changed = _small_samudra(lat_pad="pole")(x)
+        default = _small_samudra(zonally_periodic_upsample=True)(x)
+        changed = _small_samudra(zonally_periodic_upsample=True, lat_pad="pole")(x)
     assert not torch.allclose(default, changed)
 
 
+@pytest.mark.parametrize("pad_pool", [False, True])
 @pytest.mark.parametrize("lat_pad, zonally_periodic_upsample", _LAT_PAD_COMBINATIONS)
-def test_samudra_lat_pad_options_keep_state_dict(lat_pad, zonally_periodic_upsample):
+def test_samudra_lat_pad_options_keep_state_dict(
+    lat_pad, zonally_periodic_upsample, pad_pool
+):
     """A default checkpoint loads strictly into a model with any mode."""
     default = _small_samudra()
     model = _small_samudra(
         lat_pad=lat_pad,
         zonally_periodic_upsample=zonally_periodic_upsample,
+        pad_pool=pad_pool,
     )
     assert {k: v.shape for k, v in default.state_dict().items()} == {
         k: v.shape for k, v in model.state_dict().items()
@@ -741,11 +779,29 @@ def test_zonally_periodic_upsample_pole_lat_pad():
     assert torch.equal(ZonallyPeriodicBilinearUpsample(lat_pad="constant")(x), default)
 
 
+def test_zonally_periodic_upsample_constant_replicates_the_latitude_edge():
+    """Under "constant" the upsampler pads no zeros: it is the same as one
+    replicated row each side, cropped after the interpolation."""
+    x = torch.randn(2, 3, 9, 18)
+    by_hand = torch.nn.functional.pad(
+        torch.nn.functional.pad(x, (0, 0, 1, 1), mode="replicate"),
+        (1, 1, 0, 0),
+        mode="circular",
+    )
+    by_hand = torch.nn.functional.interpolate(
+        by_hand, scale_factor=2, mode="bilinear", align_corners=False
+    )[..., 2:20, 2:38]
+    torch.testing.assert_close(
+        ZonallyPeriodicBilinearUpsample(lat_pad="constant")(x), by_hand
+    )
+
+
 def test_samudra_pole_lat_pad_with_noise_conditioning():
     n_noise = 4
     model = _samudra(
         context_config=_noise_context_config(n_noise),
         conditioned_blocks="all_blocks",
+        zonally_periodic_upsample=True,
         lat_pad="pole",
     )
     img_shape = (18, 32)
@@ -756,3 +812,130 @@ def test_samudra_pole_lat_pad_with_noise_conditioning():
 def test_samudra_rejects_unknown_lat_pad():
     with pytest.raises(ValueError, match="unknown lat_pad"):
         _samudra(lat_pad="circular")
+
+
+@pytest.mark.parametrize("lat_pad", ["pole", "pole_edge"])
+def test_samudra_rejects_pole_lat_pad_with_the_default_upsampler(lat_pad: LatPad):
+    """The default upsampler cannot pad latitude, so the pole rule would be
+    silently partial."""
+    with pytest.raises(ValueError, match="requires zonally_periodic_upsample"):
+        _samudra(lat_pad=lat_pad)
+
+
+@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
+def test_avg_pool_pad_pool_pools_every_row_and_column(lat_pad: LatPad):
+    """The floor pool drops the last row and column of a 5x7 tensor; with
+    pad_pool the pool pads them to 6x8 and keeps them."""
+    x = torch.randn(2, 3, 5, 7)
+    assert AvgPool()(x).shape == (2, 3, 2, 3)
+    by_hand = torch.nn.functional.pad(
+        pad_latitude(x, 0, 1, lat_pad), (0, 1, 0, 0), mode="circular"
+    )
+    torch.testing.assert_close(
+        AvgPool(pad_pool=True, lat_pad=lat_pad)(x),
+        torch.nn.functional.avg_pool2d(by_hand, 2),
+    )
+
+
+@pytest.mark.parametrize("lat_pad", ["constant", "pole", "pole_edge"])
+def test_samudra_pad_pool_matches_reference_forward_bitwise(lat_pad: LatPad):
+    """On (22, 36) with three levels the 11-row level's pool pads a row and the
+    9-column level's pool a column, and the decoder crops them again."""
+    model = _small_samudra(
+        zonally_periodic_upsample=True, lat_pad=lat_pad, pad_pool=True
+    )
+    torch.manual_seed(1)
+    x = torch.randn(2, 2, *_SMALL_SHAPE)
+    with torch.no_grad():
+        assert torch.equal(model(x), _reference_samudra_forward(model, x, lat_pad))
+
+
+@pytest.mark.parametrize(
+    "img_shape, dilation, bottleneck",
+    [((180, 360), [1, 2, 4, 8], (12, 23)), ((45, 90), [1, 2, 4, 4], (3, 6))],
+)
+def test_samudra_pad_pool_loses_no_row_or_column(img_shape, dilation, bottleneck):
+    """On the 1 and 4 degree grids with their production dilations every pool
+    rounds up rather than down, and the bottleneck covers the whole grid."""
+    torch.manual_seed(0)
+    model = Samudra(
+        input_channels=1,
+        output_channels=1,
+        ch_width=[2, 2, 2, 2],
+        dilation=dilation,
+        n_layers=[1, 1, 1, 1],
+        norm="batch",
+        upscale_factor=1,
+        zonally_periodic_upsample=True,
+        pad_pool=True,
+    )
+    pool_shapes = []
+    for layer in model.layers:
+        if isinstance(layer, AvgPool):
+            layer.register_forward_hook(
+                lambda module, args, out: pool_shapes.append(
+                    (tuple(args[0].shape[-2:]), tuple(out.shape[-2:]))
+                )
+            )
+    with torch.no_grad():
+        out = model(torch.randn(1, 1, *img_shape))
+    assert out.shape == (1, 1, *img_shape)
+    assert [pooled for _, pooled in pool_shapes] == [
+        (-(-h // 2), -(-w // 2)) for (h, w), _ in pool_shapes
+    ]
+    assert pool_shapes[-1][1] == bottleneck
+
+
+def test_samudra_pad_pool_with_noise_conditioning():
+    """The noise is not padded: each block area-averages it onto its own grid,
+    which pad_pool makes 9x15 and 5x8 here rather than 8x15 and 4x7."""
+    n_noise = 4
+    model = _samudra(
+        context_config=_noise_context_config(n_noise),
+        conditioned_blocks="all_blocks",
+        zonally_periodic_upsample=True,
+        lat_pad="pole",
+        pad_pool=True,
+    )
+    img_shape = (17, 30)
+    out = model(torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape))
+    assert out.shape == (2, 3, *img_shape)
+
+
+@pytest.mark.parametrize("lat_pad", ["pole", "pole_edge"])
+@pytest.mark.parametrize("pad_pool", [False, True])
+def test_samudra_pole_lat_pad_runs_the_4deg_production_dilations(pad_pool, lat_pad):
+    """The 4 degree bottleneck has 2 rows (3 under pad_pool) and its dilation
+    of 4 pads 4 rows, which continue past the far pole."""
+    model = Samudra(
+        input_channels=1,
+        output_channels=1,
+        ch_width=[2, 2, 2, 2],
+        dilation=[1, 2, 4, 4],
+        n_layers=[1, 1, 1, 1],
+        norm="batch",
+        upscale_factor=1,
+        zonally_periodic_upsample=True,
+        lat_pad=lat_pad,
+        pad_pool=pad_pool,
+    )
+    with torch.no_grad():
+        out = model(torch.randn(1, 1, 45, 90))
+    assert out.shape == (1, 1, 45, 90)
+    assert torch.isfinite(out).all()
+
+
+def test_samudra_gelu_cap():
+    """By default every block's GELU is capped at 1; gelu_cap=None leaves it
+    uncapped, and the network still runs."""
+    capped = _small_samudra()
+    caps = [m.cap.item() for m in capped.modules() if isinstance(m, CappedGELU)]
+    assert len(caps) > 0 and all(cap == 1.0 for cap in caps)
+    uncapped = _small_samudra(gelu_cap=None)
+    gelus = [m for m in uncapped.modules() if isinstance(m, torch.nn.GELU)]
+    assert not any(isinstance(m, CappedGELU) for m in uncapped.modules())
+    assert len(gelus) == len(caps)
+    big = torch.tensor([5.0])
+    assert all(gelu(big) > 1.0 for gelu in gelus)
+    x = torch.randn(2, 2, *_SMALL_SHAPE)
+    assert uncapped(x).shape == (2, 3, *_SMALL_SHAPE)
