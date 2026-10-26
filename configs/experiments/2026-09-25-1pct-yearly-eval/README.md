@@ -8,6 +8,7 @@ lives with each training experiment and just names the checkpoint.
 
 | config | status tag | for checkpoints trained on |
 | --- | --- | --- |
+| `evaluator-config-1pct_1deg.yaml`, `1pct_1deg_sshsalt`, `1pct_4deg` | `run_1pct_1deg`, ... | **the default**: the matching `1pct_yearly_*` config without the monthly files |
 | `evaluator-config-1pct_yearly_4deg.yaml` | `run_1pct_yearly_4deg` | 4deg zarrs (`2026-07-22-cm4-*-4deg-coupled-ocean`, `2026-07-15-om4-*-4deg-ocean-5daily`) |
 | `evaluator-config-1pct_yearly_1deg.yaml` | `run_1pct_yearly_1deg` | 1deg zarrs (`2026-07-15-om4-1pctco2-1deg-*`) |
 | `evaluator-config-piC-ic0151-200yr.yaml` | `run_piC-ic0151-200yr` | 1deg zarrs; James's standard 200-year piControl eval (`cm4_eval/ocean`), from 0151-01-06 |
