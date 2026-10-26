@@ -1,5 +1,8 @@
 import collections
+import contextlib
 import dataclasses
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from typing import Literal, Protocol, Self
 
 import torch
@@ -46,14 +49,16 @@ class TimerResult:
 
 
 class Timer(Protocol):
-    def child(self, name: str) -> Self: ...
+    def child(self, name: str) -> AbstractContextManager["Timer"]: ...
     def __enter__(self) -> Self: ...
     def __exit__(self, exc_type, exc_val, exc_tb) -> Literal[False]: ...
 
 
 class NullTimer:
-    def child(self, name: str) -> "Self":
-        return self
+    # generator-based so dynamo can trace it; nullcontext(self) yields None under dynamo
+    @contextlib.contextmanager
+    def child(self, name: str) -> Iterator["NullTimer"]:
+        yield self
 
     def __enter__(self) -> "Self":
         return self
