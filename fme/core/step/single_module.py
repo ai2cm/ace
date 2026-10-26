@@ -7,6 +7,7 @@ from typing import Any, Literal
 import torch
 from torch import nn
 
+from fme.core import nan_debug
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.corrector.registry import CorrectorABC
@@ -500,6 +501,7 @@ class SingleModuleStep(StepABC):
         # after distributed wrapping, so the wrapper is inside the compiled
         # graph; state dict keys are unchanged
         self.module = self.module.compile()
+        nan_debug.register_module(self.module)
         self.secondary_decoder = self.secondary_decoder.compile()
         self._timestep = dataset_info.timestep
 
@@ -597,10 +599,26 @@ class SingleModuleStep(StepABC):
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
+            _dbg = nan_debug.ENABLED and torch.is_grad_enabled()
+            if _dbg:
+                _cuda_rng = (
+                    torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+                )
+                _cpu_rng = torch.get_rng_state()
+            module_labels = self._module_labels(args.labels)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
-                labels=self._module_labels(args.labels),
+                labels=module_labels,
             )
+            if _dbg:
+                _enc = None
+                if module_labels is not None and self.module._label_encoding is not None:
+                    _enc = module_labels.conform_to_encoding(
+                        self.module._label_encoding
+                    ).tensor
+                nan_debug.record_call(
+                    input_tensor, _enc, _cuda_rng, _cpu_rng, output_tensor
+                )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
             secondary_input = output_tensor.detach()
             if (
@@ -854,6 +872,7 @@ def step_with_adjustments(
     else:
         input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
+    nan_debug.check_stage("network_output_norm", output_norm)
     if residual_names is not None:
         if residual_transform is not None:
             output_norm = dict(output_norm)
@@ -865,9 +884,11 @@ def step_with_adjustments(
                 output_norm[name] = output_norm[name] * residual_transform[name]
         output_norm = add_names(input_norm, output_norm, residual_names)
     output = normalizer.denormalize(output_norm)
+    nan_debug.check_stage("denormalized", output)
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
+        nan_debug.check_stage("gmr_inverse", output)
     diagnostics = CorrectorDiagnostics()
     if corrector is not None:
         corrector_state: CorrectorState | None = (
@@ -875,6 +896,7 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
+        nan_debug.check_stage("corrected", output)
         # The deltas stay on the autograd graph so a training loss can
         # differentiate through the correction.
         diagnostics = result.diagnostics

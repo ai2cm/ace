@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from fme.core import nan_debug
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.optimization import OptimizationABC
@@ -252,6 +253,7 @@ class Optimization(OptimizationABC):
         if self.gscaler is not None:
             self.gscaler.update()
         self._saw_non_finite_loss = False
+        nan_debug.reset()
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         if skip:
             logging.warning(
@@ -361,6 +363,7 @@ class Optimization(OptimizationABC):
                 if self._max_consecutive_non_finite_losses == 0:
                     raise ValueError("Loss is non-finite (NaN or inf) during training.")
                 self._saw_non_finite_loss = True
+                nan_debug.on_non_finite_loss(loss)
 
 
 @dataclasses.dataclass
