@@ -55,6 +55,11 @@ class Samudra(torch.nn.Module):
         ``zonally_periodic_upsample`` is False and, under "constant", the
         periodic upsampler does not pad latitude. By default "constant", the
         original behavior. Adds no parameters, so checkpoints load across modes.
+    pad_pool : bool, optional
+        If True, each pool pads an odd height or width (see ``AvgPool``) and
+        the decoder crops the padding off again, so no row or column is
+        dropped. By default False. Adds no parameters, so checkpoints load
+        either way.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
         by ``conditioned_blocks`` take a conditional scale and bias off the noise
@@ -98,6 +103,7 @@ class Samudra(torch.nn.Module):
         context_config: ContextConfig | None = None,
         conditioned_blocks: ConditionedBlocks | None = None,
         lat_pad: LatPad = "constant",
+        pad_pool: bool = False,
     ):
         super().__init__()
 
@@ -118,6 +124,7 @@ class Samudra(torch.nn.Module):
         if lat_pad not in get_args(LatPad):
             raise ValueError(f"unknown lat_pad {lat_pad!r}")
         self.lat_pad = lat_pad
+        self.pad_pool = pad_pool
         upsample_cls = (
             functools.partial(ZonallyPeriodicBilinearUpsample, lat_pad=lat_pad)
             if zonally_periodic_upsample
@@ -180,7 +187,9 @@ class Samudra(torch.nn.Module):
                     lat_pad=self.lat_pad,
                 )
             )
-            layers.append(AvgPool())
+            layers.append(
+                AvgPool(pad_pool=self.pad_pool, pad=self.pad, lat_pad=self.lat_pad)
+            )
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -272,16 +281,18 @@ class Samudra(torch.nn.Module):
                 if isinstance(
                     layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
                 ):
+                    skip = temp[int(2 * self.num_steps - count - 1)]
+                    # crop what a padded pool added; or add below
+                    # what a floor pool dropped
+                    fts = fts[..., : skip.shape[-2], : skip.shape[-1]]
                     crop = np.array(fts.shape[2:])
-                    shape = np.array(
-                        temp[int(2 * self.num_steps - count - 1)].shape[2:]
-                    )
+                    shape = np.array(skip.shape[2:])
                     pads = shape - crop
                     pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
                     fts = pad_latitude(
                         fts, pads[0] // 2, pads[0] - pads[0] // 2, self.lat_pad
                     )
                     fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
-                    fts += temp[int(2 * self.num_steps - count - 1)]
+                    fts += skip
                     count += 1
         return fts

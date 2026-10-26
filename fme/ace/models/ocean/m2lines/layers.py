@@ -105,14 +105,32 @@ class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
 
 
 class AvgPool(torch.nn.Module):
+    """Average pooling by ``pooling`` in both axes. Drops the remainder of an
+    axis not divisible by ``pooling`` unless ``pad_pool`` pads it up instead
+    (latitude with ``lat_pad``, longitude with ``pad``).
+    """
+
     def __init__(
         self,
         pooling: int = 2,
+        pad_pool: bool = False,
+        pad: str = "circular",
+        lat_pad: LatPad = "constant",
     ):
         super().__init__()
         self.avgpool = torch.nn.AvgPool2d(pooling)
+        self.pooling = pooling
+        self.pad_pool = pad_pool
+        self.pad = pad
+        self.lat_pad = lat_pad
 
     def forward(self, x):
+        if self.pad_pool:
+            height, width = x.shape[-2:]
+            x = pad_latitude(x, 0, -height % self.pooling, self.lat_pad)
+            x = torch.nn.functional.pad(
+                x, (0, -width % self.pooling, 0, 0), mode=self.pad
+            )
         return self.avgpool(x)
 
 
