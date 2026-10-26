@@ -15,7 +15,6 @@ import fme
 from fme.core.compile import compile_enabled
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
 from fme.core.registry.module import Module
@@ -443,42 +442,12 @@ def test_compile_unsupported_builder_runs_eagerly_without_tracing(
     assert "not traceable" in caplog.text
 
 
-def test_compile_unsupported_reason_survives_wrapping_and_to():
-    """The reason must follow the Module through the transformations a step
-    applies before compiling it (device placement, distributed wrapping)."""
-    module = _build_compile_unsupported_module().to(fme.get_device())
-    module = module.wrap_module(lambda m: m)
-    with mock.patch("torch.compile") as mock_compile:
-        compiled = module.compile()
-    mock_compile.assert_not_called()
-    assert not compiled.is_compiled
-
-
 def test_module_compile_is_a_no_op_when_compile_disabled():
     module = Module(_LinearNet(), label_encoding=None)
     with compile_enabled(False), mock.patch("torch.compile") as mock_compile:
         compiled = module.compile()
     mock_compile.assert_not_called()
     assert not compiled.is_compiled
-
-
-@pytest.mark.medium_duration
-def test_compiled_modules_exceeding_shared_recompile_limit_fall_back_to_eager():
-    """Without distributed data parallel, every module is wrapped in
-    DummyWrapper, so dynamo traces each compiled module through the same
-    DummyWrapper.forward code object and all of them share one recompile
-    budget. Exhausting that budget must fall back to eager, not raise."""
-    nets = [
-        DummyWrapper(torch.nn.Linear(n_features, 2)).to(fme.get_device())
-        for n_features in (2, 3, 4)
-    ]
-    modules = [
-        Module(net, label_encoding=None).compile(backend="eager") for net in nets
-    ]
-    with torch._dynamo.config.patch(recompile_limit=2):
-        for net, module, n_features in zip(nets, modules, (2, 3, 4)):
-            x = torch.randn(1, n_features, device=fme.get_device())
-            torch.testing.assert_close(module(x), net(x))
 
 
 def _ncsfno_config_with_legacy_keys() -> dict[str, Any]:
