@@ -118,3 +118,16 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_edge_d1148|rs0|01M59YA81K7WPS528CNFFP2T8W|piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M59YA826YNX891VJ1RCSYD1X|ai2/ace|jupiter
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# The run trained without the salinity corrector (best inference epoch 14,
+# 0.1266; epoch 60 0.1638): best and final checkpoints over 1pctCO2 and the
+# standard piControl eval, as trained and with the SSH salt correction added at
+# inference (_sshsalt configs), on jupiter.
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr_sshsalt|best_inference_ckpt|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_1pct_yearly_1deg_sshsalt|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_pool_d1148_nocap_nosalt|rs0|01M5N0BHYP90V3ZJA9ZBSR8XK5|run_piC-ic0151-200yr_sshsalt|ema_ckpt_0060|high|--min-runtime 8h||01M5N0BHZCZN4TJBGJMMS6BVMY|ai2/ace|jupiter
