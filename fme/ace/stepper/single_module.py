@@ -32,6 +32,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.ema import load_ema_params_if_available
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -752,6 +753,9 @@ class StepperConfig:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.step.get_prescribed_prognostic_names()
 
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        self.step.replace_corrector(corrector)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1022,6 +1026,20 @@ class Stepper:
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._config.get_prescribed_prognostic_names()
+
+    def replace_corrector(self, corrector: CorrectorSelector) -> None:
+        """
+        Replace the step's corrector configuration with a new one.
+
+        Args:
+            corrector: The new corrector configuration.
+        """
+        self._config.replace_corrector(corrector)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
@@ -1481,6 +1499,15 @@ class TrainStepperConfig:
     Parameters:
         loss: The loss configuration.
         optimize_last_step_only: Whether to optimize only the last step.
+        pushforward_steps: The number of initial forward steps that are not
+            optimized (the "pushforward trick"). These steps are run without
+            gradients and do not contribute to the optimized loss, so the model
+            is trained on inputs it produced itself without being asked to
+            improve the steps that produced them. Must be less than the number
+            of loss steps. Cannot be combined with optimize_last_step_only or
+            with a sampled or scheduled n_forward_steps.
+            The aggregate ``loss`` metric, including the validation loss used
+            to select the best checkpoint, sums only the optimized steps.
         n_ensemble: The number of ensemble members evaluated for each training
             batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
             the default is 1. Must be 2 for EnsembleLoss to be valid.
@@ -1496,6 +1523,7 @@ class TrainStepperConfig:
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     optimize_last_step_only: bool = False
+    pushforward_steps: int = 0
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     n_forward_steps: TimeLength | TimeLengthSchedule | None = None
     parameter_init: ParameterInitializationConfig = dataclasses.field(
@@ -1504,6 +1532,25 @@ class TrainStepperConfig:
     corrector_loss: CorrectorLossConfig | None = None
 
     def __post_init__(self):
+        if self.pushforward_steps < 0:
+            raise ValueError(
+                f"pushforward_steps must be non-negative, got {self.pushforward_steps}"
+            )
+        if self.pushforward_steps > 0 and self.optimize_last_step_only:
+            raise ValueError(
+                "pushforward_steps cannot be combined with optimize_last_step_only"
+            )
+        if self.pushforward_steps > 0 and self.n_forward_steps is not None:
+            if not isinstance(self.n_forward_steps, int):
+                raise ValueError(
+                    "pushforward_steps cannot be combined with a sampled or "
+                    "scheduled n_forward_steps"
+                )
+            if self.pushforward_steps >= self.n_forward_steps:
+                raise ValueError(
+                    f"pushforward_steps ({self.pushforward_steps}) must be less "
+                    f"than n_forward_steps ({self.n_forward_steps})"
+                )
         if self.n_ensemble == -1:
             if self.loss.type == "EnsembleLoss":
                 self.n_ensemble = 2
@@ -1662,6 +1709,11 @@ class TrainStepper(
         self._loss_schedule.init_for_epoch(data.epoch)
         n_data_steps = data.time.shape[1] - self.n_ic_timesteps
         n_loss_steps = self._loss_schedule.sample(n_data_steps)
+        if self._config.pushforward_steps >= n_loss_steps:
+            raise ValueError(
+                f"pushforward_steps ({self._config.pushforward_steps}) must be "
+                f"less than the number of loss steps ({n_loss_steps})"
+            )
         metrics: dict[str, float] = {}
         target_data = self._stepper.get_forward_data(
             data, compute_derived_variables=False
@@ -1740,7 +1792,7 @@ class TrainStepper(
             if self._config.optimize_last_step_only:
                 optimize_step = step == n_loss_steps - 1
             else:
-                optimize_step = step < n_loss_steps
+                optimize_step = self._config.pushforward_steps <= step < n_loss_steps
             grad_context = (
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
@@ -1906,12 +1958,30 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        corrector: Corrector configuration to replace that used in producing a
+            serialized stepper. Options not restated here fall back to their
+            defaults, not to the checkpoint's values. For example::
+
+                corrector:
+                  type: atmosphere_corrector
+                  config:
+                    conserve_dry_air: true
+                    total_energy_budget_correction:
+                      method: constant_temperature
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    corrector: Literal["keep"] | CorrectorSelector = "keep"
+
+    def __post_init__(self):
+        if self.corrector != "keep" and not self.corrector.training_is_default():
+            raise ValueError(
+                "StepperOverrideConfig.corrector must not set training-only "
+                "options such as corrector_disabled_epochs."
+            )
 
 
 def load_stepper_config(
@@ -1953,12 +2023,15 @@ def load_stepper_config_with_override(
 def load_stepper(
     checkpoint_path: str | pathlib.Path,
     override_config: StepperOverrideConfig | None = None,
+    use_ema_if_available: bool = False,
 ) -> Stepper:
     """Load a stepper, optionally overriding certain aspects.
 
     Args:
         checkpoint_path: The path to the serialized checkpoint.
         override_config: Configuration options to override (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights,
+            use them in place of the stepper weights.
 
     Returns:
         The stepper serialized in the checkpoint, with appropriate options
@@ -1966,6 +2039,8 @@ def load_stepper(
     """
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    if use_ema_if_available:
+        load_ema_params_if_available(checkpoint, stepper.modules, str(checkpoint_path))
     apply_stepper_override(stepper, override_config)
     return stepper
 
@@ -1977,33 +2052,7 @@ def apply_stepper_override(
 
     Used by load_stepper and by coupled inference when loading component steppers.
     """
-    if override_config is None:
-        override_config = StepperOverrideConfig()
-    if override_config.ocean != "keep":
-        logging.info(
-            "Overriding training ocean configuration with a new ocean configuration."
-        )
-        stepper.replace_ocean(override_config.ocean)
-    if override_config.multi_call != "keep":
-        logging.info(
-            "Overriding training multi_call configuration with a new "
-            "multi_call configuration."
-        )
-        stepper.replace_multi_call(override_config.multi_call)
-    if override_config.derived_forcings != "keep":
-        logging.info(
-            "Overriding training derived_forcings configuration with a new "
-            "derived_forcings configuration."
-        )
-        stepper.replace_derived_forcings(override_config.derived_forcings)
-    if override_config.prescribed_prognostic_names != "keep":
-        logging.info(
-            "Overriding prescribed_prognostic_names with %s.",
-            override_config.prescribed_prognostic_names,
-        )
-        stepper.replace_prescribed_prognostic_names(
-            override_config.prescribed_prognostic_names
-        )
+    _apply_stepper_override(stepper, stepper.replace_multi_call, override_config)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2017,29 +2066,51 @@ def apply_stepper_override_to_stepper_config(
     weights). A ``multi_call`` override is rejected because replacing it needs
     the serialized step state, which only a full ``Stepper`` carries.
     """
+
+    def reject_multi_call(multi_call: MultiCallConfig | None) -> None:
+        raise ValueError(
+            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
+            "without a built Stepper; load the full Stepper to override multi_call."
+        )
+
+    _apply_stepper_override(stepper_config, reject_multi_call, override_config)
+
+
+def _apply_stepper_override(
+    target: Stepper | StepperConfig,
+    replace_multi_call: Callable[[MultiCallConfig | None], None],
+    override_config: StepperOverrideConfig | None,
+) -> None:
     if override_config is None:
         override_config = StepperOverrideConfig()
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
         )
-        stepper_config.replace_ocean(override_config.ocean)
+        target.replace_ocean(override_config.ocean)
     if override_config.multi_call != "keep":
-        raise ValueError(
-            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
-            "without a built Stepper; load the full Stepper to override multi_call."
+        logging.info(
+            "Overriding training multi_call configuration with a new "
+            "multi_call configuration."
         )
+        replace_multi_call(override_config.multi_call)
     if override_config.derived_forcings != "keep":
         logging.info(
             "Overriding training derived_forcings configuration with a new "
             "derived_forcings configuration."
         )
-        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+        target.replace_derived_forcings(override_config.derived_forcings)
     if override_config.prescribed_prognostic_names != "keep":
         logging.info(
             "Overriding prescribed_prognostic_names with %s.",
             override_config.prescribed_prognostic_names,
         )
-        stepper_config.replace_prescribed_prognostic_names(
+        target.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.corrector != "keep":
+        logging.info(
+            "Overriding training corrector configuration with %s.",
+            override_config.corrector,
+        )
+        target.replace_corrector(override_config.corrector)

@@ -11,6 +11,7 @@ from typing import Literal
 from unittest.mock import patch
 
 import cftime
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -22,6 +23,7 @@ from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
     save_plus_one_stepper,
+    save_stepper_with_ema,
     validate_stepper_config,
     validate_stepper_multi_call,
     validate_stepper_ocean,
@@ -40,6 +42,7 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    apply_stepper_override_to_stepper_config,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -98,13 +101,14 @@ from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
-from fme.core.step.single_module import SingleModuleStep
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStep
 from fme.core.stepper_state import StepperState
 from fme.core.testing import (
     get_dataset_info,
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
+from fme.core.testing.ema import assert_parameters_equal
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
@@ -602,6 +606,99 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     else:
         assert len(optimization.accumulate_loss.call_args_list) == n_steps
         assert all(forward_calls_grad_enabled)
+
+
+@pytest.mark.parametrize("pushforward_steps", [0, 1, 3])
+def test_train_on_batch_pushforward_steps(pushforward_steps: int):
+    torch.manual_seed(0)
+
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        pushforward_steps=pushforward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    n_optimized = n_steps - pushforward_steps
+    assert len(optimization.accumulate_loss.call_args_list) == n_optimized
+    assert not any(forward_calls_grad_enabled[:pushforward_steps])
+    assert all(forward_calls_grad_enabled[pushforward_steps:])
+    # every step's loss is reported, but only optimized steps are accumulated
+    expected_loss = sum(
+        stepped.metrics[f"loss_step_{i}"] for i in range(pushforward_steps, n_steps)
+    )
+    torch.testing.assert_close(stepped.metrics["loss"], expected_loss)
+    for i in range(n_steps):
+        assert f"loss_step_{i}" in stepped.metrics
+
+
+def test_train_on_batch_pushforward_steps_must_leave_a_loss_step():
+    n_steps = 2
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    stepper = _get_train_stepper(
+        _get_stepper_config(["a", "b"], ["a", "b"]),
+        pushforward_steps=n_steps,
+    )
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"pushforward_steps": -1},
+        {"pushforward_steps": 1, "optimize_last_step_only": True},
+        {"pushforward_steps": 2, "n_forward_steps": 2},
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthSchedule(
+                start_value=3,
+                milestones=[TimeLengthMilestone(epoch=2, value=4)],
+            ),
+        },
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=2, probability=0.5),
+                    TimeLengthProbability(steps=3, probability=0.5),
+                ]
+            ),
+        },
+    ],
+)
+def test_train_stepper_config_invalid_pushforward_steps(kwargs):
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        TrainStepperConfig(**kwargs)
+
+
+def test_train_stepper_config_valid_pushforward_steps():
+    TrainStepperConfig(pushforward_steps=1, n_forward_steps=2)
 
 
 def test_per_channel_losses_bounded_by_accumulated_loss():
@@ -1553,7 +1650,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         ["a", "b"],
         ["a", "c"],
         norm_mean=norm_mean,
-        residual_prediction=residual_prediction,
+        residual_prediction=(
+            ResidualPredictionConfig() if residual_prediction else None
+        ),
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
@@ -2277,6 +2376,123 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
     torch.testing.assert_close(output.data["var"], expected_var)
 
 
+def test_apply_stepper_override_to_stepper_config():
+    config = _get_stepper_config(["a", "b"], ["a"])
+    assert config.get_prescribed_prognostic_names() == []
+    apply_stepper_override_to_stepper_config(
+        config, StepperOverrideConfig(prescribed_prognostic_names=["a"])
+    )
+    assert config.get_prescribed_prognostic_names() == ["a"]
+    with pytest.raises(ValueError, match="multi_call cannot be applied"):
+        apply_stepper_override_to_stepper_config(
+            config, StepperOverrideConfig(multi_call=None)
+        )
+
+
+def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
+    """Run one eval-mode step from a constant input and return the predicted
+    "var"."""
+    stepper.set_eval()
+    index = xr.date_range("2000", freq="6h", periods=2, use_cftime=True)
+    time = xr.DataArray(np.stack([index]), dims=["sample", "time"])
+    input_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 1, 4, 8), value).to(DEVICE)},
+        time=time.isel(time=[0]),
+        labels=None,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 2, 4, 8), value).to(DEVICE)},
+        time=time,
+        labels=None,
+    )
+    output, _ = stepper.predict(input_data, forcing_data)
+    return output.data["var"]
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "checkpoint_force_positive, override_force_positive, checkpoint_disabled_epochs",
+    [
+        pytest.param(False, True, 0, id="turn_on"),
+        pytest.param(True, False, 0, id="turn_off"),
+        # the checkpoint's corrector state (from its EpochScheduledCorrector)
+        # must load into the unscheduled replacement
+        pytest.param(True, False, 1, id="turn_off_scheduled_checkpoint"),
+    ],
+)
+def test_load_stepper_with_corrector_override(
+    tmp_path: pathlib.Path,
+    checkpoint_force_positive: bool,
+    override_force_positive: bool,
+    checkpoint_disabled_epochs: int,
+):
+    """The stepper adds one, so an input of -3 predicts -2, which the
+    force-positive clamp turns into 0 when the active corrector enables it."""
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=[DimSize("grid_yt", 4), DimSize("grid_xt", 8)],
+        nz_interface=4,
+    )
+
+    def force_positive_names(enabled: bool) -> list[str]:
+        return ["var"] if enabled else []
+
+    def expected(enabled: bool) -> float:
+        return 0.0 if enabled else -2.0
+
+    save_plus_one_stepper(
+        stepper_path,
+        in_names=["var"],
+        out_names=["var"],
+        normalization_names={"var"},
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=force_positive_names(checkpoint_force_positive),
+            corrector_disabled_epochs=checkpoint_disabled_epochs,
+        ),
+    )
+
+    stepper = load_stepper(stepper_path)
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(checkpoint_force_positive))
+    )
+
+    override = CorrectorSelector(
+        type="atmosphere_corrector",
+        config={"force_positive_names": force_positive_names(override_force_positive)},
+    )
+    stepper = load_stepper(stepper_path, StepperOverrideConfig(corrector=override))
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+    assert _get_inner_single_module_config(stepper).corrector == override
+    # the replacement survives serialization
+    reloaded = Stepper.from_state(stepper.get_state())
+    output = _predict_one_step(reloaded, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+
+
+def test_stepper_override_rejects_corrector_disabled_epochs():
+    with pytest.raises(ValueError, match="corrector_disabled_epochs"):
+        dacite.from_dict(
+            StepperOverrideConfig,
+            {
+                "corrector": {
+                    "type": "atmosphere_corrector",
+                    "config": {"corrector_disabled_epochs": 1},
+                }
+            },
+            config=dacite.Config(strict=True),
+        )
+
+
 class _LargeLinear(torch.nn.Module):
     """Module defined at module scope so it can be pickled by torch.save."""
 
@@ -2826,6 +3042,7 @@ def _get_ocean_data_for_predict_paired(
     n_steps: int,
     in_names: list[str],
     out_names: list[str],
+    sea_surface_fraction: float,
     n_samples: int = 2,
     img_shape: tuple[int, int] = (5, 5),
 ) -> tuple[PrognosticState, BatchData]:
@@ -2835,6 +3052,8 @@ def _get_ocean_data_for_predict_paired(
         n_steps: Number of forward steps.
         in_names: Input variable names.
         out_names: Output variable names.
+        sea_surface_fraction: Value of sea_surface_fraction, or of
+            1 - land_fraction, everywhere.
         n_samples: Number of samples in batch.
         img_shape: Shape of spatial dimensions.
 
@@ -2882,12 +3101,16 @@ def _get_ocean_data_for_predict_paired(
             (n_samples, total_timesteps, *img_shape), 0.05, device=DEVICE
         )
     if "sea_surface_fraction" in data_dict:
-        data_dict["sea_surface_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["sea_surface_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            sea_surface_fraction,
+            device=DEVICE,
         )
     if "land_fraction" in data_dict:
-        data_dict["land_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["land_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            1 - sea_surface_fraction,
+            device=DEVICE,
         )
 
     time = xr.DataArray(
@@ -2908,24 +3131,27 @@ def _get_ocean_data_for_predict_paired(
 
 
 @pytest.mark.parametrize(
-    "in_names,out_names,hfds_role",
+    "in_names,out_names,hfds_role,sea_surface_fraction",
     [
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "hfgeou", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing_no_hfgeou",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "land_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.0,
             id="hfds_next_step_forcing_land_fraction",
         ),
         pytest.param(
@@ -2938,6 +3164,7 @@ def _get_ocean_data_for_predict_paired(
             ],
             ["thetao_0", "thetao_1", "hfds"],
             "diagnostic",
+            0.5,
             id="hfds_diagnostic",
         ),
     ],
@@ -2946,6 +3173,7 @@ def test_ocean_derived_variables_integration(
     in_names,
     out_names,
     hfds_role,
+    sea_surface_fraction,
 ):
     next_step_forcing_names = []
     if hfds_role == "next_step_forcing":
@@ -2961,6 +3189,7 @@ def test_ocean_derived_variables_integration(
         n_steps=n_steps,
         in_names=in_names,
         out_names=out_names,
+        sea_surface_fraction=sea_surface_fraction,
     )
     derived_data = data.compute_derived_variables(
         derive_func=stepper.derive_func, forcing_data=data
@@ -3016,13 +3245,17 @@ def test_ocean_derived_variables_integration(
     )
     # check imbalance for forward steps
     for i in range(n_steps):
-        expected_pred_imbalance = pred_tendency[:, i] - pred_flux[:, i]
+        expected_pred_imbalance = (
+            sea_surface_fraction * pred_tendency[:, i] - pred_flux[:, i]
+        )
         torch.testing.assert_close(
             pred_imbalance[:, i],
             expected_pred_imbalance,
             msg=f"Unexpected pred OHC imbalance at step {i + 1}",
         )
-        expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
+        expected_ref_imbalance = (
+            sea_surface_fraction * ref_tendency[:, i] - ref_flux[:, i]
+        )
         torch.testing.assert_close(
             ref_imbalance[:, i],
             expected_ref_imbalance,
@@ -3678,3 +3911,187 @@ def test_corrector_loss_errors_at_the_first_active_step(selected, trains):
     else:
         with pytest.raises(ValueError, match="match none of the correction deltas"):
             train_stepper.train_on_batch(data, optimization=NullOptimization())
+
+
+def _residual_stepper_config(
+    normalization: NetworkAndLossNormalizationConfig,
+    residual_prediction: ResidualPredictionConfig | None,
+    names: list[str],
+) -> StepperConfig:
+    """Single-module stepper config for the residual-prediction tests; the
+    module adds one in normalized space."""
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _AddOne()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=normalization,
+                    residual_prediction=residual_prediction,
+                )
+            ),
+        ),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+
+
+@pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
+def test_legacy_residual_prediction_bool_checkpoint_steps_identically(
+    tmp_path: pathlib.Path, legacy: bool
+):
+    """A checkpoint written when residual_prediction was a bool must keep
+    stepping exactly as it did. Config-level loading is not enough to promise
+    that: this goes through torch.save and load_stepper, the way inference
+    reaches a real checkpoint, and compares against the equivalent config
+    built the current way.
+    """
+
+    normalization = NetworkAndLossNormalizationConfig(
+        network=trivial_normalization(["a"]), residual=trivial_normalization(["a"])
+    )
+    current = _residual_stepper_config(
+        normalization, ResidualPredictionConfig() if legacy else None, names=["a"]
+    )
+    state = current.get_stepper(get_dataset_info()).get_state()
+    # Exactly what a pre-ResidualPredictionConfig checkpoint holds.
+    state["config"]["step"]["config"]["residual_prediction"] = legacy
+
+    path = tmp_path / "legacy_stepper"
+    torch.save({"stepper": state}, path)
+    loaded = load_stepper(path)
+
+    input_data = {"a": torch.rand(2, 5, 5).to(DEVICE)}
+    args = StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    expected = current.get_stepper(get_dataset_info()).step(args).output["a"]
+    torch.testing.assert_close(loaded.step(args).output["a"], expected)
+
+
+def test_step_residual_normalized_prediction():
+    """A unit network output must correspond to one residual std, added to
+    the input in physical units; residual means are never applied (the stats
+    convention pairs full-field centering with tendency stds)."""
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means=field_means, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.5, "b": 0.1}, stds=res_stds),
+        ),
+        ResidualPredictionConfig(normalized=True),
+        names,
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        expected = input_data[n] + res_stds[n] * network_output
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_step_hybrid_residual_normalized_prediction():
+    """The production case: one prognostic stepped as a residual-normalized
+    tendency while the other is predicted full-field, in the same step."""
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means=field_means, stds=field_stds),
+            residual=NormalizationConfig(means={n: 0.0 for n in names}, stds=res_stds),
+        ),
+        ResidualPredictionConfig(names=["a"], normalized=True),
+        names,
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        if n == "a":
+            expected = input_data[n] + res_stds[n] * network_output
+        else:
+            expected = network_output * field_stds[n] + field_means[n]
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
+    """Residual-stepped names are scored in tendency-std units and full-field
+    names in full-field-std units; scoring a full-field state error in tendency
+    units would inflate it by (field_std / tendency_std)^2."""
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=res_stds),
+        ),
+        residual_prediction=ResidualPredictionConfig(names=["a"]),
+    )
+    stds = config.get_loss_normalizer().stds
+    assert stds["a"].item() == pytest.approx(res_stds["a"])
+    assert stds["b"].item() == pytest.approx(field_stds["b"])
+
+
+def test_normalized_residual_prediction_rejects_explicit_loss_normalization():
+    """residual_prediction.normalized needs a residual block, which cannot
+    coexist with an explicit loss block, so the option commits the loss to the
+    tendency convention. Say that here rather than sending the user round the
+    two-step dead end of 'add a residual block' then 'residual conflicts with
+    loss', neither of which names the option that forced it."""
+    with pytest.raises(ValueError, match="cannot be combined with normalization.loss"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=trivial_normalization(["a"]),
+                loss=trivial_normalization(["a"], std=2.0),
+            ),
+            residual_prediction=ResidualPredictionConfig(normalized=True),
+        )
+
+
+def test_normalized_residual_prediction_requires_residual_block():
+    with pytest.raises(ValueError, match="normalization.residual"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=trivial_normalization(["a"]),
+            ),
+            residual_prediction=ResidualPredictionConfig(normalized=True),
+        )
+
+
+def test_load_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Warm starts (parameter_init) load weights through load_stepper, and
+    must keep getting the stepper weights of a checkpoint that has EMA weights.
+    """
+    path = tmp_path / "ckpt.tar"
+    stepper_weights, _ = save_stepper_with_ema(path)
+
+    stepper = load_stepper(path)
+
+    assert_parameters_equal(stepper.modules, stepper_weights)
