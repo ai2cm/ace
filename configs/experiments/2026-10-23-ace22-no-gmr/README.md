@@ -29,5 +29,6 @@ Constraints:
 seeds (`long36-evaluator-config.yaml`, copied unchanged from
 `../2026-08-28-ace22-variants/long36-backfill/`). While stage 2 is still running, first copy
 the checkpoint out with `snapshot-ckpt.sh`, since Beaker will not mount a running job's results.
+`snapshot-clip-off.sh` makes a copy of a checkpoint with the clip disabled, for the clip-off score.
 
 Launch with `bash run.sh`. It is safe to rerun: each run launches whatever stage has become ready.
