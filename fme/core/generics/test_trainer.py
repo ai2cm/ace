@@ -219,7 +219,9 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         compute_derived_variables: bool = False,
         evaluate_all_steps: bool = False,
     ) -> TrainOutput:
-        optimization.accumulate_loss(torch.tensor(float("inf")))
+        # a finite placeholder loss, since Optimization.accumulate_loss
+        # rejects non-finite losses by default
+        optimization.accumulate_loss(torch.tensor(1.0))
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
             self.validation_batches_seen.append(batch.i)
@@ -2162,3 +2164,9 @@ class TestBuildInferenceCallback:
             callback(epoch=1)
             callback(epoch=2)
         assert factory.call_count == 2
+
+
+def test_train_logs_skipped_non_finite_batches(tmp_path: str):
+    with mock_wandb() as wandb:
+        _start_job(tmp_path).train()
+        assert wandb.get_logs()[1]["skipped_non_finite_batches"] == 0
