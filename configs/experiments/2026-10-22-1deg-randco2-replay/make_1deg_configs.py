@@ -71,6 +71,10 @@ cfg.pop("resume_results", None)
 cfg["checkpoint_every_n_batches"] = (
     250  # a preempted segment loses at most ~1 h of training (was 1000)
 )
+# the 1deg pair sits at the edge of 80 GiB with 2 samples per GPU: the end-of-epoch validation OOMed at batch 8
+# (2026-10-25); halve the validation batch (training batch unchanged)
+for v in cfg["validation"]:
+    v["loader"]["batch_size"] = 4
 
 # replay data: the random-CO2 members of the rs1 fine-tune's training loader (atmosphere + sea_ice stores)
 rc = []

@@ -26,7 +26,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
   --weka climate-default:/climate-default \
-  --env PYTORCH_ALLOC_CONF=expandable_segments:True \
+  --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   --env FME_COLLECTIVE_TIMEOUT_MINUTES=120 \
   --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$JOB" \
   --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=1deg-randco2-replay \
