@@ -1,33 +1,10 @@
 """Muon optimizer with an auxiliary AdamW parameter group.
 
-The Muon math (momentum, Newton-Schulz orthogonalization, learning-rate
-adjustment, decoupled weight decay) is copied from PyTorch's
-``torch/optim/_muon.py`` at v2.10.0 [*] (BSD-3-Clause, notice below), so ace
-does not require torch >= 2.9 or import a private torch module. The copied
-functions are unchanged apart from dropping torch's dynamo and tensor-``lr``
-wrappers. ``torch.optim.Muon`` itself would not fit even where available: its
-constructor rejects parameters with ``ndim != 2`` (conv kernels are 4D) and
-it has no AdamW group for the remaining parameters. The ``Muon`` class here
-is the layer around the copied functional update:
-
-- Parameters with ``ndim > 2`` are updated as ``(shape[0], -1)`` views, so
-  updates write through to the parameter (a non-contiguous parameter is
-  updated through a contiguous copy that is copied back). The momentum
-  buffer is stored in the parameter's own shape, as in the previously
-  vendored implementation, so its checkpoints load unchanged.
-- Parameters with ``grad=None`` are skipped; gradients are not modified.
-- An AdamW group (defaults match ``torch.optim.AdamW``: betas
-  ``(0.9, 0.999)``, eps ``1e-8``) updates the non-Muon parameters.
-- ``load_state_dict`` refuses a state dict whose parameter groups are not
-  Muon/AdamW groups of the same layout (e.g. one saved by plain AdamW).
-
-The copied Newton-Schulz iteration fuses its bfloat16 matmuls (``addmm``),
-so its updates differ from the previously vendored kernel's by bfloat16
-rounding (about 3% of the update RMS); runs resumed from vendored-era
-checkpoints are not bitwise reproducible.
-
-Muon is single-device: under DDP the gradients are already all-reduced
-before ``step``, so every rank computes the same Newton-Schulz update.
+The functional Muon update is copied from PyTorch v2.10.0 [*] so ace needs
+neither torch >= 2.9 nor a private torch import. ``torch.optim.Muon`` would
+not fit anyway: it rejects ``ndim != 2`` parameters (conv kernels are 4D)
+and has no AdamW group. The ``Muon`` class applies the update to
+``(shape[0], -1)`` views of each parameter and carries the AdamW group.
 
 [*] https://github.com/pytorch/pytorch/blob/v2.10.0/torch/optim/_muon.py
 """
@@ -97,20 +74,8 @@ def _zeropower_via_newtonschulz(
     ns_steps: int,
     eps: float,
 ) -> torch.Tensor:
-    """Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
-
-    Newton-Schulz iteration to compute the zeroth power / orthogonalization of
-    G. We opt to use a quintic iteration whose coefficients are selected to
-    maximize the slope at zero. For the purpose of minimizing steps, it turns
-    out to be empirically effective to keep increasing the slope at zero even
-    beyond the point where the iteration no longer converges all the way to one
-    everywhere on the interval. This iteration therefore does not produce UV^T
-    but rather something like US'V^T where S' is diagonal with
-    S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model performance
-    at all relative to UV^T, where USV^T = G is the SVD.
-
-    Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
-    with suggestions by @jxbz, @leloykun, and @YouJiacheng.
+    """Copied from PyTorch (torch/optim/_muon.py, v2.10.0): approximate
+    orthogonalization of a matrix by a quintic Newton-Schulz iteration.
     """
     if ns_steps >= 100:
         raise ValueError(
@@ -140,10 +105,7 @@ def _zeropower_via_newtonschulz(
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
-    """Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
-
-    Default learning rate adjustment used by Muon.
-    """
+    """Copied from PyTorch (torch/optim/_muon.py, v2.10.0)."""
     A, B = param_shape[:2]
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
@@ -170,10 +132,7 @@ def muon(
     adjust_lr_fn: str | None,
 ) -> None:
     """Copied from PyTorch (``_single_tensor_muon`` in torch/optim/_muon.py,
-    v2.10.0), without the complex-parameter flag and tensor-``lr`` handling.
-
-    Functional Muon update of 2D ``params`` in place, from their ``grads``
-    and ``muon_momentum_bufs`` (also updated in place).
+    v2.10.0), minus its complex-parameter and tensor-``lr`` handling.
     """
     for i, param in enumerate(params):
         grad = grads[i]
@@ -229,27 +188,14 @@ class Muon(torch.optim.Optimizer):
     rate); group 1, present only if ``adamw_params`` is non-empty, is the
     AdamW group. Each group carries a ``use_muon`` flag.
 
-    Muon replaces each matrix's momentum by its approximate orthogonalization
-    (unit spectral scale regardless of the gradient magnitude), so pre-step
-    gradient-norm clipping changes the direction of the Muon update only
-    through the momentum mix, not its size; the clip matters mainly for the
-    AdamW group.
+    Gradient-norm clipping barely changes the Muon update's size (it is
+    orthogonalized), so it matters mainly for the AdamW group.
 
-    ``adjust_lr_fn`` sets the per-matrix step size from the flattened shape
-    ``(A, B) = (shape[0], prod(shape[1:]))``:
-
-    - ``None``/``"original"`` (Keller Jordan's reference): step
-      ``lr * sqrt(max(1, A / B))``.
-    - ``"match_rms_adamw"`` (Moonshot, arXiv:2502.16982): step
-      ``lr * 0.2 * sqrt(max(A, B))``, which gives the update an RMS of about
-      ``0.2 * lr`` to match AdamW. For a 3x3 conv kernel, flattened to
-      ``(C_out, C_in * 9)`` with ``C_out <= C_in * 9``, this is a
-      ``0.2 * sqrt(9 * C_in)`` times larger step than ``"original"`` at the
-      same ``lr`` (9.6x for ``C_in = 256``, 13.6x for 512), while decoupled
-      weight decay still uses the unadjusted ``lr``. Switching between the two
-      therefore needs ``lr`` and ``weight_decay`` retuned together; e.g. an
-      ``lr`` of 1e-3 under ``"original"`` corresponds to roughly 1e-4 under
-      ``"match_rms_adamw"``.
+    ``adjust_lr_fn`` scales the step for the flattened shape ``(A, B)``:
+    ``"original"``/``None`` uses ``lr * sqrt(max(1, A / B))``,
+    ``"match_rms_adamw"`` uses ``lr * 0.2 * sqrt(max(A, B))`` (about 10x
+    larger for Samudra's conv kernels). Weight decay uses the unadjusted
+    ``lr`` in both, so switching needs ``lr`` and ``weight_decay`` retuned.
 
     Args:
         muon_params: Parameters with ``ndim >= 2`` to update with Muon.
