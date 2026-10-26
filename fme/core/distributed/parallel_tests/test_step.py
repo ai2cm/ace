@@ -291,8 +291,13 @@ def test_step_applies_wrapper(config: StepSelector):
         wrapper=wrapper,
     )
     assert wrapper.call_count == multi_calls * len(step.modules)
+    wrapped = [call.args[0] for call in wrapper.call_args_list]
     for module in step.modules:
-        wrapper.assert_any_call(module)
+        # a compiled step wraps the compiled view of its module, which exposes
+        # the module torch.compile was called on as _orig_mod
+        assert any(
+            m is module or getattr(m, "_orig_mod", None) is module for m in wrapped
+        )
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
