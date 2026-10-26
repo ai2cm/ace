@@ -31,6 +31,10 @@ BASE_CONFIG_STEMS = (
     "ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced",
     "ace-train-config-4deg-nc-swin-v2.2-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield",
     "ace-train-config-4deg-nc-swin-v2.2-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced",
+    "ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-e3sm",
+    "ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-e3sm-balanced",
+    "ace-train-config-4deg-nc-swin-v2.2-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-e3sm",
+    "ace-train-config-4deg-nc-swin-v2.2-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-e3sm-balanced",
 )
 SEEDS = (0, 1, 2, 3, 4)
 MAX_MASKED_VARS = 10
