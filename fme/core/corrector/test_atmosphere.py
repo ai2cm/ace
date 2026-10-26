@@ -277,6 +277,59 @@ def test_force_conserve_moisture(
     np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
 
 
+@pytest.mark.parametrize(
+    "terms_to_modify", ["precipitation", "advection_and_precipitation"]
+)
+def test_force_conserve_moisture_zero_global_mean_precipitation(terms_to_modify):
+    """A generated precipitation field that is zero everywhere, as after
+    force_positive clamps an all-negative prediction, must not make the
+    global-mean rescaling divide by zero.
+    """
+    torch.random.manual_seed(0)
+    size = (2, 2, 5, 5)
+    precip = torch.rand(size=size)
+    precip[:, 1] = 0.0
+    precip.requires_grad_(True)
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=size),
+        "specific_total_water_0": torch.rand(size=size),
+        "specific_total_water_1": torch.rand(size=size),
+        "PRATEsfc": precip,
+        "LHTFLsfc": torch.rand(size=size),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
+    }
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+    ops = LatLonOperations(torch.ones(size[-2:]))
+    in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
+    out_data = {k: v.select(dim=1, index=1) for k, v in data.items()}
+    fixed = _force_conserve_moisture(
+        in_data,
+        out_data,
+        vertical_coordinate=vertical_coordinate,
+        area_weighted_mean=ops.area_weighted_mean,
+        timestep_seconds=TIMESTEP.total_seconds(),
+        terms_to_modify=terms_to_modify,
+    )
+    for name, value in fixed.items():
+        assert torch.isfinite(value).all(), name
+    merged = {**out_data, **fixed}
+    gen = AtmosphereData(merged, vertical_coordinate)
+    inp = AtmosphereData(in_data, vertical_coordinate)
+    twp_tendency = (
+        gen.total_water_path - inp.total_water_path
+    ) / TIMESTEP.total_seconds()
+    # the global-mean budget still closes
+    torch.testing.assert_close(
+        ops.area_weighted_mean(twp_tendency),
+        ops.area_weighted_mean(gen.evaporation_rate - gen.precipitation_rate),
+    )
+    sum(v.sum() for v in fixed.values()).backward()
+    assert precip.grad is not None
+    assert torch.isfinite(precip.grad).all()
+
+
 def test_clip_frozen_precipitation():
     data = {
         "PRATEsfc": torch.tensor([[1.0, 2.0], [3.0, 0.0]]),
