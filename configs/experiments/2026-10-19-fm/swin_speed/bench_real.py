@@ -29,6 +29,39 @@ def _sync():
     torch.cuda.synchronize()
 
 
+def _foreach_ema_call(self, model):
+    """EMATracker.__call__ with the same math, as three foreach kernels and
+    no host sync (the decay schedule stays on device).
+    """
+    self.num_updates += 1
+    decay = self.decay
+    if self._faster_decay_at_start:
+        decay = torch.minimum(
+            self.decay, (1 + self.num_updates) / (10 + self.num_updates)
+        )
+    with torch.no_grad():
+        ema, params = [], []
+        for key, p in model.named_parameters():
+            if p.requires_grad:
+                ema.append(self._ema_params[self._module_name_to_ema_name[key]])
+                params.append(p)
+        diff = torch._foreach_sub(ema, params)
+        torch._foreach_mul_(diff, 1.0 - decay)
+        torch._foreach_sub_(ema, diff)
+
+
+def _patch_compile_mode(mode: str):
+    import fme.core.registry.module as module_mod
+
+    original = module_mod.compile_module
+
+    def compile_with_mode(module, **kwargs):
+        kwargs.setdefault("mode", mode)
+        return original(module, **kwargs)
+
+    module_mod.compile_module = compile_with_mode
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("config")
@@ -36,13 +69,19 @@ def main():
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--set", nargs="*", default=[])
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--ema-impl", choices=["repo", "foreach"], default="repo")
+    parser.add_argument("--compile-mode", default=None)
     args = parser.parse_args()
+    if args.ema_impl == "foreach":
+        from fme.core.ema import EMATracker
+
+        EMATracker.__call__ = _foreach_ema_call  # type: ignore[method-assign]
+    if args.compile_mode is not None:
+        _patch_compile_mode(args.compile_mode)
 
     os.environ.setdefault("WANDB_MODE", "offline")
     overrides = [
         "train_loader.batch_size=4",
-        "include_channel_mask_inputs=true",
-        "seed=1",
         f"experiment_dir={tempfile.mkdtemp()}",
         "logging.log_to_wandb=true",
         *args.set,
@@ -103,6 +142,8 @@ def main():
     result = dict(
         name=args.name,
         overrides=args.set,
+        ema_impl=args.ema_impl,
+        compile_mode=args.compile_mode,
         gpu=torch.cuda.get_device_name(),
         compile_s=round(compile_s),
         ms_per_step=round(free_ms, 1),
