@@ -8,6 +8,7 @@ from append_dataset import DatasetAppendConfig
 from combine_stats import Config as CombineStatsConfig
 from create_coupled_datasets import CreateCoupledDatasetsConfig
 from create_coupled_ic import CreateCoupledICConfig
+from get_pooled_stats import Config as PooledStatsConfig
 from get_stats import Config as GetStatsConfig
 from time_coarsen import Config as TimeCoarsenConfig
 from upload_stats import Config as UploadStatsConfig
@@ -33,6 +34,8 @@ def _config_kind(path: str) -> str:
         return "append"
     if "runs" in keys:
         return "stats"
+    if "dataset_pairs" in keys:
+        return "pooled-stats"
     return "other"
 
 
@@ -52,6 +55,7 @@ CONFIG_YAMLS = _configs_of_kind("stats")
 APPEND_CONFIG_YAMLS = _configs_of_kind("append")
 COUPLED_CONFIG_YAMLS = _configs_of_kind("coupled")
 COUPLED_IC_CONFIG_YAMLS = _configs_of_kind("coupled-ic")
+POOLED_STATS_CONFIG_YAMLS = _configs_of_kind("pooled-stats")
 
 
 def test_every_config_is_classified():
@@ -104,6 +108,11 @@ def test_valid_create_coupled_ic_config(filename):
         data=config_data,
         config=dacite.Config(cast=[tuple], strict=True),
     )
+
+
+@pytest.mark.parametrize("filename", POOLED_STATS_CONFIG_YAMLS)
+def test_valid_pooled_stats_config(filename):
+    PooledStatsConfig.from_file(filename)
 
 
 NATIVE_DATA_DIRECTORY = "gs://bucket/native-6hourly"
