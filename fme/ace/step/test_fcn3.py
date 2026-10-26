@@ -2,6 +2,7 @@ from unittest import mock
 
 import pytest
 import torch
+from torch._dynamo.utils import counters
 
 import fme
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3Step, FCN3StepConfig
@@ -122,7 +123,10 @@ def test_fcn3_step_compiles():
     compiled_step.eval()
     with compile_backend("aot_eager"), torch.no_grad():
         eager_out = eager_step.step(args).output
+        graphs_before = counters["stats"]["unique_graphs"]
         compiled_out = compiled_step.step(args).output
+    # the step's forward really ran through dynamo, not the eager module
+    assert counters["stats"]["unique_graphs"] > graphs_before
     for name in eager_out:
         torch.testing.assert_close(
             compiled_out[name], eager_out[name], atol=1e-4, rtol=1e-4
