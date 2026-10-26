@@ -658,7 +658,8 @@ def test_inference_writer_boundaries(
     grad_mag_tol = tol
     # The random test data occasionally makes the grad-mag percent diff near
     # zero, where it is a difference of two nearly-equal float32 means with
-    # absolute error ~100 * float32 eps that rtol alone cannot absorb.
+    # absolute error ~100 * float32 eps that rtol alone cannot absorb. This
+    # atol also covers the same near-zero case on GPU.
     grad_mag_atol = 1e-3  # percent
     if using_gpu():
         # GPU test cases have higher error

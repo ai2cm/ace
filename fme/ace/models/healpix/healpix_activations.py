@@ -79,7 +79,6 @@ class CappedGELU(nn.Module):
             Tensor with GELU applied and values clamped to ``cap_value``.
         """
         x = self.gelu(inputs)
-        # Convert cap to a scalar value for clamping (ignores grad)
-        cap_value = self.cap.item()
-        x = torch.clamp(x, max=cap_value)
+        # clamp on the 0-d buffer: no .item() graph break, bound is cast to x.dtype
+        x = torch.clamp(x, max=self.cap)
         return x

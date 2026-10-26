@@ -800,14 +800,16 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                     dist.reduce_max(batch_max)
                     self._gm_min.copy_(torch.minimum(self._gm_min, batch_min))
                     self._gm_max.copy_(torch.maximum(self._gm_max, batch_max))
-            elif torch.isfinite(self._gm_max).all():
+            else:
+                # shift mean into last-epoch envelope; torch.where avoids a graph break
+                envelope_set = torch.isfinite(self._gm_max).all()
                 clipped = torch.clamp(global_means, min=self._gm_min, max=self._gm_max)
-                # Shift x by the clip residual so its per-channel spatial
-                # mean falls within the envelope observed during the most
-                # recent training epoch (the envelope is reset each epoch,
-                # so a loaded checkpoint carries its final epoch's envelope).
-                # No-op when the mean is already inside the envelope.
-                x = x + (clipped - global_means)
+                shift = torch.where(
+                    envelope_set,
+                    clipped - global_means,
+                    torch.zeros_like(global_means),
+                )
+                x = x + shift
 
         x = self._forward_features(x, context)
 
