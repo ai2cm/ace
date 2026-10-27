@@ -17,10 +17,12 @@ COORDS = {"lat": np.array([0.0, 1.0]), "lon": np.array([0.0, 1.0, 2.0])}
 
 
 def _writer(path, initial_condition_times, n_timesteps, **kwargs) -> MonthlyZarrWriter:
+    geometry = MonthlyZarrWriter.store_geometry(
+        initial_condition_times, n_timesteps, TIMESTEP
+    )
     return MonthlyZarrWriter(
         path=str(path),
         initial_condition_times=initial_condition_times,
-        n_timesteps=n_timesteps,
         timestep=TIMESTEP,
         save_names=kwargs.pop("save_names", None),
         variable_metadata=kwargs.pop(
@@ -28,6 +30,7 @@ def _writer(path, initial_condition_times, n_timesteps, **kwargs) -> MonthlyZarr
         ),
         coords=COORDS,
         dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
+        geometry=geometry,
         **kwargs,
     )
 

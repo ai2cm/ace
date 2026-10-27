@@ -1,4 +1,5 @@
 import copy
+import dataclasses
 import datetime
 import os
 from collections.abc import Iterable, Mapping, Sequence
@@ -35,6 +36,20 @@ from fme.core.writer import DATETIME_ENCODING_UNITS, ZarrWriter
 FLOAT_DTYPE = "f4"
 
 
+@dataclasses.dataclass(frozen=True)
+class MonthlyStoreGeometry:
+    """Pre-computed store dimensions and coordinates for a monthly zarr store.
+
+    Built from the global (all-rank) initial condition times by
+    ``MonthlyZarrWriter.store_geometry`` so that every rank creates an
+    identically-sized store.
+    """
+
+    n_samples: int
+    n_months: int
+    nondim_coords: dict[str, xr.DataArray]
+
+
 class MonthlyZarrWriter:
     """
     Write monthly mean data and sample counts to a zarr store.
@@ -49,29 +64,62 @@ class MonthlyZarrWriter:
     writer's.
     """
 
+    @staticmethod
+    def store_geometry(
+        global_initial_condition_times: npt.NDArray[cftime.datetime],
+        n_timesteps: int,
+        timestep: datetime.timedelta,
+    ) -> MonthlyStoreGeometry:
+        """Compute store dimensions and non-dimension coordinates from global info.
+
+        Args:
+            global_initial_condition_times: The full array of initial condition
+                times across all data-parallel ranks.
+            n_timesteps: Total number of inference forward steps.
+            timestep: The time delta between each timestep.
+        """
+        calendar = infer_calendar(global_initial_condition_times)
+        n_samples = len(global_initial_condition_times)
+        month_indexer = MonthIndexer(
+            first_output_times=[
+                time + timestep for time in global_initial_condition_times
+            ]
+        )
+        n_months = month_indexer.n_months_through(
+            [time + n_timesteps * timestep for time in global_initial_condition_times]
+        )
+        nondim_coords = _nondim_coords(
+            initial_condition_times=global_initial_condition_times,
+            month_indexer=month_indexer,
+            n_months=n_months,
+            n_samples=n_samples,
+            calendar=calendar,
+        )
+        return MonthlyStoreGeometry(
+            n_samples=n_samples,
+            n_months=n_months,
+            nondim_coords=nondim_coords,
+        )
+
     def __init__(
         self,
         path: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
-        n_timesteps: int,
         timestep: datetime.timedelta,
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        geometry: MonthlyStoreGeometry,
         chunks: Mapping[str, int] | None = None,
         sample_offset: int = 0,
-        local_n_samples: int | None = None,
     ):
         """
         Args:
             path: Path of the zarr store, on any fsspec-compatible filesystem.
-            initial_condition_times: 1D array of initial condition times
-                (start time for each inference run). Under multi-GPU inference,
-                this must be the GLOBAL array covering all ranks' samples so
-                the store is sized and coordinated correctly.
-            n_timesteps: Total number of inference forward steps, used to size
-                the store's lead-time axis.
+            initial_condition_times: This rank's initial condition times.
+                Used to build the ``MonthIndexer`` that maps each batch's
+                timestamps to month indices.
             timestep: The time delta between each timestep.
             save_names: Names of variables to save. If None, all predicted
                 variables will be saved.
@@ -80,6 +128,8 @@ class MonthlyZarrWriter:
                 coordinate for each spatial dimension, as for the raw zarr
                 writer, since the store is sized before any data arrives.
             dataset_metadata: Metadata for the dataset.
+            geometry: Pre-computed store dimensions and coordinates, from
+                ``store_geometry``.
             chunks: Optional mapping of dimension name to chunk size. Omitted
                 dimensions are chunked whole, except the sample and lead-time
                 dimensions, which are always chunked as 1. The store is
@@ -92,38 +142,14 @@ class MonthlyZarrWriter:
             sample_offset: Index of this rank's first sample in the global
                 sample dimension. Under multi-GPU each rank writes a contiguous
                 region of the shared store; single-GPU callers leave this at 0.
-            local_n_samples: Number of samples this rank writes. Defaults to
-                ``len(initial_condition_times)`` (single-GPU: all samples are
-                local). Under multi-GPU this is the per-rank subset count.
         """
         self._save_names = save_names
         self._sample_offset = sample_offset
-        self._local_n_samples = (
-            local_n_samples
-            if local_n_samples is not None
-            else len(initial_condition_times)
-        )
-        calendar = infer_calendar(initial_condition_times)
-        n_samples = len(initial_condition_times)
-        # The inference loop drops the initial condition step, so the run's
-        # output times are IC + timestep through IC + n_timesteps * timestep.
-        # Both ends of the month axis therefore follow from the constructor
-        # args, and n_months with them. The MonthIndexer uses the local
-        # subset of initial condition times so that month_indices() matches the
-        # sample dimension of each batch.
-        local_times = initial_condition_times[
-            sample_offset : sample_offset + self._local_n_samples
-        ]
+        self._local_n_samples = len(initial_condition_times)
+        self._n_months = geometry.n_months
+
         self._month_indexer = MonthIndexer(
-            first_output_times=[time + timestep for time in local_times]
-        )
-        # n_months must cover the global run span so every rank's store has the
-        # same lead-time axis length; use the full initial_condition_times.
-        global_month_indexer = MonthIndexer(
             first_output_times=[time + timestep for time in initial_condition_times]
-        )
-        self._n_months = global_month_indexer.n_months_through(
-            [time + n_timesteps * timestep for time in initial_condition_times]
         )
 
         dim_info = DIM_INFO_HEALPIX if "face" in coords else DIM_INFO_LATLON
@@ -137,8 +163,8 @@ class MonthlyZarrWriter:
             path=path,
             dims=(ENSEMBLE_DIM, LEAD_TIME_DIM, *spatial_names),
             coords={
-                ENSEMBLE_DIM: np.arange(n_samples),
-                LEAD_TIME_DIM: np.arange(self._n_months),
+                ENSEMBLE_DIM: np.arange(geometry.n_samples),
+                LEAD_TIME_DIM: np.arange(geometry.n_months),
                 **{name: np.asarray(coords[name]) for name in spatial_names},
             },
             chunks=_validate_chunks(chunks),
@@ -153,13 +179,7 @@ class MonthlyZarrWriter:
             # the lead-time axis is a month count, not a date
             time_units=LEAD_TIME_UNITS,
             time_calendar=None,
-            nondim_coords=_nondim_coords(
-                initial_condition_times=initial_condition_times,
-                month_indexer=global_month_indexer,
-                n_months=self._n_months,
-                n_samples=n_samples,
-                calendar=calendar,
-            ),
+            nondim_coords=geometry.nondim_coords,
         )
         # With save_names=None the variables to create aren't known until the
         # first batch, so the store is initialized then.

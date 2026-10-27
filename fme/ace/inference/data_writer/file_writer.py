@@ -462,20 +462,21 @@ class FileWriterConfig:
             global_times, sample_offset = _allgather_initial_condition_times(
                 initial_condition_times
             )
-            local_n_samples = len(initial_condition_times)
             if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                geometry = MonthlyZarrWriter.store_geometry(
+                    global_times, n_timesteps, timestep
+                )
                 raw_writer = MonthlyZarrWriter(
                     path=os.path.join(experiment_dir, f"{self.label}.zarr"),
-                    initial_condition_times=global_times,
-                    n_timesteps=n_timesteps,
+                    initial_condition_times=initial_condition_times,
                     timestep=timestep,
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,
                     dataset_metadata=dataset_metadata,
+                    geometry=geometry,
                     chunks=self.format.chunks,
                     sample_offset=sample_offset,
-                    local_n_samples=local_n_samples,
                 )
             else:
                 if isinstance(self.time_coarsen, TimeCoarsenConfig):
