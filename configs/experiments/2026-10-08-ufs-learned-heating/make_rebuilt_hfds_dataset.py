@@ -79,10 +79,6 @@ def main(
     )
     new_h = np.where(np.isfinite(old_h), rebuild, np.nan).astype("f4")
     new_ht = np.where(np.isfinite(old_ht), rebuild * ssf[None], np.nan).astype("f4")
-    encoding = {
-        v: {k: ds[v].encoding[k] for k in ("chunks", "dtype") if k in ds[v].encoding}
-        for v in ("hfds", "hfds_total_area")
-    }
     attrs_h = dict(
         ds["hfds"].attrs,
         rebuilt_from="FV3 surface components via fme.core.corrector.ocean._compute_ocean_net_surface_energy_flux with the previous step's SST (the corrector's prescribed open-ocean flux); replaces MOM6 hfds",
@@ -108,20 +104,30 @@ def main(
             f"  hfds_total_area global mean {name}: MOM6 {g_old[m].mean():+.2f} -> rebuilt {g_new[m].mean():+.2f} W/m2 (per total area)",
             flush=True,
         )
-    # rewrite the two variables in place (drop the old arrays, append the new ones with the same chunks)
-    for v in ("hfds", "hfds_total_area"):
+    # rewrite the two variables in place with the store's own layout: zarr v3, 360-step shards of 1-step chunks, zstd
+    import json
+
+    meta = json.load(open(src / "hfds" / "zarr.json"))
+    shard = tuple(meta["chunk_grid"]["configuration"]["chunk_shape"])
+    inner = tuple(meta["codecs"][0]["configuration"]["chunk_shape"])
+    root = zarr.open_group(str(dst), mode="r+")
+    for v, arr, attrs in (
+        ("hfds", new_h, attrs_h),
+        ("hfds_total_area", new_ht, attrs_ht),
+    ):
         shutil.rmtree(dst / v)
-    out = xr.Dataset(
-        {
-            "hfds": (("time", "lat", "lon"), new_h, attrs_h),
-            "hfds_total_area": (("time", "lat", "lon"), new_ht, attrs_ht),
-        },
-        coords={"time": time_, "lat": lat, "lon": lon},
-    )
-    chunks = encoding["hfds"].get("chunks")
-    if chunks:
-        out = out.chunk({"time": chunks[0], "lat": chunks[1], "lon": chunks[2]})
-    out.to_zarr(dst, mode="a", consolidated=False, encoding=encoding)
+        za = root.create_array(
+            v,
+            shape=arr.shape,
+            chunks=inner,
+            shards=shard,
+            dtype="float32",
+            fill_value=np.nan,
+            compressors=zarr.codecs.ZstdCodec(level=0, checksum=False),
+            dimension_names=("time", "lat", "lon"),
+            attributes={k: val for k, val in attrs.items() if k != "_FillValue"},
+        )
+        za[:] = arr
     if (src / ".zmetadata").exists():
         zarr.consolidate_metadata(str(dst))
     print(f"fields written ({time.time() - t0:.0f}s)", flush=True)
