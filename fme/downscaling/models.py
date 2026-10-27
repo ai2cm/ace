@@ -2,7 +2,7 @@ import dataclasses
 import warnings
 from collections.abc import Mapping
 from functools import cached_property
-from typing import Any
+from typing import Any, Literal
 
 import dacite
 import torch
@@ -98,6 +98,41 @@ class LossWeightsConfig:
 
 
 @dataclasses.dataclass
+class InterpolationConfig:
+    """
+    Configuration for interpolating coarse inputs to the fine grid, used for
+    the model input and for the base prediction when predicting residuals.
+
+    Parameters:
+        mode: Interpolation mode passed to torch.nn.functional.interpolate.
+            Defaults to 'bicubic'.
+        align_corners: Whether to align corner pixels of the coarse and fine
+            grids. Only supported for bilinear and bicubic modes.
+            Defaults to 'False'. When used in bicubic interpolation this reduces
+            errors relative to the reference fine grid, especially near edges.
+
+    """
+
+    mode: Literal["bicubic", "bilinear", "nearest", "nearest-exact", "area"] = "bicubic"
+    align_corners: bool = False
+
+    def __post_init__(self):
+        if self.align_corners and self.mode not in ("bilinear", "bicubic"):
+            raise ValueError(
+                "align_corners=True is only supported for bilinear and bicubic "
+                f"modes, got mode={self.mode!r}."
+            )
+
+
+def _with_legacy_interpolation(state: Mapping[str, Any]) -> dict[str, Any]:
+    state = dict(state)
+    if "interpolation" not in state:
+        # Interpolation used by checkpoints saved before InterpolationConfig existed.
+        state["interpolation"] = {"mode": "bicubic", "align_corners": True}
+    return state
+
+
+@dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
     coarse: NormalizationConfig
@@ -170,6 +205,9 @@ class DiffusionModelConfig:
         p_std: The std of the noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
             This is kept for backwards compatibility.
+        interpolation: How coarse inputs are interpolated to the fine grid.
+            Checkpoints saved without this field load with the legacy
+            behavior (bicubic, align_corners=True).
     """
 
     module: DiffusionModuleRegistrySelector
@@ -192,6 +230,9 @@ class DiffusionModelConfig:
     ) = None
     p_mean: float | None = None
     p_std: float | None = None
+    interpolation: InterpolationConfig = dataclasses.field(
+        default_factory=InterpolationConfig
+    )
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -307,7 +348,7 @@ class DiffusionModelConfig:
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "DiffusionModelConfig":
-        return dacite.from_dict(data_class=cls, data=state)
+        return dacite.from_dict(data_class=cls, data=_with_legacy_interpolation(state))
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -462,6 +503,14 @@ class DiffusionModel:
             coarse_shape[1] * self.downscale_factor,
         )
 
+    def _interpolate(self, tensor: torch.Tensor) -> torch.Tensor:
+        return interpolate(
+            tensor,
+            self.downscale_factor,
+            mode=self.config.interpolation.mode,
+            align_corners=self.config.interpolation.align_corners,
+        )
+
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
@@ -469,7 +518,7 @@ class DiffusionModel:
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
         )
-        interpolated = interpolate(normalized, self.downscale_factor)
+        interpolated = self._interpolate(normalized)
 
         if self.config.use_fine_topography and static_inputs is not None:
             expected_shape = interpolated.shape[-2:]
@@ -511,14 +560,13 @@ class DiffusionModel:
         )
 
         if self.config.predict_residual:
-            base_prediction = interpolate(
+            base_prediction = self._interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
                         {k: coarse[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
-                self.downscale_factor,
             )
             targets_norm = targets_norm - base_prediction
 
@@ -600,14 +648,13 @@ class DiffusionModel:
     ) -> tuple[TensorDict, torch.Tensor]:
         """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
-            base_prediction = interpolate(
+            base_prediction = self._interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
                         {k: coarse_data[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
-                self.downscale_factor,
             )
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
@@ -828,7 +875,9 @@ class _CheckpointModelConfigSelector:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> DiffusionModelConfig:
         return dacite.from_dict(
-            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
+            data={"wrapper": _with_legacy_interpolation(state)},
+            data_class=cls,
+            config=dacite.Config(strict=True),
         ).wrapper
 
 

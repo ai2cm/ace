@@ -17,10 +17,12 @@ from fme.downscaling.data import (
     StaticInput,
     StaticInputs,
 )
+from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModel,
     DiffusionModelConfig,
+    InterpolationConfig,
     PairedNormalizationConfig,
     _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
@@ -210,6 +212,7 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
+    interpolation: InterpolationConfig | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -231,6 +234,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
+        interpolation=interpolation or InterpolationConfig(),
     ).build(
         coarse_shape,
         downscale_factor,
@@ -889,3 +893,62 @@ def test__build_variable_loss_weight_tensor():
     assert torch.allclose(weighted_loss[:, 0], loss[:, 0] * 0.5)
     assert torch.allclose(weighted_loss[:, 1], loss[:, 1])
     assert torch.allclose(weighted_loss[:, 2], loss[:, 2] * 2.0)
+
+
+def _get_interpolation_test_model() -> DiffusionModel:
+    fine_coords = make_fine_coords((16, 32))
+    return _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+        interpolation=InterpolationConfig(mode="bilinear", align_corners=True),
+    )
+
+
+def test_interpolation_config_default_for_new_models():
+    assert InterpolationConfig() == InterpolationConfig(
+        mode="bicubic", align_corners=False
+    )
+
+
+def test_interpolation_config_raises_for_align_corners_with_unsupported_mode():
+    with pytest.raises(ValueError, match="align_corners"):
+        InterpolationConfig(mode="nearest", align_corners=True)
+
+
+def test_model_uses_configured_interpolation():
+    model = _get_interpolation_test_model()
+    coarse = torch.randn(2, 1, 8, 16, device=get_device())
+    expected = interpolate(coarse, 2, mode="bilinear", align_corners=True)
+    torch.testing.assert_close(model._interpolate(coarse), expected)
+    assert not torch.allclose(
+        model._interpolate(coarse),
+        interpolate(coarse, 2, mode="bicubic", align_corners=False),
+    )
+
+
+def test_interpolation_config_round_trips_through_checkpoint(tmp_path):
+    model = _get_interpolation_test_model()
+    expected = InterpolationConfig(mode="bilinear", align_corners=True)
+    assert DiffusionModel.from_state(model.get_state()).config.interpolation == (
+        expected
+    )
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+    loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert loaded.config.interpolation == expected
+
+
+def test_interpolation_backwards_compatibility(tmp_path):
+    """Checkpoints saved without interpolation config use the legacy settings."""
+    model = _get_interpolation_test_model()
+    state = model.get_state()
+    del state["config"]["interpolation"]
+    legacy = InterpolationConfig(mode="bicubic", align_corners=True)
+    assert DiffusionModel.from_state(state).config.interpolation == legacy
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": state}, checkpoint_path)
+    loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert loaded.config.interpolation == legacy
