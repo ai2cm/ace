@@ -12,6 +12,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr7e-5cos|o0a0rs0|01M5JC1C56SJ1XXA2MVY39N0XP|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr7e-5|o0a0rs0|01M5JES5RMM26X8BH2642S6KES|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_lin8_ppad_muon_alt-socorrlnmuonfm_a2s-ftalt_lr1e-5|o0a0rs0|01M5JESE2ADEBST90SXK9BVYQM|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-cpl_lin8_alt-socorrlnmfm_a2s-ftalt_lr7e-5||01M5JES5RMM26X8BH2642S6KES|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-cpl_lin8_alt-socorrlnmfm_a2s-ftalt_lr7e-5||01M5JES5RMM26X8BH2642S6KES|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
