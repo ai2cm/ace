@@ -345,16 +345,20 @@ def test_zarr_adapter_parallel_region_writes(tmp_path):
     a serial reference."""
     from fme.core.distributed import Distributed
 
-    dist = Distributed()
+    dist = Distributed.get_instance()
+    if dist.has_spatial_parallelism:
+        pytest.skip("zarr region writes use data parallelism only")
     rank = dist.data_parallel_rank
     n_ranks = dist.total_data_parallel_ranks
+    if n_ranks < 2:
+        pytest.skip("needs multiple data-parallel ranks")
 
     # tmp_path differs per rank under torchrun; broadcast rank 0's path
     store_path = dist.data_parallel_broadcast_object(
         str(tmp_path / "parallel_test.zarr") if rank == 0 else None
     )
 
-    n_global_samples = 4
+    n_global_samples = n_ranks * 2
     n_local = n_global_samples // n_ranks
     sample_offset = rank * n_local
     n_timesteps = 2
