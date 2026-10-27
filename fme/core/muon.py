@@ -311,7 +311,7 @@ class Muon(torch.optim.Optimizer):
                 # then normalizes it in place; without Nesterov that input is
                 # the momentum buffer itself, which would be overwritten.
                 raise ValueError(
-                    "Muon with nesterov=False does not support bfloat16 " "parameters."
+                    "Muon with nesterov=False does not support bfloat16 parameters."
                 )
             # muon reads the gradient only, so a copy is fine.
             grads.append(p.grad.reshape(p.shape[0], -1))
@@ -358,10 +358,6 @@ class Muon(torch.optim.Optimizer):
             )
             p.mul_(1 - group["lr"] * group["weight_decay"])
             p.add_(update, alpha=-group["lr"])
-
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        check_muon_state_dict_compatible(self, state_dict)
-        super().load_state_dict(state_dict)
 
 
 def is_muon_state_dict(state_dict: Mapping[str, Any]) -> bool:

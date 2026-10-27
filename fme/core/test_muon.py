@@ -246,9 +246,16 @@ def test_load_adamw_state_into_single_group_muon_raises():
     adamw = torch.optim.AdamW(model.parameters())
     model(torch.randn(2, 3, device=fme.get_device())).sum().backward()
     adamw.step()
-    muon = Muon(model.parameters(), [], lr=0.02)
+    optimization = _build(model, _muon_config())
+    assert len(optimization.optimizer.param_groups) == 1
     with pytest.raises(ValueError, match="non-Muon optimizer"):
-        muon.load_state_dict(adamw.state_dict())
+        optimization.load_state(
+            {
+                "optimizer_state_dict": adamw.state_dict(),
+                "scheduler_state_dict": optimization.scheduler.state_dict(),
+                "gscaler_state_dict": None,
+            }
+        )
 
 
 def test_muon_set_learning_rate_preserves_group_ratio():
@@ -319,28 +326,11 @@ def test_copied_muon_matches_torch(nesterov: bool, adjust_lr_fn: str | None):
         torch.testing.assert_close(fme_t, torch_t, rtol=0, atol=0)
 
 
-def _reference_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
-    """Newton-Schulz from the previously vendored Keller Jordan Muon."""
-    a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
-    transposed = G.size(-2) > G.size(-1)
-    if transposed:
-        X = X.mT
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) + 1e-7)
-    for _ in range(steps):
-        A = X @ X.mT
-        B = b * A + c * A @ A
-        X = a * X + B @ X
-    if transposed:
-        X = X.mT
-    return X
-
-
-def _copied_newtonschulz5(G: torch.Tensor, steps: int) -> torch.Tensor:
+def _newtonschulz5(G: torch.Tensor) -> torch.Tensor:
     return fme_muon._zeropower_via_newtonschulz(
         G,
         (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
-        steps,
+        fme_muon.DEFAULT_NS_STEPS,
         fme_muon.EPS,
     )
 
@@ -353,40 +343,28 @@ def _reference_muon_step(
     momentum: float,
     nesterov: bool,
     weight_decay: float,
-    newton_schulz=_reference_newtonschulz5,
 ) -> None:
-    """One step of the previously vendored Muon update, in place."""
+    """One Muon step (default adjust_lr_fn) on a parameter of any shape, in
+    place."""
     momentum_buffer.lerp_(grad, 1 - momentum)
     update = grad.lerp(momentum_buffer, momentum) if nesterov else momentum_buffer
-    update = update.reshape(update.shape[0], -1)
-    update = newton_schulz(update, 5)
+    update = _newtonschulz5(update.reshape(update.shape[0], -1))
     update = update * max(1, update.size(-2) / update.size(-1)) ** 0.5
     p.mul_(1 - lr * weight_decay)
     p.add_(update.reshape(p.shape).to(p.dtype), alpha=-lr)
 
 
-# conv kernel (4, 3, 3, 3) flattens to wide (4, 27); (24, 6) is tall
-_EQUIVALENCE_SHAPES = [(4, 3, 3, 3), (24, 6), (6, 24)]
-
-
-@pytest.mark.parametrize("newton_schulz", ["vendored", "copied"])
 @pytest.mark.parametrize("nesterov", [True, False])
-def test_muon_matches_vendored_reference(nesterov: bool, newton_schulz: str):
-    """With the default adjust_lr_fn the optimizer reproduces the
-    previously vendored update.
-
-    With the copied torch Newton-Schulz kernel in the reference, the match is exact.
-    The vendored kernel computes the same bfloat16 iteration with unfused
-    matmuls, so its updates differ from torch's by bfloat16 rounding (a few
-    percent of the update RMS per step).
-    """
+def test_muon_matches_reference_step(nesterov: bool):
+    """The optimizer applies the Muon update to a 4D conv kernel through its
+    (C_out, -1) matrix, and to tall and wide matrices, keeping momentum
+    buffers in the parameter's shape."""
     torch.manual_seed(0)
     device = fme.get_device()
     lr, momentum, weight_decay, n_steps = 0.02, 0.9, 0.1, 4
-    params = [
-        nn.Parameter(torch.randn(shape, device=device)) for shape in _EQUIVALENCE_SHAPES
-    ]
-    initial = [p.detach().clone() for p in params]
+    # conv kernel (4, 3, 3, 3) flattens to wide (4, 27); (24, 6) is tall
+    shapes = [(4, 3, 3, 3), (24, 6), (6, 24)]
+    params = [nn.Parameter(torch.randn(shape, device=device)) for shape in shapes]
     ref_params = [p.detach().clone() for p in params]
     ref_bufs = [torch.zeros_like(p) for p in params]
     optimizer = Muon(
@@ -397,28 +375,18 @@ def test_muon_matches_vendored_reference(nesterov: bool, newton_schulz: str):
         nesterov=nesterov,
         weight_decay=weight_decay,
     )
-    ns = {"vendored": _reference_newtonschulz5, "copied": _copied_newtonschulz5}
     for _ in range(n_steps):
         grads = [torch.randn_like(p) for p in params]
         for p, g in zip(params, grads):
             p.grad = g.clone()
         optimizer.step()
         for p, g, buf in zip(ref_params, grads, ref_bufs):
-            _reference_muon_step(
-                p, g, buf, lr, momentum, nesterov, weight_decay, ns[newton_schulz]
-            )
-    for p, p0, ref, ref_buf in zip(params, initial, ref_params, ref_bufs):
+            _reference_muon_step(p, g, buf, lr, momentum, nesterov, weight_decay)
+    for p, ref, ref_buf in zip(params, ref_params, ref_bufs):
         buf = optimizer.state[p]["momentum_buffer"]
         assert buf.shape == p.shape
         torch.testing.assert_close(buf, ref_buf)
-        if newton_schulz == "copied":
-            torch.testing.assert_close(p.detach(), ref)
-        else:
-            delta, ref_delta = p.detach() - p0, ref - p0
-            rel_rms = (delta - ref_delta).norm() / ref_delta.norm()
-            # measured: relative RMS <= 3%, max abs <= 0.11 * lr after 4 steps
-            assert rel_rms < 0.05
-            torch.testing.assert_close(delta, ref_delta, rtol=0, atol=0.2 * lr)
+        torch.testing.assert_close(p.detach(), ref)
 
 
 def test_muon_non_contiguous_param_and_grad():
@@ -464,9 +432,8 @@ def test_muon_match_rms_adamw_update_rms(shape: tuple[int, ...]):
     assert 0.6 * 0.2 * lr < rms < 1.2 * 0.2 * lr
 
 
-def _vendored_layout_state(model: nn.Module) -> dict[str, Any]:
-    """An optimizer state dict as saved by the vendored Muon: momentum buffers
-    in parameter shape and Muon groups without ``adjust_lr_fn``."""
+def _state_without_adjust_lr_fn(model: nn.Module) -> dict[str, Any]:
+    """A Muon optimizer state dict whose Muon group has no ``adjust_lr_fn``."""
     optimizer = Muon(
         [model.conv.weight, model.W_scale.weight],
         [model.conv.bias, model.norm.weight, model.norm.bias],
@@ -481,12 +448,12 @@ def _vendored_layout_state(model: nn.Module) -> dict[str, Any]:
     return state
 
 
-def test_muon_loads_vendored_layout_state_dict():
-    """A state saved by the vendored Muon loads, and the next step uses its
-    momentum buffers as the vendored update would."""
+def test_muon_loads_state_without_adjust_lr_fn():
+    """A state saved without ``adjust_lr_fn`` loads with the default, and the
+    next step uses its momentum buffers."""
     torch.manual_seed(0)
     model = _ConvNet().to(fme.get_device())
-    saved = _vendored_layout_state(model)
+    saved = _state_without_adjust_lr_fn(model)
     assert saved["state"][0]["momentum_buffer"].shape == model.conv.weight.shape
     optimization = _build(model, _muon_config())
     optimization.load_state(
@@ -507,7 +474,6 @@ def test_muon_loads_vendored_layout_state_dict():
         momentum=0.95,
         nesterov=True,
         weight_decay=0.0,
-        newton_schulz=_copied_newtonschulz5,
     )
     for p in model.parameters():
         p.grad = torch.randn_like(p)
