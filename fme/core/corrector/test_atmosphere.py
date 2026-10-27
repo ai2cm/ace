@@ -807,3 +807,66 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
     assert set(result.modified_names) == set()
     for name in gen_data:
         torch.testing.assert_close(result.corrected[name], gen_data[name])
+
+
+@pytest.mark.parametrize(
+    "terms_to_modify, zeroed_name",
+    [
+        ("precipitation", "PRATEsfc"),
+        ("advection_and_precipitation", "PRATEsfc"),
+        ("evaporation", "LHTFLsfc"),
+        ("advection_and_evaporation", "LHTFLsfc"),
+    ],
+)
+def test_force_conserve_moisture_zero_global_mean_term_stays_finite(
+    terms_to_modify, zeroed_name: str
+):
+    """A sample whose rescaled term is zero everywhere (e.g. precipitation that
+    ForcePositive clamped to zero at every pixel) must not produce NaN values
+    or gradients, and the global-mean moisture budget must still close.
+    """
+    torch.random.manual_seed(0)
+    size = (3, 2, 5, 5)
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=size),
+        "specific_total_water_0": torch.rand(size=size),
+        "specific_total_water_1": torch.rand(size=size),
+        "PRATEsfc": torch.rand(size=size),
+        "LHTFLsfc": torch.rand(size=size),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
+    }
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+    ops = LatLonOperations(
+        1.0 + torch.rand(size=(size[-2], 1)).broadcast_to(size=size[-2:])
+    )
+    in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
+    out_data = {k: v.select(dim=1, index=1).clone() for k, v in data.items()}
+    out_data[zeroed_name][1] = 0.0
+    out_data[zeroed_name].requires_grad_(True)
+    fixed = _force_conserve_moisture(
+        in_data,
+        out_data,
+        vertical_coordinate=vertical_coordinate,
+        area_weighted_mean=ops.area_weighted_mean,
+        timestep_seconds=TIMESTEP.total_seconds(),
+        terms_to_modify=terms_to_modify,
+    )
+    for name, value in fixed.items():
+        assert torch.isfinite(value).all(), name
+    sum(v.sum() for v in fixed.values()).backward()
+    assert torch.isfinite(out_data[zeroed_name].grad).all()
+    gen = AtmosphereData(
+        {k: v.detach() for k, v in {**out_data, **fixed}.items()},
+        vertical_coordinate,
+    )
+    twp_tendency = (
+        gen.total_water_path
+        - AtmosphereData(in_data, vertical_coordinate).total_water_path
+    ) / TIMESTEP.total_seconds()
+    # the global-mean budget still closes for every sample
+    torch.testing.assert_close(
+        ops.area_weighted_mean(twp_tendency),
+        ops.area_weighted_mean(gen.evaporation_rate - gen.precipitation_rate),
+    )
