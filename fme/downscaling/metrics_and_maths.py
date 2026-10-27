@@ -252,7 +252,7 @@ def compute_zonal_power_spectrum(tensor: torch.Tensor) -> torch.Tensor:
     return power.mean(dim=-2)
 
 
-_ALIGN_CORNERS_MODES = ("bilinear", "bicubic")
+ALIGN_CORNERS_MODES = ("bilinear", "bicubic")
 
 
 def interpolate(
@@ -271,16 +271,16 @@ def interpolate(
         align_corners: Passed to torch.nn.functional.interpolate for modes
             that support it (bilinear, bicubic); must be False otherwise.
     """
-    if mode not in _ALIGN_CORNERS_MODES and align_corners:
+    if mode not in ALIGN_CORNERS_MODES and align_corners:
         raise ValueError(
-            f"align_corners=True is only supported for modes {_ALIGN_CORNERS_MODES}, "
+            f"align_corners=True is only supported for modes {ALIGN_CORNERS_MODES}, "
             f"got mode={mode!r}."
         )
     return torch.nn.functional.interpolate(
         tensor,
         scale_factor=[scale_factor, scale_factor],
         mode=mode,
-        align_corners=align_corners if mode in _ALIGN_CORNERS_MODES else None,
+        align_corners=align_corners if mode in ALIGN_CORNERS_MODES else None,
     )
 
 

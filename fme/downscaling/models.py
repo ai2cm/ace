@@ -26,7 +26,11 @@ from fme.downscaling.data import (
     load_coords_from_path,
     roll_lon_coords,
 )
-from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
+from fme.downscaling.metrics_and_maths import (
+    ALIGN_CORNERS_MODES,
+    filter_tensor_mapping,
+    interpolate,
+)
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
@@ -117,11 +121,16 @@ class InterpolationConfig:
     align_corners: bool = False
 
     def __post_init__(self):
-        if self.align_corners and self.mode not in ("bilinear", "bicubic"):
+        if self.align_corners and self.mode not in ALIGN_CORNERS_MODES:
             raise ValueError(
                 "align_corners=True is only supported for bilinear and bicubic "
                 f"modes, got mode={self.mode!r}."
             )
+
+    def interpolate(self, tensor: torch.Tensor, scale_factor: int) -> torch.Tensor:
+        return interpolate(
+            tensor, scale_factor, mode=self.mode, align_corners=self.align_corners
+        )
 
 
 def _with_legacy_interpolation(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -505,12 +514,7 @@ class DiffusionModel:
         )
 
     def _interpolate(self, tensor: torch.Tensor) -> torch.Tensor:
-        return interpolate(
-            tensor,
-            self.downscale_factor,
-            mode=self.config.interpolation.mode,
-            align_corners=self.config.interpolation.align_corners,
-        )
+        return self.config.interpolation.interpolate(tensor, self.downscale_factor)
 
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
