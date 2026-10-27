@@ -92,31 +92,54 @@ _MUON_KWARGS = frozenset(
 def _split_muon_parameters(
     named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
     adamw_names: Sequence[str],
-) -> tuple[list[torch.nn.Parameter], list[torch.nn.Parameter]]:
-    """Split parameters into (Muon, AdamW) lists.
+    spectral_names: Sequence[str] = (),
+) -> tuple[
+    list[torch.nn.Parameter],
+    list[torch.nn.Parameter],
+    list[torch.nn.Parameter],
+]:
+    """Split parameters into (Muon, spectral Muon, AdamW) lists.
 
-    Parameters with ``ndim >= 2`` go to Muon unless their name contains one of
-    ``adamw_names``; all others go to AdamW.
+    Parameters with ``ndim >= 2`` go to Muon unless their name contains one
+    of ``adamw_names`` (→ AdamW) or ``spectral_names`` (→ spectral Muon,
+    for SFNO per-mode complex filter weights). All others go to AdamW.
 
     Raises:
-        ValueError: If an entry of ``adamw_names`` matches no parameter name.
+        ValueError: If an entry of ``adamw_names`` or ``spectral_names``
+            matches no parameter name, or a name matches both lists.
     """
     muon_params: list[torch.nn.Parameter] = []
+    spectral_params: list[torch.nn.Parameter] = []
     adamw_params: list[torch.nn.Parameter] = []
-    unmatched = set(adamw_names)
+    unmatched_adamw = set(adamw_names)
+    unmatched_spectral = set(spectral_names)
     for name, param in named_parameters:
-        matches = {pattern for pattern in adamw_names if pattern in name}
-        unmatched -= matches
-        if param.ndim >= 2 and not matches:
+        adamw_match = {p for p in adamw_names if p in name}
+        spectral_match = {p for p in spectral_names if p in name}
+        unmatched_adamw -= adamw_match
+        unmatched_spectral -= spectral_match
+        if adamw_match and spectral_match:
+            raise ValueError(
+                f"Parameter {name!r} matches both adamw_names and "
+                f"spectral_names; each parameter can belong to only one group."
+            )
+        if spectral_match and param.ndim >= 2:
+            spectral_params.append(param)
+        elif param.ndim >= 2 and not adamw_match:
             muon_params.append(param)
         else:
             adamw_params.append(param)
-    if unmatched:
+    if unmatched_adamw:
         raise ValueError(
             "OptimizationConfig.adamw_names entries matched no parameter "
-            f"name: {sorted(unmatched)}"
+            f"name: {sorted(unmatched_adamw)}"
         )
-    return muon_params, adamw_params
+    if unmatched_spectral:
+        raise ValueError(
+            "OptimizationConfig.spectral_names entries matched no parameter "
+            f"name: {sorted(unmatched_spectral)}"
+        )
+    return muon_params, spectral_params, adamw_params
 
 
 def _build_optimizer(
@@ -125,12 +148,19 @@ def _build_optimizer(
     lr: float,
     kwargs: Mapping[str, Any],
     adamw_names: Sequence[str] = (),
+    spectral_names: Sequence[str] = (),
 ) -> torch.optim.Optimizer:
     if optimizer_type == "Muon":
-        muon_params, adamw_params = _split_muon_parameters(
-            named_parameters, adamw_names
+        muon_params, spectral_params, adamw_params = _split_muon_parameters(
+            named_parameters, adamw_names, spectral_names
         )
-        return Muon(muon_params, adamw_params, lr=lr, **kwargs)
+        return Muon(
+            muon_params,
+            adamw_params,
+            lr=lr,
+            spectral_params=spectral_params,
+            **kwargs,
+        )
     parameters = [param for _, param in named_parameters]
     if optimizer_type == "FusedAdam":
         return torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -392,6 +422,14 @@ class OptimizationConfig:
             routed to the AdamW group instead of Muon, e.g. zero-initialized
             projections that Muon's unit-scale first step would move off
             zero. Every entry must match at least one parameter.
+        spectral_names: Muon only. Substrings of parameter names whose
+            parameters are SFNO spectral filter weights — shape
+            ``(groups, modes_lat, C_in, C_out, 2)`` with real/imaginary in
+            the last dimension. These receive per-mode complex
+            orthogonalization (unitary Newton-Schulz) instead of the
+            standard real ``(shape[0], -1)`` Muon update. Every entry must
+            match at least one parameter. A parameter must not match both
+            ``adamw_names`` and ``spectral_names``.
         enable_automatic_mixed_precision: Whether to use automatic mixed
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
@@ -437,6 +475,7 @@ class OptimizationConfig:
     )
     resume_optimizer_ckpt_path: str | None = None
     adamw_names: list[str] = dataclasses.field(default_factory=list)
+    spectral_names: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -462,9 +501,14 @@ class OptimizationConfig:
                     "Muon requires kwargs['adamw_lr'], the learning rate of "
                     "its AdamW parameter group."
                 )
-        elif len(self.adamw_names) > 0:
+        elif len(self.adamw_names) > 0 or len(self.spectral_names) > 0:
+            names = []
+            if self.adamw_names:
+                names.append("adamw_names")
+            if self.spectral_names:
+                names.append("spectral_names")
             raise ValueError(
-                "adamw_names is only used with optimizer_type='Muon', got "
+                f"{', '.join(names)} only used with optimizer_type='Muon', got "
                 f"optimizer_type={self.optimizer_type!r}."
             )
 
@@ -487,6 +531,7 @@ class OptimizationConfig:
             self.lr,
             self.kwargs,
             adamw_names=self.adamw_names,
+            spectral_names=self.spectral_names,
         )
         scheduler = self.scheduler.build(optimizer, max_epochs)
         optimization = Optimization(
