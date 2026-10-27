@@ -73,6 +73,7 @@ import warnings
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
+import grpc
 from beaker import Beaker, beaker_pb2
 from beaker._service_client import RpcMethod
 from beaker.exceptions import BeakerError as BeakerPyError
@@ -198,24 +199,25 @@ def allocated_usage_buckets(cluster_id, budget_id, org_name, start, now):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         client = Beaker.from_env()
-    window = beaker_pb2.Interval()
-    window.start.FromDatetime(start)
-    window.finish.FromDatetime(now)
-    request = beaker_pb2.ListClusterUsageRequest(
-        options=beaker_pb2.ListClusterUsageRequest.Opts(
-            cluster_id=cluster_id,
-            organization_id=client.organization.get(org_name).id,
-            budget_id=budget_id,
-            allocated=True,
-            window=window,
-            bucket_hours=1,
+    with client:
+        window = beaker_pb2.Interval()
+        window.start.FromDatetime(start)
+        window.finish.FromDatetime(now)
+        request = beaker_pb2.ListClusterUsageRequest(
+            options=beaker_pb2.ListClusterUsageRequest.Opts(
+                cluster_id=cluster_id,
+                organization_id=client.organization.get(org_name).id,
+                budget_id=budget_id,
+                allocated=True,
+                window=window,
+                bucket_hours=1,
+            )
         )
-    )
-    method = RpcMethod[beaker_pb2.ListClusterUsageResponse](
-        client.service.ListClusterUsage
-    )
-    pages = client.cluster.rpc_paged_request(method, request)
-    return [bucket for page in pages for bucket in page.buckets]
+        method = RpcMethod[beaker_pb2.ListClusterUsageResponse](
+            client.service.ListClusterUsage
+        )
+        pages = client.cluster.rpc_paged_request(method, request)
+        return [bucket for page in pages for bucket in page.buckets]
 
 
 def decayed_hours(start, end, now, half_life):
@@ -268,7 +270,7 @@ def allocation_clause(record, budget_id, bname, pct, now):
         buckets = allocated_usage_buckets(
             record["id"], budget_id, bname.split("/")[0], start, now
         )
-    except BeakerPyError as error:
+    except (BeakerPyError, NotImplementedError, grpc.RpcError) as error:
         return f"{text} balance score unavailable ({str(error)[:200]}).", None
     score = balance_score(buckets, target_slots, start, now, half_life_hours(record))
     return (
@@ -784,15 +786,13 @@ def main():
         usage_f = pool.submit(usage_slots, a.cluster, bname)
         record = record_f.result()
         limit, pct = limit_f.result()
-        clause_f = pool.submit(allocation_clause, record, bid, bname, pct, now)
         me, usage = me_f.result(), usage_f.result()
         jobs, authors = jobs_f.result()
-        blockers_f = pool.submit(add_blockers, jobs, a.cluster, {bid: bname})
-        clause, over = clause_f.result()
-        blockers_f.result()
+        pool.submit(add_blockers, jobs, a.cluster, {bid: bname}).result()
     if a.json:
         print(json.dumps(dict(user=me, jobs=jobs, queued_authors=authors), indent=1))
         return
+    clause, over = allocation_clause(record, bid, bname, pct, now)
     sort_keys, interruptible = scheduler_policy(record)
     allocated_gpus = gpu_total(
         [r for r in jobs if r["allocated"] and r["state"] != "queued"]
