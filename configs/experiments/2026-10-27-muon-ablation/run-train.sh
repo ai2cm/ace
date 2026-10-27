@@ -95,3 +95,4 @@ run_training() {
 }
 
 run_training "pretrain-muon.yaml" "muon-ablation-pretrain-rs0" 8
+run_training "pretrain-muon-rs1.yaml" "muon-ablation-pretrain-rs1" 8
