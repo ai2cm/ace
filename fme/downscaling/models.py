@@ -742,6 +742,23 @@ class DiffusionModel:
             "static_inputs": static_inputs_state,
         }
 
+    def validate_interpolation_matches_state(self, state: Mapping[str, Any]) -> None:
+        """
+        Raise if ``state`` (from ``get_state``) was saved with different
+        interpolation settings than this model, e.g. when resuming a training run
+        started before interpolation was configurable with a config that does
+        not set it explicitly.
+        """
+        saved = InterpolationConfig(
+            **_with_legacy_interpolation(state["config"])["interpolation"]
+        )
+        if saved != self.config.interpolation:
+            raise ValueError(
+                f"Saved model state uses interpolation {saved}, but this model uses "
+                f"{self.config.interpolation}. Set model.interpolation in the "
+                "config to match the saved state."
+            )
+
     @classmethod
     def from_state(
         cls,

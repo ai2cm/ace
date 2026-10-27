@@ -1,3 +1,4 @@
+import copy
 import os
 import pathlib
 import subprocess
@@ -258,6 +259,26 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
         trainer1.optimization.optimizer,
         trainer2.optimization.optimizer,
     )
+
+
+@pytest.mark.medium_duration
+def test_restore_checkpoint_raises_for_interpolation_mismatch(
+    default_trainer_config, tmp_path
+):
+    config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
+    trainer1 = config.build()
+    trainer1.save_epoch_checkpoints()
+
+    mismatched_config = copy.deepcopy(default_trainer_config)
+    mismatched_config["model"]["interpolation"] = {
+        "mode": "bicubic",
+        "align_corners": True,
+    }
+    trainer2 = dacite.from_dict(
+        data_class=TrainerConfig, data=mismatched_config
+    ).build()
+    with pytest.raises(ValueError, match="interpolation"):
+        restore_checkpoint(trainer2)
 
 
 @pytest.mark.medium_duration

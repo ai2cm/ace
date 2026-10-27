@@ -958,3 +958,12 @@ def test_interpolation_backwards_compatibility(tmp_path):
 def test_checkpoint_config_model_updates_raises_for_frozen_keys(key):
     with pytest.raises(ValueError, match=f"'{key}' cannot be updated"):
         CheckpointModelConfig(checkpoint_path="unused.ckpt", model_updates={key: {}})
+
+
+def test_validate_interpolation_matches_state():
+    model = _get_interpolation_test_model()
+    model.validate_interpolation_matches_state(model.get_state())
+    legacy_state = model.get_state()
+    del legacy_state["config"]["interpolation"]
+    with pytest.raises(ValueError, match="interpolation"):
+        model.validate_interpolation_matches_state(legacy_state)
