@@ -430,7 +430,7 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
     the full sample set. Non-root ranks produce no output files."""
     import cftime
 
-    from fme.ace.inference.data_writer.main import PairedDataWriter
+    from fme.ace.inference.data_writer.main import PairedDataWriter, PairedSubwriter
     from fme.ace.inference.data_writer.raw import PairedRawDataWriter
 
     dist = Distributed.get_instance()
@@ -457,9 +457,9 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
             coords=coords,
             dataset_metadata=DatasetMetadata(),
         )
-        writers = [raw_writer]
+        writers: list[PairedSubwriter] = [raw_writer]
     else:
-        writers = []
+        writers: list[PairedSubwriter] = []
 
     writer = PairedDataWriter(
         writers=writers,
