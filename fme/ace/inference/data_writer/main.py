@@ -150,7 +150,11 @@ class DataWriterConfig:
         if is_multi_gpu:
             all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
             if is_root:
-                assert all_ic_times is not None
+                if all_ic_times is None:
+                    raise RuntimeError(
+                        "data_parallel_gather_object returned None on "
+                        "data-parallel root"
+                    )
                 initial_condition_times = np.concatenate(all_ic_times)
         writers: list[PairedSubwriter] = []
         if self.save_prediction_files and (not is_multi_gpu or is_root):
@@ -255,7 +259,11 @@ class DataWriterConfig:
         if is_multi_gpu:
             all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
             if is_root:
-                assert all_ic_times is not None
+                if all_ic_times is None:
+                    raise RuntimeError(
+                        "data_parallel_gather_object returned None on "
+                        "data-parallel root"
+                    )
                 initial_condition_times = np.concatenate(all_ic_times)
         build_subwriters = not is_multi_gpu or is_root
         writers: list[Subwriter] = []
@@ -432,9 +440,10 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             if not dist.is_data_parallel_root():
                 return
             # On root, gathered values are guaranteed non-None.
-            assert prediction is not None
-            assert target is not None
-            assert time is not None
+            if prediction is None or target is None or time is None:
+                raise RuntimeError(
+                    "gather returned None on data-parallel root"
+                )
         else:
             prediction = dict(batch.prediction)
             target = dict(batch.reference)
@@ -608,8 +617,10 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 gathered_diag = None
             if not dist.is_data_parallel_root():
                 return
-            assert gathered_data is not None
-            assert time is not None
+            if gathered_data is None or time is None:
+                raise RuntimeError(
+                    "gather returned None on data-parallel root"
+                )
         else:
             unpaired_batch = BatchData.new_on_device(
                 data=merged,
