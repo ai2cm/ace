@@ -31,12 +31,20 @@ def session_compile_backend() -> Iterator[None]:
     wherever production does (on CUDA). Setting ``FME_COMPILE_BACKEND`` runs
     the suite with that backend instead, e.g. ``FME_COMPILE_BACKEND=inductor``
     to run every test through production's backend.
+
+    The backend is also exported as ``FME_COMPILE_BACKEND`` so that tests
+    running an entrypoint in a subprocess (e.g. under ``torchrun``) compile
+    with it too.
     """
     if os.environ.get("FME_COMPILE_BACKEND"):
         yield
         return
-    with compile_backend(TEST_COMPILE_BACKEND):
-        yield
+    os.environ["FME_COMPILE_BACKEND"] = TEST_COMPILE_BACKEND
+    try:
+        with compile_backend(TEST_COMPILE_BACKEND):
+            yield
+    finally:
+        del os.environ["FME_COMPILE_BACKEND"]
 
 
 @pytest.fixture(autouse=True)

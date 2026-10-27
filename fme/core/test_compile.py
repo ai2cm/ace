@@ -220,6 +220,11 @@ def test_compile_module_runs_with_configured_backend():
 def test_test_session_compiles_with_test_backend():
     """The suite compiles with the fast ``aot_eager`` backend unless
     FME_COMPILE_BACKEND asks for another; targeted tests select inductor."""
-    expected = os.environ.get("FME_COMPILE_BACKEND") or TEST_COMPILE_BACKEND
     assert TEST_COMPILE_BACKEND == "aot_eager"
-    assert get_compile_backend() == expected
+    # unless the user chose a backend, the session exports the test backend so
+    # entrypoints run in subprocesses compile with it too
+    assert os.environ.get("FME_COMPILE_BACKEND")
+    assert get_compile_backend() == os.environ["FME_COMPILE_BACKEND"]
+    assert _parse_compile_backend_env(os.environ["FME_COMPILE_BACKEND"]) == (
+        get_compile_backend()
+    )
