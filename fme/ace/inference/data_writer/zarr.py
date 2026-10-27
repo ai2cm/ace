@@ -108,6 +108,21 @@ def ensure_numpy_coords(
 
 
 class ZarrWriterAdapter:
+    """Adapt the low-level ``ZarrWriter`` to the data-writer ``append_batch`` interface.
+
+    ``ZarrWriter`` writes named arrays into a zarr store by explicit position
+    slices.  This adapter translates the timestep-oriented ``append_batch``
+    calls (``dict[str, Tensor]`` + ``batch_time``) into the correct position
+    slices, manages lazy store initialization (the time coordinates are only
+    known at the first batch), and tracks the current lead-time offset.
+
+    Under multi-GPU inference each rank holds a contiguous block of samples.
+    ``sample_offset`` shifts the sample-dimension slice so every rank writes
+    to its own region of the shared store; the store is sized for the global
+    sample count (``len(initial_condition_times)``).  Store creation and the
+    cross-rank barrier are handled inside ``ZarrWriter.initialize_store``.
+    """
+
     _SAMPLE_DIM = 0
     _TIME_DIM = 1
 
