@@ -952,3 +952,9 @@ def test_interpolation_backwards_compatibility(tmp_path):
     torch.save({"model": state}, checkpoint_path)
     loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
     assert loaded.config.interpolation == legacy
+
+
+@pytest.mark.parametrize("key", ["module", "interpolation"])
+def test_checkpoint_config_model_updates_raises_for_frozen_keys(key):
+    with pytest.raises(ValueError, match=f"'{key}' cannot be updated"):
+        CheckpointModelConfig(checkpoint_path="unused.ckpt", model_updates={key: {}})

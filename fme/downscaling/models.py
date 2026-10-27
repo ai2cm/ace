@@ -914,8 +914,9 @@ class CheckpointModelConfig:
         # For config validation testing, we don't want to load immediately
         # so we defer until build or properties are accessed.
         self._checkpoint_is_loaded = False
-        if "module" in (self.model_updates or {}):
-            raise ValueError("'module' cannot be updated in model_updates.")
+        for key in ("module", "interpolation"):
+            if key in (self.model_updates or {}):
+                raise ValueError(f"'{key}' cannot be updated in model_updates.")
         if self.fine_topography_path is not None:
             raise ValueError(
                 "fine_topography_path is deprecated and will be removed in "
