@@ -20,7 +20,6 @@ from fme.ace.inference.data_writer.main import (
 from fme.ace.inference.data_writer.raw import RawDataWriter
 from fme.ace.inference.data_writer.step_diagnostics import StepDiagnosticsWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -323,37 +322,6 @@ def test_step_diagnostics_writer_writes_one_file_per_named_dataset():
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics", "empty.nc"))
 
 
-def test_zarr_guard_raises_under_multi_gpu():
-    """The zarr-specific guard raises when any FileWriterConfig uses zarr format."""
-    config = DataWriterConfig(
-        save_prediction_files=False,
-        save_monthly_files=False,
-        files=[FileWriterConfig(label="test_zarr", format=ZarrWriterConfig())],
-    )
-    with pytest.raises(ValueError, match="zarr"):
-        config._raise_if_zarr_under_multi_gpu(n_ranks=2)
-
-
-def test_zarr_guard_allows_netcdf_under_multi_gpu():
-    """NetCDF file entries do not trigger the zarr guard."""
-    config = DataWriterConfig(
-        save_prediction_files=True,
-        save_monthly_files=True,
-        files=[FileWriterConfig(label="test_nc")],
-    )
-    # Should not raise.
-    config._raise_if_zarr_under_multi_gpu(n_ranks=2)
-
-
-def test_zarr_guard_no_op_single_gpu():
-    """The zarr guard is a no-op when n_ranks <= 1."""
-    config = DataWriterConfig(
-        files=[FileWriterConfig(label="test_zarr", format=ZarrWriterConfig())]
-    )
-    # Should not raise.
-    config._raise_if_zarr_under_multi_gpu(n_ranks=1)
-
-
 def test_gather_tensor_dict_single_rank():
     """Under a single data-parallel rank, _gather_tensor_dict returns the input."""
     data = {
@@ -417,3 +385,112 @@ def test_netcdf_build_paired_under_multi_gpu_builds_writers_on_root():
         )
         # Under single rank (the test default), subwriters should be built.
         assert len(writer._writers) == 1
+
+
+@pytest.mark.parallel
+def test_gather_tensor_dict_parallel():
+    """Each rank's tensors are gathered and concatenated on root."""
+    dist = Distributed.get_instance()
+    rank = dist.data_parallel_rank
+    data = {"x": torch.full((1, 3), float(rank))}
+    result = _gather_tensor_dict(data, dist)
+    if dist.is_data_parallel_root():
+        assert result is not None
+        assert result["x"].shape[0] == dist.total_data_parallel_ranks
+        for r in range(dist.total_data_parallel_ranks):
+            torch.testing.assert_close(
+                result["x"][r], torch.full((3,), float(r)), check_device=False
+            )
+    else:
+        assert result is None
+
+
+@pytest.mark.parallel
+def test_gather_time_parallel():
+    """Each rank's time is gathered and concatenated on root."""
+    import cftime
+
+    dist = Distributed.get_instance()
+    rank = dist.data_parallel_rank
+    time = xr.DataArray(
+        [[cftime.DatetimeProlepticGregorian(2020, 1, 1 + rank)]],
+        dims=["sample", "time"],
+    )
+    result = _gather_time(time, dist)
+    if dist.is_data_parallel_root():
+        assert result is not None
+        assert result.sizes["sample"] == dist.total_data_parallel_ranks
+    else:
+        assert result is None
+
+
+@pytest.mark.parallel
+def test_paired_data_writer_gathers_and_writes(tmp_path):
+    """Under multi-GPU, PairedDataWriter gathers data to root and writes
+    the full sample set. Non-root ranks produce no output files."""
+    import cftime
+
+    from fme.ace.inference.data_writer.main import PairedDataWriter
+    from fme.ace.inference.data_writer.raw import PairedRawDataWriter
+
+    dist = Distributed.get_instance()
+    rank = dist.data_parallel_rank
+    n_ranks = dist.total_data_parallel_ranks
+    n_local = 2
+    n_global = n_local * n_ranks
+    n_lat, n_lon = 3, 4
+
+    global_ic_times = np.array(
+        [cftime.DatetimeProlepticGregorian(2020, 1, 1 + i) for i in range(n_global)]
+    )
+    experiment_dir = str(tmp_path / f"rank_{rank}")
+    os.makedirs(experiment_dir, exist_ok=True)
+
+    coords = {"lat": np.arange(n_lat), "lon": np.arange(n_lon)}
+
+    if dist.is_data_parallel_root():
+        raw_writer = PairedRawDataWriter(
+            path=experiment_dir,
+            initial_condition_times=global_ic_times,
+            save_names=None,
+            variable_metadata={},
+            coords=coords,
+            dataset_metadata=DatasetMetadata(),
+        )
+        writers = [raw_writer]
+    else:
+        writers = []
+
+    writer = PairedDataWriter(
+        writers=writers,
+        path=experiment_dir,
+        variable_metadata={},
+        coords=coords,
+        dataset_metadata=DatasetMetadata(),
+    )
+
+    prediction = {"temp": torch.full((n_local, 1, n_lat, n_lon), float(rank))}
+    target = {"temp": torch.full((n_local, 1, n_lat, n_lon), float(rank) + 100)}
+    time = xr.DataArray(
+        [[cftime.DatetimeProlepticGregorian(2020, 2, 1 + s)] for s in range(n_local)],
+        dims=["sample", "time"],
+    )
+    batch = PairedData(
+        prediction=prediction,
+        reference=target,
+        time=time,
+    )
+    writer.append_batch(batch)
+    writer.flush()
+    writer.finalize()
+    dist.barrier()
+
+    if dist.is_data_parallel_root():
+        pred_path = os.path.join(experiment_dir, "autoregressive_predictions.nc")
+        assert os.path.exists(pred_path)
+        ds = xr.open_dataset(pred_path, decode_timedelta=False)
+        assert ds.sizes["sample"] == n_global
+        for r in range(n_ranks):
+            np.testing.assert_allclose(
+                ds["temp"].values[r * n_local : (r + 1) * n_local], float(r)
+            )

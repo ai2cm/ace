@@ -31,7 +31,6 @@ from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
 from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
-from .zarr import ZarrWriterConfig
 
 PairedSubwriter: TypeAlias = (
     PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
@@ -103,23 +102,6 @@ class DataWriterConfig:
             or bool(self.files)
         )
 
-    def _raise_if_zarr_under_multi_gpu(self, n_ranks: int) -> None:
-        """Raise if any zarr-based file writer is enabled under multi-GPU."""
-        if n_ranks <= 1:
-            return
-        zarr_labels = [
-            f.label
-            for f in (self.files or [])
-            if isinstance(f.format, ZarrWriterConfig)
-        ]
-        if zarr_labels:
-            raise ValueError(
-                "Multi-GPU inference does not yet support zarr-based file "
-                f"writers. The following file entries use zarr: "
-                f"{zarr_labels}. Use netcdf format instead, or run with a "
-                "single GPU."
-            )
-
     def _get_all_filenames(self) -> list[str]:
         filenames = []
         for file in self.files or []:
@@ -144,7 +126,6 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
         dist = Distributed.get_instance()
-        self._raise_if_zarr_under_multi_gpu(dist.total_data_parallel_ranks)
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
         if is_multi_gpu:
@@ -253,7 +234,6 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
         dist = Distributed.get_instance()
-        self._raise_if_zarr_under_multi_gpu(dist.total_data_parallel_ranks)
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
         if is_multi_gpu:
@@ -441,9 +421,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 return
             # On root, gathered values are guaranteed non-None.
             if prediction is None or target is None or time is None:
-                raise RuntimeError(
-                    "gather returned None on data-parallel root"
-                )
+                raise RuntimeError("gather returned None on data-parallel root")
         else:
             prediction = dict(batch.prediction)
             target = dict(batch.reference)
@@ -618,9 +596,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             if not dist.is_data_parallel_root():
                 return
             if gathered_data is None or time is None:
-                raise RuntimeError(
-                    "gather returned None on data-parallel root"
-                )
+                raise RuntimeError("gather returned None on data-parallel root")
         else:
             unpaired_batch = BatchData.new_on_device(
                 data=merged,
