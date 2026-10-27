@@ -54,14 +54,16 @@ def _gather_initial_condition_times(
     if dist.total_data_parallel_ranks <= 1:
         return local_times, 0
     local_n = len(local_times)
-    gathered = dist.gather_object(local_times)
-    if dist.is_root():
-        assert gathered is not None
+    gathered = dist.data_parallel_gather_object(local_times)
+    if dist.is_data_parallel_root():
+        if gathered is None:
+            raise RuntimeError(
+                "data_parallel_gather_object returned None on data-parallel root"
+            )
         global_times: npt.NDArray[cftime.datetime] = np.concatenate(gathered)
     else:
         global_times = None  # type: ignore[assignment]
-    # scatter_object broadcasts from root to all ranks
-    global_times = dist.scatter_object(global_times)
+    global_times = dist.data_parallel_broadcast_object(global_times)
     sample_offset = dist.data_parallel_rank * local_n
     return global_times, sample_offset
 
