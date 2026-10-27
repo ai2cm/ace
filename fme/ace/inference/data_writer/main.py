@@ -128,6 +128,7 @@ class DataWriterConfig:
         dist = Distributed.get_instance()
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
+        build_subwriters = not is_multi_gpu or is_root
         if is_multi_gpu:
             all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
             if is_root:
@@ -138,7 +139,7 @@ class DataWriterConfig:
                     )
                 initial_condition_times = np.concatenate(all_ic_times)
         writers: list[PairedSubwriter] = []
-        if self.save_prediction_files and (not is_multi_gpu or is_root):
+        if self.save_prediction_files and build_subwriters:
             raw_writer: PairedSubwriter = PairedRawDataWriter(
                 path=experiment_dir,
                 initial_condition_times=initial_condition_times,
@@ -150,7 +151,7 @@ class DataWriterConfig:
             if self.time_coarsen is not None:
                 raw_writer = self.time_coarsen.build_paired(raw_writer)
             writers.append(raw_writer)
-        if self.save_monthly_files and (not is_multi_gpu or is_root):
+        if self.save_monthly_files and build_subwriters:
             writers.append(
                 PairedMonthlyDataWriter(
                     path=experiment_dir,
@@ -163,8 +164,9 @@ class DataWriterConfig:
                     dataset_metadata=dataset_metadata,
                 )
             )
-        if not is_multi_gpu or is_root:
-            for writer_config in self.files or []:
+        files = self.files or []
+        if build_subwriters:
+            for writer_config in files:
                 writers.append(
                     writer_config.build_paired(
                         experiment_dir=experiment_dir,
@@ -177,7 +179,7 @@ class DataWriterConfig:
                     )
                 )
         step_diagnostics_writer: StepDiagnosticsWriter | None = None
-        if not is_multi_gpu or is_root:
+        if build_subwriters:
             step_diagnostics_writer = self._build_step_diagnostics_writer(
                 experiment_dir=experiment_dir,
                 initial_condition_times=initial_condition_times,
