@@ -1,4 +1,4 @@
-# DEBUG test config (branch debug/swin-nan-locate): seed-2 mask-on nc-swin-v2.2
+# DEBUG test config (branch debug/swin-nan-fix-test): seed-2 mask-on nc-swin-v2.2
 # with FME_NAN_DEBUG=1 instrumentation (fme/core/nan_debug.py).
 # arg: --env FME_NAN_DEBUG=1
 # nc-swin-v2.2: a noise-conditioned Swin U-Net for foundation-model training,
