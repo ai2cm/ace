@@ -1,24 +1,31 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["beaker-py==2.8.1"]
+# ///
 """Where a budget's allocated jobs stand on a Beaker cluster.
 
 Each budget holds an allocation on a cluster (`beaker allocation list <cluster> --org
-ai2`): a runtime quota, whose share of the cluster's slots is its target, and a slot
-limit, the cap. Jobs submitted with a minimum runtime are allocated jobs; jobs without
-one are unallocated backfill in a separate, age-ordered, preemptible queue.
+ai2`): a runtime quota percentage, whose share of the cluster's slots is its target
+allocation, and a slot limit on the allocated slots it may have in use at once. Jobs
+submitted with a minimum runtime are allocated jobs; jobs without one are unallocated
+backfill in a separate, age-ordered, preemptible queue.
 
 Ordering and preemption follow the cluster's scheduler policy (`beaker cluster get`,
 field schedulerPolicy), which the scheduler implements as written (allenai/beaker,
 scheduling/internal/sortpolicy.go and preemption.go). On the ai2 clusters the
-allocated partition sorts by allocation balance at the workspace-group level across the
-whole cluster, then at the workspace level, then priority, then age. Balance is
-(quota - usage) / quota over a decaying multi-day window (usageWindow lookback and decay
-half-life), and a balance criterion is an entity boundary: priority and age only ever
-order jobs within one group. So budgets do interact: a group over its target ranks
-behind every group under target, whatever their budgets. A running allocated job is
-protected for its minimum runtime and then becomes interruptible; a queued allocated
-job that ranks ahead of it on balance (when the victim's group is over target, including
-a job from another budget) or on priority within the group may preempt it; one that
-ranks ahead only by age may not.
+allocated partition sorts by balance score at the workspace-group level across the
+whole cluster, then at the workspace level, then priority, then age. The balance score
+is recent allocated usage minus target allocation, as a fraction of the target
+allocation, with usage decay-weighted over a multi-day window (usageWindow lookback and
+decay half-life); positive means over target, and a lower score ranks first. A balance
+criterion is an entity boundary: priority and age only ever order jobs within one
+group. So budgets do interact: a group with a positive balance score ranks behind every
+group with a lower one, whatever their budgets. A running allocated job is protected
+for its minimum runtime and then becomes interruptible; a queued allocated job that
+ranks ahead of it on balance score (only while the victim's group is over target,
+including a job from another budget) or on priority within the group may preempt it;
+one that ranks ahead only by age may not.
 
 `beaker job list --cluster X` returns jobs that *requested* X, and a job that named
 several clusters may be running on another one. Running and scheduled jobs are
@@ -27,21 +34,25 @@ queued jobs are kept whenever the cluster is among their constraints, and the ot
 clusters they could land on are shown. The allocated GPU total is cross-checked against
 `beaker cluster usage`, whose allocated flag is likewise min_runtime > 0.
 
-Usage:
-  beaker_queue.py CLUSTER [--budget ai2/NAME] [--include-unallocated] [--json]
+Usage (uv installs the beaker-py dependency declared above):
+  uv run --script beaker_queue.py CLUSTER [--budget ai2/NAME] [--include-unallocated]
+      [--json]
 
-  beaker_queue.py ai2/jupiter                       # ai2/atec-climate
-  beaker_queue.py ai2/titan --budget ai2/atec-olmoearth
+  uv run --script beaker_queue.py ai2/jupiter       # ai2/atec-climate
+  uv run --script beaker_queue.py ai2/titan --budget ai2/atec-olmoearth
 
-The header gives the budget's target (its runtime quota percentage of the cluster's
-slots), its slot limit (the cap), and its standing against target over the scheduler's
-lookback window, from `beaker report gpu-usage` in one-day bins weighted by the policy's
-decay half-life. That approximates the scheduler's balance (it ignores the forgiveness
-horizon and quota changes); a preemption message quotes the exact figure.
+The header gives the budget's allocated slots in use and free under its slot limit, its
+target allocation (its runtime quota percentage of the cluster's slots), and its
+balance score, computed as the Beaker UI computes it: hourly allocated usage from the
+ListClusterUsage RPC, decay-weighted over the scheduler's window. Like the UI's, it
+leaves out the slot-hours that running jobs are guaranteed but have not used yet, so
+the scheduler's own score can be higher; a preemption message (`canceledFor` on the
+job) quotes the scheduler's exact figure.
 
-Output (markdown): a header with the budget's standing and use, then the budget's
-allocated jobs running on the cluster with their minimum runtime left (blank =
-interruptible), and its allocated jobs scheduled or queued, in scheduling order.
+Output (markdown): a header with the budget's allocated slots and balance score, then
+the budget's allocated jobs running on the cluster with their minimum runtime left
+(blank = interruptible), and its allocated jobs scheduled or queued, in scheduling
+order.
 --include-unallocated adds the same two tables for the budget's unallocated jobs. Jobs
 are named by experiment, as the Beaker UI lists them, falling back to the task name.
 Below each queued table, a list gives the jobs, from any budget and able to run on this
@@ -53,19 +64,24 @@ user are marked with *. Times are local.
 import argparse
 import datetime
 import json
+import math
 import os
 import re
 import subprocess
 import sys
+import warnings
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+
+from beaker import Beaker, beaker_pb2
+from beaker._service_client import RpcMethod
+from beaker.exceptions import BeakerError as BeakerPyError
 
 HOUR_NS = 3.6e12
 NAME_WIDTH = 60
 QUEUE_BLOCKERS = re.compile(r"higher in the queue to be scheduled \(([^)]*)\)")
 JOB_ID = re.compile(r"\b[0-9A-Z]{26}\b")
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "beaker-queue")
-REPORT_TIMEOUT_S = 25
 PRIORITY_RANK = {
     "immediate": -1,
     "urgent": 0,
@@ -176,96 +192,88 @@ def half_life_hours(record):
     return seconds / 3600 if seconds > 0 else None
 
 
-def allocated_gpu_hours_between(cluster, budget_full_name, start, end):
-    org = budget_full_name.split("/")[0]
-    fmt = "%Y-%m-%dT%H:%M:%SZ"
-    rows = beaker(
-        "report",
-        "gpu-usage",
-        "--organizations",
-        org,
-        "--budgets",
-        budget_full_name,
-        "--clusters",
-        cluster,
-        "--start",
-        start.strftime(fmt),
-        "--end",
-        end.strftime(fmt),
-        "--allocated",
-        "true",
-        "--group-by",
-        "budget",
-        timeout=REPORT_TIMEOUT_S,
+def allocated_usage_buckets(cluster_id, budget_id, org_name, start, now):
+    """Hourly allocated GPU usage of the budget on the cluster since `start`, from the
+    ListClusterUsage RPC that the Beaker UI's balance score reads."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        client = Beaker.from_env()
+    window = beaker_pb2.Interval()
+    window.start.FromDatetime(start)
+    window.finish.FromDatetime(now)
+    request = beaker_pb2.ListClusterUsageRequest(
+        options=beaker_pb2.ListClusterUsageRequest.Opts(
+            cluster_id=cluster_id,
+            organization_id=client.organization.get(org_name).id,
+            budget_id=budget_id,
+            allocated=True,
+            window=window,
+            bucket_hours=1,
+        )
     )
-    return sum(float(r.get("gpuHours") or 0) for r in rows)
-
-
-def cached_day_hours(cluster, budget_full_name, day_start):
-    """Allocated GPU-hours of one completed UTC day, fetched once and kept on disk."""
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    key = f"{cluster}_{budget_full_name}_{day_start:%Y-%m-%d}.json".replace("/", "-")
-    path = os.path.join(CACHE_DIR, key)
-    if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)["gpu_hours"]
-    hours = allocated_gpu_hours_between(
-        cluster, budget_full_name, day_start, day_start + datetime.timedelta(days=1)
+    method = RpcMethod[beaker_pb2.ListClusterUsageResponse](
+        client.service.ListClusterUsage
     )
-    with open(path, "w") as f:
-        json.dump({"gpu_hours": hours}, f)
-    return hours
+    pages = client.cluster.rpc_paged_request(method, request)
+    return [bucket for page in pages for bucket in page.buckets]
 
 
-def usage_bins(cluster, bname, now, hours_back, pool):
-    """(age of bin centre in hours, bin length in hours, GPU-hours) over the lookback:
-    today's partial UTC day fetched live, completed days from the cache."""
-    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    n_days = int(hours_back // 24)
-    today = pool.submit(allocated_gpu_hours_between, cluster, bname, midnight, now)
-    days = [midnight - datetime.timedelta(days=d) for d in range(1, n_days + 1)]
-    past = [pool.submit(cached_day_hours, cluster, bname, day) for day in days]
-    elapsed = (now - midnight).total_seconds() / 3600
-    bins = [(elapsed / 2, elapsed, today.result())]
-    for d, future in enumerate(past, start=1):
-        bins.append((elapsed + (d - 0.5) * 24, 24.0, future.result()))
-    return bins
+def decayed_hours(start, end, now, half_life):
+    """Hours in [start, end] weighted by recency as the scheduler weights usage: an hour
+    of age `a` counts 2^(-a / half_life), integrated exactly over the span."""
+    span = (end - start).total_seconds() / 3600
+    if not half_life:
+        return span
+    start_age = (now - start).total_seconds() / 3600
+    end_age = (now - end).total_seconds() / 3600
+    return (half_life / math.log(2)) * (
+        2 ** (-end_age / half_life) - 2 ** (-start_age / half_life)
+    )
 
 
-def decayed_standing(bins, target_slots, half_life):
-    """Usage and target over the bins, each weighted by the decay half-life."""
-    used = target = 0.0
-    for age, length, hours in bins:
-        weight = 0.5 ** (age / half_life) if half_life else 1.0
-        used += weight * hours
-        target += weight * target_slots * length
-    return used, target
+def balance_score(buckets, target_slots, start, now, half_life):
+    """Recent allocated usage minus target allocation, as a fraction of the target
+    allocation, both decay-weighted over [start, now]; positive means over target."""
+    used = 0.0
+    for bucket in buckets:
+        bucket_start = max(bucket.bucket_start.ToDatetime(datetime.timezone.utc), start)
+        bucket_end = min(bucket.bucket_end.ToDatetime(datetime.timezone.utc), now)
+        span = (bucket_end - bucket_start).total_seconds() / 3600
+        if span > 0:
+            weight = decayed_hours(bucket_start, bucket_end, now, half_life) / span
+            used += weight * bucket.gpu_seconds / 3600
+    target = target_slots * decayed_hours(start, now, now, half_life)
+    return (used - target) / target
 
 
-def target_clause(cluster, bname, record, limit, pct, now, pool):
-    """The header's standing sentence and the over-target fraction (None if unknown)."""
+def describe_balance(score):
+    percent = round(score * 100)
+    if percent == 0:
+        return "balance score 0% (on target)"
+    word = "over" if percent > 0 else "under"
+    return f"balance score {percent:+d}% ({abs(percent)}% {word} target)"
+
+
+def allocation_clause(record, budget_id, bname, pct, now):
+    """The header's target allocation and balance score sentence, and the balance score
+    (None if unknown)."""
     slots = total_slots(record)
     hours_back = lookback_hours(record)
     if not slots or pct is None or not hours_back:
         return "", None
     target_slots = pct / 100 * slots
-    half_life = half_life_hours(record)
+    start = now - datetime.timedelta(hours=hours_back)
+    text = f" Target allocation {target_slots:.0f} slots ({pct}% of {slots});"
     try:
-        bins = usage_bins(cluster, bname, now, hours_back, pool)
-        used, target = decayed_standing(bins, target_slots, half_life)
-    except BeakerError:
-        return (
-            f" Target {target_slots:.0f} slots ({pct}% of {slots}), cap {limit}; "
-            "standing against target unavailable (usage report too slow)."
-        ), None
-    over = (used - target) / target if target else 0.0
-    word = f"{abs(over) * 100:.0f}% {'over' if over > 0 else 'under'} target"
-    text = (
-        f" Target {target_slots:.0f} slots ({pct}% of {slots}), cap {limit}; "
-        f"decay-weighted allocated use over the {hours_back / 24:.0f}-day lookback "
-        f"is {word}."
-    )
-    return text, over
+        buckets = allocated_usage_buckets(
+            record["id"], budget_id, bname.split("/")[0], start, now
+        )
+    except BeakerPyError as error:
+        return f"{text} balance score unavailable ({str(error)[:200]}).", None
+    score = balance_score(buckets, target_slots, start, now, half_life_hours(record))
+    return (
+        f"{text} {describe_balance(score)} over the {hours_back / 24:.0f}-day window."
+    ), score
 
 
 def cluster_node_ids(cluster):
@@ -535,14 +543,14 @@ def queue_order(r):
 
 def preemptible_by(r, over, interruptible):
     """Who can take a running allocated job now: nobody while its minimum runtime holds,
-    a higher-priority job of this budget once it has elapsed, and any under-target
-    group's job as well while this budget is over target."""
+    a higher-priority job of this budget once it has elapsed, and, while this budget's
+    balance score is positive, any job of a group with a lower balance score."""
     if not interruptible or r["min_left_ns"] > 0:
         return ""
     if over is None:
-        return "higher priority; any under-target group if over target"
+        return "higher priority; groups with a lower balance score if ours is positive"
     if over > 0:
-        return "any under-target group"
+        return "higher priority; groups with a lower balance score"
     return "higher priority in budget"
 
 
@@ -602,11 +610,23 @@ def waiting_header(allocated):
     ]
 
 
-def print_header(bname, cluster, now, clause, allocated_gpus, usage, me, authors):
+def slots_in_use(allocated_gpus, limit):
+    if limit is None:
+        return f"{allocated_gpus} allocated slots in use"
+    free = limit - allocated_gpus
+    return (
+        f"{allocated_gpus} of {limit} allocated slots in use ({free} free under the "
+        "slot limit)"
+    )
+
+
+def print_header(
+    bname, cluster, now, clause, allocated_gpus, limit, usage, me, authors
+):
     when = now.astimezone().strftime("%b %d %H:%M %Z")
     line = (
-        f"**{bname} on {cluster}** at {when}: {allocated_gpus} slots held by "
-        f"allocated jobs, {usage['unallocated']} by unallocated jobs.{clause}"
+        f"**{bname} on {cluster}** at {when}: {slots_in_use(allocated_gpus, limit)}; "
+        f"{usage['unallocated']} slots used by unallocated jobs.{clause}"
         f" Jobs of {me} are marked *."
     )
     if usage["allocated"] != allocated_gpus:
@@ -630,8 +650,9 @@ def print_allocated(jobs, me, interruptible, sort_keys, over):
     )
     note = (
         "'preemptible by' is blank while the minimum runtime protects the job; after "
-        "that a higher-priority job of this budget can take it, and any under-target "
-        "group's job as well while this budget is over target."
+        "that a higher-priority job of this budget can take it, and, while this "
+        "budget's balance score is positive, so can any job of a group with a lower "
+        "balance score."
     )
     print(
         f"\n**Allocated jobs running** ({len(rows)} jobs, {gpu_total(rows)} GPUs). "
@@ -763,9 +784,7 @@ def main():
         usage_f = pool.submit(usage_slots, a.cluster, bname)
         record = record_f.result()
         limit, pct = limit_f.result()
-        clause_f = pool.submit(
-            target_clause, a.cluster, bname, record, limit, pct, now, pool
-        )
+        clause_f = pool.submit(allocation_clause, record, bid, bname, pct, now)
         me, usage = me_f.result(), usage_f.result()
         jobs, authors = jobs_f.result()
         blockers_f = pool.submit(add_blockers, jobs, a.cluster, {bid: bname})
@@ -778,7 +797,9 @@ def main():
     allocated_gpus = gpu_total(
         [r for r in jobs if r["allocated"] and r["state"] != "queued"]
     )
-    print_header(bname, a.cluster, now, clause, allocated_gpus, usage, me, authors)
+    print_header(
+        bname, a.cluster, now, clause, allocated_gpus, limit, usage, me, authors
+    )
     print_allocated(jobs, me, interruptible, sort_keys, over)
     if a.include_unallocated:
         print_unallocated(jobs, me)

@@ -5,7 +5,7 @@ cluster. `SKILL.md` is the skill definition and `scripts/beaker_queue.py` the to
 script also works standalone:
 
 ```
-python3 scripts/beaker_queue.py ai2/jupiter --budget ai2/atec-climate [--include-unallocated]
+uv run --script scripts/beaker_queue.py ai2/jupiter --budget ai2/atec-climate [--include-unallocated]
 ```
 
 Install locally by copying this directory to `~/.claude/skills/beaker-queue/`, or package it with
