@@ -4,7 +4,8 @@ The filesystem is resolved from the path's URL scheme via fsspec, so callers
 use a single code path for local paths and remote URLs (e.g. ``gs://``).
 """
 
-import io
+import os
+import tempfile
 
 import fsspec
 import xarray as xr
@@ -62,15 +63,28 @@ def is_local(path: str) -> bool:
 def load_netcdf(path: str) -> xr.Dataset:
     """Load a small netCDF file, e.g. a stats file, fully into memory.
 
-    The file is fetched in a single read before parsing. Parsing a netCDF4
-    (HDF5) file directly from a remote file object instead issues a range
-    request for each of its many small, scattered metadata reads, which for a
-    file with hundreds of variables on GCS is tens of times slower.
+    A remote file is first downloaded to a temporary local file in a single
+    read. Parsing a netCDF4 (HDF5) file directly from a remote file object
+    instead issues a range request for each of its many small, scattered
+    metadata reads, which for a file with hundreds of variables on GCS is
+    tens of times slower. Reading from a local file rather than an in-memory
+    buffer also lets the default netCDF4 engine be used, so h5netcdf is not
+    required.
 
     The returned dataset's encoding["source"] is set to path.
     """
-    with fsspec.open(path, "rb") as f:
-        data = f.read()
-    ds = xr.open_dataset(io.BytesIO(data), decode_timedelta=False).load()
+    fs, fs_path = _fs_and_path(path)
+    if isinstance(fs, LocalFileSystem):
+        ds = _load_local_netcdf(fs_path)
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = os.path.join(tmpdir, os.path.basename(fs_path))
+            fs.get_file(fs_path, local_path)
+            ds = _load_local_netcdf(local_path)
     ds.encoding["source"] = path
     return ds
+
+
+def _load_local_netcdf(path: str) -> xr.Dataset:
+    with xr.open_dataset(path, decode_timedelta=False) as ds:
+        return ds.load()
