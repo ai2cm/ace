@@ -655,6 +655,11 @@ _TRAIN_AND_INFERENCE_CASES = [
             use_healpix=True,
         ),
         id="HEALPix",
+        # On CUDA the HEALPix UNet is compiled three times (no-grad, with
+        # grad, and dynamic batch size), each a large graph from the per-face
+        # padding; the aot_eager compiles alone take ~85 s on a laptop CPU,
+        # over the default 90 s timeout on the CI GPU runner.
+        marks=pytest.mark.timeout(300),
     ),
     pytest.param(
         TrainAndInferenceTestSettings(nettype="Samudra"),
