@@ -52,6 +52,16 @@ def _no_writers_config() -> DataWriterConfig:
     )
 
 
+def _prediction_writers_config() -> DataWriterConfig:
+    """DataWriterConfig with prediction file writers enabled."""
+    return DataWriterConfig(
+        save_prediction_files=True,
+        save_monthly_files=False,
+        save_step_diagnostics=False,
+        files=None,
+    )
+
+
 def _make_evaluator_test_data(
     tmp_path: pathlib.Path,
     n_forward_steps: int = 2,
@@ -276,3 +286,64 @@ def test_distributed_standalone_inference(tmp_path: pathlib.Path):
     serial_ic = xr.open_dataset(os.path.join(serial_dir, "initial_condition.nc"))
     dist_ic = xr.open_dataset(os.path.join(dist_dir, "initial_condition.nc"))
     xr.testing.assert_allclose(serial_ic, dist_ic)
+
+
+@pytest.mark.slow
+def test_distributed_evaluator_with_prediction_files(tmp_path: pathlib.Path):
+    """Evaluator with prediction file writers under 2 ranks matches serial."""
+    n_forward_steps = 2
+    stepper_path, data = _make_evaluator_test_data(
+        tmp_path, n_forward_steps=n_forward_steps
+    )
+
+    loader_config = dataclasses.replace(
+        data.inference_data_loader_config,
+        start_indices=InferenceInitialConditionIndices(
+            n_initial_conditions=N_IC,
+            first=0,
+            interval=1,
+        ),
+    )
+    serial_dir = str(tmp_path / "serial")
+    config = InferenceEvaluatorConfig(
+        experiment_dir=serial_dir,
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=False
+        ),
+        loader=loader_config,
+        forward_steps_in_memory=1,
+        data_writer=_prediction_writers_config(),
+        allow_incompatible_dataset=True,
+    )
+
+    # Serial reference.
+    with mock_wandb(), torch.no_grad():
+        run_evaluator_from_config(config)
+
+    # Distributed run.
+    dist_dir = str(tmp_path / "distributed")
+    dist_config = dataclasses.replace(config, experiment_dir=dist_dir)
+    config_yaml = str(tmp_path / "dist_evaluator_config.yaml")
+    with open(config_yaml, "w") as f:
+        yaml.dump(dataclasses.asdict(dist_config), f)
+
+    _run_torchrun(config_yaml, "fme.ace.evaluator")
+
+    # Compare prediction files.
+    for name in ("autoregressive_predictions", "autoregressive_target"):
+        serial_nc = os.path.join(serial_dir, f"{name}.nc")
+        dist_nc = os.path.join(dist_dir, f"{name}.nc")
+        assert os.path.exists(serial_nc), f"Missing serial {serial_nc}"
+        assert os.path.exists(dist_nc), f"Missing distributed {dist_nc}"
+        serial_ds = xr.open_dataset(serial_nc, decode_timedelta=False)
+        dist_ds = xr.open_dataset(dist_nc, decode_timedelta=False)
+        xr.testing.assert_allclose(serial_ds, dist_ds)
+        # Verify the gathered output has the full set of initial conditions.
+        assert dist_ds.sizes["sample"] == N_IC
+
+    # Verify that non-root did not write duplicate files.
+    dist_files = [f for f in os.listdir(dist_dir) if f.endswith(".nc")]
+    # Should not have any rank-suffixed files.
+    assert not any("rank" in f for f in dist_files)

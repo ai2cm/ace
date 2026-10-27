@@ -8,6 +8,8 @@ from typing import TypeAlias
 import cftime
 import numpy as np
 import numpy.typing as npt
+import torch
+import xarray as xr
 
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
@@ -18,8 +20,10 @@ from fme.ace.data_loading.batch_data import (
 )
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.writer import WriterABC
+from fme.core.step.step_diagnostics import StepDiagnostics
 
 from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
@@ -27,6 +31,7 @@ from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
 from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
+from .zarr import ZarrWriterConfig
 
 PairedSubwriter: TypeAlias = (
     PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
@@ -98,15 +103,20 @@ class DataWriterConfig:
             or bool(self.files)
         )
 
-    def _raise_if_unsupported_under_multi_gpu(self, n_ranks: int) -> None:
-        """Raise if per-timestep writers are enabled under multi-GPU."""
-        if n_ranks > 1 and self.has_subwriters_enabled:
+    def _raise_if_zarr_under_multi_gpu(self, n_ranks: int) -> None:
+        """Raise if any zarr-based file writer is enabled under multi-GPU."""
+        if n_ranks <= 1:
+            return
+        zarr_labels = [
+            f.label
+            for f in (self.files or [])
+            if isinstance(f.format, ZarrWriterConfig)
+        ]
+        if zarr_labels:
             raise ValueError(
-                "Multi-GPU inference does not yet support per-timestep data "
-                "writers (prediction files, monthly files, step diagnostics, "
-                "or custom file writers). Set save_prediction_files, "
-                "save_monthly_files, and save_step_diagnostics to false and "
-                "files to null in the data_writer config, or run with a "
+                "Multi-GPU inference does not yet support zarr-based file "
+                f"writers. The following file entries use zarr: "
+                f"{zarr_labels}. Use netcdf format instead, or run with a "
                 "single GPU."
             )
 
@@ -134,9 +144,16 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
         dist = Distributed.get_instance()
-        self._raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
+        self._raise_if_zarr_under_multi_gpu(dist.total_data_parallel_ranks)
+        is_multi_gpu = dist.total_data_parallel_ranks > 1
+        is_root = dist.is_data_parallel_root()
+        if is_multi_gpu:
+            all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
+            if is_root:
+                assert all_ic_times is not None
+                initial_condition_times = np.concatenate(all_ic_times)
         writers: list[PairedSubwriter] = []
-        if self.save_prediction_files:
+        if self.save_prediction_files and (not is_multi_gpu or is_root):
             raw_writer: PairedSubwriter = PairedRawDataWriter(
                 path=experiment_dir,
                 initial_condition_times=initial_condition_times,
@@ -148,7 +165,7 @@ class DataWriterConfig:
             if self.time_coarsen is not None:
                 raw_writer = self.time_coarsen.build_paired(raw_writer)
             writers.append(raw_writer)
-        if self.save_monthly_files:
+        if self.save_monthly_files and (not is_multi_gpu or is_root):
             writers.append(
                 PairedMonthlyDataWriter(
                     path=experiment_dir,
@@ -161,17 +178,27 @@ class DataWriterConfig:
                     dataset_metadata=dataset_metadata,
                 )
             )
-        for writer_config in self.files or []:
-            writers.append(
-                writer_config.build_paired(
-                    experiment_dir=experiment_dir,
-                    initial_condition_times=initial_condition_times,
-                    n_timesteps=n_timesteps,
-                    timestep=timestep,
-                    variable_metadata=variable_metadata,
-                    coords=coords,
-                    dataset_metadata=dataset_metadata,
+        if not is_multi_gpu or is_root:
+            for writer_config in self.files or []:
+                writers.append(
+                    writer_config.build_paired(
+                        experiment_dir=experiment_dir,
+                        initial_condition_times=initial_condition_times,
+                        n_timesteps=n_timesteps,
+                        timestep=timestep,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
+                    )
                 )
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None
+        if not is_multi_gpu or is_root:
+            step_diagnostics_writer = self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
             )
         return PairedDataWriter(
             writers=writers,
@@ -179,13 +206,7 @@ class DataWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
-            step_diagnostics_writer=self._build_step_diagnostics_writer(
-                experiment_dir=experiment_dir,
-                initial_condition_times=initial_condition_times,
-                variable_metadata=variable_metadata,
-                coords=coords,
-                dataset_metadata=dataset_metadata,
-            ),
+            step_diagnostics_writer=step_diagnostics_writer,
         )
 
     def _build_step_diagnostics_writer(
@@ -228,11 +249,19 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
         dist = Distributed.get_instance()
-        self._raise_if_unsupported_under_multi_gpu(dist.total_data_parallel_ranks)
+        self._raise_if_zarr_under_multi_gpu(dist.total_data_parallel_ranks)
+        is_multi_gpu = dist.total_data_parallel_ranks > 1
+        is_root = dist.is_data_parallel_root()
+        if is_multi_gpu:
+            all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
+            if is_root:
+                assert all_ic_times is not None
+                initial_condition_times = np.concatenate(all_ic_times)
+        build_subwriters = not is_multi_gpu or is_root
         writers: list[Subwriter] = []
         # TODO: handle writing HEALPix data
         # https://github.com/ai2cm/full-model/issues/1089
-        if "face" not in coords:
+        if "face" not in coords and build_subwriters:
             if self.save_prediction_files:
                 raw_writer: Subwriter = RawDataWriter(
                     path=experiment_dir,
@@ -271,20 +300,61 @@ class DataWriterConfig:
                         dataset_metadata=dataset_metadata,
                     )
                 )
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None
+        if build_subwriters:
+            step_diagnostics_writer = self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
         return DataWriter(
             writers=writers,
             path=experiment_dir,
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
-            step_diagnostics_writer=self._build_step_diagnostics_writer(
-                experiment_dir=experiment_dir,
-                initial_condition_times=initial_condition_times,
-                variable_metadata=variable_metadata,
-                coords=coords,
-                dataset_metadata=dataset_metadata,
-            ),
+            step_diagnostics_writer=step_diagnostics_writer,
         )
+
+
+def _gather_tensor_dict(
+    data: dict[str, torch.Tensor], dist: Distributed
+) -> dict[str, torch.Tensor] | None:
+    """Gather each tensor across data-parallel ranks, concatenating along dim 0.
+
+    Returns the concatenated dict on the data-parallel root, None on non-root.
+    Keys are sorted before calling collectives so every rank uses the same order.
+    """
+    device = get_device()
+    gathered: dict[str, torch.Tensor] = {}
+    for name in sorted(data):
+        rank_tensors = dist.data_parallel_gather(data[name].to(device).contiguous())
+        if dist.is_data_parallel_root():
+            if rank_tensors is None:
+                raise RuntimeError(
+                    "_gather_tensor_dict: gather returned None on data-parallel root"
+                )
+            gathered[name] = torch.cat(rank_tensors, dim=0).cpu()
+    if not dist.is_data_parallel_root():
+        return None
+    return gathered
+
+
+def _gather_time(time: xr.DataArray, dist: Distributed) -> xr.DataArray | None:
+    """Gather an xr.DataArray time coordinate across data-parallel ranks.
+
+    Returns the concatenated time on the data-parallel root, None on non-root.
+    """
+    parts = dist.data_parallel_gather_object(time)
+    if not dist.is_data_parallel_root():
+        return None
+    if parts is None:
+        raise RuntimeError(
+            "_gather_time: gather_object returned None on data-parallel root"
+        )
+    return xr.concat(parts, dim="sample")
 
 
 class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
@@ -340,22 +410,50 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Append a batch of data to the file.
 
+        Under multi-GPU inference, gathers tensor data and time from all
+        data-parallel ranks to root before dispatching to subwriters.
+        Non-root ranks return early (their subwriter lists are empty, but the
+        gather collectives must still be called by every rank).
+
         Args:
             batch: Prediction and target data.
         """
+        dist = Distributed.get_instance()
+        if dist.total_data_parallel_ranks > 1:
+            prediction = _gather_tensor_dict(dict(batch.prediction), dist)
+            target = _gather_tensor_dict(dict(batch.reference), dist)
+            time = _gather_time(batch.time, dist)
+            if batch.step_diagnostics is not None:
+                gathered_diag = _gather_tensor_dict(
+                    dict(batch.step_diagnostics.delta), dist
+                )
+            else:
+                gathered_diag = None
+            if not dist.is_data_parallel_root():
+                return
+            # On root, gathered values are guaranteed non-None.
+            assert prediction is not None
+            assert target is not None
+            assert time is not None
+        else:
+            prediction = dict(batch.prediction)
+            target = dict(batch.reference)
+            time = batch.time
+            gathered_diag = (
+                dict(batch.step_diagnostics.delta)
+                if batch.step_diagnostics is not None
+                else None
+            )
+
         for writer in self._writers:
             writer.append_batch(
-                target=dict(batch.reference),
-                prediction=dict(batch.prediction),
-                batch_time=batch.time,
+                target=target,
+                prediction=prediction,
+                batch_time=time,
             )
-        if (
-            self._step_diagnostics_writer is not None
-            and batch.step_diagnostics is not None
-        ):
-            self._step_diagnostics_writer.append_batch(
-                batch.step_diagnostics.to_datasets(batch.time)
-            )
+        if self._step_diagnostics_writer is not None and gathered_diag is not None:
+            diag = StepDiagnostics(delta=gathered_diag)
+            self._step_diagnostics_writer.append_batch(diag.to_datasets(time))
 
     def flush(self):
         """
@@ -488,30 +586,52 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         Append prediction data to the file. The prognostic data
         and forcing data are merged before writing.
 
+        Under multi-GPU inference, gathers tensor data and time from all
+        data-parallel ranks to root before dispatching to subwriters.
+        Non-root ranks return early after participating in the gather
+        collectives.
+
         Args:
             batch: Paired data to be written.
         """
+        dist = Distributed.get_instance()
         merged = {**batch.prediction, **batch.forcing}
-        unpaired_batch = BatchData.new_on_device(
-            data=merged,
-            time=batch.time,
-            labels=batch.labels,
-        )
-        self._append_batch(unpaired_batch)
-        if (
-            self._step_diagnostics_writer is not None
-            and batch.step_diagnostics is not None
-        ):
-            self._step_diagnostics_writer.append_batch(
-                batch.step_diagnostics.to_datasets(batch.time)
+
+        if dist.total_data_parallel_ranks > 1:
+            gathered_data = _gather_tensor_dict(merged, dist)
+            time = _gather_time(batch.time, dist)
+            if batch.step_diagnostics is not None:
+                gathered_diag = _gather_tensor_dict(
+                    dict(batch.step_diagnostics.delta), dist
+                )
+            else:
+                gathered_diag = None
+            if not dist.is_data_parallel_root():
+                return
+            assert gathered_data is not None
+            assert time is not None
+        else:
+            unpaired_batch = BatchData.new_on_device(
+                data=merged,
+                time=batch.time,
+                labels=batch.labels,
+            )
+            gathered_data = dict(unpaired_batch.data)
+            time = unpaired_batch.time
+            gathered_diag = (
+                dict(batch.step_diagnostics.delta)
+                if batch.step_diagnostics is not None
+                else None
             )
 
-    def _append_batch(self, batch: BatchData):
         for writer in self._writers:
             writer.append_batch(
-                data=dict(batch.data),
-                batch_time=batch.time,
+                data=gathered_data,
+                batch_time=time,
             )
+        if self._step_diagnostics_writer is not None and gathered_diag is not None:
+            diag = StepDiagnostics(delta=gathered_diag)
+            self._step_diagnostics_writer.append_batch(diag.to_datasets(time))
 
     def flush(self):
         """
