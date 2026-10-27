@@ -41,7 +41,7 @@ class MonthlyStoreGeometry:
     """Pre-computed store dimensions and coordinates for a monthly zarr store.
 
     Built from the global (all-rank) initial condition times by
-    ``MonthlyZarrWriter.store_geometry`` so that every rank creates an
+    ``MonthlyZarrWriter.compute_store_geometry`` so that every rank creates an
     identically-sized store.
     """
 
@@ -65,7 +65,7 @@ class MonthlyZarrWriter:
     """
 
     @staticmethod
-    def store_geometry(
+    def compute_store_geometry(
         global_initial_condition_times: npt.NDArray[cftime.datetime],
         n_timesteps: int,
         timestep: datetime.timedelta,
@@ -129,7 +129,7 @@ class MonthlyZarrWriter:
                 writer, since the store is sized before any data arrives.
             dataset_metadata: Metadata for the dataset.
             geometry: Pre-computed store dimensions and coordinates, from
-                ``store_geometry``.
+                ``compute_store_geometry``.
             chunks: Optional mapping of dimension name to chunk size. Omitted
                 dimensions are chunked whole, except the sample and lead-time
                 dimensions, which are always chunked as 1. The store is

@@ -311,6 +311,34 @@ def test_zarr_adapter_single_timestep_data(
     assert ds.time.size == 1
 
 
+@pytest.mark.parametrize(
+    "bad_chunks",
+    [{"sample": 2}, {"time": 2}, {"sample": 4, "time": 1}],
+)
+def test_zarr_adapter_rejects_non_unit_sample_or_time_chunks(bad_chunks):
+    """Chunk sizes of sample=1 and time=1 are required for parallel-safe writes.
+
+    Each data-parallel rank writes to its own contiguous block of samples.
+    If a chunk spans more than one sample, two ranks could contend on the same
+    chunk.
+    """
+    with pytest.raises(ValueError, match="must be 1"):
+        ZarrWriterAdapter(
+            path="/unused",
+            dims=("sample", "time", "lat", "lon"),
+            data_coords=ensure_numpy_coords(
+                {
+                    "lat": xr.DataArray([0, 1], dims=["lat"]),
+                    "lon": xr.DataArray([0, 1], dims=["lon"]),
+                }
+            ),
+            timestep=datetime.timedelta(days=1),
+            n_timesteps=2,
+            initial_condition_times=np.array([cftime.datetime(2020, 1, 1)]),
+            chunks=bad_chunks,
+        )
+
+
 @pytest.mark.parallel
 def test_zarr_adapter_parallel_region_writes(tmp_path):
     """Each data-parallel rank writes its sample region; combined store matches

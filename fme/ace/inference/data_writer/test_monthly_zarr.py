@@ -8,7 +8,10 @@ import xarray as xr
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import MonthlyDataWriter
-from fme.ace.inference.data_writer.monthly_zarr import MonthlyZarrWriter
+from fme.ace.inference.data_writer.monthly_zarr import (
+    MonthlyZarrWriter,
+    _validate_chunks,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.timing import GlobalTimer
 
@@ -17,7 +20,7 @@ COORDS = {"lat": np.array([0.0, 1.0]), "lon": np.array([0.0, 1.0, 2.0])}
 
 
 def _writer(path, initial_condition_times, n_timesteps, **kwargs) -> MonthlyZarrWriter:
-    geometry = MonthlyZarrWriter.store_geometry(
+    geometry = MonthlyZarrWriter.compute_store_geometry(
         initial_condition_times, n_timesteps, TIMESTEP
     )
     return MonthlyZarrWriter(
@@ -253,3 +256,28 @@ def test_monthly_zarr_writer_month_zero_follows_the_first_output_time(tmp_path):
         np.array(["2020-02-15"], dtype="datetime64[ns]"),
     )
     assert ds["init_time"].isel(sample=0).values == np.datetime64("2020-01-30")
+
+
+@pytest.mark.parametrize(
+    "bad_chunks",
+    [{"sample": 2}, {"time": 2}, {"sample": 4, "time": 1}],
+)
+def test_validate_chunks_rejects_non_unit_sample_or_time(bad_chunks):
+    """Chunk sizes of sample=1 and time=1 are required for parallel-safe writes.
+
+    Each data-parallel rank writes to its own contiguous block of samples.
+    If a chunk spans more than one sample, two ranks writing adjacent samples
+    could need the same chunk, causing a write conflict.  The same holds for
+    the time (month) axis: each append_batch reads back and updates individual
+    months, so a chunk spanning multiple months would cause read-modify-write
+    amplification.
+    """
+    with pytest.raises(ValueError, match="must be 1"):
+        _validate_chunks(bad_chunks)
+
+
+def test_validate_chunks_accepts_unit_sample_and_time():
+    result = _validate_chunks({"sample": 1, "time": 1, "lat": 4})
+    assert result["sample"] == 1
+    assert result["time"] == 1
+    assert result["lat"] == 4

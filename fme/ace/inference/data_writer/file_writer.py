@@ -463,7 +463,7 @@ class FileWriterConfig:
                 initial_condition_times
             )
             if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
-                geometry = MonthlyZarrWriter.store_geometry(
+                geometry = MonthlyZarrWriter.compute_store_geometry(
                     global_times, n_timesteps, timestep
                 )
                 raw_writer = MonthlyZarrWriter(
