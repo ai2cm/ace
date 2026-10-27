@@ -163,7 +163,9 @@ class DeterministicModel:
         coarse_norm = self.in_packer.pack(
             self.normalizer.coarse.normalize(coarse_inputs), axis=self._channel_axis
         )
-        interpolated = interpolate(coarse_norm, self.downscale_factor)
+        interpolated = interpolate(
+            coarse_norm, self.downscale_factor, mode="bicubic", align_corners=True
+        )
 
         if self.config.use_fine_topography:
             if static_inputs is None:

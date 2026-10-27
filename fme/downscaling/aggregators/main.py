@@ -472,9 +472,12 @@ class ZonalPowerSpectrumAggregator:
         channel_dim = -3
         keys = keys if keys is not None else data.keys()
         return {
-            k: interpolate(v.unsqueeze(channel_dim), self.downscale_factor).squeeze(
-                channel_dim
-            )
+            k: interpolate(
+                v.unsqueeze(channel_dim),
+                self.downscale_factor,
+                mode="bicubic",
+                align_corners=True,
+            ).squeeze(channel_dim)
             for k, v in data.items()
             if k in keys
         }
@@ -858,9 +861,12 @@ class RelativeMSEInterpAggregator:
         channel_dim = -3
         keys = keys if keys is not None else data.keys()
         return {
-            k: interpolate(v.unsqueeze(channel_dim), self.downscale_factor).squeeze(
-                channel_dim
-            )
+            k: interpolate(
+                v.unsqueeze(channel_dim),
+                self.downscale_factor,
+                mode="bicubic",
+                align_corners=True,
+            ).squeeze(channel_dim)
             for k, v in data.items()
             if k in keys
         }

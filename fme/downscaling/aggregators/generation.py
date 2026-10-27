@@ -126,7 +126,7 @@ class RelativeCRPSInterpAggregator:
         # Expect CRPS coarse to have sample dimension, so no adjustment needed
         keys = keys if keys is not None else data.keys()
         return {
-            k: interpolate(v, self.downscale_factor)
+            k: interpolate(v, self.downscale_factor, mode="bicubic", align_corners=True)
             for k, v in data.items()
             if k in keys
         }
