@@ -1,8 +1,9 @@
 """Guards the default ``torch.compile`` path on CUDA.
 
-The rest of the suite compiles whenever production does, so on CUDA it covers
-compiled numerics; this module asserts that compilation really happens there,
-so that coverage cannot silently fall back to eager.
+The rest of the suite compiles whenever production does (with the test
+session's ``aot_eager`` backend), so on CUDA it traces every step it builds;
+this module asserts that compilation really happens there, so that coverage
+cannot silently fall back to eager.
 """
 
 import pytest
@@ -11,7 +12,6 @@ import torch
 from fme.ace.stepper.test_single_module import get_regression_stepper_and_data
 from fme.core.optimization import OptimizationConfig
 from fme.core.step.single_module import SingleModuleStep
-from fme.core.testing import dynamo_hygiene  # noqa: F401  autouse in this module
 
 
 @pytest.mark.slow

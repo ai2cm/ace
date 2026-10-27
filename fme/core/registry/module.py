@@ -29,25 +29,6 @@ class ModuleConfig(abc.ABC):
     allowing us to specify details of the network architecture in a config file.
     """
 
-    @classmethod
-    def compile_unsupported_reason(cls) -> str | None:
-        """Why ``torch.compile`` cannot be used with the modules this builder builds.
-
-        Override to return a string in a builder whose modules cannot be
-        compiled, e.g. because the forward pass has data-dependent shapes.
-        :meth:`Module.compile` then logs this reason and leaves the module
-        uncompiled, instead of letting dynamo spend a long tracing attempt
-        before falling back to eager. Returns None, meaning compilation is
-        supported, unless overridden.
-
-        This is a classmethod rather than a ``ClassVar`` so that it is not a
-        dataclass field (which would leak into ``ModuleSelector.config`` and
-        serialized checkpoints) and adds no annotation: the sphinx docs build
-        copies inherited annotations onto each builder subclass as strings,
-        after which ``dacite`` can no longer resolve the subclass's type hints.
-        """
-        return None
-
     @abc.abstractmethod
     def build(
         self,
@@ -153,7 +134,7 @@ class Module:
         unchanged; only the callable used in ``__call__`` is compiled. Call
         after any distributed wrapping so the compiled graph includes it.
         Returns this Module unchanged when the builder declared compilation
-        unsupported via ``ModuleConfig.compile_unsupported_reason()``, or when
+        unsupported at registration (see :meth:`ModuleSelector.register`), or when
         compilation is disabled (see :func:`fme.core.compile.is_compile_enabled`).
 
         Args:
@@ -290,9 +271,24 @@ class ModuleSelector:
 
     @classmethod
     def register(
-        cls, type_name: str
+        cls, type_name: str, compile_unsupported_reason: str | None = None
     ) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:  # noqa: UP006
-        return cls.registry.register(type_name)
+        """Register a ModuleConfig builder under ``type_name``.
+
+        Args:
+            type_name: name used in configuration to select the builder.
+            compile_unsupported_reason: if given, why ``torch.compile`` cannot
+                be used with the modules this builder builds, e.g. because the
+                forward pass has data-dependent shapes. :meth:`Module.compile`
+                then logs this reason and leaves the module uncompiled, instead
+                of letting dynamo spend a long tracing attempt before falling
+                back to eager. Declared at registration rather than on the
+                builder so that it is not a dataclass field (which would leak
+                into ``ModuleSelector.config`` and serialized checkpoints).
+        """
+        return cls.registry.register(
+            type_name, compile_unsupported_reason=compile_unsupported_reason
+        )
 
     def build(
         self,
@@ -328,7 +324,9 @@ class ModuleSelector:
         return Module(
             module,
             label_encoding,
-            compile_unsupported_reason=self._instance.compile_unsupported_reason(),
+            compile_unsupported_reason=self.registry.get_compile_unsupported_reason(
+                self.type
+            ),
         )
 
     @classmethod

@@ -1,48 +1,50 @@
-"""Helpers for tests that exercise ``torch.compile``.
+"""Helpers for tests that exercise ``torch.compile``."""
 
-The ``dynamo_hygiene`` fixture lives here rather than in a ``conftest.py`` so
-that test modules in any package (``fme/core``, ``fme/ace``, ...) can opt into
-it with a single import; pytest picks up an autouse fixture from the test
-module's own namespace, so importing this name into a test module makes it
-autouse for that module and that module only. A ``conftest.py`` fixture would
-either apply to unrelated tests in the same directory or need to be duplicated
-per package.
-"""
-
-import contextlib
+import functools
+import os
 from collections.abc import Iterator
-from typing import Any
-from unittest import mock
 
 import pytest
 import torch
 
-from fme.core.compile import compile_enabled
+from fme.core.compile import compile_backend, compile_enabled
+from fme.core.device import get_device
+
+TEST_COMPILE_BACKEND = "aot_eager"
+"""The backend the test suite compiles with unless ``FME_COMPILE_BACKEND`` is set.
+
+Production compiles with inductor, whose code generation takes tens of seconds
+per network, too slow for every test that builds a step. ``aot_eager`` still
+runs dynamo tracing and AOTAutograd, so graph breaks, tracing errors and
+recompiles surface across the whole suite, but runs the traced graph eagerly
+instead of generating kernels. Inductor itself is covered by targeted tests
+that select it with :func:`fme.core.compile.compile_backend`.
+"""
 
 
-@contextlib.contextmanager
-def compile_backend(backend: str) -> Iterator[None]:
-    """Enable compilation and force every ``torch.compile`` call in the body to
-    use ``backend``.
+@pytest.fixture(autouse=True, scope="session")
+def session_compile_backend() -> Iterator[None]:
+    """Compile with :data:`TEST_COMPILE_BACKEND` for the whole test session.
 
-    Steps call ``torch.compile`` with its default backend, so there is no
-    config-level way to pick one. The default inductor backend takes
-    tens of seconds to compile even tiny networks, which does not fit the test
-    suite's timeouts, while ``"aot_eager"`` still runs the full dynamo tracing
-    and AOTAutograd path (so graph breaks and tracing errors still surface) in
-    a fraction of the time.
+    The root ``conftest.py`` imports this fixture, making it autouse for every
+    test. Whether modules compile at all is unchanged, so the suite compiles
+    wherever production does (on CUDA). Setting ``FME_COMPILE_BACKEND`` runs
+    the suite with that backend instead, e.g. ``FME_COMPILE_BACKEND=inductor``
+    to run every test through production's backend.
 
-    Args:
-        backend: The ``torch.compile`` backend to substitute, e.g.
-            ``"aot_eager"``.
+    The backend is also exported as ``FME_COMPILE_BACKEND`` so that tests
+    running an entrypoint in a subprocess (e.g. under ``torchrun``) compile
+    with it too.
     """
-    real_compile = torch.compile
-
-    def _compile(module: Any, **kwargs: Any) -> Any:
-        return real_compile(module, **{**kwargs, "backend": backend})
-
-    with compile_enabled(True), mock.patch("torch.compile", side_effect=_compile):
+    if os.environ.get("FME_COMPILE_BACKEND"):
         yield
+        return
+    os.environ["FME_COMPILE_BACKEND"] = TEST_COMPILE_BACKEND
+    try:
+        with compile_backend(TEST_COMPILE_BACKEND):
+            yield
+    finally:
+        del os.environ["FME_COMPILE_BACKEND"]
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +52,8 @@ def compile_on() -> Iterator[None]:
     """Enable compilation for every test in a test module, on any device.
 
     By default tests compile only on CUDA; use this in modules where every
-    test compiles, including on CPU. Elsewhere, :func:`compile_backend`
-    enables compilation for the steps it builds.
+    test compiles, including on CPU. Elsewhere, wrap the code under test in
+    :func:`fme.core.compile.compile_enabled`.
 
     Import this name into a test module to make it autouse for that module::
 
@@ -63,19 +65,51 @@ def compile_on() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def dynamo_hygiene() -> Iterator[None]:
-    """Isolate a test module's dynamo state from the rest of the suite.
+    """Isolate each test's dynamo state from the rest of the suite.
+
+    The root ``conftest.py`` imports this fixture, making it autouse for every
+    test.
 
     Dynamo's compilation cache is keyed on code objects and is process-global,
     so compiled functions and guards leak between tests sharing an xdist
     worker; ``torch._dynamo.reset()`` before and after each test keeps a
-    compile in one test from being served (or invalidated) by another.
+    compile in one test from being served (or invalidated) by another. Every
+    compiled module is traced through the same ``DummyWrapper.forward`` code
+    object, so without a reset the recompile budget of that code object is
+    shared by the whole worker, and later tests would silently run eagerly once
+    it is used up.
 
-    Import this name into a test module to make it autouse for that module::
-
-        from fme.core.testing import dynamo_hygiene  # noqa: F401
+    Within a test, hitting the recompile limit raises instead of falling back
+    to eager, so that tests cannot pass while claiming to exercise compiled
+    code they never ran. Tests of the production fallback patch
+    ``torch._dynamo.config.fail_on_recompile_limit_hit`` back off.
     """
     torch._dynamo.reset()
     try:
-        yield
+        with torch._dynamo.config.patch(fail_on_recompile_limit_hit=True):
+            yield
     finally:
         torch._dynamo.reset()
+
+
+@functools.cache
+def _inductor_unavailable_reason(device_type: str) -> str | None:
+    try:
+        torch.compile(lambda t: t + 1, backend="inductor", fullgraph=True)(
+            torch.zeros(2, device=device_type)
+        )
+    except Exception as err:  # e.g. no C++ compiler / OpenMP for CPU codegen
+        return f"inductor codegen unavailable on {device_type}: {err}"
+    return None
+
+
+def skip_without_inductor() -> None:
+    """Skip the calling test when inductor cannot generate code on the
+    current device, e.g. on a CPU machine without a C++ toolchain.
+
+    Production compiles with inductor on CUDA, where it is always available,
+    so this only ever skips off CUDA.
+    """
+    reason = _inductor_unavailable_reason(get_device().type)
+    if reason is not None:
+        pytest.skip(reason)

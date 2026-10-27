@@ -110,7 +110,7 @@ class SecondaryDecoder:
         unaffected.
 
         Args:
-            kwargs: Forwarded to ``torch.compile``.
+            kwargs: Forwarded to :meth:`fme.core.registry.module.Module.compile`.
         """
         compiled = copy.copy(self)
         compiled._module = self._module.compile(**kwargs)

@@ -16,13 +16,14 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.compile import compile_enabled
+from fme.core.compile import compile_backend, compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
+from fme.core.rand import use_generator
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
@@ -44,8 +45,8 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
-    compile_backend,
     get_dataset_info,
+    skip_without_inductor,
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
@@ -641,21 +642,38 @@ def test_step_applies_wrapper(config: StepSelector):
         if config._step_config_instance.config is not None:
             multi_calls += len(config._step_config_instance.config.forcing_multipliers)
 
-    wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
+    received: list[Callable[..., Any]] = []
+    invocations: list[int] = []
+
+    def wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
+        received.append(module)
+        invocations.append(0)
+        index = len(invocations) - 1
+
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            invocations[index] += 1
+            return module(*args, **kwargs)
+
+        return wrapped
+
     step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
         wrapper=wrapper,
     )
-    assert wrapper.call_count == multi_calls * len(step.modules)
-    wrapped = [call.args[0] for call in wrapper.call_args_list]
-    for module in step.modules:
-        # a compiled step wraps the compiled view of its module, which exposes
-        # the module torch.compile was called on as _orig_mod
-        assert any(
-            m is module or getattr(m, "_orig_mod", None) is module for m in wrapped
-        )
+    # the wrapper is applied once per module per call, and each wrapped result
+    # is what that forward pass runs: a wrapper applied to anything else (such
+    # as the parameter-owning module of a compiled Module) would go uncalled
+    assert len(received) == multi_calls * len(step.modules)
+    assert invocations == [1] * len(received)
+    # the wrapper receives each module's forward callable: the module itself
+    # when eager, or its torch.compile view, which exposes the compiled module
+    # as _orig_mod
+    forward_callables = list({id(m): m for m in received}.values())
+    assert len(forward_callables) == len(step.modules)
+    owners = {id(getattr(m, "_orig_mod", m)) for m in forward_callables}
+    assert owners == {id(m) for m in step.modules}
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
@@ -2569,7 +2587,41 @@ _COMPILED_MODULE_CASES = [
         ["module", "radiation_module"],
         id="separate_radiation",
     ),
+    pytest.param(
+        get_multi_call_selector,
+        ["_wrapped_step.module", "_wrapped_step.radiation_module"],
+        id="multi_call",
+    ),
 ]
+
+_EAGER_STEP_TYPES = {
+    "FCN3": "FCN3Step compiles in a follow-up PR and runs eagerly until then",
+}
+"""Registered step types that own modules but do not compile them, and why."""
+
+
+def _is_production_step_type(step_type: str) -> bool:
+    # test modules register mock step types into the same process-global
+    # registry when they share a pytest worker with this one
+    module_name = StepSelector.registry._types[step_type].__module__
+    return not module_name.rsplit(".", 1)[-1].startswith("test_")
+
+
+def test_compiled_module_cases_cover_every_registered_step_type():
+    """Every registered step type either has a compile case (which also runs
+    under inductor in test_inductor_compiled_step_matches_eager) or is listed
+    as running eagerly, so a new step type cannot silently skip compilation
+    coverage."""
+    covered = {
+        param.values[0]().type for param in _COMPILED_MODULE_CASES
+    } | _EAGER_STEP_TYPES.keys()
+    registered = {
+        step_type
+        for step_type in StepSelector.get_available_types()
+        if _is_production_step_type(step_type)
+    }
+    # "default" is a registered alias of "single_module"
+    assert covered | {"default"} == registered
 
 
 @pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)
@@ -2585,7 +2637,7 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
     selector = selector_getter()
     with compile_enabled(False):
         eager_step = get_step(selector, DEFAULT_IMG_SHAPE)
-    with compile_backend("aot_eager"):
+    with compile_enabled(True):
         compiled_step = get_step(selector, DEFAULT_IMG_SHAPE)
     assert compiled_step.get_state().keys() == eager_step.get_state().keys()
     for attr in module_attrs:
@@ -2598,3 +2650,84 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
         # _orig_mod is how torch._dynamo's OptimizedModule exposes the module
         # torch.compile was called on
         assert module.forward_module._orig_mod is module.torch_module, attr
+
+
+def _train_step_once(
+    step: StepABC, input_data: TensorDict, next_step_input_data: TensorDict
+) -> tuple[TensorDict, dict[str, torch.Tensor]]:
+    """Run one training forward and backward pass through ``step``, with any
+    random draws taken from a fixed generator, and return its outputs and the
+    gradients of its parameters."""
+    for module in step.modules:
+        module.train()
+        module.zero_grad(set_to_none=True)
+    with use_generator(torch.Generator().manual_seed(0)):
+        output = step.step(
+            args=StepArgs(input=input_data, next_step_input_data=next_step_input_data),
+            wrapper=lambda module: module,
+        ).output
+    torch.stack([tensor.square().sum() for tensor in output.values()]).sum().backward()
+    grads = {
+        name: parameter.grad.clone()
+        for name, parameter in step.modules.named_parameters()
+        if parameter.grad is not None
+    }
+    return output, grads
+
+
+def _relative_error(
+    actual: torch.Tensor, expected: torch.Tensor, floor: float = 0.0
+) -> float:
+    scale = max(expected.norm().item(), floor, 1e-12)
+    return (actual - expected).norm().item() / scale
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(300)
+@pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)
+def test_inductor_compiled_step_matches_eager(
+    selector_getter: Callable[[], StepSelector], module_attrs: list[str]
+):
+    """Each step type, compiled with inductor as in production, trains like
+    the eager step: outputs and gradients match within floating point
+    tolerance, and gradients reach the same parameters.
+
+    The rest of the suite compiles steps with ``aot_eager``, which traces the
+    same graphs but never runs inductor's code generation.
+    """
+    skip_without_inductor()
+    torch.manual_seed(0)
+    selector = selector_getter()
+    with compile_enabled(False):
+        eager_step = get_step(selector, DEFAULT_IMG_SHAPE)
+    with compile_enabled(True), compile_backend("inductor"):
+        compiled_step = get_step(selector, DEFAULT_IMG_SHAPE)
+    for attr in module_attrs:
+        assert operator.attrgetter(attr)(compiled_step).is_compiled, attr
+    compiled_step.load_state(eager_step.get_state())
+    input_data = get_tensor_dict(eager_step.input_names, DEFAULT_IMG_SHAPE, 2)
+    next_step_input_data = get_tensor_dict(
+        eager_step.next_step_input_names, DEFAULT_IMG_SHAPE, 2
+    )
+
+    eager_output, eager_grads = _train_step_once(
+        eager_step, input_data, next_step_input_data
+    )
+    compiled_output, compiled_grads = _train_step_once(
+        compiled_step, input_data, next_step_input_data
+    )
+
+    assert torch._dynamo.utils.counters["stats"]["unique_graphs"] > 0
+    assert compiled_output.keys() == eager_output.keys()
+    for name, tensor in compiled_output.items():
+        assert torch.isfinite(tensor).all(), name
+        assert _relative_error(tensor, eager_output[name]) < 1e-3, name
+    assert compiled_grads.keys() == eager_grads.keys()
+    # gradients that are zero up to rounding (e.g. normalization biases at
+    # initialization) are compared against a floor relative to the whole
+    # gradient instead of their own norm
+    floor = 1e-3 * torch.stack([g.norm() for g in eager_grads.values()]).norm().item()
+    for name, grad in compiled_grads.items():
+        assert torch.isfinite(grad).all(), name
+        error = _relative_error(grad, eager_grads[name], floor)
+        assert error < 5e-3, (name, error)

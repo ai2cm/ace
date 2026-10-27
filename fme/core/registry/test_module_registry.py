@@ -18,10 +18,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
 from fme.core.registry.module import Module
-from fme.core.testing import (  # noqa: F401  autouse in this module
-    compile_on,
-    dynamo_hygiene,
-)
+from fme.core.testing import compile_on  # noqa: F401  autouse in this module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
 
@@ -374,13 +371,13 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
     """compile() changes only the forward callable: same outputs, same
     state-dict keys, same underlying torch module; wrapping preserves it.
 
-    Uses the ``aot_eager`` backend so the test exercises dynamo tracing
-    without paying inductor's codegen cost.
+    Compiles with the test session's backend (``aot_eager``), which exercises
+    dynamo tracing without paying inductor's codegen cost.
     """
     torch.manual_seed(0)
     net = _LinearNet().to(fme.get_device())
     module = Module(net, label_encoding=None)
-    compiled = module.compile(backend="aot_eager")
+    compiled = module.compile()
     assert not module.is_compiled
     assert compiled.is_compiled
     assert compiled.torch_module is module.torch_module
@@ -407,23 +404,22 @@ def test_compiled_module_wrap_module_calls_wrapper_once():
     the compiled forward callable, and leaves the parameter-owning module as is.
     """
     module = Module(_LinearNet(), label_encoding=None)
-    compiled = module.compile(backend="aot_eager")
+    compiled = module.compile()
     wrapper = mock.MagicMock(side_effect=lambda m: m)
     wrapped = compiled.wrap_module(wrapper)
     wrapper.assert_called_once_with(compiled.forward_module)
     assert wrapped.torch_module is module.torch_module
 
 
-@ModuleSelector.register("mock_compile_unsupported")
+@ModuleSelector.register(
+    "mock_compile_unsupported",
+    compile_unsupported_reason="the mock module's forward pass is not traceable",
+)
 @dataclasses.dataclass
 class MockModuleBuilderCompileUnsupported(ModuleConfig):
     """Mock builder that declares torch.compile unsupported."""
 
     param_shapes: list[tuple[int, ...]]
-
-    @classmethod
-    def compile_unsupported_reason(cls) -> str | None:
-        return "the mock module's forward pass is not traceable"
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -452,6 +448,25 @@ def test_compile_unsupported_builder_runs_eagerly_without_tracing(
     mock_compile.assert_not_called()
     assert not compiled.is_compiled
     assert "not traceable" in caplog.text
+
+
+def test_registered_builder_without_compile_reason_compiles():
+    """A builder registered without a compile-unsupported reason is compiled
+    when built through ModuleSelector, and the registration option does not
+    leak into the serialized selector config."""
+    selector = ModuleSelector(type="mock", config={"param_shapes": [(2, 3)]})
+    module = selector.build(
+        n_in_channels=1, n_out_channels=1, dataset_info=DatasetInfo()
+    )
+    with mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile:
+        compiled = module.compile()
+    mock_compile.assert_called_once()
+    assert compiled.is_compiled
+    unsupported_selector = ModuleSelector(
+        type="mock_compile_unsupported", config={"param_shapes": [(2, 3)]}
+    )
+    assert "compile_unsupported_reason" not in unsupported_selector.config
+    assert "compile_unsupported_reason" not in dataclasses.asdict(unsupported_selector)
 
 
 def test_module_compile_is_a_no_op_when_compile_disabled():
