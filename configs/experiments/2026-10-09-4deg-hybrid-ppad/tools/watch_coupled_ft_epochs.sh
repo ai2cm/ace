@@ -40,9 +40,10 @@ for j in e['jobs']:
     state='finished' if s.get('exited') and s.get('exitCode')==0 else ('exited' if s.get('exited') else 'running')
     print(j['id'], j.get('result',{}).get('beaker'), state)") || { log "beaker experiment get failed"; sleep "$POLL"; continue; }
   if [ -z "$segs" ]; then log "no segments returned (transient?); retrying"; sleep "$POLL"; continue; fi
-  all_exited=1
-  while read -r JOB DS STATE_J; do
-    [ "$STATE_J" = finished ] || all_exited=0
+  # all segments finished?  (grep on a pipe: a here-string needs a temp file and a full disk once turned its failure
+  # into a false "experiment finished" exit, 2026-10-27)
+  all_exited=1; echo "$segs" | grep -qv " finished$" && all_exited=0
+  echo "$segs" | while read -r JOB DS STATE_J; do
     # epochs saved in this segment
     for N in $(beaker job logs "$JOB" 2>/dev/null | grep -o "Saving checkpoints for epoch [0-9]*" | awk '{print $5}' | sort -un); do
       grep -qx "$N" "$STATE" && continue
@@ -80,7 +81,7 @@ for j in e['jobs']:
       echo "$N" >> "$STATE"
       rm -rf "$D/src"
     done
-  done <<< "$segs"
+  done
   # refresh the analysis once an epoch's three evaluations have all exited
   for N in $(cat "$STATE"); do
     grep -qx "$N" "$STATE.refreshed" 2>/dev/null && continue
