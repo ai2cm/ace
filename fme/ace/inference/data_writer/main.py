@@ -315,8 +315,11 @@ def _gather_tensor_dict(
     """Gather each tensor across data-parallel ranks, concatenating along dim 0.
 
     Returns the concatenated dict on the data-parallel root, None on non-root.
+    With a single rank, returns the data on CPU without a device round-trip.
     Keys are sorted before calling collectives so every rank uses the same order.
     """
+    if dist.total_data_parallel_ranks == 1:
+        return {name: data[name].detach().cpu() for name in sorted(data)}
     device = get_device()
     gathered: dict[str, torch.Tensor] = {}
     for name in sorted(data):
@@ -336,7 +339,10 @@ def _gather_time(time: xr.DataArray, dist: Distributed) -> xr.DataArray | None:
     """Gather an xr.DataArray time coordinate across data-parallel ranks.
 
     Returns the concatenated time on the data-parallel root, None on non-root.
+    With a single rank, returns the time unchanged.
     """
+    if dist.total_data_parallel_ranks == 1:
+        return time
     parts = dist.data_parallel_gather_object(time)
     if not dist.is_data_parallel_root():
         return None
@@ -409,30 +415,19 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             batch: Prediction and target data.
         """
         dist = Distributed.get_instance()
-        if dist.total_data_parallel_ranks > 1:
-            prediction = _gather_tensor_dict(dict(batch.prediction), dist)
-            target = _gather_tensor_dict(dict(batch.reference), dist)
-            time = _gather_time(batch.time, dist)
-            if batch.step_diagnostics is not None:
-                gathered_diag = _gather_tensor_dict(
-                    dict(batch.step_diagnostics.delta), dist
-                )
-            else:
-                gathered_diag = None
-            if not dist.is_data_parallel_root():
-                return
-            # On root, gathered values are guaranteed non-None.
-            if prediction is None or target is None or time is None:
-                raise RuntimeError("gather returned None on data-parallel root")
-        else:
-            prediction = dict(batch.prediction)
-            target = dict(batch.reference)
-            time = batch.time
-            gathered_diag = (
-                dict(batch.step_diagnostics.delta)
-                if batch.step_diagnostics is not None
-                else None
+        prediction = _gather_tensor_dict(dict(batch.prediction), dist)
+        target = _gather_tensor_dict(dict(batch.reference), dist)
+        time = _gather_time(batch.time, dist)
+        if batch.step_diagnostics is not None:
+            gathered_diag = _gather_tensor_dict(
+                dict(batch.step_diagnostics.delta), dist
             )
+        else:
+            gathered_diag = None
+        if not dist.is_data_parallel_root():
+            return
+        if prediction is None or target is None or time is None:
+            raise RuntimeError("gather returned None on data-parallel root")
 
         for writer in self._writers:
             writer.append_batch(
@@ -585,33 +580,18 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         dist = Distributed.get_instance()
         merged = {**batch.prediction, **batch.forcing}
-
-        if dist.total_data_parallel_ranks > 1:
-            gathered_data = _gather_tensor_dict(merged, dist)
-            time = _gather_time(batch.time, dist)
-            if batch.step_diagnostics is not None:
-                gathered_diag = _gather_tensor_dict(
-                    dict(batch.step_diagnostics.delta), dist
-                )
-            else:
-                gathered_diag = None
-            if not dist.is_data_parallel_root():
-                return
-            if gathered_data is None or time is None:
-                raise RuntimeError("gather returned None on data-parallel root")
+        gathered_data = _gather_tensor_dict(merged, dist)
+        time = _gather_time(batch.time, dist)
+        if batch.step_diagnostics is not None:
+            gathered_diag = _gather_tensor_dict(
+                dict(batch.step_diagnostics.delta), dist
+            )
         else:
-            unpaired_batch = BatchData.new_on_device(
-                data=merged,
-                time=batch.time,
-                labels=batch.labels,
-            )
-            gathered_data = dict(unpaired_batch.data)
-            time = unpaired_batch.time
-            gathered_diag = (
-                dict(batch.step_diagnostics.delta)
-                if batch.step_diagnostics is not None
-                else None
-            )
+            gathered_diag = None
+        if not dist.is_data_parallel_root():
+            return
+        if gathered_data is None or time is None:
+            raise RuntimeError("gather returned None on data-parallel root")
 
         for writer in self._writers:
             writer.append_batch(
