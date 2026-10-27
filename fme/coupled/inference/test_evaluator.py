@@ -612,12 +612,12 @@ _SEED_N_COUPLED_STEPS = 2
 
 
 def _save_stochastic_coupled_stepper(
-    tmp_path: pathlib.Path,
+    tmp_path: pathlib.Path, stochastic_ocean: bool = False
 ) -> tuple[str, MockCoupledData]:
     """A coupled checkpoint whose atmosphere draws noise, and its mock data.
 
-    The noise is what makes the seed observable in the output. The ocean stays
-    deterministic, as in the coupled configurations run today.
+    The noise is what makes the seed observable in the output. The ocean is
+    deterministic unless ``stochastic_ocean`` is set.
     """
     dataset_info, mock_data = _create_dataset_info_for_stepper(
         ocean_in_names=_SEED_OCEAN_IN_NAMES,
@@ -637,6 +637,11 @@ def _save_stochastic_coupled_stepper(
         dataset_info=dataset_info,
         ocean_timedelta=mock_data.ocean.timedelta,
         atmosphere_timedelta=mock_data.atmosphere.timedelta,
+        ocean_builder=(
+            ModuleSelector(type="prebuilt", config={"module": AddOneWithNoise()})
+            if stochastic_ocean
+            else None
+        ),
         atmosphere_builder=ModuleSelector(
             type="prebuilt", config={"module": AddOneWithNoise()}
         ),
@@ -651,8 +656,11 @@ def _run_seeded_evaluator(
     mock_data: MockCoupledData,
     seed: int | None,
     coupled_steps_in_memory: int = 1,
+    ocean_seed: int | None = None,
+    realm: str = "atmosphere",
 ) -> np.ndarray:
-    """Run the coupled evaluator entrypoint, returning the atmosphere prognostic."""
+    """Run the coupled evaluator entrypoint, returning ``realm``'s first
+    prognostic (``a_prog`` or ``o_prog``)."""
     run_dir.mkdir()
     config = InferenceEvaluatorConfig(
         experiment_dir=str(run_dir),
@@ -673,13 +681,14 @@ def _run_seeded_evaluator(
         ),
         data_writer=CoupledDataWriterConfig(
             ocean=DataWriterConfig(
-                save_prediction_files=False, save_monthly_files=False
+                save_prediction_files=realm == "ocean", save_monthly_files=False
             ),
             atmosphere=DataWriterConfig(
-                save_prediction_files=True, save_monthly_files=False
+                save_prediction_files=realm == "atmosphere", save_monthly_files=False
             ),
         ),
         seed=seed,
+        ocean_seed=ocean_seed,
     )
     config_filename = run_dir / "config.yaml"
     with open(config_filename, "w") as f:
@@ -688,10 +697,10 @@ def _run_seeded_evaluator(
         wandb.configure(log_to_wandb=True)
         main(yaml_config=str(config_filename))
     ds = xr.open_dataset(
-        run_dir / "atmosphere" / "autoregressive_predictions.nc",
+        run_dir / realm / "autoregressive_predictions.nc",
         decode_timedelta=False,
     )
-    return ds["a_prog"].values
+    return ds["a_prog" if realm == "atmosphere" else "o_prog"].values
 
 
 @pytest.mark.slow
@@ -717,6 +726,33 @@ def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
     np.testing.assert_array_equal(seed0, seed0_again)
     np.testing.assert_array_equal(seed0, seed0_chunked)
     assert not np.allclose(seed0, seed1)
+
+
+@pytest.mark.slow
+def test_evaluator_ocean_seed(tmp_path: pathlib.Path):
+    """With a stochastic ocean, ``ocean_seed`` defaults to ``seed + 1`` (so
+    setting it explicitly reproduces the default run) and changes the ocean's
+    output when varied at a fixed ``seed``."""
+    checkpoint_path, mock_data = _save_stochastic_coupled_stepper(
+        tmp_path, stochastic_ocean=True
+    )
+
+    def run(name: str, ocean_seed: int | None) -> np.ndarray:
+        return _run_seeded_evaluator(
+            tmp_path / name,
+            checkpoint_path,
+            mock_data,
+            0,
+            ocean_seed=ocean_seed,
+            realm="ocean",
+        )
+
+    default = run("default", None)
+    explicit = run("explicit", 1)
+    other = run("other", 11)
+
+    np.testing.assert_array_equal(default, explicit)
+    assert not np.allclose(default, other)
 
 
 def save_coupled_stepper_with_ema(

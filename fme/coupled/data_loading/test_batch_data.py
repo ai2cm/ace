@@ -88,3 +88,38 @@ def test_apply_config_seed_defers_to_a_restored_random_state():
     ocean_state = result.ocean_data.as_batch_data().stepper_state
     assert ocean_state is not None
     assert ocean_state.random_state is not None
+
+
+def _draw(component, n: int = 4) -> torch.Tensor:
+    stepper_state = component.as_batch_data().stepper_state
+    assert stepper_state is not None
+    random_state = stepper_state.random_state
+    assert random_state is not None
+    return torch.randn(n, generator=random_state.generator)
+
+
+def test_apply_config_seed_ocean_defaults_to_seed_plus_one():
+    seeded = _coupled_state().apply_config_seed(0)
+    expected = torch.randn(4, generator=RandomState.from_seed(1).generator)
+    assert torch.equal(_draw(seeded.ocean_data), expected)
+    explicit = _coupled_state().apply_config_seed(0, ocean_seed=1)
+    assert torch.equal(_draw(explicit.ocean_data), expected)
+
+
+def test_apply_config_seed_ocean_seed_varies_only_the_ocean():
+    """An ensemble can hold one realm's noise fixed and vary the other's."""
+    a = _coupled_state().apply_config_seed(0, ocean_seed=11)
+    b = _coupled_state().apply_config_seed(0, ocean_seed=21)
+    assert torch.equal(_draw(a.atmosphere_data), _draw(b.atmosphere_data))
+    ocean_a = _draw(a.ocean_data)
+    assert not torch.equal(ocean_a, _draw(b.ocean_data))
+    expected = torch.randn(4, generator=RandomState.from_seed(11).generator)
+    assert torch.equal(ocean_a, expected)
+
+
+def test_apply_config_seed_ocean_seed_without_seed_seeds_only_the_ocean():
+    state = _coupled_state()
+    result = state.apply_config_seed(None, ocean_seed=5)
+    assert result.atmosphere_data is state.atmosphere_data
+    expected = torch.randn(4, generator=RandomState.from_seed(5).generator)
+    assert torch.equal(_draw(result.ocean_data), expected)
