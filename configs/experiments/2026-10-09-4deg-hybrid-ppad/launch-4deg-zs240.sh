@@ -4,6 +4,7 @@
 #   FORM=two    OCEAN_CKPT_DS=<dataset> [OCEAN_CKPT_FILE=...]  (ocean-only ckpt + frozen 4deg ACE2S atmosphere)
 #   FORM=single CKPT_DS=<dataset> [CKPT_FILE=...]              (one coupled checkpoint)
 #   NAME_PREFIX=samudra-zs240-4deg-<arm> ./launch-4deg-zs240.sh
+#   EXTRA_OVERRIDE=n_ensemble_per_ic=4 NAME_PREFIX=...-ens4 ...   (4 members per start)
 set -euo pipefail
 MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 FORM="${FORM:?two|single}"
@@ -12,6 +13,7 @@ ATMOS_DS="${ATMOS_DS:-01M0YFRM5TKQR6GSNDXKJSBNAS}"
 ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 YEARS="${YEARS:-$(seq -f '%04g' 241 260 | tr '\n' ' ')}"
 PRIORITY="${PRIORITY:-high}"
+EXTRA_OVERRIDE="${EXTRA_OVERRIDE:-}"   # e.g. n_ensemble_per_ic=4 for an ensemble of members per start (same ICs, atmosphere noise differs)
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
@@ -38,7 +40,7 @@ for Y in $YEARS; do
     "${MOUNTS[@]}" \
     --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
-    -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/zs240/yr${Y}-${FORM}.yaml" 2>&1)
+    -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/zs240/yr${Y}-${FORM}.yaml" ${EXTRA_OVERRIDE:+--override "$EXTRA_OVERRIDE"} 2>&1)
   echo "$out" | grep -qm1 "beaker.org/ex/" && ok=$((ok+1)) || echo "FAILED $JOB: $(echo "$out" | tail -1)"
 done
 echo "${NAME_PREFIX}: launched $ok/$(echo $YEARS | wc -w)"
