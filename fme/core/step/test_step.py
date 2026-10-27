@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import unittest.mock
 from collections.abc import Callable, Collection
+from typing import Any
 
 import dacite
 import pytest
@@ -647,6 +648,37 @@ def test_step_applies_wrapper(config: StepSelector):
     assert wrapper.call_count == multi_calls * len(step.modules)
     for module in step.modules:
         wrapper.assert_any_call(module)
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_step_wrapper_does_not_persist(config: StepSelector):
+    """The per-call wrapper applies to that call only.
+
+    Activation checkpointing passes a wrapper that returns a plain function
+    rather than an nn.Module, so a step that stored the wrapped result would
+    lose its modules (and its state) after one checkpointed forward pass.
+    """
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    args = StepArgs(
+        input=get_tensor_dict(step.input_names, img_shape, n_samples=2),
+        next_step_input_data=get_tensor_dict(
+            step.next_step_input_names, img_shape, n_samples=2
+        ),
+        labels=None,
+    )
+    state_before = step.get_state()
+    modules_before = list(step.modules)
+
+    def to_plain_function(module: nn.Module) -> Callable[..., Any]:
+        return lambda *args, **kwargs: module(*args, **kwargs)
+
+    step.step(args=args, wrapper=to_plain_function)
+    step.step(args=args, wrapper=to_plain_function)
+
+    assert list(step.modules) == modules_before
+    assert step.get_state().keys() == state_before.keys()
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)

@@ -436,11 +436,15 @@ class CoupledStatsConfig:
         end_date: End of the stats window.
         beaker_dataset: Name of the Beaker dataset upload_coupled_stats.py
             creates from the merged stats. Not uploaded if None.
+        exclude_runs: Names of ensemble runs to leave out of the ensemble
+            stats. Their datasets are still written, but no stats are computed
+            for them.
     """
 
     start_date: str | None = None
     end_date: str | None = None
     beaker_dataset: str | None = None
+    exclude_runs: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -542,6 +546,7 @@ class CoupledDatasetsConfig:
         stats_config: CoupledStatsConfig,
         debug: bool,
         subsample: bool,
+        compute_stats: bool = True,
     ):
         self.validate(input_datasets)
 
@@ -707,6 +712,10 @@ class CoupledDatasetsConfig:
 
         self.output_writer.close_dask_client()
 
+        if not compute_stats:
+            logging.info(f"Skipping stats for {coupled_stats_directory}")
+            return
+
         self._get_and_merge_stats(
             input_datasets,
             compute_ocean=compute_ocean,
@@ -811,7 +820,36 @@ class CreateCoupledDatasetsConfig:
 
     def __post_init__(self):
         """Initialize and print dataset information after dataclass construction."""
+        self._validate_exclude_runs()
         self.input_datasets.log_info()
+
+    def _validate_exclude_runs(self):
+        exclude_runs = self.stats.exclude_runs
+        if not exclude_runs:
+            return
+        if not isinstance(self.input_datasets, InputEnsembleConfig):
+            raise ValueError(
+                "stats.exclude_runs is only supported for ensemble input datasets."
+            )
+        unknown = [run for run in exclude_runs if run not in self.input_datasets.runs]
+        if unknown:
+            raise ValueError(
+                f"stats.exclude_runs contains runs not in input_datasets.runs: "
+                f"{unknown}."
+            )
+        if not self.stats_run_names:
+            raise ValueError("stats.exclude_runs excludes every ensemble run.")
+
+    @property
+    def stats_run_names(self) -> list[str]:
+        """Names of the ensemble runs combined into the ensemble stats."""
+        if not isinstance(self.input_datasets, InputEnsembleConfig):
+            return []
+        return [
+            run
+            for run in self.input_datasets.runs
+            if run not in self.stats.exclude_runs
+        ]
 
     def write_coupled_datasets(self, debug: bool, subsample: bool):
         """Create coupled atmosphere and ocean datasets.
@@ -896,12 +934,13 @@ class CreateCoupledDatasetsConfig:
                     stats_config=self.stats,
                     debug=debug,
                     subsample=subsample,
+                    compute_stats=run_name not in self.stats.exclude_runs,
                 )
 
             logging.info("Combining ensemble stats...")
             _combine_ensemble_stats(
                 ensemble_stats_dir,
-                run_names=list(self.input_datasets.runs.keys()),
+                run_names=self.stats_run_names,
                 debug=debug,
                 history=self._history,
             )
