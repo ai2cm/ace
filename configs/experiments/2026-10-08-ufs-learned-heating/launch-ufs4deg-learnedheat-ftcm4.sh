@@ -9,6 +9,7 @@ set -euo pipefail
 MIN_RUNTIME="${MIN_RUNTIME:-3h}"   # beaker minimum guaranteed runtime (team template: 1deg 6h, 4deg 3h); override per launch
 ARMS="${ARMS:-resid-ohc-cap0005-learnedheat-ftcm4 resid-ohc-cap0005-const0-ftcm4}"
 DATA_DS="${DATA_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # cm4vars-uh store (CM4 variable set + unaccounted_heating target)
+#   rebuilt-flux twin: DATA_DS=01M5ZPJE5XF3F84CAMZRKCSKK1 STATS_DS=01M5ZPWQV6F3KRP8KNV5H424YS (hfds = the corrector's rebuild, not MOM6; make_rebuilt_hfds_dataset.py, 2026-10-27)
 STATS_DS="${STATS_DS:-01M4E83B1B83CB8DV9YEQTGA4G}"   # UFS 4deg 2026-10-06 stats + unaccounted_heating stats (files at the dataset root)
 STATS_SUBDIR="${STATS_SUBDIR:-}"   # "ocean" for the CM4 stats dataset (01M4W3MH28S5HPAJ84R7AB4V3W, the ORIGINAL arms; CM4 stats are for pretraining only, Troy 2026-10-20)
 JOB_SUFFIX="${JOB_SUFFIX:-}"       # e.g. -ufsstats

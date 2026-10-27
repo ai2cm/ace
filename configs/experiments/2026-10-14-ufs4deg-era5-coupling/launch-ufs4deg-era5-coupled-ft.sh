@@ -10,6 +10,7 @@ ATMOS_CKPT_FILE="${ATMOS_CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar
 OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M5D5GG2FB3MWWDD5GGSH8QR2}"   # UFS 4deg stats + unaccounted_heating (+ CM4 placeholders); coupled stages use UFS ocean + ERA5 atmosphere stats (Troy 2026-10-20)
 OCEAN_STATS_SUBDIR="${OCEAN_STATS_SUBDIR:-}"   # "ocean" for the CM4 stats dataset 01M4W3MH28S5HPAJ84R7AB4V3W (the 2026-10-14 runs; CM4 stats are for pretraining only)
 OCEAN_DS="${OCEAN_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"   # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh
+#   rebuilt-flux twin: OCEAN_DS=01M5ZPJE5XF3F84CAMZRKCSKK1 OCEAN_STATS_DS=01M5ZPWQV6F3KRP8KNV5H424YS (hfds = the corrector's rebuild, not MOM6; 2026-10-27)
 ERA5_DS="${ERA5_DS:-01M4W630AM1HQRYKJ2AJ0JMNN1}"     # era5-4deg-8layer-daily-ufs-coupled-1994-2023-v2
 ERA5_ZARR=2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
 CFG="${CFG:-learnedheat-ftcm4-era5-coupled-ft-ens}"

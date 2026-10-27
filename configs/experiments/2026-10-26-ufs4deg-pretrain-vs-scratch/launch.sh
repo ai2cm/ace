@@ -13,6 +13,8 @@ PRIORITY="${PRIORITY:-high}"
 CM4_STATS_DS="${CM4_STATS_DS:-01KY8D816E67NXHP2EB29FHBJM}"      # elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats (ocean/), pretraining only
 UFS_STATS_DS="${UFS_STATS_DS:-01M5D5GG2FB3MWWDD5GGSH8QR2}"      # UFS 4deg 2026-10-06 stats (+ uh + CM4 placeholder entries), every UFS stage
 UFS_DS="${UFS_DS:-01M4E83P5GMXQEN2JN8SZFB5BN}"                  # ufs-replay-ocean-4deg-19level-5day-2026-10-06-cm4vars-uh
+#   rebuilt-flux twins (hfds/hfds_total_area = the corrector's FV3-component rebuild instead of MOM6 hfds, 2026-10-27):
+#   UFS_DS=01M5ZPJE5XF3F84CAMZRKCSKK1 UFS_STATS_DS=01M5ZPWQV6F3KRP8KNV5H424YS  (both arms of a test must use the same pair)
 ERA5_DS="${ERA5_DS:-01M4W630AM1HQRYKJ2AJ0JMNN1}"                # era5-4deg-8layer-daily-ufs-coupled-1994-2023-v2
 ERA5_ZARR=2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
 ATMOS_CKPT_DS="${ATMOS_CKPT_DS:-01M39XBD8K0KB3GAQ79ETVN470}"    # 4deg-daily-ace2s-ft3-detached-rs0 (Jeremy, wandb 1r7oyu58)
