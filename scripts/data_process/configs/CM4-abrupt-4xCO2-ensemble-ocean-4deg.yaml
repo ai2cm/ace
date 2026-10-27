@@ -1,4 +1,4 @@
-# make cm4_abrupt_4xCO2_ensemble_ocean_stats
+# make cm4_abrupt_4xCO2_ensemble_ocean_stats RESOLUTION=4deg
 # Stats of the per-member 5-daily ocean and sea-ice stores produced by the
 # scripts/gfdl_om4 xrbeam Dataflow pipeline
 # (gfdl_om4/configs/cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily.yaml).

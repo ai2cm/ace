@@ -358,7 +358,7 @@ cm4_1pctCO2_ocean_stats:
 
 .PHONY: cm4_abrupt_4xCO2_ensemble_ocean_stats
 cm4_abrupt_4xCO2_ensemble_ocean_stats:
-	./compute_stats.sh --config configs/CM4-abrupt-4xCO2-ensemble-ocean-4deg.yaml
+	./compute_stats.sh --config configs/CM4-abrupt-4xCO2-ensemble-ocean-$(RESOLUTION).yaml
 
 .PHONY: cm4_piControl_ocean_1daily_stats
 cm4_piControl_ocean_1daily_stats:
@@ -381,7 +381,7 @@ CONFIG_CM4_1PCTCO2_COUPLED_1DAILY = configs/CM4-1pctCO2-coupled-$(RESOLUTION)-1d
 CONFIG_E3SMV3_PICONTROL_COUPLED = configs/E3SMv3-piControl-100yr-coupled.yaml
 CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED = configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml
 CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED_4DEG = configs/CM4-like-AM4-random-CO2-ensemble-coupled-4deg.yaml
-CONFIG_CM4_ABRUPT_4XCO2_COUPLED_4DEG = configs/CM4-abrupt-4xCO2-ensemble-coupled-4deg.yaml
+CONFIG_CM4_ABRUPT_4XCO2_COUPLED = configs/CM4-abrupt-4xCO2-ensemble-coupled-$(RESOLUTION).yaml
 
 .PHONY: cm4_piControl_coupled
 cm4_piControl_coupled:
@@ -449,13 +449,13 @@ cm4_like_am4_random_co2_ensemble_coupled_argo:
 cm4_like_am4_random_co2_ensemble_coupled_4deg_argo:
 	./create_coupled_datasets.sh --config $(CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED_4DEG) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
-.PHONY: cm4_abrupt_4xCO2_ensemble_coupled_4deg
-cm4_abrupt_4xCO2_ensemble_coupled_4deg:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_ABRUPT_4XCO2_COUPLED_4DEG)
+.PHONY: cm4_abrupt_4xCO2_ensemble_coupled
+cm4_abrupt_4xCO2_ensemble_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_ABRUPT_4XCO2_COUPLED)
 
-.PHONY: cm4_abrupt_4xCO2_ensemble_coupled_4deg_argo
-cm4_abrupt_4xCO2_ensemble_coupled_4deg_argo:
-	./create_coupled_datasets.sh --config $(CONFIG_CM4_ABRUPT_4XCO2_COUPLED_4DEG) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+.PHONY: cm4_abrupt_4xCO2_ensemble_coupled_argo
+cm4_abrupt_4xCO2_ensemble_coupled_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_ABRUPT_4XCO2_COUPLED) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
 .PHONY: shield_amip_constant_co2_c96_dataset
 shield_amip_constant_co2_c96_dataset:

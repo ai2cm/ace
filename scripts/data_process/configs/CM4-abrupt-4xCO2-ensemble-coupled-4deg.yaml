@@ -1,5 +1,5 @@
-# make cm4_abrupt_4xCO2_ensemble_coupled_4deg
-# Requires the ocean stats from make cm4_abrupt_4xCO2_ensemble_ocean_stats.
+# make cm4_abrupt_4xCO2_ensemble_coupled RESOLUTION=4deg
+# Requires the ocean stats from make cm4_abrupt_4xCO2_ensemble_ocean_stats RESOLUTION=4deg.
 version: "2026-10-20"
 family_name: cm4-abrupt-4xCO2-ensemble-4deg-coupled
 output_directory: gs://vcm-ml-intermediate
