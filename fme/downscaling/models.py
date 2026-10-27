@@ -172,6 +172,7 @@ class DiffusionModelMetadata:
     use_fine_topography: bool
     full_fine_coords: LatLonCoordinates
     num_static_inputs: int
+    interpolation: InterpolationConfig
     # Avoid runtime failures for frozen class with unhashable field
     __hash__ = None  # type: ignore[assignment]
 
@@ -820,6 +821,7 @@ class DiffusionModel:
             num_static_inputs=len(self.static_inputs.fields)
             if self.static_inputs
             else 0,
+            interpolation=self.config.interpolation,
         )
 
     def _lon_roll_amount(self, coarse_lon: torch.Tensor) -> tuple[int, float]:
