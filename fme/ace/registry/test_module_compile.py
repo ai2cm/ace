@@ -11,15 +11,13 @@ Every production builder in the registry has one entry in
 :data:`BUILDER_CASES`, so registering a builder without deciding whether its
 networks compile fails :func:`test_builder_cases_cover_every_registered_builder`.
 
-These tests run on CUDA, and on CPU where inductor's C++ toolchain is
-available, skipping otherwise.
+These tests run only on CUDA, where production compiles by default.
 """
 
 import contextlib
 import dataclasses
 import functools
 import logging
-import sys
 from collections.abc import Callable, Iterator
 from typing import Any
 from unittest import mock
@@ -45,7 +43,7 @@ from fme.core.labels import BatchLabels
 from fme.core.rand import use_generator
 from fme.core.registry.module import Module, ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
-from fme.core.testing import get_dataset_info, skip_without_inductor
+from fme.core.testing import get_dataset_info, skip_unless_cuda
 
 LATLON_SHAPE = (8, 16)
 """Image shape for the builders that take a regular lat/lon grid."""
@@ -90,15 +88,6 @@ INDUCTOR_TIMEOUT_SECONDS = 300
 inductor, which for the Swin builders takes about two minutes on the CI GPU."""
 
 SWIN_BUILDERS = frozenset({"SwinTransformer", "NoiseConditionedSwinTransformer"})
-
-SEGFAULTS_ON_MACOS_CPU = frozenset({"Samudra"})
-"""Builders whose inductor backward crashes the process on macOS CPU.
-
-Seen with torch 2.7.1 on Apple silicon: the generated backward calls
-``aten.convolution_backward`` on a ``slice_scatter`` output and segfaults
-inside aten. Production compiles on CUDA, where the case runs; Linux CPU runs
-it too.
-"""
 
 
 def _is_production_builder(builder_type: str) -> bool:
@@ -545,13 +534,7 @@ def test_inductor_compiled_builder_matches_eager(case: BuilderCase):
     for a conditioning path this configuration does not use), so the contract
     is that compilation does not change which parameters get gradients.
     """
-    skip_without_inductor()
-    if (
-        case.name in SEGFAULTS_ON_MACOS_CPU
-        and sys.platform == "darwin"
-        and get_device().type == "cpu"
-    ):
-        pytest.skip(f"{case.name} inductor backward segfaults on macOS CPU")
+    skip_unless_cuda()
     torch.manual_seed(0)
     module = _build_module(case)
     module.torch_module.train()
