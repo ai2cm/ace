@@ -3,6 +3,7 @@ from .compile import (
     compile_on,
     dynamo_hygiene,
     session_compile_backend,
+    skip_without_inductor,
 )
 from .dataset_info import get_dataset_info
 from .distributed import mock_distributed

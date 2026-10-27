@@ -1,5 +1,6 @@
 """Helpers for tests that exercise ``torch.compile``."""
 
+import functools
 import os
 from collections.abc import Iterator
 
@@ -7,6 +8,7 @@ import pytest
 import torch
 
 from fme.core.compile import compile_backend, compile_enabled
+from fme.core.device import get_device
 
 TEST_COMPILE_BACKEND = "aot_eager"
 """The backend the test suite compiles with unless ``FME_COMPILE_BACKEND`` is set.
@@ -80,3 +82,26 @@ def dynamo_hygiene() -> Iterator[None]:
             yield
     finally:
         torch._dynamo.reset()
+
+
+@functools.cache
+def _inductor_unavailable_reason(device_type: str) -> str | None:
+    try:
+        torch.compile(lambda t: t + 1, backend="inductor", fullgraph=True)(
+            torch.zeros(2, device=device_type)
+        )
+    except Exception as err:  # e.g. no C++ compiler / OpenMP for CPU codegen
+        return f"inductor codegen unavailable on {device_type}: {err}"
+    return None
+
+
+def skip_without_inductor() -> None:
+    """Skip the calling test when inductor cannot generate code on the
+    current device, e.g. on a CPU machine without a C++ toolchain.
+
+    Production compiles with inductor on CUDA, where it is always available,
+    so this only ever skips off CUDA.
+    """
+    reason = _inductor_unavailable_reason(get_device().type)
+    if reason is not None:
+        pytest.skip(reason)
