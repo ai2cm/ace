@@ -296,7 +296,7 @@ class Optimization(OptimizationABC):
             ValueError: If the checkpoint's parameter groups are not
                 structurally compatible with the freshly-built optimizer
                 (e.g. different group count or per-group parameter count),
-                or if exactly one of the checkpoint and the current
+                or if one but not both of the checkpoint and the current
                 optimizer is Muon.
         """
         check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
@@ -342,8 +342,8 @@ class Optimization(OptimizationABC):
         Loads state from a serializable data structure.
 
         Raises:
-            ValueError: If exactly one of the saved and the current optimizer
-                is Muon.
+            ValueError: If one but not both of the saved and the current
+                optimizer is Muon.
         """
         check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
