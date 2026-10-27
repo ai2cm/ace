@@ -18,7 +18,10 @@ POLL="${POLL:-300}"
 BATCHES_PER_EPOCH="${BATCHES_PER_EPOCH:-1460}"   # 160 yr x 73 ocean steps / batch 8
 WORK="${WORK:-/home/troya/ace-randco2-figs/watchdog-work}"
 STATE="${STATE:-/home/troya/ace-randco2-figs/watchdog-${TAG}.done}"
-export CLUSTERS="${CLUSTERS:-ai2/rhea ai2/prometheus ai2/ceres ai2/jupiter ai2/titan ai2/saturn ai2/neptune}"
+# only pass CLUSTERS through when the caller set it: with --min-runtime > 0 Beaker refuses a submission whose cluster list
+# includes a cluster our budget has no allocation on ("allocation path ...; set min_runtime to 0"), which the old wide
+# default (rhea/prometheus/saturn/neptune) did; the eval launcher's own default (ceres/jupiter/titan) is allocated
+[ -n "${CLUSTERS:-}" ] && export CLUSTERS
 EVAL_LAUNCHER="${EVAL_LAUNCHER:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/launch-4deg-ace-randco2-evals.sh}"   # the ACE-only evaluator launcher to run per epoch
 REPO_ROOT=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
