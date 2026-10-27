@@ -490,3 +490,160 @@ def test_muon_bfloat16_without_nesterov_raises():
     optimizer = Muon([p], [], lr=0.02, nesterov=False)
     with pytest.raises(ValueError, match="bfloat16"):
         optimizer.step()
+
+
+# ---- Spectral Muon tests ----
+
+
+def _spectral_weight(groups: int = 1, modes: int = 4, channels: int = 8):
+    """Create a fake SFNO spectral filter weight (groups, modes, C, C, 2)."""
+    return nn.Parameter(torch.randn(groups, modes, channels, channels, 2))
+
+
+class _SpectralModel(nn.Module):
+    """Minimal model with a spectral filter weight and a regular weight."""
+
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(8, 8)
+        self.spectral_weight = _spectral_weight(1, 4, 8)
+        self.bias = nn.Parameter(torch.zeros(8))
+
+    def forward(self, x):
+        h = self.linear(x)
+        w = torch.view_as_complex(self.spectral_weight)
+        # (batch, 8) -> (batch, 1, 4, 8) complex, matmul per mode, sum
+        hc = h.cfloat().unsqueeze(1).unsqueeze(1).expand(-1, 1, 4, -1)
+        out = torch.einsum("bgmi,gmio->bgmo", hc, w)
+        return h + out.real.sum(dim=(1, 2, 3)).unsqueeze(-1) + self.bias
+
+
+def test_spectral_muon_grouping():
+    model = _SpectralModel().to(fme.get_device())
+    config = _muon_config(spectral_names=["spectral_weight"])
+    optimization = _build(model, config)
+    groups = optimization.optimizer.param_groups
+    muon_group = groups[0]
+    spectral_group = groups[1]
+    adamw_group = groups[2]
+    assert muon_group["use_muon"] is True
+    assert muon_group["spectral"] is False
+    assert spectral_group["use_muon"] is True
+    assert spectral_group["spectral"] is True
+    assert adamw_group["use_muon"] is False
+    assert id(model.linear.weight) in {id(p) for p in muon_group["params"]}
+    assert id(model.spectral_weight) in {id(p) for p in spectral_group["params"]}
+    assert id(model.bias) in {id(p) for p in adamw_group["params"]}
+    assert id(model.linear.bias) in {id(p) for p in adamw_group["params"]}
+
+
+def test_spectral_muon_step_reduces_loss():
+    torch.manual_seed(0)
+    model = _SpectralModel().to(fme.get_device())
+    config = _muon_config(spectral_names=["spectral_weight"])
+    optimization = _build(model, config)
+    x = torch.randn(4, 8, device=fme.get_device())
+    losses = _train_steps(model, optimization, x, n=3)
+    assert losses[-1] < losses[0]
+
+
+def test_spectral_muon_step_modifies_weight():
+    torch.manual_seed(0)
+    device = fme.get_device()
+    w = _spectral_weight(1, 4, 8).to(device)
+    original = w.detach().clone()
+    dummy = nn.Parameter(torch.randn(3, 3, device=device))
+    optimizer = Muon([dummy], [], lr=0.02, adamw_lr=1e-3, spectral_params=[w])
+    w.grad = torch.randn_like(w)
+    dummy.grad = torch.randn_like(dummy)
+    optimizer.step()
+    assert not torch.equal(w.detach(), original)
+
+
+def test_complex_ns_produces_approximately_unitary():
+    """The complex NS iteration should produce approximately unitary matrices."""
+    torch.manual_seed(42)
+    batch, m, n = 8, 16, 16
+    G = torch.randn(batch, m, n, dtype=torch.complex64)
+    result = fme_muon._zeropower_via_newtonschulz_complex(
+        G,
+        (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
+        fme_muon.DEFAULT_NS_STEPS,
+        fme_muon.EPS,
+    )
+    identity = torch.eye(n, dtype=torch.complex64).unsqueeze(0).expand(batch, -1, -1)
+    product = result @ result.mH
+    torch.testing.assert_close(product, identity, atol=0.4, rtol=0)
+
+
+def test_complex_ns_tall_and_wide():
+    """The complex NS handles both tall and wide matrices."""
+    torch.manual_seed(0)
+    for m, n in [(16, 8), (8, 16)]:
+        G = torch.randn(4, m, n, dtype=torch.complex64)
+        result = fme_muon._zeropower_via_newtonschulz_complex(
+            G,
+            (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
+            fme_muon.DEFAULT_NS_STEPS,
+            fme_muon.EPS,
+        )
+        assert result.shape == (4, m, n)
+        small = min(m, n)
+        if m <= n:
+            product = result @ result.mH
+        else:
+            product = result.mH @ result
+        identity = torch.eye(small, dtype=torch.complex64).unsqueeze(0).expand(4, -1, -1)
+        torch.testing.assert_close(product, identity, atol=0.5, rtol=0)
+
+
+def test_spectral_muon_invalid_shape_raises():
+    p = nn.Parameter(torch.randn(4, 8, 8))
+    with pytest.raises(ValueError, match="groups, modes, C_in, C_out, 2"):
+        Muon([nn.Parameter(torch.randn(3, 3))], [], lr=0.02, spectral_params=[p])
+
+
+def test_spectral_names_unmatched_raises():
+    model = _SpectralModel().to(fme.get_device())
+    with pytest.raises(ValueError, match="matched no parameter"):
+        _build(model, _muon_config(spectral_names=["no_such_param"]))
+
+
+def test_spectral_and_adamw_overlap_raises():
+    model = _SpectralModel().to(fme.get_device())
+    with pytest.raises(ValueError, match="matches both"):
+        _build(
+            model,
+            _muon_config(
+                adamw_names=["spectral_weight"],
+                spectral_names=["spectral_weight"],
+            ),
+        )
+
+
+def test_spectral_names_without_muon_raises():
+    with pytest.raises(ValueError, match="only used with optimizer_type='Muon'"):
+        OptimizationConfig(
+            optimizer_type="AdamW", spectral_names=["spectral_weight"]
+        )
+
+
+def test_spectral_muon_state_round_trip():
+    torch.manual_seed(0)
+    config = _muon_config(spectral_names=["spectral_weight"])
+    model = _SpectralModel().to(fme.get_device())
+    optimization = _build(model, config)
+    x = torch.randn(4, 8, device=fme.get_device())
+    _train_steps(model, optimization, x, n=2)
+    saved_state = copy.deepcopy(optimization.get_state())
+    saved_model = copy.deepcopy(model.state_dict())
+    _train_steps(model, optimization, x, n=2)
+
+    model2 = _SpectralModel().to(fme.get_device())
+    model2.load_state_dict(saved_model)
+    optimization2 = _build(model2, config)
+    optimization2.load_state(saved_state)
+    _train_steps(model2, optimization2, x, n=2)
+
+    for (name, p1), p2 in zip(model.state_dict().items(), model2.state_dict().values()):
+        torch.testing.assert_close(p1, p2, msg=name)
