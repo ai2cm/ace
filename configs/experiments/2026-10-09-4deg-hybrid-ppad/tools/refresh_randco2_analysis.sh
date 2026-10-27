@@ -9,6 +9,7 @@ export RANDCO2_OUT="$OUT"
 cd "$OUT"
 python "$SCRIPT_DIR/randco2_compare.py" > compare.log 2>&1
 python "$SCRIPT_DIR/randco2_fig.py" > fig.log 2>&1
+if [ "${RANDCO2_RES:-4deg}" != 4deg ]; then echo "refreshed $OUT (RANDCO2_RES=$RANDCO2_RES: compare + slopes only)"; exit 0; fi
 python "$SCRIPT_DIR/randco2_timeseries.py" > timeseries.log 2>&1
 python "$SCRIPT_DIR/randco2_tendency_phase.py" > tendency.log 2>&1
 python "$SCRIPT_DIR/randco2_epoch_summary.py" > summary.log 2>&1

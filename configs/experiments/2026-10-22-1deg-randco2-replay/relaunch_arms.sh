@@ -7,6 +7,8 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TOOLS=$(cd "$SCRIPT_DIR/../2026-10-09-4deg-hybrid-ppad/tools" && pwd)
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate fme
 log() { echo "$(date -u +%FT%TZ) $*"; }
+# the watchdogs' per-epoch analysis refresh scores the 1deg twin (tools/randco2_compare.py RANDCO2_RES=1deg) into its own dir
+export RANDCO2_RES=1deg OUT=/home/troya/ace-randco2-figs/analysis-1deg
 cd "$SCRIPT_DIR"
 # To continue a previous submission's run, export EXISTING_alt=<results dataset> and/or EXISTING_alt_replay=<...>:
 # the launcher then mounts it at /existing-results and uses the -resume config (resume_results + resume_wandb).

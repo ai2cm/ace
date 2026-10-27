@@ -21,6 +21,10 @@ OUT = os.environ.get("RANDCO2_OUT", os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(OUT, "cache")
 os.makedirs(CACHE, exist_ok=True)
 PROJECT = "ai2cm/ace2-cm4-atmos-noLSM"
+# RANDCO2_RES=1deg scores the 1deg twin (configs/experiments/2026-10-22-1deg-randco2-replay: rs1 atmosphere, watchdog
+# tags rco2rs1-1deg-{alt,alt-replay}-epN, wandb group ace1deg-randco2-before-after-coupled-ft); default = the 4deg set
+RES = os.environ.get("RANDCO2_RES", "4deg")
+PREFIX = f"ace{RES}-randco2"
 # tag -> wandb run-name pattern with {x} for the CO2 multiplier
 # add "rco2 rs2, after coupled FT (lifted)": "ace4deg-randco2-{x}xCO2-ic3-rco2rs2-after-jointens-ep<N>"
 # once the rco2rs2 coupled FT has a checkpoint (tools/lift_atmosphere_and_eval.sh)
@@ -49,6 +53,10 @@ api = wandb.Api()
 import re as _re
 
 _after = {}
+_LABEL_1DEG = {
+    "rco2rs1-1deg-alt": "rco2 rs1, alternating coupled FT ep{ep} (lifted, EMA)",
+    "rco2rs1-1deg-alt-replay": "rco2 rs1, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+}
 _LABEL = {
     "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",
     "rco2rs2-replay": "rco2 rs2, coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
@@ -65,13 +73,21 @@ _LABEL = {
     "rco2rs2-fta-lastblock": "rco2 rs2, FTA after FTO, last block+decoder only ep{ep} (lifted, EMA)",
     "rco2rs2-fta-firstblock": "rco2 rs2, FTA after FTO, encoder+first block only ep{ep} (lifted, EMA)",
 }
+if RES == "1deg":
+    _LABEL = _LABEL_1DEG
+    RUNS = {
+        "ace2sft-rs0 (never saw randCO2), before": PREFIX
+        + "-{x}xCO2-ic3-ace2sft-rs0-before",
+        "rco2 rs1 (1deg), before": PREFIX + "-{x}xCO2-ic3-rco2rs1-before",
+    }
 for _r in api.runs(
     PROJECT,
-    filters={"group": "ace4deg-randco2-before-after-coupled-ft"},
+    filters={"group": f"{PREFIX}-before-after-coupled-ft"},
     order="-created_at",
 ):
     _m = _re.match(
-        r"ace4deg-randco2-(\d)xCO2-ic3-(("
+        PREFIX
+        + r"-(\d)xCO2-ic3-(("
         + "|".join(sorted(_LABEL, key=len, reverse=True))
         + r")-(ep\d+|best))$",
         _r.name,
@@ -89,7 +105,7 @@ for _kind, _order in sorted(_after):
         if _ep == "best"
         else _LABEL[_kind].format(ep=_ep[2:])
     )
-    RUNS[_lab] = "ace4deg-randco2-{x}xCO2-ic3-" + _pat
+    RUNS[_lab] = PREFIX + "-{x}xCO2-ic3-" + _pat
 runs = {}
 for r in api.runs(
     PROJECT, filters={"jobType": "inference"}, order="-created_at", per_page=600
