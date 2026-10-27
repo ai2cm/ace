@@ -1,0 +1,164 @@
+# 2002-2010 clean-window S2S hindcast of the GLO12 coupled SamudrACE checkpoint, year 2003: 12 monthly starts (first
+# GLORYS12 5-day state of each month) x 8 noise members, 18 five-day steps (90 d), daily atmosphere + 5-day ocean
+# prediction files for MJO (RMM), SST CRPS, weeks 3-6 T2m/precip. GLORYS12 reanalysis ICs (GLO12 starts 2022). Troy 2026-10-27.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_coupled_steps: 18
+coupled_steps_in_memory: 6
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /glorys
+      file_pattern: 2026-10-27-glorys12-ocean-4deg-19level-5day-2001-2011-cm4vars.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5glorys
+      file_pattern: 2026-10-27-era5-4deg-8layer-daily-glorys12-coupled-2001-2011.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-01-04T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-02-03T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-03-05T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-04-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-05-04T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-06-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-07-03T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-08-02T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-09-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-10-01T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-11-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+    - '2003-12-05T00:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  atmosphere:
+    names:
+    - ULWRFtoa
+    - PRESsfc
+    - TMP2m
+    - PRATEsfc
+    - surface_temperature
+    - UGRD10m
+    - VGRD10m
+    - eastward_surface_stress
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_2
+    - eastward_wind_3
+    - eastward_wind_4
+    - eastward_wind_5
+    - eastward_wind_6
+    - eastward_wind_7
+    save_prediction_files: true
+    save_monthly_files: false
+  ocean:
+    names:
+    - sst
+    - thetao_0
+    - thetao_1
+    - thetao_2
+    - thetao_3
+    - thetao_4
+    - thetao_5
+    - thetao_6
+    - thetao_7
+    - thetao_8
+    - so_0
+    - zos
+    - ocean_sea_ice_fraction
+    - sea_ice_volume
+    save_prediction_files: true
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
