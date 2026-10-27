@@ -40,10 +40,10 @@ LAT_NAME = DIM_INFO_LATLON[0].name
 LON_NAME = DIM_INFO_LATLON[1].name
 
 
-def _gather_initial_condition_times(
+def _allgather_initial_condition_times(
     local_times: npt.NDArray[cftime.datetime],
 ) -> tuple[npt.NDArray[cftime.datetime], int]:
-    """Gather local initial-condition times from all data-parallel ranks.
+    """Allgather local initial-condition times from all data-parallel ranks.
 
     Returns:
         A tuple of (global_times, sample_offset) where global_times is the
@@ -459,7 +459,7 @@ class FileWriterConfig:
             # Zarr supports concurrent region writes, so under multi-GPU
             # inference each rank writes its own sample block directly.
             # Gather all ranks' init times so the store is sized globally.
-            global_times, sample_offset = _gather_initial_condition_times(
+            global_times, sample_offset = _allgather_initial_condition_times(
                 initial_condition_times
             )
             local_n_samples = len(initial_condition_times)

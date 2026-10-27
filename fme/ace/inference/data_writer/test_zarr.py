@@ -309,3 +309,60 @@ def test_zarr_adapter_single_timestep_data(
 
     ds = xr.open_zarr(str(tmpdir / "test.zarr"))
     assert ds.time.size == 1
+
+
+@pytest.mark.parallel
+def test_zarr_adapter_parallel_region_writes(tmp_path):
+    """Each data-parallel rank writes its sample region; combined store matches
+    a serial reference."""
+    from fme.core.distributed import Distributed
+
+    dist = Distributed()
+    rank = dist.data_parallel_rank
+    n_ranks = dist.total_data_parallel_ranks
+
+    n_global_samples = 4
+    n_local = n_global_samples // n_ranks
+    sample_offset = rank * n_local
+    n_timesteps = 2
+    timestep = datetime.timedelta(days=1)
+
+    global_ic_times = np.array(
+        [cftime.datetime(2020, 1, 1 + i) for i in range(n_global_samples)]
+    )
+    local_data = {
+        "foo": torch.full((n_local, n_timesteps, 2, 2), float(rank)),
+    }
+    local_time = xr.DataArray(
+        [
+            [cftime.datetime(2020, 2, 1 + s, t) for t in range(n_timesteps)]
+            for s in range(n_local)
+        ],
+        dims=("sample", "time"),
+    )
+
+    store_path = str(tmp_path / "parallel_test.zarr")
+    adapter = ZarrWriterAdapter(
+        path=store_path,
+        dims=("sample", "time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+            }
+        ),
+        timestep=timestep,
+        n_timesteps=n_timesteps,
+        initial_condition_times=global_ic_times,
+        sample_offset=sample_offset,
+    )
+    adapter.append_batch(local_data, local_time)
+    dist.barrier()
+
+    ds = xr.open_zarr(store_path)
+    assert ds.foo.shape == (n_global_samples, n_timesteps, 2, 2)
+    for r in range(n_ranks):
+        offset = r * n_local
+        np.testing.assert_array_equal(
+            ds.foo.values[offset : offset + n_local], float(r)
+        )
