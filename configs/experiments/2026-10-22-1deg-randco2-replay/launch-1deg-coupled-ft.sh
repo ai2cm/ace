@@ -10,7 +10,7 @@ OCEAN_DS="${OCEAN_DS:-01M4Q2J28N6YJXMWR1EE8Z1Q1D}"                # ocean_ppad_f
 OCEAN_CKPT="${OCEAN_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
 ATMOS_DS="${ATMOS_DS:-01M55CYWQKSFSB8GBCVM6WK59P}"                # random-CO2 ACE2S origLR-ft rs1 results (wandb tb6xf0ju)
 ATMOS_CKPT="${ATMOS_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
-N_GPUS="${N_GPUS:-4}"
+N_GPUS="${N_GPUS:-8}"   # 2026-10-27: 4 GPUs OOM in training at ~75 GiB (2 samples/GPU); configs are generated for N_GPUS=8
 PRIORITY="${PRIORITY:-high}"
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # guaranteed time before Beaker may preempt (gantry --min-runtime; 0 = any time)
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"

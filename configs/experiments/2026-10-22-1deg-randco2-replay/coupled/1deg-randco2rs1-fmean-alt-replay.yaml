@@ -160,7 +160,7 @@ validation:
   evaluate_all_steps: false
   weight: 1.0
   loader:
-    batch_size: 4
+    batch_size: 8
     num_data_workers: 2
     prefetch_factor: 2
     dataset:
@@ -196,7 +196,7 @@ validation:
   evaluate_all_steps: false
   weight: 1.0
   loader:
-    batch_size: 4
+    batch_size: 8
     num_data_workers: 2
     prefetch_factor: 2
     dataset:
@@ -232,7 +232,7 @@ validation:
   evaluate_all_steps: false
   weight: 1.0
   loader:
-    batch_size: 4
+    batch_size: 8
     num_data_workers: 2
     prefetch_factor: 2
     dataset:

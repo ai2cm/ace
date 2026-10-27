@@ -16,6 +16,7 @@ Spencer's step schedule, from the six 1deg random-CO2 training members of the rs
 """
 
 import copy
+import os
 import pathlib
 
 import yaml
@@ -72,9 +73,12 @@ cfg["checkpoint_every_n_batches"] = (
     250  # a preempted segment loses at most ~1 h of training (was 1000)
 )
 # the 1deg pair sits at the edge of 80 GiB with 2 samples per GPU: the end-of-epoch validation OOMed at batch 8
-# (2026-10-25); halve the validation batch (training batch unchanged)
+# (2026-10-25); one validation sample per GPU (fme requires batch_size % world_size == 0). 2026-10-27: training itself
+# OOMed at 2 samples per GPU on 4 GPUs (both arms, ~75 GiB), so the pair now runs on 8 GPUs (N_GPUS=8 ./launch-...),
+# one training sample per GPU; the training batch (8) is unchanged.
+N_GPUS = int(os.environ.get("N_GPUS", "8"))
 for v in cfg["validation"]:
-    v["loader"]["batch_size"] = 4
+    v["loader"]["batch_size"] = N_GPUS
 
 # replay data: the random-CO2 members of the rs1 fine-tune's training loader (atmosphere + sea_ice stores)
 rc = []
