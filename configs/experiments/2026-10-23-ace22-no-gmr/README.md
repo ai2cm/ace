@@ -30,5 +30,8 @@ seeds (`long36-evaluator-config.yaml`, copied unchanged from
 `../2026-08-28-ace22-variants/long36-backfill/`). While stage 2 is still running, first copy
 the checkpoint out with `snapshot-ckpt.sh`, since Beaker will not mount a running job's results.
 `snapshot-clip-off.sh` makes a copy of a checkpoint with the clip disabled, for the clip-off score.
+`run-p4k.sh` runs the control and +4 K SST pair on the selected checkpoint, clip on and off, as
+ACE2.2-ERA5's seeds were run (`inference-{control,p4k}.yaml`, copied from
+`../2026-08-28-ace22-variants/seed-perturbation/` with only the file labels' model token changed).
 
 Launch with `bash run.sh`. It is safe to rerun: each run launches whatever stage has become ready.
