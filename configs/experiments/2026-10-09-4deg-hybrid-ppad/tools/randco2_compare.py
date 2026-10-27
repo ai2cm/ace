@@ -61,6 +61,7 @@ _LABEL = {
     "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",
     "rco2rs2-replay": "rco2 rs2, coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
     "rco2rs2-replay-oceanonly": "rco2 rs2, ocean-only coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "rco2rs2-resid-replay": "rco2 rs2, hybrid-residual ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
     "rco2rs2-spb-rco2rs2": "rco2 rs2, alternating coupled FT ep{ep} (lifted, EMA)",
     "rco2rs2-spb-rco2rs2-l2sp1e-2": "rco2 rs2, alternating coupled FT + weight anchor 0.01 ep{ep} (lifted, EMA)",
     "rco2rs2-spb-rco2rs2-l2sp1": "rco2 rs2, alternating coupled FT + weight anchor 1 ep{ep} (lifted, EMA)",
