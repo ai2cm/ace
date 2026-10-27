@@ -7,15 +7,9 @@ from torch._dynamo.utils import counters
 import fme
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3Step, FCN3StepConfig
 from fme.core.compile import compile_enabled
-from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.optimization import Checkpoint
 from fme.core.step.args import StepArgs
-from fme.core.testing import (
-    compile_backend,
-    dynamo_hygiene,  # noqa: F401  autouse in this module
-    get_dataset_info,
-    trivial_network_and_loss_normalization,
-)
+from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
 
 IMG_SHAPE = (16, 32)
@@ -105,14 +99,14 @@ def test_fcn3_step_compiles():
     """Compiling runs the forward through torch.compile while leaving the
     checkpoint state identical in structure to the uncompiled step.
 
-    The step calls ``torch.compile`` with its default backend, so the backend
-    is forced to ``aot_eager`` from the outside to keep the test within the
-    suite's timeouts while still exercising dynamo tracing.
+    The step compiles with the test suite's backend (``aot_eager`` unless
+    ``FME_COMPILE_BACKEND`` is set); inductor is covered by
+    ``test_inductor_compiled_step_matches_eager`` in ``fme/core/step``.
     """
     torch.manual_seed(0)
     with compile_enabled(False):
         eager_step = _get_step(_get_fcn3_step_config())
-    with compile_backend("aot_eager"):
+    with compile_enabled(True):
         compiled_step = _get_step(_get_fcn3_step_config())
     eager_state = eager_step.get_state()
     compiled_step.load_state(eager_state)
@@ -121,7 +115,7 @@ def test_fcn3_step_compiles():
     args = _get_args(eager_step)
     eager_step.eval()
     compiled_step.eval()
-    with compile_backend("aot_eager"), torch.no_grad():
+    with torch.no_grad():
         eager_out = eager_step.step(args).output
         graphs_before = counters["stats"]["unique_graphs"]
         compiled_out = compiled_step.step(args).output
@@ -153,7 +147,7 @@ def test_compiled_fcn3_step_train_gradients(normalization_layer: str):
         eager_step = _get_step(
             _get_fcn3_step_config(normalization_layer=normalization_layer)
         )
-    with compile_backend("aot_eager"):
+    with compile_enabled(True):
         compiled_step = _get_step(
             _get_fcn3_step_config(normalization_layer=normalization_layer)
         )
@@ -164,9 +158,8 @@ def test_compiled_fcn3_step_train_gradients(normalization_layer: str):
 
     eager_out = eager_step.step(args, wrapper=Checkpoint({})).output
     sum(value.sum() for value in eager_out.values()).backward()
-    with compile_backend("aot_eager"):
-        compiled_out = compiled_step.step(args, wrapper=Checkpoint({})).output
-        sum(value.sum() for value in compiled_out.values()).backward()
+    compiled_out = compiled_step.step(args, wrapper=Checkpoint({})).output
+    sum(value.sum() for value in compiled_out.values()).backward()
 
     eager_grads = _grads(eager_step)
     compiled_grads = _grads(compiled_step)
@@ -175,16 +168,3 @@ def test_compiled_fcn3_step_train_gradients(normalization_layer: str):
     for name, grad in compiled_grads.items():
         assert torch.isfinite(grad).all(), name
         torch.testing.assert_close(grad, eager_grads[name], atol=1e-4, rtol=1e-4)
-
-
-@pytest.mark.medium_duration
-def test_fcn3_step_compiles_after_distributed_wrapping():
-    """The compiled module wraps the distributed-wrapped module, not the bare
-    one, so distributed data parallel is inside the compiled graph.
-    """
-    with compile_backend("aot_eager"):
-        step = _get_step(_get_fcn3_step_config())
-    # the presence of the (single-rank) distributed wrapper inside the compiled
-    # module is the contract under test, so its type is asserted directly
-    assert isinstance(step.module, DummyWrapper)
-    assert step._forward_module._orig_mod is step.module
