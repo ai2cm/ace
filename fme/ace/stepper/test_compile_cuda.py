@@ -1,8 +1,9 @@
 """Guards the default ``torch.compile`` path on CUDA.
 
-The rest of the suite compiles whenever production does, so on CUDA it covers
-compiled numerics; this module asserts that compilation really happens there,
-so that coverage cannot silently fall back to eager.
+The rest of the suite compiles whenever production does (with the test
+session's ``aot_eager`` backend), so on CUDA it traces every step it builds;
+this module asserts that compilation really happens there, so that coverage
+cannot silently fall back to eager.
 """
 
 import pytest

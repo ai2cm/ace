@@ -371,13 +371,13 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
     """compile() changes only the forward callable: same outputs, same
     state-dict keys, same underlying torch module; wrapping preserves it.
 
-    Uses the ``aot_eager`` backend so the test exercises dynamo tracing
-    without paying inductor's codegen cost.
+    Compiles with the test session's backend (``aot_eager``), which exercises
+    dynamo tracing without paying inductor's codegen cost.
     """
     torch.manual_seed(0)
     net = _LinearNet().to(fme.get_device())
     module = Module(net, label_encoding=None)
-    compiled = module.compile(backend="aot_eager")
+    compiled = module.compile()
     assert not module.is_compiled
     assert compiled.is_compiled
     assert compiled.torch_module is module.torch_module
@@ -404,7 +404,7 @@ def test_compiled_module_wrap_module_calls_wrapper_once():
     the compiled forward callable, and leaves the parameter-owning module as is.
     """
     module = Module(_LinearNet(), label_encoding=None)
-    compiled = module.compile(backend="aot_eager")
+    compiled = module.compile()
     wrapper = mock.MagicMock(side_effect=lambda m: m)
     wrapped = compiled.wrap_module(wrapper)
     wrapper.assert_called_once_with(compiled.forward_module)

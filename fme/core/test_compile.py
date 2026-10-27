@@ -19,6 +19,7 @@ from fme.core.compile import (
     is_compile_enabled,
 )
 from fme.core.device import force_cpu
+from fme.core.testing import TEST_COMPILE_BACKEND
 
 
 def test_compile_enabled_restores_previous_setting():
@@ -214,3 +215,11 @@ def test_compile_module_runs_with_configured_backend():
     x = torch.randn(3, 2)
     torch.testing.assert_close(module(x), net(x))
     assert torch._dynamo.utils.counters["stats"]["unique_graphs"] > 0
+
+
+def test_test_session_compiles_with_test_backend():
+    """The suite compiles with the fast ``aot_eager`` backend unless
+    FME_COMPILE_BACKEND asks for another; targeted tests select inductor."""
+    expected = os.environ.get("FME_COMPILE_BACKEND") or TEST_COMPILE_BACKEND
+    assert TEST_COMPILE_BACKEND == "aot_eager"
+    assert get_compile_backend() == expected

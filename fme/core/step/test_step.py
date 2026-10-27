@@ -44,7 +44,6 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
-    compile_backend,
     get_dataset_info,
     trivial_network_and_loss_normalization,
     trivial_normalization,
@@ -2602,7 +2601,7 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
     selector = selector_getter()
     with compile_enabled(False):
         eager_step = get_step(selector, DEFAULT_IMG_SHAPE)
-    with compile_backend("aot_eager"):
+    with compile_enabled(True):
         compiled_step = get_step(selector, DEFAULT_IMG_SHAPE)
     assert compiled_step.get_state().keys() == eager_step.get_state().keys()
     for attr in module_attrs:
