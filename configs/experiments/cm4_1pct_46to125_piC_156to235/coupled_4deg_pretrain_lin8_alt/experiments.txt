@@ -4,10 +4,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 
 # Coupled century evals of best_inference_ckpt (Troy's protocol), held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_4deg_eval
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E4ZWBEP8MT5E558E8FS|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E4ZWBEP8MT5E558E8FS|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E4ZWBEP8MT5E558E8FS|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E4ZWBEP8MT5E558E8FS|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_piC-ic0151-200yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_1pct-ic0001-130yr-4deg|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
 # Early coupled century evals of per-epoch EMA checkpoints while training continues (epoch in the job name via the checkpoint column); --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_4deg_eval
 # maeadamw30: epoch 4 from the first job's committed results dataset. mse30: epoch 2 copied to its own dataset (the running job's results dataset is uncommitted).
@@ -17,35 +17,35 @@ cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E
 cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8|01M5VD1E4ZWBEP8MT5E558E8FS|ran_1pct-ic0001-130yr-4deg|ema_ckpt_0002|high|--min-runtime 8h||01M5X8WG8HFXD5MW81M2W0K468|ai2/ace|jupiter+titan
 
 # 240-IC coupled ENSO forecasts (Troy's zs240, reports#176 Fig 6) of best_inference_ckpt in 5-year chunks of 60 ICs, 4 members per IC as seed= jobs, held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_4deg_eval
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|run_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s20|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s30|01M5VD1E4ZWBEP8MT5E558E8FS|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-241to245-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-246to250-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-251to255-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s0|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=0||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s10|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=10||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s20|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=20||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|maeadamw30_lin8-s30|01M5VD1W4N0HN3BMXQ2JZFBTWK|running_zs240-256to260-4deg|best_inference_ckpt|normal|--min-runtime 8h|seed=30||ai2/ace|jupiter+titan
