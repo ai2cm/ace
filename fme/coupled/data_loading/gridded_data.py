@@ -199,12 +199,16 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     def initial_condition(self) -> CoupledPrognosticState:
         return self._initial_condition
 
-    def apply_config_seed(self, seed: int | None) -> None:
-        """Seed the initial condition's random state from ``config.seed``,
-        unless it already carries one (see
+    def apply_config_seed(
+        self, seed: int | None, ocean_seed: int | None = None
+    ) -> None:
+        """Seed the initial condition's random state from ``config.seed`` and
+        ``config.ocean_seed``, unless it already carries one (see
         ``CoupledPrognosticState.apply_config_seed``).
         """
-        self._initial_condition = self._initial_condition.apply_config_seed(seed)
+        self._initial_condition = self._initial_condition.apply_config_seed(
+            seed, ocean_seed
+        )
 
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:

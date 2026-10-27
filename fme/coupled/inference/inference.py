@@ -175,8 +175,13 @@ class InferenceConfig:
             stochastic modules (e.g. NoiseConditionedSFNO) produce a
             reproducible noise sequence, independent of
             ``coupled_steps_in_memory``. The atmosphere takes this value and the
-            ocean ``seed + 1``. Leave unset (None) for the default
-            non-reproducible behavior.
+            ocean ``ocean_seed`` if set, else ``seed + 1``. Leave unset (None)
+            for the default non-reproducible behavior.
+        ocean_seed: If set, seeds the ocean's random state with this value
+            instead of ``seed + 1``, so the ocean's noise sequence can be varied
+            independently of the atmosphere's (e.g. an ensemble whose members
+            differ only in one realm's noise). Leave unset to derive it from
+            ``seed``.
     """
 
     experiment_dir: str
@@ -197,6 +202,7 @@ class InferenceConfig:
     atmosphere_stepper_override: StepperOverrideConfig | None = None
     use_ema_if_available: bool = True
     seed: int | None = None
+    ocean_seed: int | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -394,7 +400,7 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition=initial_condition,
         dataset_info=stepper.training_dataset_info,
     )
-    data.apply_config_seed(config.seed)
+    data.apply_config_seed(config.seed, config.ocean_seed)
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata

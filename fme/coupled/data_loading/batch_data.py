@@ -29,23 +29,28 @@ class CoupledPrognosticState:
             self.ocean_data.to_device(), self.atmosphere_data.to_device()
         )
 
-    def apply_config_seed(self, seed: int | None) -> "CoupledPrognosticState":
-        """Return a state whose components are seeded from ``config.seed``.
+    def apply_config_seed(
+        self, seed: int | None, ocean_seed: int | None = None
+    ) -> "CoupledPrognosticState":
+        """Return a state whose components are seeded from ``config.seed`` and
+        ``config.ocean_seed``.
 
-        The atmosphere, the only realm that draws noise today, takes the seed
-        unchanged, so a coupled run matches an ``fme.ace`` run of the same
-        checkpoint at the same seed. The ocean is offset by 1 (as in
-        ``fme.core.rand.set_seed``) so that a future stochastic ocean stepper
-        would not draw the same noise as the atmosphere.
+        The atmosphere takes ``seed`` unchanged, so a coupled run matches an
+        ``fme.ace`` run of the same checkpoint at the same seed. The ocean takes
+        ``ocean_seed`` if set, else ``seed + 1`` (as in
+        ``fme.core.rand.set_seed``), so that a stochastic ocean does not draw
+        the same noise as the atmosphere. Setting ``ocean_seed`` lets the two
+        noise sequences be varied independently, e.g. to vary only one
+        realm's noise across ensemble members.
 
         Precedence is per component (see ``PrognosticState.apply_config_seed``),
         so a partially restored state deliberately continues one realm and seeds
         the other.
         """
-        if seed is None:
-            return self
+        if ocean_seed is None and seed is not None:
+            ocean_seed = seed + 1
         return CoupledPrognosticState(
-            self.ocean_data.apply_config_seed(seed + 1, label="ocean"),
+            self.ocean_data.apply_config_seed(ocean_seed, label="ocean"),
             self.atmosphere_data.apply_config_seed(seed, label="atmosphere"),
         )
 
