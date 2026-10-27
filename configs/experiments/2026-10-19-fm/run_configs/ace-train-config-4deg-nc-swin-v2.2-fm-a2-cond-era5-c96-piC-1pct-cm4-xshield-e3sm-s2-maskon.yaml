@@ -1476,8 +1476,8 @@ stepper:
               global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-26-fm-all-datasets-v3/groups/xshield/centering.nc
               global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-26-fm-all-datasets-v3/groups/xshield/scaling-full-field.nc
             e3sm:
-              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-26-fm-all-datasets-v3/groups/e3sm/centering.nc
-              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-26-fm-all-datasets-v3/groups/e3sm/scaling-full-field.nc
+              global_means_path: /climate-default/alexeyy/norm_ablation_0/2026-10-26-fm-all-datasets-v3/groups/e3sm-filled/centering.nc
+              global_stds_path: /climate-default/alexeyy/norm_ablation_0/2026-10-26-fm-all-datasets-v3/groups/e3sm-filled/scaling-full-field.nc
           default_label: era5
           pinned_variables:
           - global_mean_co2

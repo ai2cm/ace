@@ -13,7 +13,7 @@ these edits:
 - The builder sets `allow_missing_variables: true`, so TMP850 and h500 are
   NaN-filled for E3SM samples and excluded from the loss.
 - Normalization points at the v3 pooled stats (which include E3SM) and gains
-  an `e3sm` group.
+  an `e3sm` group, read from groups/e3sm-filled (see fill_e3sm_group_stats.py).
 - label_sampling weights, where present, are replaced by LABEL_WEIGHTS.
 
 The configs are edited as text, as in create_fm_jobs.py, so that comments and
@@ -120,8 +120,8 @@ TRAIN_END_ANCHOR = "      labels:\n      - xshield\nvalidation:\n"
 BUILDER_ANCHOR = "        conditional: true\n"
 
 
-def _norm_group(label: str) -> str:
-    group_dir = f"{OLD_STATS}/groups/{label}"
+def _norm_group(label: str, group_dir_name: str | None = None) -> str:
+    group_dir = f"{OLD_STATS}/groups/{group_dir_name or label}"
     return (
         f"            {label}:\n"
         f"              global_means_path: {group_dir}/centering.nc\n"
@@ -130,7 +130,9 @@ def _norm_group(label: str) -> str:
 
 
 XSHIELD_GROUP_ANCHOR = _norm_group("xshield")
-E3SM_GROUP = _norm_group("e3sm")
+# groups/e3sm-filled is groups/e3sm plus pooled TMP850 and h500, written by
+# fill_e3sm_group_stats.py: every group needs every non-pinned variable.
+E3SM_GROUP = _norm_group("e3sm", "e3sm-filled")
 
 
 def _replace_once(text: str, old: str, new: str) -> str:
