@@ -1333,7 +1333,6 @@ train_loader:
       overwrite:
         multiply_scalar:
           HGTsfc: 0.10197162129779283  # 1 / 9.80665 m/s2
-          PRATEsfc: 1000.0  # m/s of liquid water to kg/m2/s
       variable_metadata:
         HGTsfc:
           units: m

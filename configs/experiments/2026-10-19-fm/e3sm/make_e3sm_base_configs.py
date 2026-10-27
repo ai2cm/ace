@@ -6,8 +6,10 @@ these edits:
 
 - An E3SMv3 piControl entry (label `e3sm`) is appended to the train concat. The
   daily store keeps E3SM variable names, so the entry renames them to the fme
-  names and converts PHIS geopotential (m2/s2) to HGTsfc (m) and precipitation
-  (m/s of liquid water) to PRATEsfc (kg/m2/s). The store has no TMP850 or h500.
+  names and converts PHIS geopotential (m2/s2) to HGTsfc (m). Its
+  surface_precipitation_rate is labeled m/s but is already in kg/m2/s (global
+  mean ~3.4e-5, consistent with its latent heat flux), so only its units
+  metadata is corrected. The store has no TMP850 or h500.
 - The builder sets `allow_missing_variables: true`, so TMP850 and h500 are
   NaN-filled for E3SM samples and excluded from the loss.
 - Normalization points at the v3 pooled stats (which include E3SM) and gains
@@ -106,7 +108,6 @@ E3SM_ENTRY = (
       overwrite:
         multiply_scalar:
           HGTsfc: 0.10197162129779283  # 1 / 9.80665 m/s2
-          PRATEsfc: 1000.0  # m/s of liquid water to kg/m2/s
       variable_metadata:
         HGTsfc:
           units: m
