@@ -60,12 +60,16 @@ class MonthlyZarrWriter:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
         chunks: Mapping[str, int] | None = None,
+        sample_offset: int = 0,
+        local_n_samples: int | None = None,
     ):
         """
         Args:
             path: Path of the zarr store, on any fsspec-compatible filesystem.
             initial_condition_times: 1D array of initial condition times
-                (start time for each inference run).
+                (start time for each inference run). Under multi-GPU inference,
+                this must be the GLOBAL array covering all ranks' samples so
+                the store is sized and coordinated correctly.
             n_timesteps: Total number of inference forward steps, used to size
                 the store's lead-time axis.
             timestep: The time delta between each timestep.
@@ -85,18 +89,40 @@ class MonthlyZarrWriter:
                 mean read-modify-write amplification on every batch, and
                 sharding would place unrelated months in one storage object. At
                 monthly resolution the resulting chunk count is small.
+            sample_offset: Index of this rank's first sample in the global
+                sample dimension. Under multi-GPU each rank writes a contiguous
+                region of the shared store; single-GPU callers leave this at 0.
+            local_n_samples: Number of samples this rank writes. Defaults to
+                ``len(initial_condition_times)`` (single-GPU: all samples are
+                local). Under multi-GPU this is the per-rank subset count.
         """
         self._save_names = save_names
+        self._sample_offset = sample_offset
+        self._local_n_samples = (
+            local_n_samples
+            if local_n_samples is not None
+            else len(initial_condition_times)
+        )
         calendar = infer_calendar(initial_condition_times)
         n_samples = len(initial_condition_times)
         # The inference loop drops the initial condition step, so the run's
         # output times are IC + timestep through IC + n_timesteps * timestep.
         # Both ends of the month axis therefore follow from the constructor
-        # args, and n_months with them.
+        # args, and n_months with them. The MonthIndexer uses the local
+        # subset of initial condition times so that month_indices() matches the
+        # sample dimension of each batch.
+        local_times = initial_condition_times[
+            sample_offset : sample_offset + self._local_n_samples
+        ]
         self._month_indexer = MonthIndexer(
+            first_output_times=[time + timestep for time in local_times]
+        )
+        # n_months must cover the global run span so every rank's store has the
+        # same lead-time axis length; use the full initial_condition_times.
+        global_month_indexer = MonthIndexer(
             first_output_times=[time + timestep for time in initial_condition_times]
         )
-        self._n_months = self._month_indexer.n_months_through(
+        self._n_months = global_month_indexer.n_months_through(
             [time + n_timesteps * timestep for time in initial_condition_times]
         )
 
@@ -129,7 +155,7 @@ class MonthlyZarrWriter:
             time_calendar=None,
             nondim_coords=_nondim_coords(
                 initial_condition_times=initial_condition_times,
-                month_indexer=self._month_indexer,
+                month_indexer=global_month_indexer,
                 n_months=self._n_months,
                 n_samples=n_samples,
                 calendar=calendar,
@@ -184,7 +210,13 @@ class MonthlyZarrWriter:
             self._store_initialized = True
 
         month_min = int(np.min(months))
-        position_slices = {LEAD_TIME_DIM: slice(month_min, int(np.max(months)) + 1)}
+        position_slices = {
+            LEAD_TIME_DIM: slice(month_min, int(np.max(months)) + 1),
+            ENSEMBLE_DIM: slice(
+                self._sample_offset,
+                self._sample_offset + self._local_n_samples,
+            ),
+        }
 
         # counts is stored as a non-dimension coordinate, so that readers attach
         # it to the data, but it is read back and updated like the data itself.

@@ -204,6 +204,78 @@ def test_separate_ic_writer_preserves_time_calendar(tmpdir, calendar):
     assert raw.time.attrs["calendar"] == calendar
 
 
+def test_zarr_adapter_sample_region_writes(tmpdir):
+    """With sample_offset the adapter writes data into the correct region.
+
+    A store is sized for 2 samples (global_ic_times has 2 entries).
+    An adapter with sample_offset=1 writes 1 local sample into the
+    second slot.  The first sample region stays at the fill value.
+    """
+    n_timesteps = 2
+    timestep = datetime.timedelta(days=1)
+    global_ic_times = np.array(
+        [cftime.datetime(2019, 12, 31), cftime.datetime(2020, 1, 1)]
+    )
+
+    # Local data for "rank 1" (1 of the 2 samples)
+    data = {"foo": torch.ones((1, n_timesteps, 2, 2)) * 42.0}
+    batch_time = xr.DataArray(
+        [[cftime.datetime(2020, 1, 2), cftime.datetime(2020, 1, 3)]],
+        dims=("sample", "time"),
+    )
+
+    adapter = ZarrWriterAdapter(
+        path=str(tmpdir / "test.zarr"),
+        dims=("sample", "time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+            }
+        ),
+        timestep=timestep,
+        n_timesteps=n_timesteps,
+        initial_condition_times=global_ic_times,
+        sample_offset=1,
+    )
+    adapter.append_batch(data, batch_time)
+
+    ds = xr.open_zarr(str(tmpdir / "test.zarr"))
+    # Store has 2 samples; only sample index 1 was written
+    assert ds.foo.shape == (2, n_timesteps, 2, 2)
+    np.testing.assert_array_equal(ds.foo.values[1], 42.0)
+
+
+def test_separate_ic_adapter_sample_offset_naming(tmpdir):
+    """With sample_offset the per-IC stores are named with global indices."""
+    n_timesteps = 2
+    timestep = datetime.timedelta(days=1)
+    local_ic_times = np.array([cftime.datetime(2020, 1, 1)])
+    data = {"foo": torch.zeros((1, n_timesteps, 2, 2))}
+    time = xr.DataArray(
+        [[cftime.datetime(2020, 1, 2), cftime.datetime(2020, 1, 3)]],
+        dims=("sample", "time"),
+    )
+    adapter = SeparateICZarrWriterAdapter(
+        path=str(tmpdir / "test.zarr"),
+        dims=("time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+            }
+        ),
+        timestep=timestep,
+        n_timesteps=n_timesteps,
+        initial_condition_times=local_ic_times,
+        sample_offset=3,
+    )
+    adapter.append_batch(data, time)
+    # The file should be named with global index 3, not local index 0
+    assert (tmpdir / "test_ic0003.zarr").exists()
+    assert not (tmpdir / "test_ic0000.zarr").exists()
+
+
 def test_zarr_adapter_single_timestep_data(
     tmpdir,
 ):

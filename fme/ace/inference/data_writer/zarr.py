@@ -124,6 +124,7 @@ class ZarrWriterAdapter:
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
         overwrite_check: bool = False,
+        sample_offset: int = 0,
     ):
         self.path = path
         self.dims = dims
@@ -132,6 +133,7 @@ class ZarrWriterAdapter:
         self.n_timesteps = n_timesteps
         self.initial_condition_times = initial_condition_times
         self.n_initial_conditions = len(self.initial_condition_times)
+        self._sample_offset = sample_offset
         self._current_timestep = 0
         self.variable_metadata = _variable_metadata_to_dict(variable_metadata)
 
@@ -221,6 +223,7 @@ class ZarrWriterAdapter:
         batch_time: Time coordinate for each sample in the batch.
         """
         numpy_data = self._to_ndarray_mapping(data)
+        n_local_samples = batch_time.sizes["sample"]
         # Zarr store initialization needs the full time coordinate information,
         # which is not available until the first batch is seen.
         if self._writer is None:
@@ -237,7 +240,11 @@ class ZarrWriterAdapter:
                     "time": slice(
                         self._current_timestep,
                         self._current_timestep + batch_time.sizes["time"],
-                    )
+                    ),
+                    "sample": slice(
+                        self._sample_offset,
+                        self._sample_offset + n_local_samples,
+                    ),
                 },
             )
         self._current_timestep += batch_time.sizes["time"]
@@ -267,6 +274,7 @@ class SeparateICZarrWriterAdapter:
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
         overwrite_check: bool = False,
+        sample_offset: int = 0,
     ):
         self.path = path
         self.dims = dims
@@ -276,6 +284,7 @@ class SeparateICZarrWriterAdapter:
         self.n_timesteps = n_timesteps
         self.initial_condition_times = initial_condition_times
         self.n_initial_conditions = len(self.initial_condition_times)
+        self._sample_offset = sample_offset
         self._current_timestep = 0
         self.data_vars = data_vars
         self.chunks = chunks
@@ -324,9 +333,10 @@ class SeparateICZarrWriterAdapter:
                 calendar=first_batch_time.dt.calendar,
             )
             _coords["time"] = init_time_numeric + lead_time_microseconds
+            global_ic_index = self._sample_offset + s
             self._writers.append(
                 ZarrWriter(
-                    path=self.path.replace(".zarr", f"_ic{s:04d}.zarr"),
+                    path=self.path.replace(".zarr", f"_ic{global_ic_index:04d}.zarr"),
                     dims=self.dims,
                     coords=_coords,
                     data_vars=self.data_vars,
