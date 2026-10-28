@@ -1,0 +1,35 @@
+# 1940-1978 rollout against ERA5: years before any training or validation year (1979-2014) and
+# outside the AIMIP holdout, to compare how the control and no-bottleneck arms do on years they
+# never trained on. Otherwise long36-evaluator.yaml: 8 initial conditions a day apart, each run
+# to 1978-12-31.
+experiment_dir: /results
+n_forward_steps: 14237
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  project: ace
+loader:
+  start_indices:
+    times:
+    - '1940-01-01T00:00:00'
+    - '1940-01-02T00:00:00'
+    - '1940-01-03T00:00:00'
+    - '1940-01-04T00:00:00'
+    - '1940-01-05T00:00:00'
+    - '1940-01-06T00:00:00'
+    - '1940-01-07T00:00:00'
+    - '1940-01-08T00:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  step_means: []
+  ensembles: []
+  histogram:
+    enabled: true
+  time_mean_reference_data: /climate-default/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019/2026-09-08-era5-4deg-8layer-daily-1940-2025/time-mean.nc
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

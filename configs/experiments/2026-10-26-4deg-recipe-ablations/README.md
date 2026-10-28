@@ -31,7 +31,9 @@ checkpoint is the fine-tune's last EMA checkpoint: epoch 40, or epoch 10 for ACE
 All arms share the ACE2.5 runs' code (ace `49ccc95`), image, data store and normalization, and
 training and validation years. They also use its +4 K pair. The clip acts only at inference, so
 every arm runs its +4 K pair and a 1979-2014 rollout (`long36-evaluator.yaml`) twice. One run uses
-the checkpoint as trained. The other uses a copy with the clip disabled (`clip_off.py`).
+the checkpoint as trained. The other uses a copy with the clip disabled (`clip_off.py`). The
+control and no-bottleneck arms also run a 1940-1978 rollout (`pre1979-evaluator.yaml`, clip on),
+on years outside training and validation.
 
 Constraints:
 

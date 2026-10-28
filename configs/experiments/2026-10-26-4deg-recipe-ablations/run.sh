@@ -16,7 +16,8 @@ export GRPC_VERBOSITY=ERROR
 #
 # Each arm runs pretrain -> fine-tune -> 1979-2014 rollout and +4 K pair. Latent global-mean
 # clipping acts only at inference, so the rollout and the pair are each run both as trained
-# and with the clip off.
+# and with the clip off. The control and no-bottleneck arms also run a 1940-1978 rollout, clip
+# on, on years outside training.
 #
 # Safe to rerun at any point. Each job is launched only if its beaker experiment does not
 # exist yet and the stage it depends on has a job that exited 0; that job's result dataset
@@ -152,5 +153,9 @@ for ARM in $ARMS; do
             stage "$ARM-inference-$EXP-clipoff-rs$SEED" "$ACE25_DIR/inference-$EXP.yaml" \
                 "$FT" "$CKPT" inference "$CLIP_OFF && $INFER checkpoint_path=/tmp/ckpt.tar"
         done
+        if [[ "$ARM" == ace22-like-4deg || "$ARM" == ace22-like-4deg-no-bottleneck ]]; then
+            stage "$ARM-pre1979-rs$SEED" "$SCRIPT_DIR/pre1979-evaluator.yaml" \
+                "$FT" "$CKPT" inference "$EVAL"
+        fi
     done
 done
