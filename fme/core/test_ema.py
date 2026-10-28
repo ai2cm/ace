@@ -98,7 +98,7 @@ def test_ema_update_matches_per_parameter_formula(faster_decay_at_start: bool):
                 param.add_(torch.randn_like(param))
         if num_updates == 3:
             # the EMA weights follow a change in the model's dtype
-            model.linear.to(torch.float64)
+            model.linear.to(torch.float16)
         ema(model)
         _per_parameter_ema_update(
             expected, model, decay, faster_decay_at_start, num_updates
@@ -106,13 +106,28 @@ def test_ema_update_matches_per_parameter_formula(faster_decay_at_start: bool):
     for name, ema_name in ema._module_name_to_ema_name.items():
         actual = ema._ema_params[ema_name]
         assert actual.dtype == dict(model.named_parameters())[name].dtype
-        if actual.dtype == torch.bfloat16:
-            # the foreach multiply keeps the float32 decay unrounded, so bf16
-            # results can differ from the reference by a few ulps
-            torch.testing.assert_close(actual, expected[name], atol=1e-2, rtol=2e-2)
+        if actual.element_size() == 2:
+            # the foreach kernels round 16-bit results differently from the
+            # reference, by under 2 eps relative to 1 + |value|
+            tol = 2 * torch.finfo(actual.dtype).eps
+            torch.testing.assert_close(actual, expected[name], atol=tol, rtol=tol)
         else:
             torch.testing.assert_close(actual, expected[name])
     assert "frozen" not in ema._module_name_to_ema_name
+
+
+def test_ema_update_follows_model_to_new_device():
+    model = nn.Linear(4, 3)
+    ema = EMATracker(model, decay=0.9, faster_decay_at_start=False)
+    model.to(get_device())
+    expected = {
+        name: param.detach().clone() for name, param in model.named_parameters()
+    }
+    ema(model)
+    for name, ema_name in ema._module_name_to_ema_name.items():
+        actual = ema._ema_params[ema_name]
+        assert actual.device == expected[name].device
+        torch.testing.assert_close(actual, expected[name])
 
 
 def compare_states(state1: dict, state2: dict):

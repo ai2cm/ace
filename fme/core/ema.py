@@ -159,8 +159,11 @@ class EMATracker:
                 if param.requires_grad:
                     ema_name = self._module_name_to_ema_name[key]
                     ema_param = self._ema_params[ema_name]
-                    if ema_param.dtype != param.dtype:
-                        ema_param = ema_param.type_as(param)
+                    if (
+                        ema_param.dtype != param.dtype
+                        or ema_param.device != param.device
+                    ):
+                        ema_param = ema_param.to(param)
                         self._ema_params[ema_name] = ema_param
                     ema_params.append(ema_param)
                     params.append(param)
@@ -171,7 +174,9 @@ class EMATracker:
                     )
             # ema -= (1 - decay) * (ema - param), batched over all parameters
             # with foreach kernels: a model with ~1000 parameter tensors
-            # otherwise launches ~3000 small kernels per update.
+            # otherwise launches ~3000 small kernels per update. _foreach_lerp_
+            # would take one kernel, but it only accepts a Python scalar
+            # weight, and converting the on-device decay would synchronize.
             if ema_params:
                 diff = torch._foreach_sub(ema_params, params)
                 torch._foreach_mul_(diff, 1.0 - decay)
