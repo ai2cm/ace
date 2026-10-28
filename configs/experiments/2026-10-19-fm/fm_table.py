@@ -23,7 +23,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from _beaker_listing import OK, fetch_experiments_by_name  # noqa: E402
+from _beaker_listing import (  # noqa: E402
+    OK,
+    NamedExperiment,
+    _created,
+    canonical_name,
+    experiment_status,
+    list_experiments,
+)
 from submit_fm_jobs import (  # noqa: E402
     ARCH_CHOICES,
     config_to_job_name,
@@ -58,6 +65,24 @@ COLUMNS = (
     "s/epoch (median) (inference)",
     "Train time (median)",
 )
+
+
+def newest_by_name(text: str) -> dict[str, NamedExperiment]:
+    """The newest experiment for each canonical job name matching ``text``.
+
+    Unlike ``_beaker_listing.experiments_by_name`` (which prefers the best
+    status, as the submit scripts need), a resubmitted job always replaces the
+    older experiment of the same name, so the table tracks the latest run.
+    """
+    newest: dict[str, dict] = {}
+    for experiment in list_experiments(text=text):
+        name = canonical_name(experiment["name"])
+        if name not in newest or _created(experiment) > _created(newest[name]):
+            newest[name] = experiment
+    return {
+        name: NamedExperiment(name, experiment_status(e), e)
+        for name, e in newest.items()
+    }
 
 
 def arch_of(name: str) -> str:
@@ -152,7 +177,7 @@ def main() -> None:
     by_name = {}
     for arch in ("sfno", "swin-v2.2"):
         arch_names = [n for n in names if arch_of(n) == arch]
-        by_name.update(fetch_experiments_by_name(text=os.path.commonprefix(arch_names)))
+        by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
     with ThreadPoolExecutor(10) as ex:
         prog = dict(zip(names, ex.map(lambda n: progress(by_name.get(n)), names)))
     print("| " + " | ".join(COLUMNS) + " |")
