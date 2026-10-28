@@ -238,7 +238,7 @@ stepper_training:
   # Required, not incidental: the ocean's stochasticity is supplied by the
   # atmosphere, so the ensemble must run through both realms.
   n_ensemble: 2
-  optimize_single_component_per_batch: false
+  optimize_single_component_per_batch: true # default for joint_ft
   ocean:
     parameter_init:
       weights_path: null # null required alongside checkpoint_path
@@ -303,6 +303,12 @@ stepper:
         exclude_names_and_prefixes:
           - land_fraction
           - sea_surface_fraction
+        fill_value_overrides:
+          ocean_sea_ice_fraction: 0.0
+          sea_ice_volume: 0.0
+          sfdsi: 0.0
+          UI: 0.0
+          VI: 0.0
       step:
         type: single_module
         config:
@@ -371,6 +377,10 @@ stepper:
                   - VI
               zos_global_mean_correction:
                 reference_global_mean: -0.00013
+              ocean_salt_content_correction:
+                method: scaled_salinity
+                budget_config:
+                  type: sea_surface_height
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
@@ -398,7 +408,7 @@ stepper:
             - northward_surface_wind_stress
             - total_frozen_precipitation_rate
             - sst
-            - zos
+            - SSH
             - so_0
             - so_1
             - so_2
@@ -482,7 +492,7 @@ stepper:
             - VI
           out_names:
             - sst
-            - zos
+            - SSH
             - so_0
             - so_1
             - so_2
@@ -568,7 +578,7 @@ stepper:
             - tauuo
             - tauvo
             - wfo
-            - SSH
+            - zos
   atmosphere:
     timedelta: 6h
     # stepper added by job_runner/create_coupled_finetune_config.sh
