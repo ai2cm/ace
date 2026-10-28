@@ -46,29 +46,50 @@ from typing import Literal
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
-from fme.core.models.swin_transformer.boundary_padding import TensorPadding
+from fme.core.models.swin_transformer.boundary_padding import TensorPaddingConfig
 
 from .swin_layers import BasicLayer, ChannelMixer, PatchExpanding, PatchMerging
 
 
-def _validate_padding(padding: TensorPadding, img_shape: tuple[int, int]):
+def _padding_index(
+    mode: Literal["mirror", "earth"],
+    img_shape: tuple[int, int],
+    pad_north: int,
+    pad_west: int,
+    padded_shape: tuple[int, int],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Data row and column of each point of the padded grid.
+
+    Point ``(i, j)`` of the padded grid sits at data row ``i - pad_north`` and
+    data column ``j - pad_west``. Longitude wraps circularly. Past either
+    latitude edge, ``"earth"`` crosses the pole (rows reverse and longitude
+    rotates by 180 degrees) and ``"mirror"`` reflects about the edge row, for
+    any padding size. Within ``TensorPadding``'s limits this matches its
+    ``pad``.
+
+    Returns:
+        ``(rows, cols)`` index tensors, each of shape ``padded_shape``.
+    """
     H, W = img_shape
-    # Earth padding flips up to H rolled rows; reflect needs pad < H.
-    max_lat = H if padding.mode == "earth" else H - 1
-    if max(padding.pad_NS) > max_lat:
-        raise ValueError(
-            f"pad_lat {list(padding.pad_NS)} (including padding up to a multiple "
-            f"of 2 * window_size) exceeds {max_lat} rows for {padding.mode!r} "
-            f"padding of a grid with {H} latitudes"
-        )
-    if max(padding.pad_WE) > W:
-        raise ValueError(
-            f"pad_lon {list(padding.pad_WE)} (including padding up to a multiple "
-            f"of 2 * window_size) exceeds the {W} longitudes of the grid"
-        )
+    Hp, Wp = padded_shape
+    rows = torch.arange(Hp) - pad_north
+    cols = torch.arange(Wp) - pad_west
+    if mode == "earth":
+        rows = rows % (2 * H)
+        crossed = rows >= H
+        rows = torch.where(crossed, 2 * H - 1 - rows, rows)
+        shift = crossed.long() * (W // 2)
+    else:
+        period = max(2 * H - 2, 1)
+        rows = rows % period
+        rows = torch.where(rows >= H, period - rows, rows)
+        shift = torch.zeros_like(rows)
+    return (
+        rows[:, None].expand(Hp, Wp),
+        (cols[None, :] - shift[:, None]) % W,
+    )
 
 
 class SwinTransformerNet(nn.Module):
@@ -103,12 +124,11 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: Hidden dimension of the CPB MLPs.
         lat_coords: Optional ``(H,)`` latitudes in degrees of the input rows;
             enables cos-lat scaling of CPB longitude offsets.
-        padding_conf: Optional ``TensorPadding`` keyword arguments. Padded
-            latitudes are produced by the same padding operator as the data.
+        padding_conf: Optional ``TensorPaddingConfig`` keyword arguments.
             Rows/columns added to reach a multiple of ``2 * window_size``
-            continue the sphere: with ``padding_conf`` active, by extending
-            its south/east padding; otherwise circular in longitude and
-            replicating the last latitude row.
+            extend its south/east padding; without active padding they
+            follow ``"earth"`` padding. Padded latitudes are those of the
+            data in each padded row.
     """
 
     def __init__(
@@ -143,39 +163,22 @@ class SwinTransformerNet(nn.Module):
         ws_h, ws_w = window_size
         self.pad_mult = (ws_h * 2, ws_w * 2)
 
-        if padding_conf is None:
-            padding_conf = {"activate": False}
-        self.use_padding = padding_conf["activate"]
-        if self.use_padding:
-            self.padding_opt = TensorPadding(**padding_conf)
-            pl = padding_conf["pad_lat"]
-            pw = padding_conf["pad_lon"]
-            H0 = img_shape[0] + pl[0] + pl[1]
-            W0 = img_shape[1] + pw[0] + pw[1]
+        padding = TensorPaddingConfig(**(padding_conf or {"activate": False}))
+        if padding.activate:
+            pad_lat, pad_lon = padding.pad_lat, padding.pad_lon
         else:
-            H0, W0 = img_shape
+            pad_lat = pad_lon = [0, 0]
+        self.pad_offset = (pad_lat[0], pad_lon[0])
+        H0 = img_shape[0] + pad_lat[0] + pad_lat[1]
+        W0 = img_shape[1] + pad_lon[0] + pad_lon[1]
         Hp = math.ceil(H0 / self.pad_mult[0]) * self.pad_mult[0]
         Wp = math.ceil(W0 / self.pad_mult[1]) * self.pad_mult[1]
         self.padded_shape = (Hp, Wp)
-        if self.use_padding:
-            # Reach the window multiple with the geometric padding itself
-            # (south/east sides) so the extra rows/columns continue the sphere.
-            self.padding_opt = TensorPadding(
-                mode=self.padding_opt.mode,
-                pad_lat=[pl[0], pl[1] + Hp - H0],
-                pad_lon=[pw[0], pw[1] + Wp - W0],
-            )
-            _validate_padding(self.padding_opt, img_shape)
-
-        if self.use_padding and lat_coords is not None:
-            # Pad the latitudes with the same operator as the data so each
-            # padded row carries the latitude of the data in it.
-            lat_padding = TensorPadding(
-                mode=self.padding_opt.mode,
-                pad_lat=self.padding_opt.pad_NS,
-                pad_lon=(0, 0),
-            )
-            lat_coords = lat_padding.pad(lat_coords.reshape(1, 1, -1, 1)).reshape(-1)
+        pad_rows, pad_cols = _padding_index(
+            padding.mode, img_shape, pad_lat[0], pad_lon[0], (Hp, Wp)
+        )
+        self.register_buffer("pad_rows", pad_rows, persistent=False)
+        self.register_buffer("pad_cols", pad_cols, persistent=False)
 
         if context_config is not None:
             self.embed_dim_scalar = context_config.embed_dim_scalar
@@ -187,10 +190,8 @@ class SwinTransformerNet(nn.Module):
             self.embed_dim_noise = 0
 
         if lat_coords is not None:
-            # Pad like the data so the CPB latitudes match the padded rows.
-            lat_full: torch.Tensor | None = self._pad_to_window_multiple(
-                lat_coords.reshape(1, 1, -1, 1)
-            )[0, 0, :, 0]  # (Hp,)
+            # The latitude of each padded row is that of the data in it.
+            lat_full: torch.Tensor | None = lat_coords[pad_rows[:, 0]]  # (Hp,)
             lat_half: torch.Tensor | None = (
                 lat_full[::2] + lat_full[1::2]  # type: ignore[index]
             ) / 2  # (Hp//2,)
@@ -280,31 +281,17 @@ class SwinTransformerNet(nn.Module):
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
 
-    def _pad_to_window_multiple(self, x: torch.Tensor) -> torch.Tensor:
-        """Pad the south/east edges of ``x`` up to ``self.padded_shape``.
-
-        Longitude wraps circularly and the last latitude row is replicated;
-        when ``padding_conf`` is active the geometric padding already reaches
-        the window multiple, so this is a no-op.
-        """
-        _, _, H, W = x.shape
-        Hp, Wp = self.padded_shape
-        pad_h = Hp - H
-        pad_w = Wp - W
-        if pad_h == 0 and pad_w == 0:
-            return x
-        if pad_w > 0:
-            # Index-based wrap, unlike F.pad's circular mode, allows pad_w > W.
-            x = x[..., torch.arange(Wp, device=x.device) % W]
-        if pad_h > 0:
-            x = F.pad(x, (0, 0, 0, pad_h), mode="replicate")
-        return x
+    def _pad(self, x: torch.Tensor) -> torch.Tensor:
+        """Pad ``x`` from ``img_shape`` to ``padded_shape``."""
+        if tuple(x.shape[-2:]) != tuple(self.img_shape):
+            raise ValueError(
+                f"Expected spatial shape {tuple(self.img_shape)}, "
+                f"got {tuple(x.shape[-2:])}"
+            )
+        return x[..., self.pad_rows, self.pad_cols]
 
     def forward(self, x: torch.Tensor, context: Context | None = None) -> torch.Tensor:
-        if self.use_padding:
-            x = self.padding_opt.pad(x)
-        _, _, H, W = x.shape
-        x = self._pad_to_window_multiple(x)
+        x = self._pad(x)
 
         x = self.encoder(x)  # (B, embed_dim, Hp, Wp)
         x = x.permute(0, 2, 3, 1)  # (B, Hp, Wp, embed_dim)
@@ -336,9 +323,7 @@ class SwinTransformerNet(nn.Module):
                     "context.noise is required for a cln-conditioned SwinTransformerNet"
                 )
             noise = context.noise  # (B, embed_dim_noise, H, W)
-            if self.use_padding:
-                noise = self.padding_opt.pad(noise)
-            noise = self._pad_to_window_multiple(noise)
+            noise = self._pad(noise)
             noise_half = noise[..., ::2, ::2]
             ctx_full = dataclasses.replace(context, noise=noise)
             ctx_half = dataclasses.replace(context, noise=noise_half)
@@ -356,7 +341,6 @@ class SwinTransformerNet(nn.Module):
         x = self.final_linear(x)  # (B, Hp, Wp, embed_dim)
         x = x.permute(0, 3, 1, 2)  # (B, embed_dim, Hp, Wp)
         x = self.decoder(x)  # (B, out_chans, Hp, Wp)
-        x = x[..., :H, :W]
-        if self.use_padding:
-            x = self.padding_opt.unpad(x)
-        return x
+        p_lat, p_lon = self.pad_offset
+        H, W = self.img_shape
+        return x[..., p_lat : p_lat + H, p_lon : p_lon + W]
