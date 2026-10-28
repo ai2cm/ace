@@ -8,7 +8,7 @@ from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.testing.regression import validate_tensor_dict
 
-from .boundary_padding import TensorPadding
+from .boundary_padding import TensorPaddingConfig
 from .swin_layers import ColumnMixer, SwinTransformerBlock, WindowAttention2D
 from .swin_transformer import SwinTransformerNet, _padding_index
 
@@ -664,19 +664,25 @@ def test_fills_window_multiple_with_data(
     _assert_window_cos_lat(net.layer1.blocks[0], padded_lat[:, 0])
 
 
-@pytest.mark.parametrize("mode", ["earth", "mirror"])
-@pytest.mark.parametrize("pad_lat, pad_lon", [((2, 1), (2, 2)), ((0, 3), (3, 0))])
-def test_padding_index_matches_tensor_padding(
-    mode: Literal["earth", "mirror"],
-    pad_lat: tuple[int, int],
-    pad_lon: tuple[int, int],
-):
-    img_shape = (5, 8)
-    x = torch.randn(2, 3, *img_shape)
-    expected = TensorPadding(mode=mode, pad_lat=pad_lat, pad_lon=pad_lon).pad(x)
-    Hp, Wp = expected.shape[-2:]
-    rows, cols = _padding_index(mode, img_shape, pad_lat[0], pad_lon[0], (Hp, Wp))
-    torch.testing.assert_close(x[..., rows, cols], expected)
+def test_padding_index_earth():
+    """Earth padding crosses the pole with a 180-degree rotation and wraps
+    longitude circularly."""
+    rows, cols = _padding_index("earth", (3, 4), 1, 1, (5, 6))
+    assert rows[:, 0].tolist() == [0, 0, 1, 2, 2]
+    assert cols.tolist() == [
+        [1, 2, 3, 0, 1, 2],
+        [3, 0, 1, 2, 3, 0],
+        [3, 0, 1, 2, 3, 0],
+        [3, 0, 1, 2, 3, 0],
+        [1, 2, 3, 0, 1, 2],
+    ]
+
+
+def test_padding_index_mirror():
+    """Mirror padding reflects about the edge row and wraps longitude."""
+    rows, cols = _padding_index("mirror", (3, 4), 1, 1, (5, 6))
+    assert rows[:, 0].tolist() == [1, 0, 1, 2, 1]
+    assert torch.all(cols == torch.tensor([3, 0, 1, 2, 3, 0]))
 
 
 def test_padding_index_continues_past_the_whole_grid():
@@ -766,3 +772,59 @@ def test_accepts_non_contiguous_lat_coords():
         },
     )
     _assert_window_cos_lat(net.layer1.blocks[0], lat_coords[net.pad_rows[:, 0]])
+
+
+def test_downsampled_cos_lat_is_polar_when_rows_wrap_both_poles():
+    """Padded rows that wrap the whole grid pair rows from opposite poles.
+
+    With 2 rows at -80 and 80 degrees, every row pair merged into the
+    half-resolution stages spans both poles; their CPB scaling must stay
+    polar instead of the equatorial ``cos`` of the pair's signed mean.
+    """
+    net = SwinTransformerNet(
+        3,
+        3,
+        (2, 8),
+        embed_dim=16,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 8),
+        lat_coords=torch.tensor([-80.0, 80.0]),
+    )
+    cos_80 = torch.cos(torch.deg2rad(torch.tensor(80.0)))
+    for layer in (net.layer1, net.layer2, net.layer3, net.layer4):
+        for block in layer.blocks:
+            torch.testing.assert_close(
+                block.window_cos_lat, cos_80.expand_as(block.window_cos_lat)
+            )
+
+
+def test_inactive_padding_fills_window_multiple_with_earth_padding():
+    def pad_rows(padding_conf: dict | None) -> torch.Tensor:
+        return SwinTransformerNet(
+            3,
+            3,
+            (9, 18),
+            embed_dim=16,
+            num_heads=(2, 2, 2, 2),
+            window_size=(4, 4),
+            padding_conf=padding_conf,
+        ).pad_rows
+
+    torch.testing.assert_close(
+        pad_rows({"activate": False, "mode": "mirror"}), pad_rows(None)
+    )
+    torch.testing.assert_close(
+        pad_rows(None),
+        pad_rows(
+            {"activate": True, "mode": "earth", "pad_lat": [0, 0], "pad_lon": [0, 0]}
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "pad_lat, pad_lon",
+    [([-1, 0], [0, 0]), ([0, 0], [0, -2]), ([3], [0, 0]), ([0, 0], [1, 2, 3])],
+)
+def test_padding_config_rejects_invalid_sizes(pad_lat: list[int], pad_lon: list[int]):
+    with pytest.raises(ValueError, match="pad_l"):
+        TensorPaddingConfig(pad_lat=pad_lat, pad_lon=pad_lon)

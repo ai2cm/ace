@@ -66,8 +66,7 @@ def _padding_index(
     data column ``j - pad_west``. Longitude wraps circularly. Past either
     latitude edge, ``"earth"`` crosses the pole (rows reverse and longitude
     rotates by 180 degrees) and ``"mirror"`` reflects about the edge row, for
-    any padding size. Within ``TensorPadding``'s limits this matches its
-    ``pad``.
+    any padding size.
 
     Returns:
         ``(rows, cols)`` index tensors, each of shape ``padded_shape``.
@@ -127,8 +126,8 @@ class SwinTransformerNet(nn.Module):
         padding_conf: Optional ``TensorPaddingConfig`` keyword arguments.
             Rows/columns added to reach a multiple of ``2 * window_size``
             extend its south/east padding; without active padding they
-            follow ``"earth"`` padding. Padded latitudes are those of the
-            data in each padded row.
+            use ``"earth"`` padding, which assumes a global grid. Padded
+            latitudes are those of the data in each padded row.
     """
 
     def __init__(
@@ -165,9 +164,9 @@ class SwinTransformerNet(nn.Module):
 
         padding = TensorPaddingConfig(**(padding_conf or {"activate": False}))
         if padding.activate:
-            pad_lat, pad_lon = padding.pad_lat, padding.pad_lon
+            mode, pad_lat, pad_lon = padding.mode, padding.pad_lat, padding.pad_lon
         else:
-            pad_lat = pad_lon = [0, 0]
+            mode, pad_lat, pad_lon = "earth", [0, 0], [0, 0]
         self.pad_offset = (pad_lat[0], pad_lon[0])
         H0 = img_shape[0] + pad_lat[0] + pad_lat[1]
         W0 = img_shape[1] + pad_lon[0] + pad_lon[1]
@@ -175,7 +174,7 @@ class SwinTransformerNet(nn.Module):
         Wp = math.ceil(W0 / self.pad_mult[1]) * self.pad_mult[1]
         self.padded_shape = (Hp, Wp)
         pad_rows, pad_cols = _padding_index(
-            padding.mode, img_shape, pad_lat[0], pad_lon[0], (Hp, Wp)
+            mode, img_shape, pad_lat[0], pad_lon[0], (Hp, Wp)
         )
         self.register_buffer("pad_rows", pad_rows, persistent=False)
         self.register_buffer("pad_cols", pad_cols, persistent=False)
@@ -189,14 +188,14 @@ class SwinTransformerNet(nn.Module):
             self.embed_dim_labels = 0
             self.embed_dim_noise = 0
 
+        cos_lat_full: torch.Tensor | None = None
+        cos_lat_half: torch.Tensor | None = None
         if lat_coords is not None:
             # The latitude of each padded row is that of the data in it.
-            lat_full: torch.Tensor | None = lat_coords[pad_rows[:, 0]]  # (Hp,)
-            lat_half: torch.Tensor | None = (
-                lat_full[::2] + lat_full[1::2]  # type: ignore[index]
-            ) / 2  # (Hp//2,)
-        else:
-            lat_full = lat_half = None
+            lat_full = lat_coords[pad_rows[:, 0]]  # (Hp,)
+            cos_lat_full = torch.cos(torch.deg2rad(lat_full))
+            # Average cos, not latitude: merged rows can lie at opposite poles.
+            cos_lat_half = (cos_lat_full[::2] + cos_lat_full[1::2]) / 2  # (Hp//2,)
 
         self.encoder = nn.Conv2d(in_chans, embed_dim, kernel_size=3, padding=1)
         self.channel_mixer = ChannelMixer(embed_dim)
@@ -224,7 +223,7 @@ class SwinTransformerNet(nn.Module):
             conditioning=conditioning,
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
-            lat_coords=lat_full,
+            cos_lat=cos_lat_full,
         )
         self.downsample = PatchMerging(embed_dim)
         self.layer2 = BasicLayer(
@@ -241,7 +240,7 @@ class SwinTransformerNet(nn.Module):
             conditioning=conditioning,
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
-            lat_coords=lat_half,
+            cos_lat=cos_lat_half,
         )
         self.layer3 = BasicLayer(
             2 * embed_dim,
@@ -257,7 +256,7 @@ class SwinTransformerNet(nn.Module):
             conditioning=conditioning,
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
-            lat_coords=lat_half,
+            cos_lat=cos_lat_half,
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
@@ -276,7 +275,7 @@ class SwinTransformerNet(nn.Module):
             conditioning=conditioning,
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
-            lat_coords=lat_full,
+            cos_lat=cos_lat_full,
         )
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)

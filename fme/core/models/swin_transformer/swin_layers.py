@@ -334,8 +334,8 @@ class SwinTransformerBlock(nn.Module):
         context_config: Required when ``conditioning="cln"``; passed to each
             ``ConditionalLayerNorm``.
         cpb_hidden_dim: Hidden dimension of the CPB MLP.
-        lat_coords: Optional ``(H,)`` latitudes in degrees of the (padded)
-            feature-map rows, used for cos-lat CPB scaling.
+        cos_lat: Optional ``(H,)`` ``cos(lat)`` of the (padded) feature-map
+            rows, used for cos-lat CPB scaling.
     """
 
     def __init__(
@@ -352,7 +352,7 @@ class SwinTransformerBlock(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
-        lat_coords: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ):
         super().__init__()
         self.dim = dim
@@ -387,7 +387,7 @@ class SwinTransformerBlock(nn.Module):
 
         self.register_buffer("attn_mask", self._build_mask(), persistent=False)
         self.register_buffer(
-            "window_cos_lat", self._window_cos_lat(lat_coords), persistent=False
+            "window_cos_lat", self._window_cos_lat(cos_lat), persistent=False
         )
 
     def _build_mask(self) -> torch.Tensor | None:
@@ -411,18 +411,18 @@ class SwinTransformerBlock(nn.Module):
         )
         return attn_mask
 
-    def _window_cos_lat(self, lat_coords: torch.Tensor | None) -> torch.Tensor | None:
+    def _window_cos_lat(self, cos_lat: torch.Tensor | None) -> torch.Tensor | None:
         """Mean ``cos(lat)`` of each window, ``(nW,)``, or ``None``.
 
         Averages ``cos`` rather than latitude, so shifted windows that wrap
         across both poles stay polar instead of averaging to the equator.
         """
-        if lat_coords is None:
+        if cos_lat is None:
             return None
         H, W = self.input_resolution
         ws_h, ws_w = self.window_size
         sh, _ = self.shift_size
-        cos_lat = torch.cos(torch.deg2rad(torch.roll(lat_coords, -sh)))
+        cos_lat = torch.roll(cos_lat, -sh)
         cos_lat_h = cos_lat.reshape(H // ws_h, ws_h).mean(1)  # (nH_win,)
         return cos_lat_h.repeat_interleave(W // ws_w)
 
@@ -574,7 +574,7 @@ class BasicLayer(nn.Module):
         context_config: Required when ``conditioning="cln"``; forwarded to each
             block's ``ConditionalLayerNorm``.
         cpb_hidden_dim: Hidden dimension of each block's CPB MLP.
-        lat_coords: Optional ``(H,)`` row latitudes for cos-lat CPB scaling.
+        cos_lat: Optional ``(H,)`` row ``cos(lat)`` for cos-lat CPB scaling.
     """
 
     def __init__(
@@ -592,7 +592,7 @@ class BasicLayer(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
-        lat_coords: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ):
         super().__init__()
         if len(drop_path) != depth:
@@ -615,7 +615,7 @@ class BasicLayer(nn.Module):
                     conditioning=conditioning,
                     context_config=context_config,
                     cpb_hidden_dim=cpb_hidden_dim,
-                    lat_coords=lat_coords,
+                    cos_lat=cos_lat,
                 )
                 for i in range(depth)
             ]
