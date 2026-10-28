@@ -123,7 +123,14 @@ class SamudraBuilder(ModuleConfig):
         )
 
 
-@ModuleSelector.register("FloeNet")
+@ModuleSelector.register(
+    "FloeNet",
+    compile_unsupported_reason=(
+        "FloeNet rebuilds its mesh graphs from numpy and uses boolean-mask "
+        "indexing in forward, producing data-dependent shapes torch.compile "
+        "cannot trace."
+    ),
+)
 @dataclasses.dataclass
 class FloeNetBuilder(ModuleConfig):
     """

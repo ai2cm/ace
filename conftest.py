@@ -9,6 +9,10 @@ import torch
 import xdist
 
 from fme.core.distributed.distributed import Distributed
+from fme.core.testing import (  # noqa: F401  autouse for every test
+    dynamo_hygiene,
+    session_compile_backend,
+)
 
 
 def pytest_addoption(parser):
@@ -61,6 +65,11 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "medium_duration: not very fast test, deselected when --very-fast is given",
+    )
+    config.addinivalue_line(
+        "markers",
+        "timeout(seconds): per-test timeout replacing the default 90 s, for "
+        "slow tests that cannot be made faster (e.g. inductor compilation)",
     )
 
 
@@ -162,7 +171,8 @@ def enforce_timeout(request, pdb_enabled, no_timeout, _serialize_when_needed):
     elif request.config.getoption("--fast"):
         timeout_seconds = 30
     else:
-        timeout_seconds = 90
+        timeout_marker = request.node.get_closest_marker("timeout")
+        timeout_seconds = 90 if timeout_marker is None else timeout_marker.args[0]
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout_seconds)  # Set the timeout for the test
     try:
