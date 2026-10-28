@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 import xarray as xr
+import zarr
 
 from fme.ace.inference.data_writer.test_data_writer import get_initial_condition_times
 from fme.ace.inference.data_writer.zarr import (
@@ -244,6 +245,53 @@ def test_zarr_adapter_sample_region_writes(tmpdir):
     # Store has 2 samples; only sample index 1 was written
     assert ds.foo.shape == (2, n_timesteps, 2, 2)
     np.testing.assert_array_equal(ds.foo.values[1], 42.0)
+
+
+def test_zarr_adapter_sample_shard_equals_local_samples(tmpdir):
+    """The sample shard must equal the local sample count, not the global count.
+
+    Under multi-GPU each rank writes a contiguous block of the sample
+    dimension.  If the shard spans more samples than a single rank owns,
+    two ranks will contend on the same storage object.
+    """
+    n_timesteps = 2
+    timestep = datetime.timedelta(days=1)
+    n_global = 4
+    n_local = 2
+    global_ic_times = np.array(
+        [cftime.datetime(2020, 1, 1 + i) for i in range(n_global)]
+    )
+    data = {"foo": torch.zeros((n_local, n_timesteps, 2, 2))}
+    batch_time = xr.DataArray(
+        [
+            [cftime.datetime(2020, 2, 1 + s, t) for t in range(n_timesteps)]
+            for s in range(n_local)
+        ],
+        dims=("sample", "time"),
+    )
+    adapter = ZarrWriterAdapter(
+        path=str(tmpdir / "test.zarr"),
+        dims=("sample", "time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+            }
+        ),
+        timestep=timestep,
+        n_timesteps=n_timesteps,
+        initial_condition_times=global_ic_times,
+        sample_offset=0,
+    )
+    adapter.append_batch(data, batch_time)
+
+    ds = zarr.open_group(str(tmpdir / "test.zarr"), mode="r")
+    sample_dim_index = 0  # dims = (sample, time, lat, lon)
+    sample_shard = ds["foo"].metadata.shards[sample_dim_index]
+    assert sample_shard == n_local, (
+        f"sample shard {sample_shard} should equal local sample count {n_local}, "
+        f"not global count {n_global}"
+    )
 
 
 def test_separate_ic_adapter_sample_offset_naming(tmpdir):
