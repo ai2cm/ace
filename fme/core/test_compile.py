@@ -73,28 +73,32 @@ def test_override_compiles_off_cuda():
         assert is_compile_enabled()
 
 
-def test_longitude_split_skips_compile_and_logs_once(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("split_dim", ["azimuth", "polar"])
+def test_spatial_split_skips_compile_and_logs_once(
+    split_dim: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
-    """Splitting longitude disables compilation even when it is forced on."""
-    monkeypatch.setattr(fme.core.compile.thd, "azimuth_group_size", lambda: 2)
-    monkeypatch.setattr(fme.core.compile, "_LOGGED_LONGITUDE_SPLIT_SKIP", False)
+    """Splitting longitude (azimuth) or latitude (polar) disables compilation
+    even when it is forced on."""
+    monkeypatch.setattr(fme.core.compile.thd, f"{split_dim}_group_size", lambda: 2)
+    monkeypatch.setattr(fme.core.compile, "_LOGGED_SPATIAL_SPLIT_SKIP", False)
     with compile_enabled(True), caplog.at_level(logging.INFO):
         assert not is_compile_enabled()
         assert not is_compile_enabled()
-    assert caplog.text.count("spatial parallelism splits longitude") == 1
+    assert caplog.text.count("spatial parallelism splits longitude or latitude") == 1
 
 
 @pytest.mark.parallel
-def test_compile_skipped_only_when_longitude_split():
+def test_compile_skipped_only_when_spatially_split():
     """Under the parallel test matrix, forced compilation stays on unless the
-    model backend splits longitude."""
-    splits_longitude = (
-        os.environ.get("FME_DISTRIBUTED_BACKEND") == "model"
-        and int(os.environ.get("FME_DISTRIBUTED_W", "1")) > 1
+    model backend splits longitude or latitude."""
+    splits_space = os.environ.get("FME_DISTRIBUTED_BACKEND") == "model" and (
+        int(os.environ.get("FME_DISTRIBUTED_W", "1")) > 1
+        or int(os.environ.get("FME_DISTRIBUTED_H", "1")) > 1
     )
     with compile_enabled(True):
-        assert is_compile_enabled() == (not splits_longitude)
+        assert is_compile_enabled() == (not splits_space)
 
 
 def test_compile_module_raises_recompile_limit():
