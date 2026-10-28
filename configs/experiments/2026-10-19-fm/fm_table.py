@@ -4,8 +4,10 @@ Epochs done per job come from the latest *started* beaker job's log: the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
 inference are all done. Finished jobs count as max_epochs; never-started jobs
-count as 0. The -e3sm configs are excluded. All values are measured; there
-are no estimates.
+count as 0. Train time is the running wall time summed over an experiment's
+jobs (preemption retries included, queueing excluded). Epoch and train-time
+columns cover finished and running jobs only. The -e3sm configs are excluded.
+All values are measured; there are no estimates.
 
 Usage:
     python fm_table.py
@@ -18,7 +20,7 @@ import statistics
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from _beaker_listing import OK, fetch_experiments_by_name  # noqa: E402
@@ -46,11 +48,33 @@ COLUMNS = (
     "Max epoch",
     "Median epoch",
     "s/epoch (median)",
+    "Train time (median)",
 )
 
 
 def arch_of(name: str) -> str:
     return "swin-v2.2" if "swin-v2.2" in name else "sfno"
+
+
+def train_seconds(named) -> float:
+    """Wall seconds the experiment's jobs have spent running, summed over all
+    attempts (preemption retries); time spent queued is excluded.
+    """
+    now = datetime.now(UTC)
+    total = 0.0
+    for job in named.experiment.get("jobs") or []:
+        status = job.get("status", {})
+        if "started" not in status:
+            continue
+        end = status.get("exited") or status.get("canceled")
+        t_end = datetime.fromisoformat(end) if end else now
+        total += (t_end - datetime.fromisoformat(status["started"])).total_seconds()
+    return total
+
+
+def format_duration(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return f"{minutes // 1440}d {minutes // 60 % 24}h {minutes % 60}m"
 
 
 def progress(named) -> tuple[int, float | None]:
@@ -106,9 +130,9 @@ def main() -> None:
         ]
         # Epoch columns cover finished and running jobs only; failed/canceled
         # or deleted jobs would pull them toward 0.
-        eps = [
-            prog[n][0] for n, st in zip(arch_names, statuses) if st in (OK, "running")
-        ] or [0]
+        live = [n for n, st in zip(arch_names, statuses) if st in (OK, "running")]
+        eps = [prog[n][0] for n in live] or [0]
+        times = [train_seconds(by_name[n]) for n in live]
         # Speed of unfinished, healthy jobs only: finished jobs skip the log
         # fetch, and failed/canceled ones are not training.
         spe = [
@@ -125,6 +149,7 @@ def main() -> None:
             max(eps),
             f"{statistics.median(eps):g}",
             f"{statistics.median(spe):.0f}" if spe else "-",
+            format_duration(statistics.median(times)) if times else "-",
         )
         print("| " + " | ".join(str(v) for v in row) + " |")
 
