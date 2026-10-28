@@ -1,0 +1,40 @@
+# ACE-only (prescribed ERA5 SST and sea ice) 45-year rollout of the ERA5 4deg daily ACE2S (wandb 1r7oyu58, never coupled
+# or fine-tuned further), 1979-01-01 .. 2023-12-31, 4 members from one initial condition, same seed in every arm.
+# CO2-clock test (Troy 2026-10-28): does ACE use global_mean_co2 as a calendar to recall ERA5's interannual anomalies
+# (ENSO teleconnections, especially over land) instead of responding to the prescribed SST? The arms differ only in CO2:
+#   control: the store's CO2; plus2yr / minus2yr: CO2 of two years later / earlier (make_co2_shift_stores.py).
+# Two years of CO2 is 3-5 ppm, about 0.06 W/m2: physically negligible. Any shift of the land anomalies toward ERA5's
+# anomalies two years away is memorization. Training years 1940-1995, 2011-2019, 2021-; 1996-2010 never trained on.
+# This arm: plus2yr
+experiment_dir: /results
+n_forward_steps: 16436  # 1979-01-01T00 .. 2024-01-01T00, daily
+forward_steps_in_memory: 73
+n_ensemble_per_ic: 4
+seed: 0
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+loader:
+  start_indices:
+    times:
+      - "1979-01-01T00:00:00"
+  dataset:
+    merge:  # first source wins: the shifted CO2 store overrides the store's global_mean_co2 (its land_fraction is an identical copy)
+      - data_path: /co2shift
+        file_pattern: era5-4deg-daily-co2-plus2yr.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names: [global_mean_co2, TMP2m, TMP2m_mean, surface_temperature, PRATEsfc, PRMSL, h500, TMP850, ULWRFtoa, USWRFtoa, DLWRFsfc, LHTFLsfc, SHTFLsfc, ocean_fraction, sea_ice_fraction]
