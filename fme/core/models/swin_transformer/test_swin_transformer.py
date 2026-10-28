@@ -454,9 +454,12 @@ def _build_padded_net(
         lat_coords=torch.linspace(-80.0, 80.0, _REGRESSION_IMG_SHAPE[0]),
         padding_conf=padding_conf,
     )
+    # At 0.2 the cln net amplifies float32 rounding to ~1e-3, so its outputs
+    # differ across platforms; 0.05 keeps it well conditioned.
+    scale = 0.2 if conditioning == "adaln" else 0.05
     with torch.no_grad():
         for param in net.parameters():
-            param.copy_(0.2 * torch.randn_like(param))
+            param.copy_(scale * torch.randn_like(param))
     return net
 
 
