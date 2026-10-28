@@ -14,6 +14,7 @@ from fme import get_device
 from fme.core.distributed import Distributed, model_torch_distributed, torch_distributed
 from fme.core.distributed.external.pnd_manager import DistributedManager
 from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
+from fme.core.distributed.non_distributed import NonDistributed
 from fme.core.distributed.torch_distributed import (
     TorchDistributed,
     _gather_irregular,
@@ -561,3 +562,42 @@ def test_dataloader_worker_without_launcher_env_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="without torchrun or srun"):
         torch_distributed.TorchDistributed()
+
+
+class _CompileRecordingBackend(NonDistributed):
+    """Records, for each reduction it runs, whether dynamo was tracing it."""
+
+    def __init__(self):
+        super().__init__()
+        self.traced: list[bool] = []
+
+    def _record(self, tensor: torch.Tensor) -> torch.Tensor:
+        self.traced.append(torch.compiler.is_compiling())
+        return tensor
+
+    reduce_mean = reduce_sum = reduce_min = reduce_max = _record
+
+
+@pytest.mark.parametrize(
+    "reduction", ["reduce_mean", "reduce_sum", "reduce_min", "reduce_max"]
+)
+def test_reductions_in_a_compiled_forward_run_eagerly(reduction):
+    """A model may reduce across ranks in its forward pass. Traced into the
+    compiled graph, the collective would be captured into a CUDA graph, and
+    NCCL would then wait for that graph to be destroyed before it could
+    destroy or abort the process group, hanging the end of every multi-GPU
+    run.
+    """
+
+    class Net(torch.nn.Module):
+        def forward(self, x):
+            getattr(Distributed.get_instance(), reduction)(x.detach().clone())
+            return 2 * x
+
+    backend = _CompileRecordingBackend()
+    compiled = torch.compile(Net(), backend="eager")
+    with Distributed.replace_backend(backend):
+        for _ in range(3):
+            compiled(torch.ones(2))
+
+    assert backend.traced == [False, False, False]

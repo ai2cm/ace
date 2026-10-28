@@ -17,6 +17,7 @@ from fme.core.labels import BatchLabels, LabelEncoding
 from .registry import Registry
 
 logger = logging.getLogger(__name__)
+_LOGGED_COMPILE_UNSUPPORTED_REASONS: set[str] = set()
 
 
 @dataclasses.dataclass
@@ -140,11 +141,13 @@ class Module:
         Args:
             kwargs: Forwarded to :func:`fme.core.compile.compile_module`.
         """
-        if self._compile_unsupported_reason is not None:
-            logger.info(
-                "torch.compile skipped, module runs eagerly: "
-                f"{self._compile_unsupported_reason}"
-            )
+        reason = self._compile_unsupported_reason
+        if reason is not None:
+            # steps compile their modules each time they are built, so log
+            # each reason once
+            if reason not in _LOGGED_COMPILE_UNSUPPORTED_REASONS:
+                logger.info(f"torch.compile skipped, module runs eagerly: {reason}")
+                _LOGGED_COMPILE_UNSUPPORTED_REASONS.add(reason)
             return self
         if not is_compile_enabled():
             return self
