@@ -110,6 +110,12 @@ def test_force_no_global_mean_moisture_advection():
     np.testing.assert_almost_equal(new_mean.cpu().numpy(), 0.0, decimal=6)
 
 
+def _get_vertical_coordinate() -> HybridSigmaPressureCoordinate:
+    return HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+
+
 @pytest.mark.parametrize(
     "size, use_area",
     [
@@ -124,9 +130,7 @@ def test_adjust_gen_dry_air_to_target(size: tuple[int, ...], use_area: bool):
         "specific_total_water_0": torch.rand(size=size),
         "specific_total_water_1": torch.rand(size=size),
     }
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
-    )
+    vertical_coordinate = _get_vertical_coordinate()
     if use_area:
         area_weights: torch.Tensor | None = 1.0 + torch.rand(
             size=(size[-2], 1)
@@ -215,9 +219,7 @@ def test_force_conserve_moisture(
             "LHFLX": torch.rand(size=size),
             "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
         }
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
-    )
+    vertical_coordinate = _get_vertical_coordinate()
     if use_area:
         ops: GriddedOperations = LatLonOperations(
             1.0 + torch.rand(size=(size[-2], 1)).broadcast_to(size=size[-2:])
@@ -818,12 +820,14 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
         ("advection_and_evaporation", "LHTFLsfc"),
     ],
 )
+@pytest.mark.parametrize("residual", [0.0, 1e-30], ids=["zero", "near_zero"])
 def test_force_conserve_moisture_zero_global_mean_term_stays_finite(
-    terms_to_modify, zeroed_name: str
+    terms_to_modify, zeroed_name: str, residual: float
 ):
-    """A sample whose rescaled term is zero everywhere (e.g. precipitation that
-    ForcePositive clamped to zero at every pixel) must not produce NaN values
-    or gradients, and the global-mean moisture budget must still close.
+    """A sample whose rescaled term is zero (or nearly zero) everywhere, e.g.
+    precipitation that ForcePositive clamped to zero at (almost) every pixel,
+    must not produce NaN or infinite values or gradients, and the global-mean
+    moisture budget must still close.
     """
     torch.random.manual_seed(0)
     size = (3, 2, 5, 5)
@@ -835,15 +839,22 @@ def test_force_conserve_moisture_zero_global_mean_term_stays_finite(
         "LHTFLsfc": torch.rand(size=size),
         "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
     }
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
-    )
+    vertical_coordinate = _get_vertical_coordinate()
     ops = LatLonOperations(
         1.0 + torch.rand(size=(size[-2], 1)).broadcast_to(size=size[-2:])
     )
     in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
     out_data = {k: v.select(dim=1, index=1).clone() for k, v in data.items()}
+    unmodified = _force_conserve_moisture(
+        in_data,
+        out_data,
+        vertical_coordinate=vertical_coordinate,
+        area_weighted_mean=ops.area_weighted_mean,
+        timestep_seconds=TIMESTEP.total_seconds(),
+        terms_to_modify=terms_to_modify,
+    )
     out_data[zeroed_name][1] = 0.0
+    out_data[zeroed_name][1, 0, 0] = residual
     out_data[zeroed_name].requires_grad_(True)
     fixed = _force_conserve_moisture(
         in_data,
@@ -853,6 +864,9 @@ def test_force_conserve_moisture_zero_global_mean_term_stays_finite(
         timestep_seconds=TIMESTEP.total_seconds(),
         terms_to_modify=terms_to_modify,
     )
+    # the other samples are corrected exactly as without the zeroed sample
+    for name, value in fixed.items():
+        torch.testing.assert_close(value[[0, 2]], unmodified[name][[0, 2]])
     for name, value in fixed.items():
         assert torch.isfinite(value).all(), name
     sum(v.sum() for v in fixed.values()).backward()

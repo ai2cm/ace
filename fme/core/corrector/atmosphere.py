@@ -525,12 +525,19 @@ def _rescale_to_global_mean(
     """Give ``field`` the global mean ``new_global_mean``.
 
     Scales ``field`` by ``new_global_mean / global_mean``. Where ``global_mean``
-    is exactly zero (e.g. precipitation that force_positive clamped to zero
-    everywhere) the ratio is undefined, so ``new_global_mean`` is added as a
-    uniform offset instead. The denominator is made safe before dividing so
-    that the unselected branch cannot put NaN into the gradient.
+    is zero or so close to zero that the ratio's gradient would overflow (e.g.
+    precipitation that force_positive clamped to zero at all but a few cells)
+    the ratio is undefined or numerically unusable, so ``new_global_mean`` is
+    added as a uniform offset instead. The denominator is made safe before
+    dividing so that the unselected branch cannot put NaN into the gradient.
+
+    A negative ``new_global_mean`` gives a negative field in either branch; it
+    is not clamped, since that would break the global budget being enforced.
     """
-    is_zero = global_mean == 0
+    # the gradient of the ratio scales as 1 / global_mean**2, which overflows
+    # once global_mean**2 drops below the smallest normal float
+    threshold = torch.finfo(global_mean.dtype).tiny ** 0.5
+    is_zero = global_mean.abs() < threshold
     safe_mean = torch.where(is_zero, torch.ones_like(global_mean), global_mean)
     scaled = field * (new_global_mean / safe_mean)
     return torch.where(is_zero, field + new_global_mean, scaled)
