@@ -424,16 +424,15 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
         padding_conf=padding_conf,
     )
 
+    # The south padding is extended to reach the window multiple.
+    pad_s = net.padded_shape[0] - img_shape[0] - pad_lat[0]
     expected_pieces = []
     if pad_lat[0] > 0:
         expected_pieces.append(torch.flip(lat_coords[: pad_lat[0]], dims=[0]))
     expected_pieces.append(lat_coords)
-    if pad_lat[1] > 0:
-        expected_pieces.append(torch.flip(lat_coords[-pad_lat[1] :], dims=[0]))
+    if pad_s > 0:
+        expected_pieces.append(torch.flip(lat_coords[-pad_s:], dims=[0]))
     expected = torch.cat(expected_pieces)
-    pad_h = net.padded_shape[0] - expected.shape[0]
-    if pad_h > 0:
-        expected = torch.cat([expected, expected[-1:].expand(pad_h)])
     torch.testing.assert_close(net.layer1.blocks[0].lat_coords, expected)
 
 
@@ -461,7 +460,6 @@ _REGRESSION_IMG_SHAPE = (9, 18)  # not a multiple of 2 * window_size
 def _build_padded_net(
     padding_mode: Literal["earth", "mirror"] | None,
     conditioning: Literal["adaln", "cln"],
-    **kwargs,
 ) -> SwinTransformerNet:
     """Small randomly-initialized net exercising padding and cos-lat CPB.
 
@@ -499,7 +497,6 @@ def _build_padded_net(
         conditioning=conditioning,
         lat_coords=torch.linspace(-80.0, 80.0, _REGRESSION_IMG_SHAPE[0]),
         padding_conf=padding_conf,
-        **kwargs,
     )
     with torch.no_grad():
         for param in net.parameters():
@@ -534,8 +531,8 @@ def test_padded_output_is_unchanged(
     padding_mode: Literal["earth", "mirror"] | None,
     conditioning: Literal["adaln", "cln"],
 ):
-    """Default padding behavior must not change, so trained checkpoints keep
-    giving the same outputs."""
+    """Regression test for the padded forward pass, covering window-multiple
+    padding and cos-lat CPB scaling."""
     device = get_device()
     net = _build_padded_net(padding_mode, conditioning).to(device)
     x, context = _regression_inputs(conditioning)
@@ -555,7 +552,7 @@ def test_padded_output_is_unchanged(
     )
 
 
-def test_consistent_padding_shifted_window_lat_mean_is_polar_at_poles():
+def test_shifted_window_lat_mean_is_polar_at_poles():
     """Shifted windows that wrap across both poles must see a polar latitude.
 
     On a 4-degree grid (-88..88) with earth padding [2, 1] the padded grid has
@@ -581,7 +578,6 @@ def test_consistent_padding_shifted_window_lat_mean_is_polar_at_poles():
             "pad_lat": [2, 1],
             "pad_lon": [0, 0],
         },
-        consistent_padding=True,
     )
     for layer in (net.layer1, net.layer2, net.layer3, net.layer4):
         for block in layer.blocks:
@@ -600,7 +596,7 @@ def test_consistent_padding_shifted_window_lat_mean_is_polar_at_poles():
 
 
 @pytest.mark.parametrize("mode", ["earth", "mirror"])
-def test_consistent_padding_lat_coords_match_padded_data(
+def test_lat_coords_match_padded_data(
     mode: Literal["earth", "mirror"],
 ):
     """The latitude of each padded row is the latitude of the data in it."""
@@ -622,7 +618,6 @@ def test_consistent_padding_lat_coords_match_padded_data(
             "pad_lat": [2, 1],
             "pad_lon": [2, 2],
         },
-        consistent_padding=True,
     )
     lat_field = lat_coords[:, None].expand(img_shape).reshape(1, 1, *img_shape)
     padded_lat_field = net.padding_opt.pad(lat_field)
@@ -659,7 +654,7 @@ def _capture_padded_input_and_noise(
 
 
 @pytest.mark.parametrize("padding_mode", ["earth", "mirror", None])
-def test_consistent_padding_fills_window_multiple_with_data(
+def test_fills_window_multiple_with_data(
     padding_mode: Literal["earth", "mirror"] | None,
 ):
     """Rows/columns added to reach a window multiple continue the sphere.
@@ -669,7 +664,7 @@ def test_consistent_padding_fills_window_multiple_with_data(
     mirror padding reflects about the edge row, and without padding the edge
     row is replicated (matching the latitudes used for CPB scaling).
     """
-    net = _build_padded_net(padding_mode, "cln", consistent_padding=True)
+    net = _build_padded_net(padding_mode, "cln")
     H, W = _REGRESSION_IMG_SHAPE
     Hp, Wp = net.padded_shape
     pl0, pw0 = (2, 2) if padding_mode is not None else (0, 0)
@@ -702,7 +697,7 @@ def test_consistent_padding_fills_window_multiple_with_data(
 
 
 @pytest.mark.parametrize("mode", ["earth", "mirror"])
-def test_consistent_padding_raises_if_padding_exceeds_grid(
+def test_raises_if_padding_exceeds_grid(
     mode: Literal["earth", "mirror"],
 ):
     # 9 + 2 + 9 = 20 rows -> 24, so the south padding grows to 13 > 9 rows.
@@ -718,22 +713,4 @@ def test_consistent_padding_raises_if_padding_exceeds_grid(
                 "pad_lat": [2, 9],
                 "pad_lon": [2, 2],
             },
-            consistent_padding=True,
         )
-
-
-@pytest.mark.parametrize(
-    "padding_mode, conditioning",
-    [(None, "adaln"), ("earth", "cln"), ("mirror", "cln")],
-)
-def test_consistent_padding_changes_output(
-    padding_mode: Literal["earth", "mirror"] | None,
-    conditioning: Literal["adaln", "cln"],
-):
-    """The fixes are opt-in: the same weights give different outputs."""
-    default_net = _build_padded_net(padding_mode, conditioning)
-    fixed_net = _build_padded_net(padding_mode, conditioning, consistent_padding=True)
-    fixed_net.load_state_dict(default_net.state_dict())
-    x, context = _regression_inputs(conditioning)
-    with torch.no_grad():
-        assert not torch.allclose(default_net(x, context), fixed_net(x, context))

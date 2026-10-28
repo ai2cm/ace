@@ -338,10 +338,6 @@ class SwinTransformerBlock(nn.Module):
         cpb_hidden_dim: Hidden dimension of the CPB MLP.
         lat_coords: Optional ``(H,)`` latitudes in degrees of the (padded)
             feature-map rows, used for cos-lat CPB scaling.
-        abs_lat_mean: If True, a window's latitude is the mean of ``|lat|``
-            over its rows instead of the signed mean. ``cos`` is even, so this
-            equals the signed mean for windows within one hemisphere, but it
-            stays polar for shifted windows that wrap across both poles.
     """
 
     def __init__(
@@ -359,7 +355,6 @@ class SwinTransformerBlock(nn.Module):
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
-        abs_lat_mean: bool = False,
     ):
         super().__init__()
         self.dim = dim
@@ -367,7 +362,6 @@ class SwinTransformerBlock(nn.Module):
         self.window_size = window_size
         self.shift_size = shift_size
         self.conditioning = conditioning
-        self.abs_lat_mean = abs_lat_mean
 
         if conditioning == "cln":
             if context_config is None:
@@ -420,8 +414,11 @@ class SwinTransformerBlock(nn.Module):
     def window_lat_mean(self) -> torch.Tensor | None:
         """Latitude in degrees of each window row, ``(H // ws_h,)``.
 
-        Accounts for the cyclic shift of shifted blocks. ``None`` when the
-        block has no latitude coordinates.
+        Accounts for the cyclic shift of shifted blocks. The mean is taken
+        over ``|lat|``: ``cos`` is even, so this equals the signed mean for
+        windows within one hemisphere, but it stays polar for shifted windows
+        that wrap across both poles. ``None`` when the block has no latitude
+        coordinates.
         """
         if self.lat_coords is None:
             return None
@@ -429,9 +426,7 @@ class SwinTransformerBlock(nn.Module):
         ws_h, _ = self.window_size
         sh, _ = self.shift_size
         lat_shifted = torch.roll(self.lat_coords, -sh) if sh != 0 else self.lat_coords
-        if self.abs_lat_mean:
-            lat_shifted = lat_shifted.abs()
-        return lat_shifted[:H].reshape(H // ws_h, ws_h).mean(1)
+        return lat_shifted[:H].abs().reshape(H // ws_h, ws_h).mean(1)
 
     def forward(
         self,
@@ -587,7 +582,6 @@ class BasicLayer(nn.Module):
             block's ``ConditionalLayerNorm``.
         cpb_hidden_dim: Hidden dimension of each block's CPB MLP.
         lat_coords: Optional ``(H,)`` row latitudes for cos-lat CPB scaling.
-        abs_lat_mean: Forwarded to each ``SwinTransformerBlock``.
     """
 
     def __init__(
@@ -606,7 +600,6 @@ class BasicLayer(nn.Module):
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
-        abs_lat_mean: bool = False,
     ):
         super().__init__()
         if len(drop_path) != depth:
@@ -630,7 +623,6 @@ class BasicLayer(nn.Module):
                     context_config=context_config,
                     cpb_hidden_dim=cpb_hidden_dim,
                     lat_coords=lat_coords,
-                    abs_lat_mean=abs_lat_mean,
                 )
                 for i in range(depth)
             ]

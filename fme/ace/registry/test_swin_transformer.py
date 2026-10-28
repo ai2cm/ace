@@ -17,7 +17,6 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels
-from fme.core.models.swin_transformer import SwinTransformerNet
 from fme.core.registry import ModuleSelector
 
 IMG_SHAPE = (16, 32)
@@ -303,20 +302,3 @@ def test_nc_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
     )
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
     assert module(x).shape == (2, n_out, *IMG_SHAPE)
-
-
-def _get_net(module: torch.nn.Module) -> SwinTransformerNet:
-    return next(m for m in module.modules() if isinstance(m, SwinTransformerNet))
-
-
-@pytest.mark.parametrize("make_builder", [_builder, _nc_builder])
-@pytest.mark.parametrize("consistent_padding", [None, False, True])
-def test_consistent_padding_is_plumbed_and_defaults_off(
-    make_builder: Any, consistent_padding: bool | None
-):
-    kwargs = {}
-    if consistent_padding is not None:
-        kwargs["consistent_padding"] = consistent_padding
-    module = make_builder(**kwargs).build(5, 3, _get_dataset_info())
-    expected = bool(consistent_padding)
-    assert _get_net(module).consistent_padding is expected

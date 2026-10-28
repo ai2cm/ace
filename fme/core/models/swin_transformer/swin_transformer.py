@@ -103,18 +103,12 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: Hidden dimension of the CPB MLPs.
         lat_coords: Optional ``(H,)`` latitudes in degrees of the input rows;
             enables cos-lat scaling of CPB longitude offsets.
-        padding_conf: Optional ``TensorPadding`` keyword arguments.
-        consistent_padding: If True, keep padded data and latitudes
-            geometrically consistent: a window's CPB latitude is the mean
-            ``|lat|`` of its rows, so shifted windows that wrap across both
-            poles see a polar latitude; and padded latitudes are produced by
-            the same padding operator as the data (fixing an off-by-one row
-            in mirror mode); and rows/columns added to reach a multiple of
-            ``2 * window_size`` continue the sphere instead of being zeros
-            (with ``padding_conf`` active, by extending its south/east
-            padding; otherwise circular in longitude and replicating the
-            last latitude row). False (default) keeps the original behavior
-            that trained checkpoints depend on.
+        padding_conf: Optional ``TensorPadding`` keyword arguments. Padded
+            latitudes are produced by the same padding operator as the data.
+            Rows/columns added to reach a multiple of ``2 * window_size``
+            continue the sphere: with ``padding_conf`` active, by extending
+            its south/east padding; otherwise circular in longitude and
+            replicating the last latitude row.
     """
 
     def __init__(
@@ -135,7 +129,6 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
         padding_conf: dict | None = None,
-        consistent_padding: bool = False,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -146,7 +139,6 @@ class SwinTransformerNet(nn.Module):
         self.use_skip = use_skip
         self.window_size = window_size
         self.conditioning = conditioning
-        self.consistent_padding = consistent_padding
 
         ws_h, ws_w = window_size
         self.pad_mult = (ws_h * 2, ws_w * 2)
@@ -165,9 +157,9 @@ class SwinTransformerNet(nn.Module):
         Hp = math.ceil(H0 / self.pad_mult[0]) * self.pad_mult[0]
         Wp = math.ceil(W0 / self.pad_mult[1]) * self.pad_mult[1]
         self.padded_shape = (Hp, Wp)
-        if self.use_padding and consistent_padding:
+        if self.use_padding:
             # Reach the window multiple with the geometric padding itself
-            # (south/east sides) rather than a trailing zero pad.
+            # (south/east sides) so the extra rows/columns continue the sphere.
             self.padding_opt = TensorPadding(
                 mode=self.padding_opt.mode,
                 pad_lat=[pl[0], pl[1] + Hp - H0],
@@ -176,24 +168,15 @@ class SwinTransformerNet(nn.Module):
             _validate_padding(self.padding_opt, img_shape)
             H0, W0 = Hp, Wp
 
-        if self.use_padding and lat_coords is not None and consistent_padding:
+        if self.use_padding and lat_coords is not None:
             # Pad the latitudes with the same operator as the data so each
-            # padded row carries the latitude of the data in it (in mirror
-            # mode, reflect padding excludes the edge row).
+            # padded row carries the latitude of the data in it.
             lat_padding = TensorPadding(
                 mode=self.padding_opt.mode,
                 pad_lat=self.padding_opt.pad_NS,
                 pad_lon=(0, 0),
             )
             lat_coords = lat_padding.pad(lat_coords.view(1, 1, -1, 1)).view(-1)
-        elif self.use_padding and lat_coords is not None:
-            padded_lat_coords = []
-            if pl[0] > 0:
-                padded_lat_coords.append(torch.flip(lat_coords[: pl[0]], dims=[0]))
-            padded_lat_coords.append(lat_coords)
-            if pl[1] > 0:
-                padded_lat_coords.append(torch.flip(lat_coords[-pl[1] :], dims=[0]))
-            lat_coords = torch.cat(padded_lat_coords)
 
         if context_config is not None:
             self.embed_dim_scalar = context_config.embed_dim_scalar
@@ -205,9 +188,8 @@ class SwinTransformerNet(nn.Module):
             self.embed_dim_noise = 0
 
         if lat_coords is not None:
-            # Rows that ``_pad_to_window_multiple`` adds get the last latitude
-            # (zeros, or replicated rows with consistent_padding). With
-            # consistent_padding and padding_conf active, there are none.
+            # Rows that ``_pad_to_window_multiple`` adds replicate the last
+            # latitude row. With padding_conf active, there are none.
             pad_h = Hp - H0
             lat_full: torch.Tensor | None = (
                 torch.cat([lat_coords, lat_coords[-1:].expand(pad_h)])
@@ -247,7 +229,6 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_full,
-            abs_lat_mean=consistent_padding,
         )
         self.downsample = PatchMerging(embed_dim)
         self.layer2 = BasicLayer(
@@ -265,7 +246,6 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_half,
-            abs_lat_mean=consistent_padding,
         )
         self.layer3 = BasicLayer(
             2 * embed_dim,
@@ -282,7 +262,6 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_half,
-            abs_lat_mean=consistent_padding,
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
@@ -302,7 +281,6 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_full,
-            abs_lat_mean=consistent_padding,
         )
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)
@@ -310,11 +288,9 @@ class SwinTransformerNet(nn.Module):
     def _pad_to_window_multiple(self, x: torch.Tensor) -> torch.Tensor:
         """Pad the south/east edges of ``x`` up to ``self.padded_shape``.
 
-        By default the extra rows/columns are zeros. With
-        ``consistent_padding`` longitude wraps circularly and the last
-        latitude row is replicated; when ``padding_conf`` is active the
-        geometric padding already reaches the window multiple, so this is a
-        no-op.
+        Longitude wraps circularly and the last latitude row is replicated;
+        when ``padding_conf`` is active the geometric padding already reaches
+        the window multiple, so this is a no-op.
         """
         _, _, H, W = x.shape
         Hp, Wp = self.padded_shape
@@ -322,8 +298,6 @@ class SwinTransformerNet(nn.Module):
         pad_w = Wp - W
         if pad_h == 0 and pad_w == 0:
             return x
-        if not self.consistent_padding:
-            return F.pad(x, (0, pad_w, 0, pad_h))
         if pad_w > 0:
             x = F.pad(x, (0, pad_w, 0, 0), mode="circular")
         if pad_h > 0:
