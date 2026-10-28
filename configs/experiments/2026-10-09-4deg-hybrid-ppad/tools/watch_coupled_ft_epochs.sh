@@ -54,8 +54,12 @@ for j in e['jobs']:
       if ! beaker dataset fetch "$DS" --prefix training_checkpoints/ckpt.tar -o "$D/src" >"$D/fetch.log" 2>&1; then
         log "epoch $N: fetch failed ($(tail -1 "$D/fetch.log")); will retry"; continue
       fi
-      info=$(PYTHONPATH="$REPO_ROOT" python "$SCRIPT_DIR/extract_atmosphere_from_coupled_ckpt.py" \
-             "$D/src/training_checkpoints/ckpt.tar" "$D/upload/training_checkpoints/best_inference_ckpt.tar" --ema 2>&1 | grep "^wrote")
+      PYTHONPATH="$REPO_ROOT" python "$SCRIPT_DIR/extract_atmosphere_from_coupled_ckpt.py" \
+             "$D/src/training_checkpoints/ckpt.tar" "$D/upload/training_checkpoints/best_inference_ckpt.tar" --ema >"$D/extract.log" 2>&1
+      info=$(grep "^wrote" "$D/extract.log")
+      # an empty result is an extraction failure (e.g. a python without torch: start the watchdog from the fme env), not
+      # a checkpoint still uploading; say why instead of retrying silently
+      [ -n "$info" ] || log "epoch $N: extraction FAILED: $(grep -vE "healpixpad|warnings.warn" "$D/extract.log" | tail -2 | tr '\n' ' ')"
       log "epoch $N: $info"
       # the restart checkpoint is written at the end of train_one_epoch, BEFORE the epoch counter increments and before
       # the inline evaluation: the end-of-epoch-N file reads "epoch N-1, batches N*B (+B this epoch)"
