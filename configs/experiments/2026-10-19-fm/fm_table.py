@@ -1,10 +1,11 @@
 """Per-architecture progress table for the 2026-10-19 FM training jobs.
 
-Epochs done per job come from the latest *started* beaker job's log: the max of
-"trained for N complete epochs" (checkpoint saves, incl. after a resume) and
-"model trained for N epochs" (validation/inference starts). Finished jobs
-count as max_epochs; never-started jobs count as 0. The -e3sm configs are
-excluded.
+Epochs done per job come from the latest *started* beaker job's log: the
+highest N in "Starting training step for model trained for N complete
+epochs", so an epoch counts only once its training, validation and inline
+inference are all done. Finished jobs count as max_epochs; never-started jobs
+count as 0. The -e3sm configs are excluded. All values are measured; there
+are no estimates.
 
 Usage:
     python fm_table.py
@@ -28,17 +29,14 @@ from submit_fm_jobs import (  # noqa: E402
 )
 
 MAX_EPOCHS = 150
-EPOCH_RE = re.compile(r"trained for (\d+) (?:complete )?epochs")
+# "Starting training step for model trained for N complete epochs" marks that
+# epochs 0..N-1 are done, including their validation and inline inference.
+EPOCH_RE = re.compile(r"Starting training step for model trained for (\d+) complete")
 # Wall time between consecutive validation starts = one full epoch, including
 # validation and inline inference.
 VAL_RE = re.compile(
     r"^(\S+)Z .*Starting validation step for model trained for (\d+) epochs", re.M
 )
-# Estimated wall seconds per epoch (train + validation + inline inference).
-# - sfno: measured ~2450 s.
-# - swin-v2.2 dm1e256 compiled: roughly SFNO speed per the 2026-10-26 speed
-#   study benchmarks (64 vs 57 samples/s/GPU with batched EMA), so ~2800 s.
-EST_S_PER_EPOCH = {"sfno": 2450, "swin-v2.2": 2800}
 COLUMNS = (
     "Architecture",
     "Finished",
@@ -48,7 +46,6 @@ COLUMNS = (
     "Max epoch",
     "Median epoch",
     "s/epoch (median)",
-    "est. s/epoch",
 )
 
 
@@ -66,7 +63,7 @@ def progress(named) -> tuple[int, float | None]:
     started = [j for j in jobs if "started" in j.get("status", {})]
     if named.status == OK or not started:
         return (MAX_EPOCHS if named.status == OK else 0), None
-    grep = "grep -E 'trained for [0-9]+ (complete )?epochs'"
+    grep = "grep -E 'Starting (training|validation) step'"
     proc = subprocess.run(
         f"beaker job logs {started[-1]['id']} 2>/dev/null | {grep}",
         shell=True,
@@ -128,7 +125,6 @@ def main() -> None:
             max(eps),
             f"{statistics.median(eps):g}",
             f"{statistics.median(spe):.0f}" if spe else "-",
-            EST_S_PER_EPOCH[arch],
         )
         print("| " + " | ".join(str(v) for v in row) + " |")
 
