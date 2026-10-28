@@ -262,7 +262,7 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
 
 
 @pytest.mark.medium_duration
-def test_restore_checkpoint_raises_for_interpolation_mismatch(
+def test_restore_checkpoint_raises_for_upsampling_mismatch(
     default_trainer_config, tmp_path
 ):
     config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)

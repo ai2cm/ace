@@ -141,7 +141,7 @@ def test_validate_experts_compatible():
         _validate_experts_compatible([e0, e1])
 
 
-def test_validate_experts_compatible_raises_for_different_interpolation():
+def test_validate_experts_compatible_raises_for_different_upsampling():
     fine_coords = make_fine_coords((16, 32))
     experts = [
         _get_diffusion_model(
@@ -150,7 +150,7 @@ def test_validate_experts_compatible_raises_for_different_interpolation():
             full_fine_coords=fine_coords,
             use_fine_topography=False,
             static_inputs=StaticInputs(fields=[], coords=fine_coords),
-            interpolation=UpsamplingConfig(align_corners=align_corners),
+            upsampling=UpsamplingConfig(align_corners=align_corners),
         )
         for align_corners in (True, False)
     ]

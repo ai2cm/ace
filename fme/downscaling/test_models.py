@@ -213,7 +213,7 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
-    interpolation: UpsamplingConfig | None = None,
+    upsampling: UpsamplingConfig | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -235,7 +235,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
-        upsampling=interpolation or UpsamplingConfig(),
+        upsampling=upsampling or UpsamplingConfig(),
     ).build(
         coarse_shape,
         downscale_factor,
@@ -896,7 +896,7 @@ def test__build_variable_loss_weight_tensor():
     assert torch.allclose(weighted_loss[:, 2], loss[:, 2] * 2.0)
 
 
-def _get_interpolation_test_model() -> DiffusionModel:
+def _get_upsampling_test_model() -> DiffusionModel:
     fine_coords = make_fine_coords((16, 32))
     return _get_diffusion_model(
         coarse_shape=(8, 16),
@@ -904,21 +904,21 @@ def _get_interpolation_test_model() -> DiffusionModel:
         full_fine_coords=fine_coords,
         use_fine_topography=False,
         static_inputs=StaticInputs(fields=[], coords=fine_coords),
-        interpolation=UpsamplingConfig(mode="bilinear", align_corners=True),
+        upsampling=UpsamplingConfig(mode="bilinear", align_corners=True),
     )
 
 
-def test_interpolation_config_default_for_new_models():
+def test_upsampling_config_default_for_new_models():
     assert UpsamplingConfig() == UpsamplingConfig(mode="bicubic", align_corners=False)
 
 
-def test_interpolation_config_raises_for_align_corners_with_unsupported_mode():
+def test_upsampling_config_raises_for_align_corners_with_unsupported_mode():
     with pytest.raises(ValueError, match="align_corners"):
         UpsamplingConfig(mode="nearest", align_corners=True)
 
 
-def test_model_uses_configured_interpolation():
-    model = _get_interpolation_test_model()
+def test_model_uses_configured_upsampling():
+    model = _get_upsampling_test_model()
     coarse = torch.randn(2, 1, 8, 16, device=get_device())
     expected = interpolate(coarse, 2, mode="bilinear", align_corners=True)
     torch.testing.assert_close(model._interpolate(coarse), expected)
@@ -928,8 +928,8 @@ def test_model_uses_configured_interpolation():
     )
 
 
-def test_interpolation_config_round_trips_through_checkpoint(tmp_path):
-    model = _get_interpolation_test_model()
+def test_upsampling_config_round_trips_through_checkpoint(tmp_path):
+    model = _get_upsampling_test_model()
     expected = UpsamplingConfig(mode="bilinear", align_corners=True)
     assert DiffusionModel.from_state(model.get_state()).config.upsampling == (expected)
     checkpoint_path = tmp_path / "test.ckpt"
@@ -938,9 +938,9 @@ def test_interpolation_config_round_trips_through_checkpoint(tmp_path):
     assert loaded.config.upsampling == expected
 
 
-def test_interpolation_backwards_compatibility(tmp_path):
-    """Checkpoints saved without interpolation config use the legacy settings."""
-    model = _get_interpolation_test_model()
+def test_upsampling_backwards_compatibility(tmp_path):
+    """Checkpoints saved without upsampling config use the legacy settings."""
+    model = _get_upsampling_test_model()
     state = model.get_state()
     del state["config"]["upsampling"]
     legacy = UpsamplingConfig(mode="bicubic", align_corners=True)
@@ -958,7 +958,7 @@ def test_checkpoint_config_model_updates_raises_for_frozen_keys(key):
 
 
 def test_validate_upsampling_matches_state():
-    model = _get_interpolation_test_model()
+    model = _get_upsampling_test_model()
     model.validate_upsampling_matches_state(model.get_state())
     legacy_state = model.get_state()
     del legacy_state["config"]["upsampling"]
