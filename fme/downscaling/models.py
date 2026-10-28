@@ -134,12 +134,31 @@ class UpsamplingConfig:
             tensor, scale_factor, mode=self.mode, align_corners=self.align_corners
         )
 
+    @classmethod
+    def legacy(cls) -> "UpsamplingConfig":
+        """Settings used by checkpoints saved before UpsamplingConfig existed."""
+        return cls(mode="bicubic", align_corners=True)
 
-def _with_legacy_interpolation(state: Mapping[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any] | None) -> "UpsamplingConfig":
+        """
+        Args:
+            state: The saved upsampling state, or None for checkpoints saved
+                before UpsamplingConfig existed, which used bicubic
+                interpolation with align_corners=True.
+        """
+        if state is None:
+            return cls.legacy()
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
+
+def _with_legacy_upsampling(state: Mapping[str, Any]) -> dict[str, Any]:
     state = dict(state)
-    if "interpolation" not in state:
-        # Interpolation used by checkpoints saved before InterpolationConfig existed.
-        state["interpolation"] = {"mode": "bicubic", "align_corners": True}
+    state["upsampling"] = dataclasses.asdict(
+        UpsamplingConfig.from_state(state.get("upsampling"))
+    )
     return state
 
 
@@ -358,7 +377,7 @@ class DiffusionModelConfig:
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "DiffusionModelConfig":
-        return dacite.from_dict(data_class=cls, data=_with_legacy_interpolation(state))
+        return dacite.from_dict(data_class=cls, data=_with_legacy_upsampling(state))
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -747,20 +766,18 @@ class DiffusionModel:
             "static_inputs": static_inputs_state,
         }
 
-    def validate_interpolation_matches_state(self, state: Mapping[str, Any]) -> None:
+    def validate_upsampling_matches_state(self, state: Mapping[str, Any]) -> None:
         """
         Raise if ``state`` (from ``get_state``) was saved with different
-        interpolation settings than this model, e.g. when resuming a training run
-        started before interpolation was configurable with a config that does
+        upsampling settings than this model, e.g. when resuming a training run
+        started before upsampling was configurable with a config that does
         not set it explicitly.
         """
-        saved = UpsamplingConfig(
-            **_with_legacy_interpolation(state["config"])["interpolation"]
-        )
+        saved = UpsamplingConfig.from_state(state["config"].get("upsampling"))
         if saved != self.config.upsampling:
             raise ValueError(
-                f"Saved model state uses interpolation {saved}, but this model uses "
-                f"{self.config.upsampling}. Set model.interpolation in the "
+                f"Saved model state uses upsampling {saved}, but this model uses "
+                f"{self.config.upsampling}. Set model.upsampling in the "
                 "config to match the saved state."
             )
 
@@ -898,7 +915,7 @@ class _CheckpointModelConfigSelector:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> DiffusionModelConfig:
         return dacite.from_dict(
-            data={"wrapper": _with_legacy_interpolation(state)},
+            data={"wrapper": _with_legacy_upsampling(state)},
             data_class=cls,
             config=dacite.Config(strict=True),
         ).wrapper
@@ -937,7 +954,7 @@ class CheckpointModelConfig:
         # For config validation testing, we don't want to load immediately
         # so we defer until build or properties are accessed.
         self._checkpoint_is_loaded = False
-        for key in ("module", "interpolation"):
+        for key in ("module", "upsampling"):
             if key in (self.model_updates or {}):
                 raise ValueError(f"'{key}' cannot be updated in model_updates.")
         if self.fine_topography_path is not None:

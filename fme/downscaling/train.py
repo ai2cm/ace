@@ -64,7 +64,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location="cpu", weights_only=False
     )
-    trainer.model.validate_interpolation_matches_state(checkpoint["model"])
+    trainer.model.validate_upsampling_matches_state(checkpoint["model"])
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
 

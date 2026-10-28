@@ -270,14 +270,14 @@ def test_restore_checkpoint_raises_for_interpolation_mismatch(
     trainer1.save_epoch_checkpoints()
 
     mismatched_config = copy.deepcopy(default_trainer_config)
-    mismatched_config["model"]["interpolation"] = {
+    mismatched_config["model"]["upsampling"] = {
         "mode": "bicubic",
         "align_corners": True,
     }
     trainer2 = dacite.from_dict(
         data_class=TrainerConfig, data=mismatched_config
     ).build()
-    with pytest.raises(ValueError, match="interpolation"):
+    with pytest.raises(ValueError, match="upsampling"):
         restore_checkpoint(trainer2)
 
 

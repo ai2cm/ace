@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from unittest.mock import MagicMock
 
@@ -941,7 +942,7 @@ def test_interpolation_backwards_compatibility(tmp_path):
     """Checkpoints saved without interpolation config use the legacy settings."""
     model = _get_interpolation_test_model()
     state = model.get_state()
-    del state["config"]["interpolation"]
+    del state["config"]["upsampling"]
     legacy = UpsamplingConfig(mode="bicubic", align_corners=True)
     assert DiffusionModel.from_state(state).config.upsampling == legacy
     checkpoint_path = tmp_path / "test.ckpt"
@@ -950,16 +951,24 @@ def test_interpolation_backwards_compatibility(tmp_path):
     assert loaded.config.upsampling == legacy
 
 
-@pytest.mark.parametrize("key", ["module", "interpolation"])
+@pytest.mark.parametrize("key", ["module", "upsampling"])
 def test_checkpoint_config_model_updates_raises_for_frozen_keys(key):
     with pytest.raises(ValueError, match=f"'{key}' cannot be updated"):
         CheckpointModelConfig(checkpoint_path="unused.ckpt", model_updates={key: {}})
 
 
-def test_validate_interpolation_matches_state():
+def test_validate_upsampling_matches_state():
     model = _get_interpolation_test_model()
-    model.validate_interpolation_matches_state(model.get_state())
+    model.validate_upsampling_matches_state(model.get_state())
     legacy_state = model.get_state()
-    del legacy_state["config"]["interpolation"]
-    with pytest.raises(ValueError, match="interpolation"):
-        model.validate_interpolation_matches_state(legacy_state)
+    del legacy_state["config"]["upsampling"]
+    with pytest.raises(ValueError, match="upsampling"):
+        model.validate_upsampling_matches_state(legacy_state)
+
+
+def test_upsampling_config_from_state():
+    assert UpsamplingConfig.from_state(None) == UpsamplingConfig(
+        mode="bicubic", align_corners=True
+    )
+    config = UpsamplingConfig(mode="bilinear", align_corners=False)
+    assert UpsamplingConfig.from_state(dataclasses.asdict(config)) == config
