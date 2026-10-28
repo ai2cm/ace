@@ -46,7 +46,7 @@ from fme.core.step.single_module import (
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
     get_dataset_info,
-    skip_without_inductor,
+    skip_unless_cuda,
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
@@ -2745,7 +2745,7 @@ def test_inductor_compiled_step_matches_eager(
     The rest of the suite compiles steps with ``aot_eager``, which traces the
     same graphs but never runs inductor's code generation.
     """
-    skip_without_inductor()
+    skip_unless_cuda()
     torch.manual_seed(0)
     selector = selector_getter()
     with compile_enabled(False):

@@ -54,7 +54,7 @@ _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
 )
 _LOGGED_AUTO_SKIP = False
-_LOGGED_LONGITUDE_SPLIT_SKIP = False
+_LOGGED_SPATIAL_SPLIT_SKIP = False
 RECOMPILE_LIMIT = 32
 
 
@@ -121,19 +121,21 @@ def is_compile_enabled() -> bool:
     resolve. :func:`compile_enabled` overrides both within a context.
 
     Regardless of these settings, modules are never compiled when spatial
-    parallelism splits longitude, where the compiled distributed inverse SHT
-    fails.
+    parallelism splits longitude or latitude. With longitude split, the
+    compiled distributed inverse SHT fails. With latitude split, uneven shards
+    (e.g. 45 latitudes over 2 ranks) make dynamo fail to trace the backward
+    gather of torch_harmonics' distributed SHT.
     """
-    global _LOGGED_AUTO_SKIP, _LOGGED_LONGITUDE_SPLIT_SKIP
-    # TODO: remove this gate once the distributed inverse SHT compiles with
-    # longitude split (https://github.com/ai2cm/ace/pull/1602)
-    if thd.azimuth_group_size() > 1:
-        if not _LOGGED_LONGITUDE_SPLIT_SKIP:
+    global _LOGGED_AUTO_SKIP, _LOGGED_SPATIAL_SPLIT_SKIP
+    # TODO: remove this gate once the distributed SHT compiles with longitude
+    # (https://github.com/ai2cm/ace/pull/1602) and uneven latitude splits
+    if thd.azimuth_group_size() > 1 or thd.polar_group_size() > 1:
+        if not _LOGGED_SPATIAL_SPLIT_SKIP:
             logger.info(
-                "torch.compile skipped: spatial parallelism splits longitude, "
-                "where the compiled distributed inverse SHT fails"
+                "torch.compile skipped: spatial parallelism splits longitude "
+                "or latitude, where the compiled distributed SHT fails"
             )
-            _LOGGED_LONGITUDE_SPLIT_SKIP = True
+            _LOGGED_SPATIAL_SPLIT_SKIP = True
         return False
     if _COMPILE_OVERRIDE is not None:
         return _COMPILE_OVERRIDE

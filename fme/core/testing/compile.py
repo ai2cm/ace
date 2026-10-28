@@ -103,6 +103,20 @@ def _inductor_unavailable_reason(device_type: str) -> str | None:
     return None
 
 
+def skip_unless_cuda() -> None:
+    """Skip the calling test unless it runs on CUDA.
+
+    For targeted inductor tests: production compiles by default only on CUDA,
+    and compiling on CPU (``FME_COMPILE=1``) is opt-in and unsupported, so
+    inductor's CPU code generation is not held to production's bar. On a Linux
+    CPU machine with a C++ toolchain it fails for many networks with inductor
+    bugs outside fme (e.g. "expected size ..., stride ..." assertions around
+    FFTs) and takes minutes for the larger ones.
+    """
+    if get_device().type != "cuda":
+        pytest.skip("production compiles with inductor only on CUDA")
+
+
 def skip_without_inductor() -> None:
     """Skip the calling test when inductor cannot generate code on the
     current device, e.g. on a CPU machine without a C++ toolchain.
