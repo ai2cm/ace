@@ -630,3 +630,110 @@ def test_consistent_padding_lat_coords_match_padded_data(
     assert torch.all(padded_lat_field == expected[:, None])
     actual = net.layer1.blocks[0].lat_coords
     torch.testing.assert_close(actual[: expected.shape[0]], expected)
+
+
+def _capture_padded_input_and_noise(
+    net: SwinTransformerNet, x: torch.Tensor, noise: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run ``net`` and return the padded input and noise seen by the U-Net."""
+    captured: dict[str, torch.Tensor] = {}
+
+    def encoder_hook(module, args):
+        captured["x"] = args[0]
+
+    def layer1_hook(module, args, kwargs):
+        captured["noise"] = kwargs["context"].noise
+
+    handles = [
+        net.encoder.register_forward_pre_hook(encoder_hook),
+        net.layer1.register_forward_pre_hook(layer1_hook, with_kwargs=True),
+    ]
+    context = Context(
+        embedding_scalar=None, embedding_pos=None, labels=None, noise=noise
+    )
+    with torch.no_grad():
+        net(x, context)
+    for handle in handles:
+        handle.remove()
+    return captured["x"], captured["noise"]
+
+
+@pytest.mark.parametrize("padding_mode", ["earth", "mirror", None])
+def test_consistent_padding_fills_window_multiple_with_data(
+    padding_mode: Literal["earth", "mirror"] | None,
+):
+    """Rows/columns added to reach a window multiple continue the sphere.
+
+    Longitude wraps circularly. Past the south/last latitude edge, earth
+    padding crosses the pole (rows reversed, longitude rotated by 180 deg),
+    mirror padding reflects about the edge row, and without padding the edge
+    row is replicated (matching the latitudes used for CPB scaling).
+    """
+    net = _build_padded_net(padding_mode, "cln", consistent_padding=True)
+    H, W = _REGRESSION_IMG_SHAPE
+    Hp, Wp = net.padded_shape
+    pl0, pw0 = (2, 2) if padding_mode is not None else (0, 0)
+    x, context = _regression_inputs("cln")
+    assert context.noise is not None
+    padded_x, padded_noise = _capture_padded_input_and_noise(net, x, context.noise)
+    for data, padded in ((x, padded_x), (context.noise, padded_noise)):
+        assert padded.shape[-2:] == (Hp, Wp)
+        cols = (torch.arange(Wp) - pw0) % W
+        rows = []
+        for i in range(Hp):
+            k = i - pl0 - H  # index past the south/last edge
+            if k < 0:
+                rows.append(data[..., i - pl0, cols])
+            elif padding_mode == "earth":
+                rows.append(torch.roll(data, W // 2, dims=-1)[..., H - 1 - k, cols])
+            elif padding_mode == "mirror":
+                rows.append(data[..., H - 2 - k, cols])
+            else:
+                rows.append(data[..., H - 1, cols])
+        expected = torch.stack(rows, dim=-2)
+        # rows above the north edge are covered by the TensorPadding tests
+        torch.testing.assert_close(padded[..., pl0:, :], expected[..., pl0:, :])
+    lat = net.layer1.blocks[0].lat_coords
+    lat_field = torch.linspace(-80.0, 80.0, H)[:, None].expand(H, W)
+    _, padded_lat = _capture_padded_input_and_noise(
+        net, x, lat_field.expand_as(context.noise).contiguous()
+    )
+    torch.testing.assert_close(lat, padded_lat[0, 0, :, 0])
+
+
+@pytest.mark.parametrize("mode", ["earth", "mirror"])
+def test_consistent_padding_raises_if_padding_exceeds_grid(
+    mode: Literal["earth", "mirror"],
+):
+    # 9 + 2 + 9 = 20 rows -> 24, so the south padding grows to 13 > 9 rows.
+    with pytest.raises(ValueError, match="pad_lat"):
+        SwinTransformerNet(
+            3,
+            3,
+            (9, 18),
+            window_size=(4, 4),
+            padding_conf={
+                "activate": True,
+                "mode": mode,
+                "pad_lat": [2, 9],
+                "pad_lon": [2, 2],
+            },
+            consistent_padding=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "padding_mode, conditioning",
+    [(None, "adaln"), ("earth", "cln"), ("mirror", "cln")],
+)
+def test_consistent_padding_changes_output(
+    padding_mode: Literal["earth", "mirror"] | None,
+    conditioning: Literal["adaln", "cln"],
+):
+    """The fixes are opt-in: the same weights give different outputs."""
+    default_net = _build_padded_net(padding_mode, conditioning)
+    fixed_net = _build_padded_net(padding_mode, conditioning, consistent_padding=True)
+    fixed_net.load_state_dict(default_net.state_dict())
+    x, context = _regression_inputs(conditioning)
+    with torch.no_grad():
+        assert not torch.allclose(default_net(x, context), fixed_net(x, context))
