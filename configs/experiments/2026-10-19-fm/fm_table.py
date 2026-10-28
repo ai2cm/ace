@@ -34,11 +34,13 @@ MAX_EPOCHS = 150
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
 EPOCH_RE = re.compile(r"Starting training step for model trained for (\d+) complete")
-# Wall time between consecutive validation starts = one full epoch, including
-# validation and inline inference.
-VAL_RE = re.compile(
-    r"^(\S+)Z .*Starting validation step for model trained for (\d+) epochs", re.M
+# Wall time between consecutive training starts = one full epoch, including
+# validation and inline inference. A resumed run's first training start is
+# mid-epoch, so that interval is skipped.
+TRAIN_START_RE = re.compile(
+    r"^(\S+)Z .*Starting training step for model trained for (\d+) complete", re.M
 )
+RESUME_MARK = "Resuming training from"
 COLUMNS = (
     "Architecture",
     "Finished",
@@ -87,7 +89,7 @@ def progress(named) -> tuple[int, float | None]:
     started = [j for j in jobs if "started" in j.get("status", {})]
     if named.status == OK or not started:
         return (MAX_EPOCHS if named.status == OK else 0), None
-    grep = "grep -E 'Starting (training|validation) step'"
+    grep = "grep -E 'Starting training step|Resuming training from'"
     proc = subprocess.run(
         f"beaker job logs {started[-1]['id']} 2>/dev/null | {grep}",
         shell=True,
@@ -96,8 +98,11 @@ def progress(named) -> tuple[int, float | None]:
     )
     done = max((int(m.group(1)) for m in EPOCH_RE.finditer(proc.stdout)), default=0)
     marks = [
-        (datetime.fromisoformat(t), int(n)) for t, n in VAL_RE.findall(proc.stdout)
+        (datetime.fromisoformat(t), int(n))
+        for t, n in TRAIN_START_RE.findall(proc.stdout)
     ]
+    if RESUME_MARK in proc.stdout:
+        marks = marks[1:]
     diffs = [
         (t2 - t1).total_seconds()
         for (t1, n1), (t2, n2) in zip(marks, marks[1:])
