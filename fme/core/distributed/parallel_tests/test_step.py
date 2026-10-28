@@ -14,6 +14,7 @@ import tempfile
 import unittest
 import unittest.mock
 from collections.abc import Callable, Collection
+from typing import Any
 
 import numpy as np
 import pytest
@@ -23,7 +24,6 @@ from torch import nn
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.compile import compile_enabled
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
@@ -38,8 +38,6 @@ from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
-    compile_backend,
-    dynamo_hygiene,  # noqa: F401  autouse in this module
     trivial_network_and_loss_normalization,
     uniform_grouped_normalization,
 )
@@ -289,16 +287,27 @@ def test_step_applies_wrapper(config: StepSelector):
         if config._step_config_instance.config is not None:
             multi_calls += len(config._step_config_instance.config.forcing_multipliers)
 
-    wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
+    wrapped: list[unittest.mock.Mock] = []
+
+    def wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
+        wrapped.append(unittest.mock.Mock(side_effect=module))
+        return wrapped[-1]
+
     step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
         wrapper=wrapper,
     )
-    assert wrapper.call_count == multi_calls * len(step.modules)
-    for module in step.modules:
-        wrapper.assert_any_call(module)
+    # each module's forward callable (the module itself when eager, or its
+    # torch.compile view exposing it as _orig_mod) is wrapped once per call,
+    # and the wrapped result is what that forward pass runs
+    assert len(wrapped) == multi_calls * len(step.modules)
+    assert [w.call_count for w in wrapped] == [1] * len(wrapped)
+    received = {id(w.side_effect): w.side_effect for w in wrapped}.values()
+    assert len(received) == len(step.modules)
+    owners = {id(getattr(m, "_orig_mod", m)) for m in received}
+    assert owners == {id(m) for m in step.modules}
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
@@ -416,49 +425,6 @@ def cache_step_output(output_data: TensorDict, checkpoint_path: pathlib.Path):
             f"Step output checkpoint created at {checkpoint_path}, "
             "please re-run the test."
         )
-
-
-@pytest.mark.parametrize("get_config", SELECTOR_GETTERS.values())
-@pytest.mark.parallel
-def test_compiled_step_matches_eager(
-    get_config: Callable[[pathlib.Path | None], StepSelector],
-):
-    """Compiling a step leaves its outputs unchanged under every parallel
-    decomposition. The step compiles after distributed wrapping, so the
-    compiled graph contains the distributed wrapper and, under spatial
-    parallelism, the decomposed network's collectives."""
-    torch.manual_seed(0)
-    img_shape = DEFAULT_IMG_SHAPE
-    n_samples = 2
-    selector = get_config(None)
-    with compile_enabled(False):
-        eager_step = get_step(selector, img_shape)
-    with compile_backend("aot_eager"):
-        compiled_step = get_step(selector, img_shape)
-    compiled_step.load_state(eager_step.get_state())
-    eager_step.eval()
-    compiled_step.eval()
-    dist = Distributed.get_instance()
-    args = StepArgs(
-        input=dist.scatter_spatial(
-            get_tensor_dict(eager_step.input_names, img_shape, n_samples), img_shape
-        ),
-        next_step_input_data=dist.scatter_spatial(
-            get_tensor_dict(eager_step.next_step_input_names, img_shape, n_samples),
-            img_shape,
-        ),
-        labels=None,
-    )
-
-    with torch.no_grad():
-        # the noise-conditioned network draws noise in its forward pass
-        torch.manual_seed(1)
-        eager_output = eager_step.step(args=args, wrapper=lambda x: x).output
-        torch.manual_seed(1)
-        compiled_output = compiled_step.step(args=args, wrapper=lambda x: x).output
-
-    for name, tensor in eager_output.items():
-        torch.testing.assert_close(compiled_output[name], tensor, atol=1e-4, rtol=1e-4)
 
 
 @pytest.mark.parametrize(

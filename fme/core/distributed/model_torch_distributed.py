@@ -32,7 +32,7 @@ from fme.core import metrics
 from fme.core.device import in_dataloader_worker, using_gpu, using_srun
 
 from ._gloo_patch import patch_gloo_alltoall
-from ._sht_patch import DistributedInverseRealSHT
+from ._uneven_gather_patch import patch_uneven_gather
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
@@ -162,6 +162,7 @@ class ModelTorchDistributed(DistributedBackend):
         if not thd.is_initialized():
             thd.init(self._h_group, self._w_group)
         patch_gloo_alltoall()
+        patch_uneven_gather()
 
         logger.info(
             "ModelTorchDistributed initialized: "
@@ -510,7 +511,7 @@ class ModelTorchDistributed(DistributedBackend):
         ).float()
 
     def get_isht(self, nlat, nlon, lmax=None, mmax=None, grid="legendre-gauss"):
-        return DistributedInverseRealSHT(
+        return thd.DistributedInverseRealSHT(
             nlat, nlon, lmax=lmax, mmax=mmax, grid=grid
         ).float()
 
