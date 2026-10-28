@@ -1,0 +1,38 @@
+# 30-yr coupled free rollout from 1994-01 (the program's 30yr-1994-singleckpt config) with the deep layers (thetao_14..18) and
+# ocean heat content added to the monthly files, for mapping the bottom-layer warming of the corrector-on arms.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar  # a coupled fine-tune checkpoint (carries the rename/scale/fraction config)
+n_coupled_steps: 2170  # 1994-01-05 .. 2023-09, the whole replay record incl. the untouched 2002-2011 decade
+coupled_steps_in_memory: 10
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /ufs4deg
+      file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5
+      file_pattern: 2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '1994-01-05T18:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [sst, thetao_0, thetao_5, thetao_10, thetao_14, thetao_15, thetao_16, thetao_17, thetao_18, ocean_heat_content, ocean_sea_ice_fraction, hfds_total_area]
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [surface_temperature, TMP2m, DSWRFsfc, DLWRFsfc, ULWRFsfc, USWRFsfc, LHTFLsfc, SHTFLsfc, PRATEsfc, eastward_surface_stress, northward_surface_stress, sea_ice_fraction, ocean_fraction]
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
