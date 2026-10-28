@@ -61,7 +61,8 @@ COLUMNS = (
     "Median epoch",
     "s/epoch (median)",
     "s/epoch (median) (train)",
-    "s/epoch (median) (inference)",
+    "s/epoch (median) (inference, every epoch)",
+    "s/epoch (median) (inference, every 10)",
     "Train time (median)",
 )
 
@@ -131,8 +132,22 @@ def _median(values: list[float]) -> float | None:
     return statistics.median(values) if values else None
 
 
-def epoch_seconds(log: str) -> tuple[float | None, float | None, float | None]:
-    """Median wall seconds per (full epoch, training, inline inference)."""
+# Inline inference runs the two aimip evaluators every epoch and all others
+# with `epochs: {start: 0, step: 10}`, i.e. after epochs 1, 11, 21, ...
+HEAVY_INFERENCE_EVERY = 10
+
+
+def _is_heavy_inference(epoch: int) -> bool:
+    return epoch % HEAVY_INFERENCE_EVERY == 1
+
+
+Seconds = tuple[float | None, float | None, float | None, float | None]
+
+
+def epoch_seconds(log: str) -> Seconds:
+    """Median wall seconds per (full epoch, training, inline inference on
+    light epochs, inline inference on heavy every-10th epochs).
+    """
     events = [
         (datetime.fromisoformat(t), phase, int(n))
         for t, phase, n in PHASE_RE.findall(log)
@@ -148,21 +163,25 @@ def epoch_seconds(log: str) -> tuple[float | None, float | None, float | None]:
         for (t1, n1), (t2, n2) in zip(starts, starts[1:])
         if n2 == n1 + 1
     ]
-    train, infer = [], []
+    train: list[float] = []
+    light: list[float] = []
+    heavy: list[float] = []
     for (t1, p1, n1), (t2, p2, n2) in zip(events, events[1:]):
         if p1 == "training" and p2 == "validation" and n2 == n1 + 1:
             if t1 != resumed_at:
                 train.append((t2 - t1).total_seconds())
         elif p1 == "inference" and p2 == "training" and n2 == n1:
-            infer.append((t2 - t1).total_seconds())
-    return _median(full), _median(train), _median(infer)
+            seconds = (t2 - t1).total_seconds()
+            (heavy if _is_heavy_inference(n1) else light).append(seconds)
+    return _median(full), _median(train), _median(light), _median(heavy)
 
 
-def progress(named) -> tuple[int, tuple[float | None, float | None, float | None]]:
-    """(epochs done, median seconds per (epoch, training, inference)) from the
+def progress(named) -> tuple[int, Seconds]:
+    """(epochs done, median seconds per (epoch, training, light and heavy
+    inference)) from the
     last started job.
     """
-    none = (None, None, None)
+    none: Seconds = (None, None, None, None)
     if named is None:
         return 0, none
     # A preempted experiment's newest job may still be queued, so read the
@@ -228,6 +247,7 @@ def main() -> None:
             median_column(0),
             median_column(1),
             median_column(2),
+            median_column(3),
             format_duration(statistics.median(times)) if times else "-",
         )
         print("| " + " | ".join(str(v) for v in row) + " |")
