@@ -661,10 +661,13 @@ def test_inference_writer_boundaries(
     # check time mean metrics
     tol = 1e-4  # relative tolerance
     grad_mag_tol = tol
+    grad_mag_atol = 0.0
     if using_gpu():
         # GPU test cases have higher error
         tol = 5e-4
         grad_mag_tol = 3e-3
+        # the percent diff can be near zero, where float32 noise exceeds any rtol
+        grad_mag_atol = 1e-4
     np.testing.assert_allclose(
         metrics.root_mean_squared_error(
             tar_time_mean, gen_time_mean, area_weights
@@ -708,6 +711,7 @@ def test_inference_writer_boundaries(
             ).item(),
             log["inference/mean/weighted_grad_mag_percent_diff/var"],
             rtol=grad_mag_tol,
+            atol=grad_mag_atol,
         )
         np.testing.assert_allclose(
             metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
