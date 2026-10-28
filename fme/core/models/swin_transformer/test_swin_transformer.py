@@ -749,3 +749,22 @@ def test_inactive_padding_fills_window_multiple_with_earth_padding():
 def test_padding_config_rejects_invalid_sizes(pad_lat: list[int], pad_lon: list[int]):
     with pytest.raises(ValueError, match="pad_l"):
         TensorPaddingConfig(pad_lat=pad_lat, pad_lon=pad_lon)
+
+
+def test_earth_padding_rejects_odd_longitudes_when_crossing_poles():
+    with pytest.raises(ValueError, match="even number of longitudes"):
+        _build_net(3, 3, (9, 17))
+    # Mirror padding does not rotate longitude, and a grid whose rows need no
+    # padding never crosses a pole.
+    _build_net(
+        3,
+        3,
+        (9, 17),
+        padding_conf={
+            "activate": True,
+            "mode": "mirror",
+            "pad_lat": [0, 0],
+            "pad_lon": [0, 0],
+        },
+    )
+    _build_net(3, 3, (8, 17), window_size=(4, 8))

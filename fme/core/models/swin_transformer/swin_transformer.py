@@ -173,6 +173,13 @@ class SwinTransformerNet(nn.Module):
         Hp = math.ceil(H0 / self.pad_mult[0]) * self.pad_mult[0]
         Wp = math.ceil(W0 / self.pad_mult[1]) * self.pad_mult[1]
         self.padded_shape = (Hp, Wp)
+        if mode == "earth" and Hp > img_shape[0] and img_shape[1] % 2 != 0:
+            # Crossing a pole rotates longitude by W // 2, not 180 degrees.
+            raise ValueError(
+                "Earth padding across the poles requires an even number of "
+                f"longitudes, got img_shape={tuple(img_shape)}; use "
+                '"mirror" padding instead'
+            )
         pad_rows, pad_cols = _padding_index(
             mode, img_shape, pad_lat[0], pad_lon[0], (Hp, Wp)
         )
