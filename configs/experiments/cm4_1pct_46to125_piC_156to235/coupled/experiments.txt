@@ -51,3 +51,5 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3
 
 cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
 cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|training|best_inference_ckpt|normal|--min-runtime 8h
