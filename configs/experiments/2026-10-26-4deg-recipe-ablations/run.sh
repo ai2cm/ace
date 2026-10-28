@@ -4,8 +4,8 @@ set -e
 export GRPC_VERBOSITY=ERROR
 
 # Ablations of ACE2.2's recipe at 4 degrees daily in AIMIP mode, one change each from the
-# ACE2.2-like control, 4 seeds per arm. Same code, image, data and +4 K pair as the ACE2.5
-# recipe's runs in ../2026-10-23-ace25-aimip-4deg/, the whole-recipe comparison:
+# ACE2.2-like control except the last arm, 4 seeds per arm. Same code, image, data and +4 K pair
+# as the ACE2.5 recipe's runs in ../2026-10-23-ace25-aimip-4deg/, the whole-recipe comparison:
 #
 #   ace22-like-4deg                          control: ACE2.2's recipe
 #   ace22-like-4deg-no-gmr                   without global mean removal
@@ -13,6 +13,9 @@ export GRPC_VERBOSITY=ERROR
 #   ace22-like-4deg-no-bottleneck            without the spectral bottleneck
 #   ace22-like-4deg-ace25-ft                 the ACE2.5 recipe's fine-tune, from the control's
 #                                            pretrains
+#   ace22-like-4deg-no-gmr-diagnostic-near-surface
+#                                            without global mean removal and with near-surface
+#                                            fields diagnosed (two changes)
 #
 # Each arm runs pretrain -> fine-tune -> 1979-2014 rollout and +4 K pair. Latent global-mean
 # clipping acts only at inference, so the rollout and the pair are each run both as trained
@@ -34,8 +37,9 @@ declare -A PRETRAIN=(
     [ace22-like-4deg-no-gmr]=ace22-pretrain-no-gmr.yaml
     [ace22-like-4deg-diagnostic-near-surface]=ace22-pretrain-diagnostic-near-surface.yaml
     [ace22-like-4deg-no-bottleneck]=ace22-pretrain-no-bottleneck.yaml
+    [ace22-like-4deg-no-gmr-diagnostic-near-surface]=ace22-pretrain-no-gmr-diagnostic-near-surface.yaml
 )
-ARMS="ace22-like-4deg ace22-like-4deg-no-gmr ace22-like-4deg-diagnostic-near-surface ace22-like-4deg-no-bottleneck ace22-like-4deg-ace25-ft"
+ARMS="ace22-like-4deg ace22-like-4deg-no-gmr ace22-like-4deg-diagnostic-near-surface ace22-like-4deg-no-bottleneck ace22-like-4deg-ace25-ft ace22-like-4deg-no-gmr-diagnostic-near-surface"
 # The fine-tune arm has no pretrain of its own and its own fine-tune config.
 declare -A PRETRAIN_ARM=([ace22-like-4deg-ace25-ft]=ace22-like-4deg)
 declare -A FINETUNE=([ace22-like-4deg-ace25-ft]=ace22-finetune-ace25.yaml)
