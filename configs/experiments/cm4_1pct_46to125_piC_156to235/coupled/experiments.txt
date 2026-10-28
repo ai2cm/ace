@@ -51,3 +51,5 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3
 # Evals launched 2026-10-27 (elynnwu): 1pct 01M5ZX1TD8NRNYV16J44QV187P, piC 01M5ZX215KMN6A5SG7C2E26XVK.
 cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-fto|o0a2rs0|01M5N1DGJ3RFYEQEPFM9N9F4CH|ran_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 8h||01M5WZG7EPBV1M75NDNGZ8T5ZD|ai2/ace|jupiter+titan
 cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-fto|o0a2rs0|01M5N1DGJ3RFYEQEPFM9N9F4CH|ran_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 8h||01M5WZG7EPBV1M75NDNGZ8T5ZD|ai2/ace|jupiter+titan
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-ft_fto|o0a2rs0|01M629VZATWWGRFABQV3DJ2A41|training|best_inference_ckpt|normal|--min-runtime 8h
