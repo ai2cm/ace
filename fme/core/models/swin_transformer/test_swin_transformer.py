@@ -597,3 +597,36 @@ def test_consistent_padding_shifted_window_lat_mean_is_polar_at_poles():
             if sh > 0:
                 # The wrapped window row mixes both poles.
                 assert torch.cos(torch.deg2rad(lat_mean[-1])) < 0.15
+
+
+@pytest.mark.parametrize("mode", ["earth", "mirror"])
+def test_consistent_padding_lat_coords_match_padded_data(
+    mode: Literal["earth", "mirror"],
+):
+    """The latitude of each padded row is the latitude of the data in it."""
+    img_shape = (9, 18)
+    lat_coords = torch.linspace(-80.0, 80.0, img_shape[0])
+    net = SwinTransformerNet(
+        3,
+        3,
+        img_shape,
+        embed_dim=16,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_coords,
+        padding_conf={
+            "activate": True,
+            "mode": mode,
+            "pad_lat": [2, 1],
+            "pad_lon": [2, 2],
+        },
+        consistent_padding=True,
+    )
+    lat_field = lat_coords[:, None].expand(img_shape).reshape(1, 1, *img_shape)
+    padded_lat_field = net.padding_opt.pad(lat_field)
+    expected = padded_lat_field[0, 0, :, 0]
+    assert torch.all(padded_lat_field == expected[:, None])
+    actual = net.layer1.blocks[0].lat_coords
+    torch.testing.assert_close(actual[: expected.shape[0]], expected)

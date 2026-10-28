@@ -90,8 +90,10 @@ class SwinTransformerNet(nn.Module):
         consistent_padding: If True, keep padded data and latitudes
             geometrically consistent: a window's CPB latitude is the mean
             ``|lat|`` of its rows, so shifted windows that wrap across both
-            poles see a polar latitude. False (default) keeps the original
-            behavior that trained checkpoints depend on.
+            poles see a polar latitude; and padded latitudes are produced by
+            the same padding operator as the data (fixing an off-by-one row
+            in mirror mode). False (default) keeps the original behavior
+            that trained checkpoints depend on.
     """
 
     def __init__(
@@ -143,7 +145,17 @@ class SwinTransformerNet(nn.Module):
         Wp = math.ceil(W0 / self.pad_mult[1]) * self.pad_mult[1]
         self.padded_shape = (Hp, Wp)
 
-        if self.use_padding and lat_coords is not None:
+        if self.use_padding and lat_coords is not None and consistent_padding:
+            # Pad the latitudes with the same operator as the data so each
+            # padded row carries the latitude of the data in it (in mirror
+            # mode, reflect padding excludes the edge row).
+            lat_padding = TensorPadding(
+                mode=self.padding_opt.mode,
+                pad_lat=self.padding_opt.pad_NS,
+                pad_lon=(0, 0),
+            )
+            lat_coords = lat_padding.pad(lat_coords.view(1, 1, -1, 1)).view(-1)
+        elif self.use_padding and lat_coords is not None:
             padded_lat_coords = []
             if pl[0] > 0:
                 padded_lat_coords.append(torch.flip(lat_coords[: pl[0]], dims=[0]))
