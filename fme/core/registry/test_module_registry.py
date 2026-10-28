@@ -369,11 +369,7 @@ class _LinearNet(torch.nn.Module):
 @pytest.mark.medium_duration
 def test_module_compile_matches_uncompiled_and_keeps_state():
     """compile() changes only the forward callable: same outputs, same
-    state-dict keys, same underlying torch module; wrapping preserves it.
-
-    Compiles with the test session's backend (``aot_eager``), which exercises
-    dynamo tracing without paying inductor's codegen cost.
-    """
+    state-dict keys, same underlying torch module; wrapping preserves it."""
     torch.manual_seed(0)
     net = _LinearNet().to(fme.get_device())
     module = Module(net, label_encoding=None)
@@ -388,27 +384,17 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
 
     assert compiled.forward_module is not compiled.torch_module
 
-    # a wrapper with an observable effect, so this checks the wrapper really
-    # sits on the compiled forward callable rather than only that the
-    # compiled flag survives wrapping
-    wrapped = compiled.wrap_module(lambda m: (lambda *args: 2 * m(*args)))
+    # a per-call wrapper (e.g. activation checkpointing) is applied once, to
+    # the compiled forward callable, and leaves the parameter-owning module
+    wrapper = mock.Mock(side_effect=lambda m: (lambda *args: 2 * m(*args)))
+    wrapped = compiled.wrap_module(wrapper)
+    wrapper.assert_called_once_with(compiled.forward_module)
+    assert wrapped.torch_module is module.torch_module
     assert wrapped.is_compiled
     torch.testing.assert_close(wrapped(x), 2 * module(x))
 
     with pytest.raises(RuntimeError, match="before Module.compile"):
         compiled.to(fme.get_device())
-
-
-def test_compiled_module_wrap_module_calls_wrapper_once():
-    """A per-call wrapper (e.g. activation checkpointing) is applied once, to
-    the compiled forward callable, and leaves the parameter-owning module as is.
-    """
-    module = Module(_LinearNet(), label_encoding=None)
-    compiled = module.compile()
-    wrapper = mock.MagicMock(side_effect=lambda m: m)
-    wrapped = compiled.wrap_module(wrapper)
-    wrapper.assert_called_once_with(compiled.forward_module)
-    assert wrapped.torch_module is module.torch_module
 
 
 @ModuleSelector.register(

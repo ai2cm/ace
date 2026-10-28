@@ -284,19 +284,11 @@ def test_step_applies_wrapper(config: StepSelector):
         if config._step_config_instance.config is not None:
             multi_calls += len(config._step_config_instance.config.forcing_multipliers)
 
-    received: list[Callable[..., Any]] = []
-    invocations: list[int] = []
+    wrapped: list[unittest.mock.Mock] = []
 
     def wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
-        received.append(module)
-        invocations.append(0)
-        index = len(invocations) - 1
-
-        def wrapped(*args: Any, **kwargs: Any) -> Any:
-            invocations[index] += 1
-            return module(*args, **kwargs)
-
-        return wrapped
+        wrapped.append(unittest.mock.Mock(side_effect=module))
+        return wrapped[-1]
 
     step.step(
         args=StepArgs(
@@ -304,17 +296,14 @@ def test_step_applies_wrapper(config: StepSelector):
         ),
         wrapper=wrapper,
     )
-    # the wrapper is applied once per module per call, and each wrapped result
-    # is what that forward pass runs: a wrapper applied to anything else (such
-    # as the parameter-owning module of a compiled Module) would go uncalled
-    assert len(received) == multi_calls * len(step.modules)
-    assert invocations == [1] * len(received)
-    # the wrapper receives each module's forward callable: the module itself
-    # when eager, or its torch.compile view, which exposes the compiled module
-    # as _orig_mod
-    forward_callables = list({id(m): m for m in received}.values())
-    assert len(forward_callables) == len(step.modules)
-    owners = {id(getattr(m, "_orig_mod", m)) for m in forward_callables}
+    # each module's forward callable (the module itself when eager, or its
+    # torch.compile view exposing it as _orig_mod) is wrapped once per call,
+    # and the wrapped result is what that forward pass runs
+    assert len(wrapped) == multi_calls * len(step.modules)
+    assert [w.call_count for w in wrapped] == [1] * len(wrapped)
+    received = {id(w.side_effect): w.side_effect for w in wrapped}.values()
+    assert len(received) == len(step.modules)
+    owners = {id(getattr(m, "_orig_mod", m)) for m in received}
     assert owners == {id(m) for m in step.modules}
 
 
