@@ -39,6 +39,22 @@ CONFIG_PREFIX = "ace-train-config-4deg-"
 # CONFIG_PREFIX. Matching is exact-tag, so `nc-swin-v2` never selects a
 # `nc-swin-v2.2` config (or vice versa).
 ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1", "nc-swin-v2.2")
+# Beaker defaults for add_beaker_args, shared with submit_inference_jobs.py so
+# inference jobs land where training jobs do. Keep in step with the
+# BEAKER_* defaults in run-ace-train.sh / run-ace-inference-job.sh.
+BEAKER_WORKSPACE: str = "ai2/ace"
+BEAKER_CLUSTERS: list[str] = ["ai2/jupiter", "ai2/titan", "ai2/saturn"]
+BEAKER_PRIORITY: str = "normal"
+
+
+def add_default_beaker_args(parser: argparse.ArgumentParser) -> None:
+    """add_beaker_args with the training submitter's defaults."""
+    add_beaker_args(
+        parser,
+        default_workspace=BEAKER_WORKSPACE,
+        default_cluster=list(BEAKER_CLUSTERS),
+        default_priority=BEAKER_PRIORITY,
+    )
 
 
 def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
@@ -88,12 +104,7 @@ def main() -> None:
             "all architectures."
         ),
     )
-    add_beaker_args(
-        parser,
-        default_workspace="ai2/ace",
-        default_cluster=["ai2/jupiter", "ai2/titan", "ai2/saturn"],
-        default_priority="normal",
-    )
+    add_default_beaker_args(parser)
     parser.add_argument(
         "--skip-if-in-wandb",
         action="store_true",
