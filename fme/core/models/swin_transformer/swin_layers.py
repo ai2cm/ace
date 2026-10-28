@@ -414,11 +414,11 @@ class SwinTransformerBlock(nn.Module):
     def window_lat_mean(self) -> torch.Tensor | None:
         """Latitude in degrees of each window row, ``(H // ws_h,)``.
 
-        Accounts for the cyclic shift of shifted blocks. The mean is taken
-        over ``|lat|``: ``cos`` is even, so this equals the signed mean for
-        windows within one hemisphere, but it stays polar for shifted windows
-        that wrap across both poles. ``None`` when the block has no latitude
-        coordinates.
+        Accounts for the cyclic shift of shifted blocks. With a shift, the
+        last window row wraps across both poles; its mean is taken over
+        ``|lat|`` (``cos`` is even) so it stays polar instead of averaging to
+        a near-equatorial latitude. Other windows use the signed mean.
+        ``None`` when the block has no latitude coordinates.
         """
         if self.lat_coords is None:
             return None
@@ -426,7 +426,10 @@ class SwinTransformerBlock(nn.Module):
         ws_h, _ = self.window_size
         sh, _ = self.shift_size
         lat_shifted = torch.roll(self.lat_coords, -sh) if sh != 0 else self.lat_coords
-        return lat_shifted[:H].abs().reshape(H // ws_h, ws_h).mean(1)
+        lat_windows = lat_shifted[:H].reshape(H // ws_h, ws_h)
+        if sh != 0:
+            lat_windows = torch.cat([lat_windows[:-1], lat_windows[-1:].abs()])
+        return lat_windows.mean(1)
 
     def forward(
         self,

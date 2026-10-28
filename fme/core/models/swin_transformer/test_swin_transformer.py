@@ -585,14 +585,15 @@ def test_shifted_window_lat_mean_is_polar_at_poles():
             sh = block.shift_size[0]
             # Latitudes of each window row, as gathered by the cyclic shift.
             rows = torch.roll(block.lat_coords, -sh).reshape(-1, ws_h)
-            abs_rows = rows.abs()
             lat_mean = block.window_lat_mean()  # (nH_win,)
             assert lat_mean is not None
-            assert torch.all(lat_mean.abs() >= abs_rows.min(dim=1).values - 1e-4)
-            assert torch.all(lat_mean.abs() <= abs_rows.max(dim=1).values + 1e-4)
             if sh > 0:
                 # The wrapped window row mixes both poles.
                 assert torch.cos(torch.deg2rad(lat_mean[-1])) < 0.15
+                rows = rows[:-1]
+                lat_mean = lat_mean[:-1]
+            # Windows that do not wrap keep the signed mean.
+            torch.testing.assert_close(lat_mean, rows.mean(dim=1))
 
 
 @pytest.mark.parametrize("mode", ["earth", "mirror"])
@@ -714,3 +715,48 @@ def test_raises_if_padding_exceeds_grid(
                 "pad_lon": [2, 2],
             },
         )
+
+
+def test_window_multiple_wraps_narrow_grid():
+    """Longitude padding wider than the grid wraps around it repeatedly."""
+    img_shape = (8, 4)  # window (4, 8) -> padded width 16 > 2 * W
+    net = SwinTransformerNet(
+        3,
+        3,
+        img_shape,
+        embed_dim=16,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 8),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+    )
+    x = torch.randn(1, 3, *img_shape)
+    padded = net._pad_to_window_multiple(x)
+    torch.testing.assert_close(padded, x.repeat(1, 1, 1, 4))
+    with torch.no_grad():
+        out = net(x)
+    assert out.shape == (1, 3, *img_shape)
+
+
+def test_accepts_non_contiguous_lat_coords():
+    img_shape = (9, 18)
+    lat_coords = torch.linspace(80.0, -80.0, 2 * img_shape[0])[::2]
+    assert not lat_coords.is_contiguous()
+    net = SwinTransformerNet(
+        3,
+        3,
+        img_shape,
+        embed_dim=16,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_coords,
+        padding_conf={
+            "activate": True,
+            "mode": "earth",
+            "pad_lat": [2, 1],
+            "pad_lon": [2, 2],
+        },
+    )
+    assert net.layer1.blocks[0].lat_coords.shape == (net.padded_shape[0],)

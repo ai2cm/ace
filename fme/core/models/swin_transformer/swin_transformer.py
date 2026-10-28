@@ -166,7 +166,6 @@ class SwinTransformerNet(nn.Module):
                 pad_lon=[pw[0], pw[1] + Wp - W0],
             )
             _validate_padding(self.padding_opt, img_shape)
-            H0, W0 = Hp, Wp
 
         if self.use_padding and lat_coords is not None:
             # Pad the latitudes with the same operator as the data so each
@@ -176,7 +175,7 @@ class SwinTransformerNet(nn.Module):
                 pad_lat=self.padding_opt.pad_NS,
                 pad_lon=(0, 0),
             )
-            lat_coords = lat_padding.pad(lat_coords.view(1, 1, -1, 1)).view(-1)
+            lat_coords = lat_padding.pad(lat_coords.reshape(1, 1, -1, 1)).reshape(-1)
 
         if context_config is not None:
             self.embed_dim_scalar = context_config.embed_dim_scalar
@@ -188,14 +187,10 @@ class SwinTransformerNet(nn.Module):
             self.embed_dim_noise = 0
 
         if lat_coords is not None:
-            # Rows that ``_pad_to_window_multiple`` adds replicate the last
-            # latitude row. With padding_conf active, there are none.
-            pad_h = Hp - H0
-            lat_full: torch.Tensor | None = (
-                torch.cat([lat_coords, lat_coords[-1:].expand(pad_h)])
-                if pad_h > 0
-                else lat_coords
-            )  # (Hp,)
+            # Pad like the data so the CPB latitudes match the padded rows.
+            lat_full: torch.Tensor | None = self._pad_to_window_multiple(
+                lat_coords.reshape(1, 1, -1, 1)
+            )[0, 0, :, 0]  # (Hp,)
             lat_half: torch.Tensor | None = (
                 lat_full[::2] + lat_full[1::2]  # type: ignore[index]
             ) / 2  # (Hp//2,)
@@ -299,7 +294,8 @@ class SwinTransformerNet(nn.Module):
         if pad_h == 0 and pad_w == 0:
             return x
         if pad_w > 0:
-            x = F.pad(x, (0, pad_w, 0, 0), mode="circular")
+            # Index-based wrap, unlike F.pad's circular mode, allows pad_w > W.
+            x = x[..., torch.arange(Wp, device=x.device) % W]
         if pad_h > 0:
             x = F.pad(x, (0, 0, 0, pad_h), mode="replicate")
         return x
