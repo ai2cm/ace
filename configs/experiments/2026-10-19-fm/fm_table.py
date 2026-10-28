@@ -1,6 +1,7 @@
 """Per-architecture progress table for the 2026-10-19 FM training jobs.
 
-Epochs done per job come from the latest *started* beaker job's log: the
+Epochs done and per-phase timings come from the logs of every run
+(preemption retry) of each finished or running experiment. Epochs done is the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
 inference are all done. Finished jobs count as max_epochs; never-started jobs
@@ -144,9 +145,12 @@ def _is_heavy_inference(epoch: int) -> bool:
 Seconds = tuple[float | None, float | None, float | None, float | None]
 
 
-def epoch_seconds(log: str) -> Seconds:
-    """Median wall seconds per (full epoch, training, inline inference on
-    light epochs, inline inference on heavy every-10th epochs).
+Intervals = tuple[list[float], list[float], list[float], list[float]]
+
+
+def epoch_intervals(log: str) -> Intervals:
+    """Wall seconds of each (full epoch, training, inline inference on light
+    epochs, inline inference on heavy every-10th epochs) in one run's log.
     """
     events = [
         (datetime.fromisoformat(t), phase, int(n))
@@ -173,32 +177,42 @@ def epoch_seconds(log: str) -> Seconds:
         elif p1 == "inference" and p2 == "training" and n2 == n1:
             seconds = (t2 - t1).total_seconds()
             (heavy if _is_heavy_inference(n1) else light).append(seconds)
-    return _median(full), _median(train), _median(light), _median(heavy)
+    return full, train, light, heavy
+
+
+def _run_log(job_id: str) -> str:
+    grep = "grep -E 'Starting (training|validation|inference) step|Resuming training'"
+    return subprocess.run(
+        f"beaker job logs {job_id} 2>/dev/null | {grep}",
+        shell=True,
+        capture_output=True,
+        text=True,
+    ).stdout
 
 
 def progress(named) -> tuple[int, Seconds]:
     """(epochs done, median seconds per (epoch, training, light and heavy
-    inference)) from the
-    last started job.
+    inference)) over the logs of every run (preemption retry) of the
+    experiment, finished or not.
     """
     none: Seconds = (None, None, None, None)
     if named is None:
         return 0, none
-    # A preempted experiment's newest job may still be queued, so read the
-    # last job that actually ran.
     jobs = named.experiment.get("jobs") or []
     started = [j for j in jobs if "started" in j.get("status", {})]
-    if named.status == OK or not started:
+    if not started:
         return (MAX_EPOCHS if named.status == OK else 0), none
-    grep = "grep -E 'Starting (training|validation|inference) step|Resuming training'"
-    proc = subprocess.run(
-        f"beaker job logs {started[-1]['id']} 2>/dev/null | {grep}",
-        shell=True,
-        capture_output=True,
-        text=True,
-    )
-    done = max((int(m.group(1)) for m in EPOCH_RE.finditer(proc.stdout)), default=0)
-    return done, epoch_seconds(proc.stdout)
+    intervals: Intervals = ([], [], [], [])
+    done = 0
+    for job in started:
+        log = _run_log(job["id"])
+        done = max(done, *(int(m.group(1)) for m in EPOCH_RE.finditer(log)), 0)
+        for acc, values in zip(intervals, epoch_intervals(log)):
+            acc.extend(values)
+    if named.status == OK:
+        done = MAX_EPOCHS
+    full, train, light, heavy = intervals
+    return done, (_median(full), _median(train), _median(light), _median(heavy))
 
 
 def main() -> None:
@@ -214,7 +228,7 @@ def main() -> None:
     for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
         by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
-    with ThreadPoolExecutor(10) as ex:
+    with ThreadPoolExecutor(20) as ex:
         prog = dict(zip(names, ex.map(lambda n: progress(by_name.get(n)), names)))
     print("| " + " | ".join(COLUMNS) + " |")
     print("|" + "---|" * len(COLUMNS))
@@ -228,12 +242,9 @@ def main() -> None:
         live = [n for n, st in zip(arch_names, statuses) if st in (OK, "running")]
         eps = [prog[n][0] for n in live] or [0]
         times = [train_seconds(by_name[n]) for n in live]
-        # Speed of unfinished, healthy jobs only: finished jobs skip the log
-        # fetch, and failed/canceled ones are not training.
-        running = [n for n, st in zip(arch_names, statuses) if st == "running"]
 
         def median_column(i: int) -> str:
-            values = [s for n in running if (s := prog[n][1][i]) is not None]
+            values = [s for n in live if (s := prog[n][1][i]) is not None]
             return f"{statistics.median(values):.0f}" if values else "-"
 
         row = (
