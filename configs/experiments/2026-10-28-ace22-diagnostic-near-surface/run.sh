@@ -26,7 +26,12 @@ declare -A STAGE1_CONFIG=(
     [ace22-diagnostic-near-surface]=train.yaml
     [ace22-no-gmr-diagnostic-near-surface]=train-no-gmr.yaml
 )
-ARMS="ace22-no-gmr-diagnostic-near-surface ace22-diagnostic-near-surface"
+# Set ARMS to launch only some arms, e.g. to hold one back while GPUs are short:
+#   ARMS=ace22-no-gmr-diagnostic-near-surface bash run.sh
+ARMS=${ARMS:-"ace22-no-gmr-diagnostic-near-surface ace22-diagnostic-near-surface"}
+for ARM in $ARMS; do
+    [[ -n "${STAGE1_CONFIG[$ARM]}" ]] || { echo "ERROR: unknown arm $ARM" >&2; exit 1; }
+done
 
 # The code and image ACE2.2-ERA5 was trained with (ai2cm/ACE2.1-ERA5-AIMIP
 # scripts/run-ace2.2-6h-train.sh and configs/ace2.2-era5/deps_only_image.txt).
@@ -35,7 +40,8 @@ IMAGE="oliverwm/fme-deps-only-c82095065"
 # As for ACE2.2-ERA5 seeds 1-3. batch_size is global, so the GPU count does not change the
 # experiment.
 TRAIN_GPUS=8
-TRAIN_CLUSTERS="ai2/jupiter"
+# Both H100, as ACE2.2-ERA5 was trained on.
+TRAIN_CLUSTERS="ai2/jupiter ai2/ceres"
 EVAL_CLUSTERS="ai2/titan ai2/jupiter"
 # The +4 K pair's inputs and outputs, as for ACE2.2-ERA5's seeds.
 IC_PATH="/climate-default/2026-08-24-aimip-evaluation/aimip-evaluation-ics/1978-09-30_IC0.nc"
