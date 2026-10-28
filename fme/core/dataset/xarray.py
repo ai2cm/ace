@@ -368,18 +368,31 @@ class OverwriteConfig:
     Parameters:
         constant: Fill field with constant value.
         multiply_scalar: Multiply field by scalar value.
+        one_minus: Set field to 1 minus another field's value. Maps
+            target field name to source field name (e.g.
+            ``{"ocean_fraction": "land_fraction"}`` sets
+            ``ocean_fraction = 1 - land_fraction``).
     """
 
     constant: Mapping[str, float] = dataclasses.field(default_factory=dict)
     multiply_scalar: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    one_minus: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        key_overlap = set(self.constant.keys()) & set(self.multiply_scalar.keys())
-        if key_overlap:
-            raise ValueError(
-                "OverwriteConfig cannot have the same variable in both constant "
-                f"and multiply_scalar: {key_overlap}"
-            )
+        all_targets = [
+            set(self.constant.keys()),
+            set(self.multiply_scalar.keys()),
+            set(self.one_minus.keys()),
+        ]
+        for i, a in enumerate(all_targets):
+            for j, b in enumerate(all_targets):
+                if i < j:
+                    overlap = a & b
+                    if overlap:
+                        raise ValueError(
+                            "OverwriteConfig cannot have the same variable "
+                            f"in multiple overwrite types: {overlap}"
+                        )
 
     def apply(self, tensors: TensorDict) -> TensorDict:
         for var, fill_value in self.constant.items():
@@ -392,11 +405,17 @@ class OverwriteConfig:
             tensors[var] = data * torch.tensor(
                 multiplier, dtype=data.dtype, device=data.device
             )
+        for target, source in self.one_minus.items():
+            tensors[target] = 1.0 - tensors[source]
         return tensors
 
     @property
     def variables(self):
-        return set(self.constant.keys()) | set(self.multiply_scalar.keys())
+        return (
+            set(self.constant.keys())
+            | set(self.multiply_scalar.keys())
+            | set(self.one_minus.keys())
+        )
 
 
 @dataclasses.dataclass
