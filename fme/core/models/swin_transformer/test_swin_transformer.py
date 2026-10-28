@@ -1,12 +1,17 @@
+import os
+from typing import Literal
+
 import pytest
 import torch
 
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.testing.regression import validate_tensor_dict
 
 from .swin_layers import ColumnMixer, WindowAttention2D
 from .swin_transformer import SwinTransformerNet
 
+DIR = os.path.abspath(os.path.dirname(__file__))
 _EMBED_DIM_NOISE = 8
 
 
@@ -447,4 +452,104 @@ def test_earth_padding_cln_forward():
         2,
         3,
         *img_shape,
+    )
+
+
+_REGRESSION_IMG_SHAPE = (9, 18)  # not a multiple of 2 * window_size
+
+
+def _build_padded_net(
+    padding_mode: Literal["earth", "mirror"] | None,
+    conditioning: Literal["adaln", "cln"],
+    **kwargs,
+) -> SwinTransformerNet:
+    """Small randomly-initialized net exercising padding and cos-lat CPB.
+
+    All parameters (including the zero-initialized CPB output layer) are
+    drawn from a seeded normal on CPU so outputs depend on the latitudes and
+    are reproducible across devices.
+    """
+    torch.manual_seed(0)
+    if padding_mode is None:
+        padding_conf = None
+    else:
+        padding_conf = {
+            "activate": True,
+            "mode": padding_mode,
+            "pad_lat": [2, 1],
+            "pad_lon": [2, 2],
+        }
+    context_config = ContextConfig(
+        embed_dim_scalar=0,
+        embed_dim_labels=0,
+        embed_dim_noise=_EMBED_DIM_NOISE if conditioning == "cln" else 0,
+        embed_dim_pos=0,
+    )
+    net = SwinTransformerNet(
+        in_chans=3,
+        out_chans=2,
+        img_shape=_REGRESSION_IMG_SHAPE,
+        embed_dim=16,
+        depth_multiplier=1,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        context_config=context_config,
+        conditioning=conditioning,
+        lat_coords=torch.linspace(-80.0, 80.0, _REGRESSION_IMG_SHAPE[0]),
+        padding_conf=padding_conf,
+        **kwargs,
+    )
+    with torch.no_grad():
+        for param in net.parameters():
+            param.copy_(0.2 * torch.randn_like(param))
+    return net
+
+
+def _regression_inputs(conditioning: str) -> tuple[torch.Tensor, Context]:
+    torch.manual_seed(1)
+    x = torch.randn(2, 3, *_REGRESSION_IMG_SHAPE)
+    noise = (
+        torch.randn(2, _EMBED_DIM_NOISE, *_REGRESSION_IMG_SHAPE)
+        if conditioning == "cln"
+        else None
+    )
+    context = Context(
+        embedding_scalar=None, embedding_pos=None, labels=None, noise=noise
+    )
+    return x, context
+
+
+@pytest.mark.parametrize(
+    "padding_mode, conditioning",
+    [
+        pytest.param(None, "adaln", id="no_padding"),
+        pytest.param("earth", "adaln", id="earth_adaln"),
+        pytest.param("earth", "cln", id="earth_cln"),
+        pytest.param("mirror", "cln", id="mirror_cln"),
+    ],
+)
+def test_padded_output_is_unchanged(
+    padding_mode: Literal["earth", "mirror"] | None,
+    conditioning: Literal["adaln", "cln"],
+):
+    """Default padding behavior must not change, so trained checkpoints keep
+    giving the same outputs."""
+    device = get_device()
+    net = _build_padded_net(padding_mode, conditioning).to(device)
+    x, context = _regression_inputs(conditioning)
+    if context.noise is not None:
+        context.noise = context.noise.to(device)
+    with torch.no_grad():
+        out = net(x.to(device), context)
+    validate_tensor_dict(
+        {"output": out},
+        os.path.join(
+            DIR,
+            "testdata",
+            f"test_padded_output_is_unchanged-{padding_mode}-{conditioning}.pt",
+        ),
+        atol=1e-5,
+        rtol=1e-4,
     )
