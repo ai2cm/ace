@@ -7,6 +7,7 @@ from typing import Any
 import torch
 import torch_harmonics.distributed as thd
 from torch import nn
+from torch.utils._pytree import tree_map_only
 
 from fme.core.device import get_device
 
@@ -47,6 +48,15 @@ def _parse_compile_backend_env(value: str | None) -> str | None:
     if value is None or value == "":
         return None
     return _validate_backend(value, "FME_COMPILE_BACKEND")
+
+
+CUDAGRAPH_COMPILE_MODE = "reduce-overhead"
+"""The ``torch.compile`` mode every module compiled with inductor uses.
+
+``reduce-overhead`` replays the compiled kernels as CUDA graphs, which removes
+the per-kernel CPU launch cost that otherwise bounds the step time of networks
+made of many small kernels. Other backends take no mode, and inductor skips
+CUDA graphs on other devices."""
 
 
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
@@ -179,10 +189,38 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     a particular backend needs that backend, while the configured one is only a
     default.
 
+    With the inductor backend, the mode is :data:`CUDAGRAPH_COMPILE_MODE`
+    (CUDA graphs) unless ``kwargs`` sets one. Outputs of the compiled module
+    are cloned, so a later CUDA graph replay cannot overwrite or free them.
+
     Args:
         module: The module to compile.
         kwargs: Forwarded to ``torch.compile``.
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())
-    return torch.compile(module, **kwargs)
+    if kwargs["backend"] == "inductor":
+        kwargs.setdefault("mode", CUDAGRAPH_COMPILE_MODE)
+    compiled = torch.compile(module, **kwargs)
+    compiled.register_forward_hook(_clone_outputs)
+    return compiled
+
+
+def _clone_outputs(module: nn.Module, args: Any, output: Any) -> Any:
+    # A CUDA graph writes its outputs to the same static buffers on every
+    # replay, and CUDA graph trees free a replay's outputs once a later call
+    # begins a new generation. Callers keep outputs across calls (e.g. the
+    # steps of a rollout), so hand them copies. The hook runs outside the
+    # compiled region.
+    return tree_map_only(torch.Tensor, torch.Tensor.clone, output)
+
+
+def uncompiled(module: nn.Module) -> nn.Module:
+    """The module ``torch.compile`` was called on, when ``module`` is a
+    compiled view, and ``module`` itself otherwise.
+    """
+    # OptimizedModule is the type of every torch.compile'd nn.Module, and
+    # _orig_mod is how it exposes the module it compiles
+    if isinstance(module, torch._dynamo.eval_frame.OptimizedModule):
+        return module._orig_mod
+    return module
