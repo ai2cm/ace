@@ -107,7 +107,11 @@ def main() -> None:
         statuses = [
             by_name[n].status if n in by_name else "missing" for n in arch_names
         ]
-        eps = [prog[n][0] for n in arch_names]
+        # Epoch columns cover finished and running jobs only; failed/canceled
+        # or deleted jobs would pull them toward 0.
+        eps = [
+            prog[n][0] for n, st in zip(arch_names, statuses) if st in (OK, "running")
+        ] or [0]
         # Speed of unfinished, healthy jobs only: finished jobs skip the log
         # fetch, and failed/canceled ones are not training.
         spe = [
