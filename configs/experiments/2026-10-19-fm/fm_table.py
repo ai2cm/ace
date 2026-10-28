@@ -26,7 +26,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from _beaker_listing import (  # noqa: E402
     OK,
     NamedExperiment,
-    _created,
     canonical_name,
     experiment_status,
     list_experiments,
@@ -67,6 +66,16 @@ COLUMNS = (
 )
 
 
+def _submitted(experiment: dict) -> str:
+    """When the experiment was submitted: its first job's creation time.
+
+    Not the latest job's, which moves forward on every preemption retry.
+    """
+    jobs = experiment.get("jobs") or []
+    created = [job.get("status", {}).get("created", "") for job in jobs]
+    return min(created, default="")
+
+
 def newest_by_name(text: str) -> dict[str, NamedExperiment]:
     """The newest experiment for each canonical job name matching ``text``.
 
@@ -77,7 +86,7 @@ def newest_by_name(text: str) -> dict[str, NamedExperiment]:
     newest: dict[str, dict] = {}
     for experiment in list_experiments(text=text):
         name = canonical_name(experiment["name"])
-        if name not in newest or _created(experiment) > _created(newest[name]):
+        if name not in newest or _submitted(experiment) > _submitted(newest[name]):
             newest[name] = experiment
     return {
         name: NamedExperiment(name, experiment_status(e), e)
