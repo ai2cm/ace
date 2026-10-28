@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import os
+import weakref
 from collections.abc import Generator
 from typing import Any
 
@@ -51,7 +52,7 @@ def _parse_compile_backend_env(value: str | None) -> str | None:
 
 
 CUDAGRAPH_COMPILE_MODE = "reduce-overhead"
-"""The ``torch.compile`` mode every module compiled with inductor uses.
+"""The default ``torch.compile`` mode of modules compiled with inductor.
 
 ``reduce-overhead`` replays the compiled kernels as CUDA graphs, which removes
 the per-kernel CPU launch cost that otherwise bounds the step time of networks
@@ -59,10 +60,32 @@ made of many small kernels. Other backends take no mode, and inductor skips
 CUDA graphs on other devices."""
 
 
+def _parse_compile_mode_env(value: str | None) -> str | None:
+    # an empty value (FME_COMPILE_MODE=) is treated as unset
+    if value is None or value == "":
+        return None
+    available = list(torch._inductor.list_mode_options())
+    if value not in available:
+        raise ValueError(
+            f"FME_COMPILE_MODE must name an inductor mode, got {value!r}; "
+            f"available modes are {available}."
+        )
+    return value
+
+
+def _uses_cudagraphs(backend: Any, mode: str | None) -> bool:
+    if backend != "inductor" or mode is None:
+        return False
+    return bool(torch._inductor.list_mode_options(mode).get("triton.cudagraphs"))
+
+
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
 _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
 )
+_MODE_OVERRIDE: str | None = _parse_compile_mode_env(os.environ.get("FME_COMPILE_MODE"))
+# compiled modules that replay CUDA graphs, see without_cudagraphs
+_CUDAGRAPH_MODULES: "weakref.WeakSet[nn.Module]" = weakref.WeakSet()
 _LOGGED_AUTO_SKIP = False
 _LOGGED_SPATIAL_SPLIT_SKIP = False
 RECOMPILE_LIMIT = 32
@@ -189,9 +212,12 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     a particular backend needs that backend, while the configured one is only a
     default.
 
-    With the inductor backend, the mode is :data:`CUDAGRAPH_COMPILE_MODE`
-    (CUDA graphs) unless ``kwargs`` sets one. Outputs of the compiled module
-    are cloned, so a later CUDA graph replay cannot overwrite or free them.
+    With the inductor backend, named by the string ``"inductor"``, the mode is
+    the one ``kwargs`` sets, else the ``FME_COMPILE_MODE`` environment variable
+    (e.g. ``default`` to turn CUDA graphs off, trading launch overhead for the
+    memory CUDA graph pools hold), else :data:`CUDAGRAPH_COMPILE_MODE`. When
+    the mode replays CUDA graphs, outputs of the compiled module are cloned,
+    so a later replay cannot overwrite or free them.
 
     Args:
         module: The module to compile.
@@ -200,9 +226,11 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())
     if kwargs["backend"] == "inductor":
-        kwargs.setdefault("mode", CUDAGRAPH_COMPILE_MODE)
+        kwargs.setdefault("mode", _MODE_OVERRIDE or CUDAGRAPH_COMPILE_MODE)
     compiled = torch.compile(module, **kwargs)
-    compiled.register_forward_hook(_clone_outputs)
+    if _uses_cudagraphs(kwargs["backend"], kwargs.get("mode")):
+        compiled.register_forward_hook(_clone_outputs)
+        _CUDAGRAPH_MODULES.add(compiled)
     return compiled
 
 
@@ -215,12 +243,13 @@ def _clone_outputs(module: nn.Module, args: Any, output: Any) -> Any:
     return tree_map_only(torch.Tensor, torch.Tensor.clone, output)
 
 
-def uncompiled(module: nn.Module) -> nn.Module:
-    """The module ``torch.compile`` was called on, when ``module`` is a
-    compiled view, and ``module`` itself otherwise.
+def without_cudagraphs(module: nn.Module) -> nn.Module:
+    """The module ``torch.compile`` was called on, when ``module`` was
+    compiled by :func:`compile_module` to replay CUDA graphs, and ``module``
+    itself otherwise.
     """
-    # OptimizedModule is the type of every torch.compile'd nn.Module, and
-    # _orig_mod is how it exposes the module it compiles
-    if isinstance(module, torch._dynamo.eval_frame.OptimizedModule):
+    if module in _CUDAGRAPH_MODULES:
+        # _orig_mod is how a torch.compile'd nn.Module exposes the module it
+        # compiles
         return module._orig_mod
     return module

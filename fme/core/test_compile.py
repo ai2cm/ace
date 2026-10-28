@@ -12,11 +12,12 @@ from fme.core.compile import (
     RECOMPILE_LIMIT,
     _parse_compile_backend_env,
     _parse_compile_env,
+    _parse_compile_mode_env,
     compile_backend,
     compile_enabled,
     compile_module,
     is_compile_enabled,
-    uncompiled,
+    without_cudagraphs,
 )
 from fme.core.device import force_cpu, get_device
 from fme.core.optimization import Checkpoint
@@ -48,6 +49,20 @@ def test_parse_compile_backend_env(value: str | None, expected: str | None | typ
             _parse_compile_backend_env(value)
     else:
         assert _parse_compile_backend_env(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [(None, None), ("", None), ("default", "default")]
+    + [("reduce-overhead", "reduce-overhead")]
+    + [(value, ValueError) for value in ["not_a_mode", " ", "Default"]],
+)
+def test_parse_compile_mode_env(value: str | None, expected: str | None | type):
+    if expected is ValueError:
+        with pytest.raises(ValueError, match="FME_COMPILE_MODE must name"):
+            _parse_compile_mode_env(value)
+    else:
+        assert _parse_compile_mode_env(value) == expected
 
 
 def _use_auto(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,6 +174,11 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
             {"backend": "inductor", "mode": "default"},
             id="explicit_mode_wins",
         ),
+        pytest.param(
+            {"backend": "inductor", "mode": None},
+            {"backend": "inductor", "mode": None},
+            id="explicit_none_mode_wins",
+        ),
     ],
 )
 def test_compile_module_backend(kwargs: dict, expected: dict):
@@ -171,12 +191,38 @@ def test_compile_module_backend(kwargs: dict, expected: dict):
     mock_compile.assert_called_once_with(net, **expected)
 
 
-def test_compiled_module_outputs_are_copies():
-    """A compiled module's outputs never share memory with the compiled graph,
-    so a later CUDA graph replay cannot overwrite outputs a caller kept, while
-    gradients still flow through them."""
+def test_configured_mode_applies_to_inductor_only(monkeypatch: pytest.MonkeyPatch):
+    """FME_COMPILE_MODE (e.g. default, to turn CUDA graphs off) sets the mode of
+    inductor compiles that do not set one, and other backends take no mode."""
+    monkeypatch.setattr(fme.core.compile, "_MODE_OVERRIDE", "default")
+    net = torch.nn.Linear(2, 2)
+    with mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile:
+        compile_module(net, backend="inductor")
+        compile_module(net, backend="aot_eager")
+    assert mock_compile.call_args_list == [
+        mock.call(net, backend="inductor", mode="default"),
+        mock.call(net, backend="aot_eager"),
+    ]
+
+
+_real_compile = torch.compile
+
+
+def _compile_with_cudagraph_mode(net: torch.nn.Module) -> torch.nn.Module:
+    # compile as if with CUDA graphs, but run eagerly so the test needs neither
+    # CUDA nor inductor
+    with mock.patch(
+        "torch.compile", side_effect=lambda m, **_: _real_compile(m, backend="eager")
+    ):
+        return compile_module(net, backend="inductor", mode=CUDAGRAPH_COMPILE_MODE)
+
+
+def test_cudagraph_compiled_module_outputs_are_copies():
+    """Outputs of a module compiled with CUDA graphs never share memory with
+    the compiled graph, so a later CUDA graph replay cannot overwrite outputs a
+    caller kept, while gradients still flow through them."""
     x = torch.randn(2, 2, requires_grad=True)
-    out = compile_module(torch.nn.Identity(), backend="eager")(x)
+    out = _compile_with_cudagraph_mode(torch.nn.Identity())(x)
     assert out.untyped_storage().data_ptr() != x.untyped_storage().data_ptr()
     torch.testing.assert_close(out, x)
     out.sum().backward()
@@ -184,10 +230,27 @@ def test_compiled_module_outputs_are_copies():
     torch.testing.assert_close(x.grad, torch.ones_like(x))
 
 
-def test_uncompiled():
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"backend": "eager"}, id="eager"),
+        pytest.param({"backend": "inductor", "mode": "default"}, id="no_cudagraphs"),
+    ],
+)
+def test_module_compiled_without_cudagraphs_returns_outputs_uncopied(kwargs: dict):
+    """Without CUDA graphs, outputs are not copied, which would only cost an
+    extra allocation and copy per call."""
+    x = torch.randn(2, 2)
+    out = compile_module(torch.nn.Identity(), **kwargs)(x)
+    assert out.untyped_storage().data_ptr() == x.untyped_storage().data_ptr()
+
+
+def test_without_cudagraphs():
     net = torch.nn.Linear(2, 2)
-    assert uncompiled(compile_module(net, backend="eager")) is net
-    assert uncompiled(net) is net
+    assert without_cudagraphs(_compile_with_cudagraph_mode(net)) is net
+    compiled = compile_module(net, backend="eager")
+    assert without_cudagraphs(compiled) is compiled
+    assert without_cudagraphs(net) is net
 
 
 class _RecordsCompiling(torch.nn.Module):
@@ -201,13 +264,14 @@ class _RecordsCompiling(torch.nn.Module):
         return self.linear(x)
 
 
-def test_checkpointed_compiled_module_runs_eagerly():
+def test_checkpointed_cudagraph_module_runs_eagerly():
     """Activation checkpointing recomputes the forward pass during backward,
     where calling a module compiled with CUDA graphs could free saved
-    activations of other steps, so a checkpointed compiled module runs (and
-    recomputes) uncompiled, with the same gradients as the plain module."""
+    activations of other steps, so a checkpointed module compiled with CUDA
+    graphs runs (and recomputes) uncompiled, with the same gradients as the
+    plain module."""
     net = _RecordsCompiling()
-    compiled = compile_module(net, backend="aot_eager")
+    compiled = _compile_with_cudagraph_mode(net)
     x = torch.randn(3, 2)
     compiled(x)
     assert net.compiling == [True]
@@ -219,6 +283,14 @@ def test_checkpointed_compiled_module_runs_eagerly():
     net.zero_grad()
     net(x).sum().backward()
     torch.testing.assert_close(checkpointed_grad, net.linear.weight.grad)
+
+
+def test_checkpointed_module_without_cudagraphs_stays_compiled():
+    """Without CUDA graphs, checkpointed steps keep the compiled speedup."""
+    net = _RecordsCompiling()
+    compiled = compile_module(net, backend="aot_eager")
+    Checkpoint({})(compiled)(torch.randn(3, 2)).sum().backward()
+    assert net.compiling[0]
 
 
 def _rollout(

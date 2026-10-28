@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from fme.core.compile import uncompiled
+from fme.core.compile import without_cudagraphs
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
@@ -21,16 +21,16 @@ class Checkpoint:
         self._kwargs = kwargs
 
     def __call__(self, module: nn.Module):
-        # The checkpointed forward pass runs uncompiled. Its recomputation
-        # happens during the backward pass, and calling a module compiled with
-        # CUDA graphs there can begin a new CUDA graph tree generation, which
-        # frees the saved activations of earlier steps whose backward has not
-        # run yet.
-        eager_module = uncompiled(module)
+        # A module compiled with CUDA graphs runs uncompiled when
+        # checkpointed. Its recomputation happens during the backward pass,
+        # and calling it there can begin a new CUDA graph tree generation,
+        # which frees the saved activations of earlier steps whose backward
+        # has not run yet.
+        checkpointed_module = without_cudagraphs(module)
 
         def wrapped(*args):
             return torch.utils.checkpoint.checkpoint(
-                eager_module,
+                checkpointed_module,
                 *args,
                 use_reentrant=False,
                 **self._kwargs,

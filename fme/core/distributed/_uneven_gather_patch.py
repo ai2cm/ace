@@ -50,7 +50,7 @@ def _padded_gather(
         raise ValueError(
             f"Expected {comm_size} shard sizes, got {len(shapes_)}: {shapes_}"
         )
-    if dim_ >= input_.dim():
+    if not -input_.dim() <= dim_ < input_.dim():
         raise ValueError(
             f"Gather dim {dim_} out of range for a {input_.dim()}-d tensor"
         )
