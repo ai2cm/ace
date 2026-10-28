@@ -94,8 +94,16 @@ def newest_by_name(text: str) -> dict[str, NamedExperiment]:
     }
 
 
+ARCHS = ("sfno", "swin-v2.2", "swin-v2.2-res")
+# One-off variant configs, kept out of run_configs/ so batch submits skip them.
+VARIANTS_DIR = pathlib.Path(__file__).parent / "variants"
+
+
 def arch_of(name: str) -> str:
-    return "swin-v2.2" if "swin-v2.2" in name else "sfno"
+    for arch in ("swin-v2.2-res", "swin-v2.2"):
+        if f"-{arch}-" in name:
+            return arch
+    return "sfno"
 
 
 def train_seconds(named) -> float:
@@ -179,19 +187,19 @@ def main() -> None:
         config_to_job_name(c)
         for c in select_configs(None, ARCH_CHOICES)
         if "e3sm" not in c
-    ]
+    ] + [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
     # List per architecture by the names' longest common prefix: the broad
     # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
     # while each narrow one takes ~1 s.
     by_name = {}
-    for arch in ("sfno", "swin-v2.2"):
+    for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
         by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
     with ThreadPoolExecutor(10) as ex:
         prog = dict(zip(names, ex.map(lambda n: progress(by_name.get(n)), names)))
     print("| " + " | ".join(COLUMNS) + " |")
     print("|" + "---|" * len(COLUMNS))
-    for arch in ("sfno", "swin-v2.2"):
+    for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
         statuses = [
             by_name[n].status if n in by_name else "missing" for n in arch_names
