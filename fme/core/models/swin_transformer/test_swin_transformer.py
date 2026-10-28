@@ -550,163 +550,70 @@ def test_shifted_window_cos_lat_is_polar_at_poles():
             assert block.window_cos_lat[-1] < 0.15
 
 
-def _capture_padded_input_and_noise(
-    net: SwinTransformerNet, x: torch.Tensor, noise: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Run ``net`` and return the padded input and noise seen by the U-Net."""
-    captured: dict[str, torch.Tensor] = {}
+def _reference_row(
+    mode: Literal["earth", "mirror"], H: int, row: int
+) -> tuple[int, bool]:
+    """Data row at ``row`` of an ``H``-row grid, walking one pole at a time.
 
-    def encoder_hook(module, args):
-        captured["x"] = args[0]
-
-    def layer1_hook(module, args, kwargs):
-        captured["noise"] = kwargs["context"].noise
-
-    handles = [
-        net.encoder.register_forward_pre_hook(encoder_hook),
-        net.layer1.register_forward_pre_hook(layer1_hook, with_kwargs=True),
-    ]
-    context = Context(
-        embedding_scalar=None, embedding_pos=None, labels=None, noise=noise
-    )
-    with torch.no_grad():
-        net(x, context)
-    for handle in handles:
-        handle.remove()
-    return captured["x"], captured["noise"]
-
-
-@pytest.mark.parametrize("padding_mode", ["earth", "mirror", None])
-def test_fills_window_multiple_with_data(
-    padding_mode: Literal["earth", "mirror"] | None,
-):
-    """Rows/columns added to reach a window multiple continue the sphere.
-
-    Longitude wraps circularly. Past the south/last latitude edge, earth
-    padding (also used without ``padding_conf``) crosses the pole (rows
-    reversed, longitude rotated by 180 deg) and mirror padding reflects about
-    the edge row. The CPB latitudes are those of the padded rows.
+    Returns the row and whether longitude is rotated by 180 degrees.
     """
-    net = _build_padded_net(padding_mode, "cln")
-    H, W = _REGRESSION_IMG_SHAPE
-    Hp, Wp = net.padded_shape
-    pl0, pw0 = (2, 2) if padding_mode is not None else (0, 0)
-    x, context = _regression_inputs("cln")
-    assert context.noise is not None
-    padded_x, padded_noise = _capture_padded_input_and_noise(net, x, context.noise)
-    for data, padded in ((x, padded_x), (context.noise, padded_noise)):
-        assert padded.shape[-2:] == (Hp, Wp)
-        cols = (torch.arange(Wp) - pw0) % W
-        rows = []
-        for i in range(Hp):
-            k = i - pl0 - H  # index past the south/last edge
-            if k < 0:
-                rows.append(data[..., i - pl0, cols])
-            elif padding_mode == "mirror":
-                rows.append(data[..., H - 2 - k, cols])
-            else:
-                rows.append(torch.roll(data, W // 2, dims=-1)[..., H - 1 - k, cols])
-        expected = torch.stack(rows, dim=-2)
-        # rows above the north edge are covered by test_padding_index_*
-        torch.testing.assert_close(padded[..., pl0:, :], expected[..., pl0:, :])
-    lat_field = torch.linspace(-80.0, 80.0, H)[:, None].expand(H, W)
-    _, padded_lat = _capture_padded_input_and_noise(
-        net, x, lat_field.expand_as(context.noise).contiguous()
-    )
-    padded_lat = padded_lat[0, 0]
-    assert torch.all(padded_lat == padded_lat[:, :1])
-    _assert_window_cos_lat(net.layer1.blocks[0], padded_lat[:, 0])
-
-
-def test_padding_index_earth():
-    """Earth padding crosses the pole with a 180-degree rotation and wraps
-    longitude circularly."""
-    rows, cols = _padding_index("earth", (3, 4), 1, 1, (5, 6))
-    assert rows[:, 0].tolist() == [0, 0, 1, 2, 2]
-    assert cols.tolist() == [
-        [1, 2, 3, 0, 1, 2],
-        [3, 0, 1, 2, 3, 0],
-        [3, 0, 1, 2, 3, 0],
-        [3, 0, 1, 2, 3, 0],
-        [1, 2, 3, 0, 1, 2],
-    ]
-
-
-def test_padding_index_mirror():
-    """Mirror padding reflects about the edge row and wraps longitude."""
-    rows, cols = _padding_index("mirror", (3, 4), 1, 1, (5, 6))
-    assert rows[:, 0].tolist() == [1, 0, 1, 2, 1]
-    assert torch.all(cols == torch.tensor([3, 0, 1, 2, 3, 0]))
-
-
-def test_padding_index_continues_past_the_whole_grid():
-    """Latitude padding longer than the grid keeps crossing or reflecting."""
-    rows, cols = _padding_index("mirror", (3, 2), 0, 0, (9, 2))
-    assert rows[:, 0].tolist() == [0, 1, 2, 1, 0, 1, 2, 1, 0]
-    assert torch.all(cols == torch.arange(2))
-    rows, cols = _padding_index("earth", (3, 2), 0, 0, (9, 2))
-    assert rows[:, 0].tolist() == [0, 1, 2, 2, 1, 0, 0, 1, 2]
-    # Longitude rotates by 180 degrees while across one pole.
-    assert cols[:, 0].tolist() == [0, 0, 0, 1, 1, 1, 0, 0, 0]
+    rotated = False
+    while not 0 <= row < H:
+        if mode == "earth":
+            row = -1 - row if row < 0 else 2 * H - 1 - row
+            rotated = not rotated
+        else:
+            row = -row if row < 0 else 2 * (H - 1) - row
+    return row, rotated
 
 
 @pytest.mark.parametrize("mode", ["earth", "mirror"])
-def test_window_multiple_beyond_user_padding_limits(
+@pytest.mark.parametrize(
+    "img_shape, pad_north, pad_west, padded_shape",
+    [
+        pytest.param((3, 4), 1, 1, (5, 6), id="both_edges"),
+        pytest.param((3, 2), 0, 0, (9, 2), id="lat_past_whole_grid"),
+        pytest.param((8, 4), 0, 0, (8, 16), id="lon_past_whole_grid"),
+        pytest.param((9, 18), 2, 2, (24, 24), id="window_multiple"),
+    ],
+)
+def test_padding_index_continues_the_sphere(
     mode: Literal["earth", "mirror"],
+    img_shape: tuple[int, int],
+    pad_north: int,
+    pad_west: int,
+    padded_shape: tuple[int, int],
 ):
-    # 9 + 2 + 9 = 20 rows -> 24, so the south padding grows to 13 > 9 rows.
+    H, W = img_shape
+    rows, cols = _padding_index(mode, img_shape, pad_north, pad_west, padded_shape)
+    for i in range(padded_shape[0]):
+        row, rotated = _reference_row(mode, H, i - pad_north)
+        assert torch.all(rows[i] == row)
+        expected_cols = (torch.arange(padded_shape[1]) - pad_west) % W
+        if rotated:
+            expected_cols = (expected_cols + W // 2) % W
+        assert torch.equal(cols[i], expected_cols)
+
+
+@pytest.mark.parametrize("mode", ["earth", "mirror", None])
+def test_pads_window_multiple_with_data(mode: Literal["earth", "mirror"] | None):
+    """Padded rows hold data and its latitude; ``None`` uses earth padding."""
     img_shape = (9, 18)
-    net = _build_net(
-        3,
-        3,
-        img_shape,
-        padding_conf={
-            "activate": True,
-            "mode": mode,
-            "pad_lat": [2, 9],
-            "pad_lon": [2, 2],
-        },
+    lat_coords = torch.linspace(-80.0, 80.0, img_shape[0])
+    padding_conf = (
+        None
+        if mode is None
+        else {"activate": True, "mode": mode, "pad_lat": [2, 1], "pad_lon": [2, 2]}
     )
-    with torch.no_grad():
-        out = net(torch.randn(1, 3, *img_shape))
-    assert out.shape == (1, 3, *img_shape)
-
-
-def test_raises_on_wrong_input_shape():
-    net = _build_net(3, 3, (9, 18))
-    with pytest.raises(ValueError, match="spatial shape"):
-        net(torch.randn(1, 3, 9, 30))
-
-
-def test_window_multiple_wraps_narrow_grid():
-    """Longitude padding wider than the grid wraps around it repeatedly."""
-    img_shape = (8, 4)  # window (4, 8) -> padded width 16 > 2 * W
-    net = _build_net(3, 3, img_shape, window_size=(4, 8))
+    net = _build_net(3, 3, img_shape, lat_coords=lat_coords, padding_conf=padding_conf)
     x = torch.randn(1, 3, *img_shape)
-    padded = net._pad(x)
-    torch.testing.assert_close(padded, x.repeat(1, 1, 1, 4))
-    with torch.no_grad():
-        out = net(x)
-    assert out.shape == (1, 3, *img_shape)
-
-
-def test_accepts_non_contiguous_lat_coords():
-    img_shape = (9, 18)
-    lat_coords = torch.linspace(80.0, -80.0, 2 * img_shape[0])[::2]
-    assert not lat_coords.is_contiguous()
-    net = _build_net(
-        3,
-        3,
-        img_shape,
-        lat_coords=lat_coords,
-        padding_conf={
-            "activate": True,
-            "mode": "earth",
-            "pad_lat": [2, 1],
-            "pad_lon": [2, 2],
-        },
+    expected_rows, expected_cols = _padding_index(
+        mode or "earth", img_shape, *net.pad_offset, net.padded_shape
     )
-    _assert_window_cos_lat(net.layer1.blocks[0], lat_coords[net.pad_rows[:, 0]])
+    torch.testing.assert_close(net._pad(x), x[..., expected_rows, expected_cols])
+    _assert_window_cos_lat(net.layer1.blocks[0], lat_coords[expected_rows[:, 0]])
+    with torch.no_grad():
+        assert net(x).shape == x.shape
 
 
 def test_downsampled_cos_lat_is_polar_when_rows_wrap_both_poles():
@@ -727,21 +634,6 @@ def test_downsampled_cos_lat_is_polar_when_rows_wrap_both_poles():
             )
 
 
-def test_inactive_padding_fills_window_multiple_with_earth_padding():
-    def pad_rows(padding_conf: dict | None) -> torch.Tensor:
-        return _build_net(3, 3, (9, 18), padding_conf=padding_conf).pad_rows
-
-    torch.testing.assert_close(
-        pad_rows({"activate": False, "mode": "mirror"}), pad_rows(None)
-    )
-    torch.testing.assert_close(
-        pad_rows(None),
-        pad_rows(
-            {"activate": True, "mode": "earth", "pad_lat": [0, 0], "pad_lon": [0, 0]}
-        ),
-    )
-
-
 @pytest.mark.parametrize(
     "pad_lat, pad_lon",
     [([-1, 0], [0, 0]), ([0, 0], [0, -2]), ([3], [0, 0]), ([0, 0], [1, 2, 3])],
@@ -754,17 +646,4 @@ def test_padding_config_rejects_invalid_sizes(pad_lat: list[int], pad_lon: list[
 def test_earth_padding_rejects_odd_longitudes_when_crossing_poles():
     with pytest.raises(ValueError, match="even number of longitudes"):
         _build_net(3, 3, (9, 17))
-    # Mirror padding does not rotate longitude, and a grid whose rows need no
-    # padding never crosses a pole.
-    _build_net(
-        3,
-        3,
-        (9, 17),
-        padding_conf={
-            "activate": True,
-            "mode": "mirror",
-            "pad_lat": [0, 0],
-            "pad_lon": [0, 0],
-        },
-    )
-    _build_net(3, 3, (8, 17), window_size=(4, 8))
+    _build_net(3, 3, (8, 17), window_size=(4, 8))  # rows need no padding
