@@ -8,7 +8,6 @@ from torch._inductor import cudagraph_trees
 
 import fme.core.compile
 from fme.core.compile import (
-    CUDAGRAPH_COMPILE_MODE,
     RECOMPILE_LIMIT,
     _parse_compile_backend_env,
     _parse_compile_env,
@@ -166,7 +165,7 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
         ),
         pytest.param(
             {"backend": "inductor"},
-            {"backend": "inductor", "mode": CUDAGRAPH_COMPILE_MODE},
+            {"backend": "inductor", "mode": "reduce-overhead"},
             id="inductor_uses_cudagraphs",
         ),
         pytest.param(
@@ -214,7 +213,7 @@ def _compile_with_cudagraph_mode(net: torch.nn.Module) -> torch.nn.Module:
     with mock.patch(
         "torch.compile", side_effect=lambda m, **_: _real_compile(m, backend="eager")
     ):
-        return compile_module(net, backend="inductor", mode=CUDAGRAPH_COMPILE_MODE)
+        return compile_module(net, backend="inductor", mode="reduce-overhead")
 
 
 def test_cudagraph_compiled_module_outputs_are_copies():

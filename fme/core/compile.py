@@ -51,8 +51,9 @@ def _parse_compile_backend_env(value: str | None) -> str | None:
     return _validate_backend(value, "FME_COMPILE_BACKEND")
 
 
-CUDAGRAPH_COMPILE_MODE = "reduce-overhead"
-"""The default ``torch.compile`` mode of modules compiled with inductor.
+DEFAULT_COMPILE_MODE = "reduce-overhead"
+"""The ``torch.compile`` mode of modules compiled with inductor, unless
+``FME_COMPILE_MODE`` or the caller sets one.
 
 ``reduce-overhead`` replays the compiled kernels as CUDA graphs, which removes
 the per-kernel CPU launch cost that otherwise bounds the step time of networks
@@ -215,7 +216,7 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     With the inductor backend, named by the string ``"inductor"``, the mode is
     the one ``kwargs`` sets, else the ``FME_COMPILE_MODE`` environment variable
     (e.g. ``default`` to turn CUDA graphs off, trading launch overhead for the
-    memory CUDA graph pools hold), else :data:`CUDAGRAPH_COMPILE_MODE`. When
+    memory CUDA graph pools hold), else :data:`DEFAULT_COMPILE_MODE`. When
     the mode replays CUDA graphs, outputs of the compiled module are cloned,
     so a later replay cannot overwrite or free them.
 
@@ -226,7 +227,7 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())
     if kwargs["backend"] == "inductor":
-        kwargs.setdefault("mode", _MODE_OVERRIDE or CUDAGRAPH_COMPILE_MODE)
+        kwargs.setdefault("mode", _MODE_OVERRIDE or DEFAULT_COMPILE_MODE)
     compiled = torch.compile(module, **kwargs)
     if _uses_cudagraphs(kwargs["backend"], kwargs.get("mode")):
         compiled.register_forward_hook(_clone_outputs)
