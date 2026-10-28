@@ -1,4 +1,9 @@
-from .compile import compile_backend, compile_on, dynamo_hygiene
+from .compile import (
+    compile_on,
+    dynamo_hygiene,
+    session_compile_backend,
+    skip_unless_cuda,
+)
 from .dataset_info import get_dataset_info
 from .distributed import mock_distributed
 from .normalization import (

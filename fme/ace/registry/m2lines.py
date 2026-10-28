@@ -123,7 +123,14 @@ class SamudraBuilder(ModuleConfig):
         )
 
 
-@ModuleSelector.register("FloeNet")
+@ModuleSelector.register(
+    "FloeNet",
+    compile_unsupported_reason=(
+        "FloeNet rebuilds its mesh graphs from numpy and uses boolean-mask "
+        "indexing in forward, producing data-dependent shapes torch.compile "
+        "cannot trace."
+    ),
+)
 @dataclasses.dataclass
 class FloeNetBuilder(ModuleConfig):
     """
@@ -140,14 +147,6 @@ class FloeNetBuilder(ModuleConfig):
     processor_steps: int = 4
     residual: bool = True
     is_ocean: bool = True
-
-    @classmethod
-    def compile_unsupported_reason(cls) -> str | None:
-        return (
-            "FloeNet rebuilds its mesh graphs from numpy and uses boolean-mask "
-            "indexing in forward, producing data-dependent shapes torch.compile "
-            "cannot trace."
-        )
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
