@@ -1027,19 +1027,6 @@ def test_resume_two_workers(tmp_path, nettype, tmpdir: pathlib.Path):
     resume_process.check_returncode()
 
 
-def _production_compile_env(inductor_cache_dir: pathlib.Path) -> dict[str, str]:
-    """The environment of a production run: no compile settings, so modules
-    compile with the default inductor backend, which writes its generated
-    code to ``inductor_cache_dir``."""
-    env = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in ("FME_COMPILE", "FME_COMPILE_BACKEND")
-    }
-    env["TORCHINDUCTOR_CACHE_DIR"] = str(inductor_cache_dir)
-    return env
-
-
 @pytest.mark.slow
 @pytest.mark.timeout(600)
 @pytest.mark.skipif(
@@ -1048,24 +1035,23 @@ def _production_compile_env(inductor_cache_dir: pathlib.Path) -> dict[str, str]:
 def test_train_and_inference_compile_with_inductor_like_production(
     tmp_path: pathlib.Path,
 ):
-    """Train and run inference through the entrypoints exactly as production
-    does, compiling with inductor.
-
-    The rest of the suite compiles with ``aot_eager`` for speed, and the
-    targeted inductor tests compile networks and steps in isolation; this is
-    the one test that runs the full training and inference loops through
-    inductor-generated code. It runs the job script in a fresh process, so
-    nothing set up by the test session (such as its compile backend) reaches
-    it.
-    """
+    """Train and run inference through the entrypoints in a fresh process
+    without the test session's compile settings, so the full loops run
+    through inductor-generated code as in production."""
     train_config, inference_config = _setup(
         tmp_path, "SphericalFourierNeuralOperatorNet"
     )
     inductor_cache_dir = tmp_path / "inductor_cache"
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("FME_COMPILE", "FME_COMPILE_BACKEND")
+    }
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(inductor_cache_dir)
     process = subprocess.run(
         [JOB_SUBMISSION_SCRIPT_PATH, train_config, inference_config, "1"],
         cwd=tmp_path,
-        env=_production_compile_env(inductor_cache_dir),
+        env=env,
     )
     process.check_returncode()
     # inductor writes the code it generates to its cache directory, so an
