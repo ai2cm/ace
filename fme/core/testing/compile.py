@@ -1,6 +1,5 @@
 """Helpers for tests that exercise ``torch.compile``."""
 
-import functools
 import os
 from collections.abc import Iterator
 
@@ -13,28 +12,22 @@ from fme.core.device import get_device
 TEST_COMPILE_BACKEND = "aot_eager"
 """The backend the test suite compiles with unless ``FME_COMPILE_BACKEND`` is set.
 
-Production compiles with inductor, whose code generation takes tens of seconds
-per network, too slow for every test that builds a step. ``aot_eager`` still
-runs dynamo tracing and AOTAutograd, so graph breaks, tracing errors and
-recompiles surface across the whole suite, but runs the traced graph eagerly
-instead of generating kernels. Inductor itself is covered by targeted tests
-that select it with :func:`fme.core.compile.compile_backend`.
+Inductor's code generation takes tens of seconds per network, too slow for
+every test that builds a step. ``aot_eager`` still runs dynamo tracing and
+AOTAutograd, so graph breaks, tracing errors and recompiles surface across the
+suite; targeted tests select inductor with
+:func:`fme.core.compile.compile_backend`.
 """
 
 
 @pytest.fixture(autouse=True, scope="session")
 def session_compile_backend() -> Iterator[None]:
-    """Compile with :data:`TEST_COMPILE_BACKEND` for the whole test session.
+    """Compile with :data:`TEST_COMPILE_BACKEND` for the whole test session,
+    unless ``FME_COMPILE_BACKEND`` is set (e.g. to ``inductor``).
 
-    The root ``conftest.py`` imports this fixture, making it autouse for every
-    test. Whether modules compile at all is unchanged, so the suite compiles
-    wherever production does (on CUDA). Setting ``FME_COMPILE_BACKEND`` runs
-    the suite with that backend instead, e.g. ``FME_COMPILE_BACKEND=inductor``
-    to run every test through production's backend.
-
-    The backend is also exported as ``FME_COMPILE_BACKEND`` so that tests
-    running an entrypoint in a subprocess (e.g. under ``torchrun``) compile
-    with it too.
+    Made autouse for every test by the root ``conftest.py``. The backend is
+    also exported as ``FME_COMPILE_BACKEND`` so that entrypoints run in a
+    subprocess (e.g. under ``torchrun``) compile with it too.
     """
     if os.environ.get("FME_COMPILE_BACKEND"):
         yield
@@ -49,11 +42,7 @@ def session_compile_backend() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def compile_on() -> Iterator[None]:
-    """Enable compilation for every test in a test module, on any device.
-
-    By default tests compile only on CUDA; use this in modules where every
-    test compiles, including on CPU. Elsewhere, wrap the code under test in
-    :func:`fme.core.compile.compile_enabled`.
+    """Enable compilation on any device for every test in a test module.
 
     Import this name into a test module to make it autouse for that module::
 
@@ -67,22 +56,15 @@ def compile_on() -> Iterator[None]:
 def dynamo_hygiene() -> Iterator[None]:
     """Isolate each test's dynamo state from the rest of the suite.
 
-    The root ``conftest.py`` imports this fixture, making it autouse for every
-    test.
-
-    Dynamo's compilation cache is keyed on code objects and is process-global,
-    so compiled functions and guards leak between tests sharing an xdist
-    worker; ``torch._dynamo.reset()`` before and after each test keeps a
-    compile in one test from being served (or invalidated) by another. Every
-    compiled module is traced through the same ``DummyWrapper.forward`` code
-    object, so without a reset the recompile budget of that code object is
-    shared by the whole worker, and later tests would silently run eagerly once
-    it is used up.
+    Made autouse for every test by the root ``conftest.py``. Dynamo's cache is
+    process-global, and every compiled module is traced through the same
+    ``DummyWrapper.forward`` code object, so without a reset tests sharing an
+    xdist worker would share its recompile budget, and later tests would
+    silently run eagerly once it is used up.
 
     Within a test, hitting the recompile limit raises instead of falling back
-    to eager, so that tests cannot pass while claiming to exercise compiled
-    code they never ran. Tests of the production fallback patch
-    ``torch._dynamo.config.fail_on_recompile_limit_hit`` back off.
+    to eager, so tests cannot pass without running the compiled code they
+    claim to exercise.
     """
     torch._dynamo.reset()
     try:
@@ -92,38 +74,9 @@ def dynamo_hygiene() -> Iterator[None]:
         torch._dynamo.reset()
 
 
-@functools.cache
-def _inductor_unavailable_reason(device_type: str) -> str | None:
-    try:
-        torch.compile(lambda t: t + 1, backend="inductor", fullgraph=True)(
-            torch.zeros(2, device=device_type)
-        )
-    except Exception as err:  # e.g. no C++ compiler / OpenMP for CPU codegen
-        return f"inductor codegen unavailable on {device_type}: {err}"
-    return None
-
-
 def skip_unless_cuda() -> None:
-    """Skip the calling test unless it runs on CUDA.
-
-    For targeted inductor tests: production compiles by default only on CUDA,
-    and compiling on CPU (``FME_COMPILE=1``) is opt-in and unsupported, so
-    inductor's CPU code generation is not held to production's bar. On a Linux
-    CPU machine with a C++ toolchain it fails for many networks with inductor
-    bugs outside fme (e.g. "expected size ..., stride ..." assertions around
-    FFTs) and takes minutes for the larger ones.
+    """Skip the calling test unless it runs on CUDA, where production compiles
+    with inductor; inductor on CPU is opt-in and unsupported.
     """
     if get_device().type != "cuda":
         pytest.skip("production compiles with inductor only on CUDA")
-
-
-def skip_without_inductor() -> None:
-    """Skip the calling test when inductor cannot generate code on the
-    current device, e.g. on a CPU machine without a C++ toolchain.
-
-    Production compiles with inductor on CUDA, where it is always available,
-    so this only ever skips off CUDA.
-    """
-    reason = _inductor_unavailable_reason(get_device().type)
-    if reason is not None:
-        pytest.skip(reason)

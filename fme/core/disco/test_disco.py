@@ -2,9 +2,7 @@ import pytest
 import torch
 import torch_harmonics as th
 
-from fme.core.device import force_cpu
 from fme.core.disco import DiscreteContinuousConvS2
-from fme.core.testing import skip_without_inductor
 
 
 def test_forward_shape():
@@ -140,9 +138,10 @@ def test_inductor_compiled_forward_matches_eager_on_cpu():
     which inductor's CPU stride prediction of ``aten._fft_c2r`` disagrees with
     the real kernel output, failing with "expected size ..., stride ...".
     """
-    with force_cpu():
-        skip_without_inductor()
-    torch._dynamo.reset()
+    try:
+        torch.compile(lambda t: t + 1, backend="inductor")(torch.zeros(2))
+    except Exception as err:  # e.g. no C++ compiler for CPU code generation
+        pytest.skip(f"inductor CPU code generation unavailable: {err}")
     torch.manual_seed(0)
     img_shape = (8, 16)
     conv = DiscreteContinuousConvS2(
