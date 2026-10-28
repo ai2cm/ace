@@ -10,6 +10,7 @@ Usage:
     python fm_table.py
 """
 
+import os
 import pathlib
 import re
 import statistics
@@ -63,7 +64,7 @@ def progress(named) -> tuple[int, float | None]:
     # last job that actually ran.
     jobs = named.experiment.get("jobs") or []
     started = [j for j in jobs if "started" in j.get("status", {})]
-    if not started:
+    if named.status == OK or not started:
         return (MAX_EPOCHS if named.status == OK else 0), None
     grep = "grep -E 'trained for [0-9]+ (complete )?epochs'"
     proc = subprocess.run(
@@ -73,8 +74,6 @@ def progress(named) -> tuple[int, float | None]:
         text=True,
     )
     done = max((int(m.group(1)) for m in EPOCH_RE.finditer(proc.stdout)), default=0)
-    if named.status == OK:
-        done = MAX_EPOCHS
     marks = [
         (datetime.fromisoformat(t), int(n)) for t, n in VAL_RE.findall(proc.stdout)
     ]
@@ -92,7 +91,13 @@ def main() -> None:
         for c in select_configs(None, ARCH_CHOICES)
         if "e3sm" not in c
     ]
-    by_name = fetch_experiments_by_name(text="ace2-fm-nc-")
+    # List per architecture by the names' longest common prefix: the broad
+    # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
+    # while each narrow one takes ~1 s.
+    by_name = {}
+    for arch in ("sfno", "swin-v2.2"):
+        arch_names = [n for n in names if arch_of(n) == arch]
+        by_name.update(fetch_experiments_by_name(text=os.path.commonprefix(arch_names)))
     with ThreadPoolExecutor(10) as ex:
         prog = dict(zip(names, ex.map(lambda n: progress(by_name.get(n)), names)))
     print("| " + " | ".join(COLUMNS) + " |")
