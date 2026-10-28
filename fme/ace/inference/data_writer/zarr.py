@@ -206,13 +206,17 @@ class ZarrWriterAdapter:
             "time": lead_times_coord,
             "sample": np.arange(self.n_initial_conditions),
         }
+        n_local_samples = batch_time.sizes["sample"]
         self._writer = ZarrWriter(
             path=self.path,
             dims=self.dims,
             coords=ensure_numpy_coords(self._dim_coords),
             data_vars=self.data_vars,
             chunks=self.chunks,
-            shards={"time": batch_time.sizes["time"]},
+            shards={
+                "time": batch_time.sizes["time"],
+                "sample": n_local_samples,
+            },
             array_attributes=self.variable_metadata,
             group_attributes=self.dataset_metadata,
             time_units=TIMEDELTA_ENCODING_UNITS,
