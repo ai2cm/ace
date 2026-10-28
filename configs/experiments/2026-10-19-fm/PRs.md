@@ -24,3 +24,5 @@ listed here.
 | [#1597](https://github.com/ai2cm/ace/pull/1597) | Add label-balanced sampling for multi-source training | yyexela |
 | [#1600](https://github.com/ai2cm/ace/pull/1600) | Let training skip a bounded run of non-finite-loss batches | yyexela |
 | [#1609](https://github.com/ai2cm/ace/pull/1609) | Guard moisture-budget rescale against a zero or near-zero global mean | yyexela |
+| [#1610](https://github.com/ai2cm/ace/pull/1610) | Compile every module with CUDA graphs (reduce-overhead) | yyexela |
+| [#1611](https://github.com/ai2cm/ace/pull/1611) | Batch EMA weight update with foreach kernels | yyexela |
