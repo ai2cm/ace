@@ -3,7 +3,7 @@
 # (15.5M, 45 GFLOP). In the 2026-06-26 norm ablation v2 had the best weather
 # skill but overfit (train 0.071 vs val 0.101), and v2.1 was capacity-limited
 # (train ~= val ~= 0.118). This one is compute-matched to the SFNO twin:
-# ~74M params at ~101 GFLOP/sample forward (nc-sfno: 14.6M, ~99 GFLOP
+# ~66M params at ~93 GFLOP/sample forward (nc-sfno: 14.6M, ~99 GFLOP
 # without FFTs; measured with the 2x mask-input channels).
 #
 # Differences from the SFNO twin (same data, inference and loss):
@@ -14,13 +14,15 @@
 #   instead of 24x48, so each 4x8 window covers ~1/9 of the globe and the
 #   FLOPs roughly halve. The 48x96 padded grid is already a multiple of
 #   2**2 * window_size, so no extra padding is needed.
-# - depth_multiplier 2 with embed_dim 192 (heads 3/6/6/3), head dim 64
-#   throughout. Compute-matched by narrowing rather than halving depth: an
-#   earlier embed_dim 256 version (~130M, ~177 GFLOP) cost 1.8x the SFNO's
-#   compute. Keeping depth keeps the shifted-window receptive field and the
-#   per-block drop_path (which scales with depth_multiplier) unchanged.
+# - depth_multiplier 1 with embed_dim 256 (heads 4/8/8/4), head dim 64
+#   throughout. Compute-matched by halving depth rather than narrowing: the
+#   embed_dim 256, depth_multiplier 2 version (~130M, ~177 GFLOP) cost 1.8x
+#   the SFNO's compute. At equal FLOPs, this beat the embed_dim 192,
+#   depth_multiplier 2 version on 3-epoch val loss (0.157 vs 0.163) and runs
+#   faster, as half the blocks means half the per-kernel launch overhead
+#   (2026-10-26 swin speed study).
 # - skip_projection (#1544) keeps the decoder at embed_dim.
-# - drop_path_rate 0.2, which the builder divides by depth_multiplier, so the
+# - drop_path_rate 0.1, which the builder divides by depth_multiplier, so the
 #   per-block maximum is 0.1 (v2: 0.05, v2.1: 0.1).
 # - weight_decay 0.01, as in the SFNO twin and the nc-swin-v2 cells: v2's
 #   fm-a2-cond val loss kept falling through epoch 140 at 0.01, so there is
@@ -1423,14 +1425,14 @@ stepper:
       builder:
         type: NoiseConditionedSwinTransformer
         config:
-          embed_dim: 192
+          embed_dim: 256
           noise_embed_dim: 32
-          depth_multiplier: 2
+          depth_multiplier: 1
           num_heads:
-          - 3
-          - 6
-          - 6
-          - 3
+          - 4
+          - 8
+          - 8
+          - 4
           window_size:
           - 4
           - 8
@@ -1439,7 +1441,7 @@ stepper:
           - 1
           num_levels: 2
           mlp_ratio: 4.0
-          drop_path_rate: 0.2
+          drop_path_rate: 0.1
           use_skip: true
           skip_projection: true
           mlp_layer: swiglu
