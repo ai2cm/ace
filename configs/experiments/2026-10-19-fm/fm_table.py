@@ -108,7 +108,13 @@ def main() -> None:
             by_name[n].status if n in by_name else "missing" for n in arch_names
         ]
         eps = [prog[n][0] for n in arch_names]
-        spe = [s for n in arch_names if (s := prog[n][1]) is not None]
+        # Speed of unfinished, healthy jobs only: finished jobs skip the log
+        # fetch, and failed/canceled ones are not training.
+        spe = [
+            s
+            for n, st in zip(arch_names, statuses)
+            if st == "running" and (s := prog[n][1]) is not None
+        ]
         row = (
             arch,
             sum(s == OK for s in statuses),
