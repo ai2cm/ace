@@ -63,6 +63,11 @@ class SwinTransformerBuilder(ModuleConfig):
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
             latitude requirement.
+        consistent_padding: When True, keep padded data and the latitudes used
+            for CPB scaling geometrically consistent (see
+            ``SwinTransformerNet``). Recommended for new models. Defaults to
+            False, the original behavior, so existing checkpoints give
+            unchanged outputs.
     """
 
     embed_dim: int = 96
@@ -77,6 +82,7 @@ class SwinTransformerBuilder(ModuleConfig):
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    consistent_padding: bool = False
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -131,6 +137,7 @@ class SwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            consistent_padding=self.consistent_padding,
         )
         return _ContextWrappedModule(net)
 
@@ -164,6 +171,11 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
             latitude requirement.
+        consistent_padding: When True, keep padded data and the latitudes used
+            for CPB scaling geometrically consistent (see
+            ``SwinTransformerNet``). Recommended for new models. Defaults to
+            False, the original behavior, so existing checkpoints give
+            unchanged outputs.
     """
 
     embed_dim: int = 96
@@ -179,6 +191,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    consistent_padding: bool = False
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -236,6 +249,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            consistent_padding=self.consistent_padding,
         )
         return NoiseConditionedModel(
             net,

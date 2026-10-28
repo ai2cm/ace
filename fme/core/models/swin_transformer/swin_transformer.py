@@ -83,6 +83,15 @@ class SwinTransformerNet(nn.Module):
         mlp_layer: ``"mlp"`` or ``"swiglu"``.
         conditioning: ``"adaln"`` (default) for native per-stage DiT AdaLN, or
             ``"cln"`` for ``ConditionalLayerNorm``-based noise conditioning.
+        cpb_hidden_dim: Hidden dimension of the CPB MLPs.
+        lat_coords: Optional ``(H,)`` latitudes in degrees of the input rows;
+            enables cos-lat scaling of CPB longitude offsets.
+        padding_conf: Optional ``TensorPadding`` keyword arguments.
+        consistent_padding: If True, keep padded data and latitudes
+            geometrically consistent: a window's CPB latitude is the mean
+            ``|lat|`` of its rows, so shifted windows that wrap across both
+            poles see a polar latitude. False (default) keeps the original
+            behavior that trained checkpoints depend on.
     """
 
     def __init__(
@@ -103,6 +112,7 @@ class SwinTransformerNet(nn.Module):
         cpb_hidden_dim: int = 64,
         lat_coords: torch.Tensor | None = None,
         padding_conf: dict | None = None,
+        consistent_padding: bool = False,
     ):
         super().__init__()
         if depth_multiplier < 1:
@@ -113,6 +123,7 @@ class SwinTransformerNet(nn.Module):
         self.use_skip = use_skip
         self.window_size = window_size
         self.conditioning = conditioning
+        self.consistent_padding = consistent_padding
 
         ws_h, ws_w = window_size
         self.pad_mult = (ws_h * 2, ws_w * 2)
@@ -190,6 +201,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_full,
+            abs_lat_mean=consistent_padding,
         )
         self.downsample = PatchMerging(embed_dim)
         self.layer2 = BasicLayer(
@@ -207,6 +219,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_half,
+            abs_lat_mean=consistent_padding,
         )
         self.layer3 = BasicLayer(
             2 * embed_dim,
@@ -223,6 +236,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_half,
+            abs_lat_mean=consistent_padding,
         )
         self.upsample = PatchExpanding(2 * embed_dim)  # -> embed_dim, 2x spatial
 
@@ -242,6 +256,7 @@ class SwinTransformerNet(nn.Module):
             context_config=context_config,
             cpb_hidden_dim=cpb_hidden_dim,
             lat_coords=lat_full,
+            abs_lat_mean=consistent_padding,
         )
         self.final_linear = nn.Linear(decoder_dim, embed_dim, bias=False)
         self.decoder = nn.Conv2d(embed_dim, out_chans, kernel_size=3, padding=1)

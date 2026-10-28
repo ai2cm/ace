@@ -553,3 +553,47 @@ def test_padded_output_is_unchanged(
         atol=1e-5,
         rtol=1e-4,
     )
+
+
+def test_consistent_padding_shifted_window_lat_mean_is_polar_at_poles():
+    """Shifted windows that wrap across both poles must see a polar latitude.
+
+    On a 4-degree grid (-88..88) with earth padding [2, 1] the padded grid has
+    48 rows; with window height 4 the last shifted window row holds rows
+    from both poles (lats [88, 88, -84, -88]). Its CPB cos-lat scaling must
+    reflect a polar latitude, not the near-equatorial signed mean.
+    """
+    lat_coords = torch.arange(-88.0, 88.0 + 1, 4.0)
+    img_shape = (lat_coords.shape[0], 16)
+    net = SwinTransformerNet(
+        3,
+        3,
+        img_shape,
+        embed_dim=16,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 8),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        lat_coords=lat_coords,
+        padding_conf={
+            "activate": True,
+            "mode": "earth",
+            "pad_lat": [2, 1],
+            "pad_lon": [0, 0],
+        },
+        consistent_padding=True,
+    )
+    for layer in (net.layer1, net.layer2, net.layer3, net.layer4):
+        for block in layer.blocks:
+            ws_h = block.window_size[0]
+            sh = block.shift_size[0]
+            # Latitudes of each window row, as gathered by the cyclic shift.
+            rows = torch.roll(block.lat_coords, -sh).reshape(-1, ws_h)
+            abs_rows = rows.abs()
+            lat_mean = block.window_lat_mean()  # (nH_win,)
+            assert lat_mean is not None
+            assert torch.all(lat_mean.abs() >= abs_rows.min(dim=1).values - 1e-4)
+            assert torch.all(lat_mean.abs() <= abs_rows.max(dim=1).values + 1e-4)
+            if sh > 0:
+                # The wrapped window row mixes both poles.
+                assert torch.cos(torch.deg2rad(lat_mean[-1])) < 0.15
