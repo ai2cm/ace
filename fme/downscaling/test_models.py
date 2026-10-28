@@ -22,8 +22,8 @@ from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModel,
     DiffusionModelConfig,
-    InterpolationConfig,
     PairedNormalizationConfig,
+    UpsamplingConfig,
     _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
@@ -212,7 +212,7 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
-    interpolation: InterpolationConfig | None = None,
+    interpolation: UpsamplingConfig | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -234,7 +234,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
-        interpolation=interpolation or InterpolationConfig(),
+        upsampling=interpolation or UpsamplingConfig(),
     ).build(
         coarse_shape,
         downscale_factor,
@@ -903,19 +903,17 @@ def _get_interpolation_test_model() -> DiffusionModel:
         full_fine_coords=fine_coords,
         use_fine_topography=False,
         static_inputs=StaticInputs(fields=[], coords=fine_coords),
-        interpolation=InterpolationConfig(mode="bilinear", align_corners=True),
+        interpolation=UpsamplingConfig(mode="bilinear", align_corners=True),
     )
 
 
 def test_interpolation_config_default_for_new_models():
-    assert InterpolationConfig() == InterpolationConfig(
-        mode="bicubic", align_corners=False
-    )
+    assert UpsamplingConfig() == UpsamplingConfig(mode="bicubic", align_corners=False)
 
 
 def test_interpolation_config_raises_for_align_corners_with_unsupported_mode():
     with pytest.raises(ValueError, match="align_corners"):
-        InterpolationConfig(mode="nearest", align_corners=True)
+        UpsamplingConfig(mode="nearest", align_corners=True)
 
 
 def test_model_uses_configured_interpolation():
@@ -931,14 +929,12 @@ def test_model_uses_configured_interpolation():
 
 def test_interpolation_config_round_trips_through_checkpoint(tmp_path):
     model = _get_interpolation_test_model()
-    expected = InterpolationConfig(mode="bilinear", align_corners=True)
-    assert DiffusionModel.from_state(model.get_state()).config.interpolation == (
-        expected
-    )
+    expected = UpsamplingConfig(mode="bilinear", align_corners=True)
+    assert DiffusionModel.from_state(model.get_state()).config.upsampling == (expected)
     checkpoint_path = tmp_path / "test.ckpt"
     torch.save({"model": model.get_state()}, checkpoint_path)
     loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
-    assert loaded.config.interpolation == expected
+    assert loaded.config.upsampling == expected
 
 
 def test_interpolation_backwards_compatibility(tmp_path):
@@ -946,12 +942,12 @@ def test_interpolation_backwards_compatibility(tmp_path):
     model = _get_interpolation_test_model()
     state = model.get_state()
     del state["config"]["interpolation"]
-    legacy = InterpolationConfig(mode="bicubic", align_corners=True)
-    assert DiffusionModel.from_state(state).config.interpolation == legacy
+    legacy = UpsamplingConfig(mode="bicubic", align_corners=True)
+    assert DiffusionModel.from_state(state).config.upsampling == legacy
     checkpoint_path = tmp_path / "test.ckpt"
     torch.save({"model": state}, checkpoint_path)
     loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
-    assert loaded.config.interpolation == legacy
+    assert loaded.config.upsampling == legacy
 
 
 @pytest.mark.parametrize("key", ["module", "interpolation"])

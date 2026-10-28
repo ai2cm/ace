@@ -102,10 +102,12 @@ class LossWeightsConfig:
 
 
 @dataclasses.dataclass
-class InterpolationConfig:
+class UpsamplingConfig:
     """
-    Configuration for interpolating coarse inputs to the fine grid, used for
+    Configuration for upsampling coarse inputs to the fine grid, used for
     the model input and for the base prediction when predicting residuals.
+    For now, this only uses torch.nn.functional.interpolate but could be
+    expanded in the future to allow for other upsampling options.
 
     Parameters:
         mode: Interpolation mode passed to torch.nn.functional.interpolate.
@@ -181,7 +183,7 @@ class DiffusionModelMetadata:
     use_fine_topography: bool
     full_fine_coords: LatLonCoordinates
     num_static_inputs: int
-    interpolation: InterpolationConfig
+    upsampling: UpsamplingConfig
     # Avoid runtime failures for frozen class with unhashable field
     __hash__ = None  # type: ignore[assignment]
 
@@ -215,9 +217,9 @@ class DiffusionModelConfig:
         p_std: The std of the noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
             This is kept for backwards compatibility.
-        interpolation: How coarse inputs are interpolated to the fine grid.
+        upsampling: How coarse inputs are upsampled to the fine grid.
             Checkpoints saved without this field load with the legacy
-            behavior (bicubic, align_corners=True).
+            behavior (bicubic interpolation with align_corners=True).
     """
 
     module: DiffusionModuleRegistrySelector
@@ -240,9 +242,7 @@ class DiffusionModelConfig:
     ) = None
     p_mean: float | None = None
     p_std: float | None = None
-    interpolation: InterpolationConfig = dataclasses.field(
-        default_factory=InterpolationConfig
-    )
+    upsampling: UpsamplingConfig = dataclasses.field(default_factory=UpsamplingConfig)
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -514,7 +514,7 @@ class DiffusionModel:
         )
 
     def _interpolate(self, tensor: torch.Tensor) -> torch.Tensor:
-        return self.config.interpolation.interpolate(tensor, self.downscale_factor)
+        return self.config.upsampling.interpolate(tensor, self.downscale_factor)
 
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
@@ -754,13 +754,13 @@ class DiffusionModel:
         started before interpolation was configurable with a config that does
         not set it explicitly.
         """
-        saved = InterpolationConfig(
+        saved = UpsamplingConfig(
             **_with_legacy_interpolation(state["config"])["interpolation"]
         )
-        if saved != self.config.interpolation:
+        if saved != self.config.upsampling:
             raise ValueError(
                 f"Saved model state uses interpolation {saved}, but this model uses "
-                f"{self.config.interpolation}. Set model.interpolation in the "
+                f"{self.config.upsampling}. Set model.interpolation in the "
                 "config to match the saved state."
             )
 
@@ -825,7 +825,7 @@ class DiffusionModel:
             num_static_inputs=len(self.static_inputs.fields)
             if self.static_inputs
             else 0,
-            interpolation=self.config.interpolation,
+            upsampling=self.config.upsampling,
         )
 
     def _lon_roll_amount(self, coarse_lon: torch.Tensor) -> tuple[int, float]:

@@ -6,7 +6,7 @@ import torch
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data import StaticInputs
-from fme.downscaling.models import CheckpointModelConfig, InterpolationConfig
+from fme.downscaling.models import CheckpointModelConfig, UpsamplingConfig
 from fme.downscaling.predictors.serial_denoising import (
     DenoisingExpertCheckpointConfig,
     DenoisingMoEBundledConfig,
@@ -150,7 +150,7 @@ def test_validate_experts_compatible_raises_for_different_interpolation():
             full_fine_coords=fine_coords,
             use_fine_topography=False,
             static_inputs=StaticInputs(fields=[], coords=fine_coords),
-            interpolation=InterpolationConfig(align_corners=align_corners),
+            interpolation=UpsamplingConfig(align_corners=align_corners),
         )
         for align_corners in (True, False)
     ]
