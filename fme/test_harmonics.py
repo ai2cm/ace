@@ -2,8 +2,8 @@
 
 import pytest
 import torch
-import torch_harmonics as harmonics
 
+import fme.core.sht as harmonics
 from fme.core.device import get_device
 
 

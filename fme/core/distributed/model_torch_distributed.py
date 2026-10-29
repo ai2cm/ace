@@ -24,10 +24,10 @@ from typing import Any, TypeVar
 import torch
 import torch.distributed
 import torch.nn as nn
-import torch_harmonics.distributed as thd
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
+import fme.core.sht._distributed as thd
 from fme.core import metrics
 from fme.core.device import in_dataloader_worker, using_gpu, using_srun
 
@@ -211,7 +211,7 @@ class ModelTorchDistributed(DistributedBackend):
         Returns:
             tuple[slice, slice]: Slices for the local height and width.
         """
-        from torch_harmonics.distributed import compute_split_shapes
+        from fme.core.sht import compute_split_shapes
 
         h_shapes = compute_split_shapes(h, self._h_size)
         w_shapes = compute_split_shapes(w, self._w_size)

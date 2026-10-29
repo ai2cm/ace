@@ -18,7 +18,7 @@ import math
 
 import torch
 import torch.nn as nn
-import torch_harmonics.distributed as thd
+import fme.core.sht._distributed as thd
 from torch import amp
 
 from fme.ace.models.makani_fcn3.models.common import ComplexReLU

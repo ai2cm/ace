@@ -21,8 +21,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 tl.set_backend("pytorch")
-import torch_harmonics as th
-import torch_harmonics.distributed as thd
+import fme.core.sht as th
+import fme.core.sht._distributed as thd
 
 # from tensorly.plugins import use_opt_einsum
 # use_opt_einsum('optimal')

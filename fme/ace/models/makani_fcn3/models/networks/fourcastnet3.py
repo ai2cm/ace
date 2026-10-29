@@ -22,9 +22,9 @@ import torch
 import torch.amp as amp
 import torch.nn as nn
 
-# get spectral transforms and spherical convolutions from torch_harmonics
-import torch_harmonics as th
-import torch_harmonics.distributed as thd
+# get spectral transforms and spherical convolutions from fme.core.sht
+import fme.core.sht as th
+import fme.core.sht._distributed as thd
 from torch.utils.checkpoint import checkpoint
 
 # helpers
