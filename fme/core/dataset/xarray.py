@@ -400,6 +400,39 @@ class OverwriteConfig:
 
 
 @dataclasses.dataclass
+class RandomTimeShiftConfig:
+    """Replace variables with their values at a randomly shifted time.
+
+    One shift is drawn per sample, uniformly from [-max_shift_days,
+    max_shift_days], and applied to every timestep of the sample, so a
+    monotonic forcing such as CO2 stops identifying the year of the sample
+    while keeping its continuity within the sample. Values beyond the ends of
+    the record are extrapolated linearly from the first or last
+    extrapolation_days of the record.
+
+    Parameters:
+        names: Variables to shift. Each must be spatially uniform (a global
+            series), as only its value at the first spatial point is used.
+        max_shift_days: Largest shift, in days, in either direction.
+        extrapolation_days: Length of record, in days, at each end used to fit
+            the linear extrapolation.
+    """
+
+    names: list[str]
+    max_shift_days: float
+    extrapolation_days: float = 3652.5
+
+    def __post_init__(self):
+        if len(self.names) == 0:
+            raise ValueError("RandomTimeShiftConfig requires at least one name.")
+        if self.max_shift_days <= 0 or self.extrapolation_days <= 0:
+            raise ValueError(
+                "max_shift_days and extrapolation_days must be positive, got "
+                f"{self.max_shift_days} and {self.extrapolation_days}."
+            )
+
+
+@dataclasses.dataclass
 class XarrayDataConfig(DatasetConfigABC):
     """
     Parameters:
@@ -429,6 +462,8 @@ class XarrayDataConfig(DatasetConfigABC):
         dtype: Data type to cast the data to. If None, no casting is done. It is
             required that 'torch.{dtype}' is a valid dtype.
         overwrite: Optional OverwriteConfig to overwrite loaded field values.
+        random_time_shift: Optional RandomTimeShiftConfig replacing the named
+            variables with their values at a random time shift per sample.
         fill_nans: Optional FillNaNsConfig to fill NaNs with a constant value.
         isel: Optional xarray isel arguments to be passed to the dataset. Will
             raise ValueError if time is included here, since the subset argument
@@ -463,6 +498,7 @@ class XarrayDataConfig(DatasetConfigABC):
     infer_timestep: bool = True
     dtype: str | None = "float32"
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
+    random_time_shift: RandomTimeShiftConfig | None = None
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
@@ -600,6 +636,13 @@ class XarrayDataset(DatasetABC):
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
+        self._random_time_shift = config.random_time_shift
+        if self._random_time_shift is not None and (
+            config.n_repeats > 1 or self._timestep is None
+        ):
+            raise ValueError(
+                "random_time_shift requires n_repeats == 1 and infer_timestep."
+            )
 
         self._nonspacetime_dims = get_nonspacetime_dimensions(
             first_dataset, _loaded_horizontal_dims
@@ -618,11 +661,53 @@ class XarrayDataset(DatasetABC):
         self._check_isel_dimensions(first_dataset.sizes)
         first_dataset.close()
         self._time_invariant_tensors = self._load_time_invariant_tensors()
+        self._shift_series = self._load_shift_series()
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
         self._local_epoch: int = -1
         self._global_epoch = torch.tensor(-1)
+
+    def _load_shift_series(self) -> dict[str, np.ndarray]:
+        """Load the full time series of each random_time_shift variable (its
+        value at the first spatial point), concatenated over the files.
+        """
+        if self._random_time_shift is None:
+            return {}
+        series: dict[str, list[np.ndarray]] = {}
+        for path in self.full_paths:
+            ds = _open_xr_dataset(path, engine=self.engine)
+            for name in self._random_time_shift.names:
+                da = ds[name]
+                if "time" not in da.dims:
+                    raise ValueError(f"random_time_shift variable {name} has no time.")
+                da = da.isel({d: 0 for d in da.dims if d != "time"})
+                series.setdefault(name, []).append(da.values.astype(np.float64))
+            ds.close()
+        return {name: np.concatenate(parts) for name, parts in series.items()}
+
+    def _apply_random_time_shift(
+        self, tensors: TensorDict, time_slice: slice
+    ) -> TensorDict:
+        assert self._random_time_shift is not None and self._timestep is not None
+        config = self._random_time_shift
+        step_days = self._timestep / datetime.timedelta(days=1)
+        shift = (2 * torch.rand(()).item() - 1) * config.max_shift_days / step_days
+        index = np.arange(time_slice.start, time_slice.stop) + shift
+        n_fit = max(2, int(round(config.extrapolation_days / step_days)))
+        for name in config.names:
+            values = _interp_linear_extrapolation(
+                index, self._shift_series[name], n_fit
+            )
+            data = tensors[name]
+            shape = [-1] + [1] * (data.ndim - 1)
+            tensors[name] = (
+                torch.as_tensor(values, dtype=data.dtype, device=data.device)
+                .reshape(shape)
+                .expand_as(data)
+                .clone()
+            )
+        return tensors
 
     def _load_time_invariant_tensors(self) -> dict[str, torch.Tensor]:
         """Load the time-invariant variables into memory.
@@ -975,6 +1060,8 @@ class XarrayDataset(DatasetABC):
 
         # Apply field overwrites
         tensors = self.overwrite.apply(tensors)
+        if self._random_time_shift is not None:
+            tensors = self._apply_random_time_shift(tensors, time_slice)
 
         # Fill NaN for missing variables so all samples share the same keys
         missing_names: frozenset[str] | None = None
@@ -1006,6 +1093,26 @@ class XarrayDataset(DatasetABC):
         conditions and the sample start times if the number of timesteps is a schedule.
         """
         self._global_epoch.fill_(epoch)  # values get set lazily based on this
+
+
+def _interp_linear_extrapolation(
+    index: np.ndarray, series: np.ndarray, n_fit: int
+) -> np.ndarray:
+    """Interpolate series (sampled at 0, 1, ..., len - 1) at fractional index,
+    extrapolating linearly beyond the ends with slopes fit to the first or last
+    n_fit samples.
+    """
+    n = len(series)
+    positions = np.arange(n)
+    out = np.interp(index, positions, series)
+    below, above = index < 0, index > n - 1
+    if below.any():
+        slope = np.polyfit(positions[:n_fit], series[:n_fit], 1)[0]
+        out[below] = series[0] + slope * index[below]
+    if above.any():
+        slope = np.polyfit(positions[-n_fit:], series[-n_fit:], 1)[0]
+        out[above] = series[-1] + slope * (index[above] - (n - 1))
+    return out
 
 
 def _get_timestep(time: np.ndarray) -> datetime.timedelta:

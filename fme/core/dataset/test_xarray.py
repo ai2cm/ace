@@ -28,6 +28,7 @@ from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
     GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD,
     OverwriteConfig,
+    RandomTimeShiftConfig,
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
@@ -1358,3 +1359,95 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+def _write_linear_co2_dataset(path, n_times: int = 100) -> str:
+    time = pd.date_range("2000-01-01", periods=n_times, freq="D")
+    co2 = 300.0 + 0.1 * np.arange(n_times)
+    ds = xr.Dataset(
+        {
+            "co2": xr.DataArray(co2.astype(np.float32), dims=("time",)),
+            "foo": xr.DataArray(
+                np.random.randn(n_times, 3, 4).astype(np.float32),
+                dims=("time", "lat", "lon"),
+            ),
+        },
+        coords={
+            "time": time,
+            "lat": np.arange(3, dtype=np.float32),
+            "lon": np.arange(4, dtype=np.float32),
+        },
+    )
+    ds.to_netcdf(path / "data.nc")
+    return str(path)
+
+
+def test_random_time_shift_shifts_whole_sample(tmp_path):
+    data_path = _write_linear_co2_dataset(tmp_path)
+    names = ["co2", "foo"]
+    plain = xarray_dataset_constructor(XarrayDataConfig(data_path=data_path), names, 5)
+    shift_config = RandomTimeShiftConfig(names=["co2"], max_shift_days=10.0)
+    shifted = xarray_dataset_constructor(
+        XarrayDataConfig(data_path=data_path, random_time_shift=shift_config),
+        names,
+        5,
+    )
+    torch.manual_seed(0)
+    offsets = []
+    for idx in (0, 20, 50, 95):
+        data, _, _, _, _ = shifted[idx]
+        reference, _, _, _, _ = plain[idx]
+        torch.testing.assert_close(data["foo"], reference["foo"])
+        co2 = data["co2"].double()
+        # spatially uniform, one shift for the whole sample
+        assert torch.all(co2 == co2[:, :1, :1])
+        steps = torch.diff(co2[:, 0, 0])
+        torch.testing.assert_close(
+            steps, torch.full_like(steps, 0.1), atol=1e-4, rtol=0
+        )
+        offset = (co2[0, 0, 0].item() - 300.0) / 0.1 - idx
+        assert -10.0 - 1e-3 <= offset <= 10.0 + 1e-3
+        offsets.append(offset)
+    assert len({round(o, 3) for o in offsets}) == len(offsets)
+
+
+def test_random_time_shift_extrapolates_linearly(tmp_path, monkeypatch):
+    data_path = _write_linear_co2_dataset(tmp_path)
+    shift_config = RandomTimeShiftConfig(names=["co2"], max_shift_days=10.0)
+    shifted = xarray_dataset_constructor(
+        XarrayDataConfig(data_path=data_path, random_time_shift=shift_config),
+        ["co2", "foo"],
+        5,
+    )
+    for draw, idx, expected_start in ((0.0, 0, 299.0), (1.0, 95, 310.5)):
+        monkeypatch.setattr(torch, "rand", lambda *args, d=draw: torch.tensor(d))
+        data, _, _, _, _ = shifted[idx]
+        torch.testing.assert_close(
+            data["co2"][:, 0, 0].double(),
+            expected_start + 0.1 * torch.arange(5, dtype=torch.float64),
+            atol=1e-4,
+            rtol=0,
+        )
+
+
+def test_random_time_shift_through_time_subset(tmp_path):
+    data_path = _write_linear_co2_dataset(tmp_path)
+    config = XarrayDataConfig(
+        data_path=data_path,
+        subset=TimeSlice(start_time="2000-02-01", stop_time="2000-03-01"),
+        random_time_shift=RandomTimeShiftConfig(names=["co2"], max_shift_days=3.0),
+    )
+    dataset, _ = config.build(["co2", "foo"], IntSchedule.from_constant(2))
+    torch.manual_seed(1)
+    data, time, _, _, _ = dataset[0]
+    day = (pd.Timestamp(str(time.values[0])) - pd.Timestamp("2000-01-01")).days
+    offset = (data["co2"][0, 0, 0].item() - 300.0) / 0.1 - day
+    assert day == 31
+    assert -3.0 - 1e-3 <= offset <= 3.0 + 1e-3
+
+
+def test_random_time_shift_config_validation():
+    with pytest.raises(ValueError):
+        RandomTimeShiftConfig(names=[], max_shift_days=1.0)
+    with pytest.raises(ValueError):
+        RandomTimeShiftConfig(names=["co2"], max_shift_days=0.0)
