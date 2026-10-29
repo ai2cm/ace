@@ -10,6 +10,7 @@ from torch import nn
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: ignore
     AtmoSphericNeuralOperatorNet,
 )
+from fme.core.compile import compile_module, is_compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
@@ -389,6 +390,14 @@ class FCN3Step(StepABC):
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
+        # Separate from self.module so checkpoint keys don't change with compile.
+        # (torch.compile's wrapper prefixes its state_dict keys with "_orig_mod.")
+        # Single-rank FCN3 traces as one graph. Under spatial parallelism the
+        # distributed DISCO convolution still uses sparse tensors, so the
+        # compiled step has graph breaks there (still correct).
+        self._forward_module = (
+            compile_module(self.module) if is_compile_enabled() else self.module
+        )
         self._img_shape = dataset_info.img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -456,9 +465,9 @@ class FCN3Step(StepABC):
             surface_tensor = self.surface_input_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            atmosphere_output_tensor, surface_output_tensor = wrapper(self.module)(
-                atmosphere_tensor, surface_tensor, forcing_tensor
-            )
+            atmosphere_output_tensor, surface_output_tensor = wrapper(
+                self._forward_module
+            )(atmosphere_tensor, surface_tensor, forcing_tensor)
             atmosphere_output = self.atmosphere_output_packer.unpack(
                 atmosphere_output_tensor, axis=self.CHANNEL_DIM
             )

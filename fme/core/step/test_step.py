@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import unittest.mock
 from collections.abc import Callable, Collection
-from typing import Any
+from typing import Any, cast
 
 import dacite
 import pytest
@@ -14,7 +14,7 @@ from torch import nn
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
-from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
+from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3Step, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.compile import compile_backend, compile_enabled
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
@@ -2559,33 +2559,81 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     assert stds["b_double"] == pytest.approx(field_stds["b"])
 
 
+@dataclasses.dataclass
+class _CompiledModuleView:
+    """How a step's module is split into the module owning the parameters and
+    the callable its forward pass runs through."""
+
+    name: str
+    is_compiled: bool
+    torch_module: nn.Module
+    forward_module: nn.Module
+
+
+def _registry_module_view(attr: str) -> Callable[[StepABC], _CompiledModuleView]:
+    """View of a :class:`fme.core.registry.Module` at ``attr`` on a step."""
+
+    def get(step: StepABC) -> _CompiledModuleView:
+        module = operator.attrgetter(attr)(step)
+        return _CompiledModuleView(
+            name=attr,
+            is_compiled=module.is_compiled,
+            torch_module=module.torch_module,
+            forward_module=module.forward_module,
+        )
+
+    return get
+
+
+def _fcn3_module_view(step: StepABC) -> _CompiledModuleView:
+    # FCN3Step owns a plain nn.Module, whose three-tensor forward does not fit
+    # the registry Module's call signature, and keeps its forward callable
+    # private; the cases below always build an FCN3Step for this view
+    fcn3_step = cast(FCN3Step, step)
+    return _CompiledModuleView(
+        name="module",
+        is_compiled=fcn3_step._forward_module is not fcn3_step.module,
+        torch_module=fcn3_step.module,
+        forward_module=fcn3_step._forward_module,
+    )
+
+
 _COMPILED_MODULE_CASES = [
-    pytest.param(get_single_module_selector, ["module"], id="single_module"),
+    pytest.param(
+        get_single_module_selector,
+        [_registry_module_view("module")],
+        id="single_module",
+    ),
     pytest.param(
         get_single_module_noise_conditioned_selector,
-        ["module", "secondary_decoder._module"],
+        [
+            _registry_module_view("module"),
+            _registry_module_view("secondary_decoder._module"),
+        ],
         id="single_module_secondary_decoder",
     ),
     pytest.param(
         get_secondary_module_selector,
-        ["module", "secondary_module"],
+        [_registry_module_view("module"), _registry_module_view("secondary_module")],
         id="secondary_module",
     ),
     pytest.param(
         get_separate_radiation_selector,
-        ["module", "radiation_module"],
+        [_registry_module_view("module"), _registry_module_view("radiation_module")],
         id="separate_radiation",
     ),
     pytest.param(
         get_multi_call_selector,
-        ["_wrapped_step.module", "_wrapped_step.radiation_module"],
+        [
+            _registry_module_view("_wrapped_step.module"),
+            _registry_module_view("_wrapped_step.radiation_module"),
+        ],
         id="multi_call",
     ),
+    pytest.param(get_fcn3_selector, [_fcn3_module_view], id="FCN3"),
 ]
 
-_EAGER_STEP_TYPES = {
-    "FCN3": "FCN3Step compiles in a follow-up PR and runs eagerly until then",
-}
+_EAGER_STEP_TYPES: dict[str, str] = {}
 """Registered step types that own modules but do not compile them, and why."""
 
 
@@ -2613,9 +2661,10 @@ def test_compiled_module_cases_cover_every_registered_step_type():
     assert covered | {"default"} == registered
 
 
-@pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)
+@pytest.mark.parametrize("selector_getter,module_views", _COMPILED_MODULE_CASES)
 def test_step_compiles_its_modules_after_distributed_wrapping(
-    selector_getter: Callable[[], StepSelector], module_attrs: list[str]
+    selector_getter: Callable[[], StepSelector],
+    module_views: list[Callable[[StepABC], _CompiledModuleView]],
 ):
     """Every module a step owns is compiled, on top of the distributed wrapper,
     so the wrapper is inside the compiled graph and state-dict keys are
@@ -2629,16 +2678,16 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
     with compile_enabled(True):
         compiled_step = get_step(selector, DEFAULT_IMG_SHAPE)
     assert compiled_step.get_state().keys() == eager_step.get_state().keys()
-    for attr in module_attrs:
-        module = operator.attrgetter(attr)(compiled_step)
-        assert module.is_compiled, attr
-        assert not operator.attrgetter(attr)(eager_step).is_compiled, attr
+    for get_view in module_views:
+        module = get_view(compiled_step)
+        assert module.is_compiled, module.name
+        assert not get_view(eager_step).is_compiled, module.name
         # at single rank Distributed.wrap_module returns a DummyWrapper; finding
         # it directly under the compiled callable is the ordering under test
-        assert isinstance(module.torch_module, DummyWrapper), attr
+        assert isinstance(module.torch_module, DummyWrapper), module.name
         # _orig_mod is how torch._dynamo's OptimizedModule exposes the module
         # torch.compile was called on
-        assert module.forward_module._orig_mod is module.torch_module, attr
+        assert module.forward_module._orig_mod is module.torch_module, module.name
 
 
 def _train_step_once(
@@ -2673,9 +2722,10 @@ def _relative_error(
 
 @pytest.mark.slow
 @pytest.mark.timeout(300)
-@pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)
+@pytest.mark.parametrize("selector_getter,module_views", _COMPILED_MODULE_CASES)
 def test_inductor_compiled_step_matches_eager(
-    selector_getter: Callable[[], StepSelector], module_attrs: list[str]
+    selector_getter: Callable[[], StepSelector],
+    module_views: list[Callable[[StepABC], _CompiledModuleView]],
 ):
     """Each step type, compiled with inductor as in production, trains like
     the eager step: outputs and gradients match within floating point
@@ -2691,8 +2741,9 @@ def test_inductor_compiled_step_matches_eager(
         eager_step = get_step(selector, DEFAULT_IMG_SHAPE)
     with compile_enabled(True), compile_backend("inductor"):
         compiled_step = get_step(selector, DEFAULT_IMG_SHAPE)
-    for attr in module_attrs:
-        assert operator.attrgetter(attr)(compiled_step).is_compiled, attr
+    for get_view in module_views:
+        module = get_view(compiled_step)
+        assert module.is_compiled, module.name
     compiled_step.load_state(eager_step.get_state())
     input_data = get_tensor_dict(eager_step.input_names, DEFAULT_IMG_SHAPE, 2)
     next_step_input_data = get_tensor_dict(
