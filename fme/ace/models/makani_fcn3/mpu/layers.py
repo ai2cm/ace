@@ -22,11 +22,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.amp import custom_bwd, custom_fwd
 
-# use some distributed routines from torch harmonics
-from torch_harmonics.distributed import (
+# use some distributed routines from fme.core.sht
+from fme.core.sht import (
     distributed_transpose_azimuth as distributed_transpose_w,
 )
-from torch_harmonics.distributed import (
+from fme.core.sht import (
     distributed_transpose_polar as distributed_transpose_h,
 )
 

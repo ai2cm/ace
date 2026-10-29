@@ -20,9 +20,9 @@ from typing import Any, Tuple
 import torch
 import torch.nn as nn
 
-# get spectral transforms from torch_harmonics
-import torch_harmonics as th
-import torch_harmonics.distributed as thd
+# get spectral transforms from fme.core.sht
+import fme.core.sht as th
+import fme.core.sht._distributed as thd
 from torch.utils.checkpoint import checkpoint
 
 from .initialization import trunc_normal_
@@ -30,7 +30,7 @@ from .initialization import trunc_normal_
 # wrap fft, to unify interface to spectral transforms
 # import global convolution and non-linear spectral layers
 # helpers
-from .layers import MLP, DropPath, RealFFT2, SpectralAttention2d
+from .layers import MLP, DropPath, InverseRealFFT2, RealFFT2, SpectralAttention2d
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 
 # layer normalization
@@ -483,13 +483,15 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             self.residual_filter_up = nn.Identity()
         else:
             self.residual_filter_down = th.RealSHT(
-                *self.img_shape,
+                self.img_shape[0],
+                self.img_shape[1],
                 lmax=modes_lat_residual,
                 mmax=modes_lon_residual,
                 grid=data_grid,
             ).float()
             self.residual_filter_up = th.InverseRealSHT(
-                *self.img_shape,
+                self.img_shape[0],
+                self.img_shape[1],
                 lmax=modes_lat_residual,
                 mmax=modes_lon_residual,
                 grid=data_grid,
@@ -502,10 +504,18 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
             # set up
             self.trans_down = sht_handle(
-                *self.img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
+                self.img_shape[0],
+                self.img_shape[1],
+                lmax=modes_lat,
+                mmax=modes_lon,
+                grid=data_grid,
             ).float()
             self.itrans_up = isht_handle(
-                *self.img_shape, lmax=modes_lat, mmax=modes_lon, grid=data_grid
+                self.img_shape[0],
+                self.img_shape[1],
+                lmax=modes_lat,
+                mmax=modes_lon,
+                grid=data_grid,
             ).float()
             self.trans = sht_handle(
                 self.h, self.w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
@@ -519,8 +529,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 raise NotImplementedError(
                     "Residual filter factor is not implemented for FFT spectral transform"
                 )
-            fft_handle = th.RealFFT2
-            ifft_handle = th.InverseRealFFT2
+            fft_handle = RealFFT2
+            ifft_handle = InverseRealFFT2
 
             # effective image size:
             self.img_shape_eff = (

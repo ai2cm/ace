@@ -2,11 +2,11 @@ import unittest.mock
 
 import pytest
 import torch
-from torch_harmonics import InverseRealSHT
 
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO, isotropic_noise
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context
+from fme.core.sht import InverseRealSHT
 
 
 @pytest.mark.parametrize("nlat, nlon", [(8, 16), (64, 128)])
