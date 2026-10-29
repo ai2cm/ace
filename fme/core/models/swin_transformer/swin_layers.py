@@ -41,7 +41,6 @@ blocks operate on tensors with a trailing channel dimension, i.e. shape
 ``(B, H, W, C)``.
 """
 
-import math
 from typing import Literal
 
 import torch
@@ -75,19 +74,19 @@ def window_reverse_2d(
 
 
 def _cos_lat_scaled_coords_log(
-    relative_coords_base: torch.Tensor, lat_mean: torch.Tensor
+    relative_coords_base: torch.Tensor, cos_lat: torch.Tensor
 ) -> torch.Tensor:
-    """Log-spaced relative coordinates with longitude offsets scaled by
-    ``cos(lat)`` per latitude band: ``(n_bands, N*N, 2)``.
+    """Log-spaced relative coordinates with longitude offsets scaled by the
+    ``(n_bands,)`` per-latitude-band ``cos_lat``: ``(n_bands, N*N, 2)``.
     """
-    n_bands = lat_mean.shape[0]
-    # lat_mean may live on the accelerator while the base coordinates are
+    n_bands = cos_lat.shape[0]
+    # cos_lat may live on the accelerator while the base coordinates are
     # built on CPU; compute on CPU and let the module's .to() move the buffer.
-    lat_rad = lat_mean.to(
+    cos_lat = cos_lat.to(
         device=relative_coords_base.device, dtype=relative_coords_base.dtype
-    ) * (math.pi / 180.0)
+    )
     h_coords = relative_coords_base[:, 0]  # (N*N,)
-    w_coords = relative_coords_base[:, 1].unsqueeze(0) * torch.cos(lat_rad).unsqueeze(
+    w_coords = relative_coords_base[:, 1].unsqueeze(0) * cos_lat.unsqueeze(
         1
     )  # (n_bands, N*N)
     coords = torch.stack(
@@ -96,33 +95,35 @@ def _cos_lat_scaled_coords_log(
     return torch.sign(coords) * torch.log(1.0 + coords.abs())
 
 
-def window_lat_mean(
-    lat_coords: torch.Tensor | None,
+def window_cos_lat(
+    cos_lat: torch.Tensor | None,
     input_resolution: tuple[int, int],
     window_size: tuple[int, int],
     shift: int,
 ) -> torch.Tensor | None:
-    """Mean latitude (degrees) of each row of attention windows, for a feature
-    map whose rows are cyclically shifted by ``shift``.
+    """Mean ``cos(lat)`` of each row of attention windows, for a feature map
+    whose rows (with per-row ``cos_lat`` of shape ``(H,)``) are cyclically
+    shifted by ``shift``.
 
-    All windows in a window-row share a mean latitude, so only one value per
-    row is returned: ``(nH_win,)``, or None when ``lat_coords`` is None.
+    Averages ``cos`` rather than latitude, so shifted windows that wrap
+    across both poles stay polar instead of averaging to the equator. All
+    windows in a window-row share the value, so only one per row is
+    returned: ``(nH_win,)``, or None when ``cos_lat`` is None.
     """
-    if lat_coords is None:
+    if cos_lat is None:
         return None
     H, _ = input_resolution
     ws_h, _ = window_size
-    lat_shifted = torch.roll(lat_coords, -shift) if shift != 0 else lat_coords
-    nH_win = H // ws_h
-    return lat_shifted[:H].reshape(nH_win, ws_h).mean(1)
+    cos_lat = torch.roll(cos_lat, -shift) if shift != 0 else cos_lat
+    return cos_lat.reshape(H // ws_h, ws_h).mean(1)
 
 
 class WindowAttention2D(nn.Module):
     """Multi-head self-attention within 2D windows with continuous position bias.
 
     Uses a 2-layer MLP (CPB, Swin V2-style) over log-spaced coordinate offsets
-    instead of a lookup-table RPB. When ``lat_mean`` is supplied, the
-    longitude offsets are scaled by ``cos(lat)`` per spatial window so that
+    instead of a lookup-table RPB. When ``cos_lat`` is supplied, the
+    longitude offsets are scaled by it per spatial window so that
     the bias reflects physical arc-length rather than pixel-index distance.
     The (constant) log-spaced coordinates are precomputed once at
     construction; only the CPB MLP runs at forward time. Because the scaling
@@ -137,14 +138,14 @@ class WindowAttention2D(nn.Module):
         qkv_bias: Whether to add a learnable bias to query/key/value.
         attn_drop: Dropout rate on the attention matrix.
         proj_drop: Dropout rate on the output projection.
-        lat_mean: Optional ``(nH_win,)`` tensor of mean latitude in degrees
-            for each row of spatial windows of the feature map this module
-            attends over, top to bottom. When None, plain Swin V2 offsets are
-            used.
+        cos_lat: Optional ``(nH_win,)`` tensor of the mean ``cos(lat)`` of
+            each row of spatial windows of the feature map this module
+            attends over, top to bottom (see ``window_cos_lat``). When None,
+            plain Swin V2 offsets are used.
         num_windows_w: Number of windows per window-row, ``nW_win``. Together
-            with ``lat_mean`` this fixes the window count
+            with ``cos_lat`` this fixes the window count
             ``nW = nH_win * nW_win`` that the position bias is gathered to.
-            Required when ``lat_mean`` is given, ignored otherwise.
+            Required when ``cos_lat`` is given, ignored otherwise.
     """
 
     def __init__(
@@ -156,7 +157,7 @@ class WindowAttention2D(nn.Module):
         qkv_bias: bool = True,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
-        lat_mean: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
         num_windows_w: int | None = None,
     ):
         super().__init__()
@@ -193,15 +194,13 @@ class WindowAttention2D(nn.Module):
         self.register_buffer("relative_coords_log", relative_coords_log)
         # Per-band cos(lat)-scaled offsets, (n_bands, N*N, 2), and the band of
         # each window in window-partition order, (nW,); both None without lat.
-        if lat_mean is None:
+        if cos_lat is None:
             coords_log = band_index = None
         else:
             if num_windows_w is None:
-                raise ValueError("num_windows_w is required when lat_mean is given")
-            coords_log = _cos_lat_scaled_coords_log(relative_coords_base, lat_mean)
-            band_index = torch.arange(lat_mean.shape[0]).repeat_interleave(
-                num_windows_w
-            )
+                raise ValueError("num_windows_w is required when cos_lat is given")
+            coords_log = _cos_lat_scaled_coords_log(relative_coords_base, cos_lat)
+            band_index = torch.arange(cos_lat.shape[0]).repeat_interleave(num_windows_w)
         self.register_buffer("coords_log", coords_log, persistent=False)
         self.register_buffer("band_index", band_index, persistent=False)
 
@@ -422,6 +421,9 @@ class SwinTransformerBlock(nn.Module):
             ``ConditionalLayerNorm``. In ``"cln"`` mode the ``context`` passed to
             ``forward`` must carry channels-last noise of shape
             ``(B, H, W, embed_dim_noise)`` matching this block's resolution.
+        cpb_hidden_dim: Hidden dimension of the CPB MLP.
+        cos_lat: Optional ``(H,)`` ``cos(lat)`` of the (padded) feature-map
+            rows, used for cos-lat CPB scaling.
     """
 
     def __init__(
@@ -438,7 +440,7 @@ class SwinTransformerBlock(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
-        lat_coords: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ):
         super().__init__()
         self.dim = dim
@@ -466,8 +468,8 @@ class SwinTransformerBlock(nn.Module):
             num_heads,
             cpb_hidden_dim=cpb_hidden_dim,
             qkv_bias=qkv_bias,
-            lat_mean=window_lat_mean(
-                lat_coords, input_resolution, window_size, shift_size[0]
+            cos_lat=window_cos_lat(
+                cos_lat, input_resolution, window_size, shift_size[0]
             ),
             num_windows_w=input_resolution[1] // window_size[1],
         )
@@ -652,6 +654,8 @@ class BasicLayer(nn.Module):
         conditioning: ``"adaln"`` (default) or ``"cln"``.
         context_config: Required when ``conditioning="cln"``; forwarded to each
             block's ``ConditionalLayerNorm``.
+        cpb_hidden_dim: Hidden dimension of each block's CPB MLP.
+        cos_lat: Optional ``(H,)`` row ``cos(lat)`` for cos-lat CPB scaling.
     """
 
     def __init__(
@@ -669,7 +673,7 @@ class BasicLayer(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
-        lat_coords: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ):
         super().__init__()
         if len(drop_path) != depth:
@@ -692,7 +696,7 @@ class BasicLayer(nn.Module):
                     conditioning=conditioning,
                     context_config=context_config,
                     cpb_hidden_dim=cpb_hidden_dim,
-                    lat_coords=lat_coords,
+                    cos_lat=cos_lat,
                 )
                 for i in range(depth)
             ]
