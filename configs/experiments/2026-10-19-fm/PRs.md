@@ -26,3 +26,4 @@ listed here.
 | [#1609](https://github.com/ai2cm/ace/pull/1609) | Guard moisture-budget rescale against a zero or near-zero global mean | yyexela |
 | [#1610](https://github.com/ai2cm/ace/pull/1610) | Compile every module with CUDA graphs (reduce-overhead) | yyexela |
 | [#1611](https://github.com/ai2cm/ace/pull/1611) | Batch EMA weight update with foreach kernels | yyexela |
+| [#1612](https://github.com/ai2cm/ace/pull/1612) | Fix Swin padding geometry: consistent CPB latitudes, window-multiple fill, and mirror-mode lat coords | yyexela |
