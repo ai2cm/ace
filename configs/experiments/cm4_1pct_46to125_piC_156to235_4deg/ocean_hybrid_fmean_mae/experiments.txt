@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs1|01M64YCW251NA63GZW58HBVRME|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs0|01M64YD53E2E2BH517BCVCEMP6|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs1|01M64YDDJN8KQSQGCGPSS3R855|training|best_inference_ckpt|normal|--min-runtime 8h
