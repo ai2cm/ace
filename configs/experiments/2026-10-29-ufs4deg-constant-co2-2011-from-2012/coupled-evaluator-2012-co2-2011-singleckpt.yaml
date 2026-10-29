@@ -1,0 +1,43 @@
+# Warm-start test of the constant-CO2 drift (2026-10-29): the 1994-start constant-1993-CO2 twin warmed ~0.1 K in its first
+# decade, plausibly relaxation from the cold 1994 state toward the coupled model's own (training-period) climate. Start from
+# warmer 2012 instead: if the system relaxes to its own climate, the constant-CO2 run should settle near the same level.
+# This file: global_mean_co2 held at its 2011 annual mean from 2012-01-01.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar  # a coupled fine-tune checkpoint (carries the rename/scale/fraction config)
+n_coupled_steps: 850  # 2012-01-01 .. 2023-08, to the end of the replay record
+coupled_steps_in_memory: 10
+loader:
+  num_data_workers: 2
+  dataset:
+    ocean:
+      data_path: /ufs4deg
+      file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /era5
+      file_pattern: 2026-10-14-era5-4deg-8layer-daily-ufs-coupled-1994-2023.zarr
+      engine: zarr
+      overwrite:
+        constant:
+          global_mean_co2: 3.9093e-04  # 2011 annual mean of the parent ERA5 4deg daily store (390.9 ppm)
+  start_indices:
+    times:
+    - '2012-01-01T18:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [sst, thetao_0, thetao_5, thetao_10, ocean_sea_ice_fraction, hfds_total_area]
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [surface_temperature, TMP2m, DSWRFsfc, DLWRFsfc, ULWRFsfc, USWRFsfc, LHTFLsfc, SHTFLsfc, PRATEsfc, eastward_surface_stress, northward_surface_stress, sea_ice_fraction, ocean_fraction]
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
