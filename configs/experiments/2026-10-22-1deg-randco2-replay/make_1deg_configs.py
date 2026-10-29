@@ -120,6 +120,29 @@ arms["alt-replay"] = (
         "troya/2026-10-20-coupled-ft-atmosphere-replay (train_loader_atmosphere_only + stepper_training.atmosphere_only).",
     ],
 )
+# 2026-10-29 (Troy): the same alternating baseline with the ocean swapped for the 1deg hybrid residual + diagnosed-SST
+# pretrain (thetao residual, sst output-only; wandb ace-samudra-cm4/jrgclj2f), the paper-1 recipe candidate. Needs the
+# coupled-stepper ocean_ic_names fix and the OceanData sst fallback (both cherry-picked onto this branch).
+hyb_ocean = yaml.safe_load(
+    (HERE / "inputs/samudra-resid-ohc-ppad-sstdiag-fmean-1deg-config.yaml").read_text()
+)["stepper"]
+for k in STRIP:
+    hyb_ocean.pop(k, None)
+hyb_corr = hyb_ocean["step"]["config"]["corrector"]["config"]
+hyb_corr["corrector_disabled_epochs"] = 0
+hyb_ocean["step"]["config"]["builder"]["config"]["checkpoint_strategy"] = "all"
+assert "sst" not in hyb_ocean["step"]["config"]["in_names"]
+assert "sst" in hyb_ocean["step"]["config"]["out_names"]
+hyb = copy.deepcopy(cfg)
+hyb["stepper"]["ocean"]["stepper"] = hyb_ocean
+arms["hybridsstdiag-alt"] = (
+    hyb,
+    [
+        "1deg alternating coupled fine-tune of the random-CO2 ACE2S rs1 with the 1deg HYBRID RESIDUAL + DIAGNOSED-SST",
+        "Samudra (James's ocean_ppad_fmean rs0 recipe with thetao_0..18 residual and sst output-only; wandb jrgclj2f).",
+        "Identical to -alt otherwise (Troy 2026-10-29). Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
+    ],
+)
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(
