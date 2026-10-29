@@ -1,0 +1,53 @@
+# job_runner/inference.sh configs/experiments/cm4-like-am4-4deg-randco2v2-eval/coupled .
+# Coupled abrupt-4xCO2 ensemble member 17 of 36: 90-day inference from piControl
+# at 0306-05-01T00:00:00, with CO2 held at 4x (1137.048 ppm). Initial conditions come from the
+# daily piControl ocean store and the 6-hourly atmosphere store, since most
+# first-of-month start dates are not on the 5-daily training data's time axis.
+# The ocean's exogenous forcings (land_fraction, sea_surface_fraction, deptho,
+# hfgeou) are time-constant, so they come from a small file that repeats them on
+# a 5-day axis starting at the initial time, matching the 5-day ocean step.
+experiment_dir: /results
+n_coupled_steps: 18 # 90 days of 5-day ocean steps
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+initial_condition:
+  ocean:
+    path: /climate-default/2026-09-02-cm4-piControl-4deg-ocean-1daily.zarr
+    engine: zarr
+  atmosphere:
+    path: /climate-default/2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+    engine: zarr
+  start_indices:
+    times:
+      - "0306-05-01T00:00:00"
+forcing_loader:
+  num_data_workers: 1
+  ocean:
+    dataset:
+      data_path: /climate-default/2026-10-20-cm4-abrupt-4xCO2-ensemble-4deg-static-ocean-forcing
+      file_pattern: ic_0017.nc
+  atmosphere:
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+          engine: zarr
+          overwrite:
+            constant:
+              carbon_dioxide: 1137.048
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
