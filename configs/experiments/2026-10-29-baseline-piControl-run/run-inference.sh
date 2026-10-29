@@ -10,8 +10,8 @@ EXISTING_RESULTS_DATASET="01JZHQJXC4EYAPTCSP188YSVC0"
 CONFIG_FILENAME="inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
+WANDB_USERNAME=spencerc_ai2
 
 cd "$REPO_ROOT"  # so config path is valid no matter where we are running this script
 
@@ -23,12 +23,12 @@ gantry run \
     --description "SamudrACE paper checkpoint 100-year CM4 piControl inference" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
-    --not-preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/saturn-cirrascale \
+    --priority high \
+    --min-runtime 2h \
+    --cluster ai2/ceres \
+    --cluster ai2/jupiter \
     --weka climate-default:/climate-default \
-    --env WANDB_USERNAME=$BEAKER_USERNAME \
+    --env WANDB_USERNAME=$WANDB_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
     --env WANDB_RUN_GROUP=$JOB_GROUP \
@@ -38,7 +38,6 @@ gantry run \
     --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
-    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.coupled.inference $CONFIG_PATH
