@@ -1,0 +1,5 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+# 2 GPUs at global batch 16 (wave: 1 GPU, same batch). mu3e-4 = Jeremy's ACE2S Muon ablation rates (feature/spectral-muon).
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_mae_muon_lr|mu3e-4|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.optimizer_type=Muon optimization.lr=0.0003 optimization.kwargs.adamw_lr=0.0001 optimization.kwargs.adamw_weight_decay=0.01|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_mae_muon_lr|mu1e-4|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.optimizer_type=Muon optimization.lr=0.0001 optimization.kwargs.adamw_lr=0.0001 optimization.kwargs.adamw_weight_decay=0.01|8h
