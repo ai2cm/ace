@@ -2,7 +2,7 @@ import dataclasses
 import warnings
 from collections.abc import Mapping
 from functools import cached_property
-from typing import Any
+from typing import Any, Literal
 
 import dacite
 import torch
@@ -26,7 +26,11 @@ from fme.downscaling.data import (
     load_coords_from_path,
     roll_lon_coords,
 )
-from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
+from fme.downscaling.metrics_and_maths import (
+    ALIGN_CORNERS_MODES,
+    filter_tensor_mapping,
+    interpolate,
+)
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
@@ -98,6 +102,68 @@ class LossWeightsConfig:
 
 
 @dataclasses.dataclass
+class UpsamplingConfig:
+    """
+    Configuration for upsampling coarse inputs to the fine grid, used for
+    the model input and for the base prediction when predicting residuals.
+    For now, this only uses torch.nn.functional.interpolate but could be
+    expanded in the future to allow for other upsampling options.
+
+    Parameters:
+        mode: Interpolation mode passed to torch.nn.functional.interpolate.
+            Defaults to 'bicubic'.
+        align_corners: Whether to align corner pixels of the coarse and fine
+            grids. Only supported for bilinear and bicubic modes.
+            Defaults to 'False'. When used in bicubic interpolation, `True`
+            produces larger offset errors in the upsampled domain that are
+            amplified further when generated domain size does not match
+            training patch size.
+    """
+
+    mode: Literal["bicubic", "bilinear", "nearest", "nearest-exact", "area"] = "bicubic"
+    align_corners: bool = False
+
+    def __post_init__(self):
+        if self.align_corners and self.mode not in ALIGN_CORNERS_MODES:
+            raise ValueError(
+                f"align_corners=True is only supported for {ALIGN_CORNERS_MODES} "
+                f"modes, got mode={self.mode!r}."
+            )
+
+    def interpolate(self, tensor: torch.Tensor, scale_factor: int) -> torch.Tensor:
+        return interpolate(
+            tensor, scale_factor, mode=self.mode, align_corners=self.align_corners
+        )
+
+    @classmethod
+    def legacy(cls) -> "UpsamplingConfig":
+        """Settings used by checkpoints saved before UpsamplingConfig existed."""
+        return cls(mode="bicubic", align_corners=True)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any] | None) -> "UpsamplingConfig":
+        """
+        Args:
+            state: The saved upsampling state, or None for checkpoints saved
+                before UpsamplingConfig existed, which used bicubic
+                interpolation with align_corners=True.
+        """
+        if state is None:
+            return cls.legacy()
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
+
+
+def _with_legacy_upsampling(state: Mapping[str, Any]) -> dict[str, Any]:
+    state = dict(state)
+    state["upsampling"] = dataclasses.asdict(
+        UpsamplingConfig.from_state(state.get("upsampling"))
+    )
+    return state
+
+
+@dataclasses.dataclass
 class PairedNormalizationConfig:
     fine: NormalizationConfig
     coarse: NormalizationConfig
@@ -137,6 +203,7 @@ class DiffusionModelMetadata:
     use_fine_topography: bool
     full_fine_coords: LatLonCoordinates
     num_static_inputs: int
+    upsampling: UpsamplingConfig
     # Avoid runtime failures for frozen class with unhashable field
     __hash__ = None  # type: ignore[assignment]
 
@@ -170,6 +237,9 @@ class DiffusionModelConfig:
         p_std: The std of the noise distribution used during training.
             Deprecated. Use training_noise_distribution field instead.
             This is kept for backwards compatibility.
+        upsampling: How coarse inputs are upsampled to the fine grid.
+            Checkpoints saved without this field load with the legacy
+            behavior (bicubic interpolation with align_corners=True).
     """
 
     module: DiffusionModuleRegistrySelector
@@ -192,6 +262,7 @@ class DiffusionModelConfig:
     ) = None
     p_mean: float | None = None
     p_std: float | None = None
+    upsampling: UpsamplingConfig = dataclasses.field(default_factory=UpsamplingConfig)
 
     def __post_init__(self):
         self._interpolate_input = self.module.expects_interpolated_input
@@ -307,7 +378,7 @@ class DiffusionModelConfig:
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "DiffusionModelConfig":
-        return dacite.from_dict(data_class=cls, data=state)
+        return dacite.from_dict(data_class=cls, data=_with_legacy_upsampling(state))
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -462,6 +533,9 @@ class DiffusionModel:
             coarse_shape[1] * self.downscale_factor,
         )
 
+    def _interpolate(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self.config.upsampling.interpolate(tensor, self.downscale_factor)
+
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
@@ -469,7 +543,7 @@ class DiffusionModel:
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
         )
-        interpolated = interpolate(normalized, self.downscale_factor)
+        interpolated = self._interpolate(normalized)
 
         if self.config.use_fine_topography and static_inputs is not None:
             expected_shape = interpolated.shape[-2:]
@@ -511,14 +585,13 @@ class DiffusionModel:
         )
 
         if self.config.predict_residual:
-            base_prediction = interpolate(
+            base_prediction = self._interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
                         {k: coarse[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
-                self.downscale_factor,
             )
             targets_norm = targets_norm - base_prediction
 
@@ -600,14 +673,13 @@ class DiffusionModel:
     ) -> tuple[TensorDict, torch.Tensor]:
         """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
-            base_prediction = interpolate(
+            base_prediction = self._interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
                         {k: coarse_data[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
-                self.downscale_factor,
             )
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
@@ -695,6 +767,21 @@ class DiffusionModel:
             "static_inputs": static_inputs_state,
         }
 
+    def validate_upsampling_matches_state(self, state: Mapping[str, Any]) -> None:
+        """
+        Raise if ``state`` (from ``get_state``) was saved with different
+        upsampling settings than this model, e.g. when resuming a training run
+        started before upsampling was configurable with a config that does
+        not set it explicitly.
+        """
+        saved = UpsamplingConfig.from_state(state["config"].get("upsampling"))
+        if saved != self.config.upsampling:
+            raise ValueError(
+                f"Saved model state uses upsampling {saved}, but this model uses "
+                f"{self.config.upsampling}. Set model.upsampling in the "
+                "config to match the saved state."
+            )
+
     @classmethod
     def from_state(
         cls,
@@ -756,6 +843,7 @@ class DiffusionModel:
             num_static_inputs=len(self.static_inputs.fields)
             if self.static_inputs
             else 0,
+            upsampling=self.config.upsampling,
         )
 
     def _lon_roll_amount(self, coarse_lon: torch.Tensor) -> tuple[int, float]:
@@ -828,7 +916,9 @@ class _CheckpointModelConfigSelector:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> DiffusionModelConfig:
         return dacite.from_dict(
-            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
+            data={"wrapper": _with_legacy_upsampling(state)},
+            data_class=cls,
+            config=dacite.Config(strict=True),
         ).wrapper
 
 
@@ -851,7 +941,8 @@ class CheckpointModelConfig:
         model_updates: Optional mapping of {key: new_value} model config updates to
             apply when loading the model. This is useful for running evaluation with
             updated parameters than at training time. Use with caution; not all
-            parameters can or should be updated at evaluation time.
+            parameters can or should be updated at evaluation time. 'module' and
+            'upsampling' are explicitly prohibited as keys.
     """
 
     checkpoint_path: str
@@ -865,8 +956,9 @@ class CheckpointModelConfig:
         # For config validation testing, we don't want to load immediately
         # so we defer until build or properties are accessed.
         self._checkpoint_is_loaded = False
-        if "module" in (self.model_updates or {}):
-            raise ValueError("'module' cannot be updated in model_updates.")
+        for key in ("module", "upsampling"):
+            if key in (self.model_updates or {}):
+                raise ValueError(f"'{key}' cannot be updated in model_updates.")
         if self.fine_topography_path is not None:
             raise ValueError(
                 "fine_topography_path is deprecated and will be removed in "

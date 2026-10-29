@@ -6,7 +6,7 @@ import torch
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.downscaling.data import StaticInputs
-from fme.downscaling.models import CheckpointModelConfig
+from fme.downscaling.models import CheckpointModelConfig, UpsamplingConfig
 from fme.downscaling.predictors.serial_denoising import (
     DenoisingExpertCheckpointConfig,
     DenoisingMoEBundledConfig,
@@ -139,6 +139,23 @@ def test_validate_experts_compatible():
     )
     with pytest.raises(ValueError, match="metadata"):
         _validate_experts_compatible([e0, e1])
+
+
+def test_validate_experts_compatible_raises_for_different_upsampling():
+    fine_coords = make_fine_coords((16, 32))
+    experts = [
+        _get_diffusion_model(
+            coarse_shape=(8, 16),
+            downscale_factor=2,
+            full_fine_coords=fine_coords,
+            use_fine_topography=False,
+            static_inputs=StaticInputs(fields=[], coords=fine_coords),
+            upsampling=UpsamplingConfig(align_corners=align_corners),
+        )
+        for align_corners in (True, False)
+    ]
+    with pytest.raises(ValueError, match="metadata"):
+        _validate_experts_compatible(experts)
 
 
 def test_generate_on_batch_returns_scalar_loss():
