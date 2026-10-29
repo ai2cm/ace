@@ -1,6 +1,6 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
 # 2 GPUs at global batch 16 (qt9gvoti: 1 GPU, same batch). qt9gvoti (unseeded) is the second MSE seed.
-cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs1|train|normal|jupiter+titan|2||3|ai2/ace|seed=1|8h
-cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs0|train|normal|jupiter+titan|2||3|ai2/ace|seed=0 stepper_training.loss.type=L1|8h
-cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs1|train|normal|jupiter+titan|2||3|ai2/ace|seed=1 stepper_training.loss.type=L1|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs1|train|high|jupiter+titan|2||3|ai2/ace|seed=1|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs0|train|high|jupiter+titan|2||3|ai2/ace|seed=0 stepper_training.loss.type=L1|8h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs1|train|high|jupiter+titan|2||3|ai2/ace|seed=1 stepper_training.loss.type=L1|8h
