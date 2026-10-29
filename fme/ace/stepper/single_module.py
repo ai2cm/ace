@@ -621,11 +621,10 @@ class StepperConfig:
                 dataset_info.timestep
             )
         if self.input_masking is None:
-            input_masking = NullSpatialMasking()
+            input_masking: SpatialMasking = NullSpatialMasking()
         else:
             input_masking = self.input_masking.build(
-                mask=dataset_info.spatial_mask_provider,
-                means=step.normalizer.means,
+                mask=dataset_info.spatial_mask_provider
             )
         try:
             output_masking: SpatialMasking = (
@@ -637,7 +636,7 @@ class StepperConfig:
             config=self,
             step=step,
             dataset_info=dataset_info,
-            input_process_func=input_masking,
+            input_masking=input_masking,
             output_masking=output_masking,
             derive_func=derive_func,
             parameter_initializer=parameter_initializer,
@@ -824,7 +823,7 @@ class Stepper:
         config: StepperConfig,
         step: StepABC,
         dataset_info: DatasetInfo,
-        input_process_func: Callable[[TensorMapping], TensorDict],
+        input_masking: SpatialMasking,
         output_masking: SpatialMasking,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         parameter_initializer: ParameterInitializer,
@@ -838,9 +837,9 @@ class Stepper:
             output_masking: Spatial masking applied to the step output and to
                 the corrector diagnostics carried alongside it.
             derive_func: Function to compute derived variables.
-            input_process_func: Optional function for processing inputs and next-step
-                inputs before passing them to the step object, e.g., by masking
-                specific regions.
+            input_masking: Spatial masking applied to the inputs and next-step
+                inputs before they are passed to the step object. A "mean" fill
+                uses the step's network normalizer for each batch.
             parameter_initializer: The parameter initializer to use for loading weights
                 from an external source.
             training_history: History of the stepper's training jobs.
@@ -850,7 +849,7 @@ class Stepper:
         self._dataset_info = dataset_info
         self._derive_func = derive_func
         self._output_masking = output_masking
-        self._input_process_func = input_process_func
+        self._input_masking = input_masking
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
 
@@ -1106,7 +1105,10 @@ class Stepper:
             ``None``), and the corrector's per-variable correction diagnostics,
             spatially masked consistently with the output.
         """
-        args = args.apply_input_process_func(self._input_process_func)
+        means = self._step_obj.network_normalizer(args.labels).means
+        args = args.apply_input_process_func(
+            lambda data: self._input_masking(data, means=means)
+        )
         random_state = (
             args.stepper_state.random_state if args.stepper_state is not None else None
         )

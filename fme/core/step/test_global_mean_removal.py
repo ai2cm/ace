@@ -22,26 +22,27 @@ def _build_normalizer_for(means, stds):
 
 
 def _make_shared(means, stds, append_as_input=False):
+    """Build a shared transform and the normalizer that supplies its constants."""
     normalizer = _build_normalizer_for(means, stds)
     config = SharedGlobalMeanRemovalConfig(
         reference_field="surface_temperature",
         field_names=list(means.keys()),
         append_as_input=append_as_input,
     )
-    return config.build(normalizer, list(means.keys()))
+    return config.build(list(means.keys())), normalizer
 
 
 def test_shared_worked_example():
     means = {"surface_temperature": 280.0, "air_temperature_4": 250.0}
     stds = {"surface_temperature": 2.0, "air_temperature_4": 4.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     tensors = move_tensordict_to_device(
         {
             "surface_temperature": torch.full((1, 4, 4), 285.0),
             "air_temperature_4": torch.full((1, 4, 4), 245.0),
         }
     )
-    result, _ = transform.forward_transform(tensors, None)
+    result, _ = transform.forward_transform(tensors, None, normalizer)
     # offset = 280 - 285 = -5; shifted = 285 + (-5) = 280
     torch.testing.assert_close(
         result["surface_temperature"],
@@ -58,11 +59,11 @@ def test_shared_round_trip():
     torch.manual_seed(0)
     means = {"surface_temperature": 288.0, "air_temperature_0": 220.0}
     stds = {"surface_temperature": 5.0, "air_temperature_0": 3.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     tensors = move_tensordict_to_device(
         {k: torch.randn(2, 4, 4) + means[k] for k in means}
     )
-    result, state = transform.forward_transform(tensors, None)
+    result, state = transform.forward_transform(tensors, None, normalizer)
     restored = transform.inverse_transform(result, state)
     for k in means:
         torch.testing.assert_close(restored[k], tensors[k])
@@ -75,11 +76,11 @@ def test_shared_state_independent_of_call_order():
     """
     means = {"surface_temperature": 280.0}
     stds = {"surface_temperature": 1.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     a = move_tensordict_to_device({"surface_temperature": torch.full((1, 4, 4), 285.0)})
     b = move_tensordict_to_device({"surface_temperature": torch.full((1, 4, 4), 270.0)})
-    shifted_a, state_a = transform.forward_transform(a, None)
-    shifted_b, state_b = transform.forward_transform(b, None)  # interleaved
+    shifted_a, state_a = transform.forward_transform(a, None, normalizer)
+    shifted_b, state_b = transform.forward_transform(b, None, normalizer)  # interleaved
     restored_a = transform.inverse_transform(shifted_a, state_a)
     restored_b = transform.inverse_transform(shifted_b, state_b)
     torch.testing.assert_close(
@@ -93,11 +94,11 @@ def test_shared_state_independent_of_call_order():
 def test_shared_preserves_horizontal_gradients():
     means = {"surface_temperature": 280.0}
     stds = {"surface_temperature": 1.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.tensor([[285.0, 290.0, 275.0]])}
     )
-    result, _ = transform.forward_transform(tensors, None)
+    result, _ = transform.forward_transform(tensors, None, normalizer)
     raw_grad = (
         tensors["surface_temperature"][0, 1] - tensors["surface_temperature"][0, 0]
     )
@@ -110,13 +111,13 @@ def test_shared_preserves_horizontal_gradients():
 def test_shared_is_per_sample():
     means = {"surface_temperature": 280.0, "air_temperature_0": 220.0}
     stds = {"surface_temperature": 1.0, "air_temperature_0": 1.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     surface_t = torch.tensor([[[285.0]], [[270.0]]])
     air_t_0 = torch.tensor([[[230.0]], [[230.0]]])
     tensors = move_tensordict_to_device(
         {"surface_temperature": surface_t, "air_temperature_0": air_t_0}
     )
-    result, _ = transform.forward_transform(tensors, None)
+    result, _ = transform.forward_transform(tensors, None, normalizer)
     # sample 0: offset = 280 - 285 = -5; sample 1: offset = 280 - 270 = +10
     expected = torch.tensor([[[230.0 + (-5.0)]], [[230.0 + 10.0]]])
     torch.testing.assert_close(result["air_temperature_0"].cpu(), expected)
@@ -125,26 +126,26 @@ def test_shared_is_per_sample():
 def test_shared_no_extra_channels():
     means = {"surface_temperature": 280.0}
     stds = {"surface_temperature": 1.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     assert transform.n_extra_input_channels == 0
     assert transform.extra_channel_names == []
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
-    _, state = transform.forward_transform(tensors, None)
+    _, state = transform.forward_transform(tensors, None, normalizer)
     assert transform.extras_normalized(state) == {}
 
 
 def test_shared_extra_channels():
     means = {"surface_temperature": 280.0}
     stds = {"surface_temperature": 5.0}
-    transform = _make_shared(means, stds, append_as_input=True)
+    transform, normalizer = _make_shared(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 1
     [extra_name] = transform.extra_channel_names
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
-    _, state = transform.forward_transform(tensors, None)
+    _, state = transform.forward_transform(tensors, None, normalizer)
     extras = transform.extras_normalized(state)
     assert list(extras) == [extra_name]
     extra = extras[extra_name]
@@ -156,49 +157,50 @@ def test_shared_extra_channels():
 def test_shared_raises_on_masked_reference():
     means = {"surface_temperature": 280.0}
     stds = {"surface_temperature": 1.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     tensors = move_tensordict_to_device(
         {"surface_temperature": torch.full((2, 4, 4), 285.0)}
     )
     data_mask = {"surface_temperature": torch.tensor([True, False])}
     with pytest.raises(ValueError, match="masked"):
-        transform.forward_transform(tensors, data_mask)
+        transform.forward_transform(tensors, data_mask, normalizer)
 
 
 def test_shared_raises_on_missing_reference():
     means = {"surface_temperature": 280.0, "air_temperature_0": 220.0}
     stds = {"surface_temperature": 1.0, "air_temperature_0": 1.0}
-    transform = _make_shared(means, stds)
+    transform, normalizer = _make_shared(means, stds)
     tensors = move_tensordict_to_device(
         {"air_temperature_0": torch.full((2, 4, 4), 225.0)}
     )
     with pytest.raises(ValueError, match="not present"):
-        transform.forward_transform(tensors, None)
+        transform.forward_transform(tensors, None, normalizer)
 
 
 # ── PerChannelGlobalMeanRemoval ─────────────────────────────────────────
 
 
 def _make_per_channel(means, stds, field_names=None, append_as_input=False):
+    """Build a per-channel transform and the normalizer that supplies its constants."""
     normalizer = _build_normalizer_for(means, stds)
     config = PerChannelGlobalMeanRemovalConfig(
         field_names=field_names,
         append_as_input=append_as_input,
     )
-    return config.build(normalizer, list(means.keys()))
+    return config.build(list(means.keys())), normalizer
 
 
 def test_per_channel_removes_correct_means():
     means = {"a": 10.0, "b": 20.0}
     stds = {"a": 1.0, "b": 1.0}
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
     tensors = move_tensordict_to_device(
         {
             "a": torch.tensor([[[12.0, 14.0]]]),  # mean = 13
             "b": torch.tensor([[[22.0, 28.0]]]),  # mean = 25
         }
     )
-    result, _ = transform.forward_transform(tensors, None)
+    result, _ = transform.forward_transform(tensors, None, normalizer)
     # a: shift = 10 - 13 = -3; result = [12 - 3, 14 - 3] = [9, 11]
     torch.testing.assert_close(result["a"].cpu(), torch.tensor([[[9.0, 11.0]]]))
     # b: shift = 20 - 25 = -5; result = [22 - 5, 28 - 5] = [17, 23]
@@ -209,11 +211,11 @@ def test_per_channel_round_trip():
     torch.manual_seed(0)
     means = {"a": 10.0, "b": 20.0}
     stds = {"a": 2.0, "b": 3.0}
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
     tensors = move_tensordict_to_device(
         {k: torch.randn(3, 8, 8) + means[k] for k in means}
     )
-    result, state = transform.forward_transform(tensors, None)
+    result, state = transform.forward_transform(tensors, None, normalizer)
     restored = transform.inverse_transform(result, state)
     for k in means:
         torch.testing.assert_close(restored[k], tensors[k])
@@ -223,11 +225,11 @@ def test_per_channel_state_independent_of_call_order():
     """Two interleaved forward/inverse pairs must each round-trip cleanly."""
     means = {"a": 0.0}
     stds = {"a": 1.0}
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
     a = move_tensordict_to_device({"a": torch.tensor([[[10.0, 20.0]]])})
     b = move_tensordict_to_device({"a": torch.tensor([[[100.0, 200.0]]])})
-    shifted_a, state_a = transform.forward_transform(a, None)
-    shifted_b, state_b = transform.forward_transform(b, None)
+    shifted_a, state_a = transform.forward_transform(a, None, normalizer)
+    shifted_b, state_b = transform.forward_transform(b, None, normalizer)
     restored_a = transform.inverse_transform(shifted_a, state_a)
     restored_b = transform.inverse_transform(shifted_b, state_b)
     torch.testing.assert_close(restored_a["a"], a["a"])
@@ -237,11 +239,11 @@ def test_per_channel_state_independent_of_call_order():
 def test_per_channel_is_per_sample():
     means = {"a": 0.0}
     stds = {"a": 1.0}
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
     tensors = move_tensordict_to_device(
         {"a": torch.tensor([[[10.0, 20.0]], [[100.0, 200.0]]])}
     )
-    result, _ = transform.forward_transform(tensors, None)
+    result, _ = transform.forward_transform(tensors, None, normalizer)
     # clim_mean=0, so shift per sample is -sample_mean
     # sample 0: mean=15 → shift=-15 → [10-15, 20-15] = [-5, 5]
     # sample 1: mean=150 → shift=-150 → [100-150, 200-150] = [-50, 50]
@@ -253,18 +255,18 @@ def test_per_channel_is_per_sample():
 def test_per_channel_no_extra_channels():
     means = {"a": 0.0}
     stds = {"a": 1.0}
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
     assert transform.n_extra_input_channels == 0
     assert transform.extra_channel_names == []
     tensors = move_tensordict_to_device({"a": torch.full((2, 4, 4), 5.0)})
-    _, state = transform.forward_transform(tensors, None)
+    _, state = transform.forward_transform(tensors, None, normalizer)
     assert transform.extras_normalized(state) == {}
 
 
 def test_per_channel_extra_channels():
     means = {"a": 10.0, "b": 20.0}
     stds = {"a": 2.0, "b": 5.0}
-    transform = _make_per_channel(means, stds, append_as_input=True)
+    transform, normalizer = _make_per_channel(means, stds, append_as_input=True)
     assert transform.n_extra_input_channels == 2
     a_extra, b_extra = transform.extra_channel_names
     tensors = move_tensordict_to_device(
@@ -273,7 +275,7 @@ def test_per_channel_extra_channels():
             "b": torch.full((1, 4, 4), 25.0),  # mean=25
         }
     )
-    _, state = transform.forward_transform(tensors, None)
+    _, state = transform.forward_transform(tensors, None, normalizer)
     extras = transform.extras_normalized(state)
     assert list(extras) == [a_extra, b_extra]
     assert extras[a_extra].shape == (1, 4, 4)
@@ -286,11 +288,11 @@ def test_per_channel_extra_channels():
 def test_per_channel_with_field_names_subset():
     means = {"a": 10.0, "b": 20.0}
     stds = {"a": 2.0, "b": 5.0}
-    transform = _make_per_channel(means, stds, field_names=["a"])
+    transform, normalizer = _make_per_channel(means, stds, field_names=["a"])
     tensors = move_tensordict_to_device(
         {"a": torch.full((1, 4, 4), 14.0), "b": torch.full((1, 4, 4), 25.0)}
     )
-    result, _ = transform.forward_transform(tensors, None)
+    result, _ = transform.forward_transform(tensors, None, normalizer)
     # a: shift = 10 - 14 = -4; result = 14 - 4 = 10 (== clim_mean)
     torch.testing.assert_close(result["a"].cpu(), torch.full((1, 4, 4), 10.0))
     # b was NOT shifted
@@ -300,13 +302,13 @@ def test_per_channel_with_field_names_subset():
 def test_per_channel_masked_no_shift():
     means = {"a": 10.0}
     stds = {"a": 2.0}
-    transform = _make_per_channel(means, stds, append_as_input=True)
+    transform, normalizer = _make_per_channel(means, stds, append_as_input=True)
     [extra_name] = transform.extra_channel_names
     tensors = move_tensordict_to_device(
         {"a": torch.tensor([[[14.0, 14.0]], [[14.0, 14.0]]])}
     )
     data_mask = move_tensordict_to_device({"a": torch.tensor([True, False])})
-    result, state = transform.forward_transform(tensors, data_mask)
+    result, state = transform.forward_transform(tensors, data_mask, normalizer)
     # sample 0 (unmasked): shift = 10 - 14 = -4; result = 14 - 4 = 10
     torch.testing.assert_close(result["a"][0].cpu(), torch.full((1, 2), 10.0))
     # sample 1 (masked): no shift, unchanged
@@ -331,8 +333,7 @@ def test_per_channel_post_normalization_mean_is_near_zero():
     # Realistic climatology: surface temperature ~288 K, std ~15 K.
     means = {"surface_temperature": 288.0, "air_temperature_0": 220.0}
     stds = {"surface_temperature": 15.0, "air_temperature_0": 10.0}
-    normalizer = _build_normalizer_for(means, stds)
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
 
     tensors = move_tensordict_to_device(
         {
@@ -340,7 +341,7 @@ def test_per_channel_post_normalization_mean_is_near_zero():
             "air_temperature_0": torch.randn(2, 8, 16) * 8.0 + 215.0,
         }
     )
-    shifted, _ = transform.forward_transform(tensors, None)
+    shifted, _ = transform.forward_transform(tensors, None, normalizer)
     normalized = normalizer.normalize(shifted)
     for name in means:
         sample_means = normalized[name].mean(dim=tuple(range(1, normalized[name].ndim)))
@@ -357,13 +358,12 @@ def test_per_channel_post_normalization_mean_near_zero_when_masked():
     still land near zero in normalized space."""
     means = {"a": 100.0}
     stds = {"a": 5.0}
-    normalizer = _build_normalizer_for(means, stds)
-    transform = _make_per_channel(means, stds)
+    transform, normalizer = _make_per_channel(means, stds)
 
     # Two samples, both with physical mean 110; one is masked.
     tensors = move_tensordict_to_device({"a": torch.full((2, 4, 4), 110.0)})
     data_mask = move_tensordict_to_device({"a": torch.tensor([True, False])})
-    shifted, _ = transform.forward_transform(tensors, data_mask)
+    shifted, _ = transform.forward_transform(tensors, data_mask, normalizer)
     normalized = normalizer.normalize(shifted)
     # Unmasked sample: spatial mean ≈ 0 in normalized space.
     assert normalized["a"][0].mean().abs().item() < 1e-5
@@ -402,16 +402,13 @@ def test_per_channel_config_raises_on_output_only_field():
 
 
 def test_per_channel_config_none_field_names_means_all():
-    means = {"a": 0.0, "b": 0.0}
-    stds = {"a": 1.0, "b": 1.0}
-    normalizer = _build_normalizer_for(means, stds)
     config = PerChannelGlobalMeanRemovalConfig(field_names=None)
     config.validate_names(["a", "b"], ["a", "b"])
-    assert config.build(normalizer, ["a", "b"]).n_extra_input_channels == 0
+    assert config.build(["a", "b"]).n_extra_input_channels == 0
     config_with_input = PerChannelGlobalMeanRemovalConfig(
         field_names=None, append_as_input=True
     )
-    assert config_with_input.build(normalizer, ["a", "b"]).n_extra_input_channels == 2
+    assert config_with_input.build(["a", "b"]).n_extra_input_channels == 2
 
 
 # ── Dacite union serialization ──────────────────────────────────────────

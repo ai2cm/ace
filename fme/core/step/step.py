@@ -8,6 +8,7 @@ import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.corrector import CorrectorSelector
@@ -349,6 +350,16 @@ class StepABC(abc.ABC):
     @property
     @abc.abstractmethod
     def normalizer(self) -> StandardNormalizer:
+        pass
+
+    @abc.abstractmethod
+    def network_normalizer(self, labels: BatchLabels | None) -> StandardNormalizer:
+        """The normalizer applied to the network's inputs for this batch.
+
+        Also supplies the fill values for a "mean" input masking. Its constants
+        may be per-sample, so it can differ from ``normalizer``, which is the
+        one exposed to the loss and aggregators.
+        """
         pass
 
     @property
