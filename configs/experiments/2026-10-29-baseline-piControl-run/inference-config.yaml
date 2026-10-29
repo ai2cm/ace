@@ -30,12 +30,10 @@ forcing_loader:
       engine: zarr
       # forcing data ends in 0350, so repeat it to cover 0320-0420
       n_repeats: 2
-  ocean:
-    dataset:
-      data_path: /climate-default
-      file_pattern: 2025-10-15-cm4-piControl-200yr-ocean-no-smoothing.zarr
-      engine: zarr
-      n_repeats: 2
+  # No ocean forcing loader: this model has no ocean-only exogenous forcings
+  # (land_fraction comes from the atmosphere), and providing an ocean dataset
+  # with no required variables yields empty ocean forcing batches, which
+  # crashes the coupled stepper.
   num_data_workers: 1
 initial_condition:
   # year 0320 is outside the 0151-0310 training and validation period; created
