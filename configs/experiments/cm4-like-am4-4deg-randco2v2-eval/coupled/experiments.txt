@@ -40,4 +40,4 @@ ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|inf_done_cm4-abrup
 ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|inf_done_cm4-abrupt4xCO2-ic36|best_inference_ckpt|high|--min-runtime 1h||01M61P2YDVP9CKQ8KMJVCYQMH9|ai2/ace|titan
 
 # 100-year extension of abrupt-4xCO2 ensemble member 1 (same checkpoint)
-ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|run_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 12h||01M61P2YDVP9CKQ8KMJVCYQMH9|ai2/ace|titan
+ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|run_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M61P2YDVP9CKQ8KMJVCYQMH9|ai2/ace|titan
