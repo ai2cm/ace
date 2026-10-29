@@ -23,6 +23,7 @@ for S in $SCENARIOS; do
   case "$S" in
     piC)  CFG=coupled-evaluator-config-piC-ic0151-200yr-4deg-singleckpt.yaml;  TAG=piC-ic0151-200yr ;;
     1pct) CFG=coupled-evaluator-config-1pct-ic0001-130yr-4deg-singleckpt.yaml; TAG=1pct-ic0001-130yr ;;
+    1pctconst) CFG=coupled-evaluator-config-1pct-ic0001-130yr-4deg-singleckpt-co2const.yaml; TAG=1pct-ic0001-130yr-co2const ;;
     *) echo "unknown scenario $S"; exit 1 ;;
   esac
   JOB="samudra-ppad4deg-${ARM}-coupled-ft${VARIANT}-eval-${TAG}"
