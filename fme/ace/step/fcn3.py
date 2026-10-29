@@ -390,7 +390,8 @@ class FCN3Step(StepABC):
 
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module)
-        # not a replacement: state dict, device, train/eval still go via self.module.
+        # self.module owns params for checkpoints: torch.compile prefixes state_dict
+        # keys with "_orig_mod.". The compiled view is used only for forward.
         # Single-rank FCN3 traces as one graph. Under spatial parallelism the
         # distributed DISCO convolution still uses sparse tensors, so the
         # compiled step has graph breaks there (still correct).
