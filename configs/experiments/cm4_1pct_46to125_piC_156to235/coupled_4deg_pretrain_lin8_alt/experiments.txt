@@ -80,6 +80,7 @@ cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-a0-o1|01
 # 10-year coupled ensemble spread (E3SM ask), 20 January starts in piControl 0241-0260 per job; --config-dir configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_4deg_eval
 # First the load-and-match check: Troy's deterministic hybrid (training experiment 01M50BNJJGV3AVXCG1AV476N9N) at seed=1, vs his zs240 s1-yr0241 member.
 cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|troyhyb-s1|01M50BNJJGV3AVXCG1AV476N9N|running_dec10-check-4deg|best_inference_ckpt|normal|--min-runtime 3h|seed=1||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|troyhyb-s1|01M50BNJJGV3AVXCG1AV476N9N|run_dec10-check12-4deg|best_inference_ckpt|normal|--min-runtime 3h|seed=1||ai2/ace|jupiter+titan
 # Held until the check passes. mse30_lin8 both-noise (ocean seed = seed+1), fixed-ocean (ocean_seed=1; its a0 member is the both-noise s0), and Troy's hybrid (atmosphere seed only).
 cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s0|01M5VD1E4ZWBEP8MT5E558E8FS|pending_dec10-241to260-4deg|best_inference_ckpt|normal|--min-runtime 3h|seed=0||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-coupled_4deg_pretrain_lin8_alt|mse30_lin8-s10|01M5VD1E4ZWBEP8MT5E558E8FS|pending_dec10-241to260-4deg|best_inference_ckpt|normal|--min-runtime 3h|seed=10||ai2/ace|jupiter+titan
