@@ -476,7 +476,7 @@ class ZonalPowerSpectrumAggregator:
                 v.unsqueeze(channel_dim),
                 self.downscale_factor,
                 mode="bicubic",
-                align_corners=True,
+                align_corners=False,
             ).squeeze(channel_dim)
             for k, v in data.items()
             if k in keys
@@ -865,7 +865,7 @@ class RelativeMSEInterpAggregator:
                 v.unsqueeze(channel_dim),
                 self.downscale_factor,
                 mode="bicubic",
-                align_corners=True,
+                align_corners=False,
             ).squeeze(channel_dim)
             for k, v in data.items()
             if k in keys

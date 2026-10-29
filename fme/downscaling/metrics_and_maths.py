@@ -258,8 +258,8 @@ ALIGN_CORNERS_MODES = ("bilinear", "bicubic")
 def interpolate(
     tensor: torch.Tensor,
     scale_factor: int,
-    mode: str = "bicubic",
-    align_corners: bool = True,
+    mode: str,
+    align_corners: bool,
 ) -> torch.Tensor:
     """
     Interpolate the last two (spatial) dimensions of a 4D tensor.

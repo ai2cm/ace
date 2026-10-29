@@ -114,9 +114,10 @@ class UpsamplingConfig:
             Defaults to 'bicubic'.
         align_corners: Whether to align corner pixels of the coarse and fine
             grids. Only supported for bilinear and bicubic modes.
-            Defaults to 'False'. When used in bicubic interpolation this reduces
-            errors relative to the reference fine grid, especially near edges.
-
+            Defaults to 'False'. When used in bicubic interpolation, `True`
+            produces larger offset errors in the upsampled domain that are
+            amplified further when generated domain size does not match
+            training patch size.
     """
 
     mode: Literal["bicubic", "bilinear", "nearest", "nearest-exact", "area"] = "bicubic"
@@ -125,7 +126,7 @@ class UpsamplingConfig:
     def __post_init__(self):
         if self.align_corners and self.mode not in ALIGN_CORNERS_MODES:
             raise ValueError(
-                "align_corners=True is only supported for bilinear and bicubic "
+                f"align_corners=True is only supported for {ALIGN_CORNERS_MODES} "
                 f"modes, got mode={self.mode!r}."
             )
 
@@ -940,7 +941,8 @@ class CheckpointModelConfig:
         model_updates: Optional mapping of {key: new_value} model config updates to
             apply when loading the model. This is useful for running evaluation with
             updated parameters than at training time. Use with caution; not all
-            parameters can or should be updated at evaluation time.
+            parameters can or should be updated at evaluation time. 'module' and
+            'upsampling' are explicitly prohibited as keys.
     """
 
     checkpoint_path: str

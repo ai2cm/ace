@@ -164,7 +164,7 @@ class DeterministicModel:
             self.normalizer.coarse.normalize(coarse_inputs), axis=self._channel_axis
         )
         interpolated = interpolate(
-            coarse_norm, self.downscale_factor, mode="bicubic", align_corners=True
+            coarse_norm, self.downscale_factor, mode="bicubic", align_corners=False
         )
 
         if self.config.use_fine_topography:
