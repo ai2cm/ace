@@ -1,7 +1,9 @@
 import os
 
 import fsspec
-from fs_utils import is_dir, is_local, makedirs, path_exists
+import numpy as np
+import xarray as xr
+from fs_utils import is_dir, is_local, load_netcdf, makedirs, path_exists
 from fsspec.implementations.memory import MemoryFileSystem
 
 
@@ -63,3 +65,20 @@ def test_path_exists_sees_write_made_after_an_earlier_miss():
         f.write(b"data")
 
     assert path_exists(store)
+
+
+def test_load_netcdf_from_local_and_remote_paths(tmp_path):
+    ds = xr.Dataset(
+        {f"var_{i}": ("lat", np.arange(3.0) + i, {"units": "K"}) for i in range(5)},
+        coords={"lat": [-45.0, 0.0, 45.0]},
+        attrs={"input_samples": 1460},
+    )
+    local_path = str(tmp_path / "centering.nc")
+    ds.to_netcdf(local_path)
+    remote_path = "memory://stats/centering.nc"
+    fsspec.filesystem("memory").put_file(local_path, remote_path)
+
+    for path in [local_path, remote_path]:
+        loaded = load_netcdf(path)
+        xr.testing.assert_identical(loaded, ds)
+        assert loaded.encoding["source"] == path
