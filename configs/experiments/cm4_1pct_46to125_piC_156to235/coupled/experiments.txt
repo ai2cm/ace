@@ -46,10 +46,12 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
 
 # --config-dir configs/experiments/cm4_eval/coupled
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
-cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
-cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config-dir configs/experiments/cm4_eval/coupled
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
