@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_mae_muon_lr|mu3e-4|01M651P8D3HTHN2XK8SZA7X4BK|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_mae_muon_lr|mu1e-4|01M651PHDS4PW6W4R2QPNMK270|training|best_inference_ckpt|normal|--min-runtime 8h
