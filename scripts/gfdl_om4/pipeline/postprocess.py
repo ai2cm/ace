@@ -16,6 +16,7 @@ set. A transform is skipped for chunks that don't carry its required
 variables.
 """
 
+import argparse
 import dataclasses
 import functools
 import inspect
@@ -23,6 +24,7 @@ from typing import Callable, Mapping, Sequence
 
 import numpy as np
 import xarray as xr
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
 
 # Provenance attribute names stamped on every output variable.
 SOURCE_STORE_ATTR = "source_store"
@@ -34,6 +36,53 @@ def provenance_attrs(store: str, variable: str, derivation: str | None = None) -
     attrs = {SOURCE_STORE_ATTR: store, SOURCE_VARIABLE_ATTR: variable}
     if derivation is not None:
         attrs[DERIVATION_ATTR] = derivation
+    return attrs
+
+
+# Root attrs naming the code that built a store (D22(a)); image_tag is
+# written only under DataflowRunner, whose workers run that image.
+ACE_COMMIT_ATTR = "ace_commit"
+IMAGE_TAG_ATTR = "image_tag"
+
+
+def add_provenance_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ace-commit",
+        required=True,
+        help="ace commit the run's code comes from (Makefile ACE_COMMIT)",
+    )
+    parser.add_argument(
+        "--image-tag",
+        help="Tag of the Dataflow worker image; required under DataflowRunner, "
+        "rejected under any other runner",
+    )
+
+
+def _is_dataflow_runner(pipeline_args: list[str]) -> bool:
+    runner = PipelineOptions(pipeline_args).view_as(StandardOptions).runner
+    if runner is None:
+        return False
+    # Beam resolves "dataflow", "DataflowRunner" and the qualified class path
+    # to one runner.
+    return runner.rsplit(".", 1)[-1].lower().removesuffix("runner") == "dataflow"
+
+
+def check_provenance_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    pipeline_args: list[str],
+) -> None:
+    dataflow = _is_dataflow_runner(pipeline_args)
+    if dataflow and args.image_tag is None:
+        parser.error("--image-tag is required under DataflowRunner")
+    if not dataflow and args.image_tag is not None:
+        parser.error("--image-tag is only accepted under DataflowRunner")
+
+
+def provenance_run_attrs(ace_commit: str, image_tag: str | None) -> dict:
+    attrs = {ACE_COMMIT_ATTR: ace_commit}
+    if image_tag is not None:
+        attrs[IMAGE_TAG_ATTR] = image_tag
     return attrs
 
 
@@ -53,13 +102,17 @@ class ChunkContext:
             chunk's regrid (the chunk's instantaneous surface ocean coverage
             on the target grid).
         store: source store URL of the stream, for provenance attrs.
-        areacello: exact target-grid cell areas in m^2, for pipelines whose
-            transforms need them; None otherwise.
+        areacello: ``A_J``, target cell areas in m^2 covered by native cells,
+            from the native-area weight artifact; None if unused.
+        ice_volume_per_cell_area: ``(HI c)_J``, the full-cell regrid of the
+            native product of sea-ice thickness and fraction, in m; set for
+            chunks of a stream whose postprocess lists ``sea_ice``.
     """
 
     ocean_fraction: xr.DataArray
     store: str
     areacello: xr.DataArray | None = None
+    ice_volume_per_cell_area: xr.DataArray | None = None
 
 
 @dataclasses.dataclass(frozen=True)

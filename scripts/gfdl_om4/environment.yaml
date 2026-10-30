@@ -6,3 +6,4 @@ dependencies:
   - esmf
   - xesmf
   - pip
+  - pytest

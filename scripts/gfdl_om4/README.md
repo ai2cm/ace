@@ -29,10 +29,18 @@ subpackage imports the other.
   wetmask-normalized conservative regridding.
 - `pipeline/weights.py`: one-time setup step that precomputes xESMF
   conservative weights for a source×target grid pair and stores them as a
-  versioned GCS artifact, plus the per-process cached regridder loader used
-  by workers.
+  versioned GCS artifact, plus the per-process cached loaders used by
+  workers (`get_regridder`, `open_areacello`).
+- `pipeline/native_area.py`: the native-area regridding math (no I/O) —
+  weights rebuilt in native MOM6 cell areas, the regridded statics, the
+  thickness-weighted 3D regrid, the full-cell regrid, and the area and
+  volume identities every run asserts. See
+  [Native-area weights](#native-area-weights).
+- `pipeline/native_area_weights.py`: one-time setup step that builds the
+  native-area weight artifact from an ESMF one.
 - `pipeline/postprocess.py`: the postprocess contract (`Postprocess`,
-  `ChunkContext`) and provenance-attr helpers.
+  `ChunkContext`), provenance-attr helpers and the `--ace-commit` /
+  `--image-tag` flags.
 - `pipeline/config_io.py`: YAML loading (with optional `{member}`
   substitution) and the `OutputConfig`/`WetmaskConfig` dataclasses.
 - `pipeline/zarr_io.py`: store opening, the output-store-absent guard, the
@@ -69,7 +77,10 @@ in the `Makefile`) for both pipelines:
 
 ```
 make create_environment      # conda env gfdl-om4-ingestion
-make generate_weights        # conservative regridding weights (F90 + F22.5), read by both
+make test                    # unit tests (python -m pytest --confcutdir=. pipeline)
+make generate_weights        # ESMF conservative regridding weights (F90 + F22.5)
+make native_area_weights_one_degree native_area_weights_four_degree
+                             # native-area artifacts built from them, read by both
 make build_dataflow          # local image build; smoke-imports pipeline.om4.run and pipeline.randco2.run
 make push_dataflow           # build and push to Artifact Registry
 make enter                   # shell in the image with this directory mounted
@@ -78,6 +89,40 @@ make enter                   # shell in the image with this directory mounted
 The weights are published under the dated, immutable `INPUTS_URL_ROOT`
 prefix in the `Makefile` — regenerating requires a new prefix or explicit
 overwrite flags.
+
+### Native-area weights
+
+ESMF computes conservative weights in its own great-circle cell areas,
+which differ from the MOM6 cell areas `areacello` of the native grid. Every
+config's `weights_url` therefore names a native-area artifact,
+`$(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-<target_grid>`,
+which `pipeline/native_area_weights.py` rebuilds from the ESMF artifact and
+the native `areacello` (`NATIVE_AREA_A_SOURCE_URL`):
+
+- `weights.nc`: weights `ŵ` in native cell areas, float64, with provenance
+  attrs (`native_area.ARTIFACT_ATTRS`); `get_regridder` refuses a
+  `weights.nc` without them.
+- `areacello.nc`: target cell areas `A_J` consistent with `ŵ` (0 on target
+  cells no native cell covers), stored as the `areacello` static.
+- `source_grid.nc`: the source grid, as in the ESMF artifact.
+
+The build refuses an existing prefix; a superseding artifact bumps
+`NATIVE_AREA_WEIGHTS_VERSION`.
+
+Both pipelines read native `areacello` and `sftof` (OM4 also `deptho`)
+from the config's `statics.store`. Every run asserts the area identities
+of `pipeline/native_area.py` on the statics and on every chunk, before the
+float32 cast, and fails on a violation.
+
+### Provenance
+
+Every run takes `--ace-commit` (the make targets pass `git rev-parse
+HEAD`); a `DataflowRunner` launch also takes `--image-tag` (the make
+targets pass the tag of `$(IMAGE_NAME)`), and any other runner refuses it. Both land in
+the store's root attrs, and `check_output` fails on a store without
+`ace_commit`. The root attr `native_area_checks` records report-only
+diagnostics: the artifact's `a/ã` spread and, for OM4, the z\* volume and
+content residuals at the first and last output time.
 
 `run-dataflow.sh {om4|randco2} RUNNER CONFIG [FLAGS...]` launches either
 pipeline; the first argument selects the module (`pipeline.<name>.run`),
@@ -174,7 +219,8 @@ after the script's own arguments:
 
 ```
 python -m pipeline.om4.run --config configs/om4-picontrol-1deg-5daily.yaml \
-    --num-timesteps 6 --output-path <url> --runner DirectRunner
+    --num-timesteps 6 --output-path <url> --ace-commit $(git rev-parse HEAD) \
+    --runner DirectRunner
 ```
 
 #### Production launch checklist
@@ -230,7 +276,7 @@ so there is one config carrying a `{member}` placeholder rather than nine
 near-identical files, and `randco2.mk` holds the member list
 (`RANDCO2_MEMBERS`).
 
-Each output store carries exactly five variables on the target grid:
+Each output store carries exactly seven variables on the target grid:
 
 | Variable | Meaning |
 | --- | --- |
@@ -238,7 +284,9 @@ Each output store carries exactly five variables on the target grid:
 | `sst` | the same field in K (`SST + 273.15`) |
 | `sea_ice_fraction` | ice area per total cell area |
 | `ocean_sea_ice_fraction` | ice area per ocean area |
-| `sea_surface_fraction` | time-invariant ocean fraction of each target cell |
+| `sea_surface_fraction` | time-invariant ocean fraction of each target cell (`sftof / 100`) |
+| `areacello` | time-invariant target cell area `A_J`, m², from the weight artifact |
+| `sftof` | time-invariant ocean percentage of each target cell, full-cell regrid of native `sftof` |
 
 The source `sea_ice_fraction` is ice area per native cell area, and native
 tracer cells are wholly wet or wholly dry, so on the source grid the
@@ -274,9 +322,9 @@ tracer grid, so no weights are generated for them.
 
 The source fields are 2D surface quantities on the tracer grid, so nothing
 here splits vertical levels, interpolates from staggered points, or rotates
-vectors, and there is no statics source store: `sea_surface_fraction` is the
-only time-invariant output, and the target grid's cell geometry comes from
-the analytic grid constructor.
+vectors. The statics source store (`statics.store`, the OM4 ocean statics
+on the same tracer grid) supplies native `areacello` and `sftof`; the
+target `areacello` comes from the weight artifact.
 
 ### Masking
 
@@ -284,8 +332,9 @@ Every time-varying field is NaN over land, and the NaN pattern is the same at
 every timestep: the wetmask is the first timestep's NaN pattern of the
 source's own `SST`, every chunk's valid-data footprint is asserted to equal
 it before regridding, and the normalized regrid NaNs target cells with no
-ocean source area. `sea_surface_fraction` is 0 over land rather than NaN, and
-is the only variable exempt from the land-NaN convention.
+ocean source area. `areacello`, `sftof` and `sea_surface_fraction` are 0
+over land rather than NaN, and are the only variables exempt from the
+land-NaN convention.
 
 ### Setup
 
@@ -331,7 +380,8 @@ after the script's own arguments:
 python -m pipeline.randco2.run \
     --config configs/cm4-like-am4-randco2-sea-surface-1deg.yaml \
     --member random-CO2-1xCO2-ic_0001 \
-    --num-timesteps 6 --output-path <url> --runner DirectRunner
+    --num-timesteps 6 --output-path <url> --ace-commit $(git rev-parse HEAD) \
+    --runner DirectRunner
 ```
 
 #### Production launch checklist

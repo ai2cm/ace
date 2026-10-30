@@ -66,12 +66,16 @@ def sea_ice(
     - ``UI``/``VI`` and ``HI`` are zero where ``sea_ice_fraction`` is zero
       (NaN over land), so the fields are defined everywhere over ocean with
       no time-varying NaN pattern.
-    - ``sea_ice_volume`` = ``HI`` x ``areacello`` x ``sea_ice_fraction``,
-      in m^3.
+    - ``sea_ice_volume`` = ``areacello`` x ``(HI c)_J``, in m^3: ``A_J``
+      times the full-cell regrid of native ``HI`` x ``sea_ice_fraction``
+      (ChunkContext.ice_volume_per_cell_area), so its sum over cells equals
+      the native ice volume.
     """
     frac = ds[sea_ice_fraction]
-    if context.areacello is None:
-        raise ValueError("sea_ice needs ChunkContext.areacello")
+    if context.areacello is None or context.ice_volume_per_cell_area is None:
+        raise ValueError(
+            "sea_ice needs ChunkContext.areacello and .ice_volume_per_cell_area"
+        )
 
     check_sea_ice_fraction_consistency(
         ds,
@@ -86,15 +90,15 @@ def sea_ice(
         zeroed.attrs = ds[name].attrs
         ds[name] = append_derivation(zeroed, zero_note)
 
-    volume = ds["HI"] * context.areacello * frac
+    volume = context.ice_volume_per_cell_area * context.areacello
     volume.attrs = {
         "long_name": "ice volume",
         "units": "m^3",
         **provenance_attrs(
             context.store,
             "HI",
-            f"HI x areacello x {sea_ice_fraction} (ice thickness times the "
-            "ice-covered cell area)",
+            f"areacello x full-cell regrid of native HI x {sea_ice_fraction} "
+            "(ice volume per cell area, zeroed over land)",
         ),
     }
     ds["sea_ice_volume"] = volume
