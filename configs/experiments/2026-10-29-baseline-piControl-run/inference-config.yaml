@@ -1,4 +1,4 @@
-experiment_dir: gs://vcm-ml-scratch/spencerc/2026-10-29-baseline-piControl-SamudrACE
+experiment_dir: gs://vcm-ml-scratch/spencerc/2026-10-30-baseline-piControl-SamudrACE
 # 100 years of 5-day coupled (ocean) steps
 n_coupled_steps: 7300
 coupled_steps_in_memory: 20
@@ -7,6 +7,15 @@ data_writer:
   ocean:
     save_prediction_files: false
     save_monthly_files: false
+    files:
+      - label: monthly_mean_predictions
+        names:
+          - sst
+        save_reference: false
+        time_coarsen:
+          method: monthly_mean
+        format:
+          name: zarr
   atmosphere:
     save_prediction_files: false
     save_monthly_files: false
