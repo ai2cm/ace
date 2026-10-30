@@ -48,9 +48,9 @@ initial_condition:
   # year 0320 is outside the 0151-0310 training and validation period; created
   # with run-create-ic.sh
   ocean:
-    path: /climate-default/home/spencerc/2026-10-29-baseline-piControl-run/0320-01-03_ocean_ic.nc
+    path: /climate-default/home/spencerc/2026-10-30-baseline-piControl-run/0320-01-03_ocean_ic.nc
   atmosphere:
-    path: /climate-default/home/spencerc/2026-10-29-baseline-piControl-run/0320-01-03_atmosphere_ic.nc
+    path: /climate-default/home/spencerc/2026-10-30-baseline-piControl-run/0320-01-03_atmosphere_ic.nc
   start_indices:
     first: 0
     n_initial_conditions: 1
