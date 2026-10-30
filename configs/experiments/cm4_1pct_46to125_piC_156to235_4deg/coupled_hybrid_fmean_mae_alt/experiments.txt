@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs1|01M671V2K1TND6RD0RZ8H1PSDG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs0|01M671VHMPN9VK1EA7ZZ36YCBQ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|01M671W0K9V5T6JTG9TH436B7F|training|best_inference_ckpt|normal|--min-runtime 8h
