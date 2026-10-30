@@ -5,3 +5,11 @@ cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs1|01M671V2
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs0|01M671VHMPN9VK1EA7ZZ36YCBQ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|01M671W0K9V5T6JTG9TH436B7F|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Coupled century evals of best_inference_ckpt, held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_eval_4deg/coupled
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs1|01M671V2K1TND6RD0RZ8H1PSDG|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs1|01M671V2K1TND6RD0RZ8H1PSDG|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs0|01M671VHMPN9VK1EA7ZZ36YCBQ|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs0|01M671VHMPN9VK1EA7ZZ36YCBQ|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|01M671W0K9V5T6JTG9TH436B7F|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|01M671W0K9V5T6JTG9TH436B7F|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
