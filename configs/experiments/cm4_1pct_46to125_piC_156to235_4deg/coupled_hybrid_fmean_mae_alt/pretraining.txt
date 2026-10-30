@@ -1,0 +1,6 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|extra_env
+
+# 2 GPUs as Troy's 4deg coupled runs. lr in the template (7e-5). qt9gvoti's FT-alt is ylcw8iwl (not rerun).
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs1|ace-samudra-cm4|x0tdovro|best_inference_ckpt|ace2-cm4-atmos-noLSM|etzrvbi4|best_inference_ckpt|train|high|jupiter+titan|2||3|ai2/ace|seed=0|8h|
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs0|ace-samudra-cm4|6wpv6o1f|best_inference_ckpt|ace2-cm4-atmos-noLSM|etzrvbi4|best_inference_ckpt|train|high|jupiter+titan|2||3|ai2/ace|seed=0|8h|
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|ace-samudra-cm4|vh6a0tvj|best_inference_ckpt|ace2-cm4-atmos-noLSM|etzrvbi4|best_inference_ckpt|train|high|jupiter+titan|2||3|ai2/ace|seed=0|8h|
