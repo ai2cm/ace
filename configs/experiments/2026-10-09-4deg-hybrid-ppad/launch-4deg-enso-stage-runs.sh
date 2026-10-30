@@ -1,10 +1,11 @@
 #!/bin/bash
-# ENSO-by-coupled-stage follow-ups (elynn 2026-10-29), two sets:
+# ENSO-by-coupled-stage follow-ups (elynn 2026-10-29), three sets:
 #   ftalt  - FTO->FTalt training of the hybrid-residual mean-fill ocean (coupled/...-jointens-spb-fto-then-ftalt.yaml):
 #            ocean from its FTO's lifted selected checkpoint, atmosphere from the 4deg ACE2S checkpoint.
 #   fta    - 200-yr piControl / 130-yr 1pctCO2 coupled centennials of the three FTO->FTA runs' best_inference_ckpt,
 #            named like the other stages' centennials (launch-4deg-ppad-coupled-ckpt-evals.sh), monthly files off.
-#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta
+#   ftalt-evals - the same centennials of the ftalt run's best_inference_ckpt (gf75ziyo, epoch 3).
+#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta ftalt-evals
 set -euo pipefail
 WANDB_USERNAME="${WANDB_USERNAME:-elynnwu}"
 [ "$WANDB_USERNAME" = elynnwu ] || { echo "WANDB_USERNAME must be elynnwu, got $WANDB_USERNAME"; exit 1; }
@@ -13,6 +14,7 @@ DRY="${DRY_RUN:+--dry-run}"
 COUPLED_STATS=01KY8D816E67NXHP2EB29FHBJM   # 4deg cm4 coupled stats: coupled_atmosphere/ + ocean/
 ATMOS_DS=01M0YFRM5TKQR6GSNDXKJSBNAS        # 4deg atmos_ace2s-ft rs0 results
 HYBRID_FTO_OCEAN=01M508MVK5B0RVKG68E1W6VA3D   # hybrid FTO's selected checkpoint, ocean lifted (as for -fto-then-coupledft)
+FTALT_DS=01M653EE2D87BFVAZD48TADRFE           # results of the ftalt run (gf75ziyo)
 fta_ds() {   # results of troya/samudra-ppad4deg-<arm>-coupled-ft-fta-fto-then-fta
   case "$1" in
     ff-ohc-ppad) echo 01M554PBMJCQSE4X2TSNANBNM6 ;;
@@ -48,31 +50,44 @@ launch_ftalt() {
     -- torchrun --nproc_per_node=2 -m fme.coupled.train "$CFG"
 }
 
-launch_fta() {
-  local A S CFG TAG JOB
-  for A in $FTA_ARMS; do
-    for S in piC 1pct; do
-      case "$S" in
-        piC)  CFG=coupled-evaluator-config-piC-ic0151-200yr-4deg-singleckpt.yaml;  TAG=piC-ic0151-200yr ;;
-        1pct) CFG=coupled-evaluator-config-1pct-ic0001-130yr-4deg-singleckpt.yaml; TAG=1pct-ic0001-130yr ;;
-      esac
-      JOB="samudra-ppad4deg-${A}-coupled-ft-fta-fto-then-fta-eval-${TAG}"
-      gantry run $DRY --name "$JOB" --task-name "$JOB" "${COMMON[@]}" \
-        --description "4deg ppad ${A} FTO-then-FTA selected checkpoint: ${TAG} coupled free rollout" \
-        --min-runtime 8h \
-        --env WANDB_NAME="$JOB" --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ppad-4deg-centennial \
-        --dataset "$(fta_ds "$A"):training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
-        --gpus 1 --shared-memory 100GiB \
-        -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/${CFG}" \
-          --override data_writer.ocean.save_monthly_files=false
-    done
+launch_centennials() {   # <job prefix> <results dataset> <description>
+  local S CFG TAG JOB
+  for S in piC 1pct; do
+    case "$S" in
+      piC)  CFG=coupled-evaluator-config-piC-ic0151-200yr-4deg-singleckpt.yaml;  TAG=piC-ic0151-200yr ;;
+      1pct) CFG=coupled-evaluator-config-1pct-ic0001-130yr-4deg-singleckpt.yaml; TAG=1pct-ic0001-130yr ;;
+    esac
+    JOB="$1-eval-${TAG}"
+    gantry run $DRY --name "$JOB" --task-name "$JOB" "${COMMON[@]}" \
+      --description "$3: ${TAG} coupled free rollout" \
+      --min-runtime 8h \
+      --env WANDB_NAME="$JOB" --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ppad-4deg-centennial \
+      --dataset "$2:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
+      --gpus 1 --shared-memory 100GiB \
+      -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/${CFG}" \
+        --override data_writer.ocean.save_monthly_files=false
   done
+}
+
+launch_fta() {
+  local A
+  for A in $FTA_ARMS; do
+    launch_centennials "samudra-ppad4deg-${A}-coupled-ft-fta-fto-then-fta" "$(fta_ds "$A")" \
+      "4deg ppad ${A} FTO-then-FTA selected checkpoint"
+  done
+}
+
+launch_ftalt_evals() {
+  local A=resid-ohc-cap0005-ppad-fmean
+  launch_centennials "samudra-ppad4deg-${A}-coupled-ft-jointens-spb-fto-then-ftalt" "$FTALT_DS" \
+    "4deg ppad ${A} FTO-then-FTalt selected checkpoint"
 }
 
 for set in "$@"; do
   case "$set" in
     ftalt) launch_ftalt ;;
     fta) launch_fta ;;
-    *) echo "unknown set $set (ftalt|fta)"; exit 1 ;;
+    ftalt-evals) launch_ftalt_evals ;;
+    *) echo "unknown set $set (ftalt|fta|ftalt-evals)"; exit 1 ;;
   esac
 done
