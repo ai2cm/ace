@@ -2,6 +2,9 @@
 #   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
+ema_checkpoint_save_epochs:
+  start: 1
+  step: 1
 validate_using_ema: true
 evaluate_before_training: true
 ema:

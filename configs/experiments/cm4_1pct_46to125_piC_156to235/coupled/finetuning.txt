@@ -4,4 +4,12 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|cjvhgrus|best_inference_ckpt|trained|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
 
-cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|ezbpgnbn|best_inference_ckpt|train|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|ezbpgnbn|best_inference_ckpt|trained|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
+
+# ccde0 = clip (max_grad_norm=1.0) + corrector_disabled_epochs=0
+
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|cjvhgrus|best_inference_ckpt|trained|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 stepper.ocean.stepper.step.config.corrector.config.corrector_disabled_epochs=0||8h
+
+# joint fine-tuning of cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|i6u2mxg6|best_inference_ckpt|trained|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h

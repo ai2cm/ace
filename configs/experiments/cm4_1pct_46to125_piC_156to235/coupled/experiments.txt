@@ -45,11 +45,20 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
 
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|training|best_inference_ckpt|normal|--min-runtime 8h
-
 # training finished 2026-10-27 (8/8 epochs, final attempt exit 0); results_dataset pins the final attempt's dataset.
 # Evals launched 2026-10-27 (elynnwu): 1pct 01M5ZX1TD8NRNYV16J44QV187P, piC 01M5ZX215KMN6A5SG7C2E26XVK.
 cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-fto|o0a2rs0|01M5N1DGJ3RFYEQEPFM9N9F4CH|ran_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 8h||01M5WZG7EPBV1M75NDNGZ8T5ZD|ai2/ace|jupiter+titan
 cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-fto|o0a2rs0|01M5N1DGJ3RFYEQEPFM9N9F4CH|ran_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 8h||01M5WZG7EPBV1M75NDNGZ8T5ZD|ai2/ace|jupiter+titan
 
 cm4_1pct_45to125_piC_156to235-coupled_clip-oizero_a2sLR-ft_fto|o0a2rs0|01M629VZATWWGRFABQV3DJ2A41|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# --config-dir configs/experiments/cm4_eval/coupled
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+# --config-dir configs/experiments/cm4_eval/coupled
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
