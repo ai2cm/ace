@@ -10,6 +10,6 @@ coupled_atmosphere_zarr: /climate-default/2025-06-03-cm4-piControl-200yr-coupled
 original_ocean_zarr: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
 original_atmosphere_zarr: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
 time:
-  timestamp: "0320-01-03T12:00:00"
+  timestamp: "0320-01-01T00:00:00"
 output_directory: /climate-default/home/spencerc/2026-10-30-baseline-piControl-run
 output_prefix: "0320-01-03"
