@@ -4,7 +4,7 @@
 #   ARM=alt CKPT_DS=<dataset holding training_checkpoints/best_inference_ckpt.tar> ./launch-1deg-coupled-ckpt-evals.sh
 # A results dataset of a RUNNING job is not mountable: fetch its best_inference_ckpt.tar and upload it as a new dataset.
 # ~1.7 s per coupled step on one GPU (inline inference timing): piC ~7 h, 1pct ~4.5 h; no resume, so the min runtime
-# covers the whole rollout.
+# covers the whole rollout (8h is the Beaker cap).
 set -euo pipefail
 ARM="${ARM:?arm name, e.g. alt or alt-replay}"
 CKPT_DS="${CKPT_DS:?dataset}"
@@ -22,7 +22,7 @@ ok=0; total=0
 for S in $SCENARIOS; do
   total=$((total+1))
   case "$S" in
-    piC)  CFG=coupled-evaluator-config-piC-ic0151-200yr-1deg-singleckpt.yaml;  TAG=piC-ic0151-200yr;  MIN_RUNTIME=12h ;;
+    piC)  CFG=coupled-evaluator-config-piC-ic0151-200yr-1deg-singleckpt.yaml;  TAG=piC-ic0151-200yr;  MIN_RUNTIME=8h ;;   # Beaker caps min runtime at 8h
     1pct) CFG=coupled-evaluator-config-1pct-ic0001-130yr-1deg-singleckpt.yaml; TAG=1pct-ic0001-130yr; MIN_RUNTIME=8h ;;
     *) echo "unknown scenario $S"; exit 1 ;;
   esac
