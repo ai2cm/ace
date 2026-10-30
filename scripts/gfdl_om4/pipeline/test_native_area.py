@@ -17,6 +17,10 @@ import numpy as np
 import pytest
 import scipy.sparse
 import xarray as xr
+
+for _name in ("xesmf", "esmpy", "apache_beam", "xarray_beam", "obstore"):
+    pytest.importorskip(_name)
+
 import xesmf as xe
 
 from . import weights

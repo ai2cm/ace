@@ -8,6 +8,10 @@ from fractions import Fraction as F
 import numpy as np
 import pytest
 import xarray as xr
+
+for _name in ("xesmf", "esmpy", "apache_beam", "xarray_beam", "obstore"):
+    pytest.importorskip(_name)
+
 import xarray_beam as xbeam
 import yaml
 import zarr

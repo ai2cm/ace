@@ -13,6 +13,9 @@ import pytest
 import xarray as xr
 import zarr
 
+for _name in ("xesmf", "esmpy", "apache_beam", "xarray_beam", "obstore"):
+    pytest.importorskip(_name)
+
 from .. import weights
 from ..native_area import F64_RTOL, NATIVE_AREA_CHECKS, assert_close
 from ..native_area_weights import write_native_area_artifact
