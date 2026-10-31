@@ -1,4 +1,4 @@
-experiment_dir: gs://vcm-ml-scratch/spencerc/2026-10-31-baseline-piControl-SamudrACE
+experiment_dir: gs://vcm-ml-scratch/spencerc/2026-10-31-baseline-piControl-SamudrACE-500yr
 # 500 years of 5-day coupled (ocean) steps
 n_coupled_steps: 36500
 coupled_steps_in_memory: 20
