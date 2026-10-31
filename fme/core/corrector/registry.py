@@ -74,6 +74,16 @@ class CorrectorConfigABC(abc.ABC):
         dataset_info: DatasetInfo,
     ) -> "CorrectorABC": ...
 
+    @property
+    def input_state_names(self) -> frozenset[str]:
+        """Names the corrector reads from the step input which the step may
+        produce only as outputs (e.g. the SST of an ocean model that does not
+        take SST as an input). The stepper carries these in its state, so the
+        corrector reads the previous step's value at every step and the
+        initial condition's value at the first.
+        """
+        return frozenset()
+
 
 class Correction(Protocol):
     """A single correction applied to ``gen_data`` by a corrector.
