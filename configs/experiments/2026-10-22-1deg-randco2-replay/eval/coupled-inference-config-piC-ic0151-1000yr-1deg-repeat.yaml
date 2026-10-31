@@ -1,0 +1,54 @@
+# 1000-year piControl coupled free rollout (no target) of a single 1deg coupled checkpoint mounted at /ckpt.tar.
+# The 200-yr CM4 piControl forcing (0151-01-01T06..0351-01-01T00, exactly 200 noleap years) is repeated with
+# n_repeats, so year 351 continues seamlessly with the year-151 forcing. Run with
+# `python -m fme.coupled.inference <this> --segments 10`: 10 resumable 100-yr segments (7300 coupled steps each).
+# Initial conditions at 0151-01-06 (same start as the 200-yr evaluator protocol) from the merged stores
+# (scratchpad make_ic.py), mounted at /ic.
+experiment_dir: /results
+n_coupled_steps: 7300
+coupled_steps_in_memory: 5
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [sst, thetao_0, thetao_10, so_0, zos, ocean_sea_ice_fraction, hfds]
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names: [TMP2m, PRATEsfc, ULWRFtoa, USWRFtoa]
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+initial_condition:
+  ocean:
+    path: /ic/ocean_ic_0151-01-06.nc
+  atmosphere:
+    path: /ic/atmosphere_ic_0151-01-06.nc
+forcing_loader:
+  num_data_workers: 1
+  ocean:
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+          n_repeats: 6
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+          n_repeats: 6
+  atmosphere:
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+          n_repeats: 6
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+          n_repeats: 6
