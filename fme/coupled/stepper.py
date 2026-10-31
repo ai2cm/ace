@@ -654,12 +654,12 @@ class CoupledStepperConfig:
     @property
     def ocean_ic_names(self) -> list[str]:
         """Ocean variables carried in the coupled state between coupled steps:
-        the ocean's prognostic variables plus the SST, which the atmosphere
-        reads from the ocean state at every coupled step and which may be an
-        output-only diagnostic of the ocean (then it is taken from the ocean's
-        previous output, or from the data at the initial condition).
+        the ocean stepper's state plus the SST, which the atmosphere reads from
+        the ocean state at every coupled step and which may be an output-only
+        diagnostic of the ocean (then it is taken from the ocean's previous
+        output, or from the data at the initial condition).
         """
-        return sorted(set(self.ocean.stepper.prognostic_names) | {self.sst_name})
+        return sorted(set(self.ocean.stepper.state_names) | {self.sst_name})
 
     def get_forcing_window_data_requirements(
         self, n_coupled_steps: int

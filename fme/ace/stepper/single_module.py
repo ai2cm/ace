@@ -562,7 +562,7 @@ class StepperConfig:
 
     def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
         return PrognosticStateDataRequirements(
-            names=self.prognostic_names,
+            names=self.state_names,
             n_timesteps=self.n_ic_timesteps,
         )
 
@@ -714,6 +714,13 @@ class StepperConfig:
     def prognostic_names(self) -> frozenset[str]:
         """Names of variables which both inputs and outputs."""
         return self.step.prognostic_names
+
+    @property
+    def state_names(self) -> frozenset[str]:
+        """Names carried between steps and loaded at the initial condition:
+        the prognostic names plus any output-only names the corrector reads.
+        """
+        return self.step.state_names
 
     @property
     def output_names(self) -> frozenset[str]:
@@ -1065,6 +1072,10 @@ class Stepper:
         return self._step_obj.prognostic_names
 
     @property
+    def state_names(self) -> frozenset[str]:
+        return self._step_obj.state_names
+
+    @property
     def out_names(self) -> frozenset[str]:
         return self._step_obj.output_names
 
@@ -1287,7 +1298,7 @@ class Stepper:
                     )
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
-        prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        prognostic_state = data.get_end(self.state_names, self.n_ic_timesteps)
         # Attach the stacked per-step diagnostics only at this final
         # reconstruction, after the derived-variables prepend/remove dance:
         # here the data and the series are both n_forward_steps long and
@@ -1669,7 +1680,7 @@ class TrainStepper(
             n_forward_steps_schedule=config.n_forward_steps_schedule,
         )
 
-        self._prognostic_names = self._stepper.prognostic_names
+        self._state_names = self._stepper.state_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = StepOutputLoss(
             self._stepper.build_loss(config.loss),
@@ -1765,7 +1776,7 @@ class TrainStepper(
         n_forward_steps: int,
         n_loss_steps: int,
     ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
-        input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
+        input_data = data.get_start(self._state_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
         if input_batch_data.labels != data.labels:

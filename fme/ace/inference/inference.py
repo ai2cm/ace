@@ -375,7 +375,7 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition = get_initial_condition(
             ic_ds,
             InitialConditionRequirements(
-                prognostic_names=stepper_config.prognostic_names,
+                prognostic_names=stepper_config.state_names,
                 labels=config.labels,
             ),
         )
@@ -500,7 +500,7 @@ def _get_initialization_time_and_timestep(
     initial_condition = get_initial_condition(
         config.initial_condition.get_dataset(),
         InitialConditionRequirements(
-            prognostic_names=stepper.prognostic_names,
+            prognostic_names=stepper.state_names,
             labels=config.labels,
         ),
     )
