@@ -1,6 +1,6 @@
-experiment_dir: gs://vcm-ml-scratch/spencerc/2026-10-30-baseline-piControl-SamudrACE
-# 100 years of 5-day coupled (ocean) steps
-n_coupled_steps: 7300
+experiment_dir: gs://vcm-ml-scratch/spencerc/2026-10-31-baseline-piControl-SamudrACE
+# 500 years of 5-day coupled (ocean) steps
+n_coupled_steps: 36500
 coupled_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
 data_writer:
@@ -23,8 +23,6 @@ data_writer:
       - label: monthly_mean_predictions
         names:
           - surface_temperature
-          - ULWRFtoa
-          - USWRFtoa
           - net_energy_flux_toa_into_atmosphere
         save_reference: false
         time_coarsen:
@@ -37,8 +35,7 @@ forcing_loader:
       data_path: /climate-default
       file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
       engine: zarr
-      # forcing data ends in 0350, so repeat it to cover 0320-0420
-      n_repeats: 2
+      n_repeats: 8
   # No ocean forcing loader: this model has no ocean-only exogenous forcings
   # (land_fraction comes from the atmosphere), and providing an ocean dataset
   # with no required variables yields empty ocean forcing batches, which

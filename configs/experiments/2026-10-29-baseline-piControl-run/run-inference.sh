@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="2026-10-30-samudrace-paper-ckpt-piControl-inference-100yr"
+JOB_NAME="2026-10-31-samudrace-paper-ckpt-piControl-inference-500yr"
 JOB_GROUP="samudrace-paper-ckpt-piControl"
 # Results dataset of the SamudrACE paper coupled fine-tuning experiment
 # 01JZHQJXBGRW367AXKJFG1BCR0 (ft-1y8prir2-20ep-cosine_annealing)
@@ -23,10 +23,9 @@ gantry run \
     --description "SamudrACE paper checkpoint 100-year CM4 piControl inference" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority high \
-    --min-runtime 2h \
-    --cluster ai2/ceres \
-    --cluster ai2/jupiter \
+    --priority low \
+    --min-runtime 0h \
+    --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$WANDB_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
