@@ -17,3 +17,5 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs1|01M64YDDJN8KQS
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs1|01M64YDDJN8KQSQGCGPSS3R855|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs2|01M6F7DEXKY1EXJVA8VBVF3SGF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs3|01M6F7DQBTA0CQX0X528MJJCDB|training|best_inference_ckpt|normal|--min-runtime 8h
