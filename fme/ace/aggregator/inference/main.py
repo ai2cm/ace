@@ -29,10 +29,17 @@ from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregat
 from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig, GlobalMeanAnnualAggregator
 from .build_context import MetricBuildContext, MetricNotSupportedError
-from .data import InferenceBatchData, MetricBuildResult, SubAggregator, TimeSeriesLogs
+from .data import (
+    InferenceBatchData,
+    MetricBuildResult,
+    PerSampleSlopes,
+    SubAggregator,
+    TimeSeriesLogs,
+)
 from .enso import RegionalIndexAggregator
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
+from .global_mean_drift import GlobalMeanDriftConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
 from .near_zero_fraction import NearZeroFractionMetricConfig
@@ -68,6 +75,7 @@ MetricConfig = (
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
     | TrendMetricConfig
+    | GlobalMeanDriftConfig
     | NearZeroFractionMetricConfig
 )
 
@@ -139,6 +147,7 @@ def build_inference_evaluator_aggregator(
     aggregators: dict[str, SubAggregator] = {}
     time_series_aggregators: dict[str, TimeSeriesLogs] = {}
     ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] = {}
+    global_mean_drift: PerSampleSlopes | None = None
 
     for metric in metrics:
         name = metric.get_name()
@@ -158,6 +167,10 @@ def build_inference_evaluator_aggregator(
             time_series_aggregators[name] = result.time_series
         if result.ensemble is not None:
             ensemble_aggregators[name] = result.ensemble
+        if result.per_sample_slopes is not None:
+            if global_mean_drift is not None:
+                raise ValueError("Only one global-mean drift metric is supported.")
+            global_mean_drift = result.per_sample_slopes
 
     step_diagnostics_aggregator = (
         step_diagnostics or StepDiagnosticsMetricConfig()
@@ -180,6 +193,7 @@ def build_inference_evaluator_aggregator(
         n_ensemble_per_ic=n_ensemble_per_ic,
         ensemble_aggregators=ensemble_aggregators,
         step_diagnostics_aggregator=step_diagnostics_aggregator,
+        global_mean_drift=global_mean_drift,
     )
 
 
@@ -219,6 +233,9 @@ class InferenceEvaluatorAggregatorConfig:
         ipo_index: Interdecadal Pacific Oscillation index metrics.
         trend: Per-grid-cell linear trend (slope vs. time) map metrics.
             Disabled by default.
+        global_mean_drift: Per-sample linear drift (slope vs. time) of the
+            global-mean bias, with its t-statistic across samples. Skipped
+            for rollouts of ~2 years or less.
         near_zero_fraction: Area-weighted fraction of cells at or below a
             small non-negative ``eps`` per variable, reported for prediction and
             its difference from the target. Optionally (``include_maps``) also
@@ -278,6 +295,9 @@ class InferenceEvaluatorAggregatorConfig:
         default_factory=IpoIndexMetricConfig
     )
     trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
+    global_mean_drift: GlobalMeanDriftConfig = dataclasses.field(
+        default_factory=GlobalMeanDriftConfig
+    )
     near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
         default_factory=NearZeroFractionMetricConfig
     )
@@ -325,6 +345,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_coefficient,
             self.ipo_index,
             self.trend,
+            self.global_mean_drift,
             self.near_zero_fraction,
         ]
         return [m for m in all_metrics if m.enabled]
@@ -545,11 +566,13 @@ class InferenceEvaluatorAggregator(
         n_ensemble_per_ic: int = 1,
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] | None = None,
         step_diagnostics_aggregator: StepDiagnosticsAggregator | None = None,
+        global_mean_drift: PerSampleSlopes | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
         self._aggregators = aggregators
         self._time_series_aggregators = time_series_aggregators
+        self._global_mean_drift = global_mean_drift
         self.n_ensemble_per_ic = n_ensemble_per_ic
         self._ensemble_aggregators = ensemble_aggregators or {}
         summary_aggregators: dict[str, SubAggregator | SelectStepEnsembleAggregator] = {
@@ -677,6 +700,22 @@ class InferenceEvaluatorAggregator(
 
     def get_summary_logs(self) -> InferenceLog:
         return self.get_summary().logs
+
+    @torch.no_grad()
+    def get_global_mean_drift_slopes(self) -> dict[str, torch.Tensor] | None:
+        """Per-sample drift slopes of the global-mean bias.
+
+        This is a collective operation and must be called on every rank.
+
+        Returns:
+            ``None`` if the global-mean drift metric is not configured.
+            Otherwise a mapping from variable name to a ``[n_sample]`` tensor
+            of slopes (variable units per year) over all samples, empty on
+            non-root ranks.
+        """
+        if self._global_mean_drift is None:
+            return None
+        return self._global_mean_drift.get_per_sample_slopes()
 
     @torch.no_grad()
     def _get_logs(self):
