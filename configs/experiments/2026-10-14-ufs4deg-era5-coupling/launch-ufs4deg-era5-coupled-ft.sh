@@ -21,9 +21,10 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
-JOB="samudra-ufs4deg-era5-${CFG}"
+TAG="${TAG:-}"   # suffix for non-default checkpoints, e.g. ace2s-shift10
+JOB="samudra-ufs4deg-era5-${CFG}${TAG:+-$TAG}"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
-  --description "UFS 4deg ocean + frozen ERA5 4deg daily ACE2S: coupled fine-tune ${CFG}" \
+  --description "UFS 4deg ocean + frozen ERA5 4deg daily ACE2S: coupled fine-tune ${CFG}${TAG:+ ($TAG)}; ocean ${OCEAN_CKPT_DS}, atmosphere ${ATMOS_CKPT_DS}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
   --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
