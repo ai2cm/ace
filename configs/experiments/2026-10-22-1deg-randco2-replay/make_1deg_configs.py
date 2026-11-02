@@ -143,6 +143,17 @@ arms["hybridsstdiag-alt"] = (
         "Identical to -alt otherwise (Troy 2026-10-29). Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
     ],
 )
+# 2026-11-02 (Troy): the hybrid residual + diagnosed-SST ocean WITH random-CO2 replay = the paper-1 1deg candidate.
+hyb_rep = copy.deepcopy(rep)
+hyb_rep["stepper"]["ocean"]["stepper"] = copy.deepcopy(hyb_ocean)
+arms["hybridsstdiag-alt-replay"] = (
+    hyb_rep,
+    [
+        "1deg alternating coupled fine-tune of the random-CO2 ACE2S rs1 with the 1deg HYBRID RESIDUAL + DIAGNOSED-SST",
+        "Samudra (wandb jrgclj2f) WITH RANDOM-CO2 REPLAY (a third of batches atmosphere-only on the random-CO2 stores, as",
+        "-alt-replay). = -hybridsstdiag-alt + replay (Troy 2026-11-02). Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
+    ],
+)
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(
