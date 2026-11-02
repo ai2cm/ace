@@ -53,5 +53,10 @@ cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW
 cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
 # --config-dir configs/experiments/cm4_eval/coupled
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+
+# troy's training runs with the hybrid SST Samudra
+1deg-randco2rs1-fmean-hybridsstdiag-alt||01M64JR109MDKK6T533BR90HMM|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
+1deg-randco2rs1-fmean-hybridsstdiag-alt||01M64JR109MDKK6T533BR90HMM|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
