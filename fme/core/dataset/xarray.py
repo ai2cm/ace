@@ -696,6 +696,10 @@ class XarrayDataset(DatasetABC):
         index = np.arange(time_slice.start, time_slice.stop) + shift
         n_fit = max(2, int(round(config.extrapolation_days / step_days)))
         for name in config.names:
+            if name not in tensors:
+                # the coupled loader builds a forcing and a target dataset from
+                # the same config; a shifted forcing is absent from the latter
+                continue
             values = _interp_linear_extrapolation(
                 index, self._shift_series[name], n_fit
             )
