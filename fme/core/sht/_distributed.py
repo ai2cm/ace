@@ -85,7 +85,7 @@ class DistributedRealSHT(thd.DistributedRealSHT):
         ).contiguous()
 
         # cast to complex; cloned so the transpose below never receives a view
-        x = torch.view_as_complex(xs).clone()
+        x = torch.view_as_complex(xs)
 
         # transpose: after this, l is split and c is local
         if self.comm_size_polar > 1:
@@ -117,7 +117,7 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         xs = torch.einsum("...lmr, mlk->...kmr", x, self.pct.to(x.dtype)).contiguous()
 
         # inverse FFT; cloned so the transposes below never receive a view
-        x = torch.view_as_complex(xs).clone()
+        x = torch.view_as_complex(xs)
 
         if self.comm_size_polar > 1:
             chan_shapes = thd.compute_split_shapes(num_chans, self.comm_size_polar)
