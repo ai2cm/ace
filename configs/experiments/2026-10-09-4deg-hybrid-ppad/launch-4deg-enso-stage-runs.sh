@@ -5,7 +5,10 @@
 #   fta    - 200-yr piControl / 130-yr 1pctCO2 coupled centennials of the three FTO->FTA runs' best_inference_ckpt,
 #            named like the other stages' centennials (launch-4deg-ppad-coupled-ckpt-evals.sh), monthly files off.
 #   ftalt-evals - the same centennials of the ftalt run's best_inference_ckpt (gf75ziyo, epoch 3).
-#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta ftalt-evals
+#   cde1   - the hybrid FTO, direct FTalt and FTO->FTalt trainings rerun with the ocean corrector off for the first fine-tune
+#            epoch (coupled/...-cde1.yaml; corrector_disabled_epochs 1, all else as the originals 6rua820x / ylcw8iwl /
+#            gf75ziyo). FTO->FTalt starts from the original FTO's ocean, so only its FTalt stage changes.
+#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta cde1 ftalt-evals
 set -euo pipefail
 WANDB_USERNAME="${WANDB_USERNAME:-elynnwu}"
 [ "$WANDB_USERNAME" = elynnwu ] || { echo "WANDB_USERNAME must be elynnwu, got $WANDB_USERNAME"; exit 1; }
@@ -15,6 +18,7 @@ COUPLED_STATS=01KY8D816E67NXHP2EB29FHBJM   # 4deg cm4 coupled stats: coupled_atm
 ATMOS_DS=01M0YFRM5TKQR6GSNDXKJSBNAS        # 4deg atmos_ace2s-ft rs0 results
 HYBRID_FTO_OCEAN=01M508MVK5B0RVKG68E1W6VA3D   # hybrid FTO's selected checkpoint, ocean lifted (as for -fto-then-coupledft)
 FTALT_DS=01M653EE2D87BFVAZD48TADRFE           # results of the ftalt run (gf75ziyo)
+HYBRID_PRETRAIN=01M4M4N9PVJ60PSCJPJNXQBASY   # troya/samudra-ppad4deg-resid-ohc-cap0005-ppad-fmean results (FTO, FTalt start here)
 fta_ds() {   # results of troya/samudra-ppad4deg-<arm>-coupled-ft-fta-fto-then-fta
   case "$1" in
     ff-ohc-ppad) echo 01M554PBMJCQSE4X2TSNANBNM6 ;;
@@ -81,6 +85,29 @@ launch_ftalt_evals() {
   local A=resid-ohc-cap0005-ppad-fmean
   launch_centennials "samudra-ppad4deg-${A}-coupled-ft-jointens-spb-fto-then-ftalt" "$FTALT_DS" \
     "4deg ppad ${A} FTO-then-FTalt selected checkpoint"
+}
+
+launch_cde1() {
+  local A=resid-ohc-cap0005-ppad-fmean V OCEAN DESC JOB CFG
+  for V in ens jointens-spb jointens-spb-fto-then-ftalt; do
+    case "$V" in
+      ens) OCEAN=$HYBRID_PRETRAIN; DESC="FTO (ocean trained, atmosphere frozen)" ;;
+      jointens-spb) OCEAN=$HYBRID_PRETRAIN; DESC="direct alternating coupled FT" ;;
+      jointens-spb-fto-then-ftalt) OCEAN=$HYBRID_FTO_OCEAN; DESC="FTO (original) then alternating coupled FT" ;;
+    esac
+    JOB="samudra-ppad4deg-${A}-coupled-ft-${V}-cde1"
+    CFG="${SCRIPT_PATH}/coupled/${A}-coupled-ft-${V}-cde1.yaml"
+    [ -f "$CFG" ] || { echo "missing $CFG"; exit 1; }
+    gantry run $DRY --name "$JOB" --task-name "$JOB" "${COMMON[@]}" \
+      --description "4deg ppad ${A}: ${DESC}, ocean corrector off for epoch 1" \
+      --min-runtime 3h --env FME_COLLECTIVE_TIMEOUT_MINUTES=120 \
+      --env WANDB_NAME="$JOB" --env WANDB_JOB_TYPE=training --env WANDB_RUN_GROUP=samudra-ppad-4deg-coupled-ft \
+      --dataset "${COUPLED_STATS}:coupled_atmosphere:/atmos_stats" --dataset "${COUPLED_STATS}:ocean:/ocean_stats" \
+      --dataset "${OCEAN}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar" \
+      --dataset "${ATMOS_DS}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar" \
+      --gpus 2 --shared-memory 200GiB \
+      -- torchrun --nproc_per_node=2 -m fme.coupled.train "$CFG"
+  done
 }
 
 for set in "$@"; do
