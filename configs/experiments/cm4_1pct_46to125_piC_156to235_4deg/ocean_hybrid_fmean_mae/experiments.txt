@@ -21,3 +21,5 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs2|01M6F7DEXKY1EX
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs3|01M6F7DQBTA0CQX0X528MJJCDB|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs2|01M6F7DZRCB3JHGQ48ZZPBGH8P|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs3|01M6F7E829A394M2V9PVG0NDQR|training|best_inference_ckpt|normal|--min-runtime 8h
