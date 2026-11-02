@@ -2,10 +2,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import torch
-import torch_harmonics
 import xarray as xr
 
 import fme
+import fme.core.sht
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import (
     PairedSphericalPowerSpectrumAggregator,
@@ -57,7 +57,7 @@ def test_spherical_power_spectrum_aggregator(report_plot: bool):
     assert "a" in result
     assert result["a"].shape == (nlat,)
 
-    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(fme.get_device())
+    sht = fme.core.sht.RealSHT(nlat, nlon, grid=grid).to(fme.get_device())
     data_concat = torch.cat([data["a"], data2["a"]], dim=1)
     expected_value = torch.mean(spherical_power_spectrum(data_concat, sht), dim=(0, 1))
     torch.testing.assert_close(result["a"], expected_value)
@@ -89,7 +89,7 @@ def test_spherical_power_spectrum_aggregator_get_dataset():
         )
     )
     result = agg.get_dataset()
-    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
+    sht = fme.core.sht.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_values = torch.mean(spherical_power_spectrum(data["a"], sht), dim=(0, 1))
     expected_attrs = {
         "long_name": "spherical power spectrum of temperature",
@@ -124,7 +124,7 @@ def test_paired_spherical_power_spectrum_aggregator_get_dataset():
         )
     )
     result = agg.get_dataset()
-    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
+    sht = fme.core.sht.RealSHT(nlat, nlon, grid=grid).to(DEVICE)
     expected_gen = torch.mean(spherical_power_spectrum(gen_data["a"], sht), dim=(0, 1))
     expected_target = torch.mean(
         spherical_power_spectrum(target_data["a"], sht), dim=(0, 1)

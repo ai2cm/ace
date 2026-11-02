@@ -7,11 +7,11 @@ from typing import Any, TypeVar
 import torch.distributed
 import torch.nn as nn
 import torch.utils.data
-import torch_harmonics as th
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
+import fme.core.sht as th
 from fme.core import metrics
 from fme.core.device import get_device, in_dataloader_worker, using_gpu, using_srun
 from fme.core.disco import DiscreteContinuousConvS2

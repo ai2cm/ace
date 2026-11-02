@@ -3,9 +3,9 @@
 # isort: skip_file
 
 """
-This file contains a fix that we needed to get the SFNO to work on multiple
-unroll steps in multiprocessing (e.g. multi-GPU mode.) We forked this code from
-the torch harmonics sht.py file [*].
+Forked SHT classes from torch-harmonics [*]. These are standalone
+reimplementations (not subclasses of the upstream classes), which fix
+multi-step / multi-GPU issues we hit with the originals.
 
 [*] https://github.com/NVIDIA/torch-harmonics/blob/17eefa53468d1a885d72087918eba905fa53e10a/torch_harmonics/sht.py
 """
@@ -49,13 +49,12 @@ import torch.fft
 
 from torch_harmonics.quadrature import legendre_gauss_weights, lobatto_weights, clenshaw_curtiss_weights
 from torch_harmonics.legendre import _precompute_legpoly
-import torch_harmonics
 
 from fme.core.benchmark.timer import Timer
 from fme.core.device import get_device
 from fme.core.benchmark.benchmark import BenchmarkABC, register_benchmark
 from fme.core.typing_ import TensorDict
-from fme.fft import rfft, irfft
+from fme.core.sht._fft import rfft, irfft
 
 class RealSHT(nn.Module):
     """
@@ -224,9 +223,6 @@ class InverseRealSHT(nn.Module):
             x = irfft(x, n=self.nlon, dim=-1, norm="forward")
 
         return x
-
-torch_harmonics.RealSHT = RealSHT
-torch_harmonics.InverseRealSHT = InverseRealSHT
 
 
 @register_benchmark("sht")

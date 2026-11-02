@@ -3,7 +3,7 @@ from unittest import mock
 
 import pytest
 import torch
-import torch_harmonics as th
+import fme.core.sht as th
 
 from fme.ace.models.makani_fcn3.models.networks import fourcastnet3
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (
