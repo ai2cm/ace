@@ -115,6 +115,7 @@ for set in "$@"; do
     ftalt) launch_ftalt ;;
     fta) launch_fta ;;
     ftalt-evals) launch_ftalt_evals ;;
-    *) echo "unknown set $set (ftalt|fta|ftalt-evals)"; exit 1 ;;
+    cde1) launch_cde1 ;;
+    *) echo "unknown set $set (ftalt|fta|ftalt-evals|cde1)"; exit 1 ;;
   esac
 done
