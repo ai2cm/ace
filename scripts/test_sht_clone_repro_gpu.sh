@@ -4,6 +4,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONPATH=$PWD
+pip install -q pytest
 python -c 'import torch, torch_harmonics; print("torch", torch.__version__, "cuda", torch.version.cuda, "th", torch_harmonics.__version__, "gpus", torch.cuda.device_count())'
 nvidia-smi -L
 
