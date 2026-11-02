@@ -1,0 +1,147 @@
+# ruff: noqa: E501
+"""UFS 1deg fine-tunes of the 1deg CM4 hybrid-residual + diagnosed-SST ppad pretrain (Troy 2026-11-02: start fine-tuning the
+paper-1 1deg Samudra on UFS, the first stage of the paper-2 path CM4 pretrain -> UFS ocean FT -> coupled FT with ERA5).
+
+Config = the 4deg UFS fine-tune recipe (2026-10-08-ufs-learned-heating/resid-noohc-fmean-ftcm4.yaml: train 1994-2001 +
+2012-2021, validation 2022-2023, inline 10-yr rollouts from 2012/2013, 60 epochs, lr 5e-5, MSE, 4 steps, parameter_init
+/ckpt.tar) on the 1deg UFS 2026-10-06 5-day store augmented with the CM4 placeholder fields (hfgeou from the CM4 1deg
+store, zero sfdsi/UI/VI; weka ...-cm4vars.zarr) and the 1deg UFS stats with the CM4 placeholder entries, plus the
+pretrain's own stepper block (CM4 1deg variable set, pole padding, mean fill, thetao residual, sst output-only), with
+corrector_disabled_epochs 0 and the UFS zos reference 0.0 (the store zos is demeaned).
+
+Arms: ohc (the pretrain's scaled-temperature OHC corrector kept) and noohc (corrector dropped, the corrector-free paper-2 line).
+"""
+
+import copy
+import pathlib
+
+import yaml
+
+HERE = pathlib.Path(__file__).resolve().parent
+PRETRAIN = (
+    HERE
+    / "../2026-10-22-1deg-randco2-replay/inputs/samudra-resid-ohc-ppad-sstdiag-fmean-1deg-config.yaml"
+)
+STORE = "2026-10-06-ufs-replay-ocean-1deg-19level-1994-2023-cm4vars.zarr"
+DATA = {"data_path": "/climate-default", "file_pattern": STORE, "engine": "zarr"}
+
+
+def ds(start=None, stop=None):
+    d: dict = dict(DATA)
+    sub = {k: v for k, v in (("start_time", start), ("stop_time", stop)) if v}
+    if sub:
+        d["subset"] = sub
+    return d
+
+
+pre = yaml.safe_load(PRETRAIN.read_text())
+stepper = copy.deepcopy(pre["stepper"])
+cc = stepper["step"]["config"]
+assert "sst" not in cc["in_names"] and "sst" in cc["out_names"]  # diagnosed SST
+assert cc["residual_prediction"]["names"][0] == "thetao_0"
+cc["corrector"]["config"]["corrector_disabled_epochs"] = 0
+cc["corrector"]["config"]["zos_global_mean_correction"] = {"reference_global_mean": 0.0}
+
+base = {
+    "experiment_dir": "/results",
+    "save_checkpoint": True,
+    "validate_using_ema": True,
+    "ema": {"decay": 0.999},
+    "max_epochs": 60,
+    "inference": [
+        {
+            "name": "inference_10yr",
+            "weight": 1.0,
+            "n_forward_steps": 730,
+            "forward_steps_in_memory": 40,
+            "loader": {
+                "start_indices": {
+                    "times": ["2012-01-01T18:00:00", "2013-01-05T18:00:00"]
+                },
+                "dataset": ds(),
+                "num_data_workers": 4,
+            },
+            "aggregator": {"log_histograms": False},
+        }
+    ],
+    "logging": {
+        "log_to_screen": True,
+        "log_to_wandb": True,
+        "log_to_file": True,
+        "project": "ace-samudra-cm4",
+        "entity": "ai2cm",
+        "metrics_log_dir": "metrics",
+    },
+    "train_loader": {
+        "batch_size": 16,
+        "num_data_workers": 8,
+        "dataset": {
+            "concat": [
+                ds("1994-01-05T18:00:00", "2002-01-01T00:00:00"),
+                ds("2012-01-01T00:00:00", "2022-01-01T00:00:00"),
+            ],
+            "strict": True,
+        },
+    },
+    "validation": [
+        {
+            "name": "val_2022_2023",
+            "evaluate_all_steps": False,
+            "weight": 1.0,
+            "loader": {
+                "batch_size": 16,
+                "num_data_workers": 8,
+                "dataset": ds("2022-01-03T18:00:00"),
+            },
+        }
+    ],
+    "optimization": {
+        "use_gradient_accumulation": True,
+        "max_grad_norm": 1.0,
+        "enable_automatic_mixed_precision": False,
+        "lr": 5.0e-05,
+        "optimizer_type": "AdamW",
+        "kwargs": {"fused": True, "weight_decay": 0.01},
+    },
+    "stepper_training": {
+        "n_forward_steps": 4,
+        "loss": {"type": "MSE"},
+        "parameter_init": {"weights_path": "/ckpt.tar"},
+    },
+    "evaluate_before_training": True,
+}
+
+arms = {}
+arms["resid-ohc-ppad-sstdiag-fmean-ufsft"] = (
+    stepper,
+    "the pretrain's scaled-temperature OHC corrector kept",
+)
+noohc = copy.deepcopy(stepper)
+noohc["step"]["config"]["corrector"]["config"].pop("ocean_heat_content_correction")
+arms["resid-noohc-ppad-sstdiag-fmean-ufsft"] = (
+    noohc,
+    "NO ocean_heat_content_correction (the corrector-free paper-2 line; weights from the corrector-trained pretrain)",
+)
+for arm, (st, what) in arms.items():
+    c: dict = dict(base)
+    c["stepper"] = st
+    hdr = (
+        f"# {arm}: UFS 1deg fine-tune (2026-10-06 5-day store + CM4 placeholders, UFS stats + placeholder entries, 60 ep, lr 5e-5)\n"
+        f"# of the 1deg CM4 hybrid-residual + diagnosed-SST ppad pretrain samudra-ppad1deg-resid-ohc-ppad-sstdiag-fmean (wandb jrgclj2f,\n"
+        f"# results 01M626JPB247BQWSE0GN35SAXR); {what}; corrector_disabled_epochs 0, zos reference 0.0.\n"
+        f"# Generated by make_configs.py. Troy 2026-11-02.\n"
+    )
+    (HERE / f"{arm}.yaml").write_text(
+        hdr + yaml.safe_dump(c, sort_keys=False, width=120)
+    )
+    sc = st["step"]["config"]
+    print(
+        "wrote",
+        arm,
+        "| in",
+        len(sc["in_names"]),
+        "out",
+        len(sc["out_names"]),
+        "| corrector keys",
+        sorted(sc["corrector"]["config"]),
+    )
