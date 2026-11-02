@@ -11,5 +11,5 @@ cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs0|01M671VH
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|01M671W0K9V5T6JTG9TH436B7F|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs1|01M671W0K9V5T6JTG9TH436B7F|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 # mse-rs0 = Troy's FT-alt ylcw8iwl (training 01M50BNJJGV3AVXCG1AV476N9N), rerun with cm4_eval_4deg/coupled so it carries the data writers (his own evals 4kzf46zr/or4c2d8y did not)
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs0|01M50BNJJGV3AVXCG1AV476N9N|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M56WAE24QK1T4VANAASXW7RD|ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs0|01M50BNJJGV3AVXCG1AV476N9N|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M56WAE24QK1T4VANAASXW7RD|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs0|01M50BNJJGV3AVXCG1AV476N9N|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M56WAE24QK1T4VANAASXW7RD|ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs0|01M50BNJJGV3AVXCG1AV476N9N|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M56WAE24QK1T4VANAASXW7RD|ai2/ace|jupiter+titan
