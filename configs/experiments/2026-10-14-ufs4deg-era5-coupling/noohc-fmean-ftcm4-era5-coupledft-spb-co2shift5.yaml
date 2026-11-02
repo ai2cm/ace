@@ -1,6 +1,6 @@
-# noohc-fmean-ftcm4-era5-coupledft-spb-co2shift30: the corrector-free alternating coupled FT (noohc-fmean-ftcm4-era5-coupledft-spb.yaml)
-# with the atmosphere's training CO2 randomly shifted by up to +-30 yr per sample (as in the co2shift30 ACE2S training), so the coupled FT
-# cannot relearn the CO2 -> land-warming shortcut; validation and inline inference keep the true CO2. Pair with the co2shift30 ACE2S. Troy 2026-11-02.
+# noohc-fmean-ftcm4-era5-coupledft-spb-co2shift5: the corrector-free alternating coupled FT (noohc-fmean-ftcm4-era5-coupledft-spb.yaml)
+# with the atmosphere's training CO2 randomly shifted by up to +-5 yr per sample (Troy 2026-11-02: at most 10 yr; the ACE itself trained with +-30), so the coupled FT
+# cannot relearn the CO2 -> land-warming shortcut; validation and inline inference keep the true CO2. Pair with the co2shift30 ACE2S.
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -63,7 +63,7 @@ train_loader:
         random_time_shift:
           names:
           - global_mean_co2
-          max_shift_days: 10957.5
+          max_shift_days: 1826.25
     - ocean:
         data_path: /ufs4deg
         file_pattern: 2026-10-06-ufs-replay-ocean-4deg-19level-1994-2023.zarr
@@ -81,7 +81,7 @@ train_loader:
         random_time_shift:
           names:
           - global_mean_co2
-          max_shift_days: 10957.5
+          max_shift_days: 1826.25
 validation:
 - name: val_2022_2023
   evaluate_all_steps: false
