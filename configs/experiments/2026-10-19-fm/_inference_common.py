@@ -24,6 +24,37 @@ WANDB_PROJECT = "FM"
 CHECKPOINT_PATH = "training_checkpoints/best_inference_ckpt.tar"
 MOUNTED_CHECKPOINT_PATH = "/ckpt.tar"
 
+# Checkpoint choices of submit_inference_jobs.py --ckpt: (file in the training
+# result dataset, job-name suffix). Both hold EMA weights as their stepper
+# weights: with validate_using_ema the trainer saves best_inference_ckpt.tar and
+# every ema_ckpt_XXXX.tar inside its EMA context (ckpt.tar instead holds the raw
+# weights, with the EMA weights in a side entry). ema_ckpt_0150.tar is the EMA
+# checkpoint of the last epoch (max_epochs 150, ema_checkpoint_save_epochs
+# start 5 step 5).
+CHECKPOINTS = {
+    "bestinf": (CHECKPOINT_PATH, "-bestinf"),
+    "lastema": ("training_checkpoints/ema_ckpt_0150.tar", "-lastema"),
+}
+
+# The 2026-06-26 single/two-dataset baselines (wandb group
+# ace2-fm-norm-ablation-2026-06-26) the notebook compares against: run name ->
+# (training result dataset, eval-suite config in inference_configs/). The
+# configs are the suites of their old -bestinf jobs, copied unchanged.
+OLD_RUNS = {
+    "ace2-fm-nc-sfno-era5-a1": (
+        "01M0ZHY0XK03PKWZ5PVVRAGP7W",
+        "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-era5-a1.yaml",
+    ),
+    "ace2-fm-nc-sfno-fm-a2-cond": (
+        "01M13B36FHZZJQX0A1HW5YJVYC",
+        "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-fm-a2-cond.yaml",
+    ),
+    "ace2-fm-nc-sfno-c96-a1": (
+        "01M11FKTJ6H2HJ61S3HAWXKQ25",
+        "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-c96-a1.yaml",
+    ),
+}
+
 # The training runs these inference families cover: the nc-sfno cells of the
 # four-source mix, balanced and unbalanced. The e3sm cells, the swin cells and
 # one-off diagnostics are left out.

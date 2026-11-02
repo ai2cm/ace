@@ -1,4 +1,4 @@
-"""Submit inference jobs on the best_inference_ckpt.tar of the 2026-10-19 runs.
+"""Submit inference jobs on a checkpoint of the 2026-10-19 runs.
 
 Runs: the nc-sfno four-source training runs (_inference_common.
 inference_run_names; no e3sm, no swin) whose Beaker experiment succeeded.
@@ -17,6 +17,18 @@ Families (--family, default all):
   paper-som   {run}-{kind}                      evaluator, 2 SOM slab kinds
   paper-era5  {run}-{kind}                      evaluator, 4 ERA5 kinds
 
+Checkpoint (--ckpt, default bestinf; _inference_common.CHECKPOINTS):
+
+  bestinf     training_checkpoints/best_inference_ckpt.tar  (EMA weights)
+  lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch)
+
+--ckpt lastema applies to the eval-suite families only; it swaps the job
+name's "-bestinf" for "-lastema" and logs to a "-lastema" wandb group.
+--old-runs (lastema, eval family only) adds the 2026-06-26 baselines
+(_inference_common.OLD_RUNS: era5-a1, fm-a2-cond, c96-a1), each on the eval
+suite of its old -bestinf job, so their last-epoch EMA scores cover the same
+entries as their best-inference ones.
+
 Gantry clones the repository at HEAD, so the configs must be committed and
 pushed before a real submission; this is checked unless --dry-run is given.
 Every config a submission uses is validated against this checkout's fme
@@ -26,6 +38,7 @@ Usage:
     python submit_inference_jobs.py [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
+                                    [--ckpt {bestinf,lastema}] [--old-runs]
                                     [--use-map] [--dry-run]
                                     [--skip-if-in-beaker] [--exclude-job NAME ...]
                                     [--beaker-workspace WORKSPACE]
@@ -43,8 +56,9 @@ from typing import NamedTuple
 from _beaker_listing import fetch_experiments_by_name
 from _inference_common import (
     BEAKER_MAP_PATH,
-    CHECKPOINT_PATH,
+    CHECKPOINTS,
     INFERENCE_CONFIGS_DIR,
+    OLD_RUNS,
     WANDB_PROJECT,
     finished_runs,
     inference_run_names,
@@ -73,6 +87,12 @@ WANDB_GROUPS = {
     "paper-som": "ace2-fm-paper-2026-10-19",
     "paper-era5": "ace2-fm-paper-2026-10-19",
 }
+# wandb groups of the --ckpt lastema jobs, kept apart from the bestinf ones.
+LASTEMA_WANDB_GROUPS = {
+    "eval": "ace2-fm-eval-lastema-2026-10-19",
+    "cm4xshield": "ace2-fm-cm4xshield-eval-lastema-2026-10-19",
+    "cm4-1pct": "ace2-fm-cm4xshield-eval-lastema-2026-10-19",
+}
 # run-ace-inference-job.sh MODE per family.
 MODES = {
     "eval": "suite",
@@ -94,6 +114,7 @@ class Job(NamedTuple):
     family: str
     config: str  # filename in inference_configs/
     dataset_id: str
+    wandb_group: str
 
 
 def family_jobs(
@@ -102,14 +123,19 @@ def family_jobs(
     kinds: list[str] | None = None,
     sst_grids: list[str] | None = None,
     sst_levels: list[str] | None = None,
+    ckpt: str = "bestinf",
 ) -> list[tuple[str, str]]:
     """(job name, config filename) of one run's jobs in one family, narrowed
-    by `kinds` (paper families) and `sst_grids`/`sst_levels` (sst).
+    by `kinds` (paper families) and `sst_grids`/`sst_levels` (sst). `ckpt`
+    sets the eval-suite job-name suffix (CHECKPOINTS).
     """
     if family in EVAL_SUITE_CONFIGS:
-        return [
-            (f"{run}{EVAL_SUITE_NAME_SUFFIXES[family]}", EVAL_SUITE_CONFIGS[family])
-        ]
+        suffix = EVAL_SUITE_NAME_SUFFIXES[family].replace(
+            "-bestinf", CHECKPOINTS[ckpt][1]
+        )
+        return [(f"{run}{suffix}", EVAL_SUITE_CONFIGS[family])]
+    if ckpt != "bestinf":
+        raise ValueError(f"--ckpt {ckpt} applies to the eval-suite families only")
     if family == "sst":
         return [
             (f"{run}-sst-{grid}-{level}", sst_config_filename(grid, level))
@@ -227,9 +253,33 @@ def main() -> None:
         metavar="NAME",
         help="Only these exact job names (applied after the other filters).",
     )
+    parser.add_argument(
+        "--ckpt",
+        choices=list(CHECKPOINTS),
+        default="bestinf",
+        help="Checkpoint to evaluate (default: bestinf); lastema: eval suites only.",
+    )
+    parser.add_argument(
+        "--old-runs",
+        action="store_true",
+        help=(
+            "Also submit the 2026-06-26 baselines (OLD_RUNS) on their old eval "
+            "suites; needs --ckpt lastema and --family eval."
+        ),
+    )
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
+    if args.ckpt != "bestinf":
+        bad = sorted(set(args.family) - set(EVAL_SUITE_CONFIGS))
+        if bad:
+            raise SystemExit(
+                f"--ckpt {args.ckpt} applies to eval-suite families only, not {bad}"
+            )
+    if args.old_runs and (args.ckpt != "lastema" or args.family != ["eval"]):
+        raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
+    checkpoint_path = CHECKPOINTS[args.ckpt][0]
+    groups = WANDB_GROUPS if args.ckpt == "bestinf" else LASTEMA_WANDB_GROUPS
 
     ready, skipped = resolve_runs(args)
     print(f"\n{len(ready)} run(s) with a succeeded training job:")
@@ -242,13 +292,19 @@ def main() -> None:
     print()
 
     jobs = [
-        Job(name, family, config, ready[run])
+        Job(name, family, config, ready[run], groups[family])
         for family in args.family
         for run in sorted(ready)
         for name, config in family_jobs(
-            family, run, args.kind, args.sst_grid, args.sst_level
+            family, run, args.kind, args.sst_grid, args.sst_level, args.ckpt
         )
     ]
+    if args.old_runs:
+        suffix = CHECKPOINTS[args.ckpt][1]
+        jobs += [
+            Job(f"{run}{suffix}", "eval", config, dataset, groups["eval"])
+            for run, (dataset, config) in sorted(OLD_RUNS.items())
+        ]
     if args.job_name is not None:
         unknown = sorted(set(args.job_name) - {job.name for job in jobs})
         if unknown:
@@ -278,9 +334,9 @@ def main() -> None:
                 MODES[job.family],
                 f"{CONFIGS_DIRNAME}/{job.config}",
                 job.name,
-                WANDB_GROUPS[job.family],
+                job.wandb_group,
                 job.dataset_id,
-                CHECKPOINT_PATH,
+                checkpoint_path,
             ],
             wandb_project=WANDB_PROJECT,
             args=args,
