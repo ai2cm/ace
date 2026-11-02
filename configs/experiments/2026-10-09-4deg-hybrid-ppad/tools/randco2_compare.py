@@ -56,6 +56,7 @@ _after = {}
 _LABEL_1DEG = {
     "rco2rs1-1deg-alt": "rco2 rs1, alternating coupled FT ep{ep} (lifted, EMA)",
     "rco2rs1-1deg-alt-replay": "rco2 rs1, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "rco2rs1-1deg-hybridsstdiag-alt-replay": "rco2 rs1, hybrid-residual diagnosed-SST ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
 }
 _LABEL = {
     "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",
