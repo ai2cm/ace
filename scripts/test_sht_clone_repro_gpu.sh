@@ -13,8 +13,10 @@ run_matrix() {
     echo "===== [$1] H=$H W=$W"
     FME_DISTRIBUTED_BACKEND=model FME_DISTRIBUTED_H=$H FME_DISTRIBUTED_W=$W \
       torchrun --nproc-per-node "$N" -m pytest -m parallel -q -p no:cacheprovider \
-      fme/core/sht/test_distributed_compile.py fme/core/sht/test_repro_stress.py 2>&1 \
-      | grep -E 'passed|failed|setStorage|FAILED|Error' | sort | uniq -c | head -30
+      fme/core/sht/test_distributed_compile.py fme/core/sht/test_repro_stress.py > /tmp/log.txt 2>&1
+    echo "exit $?"
+    grep -E '^E .*Error|passed|failed' /tmp/log.txt | cut -c1-300 | sort | uniq -c | head -30
+    grep -q passed /tmp/log.txt || tail -60 /tmp/log.txt
   done
 }
 
