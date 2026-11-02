@@ -1,5 +1,6 @@
 import re
 
+import dacite
 import pytest
 import torch
 
@@ -60,8 +61,9 @@ def test_masking_config():
         mask_value=1,
         fill_value="mean",
     )
-    with pytest.raises(ValueError, match="fill_values mapping required"):
-        _ = config.build(_Mask(mask_2d=torch.ones(1, 1)))
+    mask = config.build(_Mask(mask_2d=torch.ones(1, 1)))
+    with pytest.raises(ValueError, match="requires means"):
+        _ = mask({"PRESsfc": torch.zeros(1, 1)})
 
 
 _SIZE = (4, 4)
@@ -142,15 +144,15 @@ def test_masking_with_means():
         mask_value=0,
         fill_value="mean",
     )
-    mask = config.build(
-        mask=_Mask(_MASK_2D, _MASK_3D),
+    mask = config.build(mask=_Mask(_MASK_2D, _MASK_3D))
+    output = mask(
+        _DATA,
         means={
             "PRESsfc": torch.tensor(1.0, device=DEVICE),
             "specific_total_water_0": torch.tensor(2.0, device=DEVICE),
             "specific_total_water_1": torch.tensor(3.0, device=DEVICE),
         },
     )
-    output = mask(_DATA)
     assert output["PRESsfc"][1, 1] == 1.0
     assert output["PRESsfc"][0, 1] != 1.0
     assert torch.all(output["specific_total_water_0"][0, :] == 2.0)
@@ -210,6 +212,34 @@ def test_masking_missing_3d_mask():
     assert masked["PRESsfc"][0, 1] != 0.0
     for name in ["specific_total_water_0", "specific_total_water_1"]:
         torch.testing.assert_close(masked[name], _DATA[name])
+
+
+def test_masking_with_per_sample_means():
+    """Per-sample means fill each sample with its own value."""
+    config = StaticSpatialMaskingConfig(mask_value=0, fill_value="mean")
+    mask = config.build(mask=_Mask(_MASK_2D))
+    data = {"PRESsfc": torch.rand(size=(2, *_SIZE), device=DEVICE)}
+    means = {"PRESsfc": torch.tensor([1.0, 2.0], device=DEVICE).reshape(2, 1, 1)}
+    output = mask(data, means=means)
+    assert output["PRESsfc"][0, 1, 1] == 1.0
+    assert output["PRESsfc"][1, 1, 1] == 2.0
+    torch.testing.assert_close(output["PRESsfc"][:, 0, 0], data["PRESsfc"][:, 0, 0])
+
+
+@pytest.mark.parametrize("fill_value", [2.0, 2], ids=["float", "int"])
+def test_masking_with_numeric_fill_ignores_means(fill_value: float):
+    """A numeric fill is used as-is, including an int as YAML loads ``2``."""
+    config = dacite.from_dict(
+        StaticSpatialMaskingConfig,
+        {"mask_value": 0, "fill_value": fill_value},
+        config=dacite.Config(strict=True),
+    )
+    mask = config.build(mask=_Mask(_MASK_2D))
+    output = mask(
+        {"PRESsfc": torch.ones(_SIZE, device=DEVICE)},
+        means={"PRESsfc": torch.tensor(5.0, device=DEVICE)},
+    )
+    assert output["PRESsfc"][1, 1] == 2.0
 
 
 def test_static_masking_error_on_missing_mean():

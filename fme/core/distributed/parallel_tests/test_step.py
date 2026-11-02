@@ -36,7 +36,10 @@ from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.testing import (
+    trivial_network_and_loss_normalization,
+    uniform_grouped_normalization,
+)
 from fme.core.typing_ import TensorDict
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
@@ -539,3 +542,56 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
                 torch.testing.assert_close(
                     gathered[group_start + offset].to(fme.get_device()), root
                 )
+
+
+class _AddOne(nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+@pytest.mark.parallel
+def test_grouped_normalization_step_is_decomposition_independent():
+    """Per-sample group constants broadcast against each rank's spatial chunk.
+
+    The add-one network advances each sample by its own group's std (2 for
+    c96, 4 for era5) on every rank, whatever the spatial decomposition.
+    """
+    dist = Distributed.get_instance()
+    img_shape = (20, 40)
+    selector = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(type="prebuilt", config={"module": _AddOne()}),
+                in_names=["a"],
+                out_names=["a"],
+                normalization=NetworkAndLossNormalizationConfig(
+                    network=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+                    grouped=uniform_grouped_normalization(
+                        ["a"],
+                        groups={
+                            "c96": (10.0, 2.0),
+                            "era5": (20.0, 4.0),
+                        },
+                        default_label="c96",
+                    ),
+                ),
+            )
+        ),
+    )
+    step = get_step(selector, img_shape, all_labels={"c96", "era5"})
+    labels = BatchLabels(
+        tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]], device=fme.get_device()),
+        names=["c96", "era5"],
+    )
+    input_data = dist.scatter_spatial(
+        get_tensor_dict(["a"], img_shape, n_samples=2), img_shape
+    )
+    output = step.step(
+        args=StepArgs(input=input_data, next_step_input_data={}, labels=labels),
+        wrapper=lambda x: x,
+    ).output
+    expected = torch.tensor([2.0, 4.0], device=fme.get_device()).reshape(2, 1, 1)
+    torch.testing.assert_close(
+        output["a"] - input_data["a"], expected.expand_as(input_data["a"])
+    )

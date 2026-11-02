@@ -228,6 +228,10 @@ class InferenceEvaluatorConfig:
             noise sequence, independent of forward_steps_in_memory. Leave unset
             (None) for the default non-reproducible behavior. Only affects the
             stepper rollout (not the prediction_loader comparison path).
+        labels: If given, these labels are provided on each sample instead of
+            the labels in the dataset. Required when evaluating a stepper which
+            was trained with labels against a dataset which does not carry
+            them.
     """
 
     experiment_dir: str
@@ -250,6 +254,7 @@ class InferenceEvaluatorConfig:
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
     seed: int | None = None
+    labels: list[str] | None = None
 
     def __post_init__(self):
         self.data_writer.validate_time_coarsen(
@@ -368,6 +373,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             total_forward_steps=config.n_forward_steps,
             window_requirements=window_requirements,
             initial_condition=initial_condition_requirements,
+            label_override=config.labels,
         )
         if config.n_ensemble_per_ic > 1:
             ic = data.initial_condition.as_batch_data()
