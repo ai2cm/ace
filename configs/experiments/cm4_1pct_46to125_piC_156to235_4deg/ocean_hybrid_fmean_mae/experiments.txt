@@ -23,3 +23,12 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs3|01M6F7DQBTA0CQ
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs2|01M6F7DZRCB3JHGQ48ZZPBGH8P|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs3|01M6F7E829A394M2V9PVG0NDQR|training|best_inference_ckpt|normal|--min-runtime 8h
+# Seeds 2-3: uncoupled century evals of best_inference_ckpt, held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_eval_4deg/ocean.
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs2|01M6F7DEXKY1EXJVA8VBVF3SGF|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs2|01M6F7DEXKY1EXJVA8VBVF3SGF|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs3|01M6F7DQBTA0CQX0X528MJJCDB|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mse-rs3|01M6F7DQBTA0CQX0X528MJJCDB|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs2|01M6F7DZRCB3JHGQ48ZZPBGH8P|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs2|01M6F7DZRCB3JHGQ48ZZPBGH8P|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs3|01M6F7E829A394M2V9PVG0NDQR|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-ocean_hybrid_fmean_mae|mae-rs3|01M6F7E829A394M2V9PVG0NDQR|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
