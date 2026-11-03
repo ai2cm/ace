@@ -56,7 +56,14 @@ base = {
             "forward_steps_in_memory": 40,
             "loader": {
                 "start_indices": {
-                    "times": ["2012-01-01T18:00:00", "2013-01-05T18:00:00"]
+                    # 4 ICs = the 4-GPU job's rank count (the inline IC count must divide the world size; dacite reports
+                    # that ValueError as a UnionMatchError on `inference`). 10-yr windows end by 2023-07, inside the store.
+                    "times": [
+                        "2012-01-01T18:00:00",
+                        "2012-07-04T18:00:00",
+                        "2013-01-05T18:00:00",
+                        "2013-07-04T18:00:00",
+                    ]
                 },
                 "dataset": ds(),
                 "num_data_workers": 4,

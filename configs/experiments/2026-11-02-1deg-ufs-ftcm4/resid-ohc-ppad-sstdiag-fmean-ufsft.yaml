@@ -17,7 +17,9 @@ inference:
     start_indices:
       times:
       - '2012-01-01T18:00:00'
+      - '2012-07-04T18:00:00'
       - '2013-01-05T18:00:00'
+      - '2013-07-04T18:00:00'
     dataset:
       data_path: /climate-default
       file_pattern: 2026-10-06-ufs-replay-ocean-1deg-19level-1994-2023-cm4vars.zarr
