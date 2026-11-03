@@ -101,7 +101,7 @@ Smoke configs (`-smoke.yaml`, seed 0): `max_epochs: 2`, `ema_checkpoint_save_epo
 | result dataset | 01M6FMB3MC5ZWWMMYA2YSMHHYT | 01M6FMBBJ5WT2VR085DJ1M0PZS |
 | epoch 1 / 2 wall (s) | 2127 / 1896 | 2603 / 2417 |
 | train part (s) | 1865 / 1708 | 2308 / 2186 |
-| inline inference (s) | 153 / 177 | 161 / 210 |
+| inline inference (s) | 156 / 176 | 164 / 210 |
 | epoch-1 `aimip_checkpoint_era5` RMSE | 0.04027 | 0.03684 |
 
 - Parent weights loaded: no load error, 14,560,952 trainable parameters, and the
