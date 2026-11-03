@@ -243,12 +243,7 @@ def test_static_masking_mask_ignored_name():
 
 
 def _overrides_setup():
-    """A 2x2 grid with one masked cell, and means far from any fill value.
-
-    ``so_0`` and ``sos`` share a leading substring but are distinct channels
-    under the name-and-prefix convention, so they pin down which channels an
-    override key selects.
-    """
+    """A 2x2 grid with one masked cell; ``sos`` must not match key ``so``."""
     mask_2d = torch.tensor([[1.0, 0.0], [1.0, 1.0]], device=DEVICE)
     mask_3d = mask_2d[..., None].expand(2, 2, 2)
     names = ["sst", "sos", "so_0", "thetao_0", "thetao_1", "deptho"]
@@ -291,11 +286,7 @@ def test_fill_value_overrides_apply_per_channel():
 
 @pytest.mark.parametrize("key", ["so", "so_"])
 def test_fill_value_overrides_key_does_not_select_similar_name(key):
-    """``so``/``so_`` select the so_<level> channels, never the distinct ``sos``.
-
-    Selection follows NameAndPrefixMatcher, not a raw string prefix, so a key
-    cannot silently capture an unrelated channel that happens to start with it.
-    """
+    """``so``/``so_`` select ``so_<level>``, not ``sos``."""
     mask, data, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
         mask_value=0,
@@ -353,7 +344,6 @@ def test_fill_value_overrides_unmatched_key_raises(key):
 
 
 def test_fill_value_overrides_key_selecting_only_excluded_channels_raises():
-    """An excluded channel is never filled, so an override for it is a no-op."""
     mask, _, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
         mask_value=0,
@@ -366,7 +356,6 @@ def test_fill_value_overrides_key_selecting_only_excluded_channels_raises():
 
 
 def test_fill_value_overrides_masked_channel_missing_from_means_raises():
-    """With overrides set, means lists the channels to fill, even for a float."""
     mask, data, means = _overrides_setup()
     del means["sst"]
     config = StaticSpatialMaskingConfig(
@@ -407,11 +396,7 @@ def test_fill_value_overrides_bad_value_rejected_on_load():
 @pytest.mark.parametrize("fill_value", [0.0, 0, 3.5, "mean"])
 @pytest.mark.parametrize("overrides", [None, {"deptho": 1.0}])
 def test_fill_value_applies_to_channels_no_override_selects(fill_value, overrides):
-    """``fill_value`` fills every channel an override does not select.
-
-    Parametrized over both branches of ``build`` so the two agree, including for
-    an integer ``fill_value``, which YAML yields for an unsuffixed ``0``.
-    """
+    """Both build branches agree, including for an integer (YAML ``0``)."""
     mask, data, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
         mask_value=0, fill_value=fill_value, fill_value_overrides=overrides

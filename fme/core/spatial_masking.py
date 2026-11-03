@@ -54,28 +54,14 @@ class StaticSpatialMaskingConfig:
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.
         fill_value: A float fill value to use inside of masked regions. Can also be
             "mean", in which case the normalizer means are used as channel-specific
-            fill values. Applies to every masked channel that no
-            ``fill_value_overrides`` entry selects.
+            fill values.
         exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
             to exclude when applying the mask.
-        fill_value_overrides: Per-channel fill values overriding ``fill_value``,
-            keyed by name (2D variables) or prefix (3D variables), selecting
-            channels by the same convention as ``exclude_names_and_prefixes``.
-            Values take the same form as ``fill_value``. Where more than one key
-            selects a channel the longest key wins, so an exact ``name_<level>``
-            beats the ``name_`` prefix, which beats the bare ``name``; a channel
-            no key selects takes ``fill_value``. Every key must select at least
-            one masked channel (a normalizer channel not excluded by
-            ``exclude_names_and_prefixes``), so a key that selects nothing
-            raises at build time rather than silently doing nothing. Setting
-            overrides makes the normalizer means the list of channels to fill,
-            so a masked channel absent from them raises a ``KeyError`` when
-            masking is applied, even where ``fill_value`` is a float.
-
-            Use this where the right fill differs by channel: the channel mean is
-            a neutral filler where masked cells hold no data, whereas ``0.0``
-            marks them as out of range, which is usable information where the
-            masked cells are genuinely dry.
+        fill_value_overrides: Per-channel overrides of ``fill_value``, keyed by
+            name or prefix as in ``exclude_names_and_prefixes``. The longest
+            matching key wins. A key matching no masked channel raises. When
+            set, a masked channel missing from the normalizer means raises a
+            ``KeyError``.
 
     """
 
@@ -93,17 +79,7 @@ class StaticSpatialMaskingConfig:
     def _resolve_fill_values(
         self, names: Iterable[str]
     ) -> dict[str, Literal["mean"] | float]:
-        """The fill value to use for each of ``names``.
-
-        Override keys select channels by the same name-or-prefix convention as
-        ``exclude_names_and_prefixes``. Where more than one key selects a
-        channel the longest key wins, so an exact ``name_<level>`` beats the
-        ``name_`` prefix, which beats the bare ``name``. A channel no key
-        selects takes ``fill_value``.
-
-        Raises:
-            ValueError: If an override key selects none of ``names``.
-        """
+        """The fill value for each of ``names``; the longest matching key wins."""
         overrides = self.fill_value_overrides or {}
         channels = list(names)
         unselected = NameAndPrefixSelection(tuple(overrides)).unmatched_entries(
@@ -111,9 +87,7 @@ class StaticSpatialMaskingConfig:
         )
         if unselected:
             raise ValueError(
-                f"fill_value_overrides keys match no masked channel: {unselected}. "
-                "Keys are names or prefixes of normalizer channels not excluded "
-                "by exclude_names_and_prefixes."
+                f"fill_value_overrides keys match no masked channel: {unselected}"
             )
         matchers = {key: NameAndPrefixMatcher([key]) for key in overrides}
         resolved: dict[str, Literal["mean"] | float] = {}
@@ -152,12 +126,10 @@ class StaticSpatialMaskingConfig:
                 mask=mask,
                 exclude=exclude,
             )
-        # A per-channel mapping cannot be deferred to a defaultdict or to `means`
-        # itself, so it is resolved eagerly over the masked channels `means` names.
         if means is None:
             raise ValueError(
                 "fill_values mapping required by build when fill_value_overrides "
-                "is set, to enumerate the channels and to supply any 'mean' fills."
+                "is set."
             )
         fill_mapping = {
             name: means[name] if value == "mean" else torch.as_tensor(float(value))
