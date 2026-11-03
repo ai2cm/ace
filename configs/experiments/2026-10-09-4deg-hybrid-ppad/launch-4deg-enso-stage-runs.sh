@@ -8,7 +8,9 @@
 #   cde1   - the hybrid FTO, direct FTalt and FTO->FTalt trainings rerun with the ocean corrector off for the first fine-tune
 #            epoch (coupled/...-cde1.yaml; corrector_disabled_epochs 1, all else as the originals 6rua820x / ylcw8iwl /
 #            gf75ziyo). FTO->FTalt starts from the original FTO's ocean, so only its FTalt stage changes.
-#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta cde1 ftalt-evals
+#   cde1-evals - the same centennials of the cde1 FTO and FTO->FTalt runs' best_inference_ckpt. The direct FTalt cde1
+#            (01M6F5MMCRPE60DSMYGVP9XGP7) is evaluated as mse-rs0 in cm4_..._4deg/coupled_hybrid_fmean_mae_alt_cde1.
+#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta cde1 ftalt-evals cde1-evals
 set -euo pipefail
 WANDB_USERNAME="${WANDB_USERNAME:-elynnwu}"
 [ "$WANDB_USERNAME" = elynnwu ] || { echo "WANDB_USERNAME must be elynnwu, got $WANDB_USERNAME"; exit 1; }
@@ -18,6 +20,8 @@ COUPLED_STATS=01KY8D816E67NXHP2EB29FHBJM   # 4deg cm4 coupled stats: coupled_atm
 ATMOS_DS=01M0YFRM5TKQR6GSNDXKJSBNAS        # 4deg atmos_ace2s-ft rs0 results
 HYBRID_FTO_OCEAN=01M508MVK5B0RVKG68E1W6VA3D   # hybrid FTO's selected checkpoint, ocean lifted (as for -fto-then-coupledft)
 FTALT_DS=01M653EE2D87BFVAZD48TADRFE           # results of the ftalt run (gf75ziyo)
+FTO_CDE1_DS=01M6F5MHQE8010YVVYPYRGF7X5         # results of the cde1 FTO run (40mvt0xo)
+FTALT_CDE1_DS=01M6F5MPWPZG8H08ESR85RDKAQ       # results of the cde1 FTO->FTalt run (ut6z1p5b)
 HYBRID_PRETRAIN=01M4M4N9PVJ60PSCJPJNXQBASY   # troya/samudra-ppad4deg-resid-ohc-cap0005-ppad-fmean results (FTO, FTalt start here)
 fta_ds() {   # results of troya/samudra-ppad4deg-<arm>-coupled-ft-fta-fto-then-fta
   case "$1" in
@@ -87,6 +91,14 @@ launch_ftalt_evals() {
     "4deg ppad ${A} FTO-then-FTalt selected checkpoint"
 }
 
+launch_cde1_evals() {
+  local A=resid-ohc-cap0005-ppad-fmean
+  launch_centennials "samudra-ppad4deg-${A}-coupled-ft-ens-cde1" "$FTO_CDE1_DS" \
+    "4deg ppad ${A} FTO cde1 selected checkpoint"
+  launch_centennials "samudra-ppad4deg-${A}-coupled-ft-jointens-spb-fto-then-ftalt-cde1" "$FTALT_CDE1_DS" \
+    "4deg ppad ${A} FTO-then-FTalt cde1 selected checkpoint"
+}
+
 launch_cde1() {
   local A=resid-ohc-cap0005-ppad-fmean V OCEAN DESC JOB CFG
   for V in ens jointens-spb jointens-spb-fto-then-ftalt; do
@@ -116,6 +128,7 @@ for set in "$@"; do
     fta) launch_fta ;;
     ftalt-evals) launch_ftalt_evals ;;
     cde1) launch_cde1 ;;
-    *) echo "unknown set $set (ftalt|fta|ftalt-evals|cde1)"; exit 1 ;;
+    cde1-evals) launch_cde1_evals ;;
+    *) echo "unknown set $set (ftalt|fta|ftalt-evals|cde1|cde1-evals)"; exit 1 ;;
   esac
 done
