@@ -5,7 +5,10 @@ from typing import Literal, Protocol, runtime_checkable
 
 import torch
 
-from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
+from fme.core.name_and_prefix_matcher import (
+    NameAndPrefixMatcher,
+    NameAndPrefixSelection,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -98,18 +101,16 @@ class StaticSpatialMaskingConfig:
             ValueError: If an override key selects none of ``names``.
         """
         overrides = self.fill_value_overrides or {}
-        matchers = {key: NameAndPrefixMatcher([key]) for key in overrides}
         channels = list(names)
-        unselected = sorted(
-            key
-            for key, matcher in matchers.items()
-            if not any(matcher.match(channel) for channel in channels)
+        unselected = NameAndPrefixSelection(tuple(overrides)).unmatched_entries(
+            channels
         )
         if unselected:
             raise ValueError(
                 f"fill_value_overrides keys match no channel: {unselected}. "
                 "Keys are names or prefixes, as in exclude_names_and_prefixes."
             )
+        matchers = {key: NameAndPrefixMatcher([key]) for key in overrides}
         resolved: dict[str, Literal["mean"] | float] = {}
         for channel in channels:
             selecting = [
