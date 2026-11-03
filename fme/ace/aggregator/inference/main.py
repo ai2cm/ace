@@ -705,13 +705,8 @@ class InferenceEvaluatorAggregator(
     def get_global_mean_drift_slopes(self) -> dict[str, torch.Tensor] | None:
         """Per-sample drift slopes of the global-mean bias.
 
-        This is a collective operation and must be called on every rank.
-
-        Returns:
-            ``None`` if the global-mean drift metric is not configured.
-            Otherwise a mapping from variable name to a ``[n_sample]`` tensor
-            of slopes (variable units per year) over all samples, empty on
-            non-root ranks.
+        Collective; must be called on every rank. ``None`` if the metric was
+        not built, otherwise as ``GlobalMeanDriftAggregator.get_per_sample_slopes``.
         """
         if self._global_mean_drift is None:
             return None
