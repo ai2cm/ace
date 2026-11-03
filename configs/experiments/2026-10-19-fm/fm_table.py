@@ -10,6 +10,13 @@ jobs (preemption retries included, queueing excluded). Epoch and train-time
 columns cover finished and running jobs only. The -e3sm configs are excluded.
 All values are measured; there are no estimates.
 
+After the architecture rows come the anneal sweep's rows (create_anneal_jobs.py),
+"anneal (nc-sfno) aN", one per arm (5 seeds each, found by the `-anneal-aN`
+job-name suffix), counted against the anneal max_epochs (20). Anneal runs
+inline inference every epoch only, so their every-10 inference column is "-".
+"Not submitted" counts job names with no Beaker experiment;
+"Failed/other" counts only experiments that exist and failed or were canceled.
+
 Usage:
     python fm_table.py
 """
@@ -32,6 +39,8 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
+from create_anneal_jobs import ARMS  # noqa: E402
+from create_anneal_jobs import MAX_EPOCHS as ANNEAL_MAX_EPOCHS  # noqa: E402
 from submit_fm_jobs import (  # noqa: E402
     ARCH_CHOICES,
     config_to_job_name,
@@ -59,6 +68,7 @@ COLUMNS = (
     "Running",
     "Queued",
     "Failed/other",
+    "Not submitted",
     "Min epoch",
     "Max epoch",
     "Median epoch",
@@ -157,9 +167,10 @@ Seconds = tuple[float | None, float | None, float | None, float | None]
 Intervals = tuple[list[float], list[float], list[float], list[float]]
 
 
-def epoch_intervals(log: str) -> Intervals:
+def epoch_intervals(log: str, heavy_inference: bool = True) -> Intervals:
     """Wall seconds of each (full epoch, training, inline inference on light
     epochs, inline inference on heavy every-10th epochs) in one run's log.
+    Without heavy_inference every inference interval counts as light.
     """
     events = [
         (datetime.fromisoformat(t), phase, int(n))
@@ -185,7 +196,8 @@ def epoch_intervals(log: str) -> Intervals:
                 train.append((t2 - t1).total_seconds())
         elif p1 == "inference" and p2 == "training" and n2 == n1:
             seconds = (t2 - t1).total_seconds()
-            (heavy if _is_heavy_inference(n1) else light).append(seconds)
+            is_heavy = heavy_inference and _is_heavy_inference(n1)
+            (heavy if is_heavy else light).append(seconds)
     return full, train, light, heavy
 
 
@@ -199,7 +211,9 @@ def _run_log(job_id: str) -> str:
     ).stdout
 
 
-def progress(named) -> tuple[int, Seconds]:
+def progress(
+    named, max_epochs: int = MAX_EPOCHS, heavy_inference: bool = True
+) -> tuple[int, Seconds]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference)) over the logs of every run (preemption retry) of the
     experiment, finished or not.
@@ -210,18 +224,29 @@ def progress(named) -> tuple[int, Seconds]:
     jobs = named.experiment.get("jobs") or []
     started = [j for j in jobs if "started" in j.get("status", {})]
     if not started:
-        return (MAX_EPOCHS if named.status == OK else 0), none
+        return (max_epochs if named.status == OK else 0), none
     intervals: Intervals = ([], [], [], [])
     done = 0
     for job in started:
         log = _run_log(job["id"])
         done = max(done, *(int(m.group(1)) for m in EPOCH_RE.finditer(log)), 0)
-        for acc, values in zip(intervals, epoch_intervals(log)):
+        for acc, values in zip(intervals, epoch_intervals(log, heavy_inference)):
             acc.extend(values)
     if named.status == OK:
-        done = MAX_EPOCHS
+        done = max_epochs
     full, train, light, heavy = intervals
     return done, (_median(full), _median(train), _median(light), _median(heavy))
+
+
+def anneal_names() -> dict[str, list[str]]:
+    """Anneal job names per row label, by their `-anneal-aN` suffix."""
+    from _inference_common import anneal_run_names
+
+    names = anneal_run_names()
+    return {
+        f"anneal (nc-sfno) {arm}": [n for n in names if n.endswith(f"-anneal-{arm}")]
+        for arm in ARMS
+    }
 
 
 def main() -> None:
@@ -237,12 +262,25 @@ def main() -> None:
     for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
         by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
+    rows = {arch: [n for n in names if arch_of(n) == arch] for arch in ARCHS}
+    anneal_rows = anneal_names()
+    anneal = [n for row in anneal_rows.values() for n in row]
+    if anneal:
+        by_name.update(newest_by_name(os.path.commonprefix(anneal)))
+    rows.update(anneal_rows)
+    anneal_set = set(anneal)
+
+    def run_progress(n: str) -> tuple[int, Seconds]:
+        if n in anneal_set:
+            return progress(by_name.get(n), ANNEAL_MAX_EPOCHS, heavy_inference=False)
+        return progress(by_name.get(n))
+
+    all_names = names + anneal
     with ThreadPoolExecutor(20) as ex:
-        prog = dict(zip(names, ex.map(lambda n: progress(by_name.get(n)), names)))
+        prog = dict(zip(all_names, ex.map(run_progress, all_names)))
     print("| " + " | ".join(COLUMNS) + " |")
     print("|" + "---|" * len(COLUMNS))
-    for arch in ARCHS:
-        arch_names = [n for n in names if arch_of(n) == arch]
+    for arch, arch_names in rows.items():
         statuses = [
             by_name[n].status if n in by_name else "missing" for n in arch_names
         ]
@@ -264,7 +302,8 @@ def main() -> None:
             sum(s == OK for s in statuses),
             sum(s == "running" and not _queued(by_name[n]) for n, s in live_pairs),
             sum(s == "running" and _queued(by_name[n]) for n, s in live_pairs),
-            sum(s not in (OK, "running") for s in statuses),
+            sum(s not in (OK, "running", "missing") for s in statuses),
+            sum(s == "missing" for s in statuses),
             min(eps),
             max(eps),
             f"{statistics.median(eps):g}",
