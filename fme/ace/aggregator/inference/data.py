@@ -157,6 +157,10 @@ class SubAggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
+class PerSampleSlopes(Protocol):
+    def get_per_sample_slopes(self) -> dict[str, torch.Tensor]: ...
+
+
 class TimeSeriesLogs(Protocol):
     def get_logs(self, label: str, step_slice: slice = ...) -> dict[str, Any]: ...
 
@@ -172,3 +176,4 @@ class MetricBuildResult:
     aggregator: SubAggregator | None = None
     time_series: TimeSeriesLogs | None = None
     ensemble: Any = None
+    per_sample_slopes: PerSampleSlopes | None = None
