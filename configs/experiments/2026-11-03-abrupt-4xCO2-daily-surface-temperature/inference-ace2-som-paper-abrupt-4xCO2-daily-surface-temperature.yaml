@@ -1,0 +1,90 @@
+# arg: --dataset 01J4BR6J5AW32ZDQ77VZ60P4KT:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar
+#
+# 90-day abrupt-4xCO2 inference ensemble with the ACE2-SOM paper checkpoint
+# (beaker dataset 01J4BR6J5AW32ZDQ77VZ60P4KT, best_inference_ckpt.tar),
+# following configs/baselines/shield-som/ace-abrupt-4xCO2-inference-ensemble-config.yaml.
+# Initial conditions are taken from the 1xCO2 control (ic_0005) on the first of
+# each month from 2031-01 to 2033-12, matching the initialization dates of the
+# 36 SHiELD-SOM abrupt-4xCO2 ensemble members. 360 6-hourly steps = 90 days.
+#
+# Forcing comes from the control run with global_mean_co2 overwritten to
+# 4x its 1xCO2 value (0.0014537).
+#
+# Daily-mean surface_temperature (block mean of 4 6-hourly steps) is written
+# to a zarr store at <experiment_dir>/daily_surface_temperature.zarr with dims
+# (sample, time, lat, lon). forward_steps_in_memory must be divisible by the
+# coarsen factor.
+#
+# The checkpoint was trained without multi-call and already has the slab ocean
+# config, so no stepper override is needed.
+experiment_dir: gs://vcm-ml-experiments/spencerc/2026-11-03-abrupt-4xCO2-ensemble-ACE2-SOM
+checkpoint_path: /ckpt.tar
+n_forward_steps: 360
+forward_steps_in_memory: 4
+logging:
+  project: ace-som
+  entity: ai2cm
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false  # not supported with a remote experiment_dir
+initial_condition:
+  path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr/1xCO2-ic_0005.zarr
+  engine: zarr
+  start_indices:
+    times:
+    - '2031-01-01T00:00:00'
+    - '2031-02-01T00:00:00'
+    - '2031-03-01T00:00:00'
+    - '2031-04-01T00:00:00'
+    - '2031-05-01T00:00:00'
+    - '2031-06-01T00:00:00'
+    - '2031-07-01T00:00:00'
+    - '2031-08-01T00:00:00'
+    - '2031-09-01T00:00:00'
+    - '2031-10-01T00:00:00'
+    - '2031-11-01T00:00:00'
+    - '2031-12-01T00:00:00'
+    - '2032-01-01T00:00:00'
+    - '2032-02-01T00:00:00'
+    - '2032-03-01T00:00:00'
+    - '2032-04-01T00:00:00'
+    - '2032-05-01T00:00:00'
+    - '2032-06-01T00:00:00'
+    - '2032-07-01T00:00:00'
+    - '2032-08-01T00:00:00'
+    - '2032-09-01T00:00:00'
+    - '2032-10-01T00:00:00'
+    - '2032-11-01T00:00:00'
+    - '2032-12-01T00:00:00'
+    - '2033-01-01T00:00:00'
+    - '2033-02-01T00:00:00'
+    - '2033-03-01T00:00:00'
+    - '2033-04-01T00:00:00'
+    - '2033-05-01T00:00:00'
+    - '2033-06-01T00:00:00'
+    - '2033-07-01T00:00:00'
+    - '2033-08-01T00:00:00'
+    - '2033-09-01T00:00:00'
+    - '2033-10-01T00:00:00'
+    - '2033-11-01T00:00:00'
+    - '2033-12-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr
+    file_pattern: 1xCO2-ic_0005.zarr
+    engine: zarr
+    overwrite:
+      constant:
+        global_mean_co2: 0.0014537
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: daily_surface_temperature
+    names:
+    - surface_temperature
+    time_coarsen:
+      coarsen_factor: 4
+    format:
+      name: zarr
