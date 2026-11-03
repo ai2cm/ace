@@ -30,7 +30,6 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
-    InferenceCallbackResult,
     InferenceTask,
     Trainer,
     TrainerParams,
@@ -463,9 +462,9 @@ def get_trainer(
         assert summary.loss is not None
         return summary.logs, summary.loss
 
-    def inference_callback(epoch: int) -> InferenceCallbackResult:
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
-            return {}, None, {}
+            return {}, None
         summary = inference_one_epoch(
             stepper=stepper,
             validation_context=contextlib.nullcontext,
@@ -474,7 +473,7 @@ def get_trainer(
             label="inference",
             epoch=epoch,
         )
-        return summary.logs, summary.loss, {}
+        return summary.logs, summary.loss
 
     validate_stepper_callback: ValidateStepper | None = None
     if lr_tuning is not None:
@@ -1964,8 +1963,7 @@ class TestBuildInferenceCallback:
                 inference_epochs=inference_epochs,
                 stepper=stepper,
             )
-            logs, error, _ = callback(epoch=epoch)
-            return logs, error
+            return callback(epoch=epoch)
 
     def test_epoch_not_in_inference_epochs_returns_none(self):
         tasks = [self._make_task("a", weight=1.0, epoch_set=frozenset({1, 2}))]

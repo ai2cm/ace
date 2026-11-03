@@ -1,9 +1,6 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
 from typing import Any, Generic, TypeVar
-
-import torch
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
 T = TypeVar("T", contravariant=True)
@@ -51,16 +48,10 @@ class InferenceSummary:
         loss: Scalar to minimize for best-inference checkpoint selection,
             or ``None`` if this aggregator does not contribute to checkpoint
             selection.
-        drift_slopes: Per-sample drift slopes of the global-mean bias, as a
-            mapping from variable name to a ``[n_sample]`` tensor (variable
-            units per year), used to gate drift-aware checkpoint selection.
-            ``None`` if the aggregator does not compute drift. Only populated
-            on the root rank (empty mapping elsewhere).
     """
 
     logs: InferenceLog
     loss: float | None
-    drift_slopes: Mapping[str, torch.Tensor] | None = None
 
 
 class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):

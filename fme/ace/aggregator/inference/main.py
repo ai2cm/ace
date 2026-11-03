@@ -696,9 +696,7 @@ class InferenceEvaluatorAggregator(
         if self._step_diagnostics_aggregator is not None:
             logs.update(self._step_diagnostics_aggregator.summary_logs())
         loss = logs.get("time_mean_norm/rmse/channel_mean")
-        return InferenceSummary(
-            logs=logs, loss=loss, drift_slopes=self.get_global_mean_drift_slopes()
-        )
+        return InferenceSummary(logs=logs, loss=loss)
 
     def get_summary_logs(self) -> InferenceLog:
         return self.get_summary().logs

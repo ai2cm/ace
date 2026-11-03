@@ -531,6 +531,19 @@ class TrainConfig:
                 "whose error and drift are used to select the soup window."
             )
 
+    @property
+    def _drift_log_keys(self) -> list[str]:
+        """Log keys of the drift max |t| of inference entries with weight > 0."""
+        keys = []
+        for name, entry in zip(self.inference_names, self.inference_list):
+            # the legacy aggregator config does not compute drift
+            if entry.weight > 0 and isinstance(
+                entry.aggregator, InferenceEvaluatorAggregatorConfig
+            ):
+                drift_name = entry.aggregator.global_mean_drift.name
+                keys.append(f"{name}/{drift_name}/max_abs_t")
+        return keys
+
     def set_random_seed(self):
         if self.seed is not None:
             set_seed(self.seed)
@@ -628,6 +641,7 @@ class TrainConfig:
             ),
             lr_tuning=self.lr_tuning,
             checkpoint_selection=self.checkpoint_selection,
+            checkpoint_selection_drift_log_keys=self._drift_log_keys,
         )
 
     def _get_n_forward_steps(self) -> int | IntSchedule:

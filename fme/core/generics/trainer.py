@@ -62,7 +62,7 @@ from typing import Any, Generic, Protocol, TypeVar
 import torch
 
 import fme
-from fme.core.checkpoint_soup import soup_checkpoint_dicts
+from fme.core.checkpoint_soup import soup_checkpoints
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
@@ -75,7 +75,7 @@ from fme.core.generics.aggregator import (
 from fme.core.generics.checkpoint_selection import (
     CheckpointSelectionConfig,
     CheckpointSelector,
-    EntryDriftSlopes,
+    epoch_drift,
 )
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
@@ -116,25 +116,19 @@ class ValidationCallback(Protocol):
         ...
 
 
-InferenceCallbackResult = tuple[dict[str, Any], float | None, EntryDriftSlopes]
-
-
 class InferenceCallback(Protocol):
-    def __call__(self, epoch: int) -> InferenceCallbackResult:
+    def __call__(self, epoch: int) -> tuple[dict[str, Any], float | None]:
         """Run inference for the given epoch.
 
         Returns:
-            A tuple of (logs, inference_error_or_none, drift_slopes), where
-            drift_slopes maps the name of each inference entry with weight > 0
-            that computes drift to its per-sample global-mean drift slopes
-            (see ``InferenceSummary.drift_slopes``). When no inference runs
-            for this epoch, returns ({}, None, {}).
+            A tuple of (logs, inference_error_or_none). When no inference runs
+            for this epoch, returns ({}, None).
         """
         ...
 
 
-def _null_inference_callback(epoch: int) -> InferenceCallbackResult:
-    return {}, None, {}
+def _null_inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
+    return {}, None
 
 
 @dataclasses.dataclass
@@ -175,6 +169,11 @@ class TrainerParams:
             ``soup_ckpt.tar``, the average of the EMA epoch checkpoints of a
             drift-gated window of inference epochs. Requires
             ``save_checkpoint`` and EMA epoch checkpoints saved every epoch.
+        checkpoint_selection_drift_log_keys: Inference log keys holding the
+            per-epoch drift statistic (maximum absolute drift t-statistic) of
+            each inference entry with weight > 0, used to gate
+            ``checkpoint_selection``. An epoch's drift is the maximum over the
+            keys present in its inference logs.
     """
 
     experiment_dir: str
@@ -192,6 +191,7 @@ class TrainerParams:
     save_best_inference_epoch_checkpoints: bool
     lr_tuning: LRTuningConfig | None
     checkpoint_selection: CheckpointSelectionConfig | None = None
+    checkpoint_selection_drift_log_keys: Sequence[str] = ()
 
     def __post_init__(self):
         validate_checkpoint_selection(
@@ -510,7 +510,7 @@ class Trainer:
             with self.validation_context():
                 valid_logs, valid_loss = validation_callback(self._epochs_trained)
                 logging.info("Starting inline inference before training")
-                inference_logs, _, _ = inference_callback(self._epochs_trained)
+                inference_logs, _ = inference_callback(self._epochs_trained)
             logging.info(f"Validation loss before training: {valid_loss}")
             logging.info("Logging to wandb")
             all_logs = valid_logs | inference_logs | {"epoch": self._epochs_trained}
@@ -540,7 +540,7 @@ class Trainer:
                     f"Starting inference step for model trained for "
                     f"{self._epochs_trained} epochs"
                 )
-                inference_logs, inference_error, drift_slopes = inference_callback(
+                inference_logs, inference_error = inference_callback(
                     self._epochs_trained
                 )
                 inference_end: float | None = time.time() if inference_logs else None
@@ -567,7 +567,7 @@ class Trainer:
             # let a diverged epoch report itself as the best)
             self._update_best_metrics(valid_loss, inference_error)
             selection_logs = self._update_checkpoint_selection(
-                valid_loss, inference_error, drift_slopes
+                valid_loss, inference_error, inference_logs
             )
 
             with self.validation_context():
@@ -837,12 +837,12 @@ class Trainer:
         self,
         valid_loss: float,
         inference_error: float | None,
-        drift_slopes: EntryDriftSlopes,
+        inference_logs: Mapping[str, Any],
     ) -> dict[str, Any]:
         """Record this epoch for soup checkpoint selection.
 
-        Runs on the root rank only, which holds the drift slopes and saves
-        checkpoints. Must be called once per epoch, after inference.
+        Runs on the root rank only, which holds the complete inference logs and
+        saves checkpoints. Must be called once per epoch, after inference.
 
         Returns:
             Logs describing the currently chosen soup window.
@@ -860,7 +860,9 @@ class Trainer:
                 epoch=self._epochs_trained,
                 score=inference_error,
                 valid_loss=valid_loss,
-                drift_slopes=drift_slopes,
+                drift=epoch_drift(
+                    inference_logs, self.params.checkpoint_selection_drift_log_keys
+                ),
             )
             if config.mode == "best_window":
                 selector.evaluate_current_window()
@@ -897,12 +899,10 @@ class Trainer:
             f"Saving soup checkpoint of epochs {chosen.epochs} "
             f"(status {selector.status}) to {self.paths.soup_checkpoint_path}"
         )
-        checkpoints = [
-            torch.load(path, map_location="cpu", weights_only=False) for path in paths
-        ]
-        soup = soup_checkpoint_dicts(checkpoints, sources=paths)
-        soup[CHECKPOINT_SELECTION_KEY] = selector.get_state()
-        _atomic_save(soup, self.paths.soup_checkpoint_path)
+        _atomic_write(
+            self.paths.soup_checkpoint_path,
+            lambda path: soup_checkpoints(paths, path),
+        )
         self._soup_written_epochs = list(chosen.epochs)
 
     def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
@@ -1047,9 +1047,7 @@ def inference_one_epoch(
     logging.info("Getting inline inference aggregator summary")
     summary = aggregator.get_summary()
     prefixed_logs = {f"{label}/{k}": v for k, v in summary.logs.items()}
-    return InferenceSummary(
-        logs=prefixed_logs, loss=summary.loss, drift_slopes=summary.drift_slopes
-    )
+    return InferenceSummary(logs=prefixed_logs, loss=summary.loss)
 
 
 @dataclasses.dataclass
@@ -1081,16 +1079,15 @@ def build_inference_callback(
     """Build an ``InferenceCallback`` shared between ACE and coupled training."""
     inference_epochs_set = set(inference_epochs)
 
-    def inference_callback(epoch: int) -> InferenceCallbackResult:
+    def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs_set:
-            return {}, None, {}
+            return {}, None
         active_tasks = [t for t in tasks if epoch in t.epoch_set]
         if not active_tasks:
-            return {}, None, {}
+            return {}, None
 
         all_logs: dict[str, Any] = {}
         weighted_error: float | None = None
-        drift_slopes: dict[str, Mapping[str, torch.Tensor]] = {}
         for task in active_tasks:
             aggregator = task.aggregator_factory()
             summary = inference_one_epoch(
@@ -1118,9 +1115,7 @@ def build_inference_callback(
                 if weighted_error is None:
                     weighted_error = 0.0
                 weighted_error += task.weight * summary.loss
-                if summary.drift_slopes is not None:
-                    drift_slopes[task.name] = summary.drift_slopes
-        return all_logs, weighted_error, drift_slopes
+        return all_logs, weighted_error
 
     return inference_callback
 
@@ -1148,12 +1143,16 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
 
 
 def _atomic_save(data: Mapping[str, Any], checkpoint_path: str):
-    # save to a temporary file in case we get pre-empted during save
+    _atomic_write(checkpoint_path, lambda path: torch.save(data, path))
+
+
+def _atomic_write(checkpoint_path: str, write: Callable[[str], None]):
+    # write to a temporary file in case we get pre-empted during save
     temporary_location = os.path.join(
         os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
     )
     try:
-        torch.save(data, temporary_location)
+        write(temporary_location)
         os.replace(temporary_location, checkpoint_path)
     finally:
         if os.path.exists(temporary_location):

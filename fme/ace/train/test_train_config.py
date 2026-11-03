@@ -531,8 +531,7 @@ class TestGetInferenceCallback:
                 output_dir="/tmp/out",
                 save_per_epoch_diagnostics=False,
             )
-            logs, error, _ = callback(epoch=epoch)
-            return logs, error
+            return callback(epoch=epoch)
 
     def test_epoch_not_in_inference_epochs_returns_empty(self):
         entries = [self._make_entry("inference")]
@@ -647,6 +646,19 @@ def test_checkpoint_selection_passed_to_trainer_params(tmp_path):
     assert config.get_trainer_params().checkpoint_selection == (
         CheckpointSelectionConfig(window=3, t_cutoff=2.5, mode="final_window")
     )
+
+
+def test_checkpoint_selection_drift_log_keys_of_weighted_entries(tmp_path):
+    config = _make_checkpoint_selection_train_config(
+        tmp_path,
+        [
+            _make_inference_config(name="climate", weight=1.0),
+            _make_inference_config(name="weather", weight=0.0),
+        ],
+    )
+    assert list(config.get_trainer_params().checkpoint_selection_drift_log_keys) == [
+        "climate/global_mean_drift/max_abs_t"
+    ]
 
 
 def test_checkpoint_selection_disabled_by_default(tmp_path):

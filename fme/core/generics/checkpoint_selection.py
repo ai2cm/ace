@@ -1,12 +1,12 @@
 """Drift-gated selection of a window of epochs to average into a soup checkpoint.
 
 Each epoch with inline inference contributes a record of its weighted
-inference error ("score") and of the per-sample global-mean drift slopes of
-each weighted inference entry. A window of the most recent records passes the
-drift gate if, for every (entry, variable), the slopes pooled over the
-window's epochs and samples are not significantly different from zero. The
-chosen window is the passing window with the lowest median score, or, if no
-window has passed, the window with the lowest maximum drift t-statistic.
+inference error ("score") and of its drift statistic: the maximum, over the
+weighted inference entries, of the logged maximum absolute t-statistic of the
+global-mean drift. A window of the most recent records passes the drift gate
+if the median of its epochs' drift statistics is at most a cutoff. The chosen
+window is the passing window with the lowest median score, or, if no window
+has passed, the window with the lowest median drift.
 """
 
 import collections
@@ -16,15 +16,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 import numpy as np
-import torch
 
 STATUS_PASSED = "passed"
 STATUS_FALLBACK = "fallback"
 STATUS_PARTIAL = "partial"
 STATUS_UNGATED = "ungated"
-
-# inference entry name -> variable name -> [n_sample] slopes
-EntryDriftSlopes = Mapping[str, Mapping[str, torch.Tensor]]
 
 
 @dataclasses.dataclass
@@ -33,27 +29,26 @@ class CheckpointSelectionConfig:
     Configuration for selecting a window of epochs whose EMA checkpoints are
     averaged into ``soup_ckpt.tar`` during training.
 
-    After each epoch with inline inference, the most recent ``window`` epochs
-    are evaluated. For each inference entry with ``weight > 0`` and each
-    variable, the per-sample global-mean drift slopes are pooled across the
-    window's epochs and samples, and their t-statistic
-    ``mean / (std / sqrt(n))`` is computed. The window passes the drift gate
-    if the maximum ``|t|`` is at most ``t_cutoff``; if no drift slopes are
-    available (e.g. rollouts too short for the drift metric) the window is
-    ungated and treated as passing. A window's score is the median of its
-    epochs' weighted inference errors (the error used for
+    After each epoch with inline inference, the epoch's drift is the maximum,
+    over inference entries with ``weight > 0``, of their logged
+    ``global_mean_drift/max_abs_t`` (the largest absolute t-statistic across
+    variables of the per-sample global-mean drift slopes), or NaN if no
+    weighted entry logs it (e.g. rollouts too short for the drift metric). The
+    most recent ``window`` epochs pass the drift gate if the median of their
+    drift, ignoring NaN, is at most ``t_cutoff``; a window whose drift is all
+    NaN is ungated and treated as passing. A window's score is the median of
+    its epochs' weighted inference errors (the error used for
     ``best_inference_ckpt.tar``).
 
     The soup is the uniform average of the windows' epoch EMA checkpoints
     (``ema_ckpt_XXXX.tar``), so it averages EMA weights regardless of
     ``validate_using_ema``; when ``validate_using_ema`` is False the scores and
-    drift slopes are computed with the non-EMA weights. EMA checkpoints must
-    be saved every epoch (``ema_checkpoint_save_epochs`` covering every
-    epoch).
+    drift are computed with the non-EMA weights. EMA checkpoints must be saved
+    every epoch (``ema_checkpoint_save_epochs`` covering every epoch).
 
     Parameters:
         window: Number of consecutive inference epochs in a window.
-        t_cutoff: Maximum allowed absolute drift t-statistic for a window to
+        t_cutoff: Maximum allowed median drift t-statistic for a window to
             pass. The default corresponds roughly to a two-sided 5% test with
             Bonferroni correction over ~30 variables.
         mode: ``"best_window"`` evaluates a candidate window after every
@@ -79,6 +74,16 @@ class CheckpointSelectionConfig:
             )
 
 
+def epoch_drift(logs: Mapping[str, Any], drift_log_keys: Sequence[str]) -> float:
+    """The maximum of the non-NaN values logged under ``drift_log_keys``.
+
+    Returns NaN if none of the keys has a non-NaN value.
+    """
+    values = [float(logs[key]) for key in drift_log_keys if key in logs]
+    values = [v for v in values if not math.isnan(v)]
+    return max(values) if values else math.nan
+
+
 @dataclasses.dataclass
 class EpochRecord:
     """Selection inputs recorded for one epoch with inline inference."""
@@ -86,7 +91,7 @@ class EpochRecord:
     epoch: int
     score: float
     valid_loss: float
-    drift_slopes: dict[str, dict[str, torch.Tensor]]
+    drift: float
 
     def get_state(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -97,10 +102,7 @@ class EpochRecord:
             epoch=int(state["epoch"]),
             score=float(state["score"]),
             valid_loss=float(state["valid_loss"]),
-            drift_slopes={
-                entry: {name: torch.as_tensor(v) for name, v in slopes.items()}
-                for entry, slopes in state["drift_slopes"].items()
-            },
+            drift=float(state["drift"]),
         )
 
 
@@ -111,21 +113,20 @@ class WindowEvaluation:
     Attributes:
         epochs: The window's epochs, in increasing order.
         score: Median of the epochs' scores.
-        max_abs_t: Maximum over (entry, variable) of the absolute drift
-            t-statistic, NaN if no t-statistic could be computed.
+        drift: Median of the epochs' drift, ignoring NaN; NaN if all are NaN.
         complete: Whether the window has the configured number of epochs.
         passed: Whether the window passes the drift gate.
     """
 
     epochs: list[int]
     score: float
-    max_abs_t: float
+    drift: float
     complete: bool
     passed: bool
 
     @property
     def ungated(self) -> bool:
-        return math.isnan(self.max_abs_t)
+        return math.isnan(self.drift)
 
     def get_state(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -135,41 +136,15 @@ class WindowEvaluation:
         return cls(
             epochs=[int(e) for e in state["epochs"]],
             score=float(state["score"]),
-            max_abs_t=float(state["max_abs_t"]),
+            drift=float(state["drift"]),
             complete=bool(state["complete"]),
             passed=bool(state["passed"]),
         )
 
 
-def _t_statistic(values: torch.Tensor) -> float:
-    values = values.detach().to("cpu", torch.float64).flatten()
-    values = values[torch.isfinite(values)]
-    n = values.numel()
-    if n < 2:
-        return math.nan
-    std = float(values.std(unbiased=True))
-    mean = float(values.mean())
-    if std == 0.0:
-        return 0.0 if mean == 0.0 else math.copysign(math.inf, mean)
-    return mean / (std / math.sqrt(n))
-
-
-def max_abs_drift_t(records: Sequence[EpochRecord]) -> float:
-    """Maximum absolute t-statistic of the drift slopes pooled over records.
-
-    For each (entry, variable), the finite slopes of all records and samples
-    are pooled into one t-statistic. Returns NaN if none could be computed.
-    """
-    pooled: dict[tuple[str, str], list[torch.Tensor]] = collections.defaultdict(list)
-    for record in records:
-        for entry, slopes in record.drift_slopes.items():
-            for name, values in slopes.items():
-                pooled[(entry, name)].append(values.flatten())
-    abs_t = [abs(_t_statistic(torch.cat(values))) for values in pooled.values()]
-    abs_t = [t for t in abs_t if not math.isnan(t)]
-    if len(abs_t) == 0:
-        return math.nan
-    return max(abs_t)
+def _nan_median(values: Sequence[float]) -> float:
+    finite = [v for v in values if not math.isnan(v)]
+    return float(np.median(finite)) if finite else math.nan
 
 
 def _nan_to_inf(value: float) -> float:
@@ -179,8 +154,8 @@ def _nan_to_inf(value: float) -> float:
 class CheckpointSelector:
     """Tracks epoch records and the chosen window of epochs to average.
 
-    Only the root rank holds drift slopes, so only the root rank's selection
-    is meaningful; the trainer updates the selector on the root rank only.
+    Inference logs are only complete on the root rank, so the trainer updates
+    the selector on the root rank only.
     """
 
     def __init__(self, config: CheckpointSelectionConfig):
@@ -192,26 +167,14 @@ class CheckpointSelector:
         self._best_fallback: WindowEvaluation | None = None
         self._latest_partial: WindowEvaluation | None = None
 
-    def record(
-        self,
-        epoch: int,
-        score: float,
-        valid_loss: float,
-        drift_slopes: EntryDriftSlopes,
-    ) -> None:
+    def record(self, epoch: int, score: float, valid_loss: float, drift: float):
         """Record the selection inputs of an epoch with inline inference."""
         self._records.append(
             EpochRecord(
                 epoch=epoch,
                 score=float(score),
                 valid_loss=float(valid_loss),
-                drift_slopes={
-                    entry: {
-                        name: values.detach().to("cpu", torch.float64).clone()
-                        for name, values in slopes.items()
-                    }
-                    for entry, slopes in drift_slopes.items()
-                },
+                drift=float(drift),
             )
         )
 
@@ -220,13 +183,14 @@ class CheckpointSelector:
         if len(self._records) == 0:
             return None
         records = list(self._records)
-        max_abs_t = max_abs_drift_t(records)
+        drift = _nan_median([r.drift for r in records])
         evaluation = WindowEvaluation(
             epochs=[r.epoch for r in records],
+            # NaN scores (diverged epochs) propagate, so never become the best
             score=float(np.median([r.score for r in records])),
-            max_abs_t=max_abs_t,
+            drift=drift,
             complete=len(records) == self._config.window,
-            passed=math.isnan(max_abs_t) or max_abs_t <= self._config.t_cutoff,
+            passed=math.isnan(drift) or drift <= self._config.t_cutoff,
         )
         if not evaluation.complete:
             self._latest_partial = evaluation
@@ -236,12 +200,13 @@ class CheckpointSelector:
             ) < _nan_to_inf(self._best_passing.score):
                 self._best_passing = evaluation
         elif self._best_fallback is None or (
-            _nan_to_inf(evaluation.max_abs_t),
+            evaluation.drift,
             _nan_to_inf(evaluation.score),
         ) < (
-            _nan_to_inf(self._best_fallback.max_abs_t),
+            self._best_fallback.drift,
             _nan_to_inf(self._best_fallback.score),
         ):
+            # a failing window's drift is never NaN, since NaN drift passes
             self._best_fallback = evaluation
         return evaluation
 
@@ -277,7 +242,7 @@ class CheckpointSelector:
             "soup/first_epoch": chosen.epochs[0],
             "soup/last_epoch": chosen.epochs[-1],
             "soup/score": chosen.score,
-            "soup/max_abs_t": chosen.max_abs_t,
+            "soup/drift": chosen.drift,
         }
 
     def get_state(self) -> dict[str, Any]:
