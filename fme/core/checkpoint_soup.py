@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 
+from fme.core.distributed import Distributed
 from fme.core.ema import EMA_CHECKPOINT_KEY
 
 SOUP_CHECKPOINT_KEY = "soup"
@@ -195,4 +196,5 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    main()
+    with Distributed.context():
+        main()
