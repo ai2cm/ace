@@ -1,0 +1,77 @@
+# arg: --dataset 01JQKRW7XSB1QJQSXAEY3G7D1C:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar
+#
+# Seven-day 1xCO2 control inference with
+# 2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1 (best_inference_ckpt.tar),
+# following the ACE2S-SHiELD+ paper setup
+# (ace2s-shield-plus-paper: ACE-experiments/inference/
+# run-seven-day-1xCO2-and-abrupt-4xCO2-inference-ensemble.sh). Initial
+# conditions are taken from the 1xCO2 control (ic_0005) on the first of each
+# month from 2031-01 to 2033-12, matching the initialization dates of the 36
+# SHiELD-SOM abrupt-4xCO2 ensemble members. 28 6-hourly steps = 7 days.
+#
+# Forcing comes from the control run, with its own global_mean_co2.
+#
+# Multi-call is disabled, as in the paper. The checkpoint already has the slab
+# ocean config the paper applied as an override, so it is not repeated here.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+n_forward_steps: 28
+forward_steps_in_memory: 1
+logging:
+  project: ace-som
+  entity: ai2cm
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+initial_condition:
+  path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr/1xCO2-ic_0005.zarr
+  engine: zarr
+  start_indices:
+    times:
+    - '2031-01-01T00:00:00'
+    - '2031-02-01T00:00:00'
+    - '2031-03-01T00:00:00'
+    - '2031-04-01T00:00:00'
+    - '2031-05-01T00:00:00'
+    - '2031-06-01T00:00:00'
+    - '2031-07-01T00:00:00'
+    - '2031-08-01T00:00:00'
+    - '2031-09-01T00:00:00'
+    - '2031-10-01T00:00:00'
+    - '2031-11-01T00:00:00'
+    - '2031-12-01T00:00:00'
+    - '2032-01-01T00:00:00'
+    - '2032-02-01T00:00:00'
+    - '2032-03-01T00:00:00'
+    - '2032-04-01T00:00:00'
+    - '2032-05-01T00:00:00'
+    - '2032-06-01T00:00:00'
+    - '2032-07-01T00:00:00'
+    - '2032-08-01T00:00:00'
+    - '2032-09-01T00:00:00'
+    - '2032-10-01T00:00:00'
+    - '2032-11-01T00:00:00'
+    - '2032-12-01T00:00:00'
+    - '2033-01-01T00:00:00'
+    - '2033-02-01T00:00:00'
+    - '2033-03-01T00:00:00'
+    - '2033-04-01T00:00:00'
+    - '2033-05-01T00:00:00'
+    - '2033-06-01T00:00:00'
+    - '2033-07-01T00:00:00'
+    - '2033-08-01T00:00:00'
+    - '2033-09-01T00:00:00'
+    - '2033-10-01T00:00:00'
+    - '2033-11-01T00:00:00'
+    - '2033-12-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr
+    file_pattern: 1xCO2-ic_0005.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+stepper_override:
+  multi_call: null
