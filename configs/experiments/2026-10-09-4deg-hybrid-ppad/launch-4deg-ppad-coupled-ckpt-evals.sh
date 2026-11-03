@@ -11,6 +11,7 @@ CKPT_DS="${CKPT_DS:?results dataset}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 SCENARIOS="${SCENARIOS:-piC 1pct}"
 PRIORITY="${PRIORITY:-high}"
+MIN_RUNTIME="${MIN_RUNTIME:-1h}"   # team template: evals 1h; never bare --preemptible (minRuntime 0 sits unscheduled for hours)
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
@@ -28,7 +29,7 @@ for S in $SCENARIOS; do
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "4deg ppad ${ARM} coupled-ft${VARIANT} selected checkpoint: ${TAG} coupled free rollout" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+    --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
     --cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
