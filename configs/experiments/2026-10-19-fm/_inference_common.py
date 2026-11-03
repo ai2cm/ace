@@ -82,8 +82,27 @@ def inference_run_names() -> list[str]:
     ]
 
 
+def anneal_run_names() -> list[str]:
+    """Job names of the anneal runs in run_configs/anneal/ (smoke tests left
+    out), from the JOB_NAME line create_anneal_jobs.py writes in each header.
+    """
+    from create_anneal_jobs import ANNEAL_DIR, read_header
+
+    return sorted(
+        read_header(path)["JOB_NAME"]
+        for path in ANNEAL_DIR.glob(f"{CONFIG_PREFIX}*.yaml")
+        if not path.stem.endswith("-smoke")
+    )
+
+
 def all_training_run_names() -> list[str]:
-    return [config_to_job_name(name) for name in training_config_names()]
+    """Every training run of update_beaker_map.py: run_configs/ and the
+    anneal runs. Inference families use inference_run_names, which has no
+    anneal runs.
+    """
+    return [
+        config_to_job_name(name) for name in training_config_names()
+    ] + anneal_run_names()
 
 
 def finished_runs(
