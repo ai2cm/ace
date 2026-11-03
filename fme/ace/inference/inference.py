@@ -23,6 +23,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
+    local_ic_range,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
@@ -35,28 +36,18 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import (
-    exists,
-    is_local,
-    makedirs,
-    open_dataset_via_inter_filesystem_copy,
-)
+from fme.core.cloud import is_local, makedirs, open_dataset_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
-from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.distributed import Distributed
+from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
-from fme.core.wandb import WandB
 
 from .evaluator import resolve_variable_metadata
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
-
-# Truncated to hour precision: segment start times in existing runs have always
-# been at least 6h apart, so finer precision would just add visual noise. We can
-# reconsider if this changes.
-SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
 
 
 @dataclasses.dataclass
@@ -79,7 +70,7 @@ class InitialConditionConfig:
     """
 
     path: str
-    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    engine: Literal["netcdf4", "zarr"] = "netcdf4"
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
@@ -238,10 +229,9 @@ class InferenceConfig:
                 - To write raw or time-coarsened data, the zarr writer must be
                   used. See the ``files`` parameter of the
                   :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Note that monthly coarsened data cannot
-                  currently be written to zarr, and hence a remote directory,
-                  since it uses a different code path than uniformly coarsened
-                  data.
+                  can be configured. Monthly coarsened data configured through
+                  ``files`` can be written to zarr. The legacy
+                  ``save_monthly_files`` option remains netCDF-only.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the
@@ -261,6 +251,10 @@ class InferenceConfig:
         aggregator: Configuration for inference aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        use_ema_if_available: If True and the checkpoint contains EMA weights
+            (only checkpoints saved with their optimization state, e.g.
+            ``ckpt.tar``), run inference with the EMA weights in place of the
+            stepper weights.
         allow_incompatible_dataset: If True, allow the dataset used for inference
             to be incompatible with the dataset used for stepper training. This should
             be used with caution, as it may allow the stepper to make scientifically
@@ -291,6 +285,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     stepper_override: StepperOverrideConfig | None = None
+    use_ema_if_available: bool = True
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
@@ -310,7 +305,11 @@ class InferenceConfig:
 
     def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path, self.stepper_override)
+        return load_stepper(
+            self.checkpoint_path,
+            self.stepper_override,
+            use_ema_if_available=self.use_ema_if_available,
+        )
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
@@ -372,8 +371,9 @@ def run_inference_from_config(config: InferenceConfig):
             n_forward_steps=config.forward_steps_in_memory
         )
         logging.info("Loading initial condition data")
+        ic_ds = config.initial_condition.get_dataset()
         initial_condition = get_initial_condition(
-            config.initial_condition.get_dataset(),
+            ic_ds,
             InitialConditionRequirements(
                 prognostic_names=stepper_config.prognostic_names,
                 labels=config.labels,
@@ -381,6 +381,18 @@ def run_inference_from_config(config: InferenceConfig):
         )
         stepper = config.load_stepper()
         stepper.set_eval()
+        dist = Distributed.get_instance()
+        n_ic = initial_condition.as_batch_data().time.sizes["sample"]
+        ic_already_sharded = (
+            dist.total_data_parallel_ranks > 1
+            and BatchData.dataset_has_gathered_state(ic_ds)
+        )
+        if not ic_already_sharded:
+            # Validate divisibility (raises ValueError if not divisible).
+            local_ic_range(
+                n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
+            )
+
         logging.info("Initializing forcing data loader")
         data = get_forcing_data(
             config=config.forcing_loader,
@@ -391,6 +403,17 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        # Must happen before the ensemble broadcast.  Gathered restarts
+        # are already per-rank (scattered inside from_xarray_dataset).
+        if dist.total_data_parallel_ranks > 1 and not ic_already_sharded:
+            ic_batch = data.initial_condition.as_batch_data()
+            start, end = local_ic_range(
+                n_ic, dist.data_parallel_rank, dist.total_data_parallel_ranks
+            )
+            data._initial_condition = PrognosticState(
+                ic_batch.select_sample_slice(slice(start, end))
+            )
+
         # Broadcast the initial condition across ensemble members only after the
         # forcing loader is built, mirroring the evaluator path. The forcing then
         # has one window per initial condition (n_ensemble=1) and predict_paired
@@ -471,9 +494,8 @@ def run_inference_from_config(config: InferenceConfig):
 def _get_initialization_time_and_timestep(
     config: InferenceConfig,
 ) -> tuple[cftime.datetime, datetime.timedelta]:
-    # Loading the stepper is expensive, but it is necessary to get the timestep
-    # and prognostic names. We only call this function once before the
-    # segmented loop starts to minimize the overhead.
+    # Loading the stepper is expensive, so this is called once per run; it gives
+    # the timestep and the prognostic names.
     stepper = config.load_stepper()
     initial_condition = get_initial_condition(
         config.initial_condition.get_dataset(),
@@ -486,92 +508,39 @@ def _get_initialization_time_and_timestep(
     return initialization_time, stepper.training_dataset_info.timestep
 
 
-def _get_segment_label(
-    initialization_time: cftime.datetime,
-    timestep: datetime.timedelta,
-    segment: int,
-    n_forward_steps: int,
-) -> str:
-    segment_length = n_forward_steps * timestep
-    current_start_time = initialization_time + segment * segment_length
-    current_label = current_start_time.strftime(SEGMENT_LABEL_FORMAT)
-
-    if segment > 0:
-        previous_start_time = initialization_time + (segment - 1) * segment_length
-        previous_label = previous_start_time.strftime(SEGMENT_LABEL_FORMAT)
-        if previous_label == current_label:
-            raise ValueError(
-                f"Consecutive segments have the same label ({previous_label!r} "
-                f"and {current_label!r}), meaning the current segment would "
-                f"overwrite the previous segment. Please open an issue on "
-                f"GitHub if having greater temporal precision in segmented run "
-                f"directory labels is an important use-case for you."
-            )
-
-    return current_label
-
-
 def run_segmented_inference(config: InferenceConfig, segments: int):
-    """Run inference in multiple segments.
+    """Run inference in multiple segments, each resumable after preemption.
 
     Args:
-        config: inference configuration to be used for each individual segment. The
-            provided initial condition configuration will only be used for the first
-            segment.
-        segments: total number of segments desired. Only missing segments will be run.
-
-    Note:
-        This is useful when running very long simulations or when saving a large
-        amount of output data to disk. The simulation outputs will be split across
-        multiple folders, each corresponding to one of the segments and labeled by
-        the start time of its first (or only) ensemble member.
+        config: Configuration for each segment. Its initial condition is used
+            only for the first segment; later segments start from the previous
+            segment's restart file.
+        segments: Total number of segments; only missing ones are run.
     """
-    if config.n_ensemble_per_ic > 1:
-        raise ValueError(
-            "Ensemble inference (n_ensemble_per_ic > 1) is not supported with "
-            "segmented inference. A segment's restart already carries the "
-            "broadcasted ensemble as its sample dimension, so later segments "
-            "cannot re-broadcast it consistently. Run with n_ensemble_per_ic=1, "
-            "or run a single non-segmented inference for ensemble runs."
-        )
-    # Configure top-level logging without a wandb run; each segment owns its run.
-    top_level_logging = dataclasses.replace(config.logging, log_to_wandb=False)
-    top_level_logging.configure_logging(
-        config.experiment_dir,
-        "inference_out.log",
-        config=dataclasses.asdict(config),
-        resumable=False,
-    )
-    logging.info(
-        f"Starting segmented inference with {segments} segments. "
-        f"Saving to {config.experiment_dir}."
-    )
     config_copy = copy.deepcopy(config)
-    original_wandb_name = os.environ.get("WANDB_NAME")
 
-    initialization_time, timestep = _get_initialization_time_and_timestep(config)
-    n_forward_steps = config.n_forward_steps
+    def _get_restart_paths(segment_dir: str) -> Sequence[str]:
+        return [os.path.join(segment_dir, "restart.nc")]
 
-    for segment in range(segments):
-        segment_label = _get_segment_label(
-            initialization_time,
-            timestep,
-            segment,
-            n_forward_steps,
-        )
-        segment_dir = os.path.join(config.experiment_dir, segment_label)
-        restart_path = os.path.join(segment_dir, "restart.nc")
-        if exists(restart_path):
-            logging.info(f"Skipping segment {segment} because it has already been run.")
-        else:
-            logging.info(f"Running segment {segment}.")
-            config_copy.experiment_dir = segment_dir
-            if original_wandb_name is not None:
-                os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
-            with GlobalTimer():
-                run_inference_from_config(config_copy)
-            # Finish this segment's run so the next segment starts a fresh one.
-            WandB.get_instance().finish()
+    def _run_segment(segment_dir: str) -> None:
+        config_copy.experiment_dir = segment_dir
+        run_inference_from_config(config_copy)
+
+    def _set_initial_condition(restart_paths: Sequence[str]) -> None:
+        (restart_path,) = restart_paths
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )
+
+    run_segments(
+        segments=segments,
+        experiment_dir=config.experiment_dir,
+        logging_config=config.logging,
+        logging_config_dict=dataclasses.asdict(config),
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
+        n_steps_per_segment=config.n_forward_steps,
+        get_initialization=lambda: _get_initialization_time_and_timestep(config),
+        get_restart_paths=_get_restart_paths,
+        run_segment=_run_segment,
+        set_initial_condition=_set_initial_condition,
+    )

@@ -74,7 +74,7 @@ class PerChannelLossAggregator:
     def get_logs(self, label: str) -> dict[str, float]:
         dist = Distributed.get_instance()
         logs: dict[str, float] = {}
-        for var_name, ws in self._weighted_sums.items():
+        for var_name, ws in sorted(self._weighted_sums.items()):
             count = self._counts[var_name]
             mean = ws / count if count > 0 else ws
             logs[f"{label}/mean/loss/{var_name}"] = float(

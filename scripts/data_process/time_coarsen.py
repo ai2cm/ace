@@ -203,7 +203,7 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
 
 def _write_eager(ds: xr.Dataset, path: str) -> None:
     """Write dataset eagerly using xarray's to_zarr."""
-    ds.to_zarr(path, mode="w", zarr_version=3)
+    ds.to_zarr(path, mode="w", zarr_format=3)
 
 
 def _write_xpartition(ds: xr.Dataset, path: str, config: TimeCoarsenConfig) -> None:

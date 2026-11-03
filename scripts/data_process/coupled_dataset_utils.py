@@ -222,7 +222,14 @@ class PrecomputedSeaIceMaskConfig:
             raise ValueError(
                 f"Expected a 2D precomputed sea ice mask, but got {str(mask)}."
             )
-        return mask.load()
+        mask = mask.load()
+        # A store still being written reads its unwritten mask as the NaN fill.
+        if not bool(mask.isin([0, 1]).all()):
+            raise ValueError(
+                f"Precomputed sea ice mask {self.name} in {self.zarr_path} has "
+                "values other than 0 and 1; is the store fully written?"
+            )
+        return mask
 
 
 @dataclasses.dataclass

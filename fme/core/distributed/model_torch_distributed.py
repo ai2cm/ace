@@ -307,6 +307,54 @@ class ModelTorchDistributed(DistributedBackend):
         torch.distributed.gather(tensor, gather_list)
         return gather_list
 
+    def data_parallel_gather(
+        self,
+        tensor: torch.Tensor,
+        gather_list: list[torch.Tensor] | None = None,
+    ) -> list[torch.Tensor] | None:
+        dst = torch.distributed.get_global_rank(self._data_group, 0)
+        if gather_list is None and self._data_rank == 0:
+            gather_list = [tensor] + [
+                torch.empty_like(tensor) for _ in range(self._data_size - 1)
+            ]
+        torch.distributed.gather(tensor, gather_list, dst=dst, group=self._data_group)
+        return gather_list if self._data_rank == 0 else None
+
+    def data_parallel_scatter(
+        self,
+        tensor: torch.Tensor,
+        scatter_list: list[torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        src = torch.distributed.get_global_rank(self._data_group, 0)
+        torch.distributed.scatter(tensor, scatter_list, src=src, group=self._data_group)
+        return tensor
+
+    def data_parallel_gather_object(self, obj: T) -> list[T] | None:
+        dst = torch.distributed.get_global_rank(self._data_group, 0)
+        gather_list: list[Any] | None = (
+            [None for _ in range(self._data_size)] if self._data_rank == 0 else None
+        )
+        torch.distributed.gather_object(
+            obj, gather_list, dst=dst, group=self._data_group
+        )
+        return gather_list if self._data_rank == 0 else None
+
+    def data_parallel_broadcast_object(self, obj: T | None) -> T:
+        if self._data_rank == 0:
+            if obj is None:
+                raise ValueError(
+                    "Data-parallel root must provide an object to broadcast"
+                )
+            object_list: list[Any] | None = [obj for _ in range(self._data_size)]
+        else:
+            object_list = None
+        output_list: list[Any] = [None]
+        src = torch.distributed.get_global_rank(self._data_group, 0)
+        torch.distributed.scatter_object_list(
+            output_list, object_list, src=src, group=self._data_group
+        )
+        return output_list[0]
+
     def gather_object(self, obj: T) -> list[T] | None:
         """Gather a picklable object globally."""
         gather_list: list[Any] | None = (

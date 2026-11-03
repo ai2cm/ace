@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import logging
 from math import ceil
@@ -10,6 +11,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
+    local_ic_range,
 )
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.dummy import DummyDataset
@@ -168,10 +170,10 @@ class InferenceDataset(torch.utils.data.Dataset):
         dist = Distributed.get_instance()
         i_start = index * self._coupled_steps_in_memory
         samples = []
-        for i_member in range(self._n_initial_conditions):
-            # check if sample is one this local rank should process
-            if i_member % dist.world_size != dist.rank:
-                continue
+        local_start, local_end = local_ic_range(
+            self._n_initial_conditions, dist.rank, dist.world_size
+        )
+        for i_member in range(local_start, local_end):
             i_window_start = i_start + self._start_indices[i_member]
             samples.append(self._dataset[i_window_start])
         return CoupledBatchData.collate_fn(
@@ -216,18 +218,22 @@ class CoupledForcingDataLoaderConfig:
         self,
         start_indices: ExplicitIndices,
     ):
+        # the built loader takes ownership of its dataset configs and updates
+        # the atmosphere subset in place to align it with the ocean start, so
+        # hand out copies to leave this user-provided config untouched (e.g.
+        # for reuse by the following segments of a segmented run)
         if self.ocean is None:
             return InferenceDataLoaderConfig(
                 dataset=CoupledDatasetWithOptionalOceanConfig(
-                    atmosphere=self.atmosphere.dataset,
+                    atmosphere=copy.deepcopy(self.atmosphere.dataset),
                 ),
                 start_indices=start_indices,
                 num_data_workers=self.num_data_workers,
             )
         return InferenceDataLoaderConfig(
             dataset=CoupledDatasetWithOptionalOceanConfig(
-                atmosphere=self.atmosphere.dataset,
-                ocean=self.ocean.dataset,
+                atmosphere=copy.deepcopy(self.atmosphere.dataset),
+                ocean=copy.deepcopy(self.ocean.dataset),
             ),
             start_indices=start_indices,
             num_data_workers=self.num_data_workers,

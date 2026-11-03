@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from fme.ace.models.land.land_net import LandNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
@@ -16,6 +17,10 @@ class LandNetBuilder(ModuleConfig):
     hidden_dims: list[int] = dataclasses.field(default_factory=lambda: [64, 64])
     network_type: Literal["MLP"] = "MLP"
     use_positional_embedding: bool = False
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,

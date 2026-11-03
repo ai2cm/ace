@@ -761,7 +761,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
     def _forward_features(self, x: torch.Tensor, context: Context):
         for blk in self.blocks:
             if self.checkpointing >= 3:
-                x = checkpoint(blk, x, context)
+                x = checkpoint(blk, x, context, use_reentrant=False)
             else:
                 x = blk(x, context)
 
@@ -774,7 +774,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             residual = self.norm_big_skip(residual, context=context)
 
         if self.checkpointing >= 1:
-            x = checkpoint(self.encoder, x)
+            x = checkpoint(self.encoder, x, use_reentrant=False)
         else:
             x = self.encoder(x)
 
@@ -800,14 +800,16 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                     dist.reduce_max(batch_max)
                     self._gm_min.copy_(torch.minimum(self._gm_min, batch_min))
                     self._gm_max.copy_(torch.maximum(self._gm_max, batch_max))
-            elif torch.isfinite(self._gm_max).all():
+            else:
+                # shift mean into last-epoch envelope; torch.where avoids a graph break
+                envelope_set = torch.isfinite(self._gm_max).all()
                 clipped = torch.clamp(global_means, min=self._gm_min, max=self._gm_max)
-                # Shift x by the clip residual so its per-channel spatial
-                # mean falls within the envelope observed during the most
-                # recent training epoch (the envelope is reset each epoch,
-                # so a loaded checkpoint carries its final epoch's envelope).
-                # No-op when the mean is already inside the envelope.
-                x = x + (clipped - global_means)
+                shift = torch.where(
+                    envelope_set,
+                    clipped - global_means,
+                    torch.zeros_like(global_means),
+                )
+                x = x + shift
 
         x = self._forward_features(x, context)
 
@@ -815,7 +817,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = torch.cat((x, residual), dim=1)
 
         if self.checkpointing >= 1:
-            x = checkpoint(self.decoder, x)
+            x = checkpoint(self.decoder, x, use_reentrant=False)
         else:
             x = self.decoder(x)
 

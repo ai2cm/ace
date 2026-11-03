@@ -11,6 +11,7 @@ from typing import Literal
 from unittest.mock import patch
 
 import cftime
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -22,6 +23,7 @@ from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
     save_plus_one_stepper,
+    save_stepper_with_ema,
     validate_stepper_config,
     validate_stepper_multi_call,
     validate_stepper_ocean,
@@ -40,6 +42,7 @@ from fme.ace.stepper.single_module import (
     TrainOutput,
     TrainStepper,
     TrainStepperConfig,
+    apply_stepper_override_to_stepper_config,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -62,8 +65,17 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
+from fme.core.corrector.loss_config import (
+    CorrectorLossConfig,
+    CorrectorRegularizationConfig,
+    PreCorrectorOptimizationConfig,
+)
 from fme.core.corrector.output import CorrectorOutput
-from fme.core.corrector.registry import CorrectionSequence, CorrectorABC
+from fme.core.corrector.registry import (
+    CorrectionSequence,
+    CorrectorABC,
+    EpochScheduledCorrector,
+)
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
@@ -89,13 +101,14 @@ from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
-from fme.core.step.single_module import SingleModuleStep
+from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStep
 from fme.core.stepper_state import StepperState
 from fme.core.testing import (
     get_dataset_info,
     trivial_network_and_loss_normalization,
     trivial_normalization,
 )
+from fme.core.testing.ema import assert_parameters_equal
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
@@ -593,6 +606,99 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
     else:
         assert len(optimization.accumulate_loss.call_args_list) == n_steps
         assert all(forward_calls_grad_enabled)
+
+
+@pytest.mark.parametrize("pushforward_steps", [0, 1, 3])
+def test_train_on_batch_pushforward_steps(pushforward_steps: int):
+    torch.manual_seed(0)
+
+    forward_calls_grad_enabled = []
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            forward_calls_grad_enabled.append(torch.is_grad_enabled())
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                )
+            ),
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        pushforward_steps=pushforward_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    optimization = unittest.mock.Mock(wraps=NullOptimization())
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=optimization)
+    n_optimized = n_steps - pushforward_steps
+    assert len(optimization.accumulate_loss.call_args_list) == n_optimized
+    assert not any(forward_calls_grad_enabled[:pushforward_steps])
+    assert all(forward_calls_grad_enabled[pushforward_steps:])
+    # every step's loss is reported, but only optimized steps are accumulated
+    expected_loss = sum(
+        stepped.metrics[f"loss_step_{i}"] for i in range(pushforward_steps, n_steps)
+    )
+    torch.testing.assert_close(stepped.metrics["loss"], expected_loss)
+    for i in range(n_steps):
+        assert f"loss_step_{i}" in stepped.metrics
+
+
+def test_train_on_batch_pushforward_steps_must_leave_a_loss_step():
+    n_steps = 2
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    stepper = _get_train_stepper(
+        _get_stepper_config(["a", "b"], ["a", "b"]),
+        pushforward_steps=n_steps,
+    )
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"pushforward_steps": -1},
+        {"pushforward_steps": 1, "optimize_last_step_only": True},
+        {"pushforward_steps": 2, "n_forward_steps": 2},
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthSchedule(
+                start_value=3,
+                milestones=[TimeLengthMilestone(epoch=2, value=4)],
+            ),
+        },
+        {
+            "pushforward_steps": 1,
+            "n_forward_steps": TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=2, probability=0.5),
+                    TimeLengthProbability(steps=3, probability=0.5),
+                ]
+            ),
+        },
+    ],
+)
+def test_train_stepper_config_invalid_pushforward_steps(kwargs):
+    with pytest.raises(ValueError, match="pushforward_steps"):
+        TrainStepperConfig(**kwargs)
+
+
+def test_train_stepper_config_valid_pushforward_steps():
+    TrainStepperConfig(pushforward_steps=1, n_forward_steps=2)
 
 
 def test_per_channel_losses_bounded_by_accumulated_loss():
@@ -1233,12 +1339,11 @@ def test_stepper_config_input_only_and_all_names_are_sets():
     assert isinstance(config.input_only_names, set)
     assert config.input_only_names == {"a", "c"}
 
-    assert isinstance(config.all_names, set)
+    assert isinstance(config.all_names, frozenset)
     assert config.all_names == {"a", "b", "c", "d"}
 
-    # base config values represent ML channel order and must stay list[str]
-    assert isinstance(config.input_names, list)
-    assert isinstance(config.output_names, list)
+    assert isinstance(config.input_names, frozenset)
+    assert isinstance(config.output_names, frozenset)
 
 
 def _init_train_stepper(
@@ -1274,7 +1379,9 @@ class _DummyParamModule(torch.nn.Module):
 
 
 def _input_dropout_stepper_config(
-    in_names: list[str], out_names: list[str], input_dropout: VariableMaskingConfig
+    in_names: list[str],
+    out_names: list[str],
+    input_dropout: VariableMaskingConfig,
 ) -> StepperConfig:
     return StepperConfig(
         step=StepSelector(
@@ -1394,6 +1501,76 @@ def test_input_dropout_mask_sampled_per_forward_step():
         assert (indicators == 0.0).all(), "dropped channel indicator must be 0"
 
 
+def _rollout_dropout_indicators(
+    optimize_last_step_only: bool,
+    n_steps: int = 3,
+) -> list[float]:
+    """Train one rollout batch and return the per-step presence indicator of "a".
+
+    A rate-1.0 Bernoulli group always drops "a", so each step's indicator is
+    deterministic: 0.0 where input dropout applied, 1.0 where it did not.
+    """
+    config = _input_dropout_stepper_config(
+        ["a"],
+        ["a"],
+        VariableMaskingConfig(
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=1.0)
+                )
+            ]
+        ),
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_ensemble=1,
+        loss=StepLossConfig(type="MSE"),
+        n_forward_steps=n_steps,
+        optimize_last_step_only=optimize_last_step_only,
+    )
+    data = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert len(captured) == n_steps
+    # channel 0 is the input "a", channel 1 its presence indicator
+    indicators = []
+    for packed in captured:
+        indicator = packed[:, 1, 0, 0]
+        assert (indicator == indicator[0]).all()
+        indicators.append(float(indicator[0]))
+    return indicators
+
+
+def test_input_dropout_masks_only_optimized_step_with_last_step_only():
+    """Under optimize_last_step_only, only the final step is masked.
+
+    The training loop runs every step but the last under no_grad, so the two
+    non-optimized steps see "a" present (1.0) and only the final optimized
+    step sees it dropped (0.0).
+    """
+    indicators = _rollout_dropout_indicators(optimize_last_step_only=True)
+    assert indicators == [1.0, 1.0, 0.0]
+
+
+def test_input_dropout_masks_every_optimized_step():
+    """Without optimize_last_step_only every rollout step is optimized and masked."""
+    indicators = _rollout_dropout_indicators(optimize_last_step_only=False)
+    assert indicators == [0.0, 0.0, 0.0]
+
+
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
     """A NullOptimization train_on_batch (eval mode) applies no input dropout.
 
@@ -1473,7 +1650,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
         ["a", "b"],
         ["a", "c"],
         norm_mean=norm_mean,
-        residual_prediction=residual_prediction,
+        residual_prediction=(
+            ResidualPredictionConfig() if residual_prediction else None
+        ),
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
@@ -2197,6 +2376,123 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
     torch.testing.assert_close(output.data["var"], expected_var)
 
 
+def test_apply_stepper_override_to_stepper_config():
+    config = _get_stepper_config(["a", "b"], ["a"])
+    assert config.get_prescribed_prognostic_names() == []
+    apply_stepper_override_to_stepper_config(
+        config, StepperOverrideConfig(prescribed_prognostic_names=["a"])
+    )
+    assert config.get_prescribed_prognostic_names() == ["a"]
+    with pytest.raises(ValueError, match="multi_call cannot be applied"):
+        apply_stepper_override_to_stepper_config(
+            config, StepperOverrideConfig(multi_call=None)
+        )
+
+
+def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
+    """Run one eval-mode step from a constant input and return the predicted
+    "var"."""
+    stepper.set_eval()
+    index = xr.date_range("2000", freq="6h", periods=2, use_cftime=True)
+    time = xr.DataArray(np.stack([index]), dims=["sample", "time"])
+    input_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 1, 4, 8), value).to(DEVICE)},
+        time=time.isel(time=[0]),
+        labels=None,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 2, 4, 8), value).to(DEVICE)},
+        time=time,
+        labels=None,
+    )
+    output, _ = stepper.predict(input_data, forcing_data)
+    return output.data["var"]
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "checkpoint_force_positive, override_force_positive, checkpoint_disabled_epochs",
+    [
+        pytest.param(False, True, 0, id="turn_on"),
+        pytest.param(True, False, 0, id="turn_off"),
+        # the checkpoint's corrector state (from its EpochScheduledCorrector)
+        # must load into the unscheduled replacement
+        pytest.param(True, False, 1, id="turn_off_scheduled_checkpoint"),
+    ],
+)
+def test_load_stepper_with_corrector_override(
+    tmp_path: pathlib.Path,
+    checkpoint_force_positive: bool,
+    override_force_positive: bool,
+    checkpoint_disabled_epochs: int,
+):
+    """The stepper adds one, so an input of -3 predicts -2, which the
+    force-positive clamp turns into 0 when the active corrector enables it."""
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=[DimSize("grid_yt", 4), DimSize("grid_xt", 8)],
+        nz_interface=4,
+    )
+
+    def force_positive_names(enabled: bool) -> list[str]:
+        return ["var"] if enabled else []
+
+    def expected(enabled: bool) -> float:
+        return 0.0 if enabled else -2.0
+
+    save_plus_one_stepper(
+        stepper_path,
+        in_names=["var"],
+        out_names=["var"],
+        normalization_names={"var"},
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=force_positive_names(checkpoint_force_positive),
+            corrector_disabled_epochs=checkpoint_disabled_epochs,
+        ),
+    )
+
+    stepper = load_stepper(stepper_path)
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(checkpoint_force_positive))
+    )
+
+    override = CorrectorSelector(
+        type="atmosphere_corrector",
+        config={"force_positive_names": force_positive_names(override_force_positive)},
+    )
+    stepper = load_stepper(stepper_path, StepperOverrideConfig(corrector=override))
+    output = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+    assert _get_inner_single_module_config(stepper).corrector == override
+    # the replacement survives serialization
+    reloaded = Stepper.from_state(stepper.get_state())
+    output = _predict_one_step(reloaded, -3.0)
+    torch.testing.assert_close(
+        output, torch.full_like(output, expected(override_force_positive))
+    )
+
+
+def test_stepper_override_rejects_corrector_disabled_epochs():
+    with pytest.raises(ValueError, match="corrector_disabled_epochs"):
+        dacite.from_dict(
+            StepperOverrideConfig,
+            {
+                "corrector": {
+                    "type": "atmosphere_corrector",
+                    "config": {"corrector_disabled_epochs": 1},
+                }
+            },
+            config=dacite.Config(strict=True),
+        )
+
+
 class _LargeLinear(torch.nn.Module):
     """Module defined at module scope so it can be pickled by torch.save."""
 
@@ -2746,6 +3042,7 @@ def _get_ocean_data_for_predict_paired(
     n_steps: int,
     in_names: list[str],
     out_names: list[str],
+    sea_surface_fraction: float,
     n_samples: int = 2,
     img_shape: tuple[int, int] = (5, 5),
 ) -> tuple[PrognosticState, BatchData]:
@@ -2755,6 +3052,8 @@ def _get_ocean_data_for_predict_paired(
         n_steps: Number of forward steps.
         in_names: Input variable names.
         out_names: Output variable names.
+        sea_surface_fraction: Value of sea_surface_fraction, or of
+            1 - land_fraction, everywhere.
         n_samples: Number of samples in batch.
         img_shape: Shape of spatial dimensions.
 
@@ -2802,12 +3101,16 @@ def _get_ocean_data_for_predict_paired(
             (n_samples, total_timesteps, *img_shape), 0.05, device=DEVICE
         )
     if "sea_surface_fraction" in data_dict:
-        data_dict["sea_surface_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["sea_surface_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            sea_surface_fraction,
+            device=DEVICE,
         )
     if "land_fraction" in data_dict:
-        data_dict["land_fraction"] = torch.ones(
-            n_samples, total_timesteps, *img_shape, device=DEVICE
+        data_dict["land_fraction"] = torch.full(
+            (n_samples, total_timesteps, *img_shape),
+            1 - sea_surface_fraction,
+            device=DEVICE,
         )
 
     time = xr.DataArray(
@@ -2828,24 +3131,27 @@ def _get_ocean_data_for_predict_paired(
 
 
 @pytest.mark.parametrize(
-    "in_names,out_names,hfds_role",
+    "in_names,out_names,hfds_role,sea_surface_fraction",
     [
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "hfgeou", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "sea_surface_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.5,
             id="hfds_next_step_forcing_no_hfgeou",
         ),
         pytest.param(
             ["thetao_0", "thetao_1", "hfds", "land_fraction"],
             ["thetao_0", "thetao_1"],
             "next_step_forcing",
+            0.0,
             id="hfds_next_step_forcing_land_fraction",
         ),
         pytest.param(
@@ -2858,6 +3164,7 @@ def _get_ocean_data_for_predict_paired(
             ],
             ["thetao_0", "thetao_1", "hfds"],
             "diagnostic",
+            0.5,
             id="hfds_diagnostic",
         ),
     ],
@@ -2866,6 +3173,7 @@ def test_ocean_derived_variables_integration(
     in_names,
     out_names,
     hfds_role,
+    sea_surface_fraction,
 ):
     next_step_forcing_names = []
     if hfds_role == "next_step_forcing":
@@ -2881,6 +3189,7 @@ def test_ocean_derived_variables_integration(
         n_steps=n_steps,
         in_names=in_names,
         out_names=out_names,
+        sea_surface_fraction=sea_surface_fraction,
     )
     derived_data = data.compute_derived_variables(
         derive_func=stepper.derive_func, forcing_data=data
@@ -2936,13 +3245,17 @@ def test_ocean_derived_variables_integration(
     )
     # check imbalance for forward steps
     for i in range(n_steps):
-        expected_pred_imbalance = pred_tendency[:, i] - pred_flux[:, i]
+        expected_pred_imbalance = (
+            sea_surface_fraction * pred_tendency[:, i] - pred_flux[:, i]
+        )
         torch.testing.assert_close(
             pred_imbalance[:, i],
             expected_pred_imbalance,
             msg=f"Unexpected pred OHC imbalance at step {i + 1}",
         )
-        expected_ref_imbalance = ref_tendency[:, i] - ref_flux[:, i]
+        expected_ref_imbalance = (
+            sea_surface_fraction * ref_tendency[:, i] - ref_flux[:, i]
+        )
         torch.testing.assert_close(
             ref_imbalance[:, i],
             expected_ref_imbalance,
@@ -3181,3 +3494,604 @@ def test_step_masks_corrector_diagnostics():
     assert torch.isnan(delta[..., 0, 0]).all()
     on_mask = delta[~torch.isnan(delta)]
     torch.testing.assert_close(on_mask, torch.full_like(on_mask, offset))
+
+
+class _AddOne(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+class _ScaleModule(torch.nn.Module):
+    """Multiplies input by a learnable scalar, so grads flow through outputs."""
+
+    def __init__(self, factor: float = 1.5):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor(factor, device=get_device()))
+
+    def forward(self, x):
+        return self.weight * x
+
+
+class _ScaleCorrection:
+    """Scales one field, so the delta carries the prediction's graph."""
+
+    def __init__(self, name: str, factor: float):
+        self._name = name
+        self._factor = factor
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[dict, CorrectorState | None]:
+        return {self._name: self._factor * gen_data[self._name]}, corrector_state
+
+
+class _GradRecordingOptimization(NullOptimization):
+    """Backwards the accumulated loss and records grads instead of stepping."""
+
+    def __init__(self, params: Iterable[torch.nn.Parameter]):
+        super().__init__()
+        self._params = list(params)
+        self.grads: list[torch.Tensor] | None = None
+
+    def set_mode(self, modules: torch.nn.ModuleList):
+        for m in modules:
+            m.train()
+
+    def step_weights(self):
+        self._accumulated_loss.backward()
+        self.grads = [
+            p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p)
+            for p in self._params
+        ]
+        for p in self._params:
+            p.grad = None
+        super().step_weights()
+
+
+def _corrector_loss_stepper(
+    module: torch.nn.Module,
+    correction=None,
+    disabled_epochs: int = 0,
+    dataset_info: DatasetInfo | None = None,
+    input_masking: StaticSpatialMaskingConfig | None = None,
+    names: list[str] | None = None,
+) -> Stepper:
+    """Build a ``names`` -> ``names`` stepper, optionally installing a
+    correction. ``names`` defaults to ``["a"]``."""
+    names = ["a"] if names is None else names
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=list(names),
+                    out_names=list(names),
+                    normalization=trivial_network_and_loss_normalization(names),
+                )
+            ),
+        ),
+        input_masking=input_masking,
+    )
+    stepper = config.get_stepper(
+        dataset_info if dataset_info is not None else get_dataset_info()
+    )
+    if correction is not None:
+        step = stepper._step_obj
+        assert isinstance(step, SingleModuleStep)
+        corrector: CorrectorABC = CorrectionSequence([correction])
+        if disabled_epochs > 0:
+            corrector = EpochScheduledCorrector(
+                wrapped=corrector, disabled_epochs=disabled_epochs
+            )
+        step._corrector = corrector
+    return stepper
+
+
+def test_train_on_batch_pre_corrector_equivalence():
+    torch.manual_seed(0)
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=2, epoch=0
+    ).to_device()
+    offset = 3.0
+    baseline = _init_train_stepper(
+        stepper=_corrector_loss_stepper(_AddOne()),
+        loss=StepLossConfig(type="MSE"),
+    )
+    corrected = _init_train_stepper(
+        stepper=_corrector_loss_stepper(
+            _AddOne(), ConstantOffsetCorrection("a", offset)
+        ),
+        loss=StepLossConfig(type="MSE"),
+        corrector_loss=CorrectorLossConfig(
+            precorrector_optimization=PreCorrectorOptimizationConfig(
+                names_and_prefixes=["a"]
+            )
+        ),
+    )
+    baseline_out = baseline.train_on_batch(data, optimization=NullOptimization())
+    corrected_out = corrected.train_on_batch(data, optimization=NullOptimization())
+    # the main loss sees the pre-corrector predictions, matching a stepper
+    # with no corrector at all
+    torch.testing.assert_close(
+        corrected_out.metrics["loss"], baseline_out.metrics["loss"]
+    )
+    # the returned predictions stay fully corrected
+    ic = data.data["a"][:, 0]
+    torch.testing.assert_close(corrected_out.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
+
+
+def test_gradient_flows_through_correction_when_configured():
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=2, epoch=0
+    ).to_device()
+    corrector_loss = CorrectorLossConfig(
+        regularization=CorrectorRegularizationConfig(
+            names_and_prefixes=["a"], norm="L2"
+        )
+    )
+    grads = {}
+    for label, config in (("baseline", None), ("regularized", corrector_loss)):
+        module = _ScaleModule()
+        stepper = _corrector_loss_stepper(module, _ScaleCorrection("a", 2.0))
+        train_stepper = _init_train_stepper(
+            stepper=stepper,
+            loss=StepLossConfig(type="MSE"),
+            corrector_loss=config,
+        )
+        # the prebuilt module is deep-copied into the stepper, so read the
+        # stepper's own parameters
+        optimization = _GradRecordingOptimization(stepper.modules.parameters())
+        train_stepper.train_on_batch(data, optimization=optimization)
+        assert optimization.grads is not None
+        grads[label] = optimization.grads[0]
+    assert torch.isfinite(grads["baseline"]).all()
+    assert torch.isfinite(grads["regularized"]).all()
+    assert not torch.allclose(grads["baseline"], grads["regularized"])
+
+
+def test_corrector_penalty_gradient_accumulation():
+    torch.manual_seed(0)
+    n_forward_steps = 2
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=n_forward_steps + 1, epoch=0
+    ).to_device()
+    train_stepper = _init_train_stepper(
+        stepper=_corrector_loss_stepper(_ScaleModule(), _ScaleCorrection("a", 2.0)),
+        loss=StepLossConfig(type="MSE"),
+        corrector_loss=CorrectorLossConfig(
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2"
+            )
+        ),
+    )
+    optimization = OptimizationConfig(use_gradient_accumulation=True).build(
+        modules=train_stepper.modules, max_epochs=2
+    )
+    accumulate_calls: list[torch.Tensor] = []
+    original_accumulate = optimization.accumulate_loss
+
+    def counting_accumulate(loss: torch.Tensor):
+        accumulate_calls.append(loss)
+        original_accumulate(loss)
+
+    optimization.accumulate_loss = counting_accumulate  # type: ignore[method-assign]
+    # backward runs inside each accumulate_loss call; the penalty is folded
+    # into the per-step total, so this must not double-backward
+    output = train_stepper.train_on_batch(data, optimization=optimization)
+    assert len(accumulate_calls) == n_forward_steps  # one per optimized step
+    assert torch.isfinite(output.metrics["loss"])
+    for step in range(n_forward_steps):
+        assert torch.isfinite(output.metrics[f"loss_step_{step}"])
+
+
+def test_masked_output_with_corrector_loss_finite():
+    torch.manual_seed(0)
+    mask = torch.ones(5, 5, device=DEVICE)
+    mask[0, 0] = 0.0
+    dataset_info = get_dataset_info(
+        img_shape=(5, 5),
+        spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+        device=DEVICE,
+    )
+    stepper = _corrector_loss_stepper(
+        _ScaleModule(),
+        _ScaleCorrection("a", 2.0),
+        dataset_info=dataset_info,
+        input_masking=StaticSpatialMaskingConfig(mask_value=0, fill_value=0.0),
+    )
+    train_stepper = _init_train_stepper(
+        stepper=stepper,
+        loss=StepLossConfig(type="MSE"),
+        corrector_loss=CorrectorLossConfig(
+            precorrector_optimization=PreCorrectorOptimizationConfig(
+                names_and_prefixes=["a"]
+            ),
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2"
+            ),
+        ),
+    )
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=2, img_shape=(5, 5), epoch=0
+    ).to_device()
+    # the dataset is NaN at the masked point, like the masked outputs
+    data.data["a"][..., 0, 0] = torch.nan
+    optimization = _GradRecordingOptimization(stepper.modules.parameters())
+    output = train_stepper.train_on_batch(data, optimization=optimization)
+    # losses and gradients stay finite through the NaN-filling
+    # apply_output_masking path
+    assert torch.isfinite(output.metrics["loss"])
+    assert torch.isfinite(output.metrics["loss_step_0"])
+    assert optimization.grads is not None
+    for grad in optimization.grads:
+        assert torch.isfinite(grad).all()
+
+
+def test_epoch_scheduled_corrector():
+    torch.manual_seed(0)
+    offset = 2.0
+    weight = 0.5
+
+    def make(corrector_loss: CorrectorLossConfig | None) -> TrainStepper:
+        return _init_train_stepper(
+            stepper=_corrector_loss_stepper(
+                _AddOne(), ConstantOffsetCorrection("a", offset), disabled_epochs=1
+            ),
+            loss=StepLossConfig(type="MSE"),
+            corrector_loss=corrector_loss,
+        )
+
+    train_stepper = make(
+        CorrectorLossConfig(
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2", weight=weight
+            )
+        )
+    )
+    baseline = make(None)
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=2, epoch=0
+    ).to_device()
+    ic = data.data["a"][:, 0]
+
+    for stepper in (train_stepper, baseline):
+        stepper.set_train()
+        stepper.set_epoch(1)  # disabled during the first epoch
+    disabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
+    disabled_base = baseline.train_on_batch(data, optimization=NullOptimization())
+    # inert: no correction applied, nothing added to the total, no error
+    torch.testing.assert_close(disabled.gen_data["a"][:, 0, 1], ic + 1.0)
+    torch.testing.assert_close(
+        disabled.metrics["loss_step_0"], disabled_base.metrics["loss_step_0"]
+    )
+
+    # the corrector is always applied in eval mode, so the validation pass of
+    # the still-disabled epoch resolves the selection and applies the penalty
+    for stepper in (train_stepper, baseline):
+        stepper.set_eval()
+    eval_pass = train_stepper.train_on_batch(data, optimization=NullOptimization())
+    eval_base = baseline.train_on_batch(data, optimization=NullOptimization())
+    torch.testing.assert_close(
+        eval_pass.metrics["loss_step_0"],
+        eval_base.metrics["loss_step_0"] + weight * offset**2,
+    )
+
+    for stepper in (train_stepper, baseline):
+        stepper.set_train()
+        stepper.set_epoch(2)  # first enabled epoch
+    enabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
+    enabled_base = baseline.train_on_batch(data, optimization=NullOptimization())
+    torch.testing.assert_close(enabled.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
+    torch.testing.assert_close(
+        enabled.metrics["loss_step_0"],
+        enabled_base.metrics["loss_step_0"] + weight * offset**2,
+    )
+
+
+def test_penalty_rides_the_existing_metrics():
+    torch.manual_seed(0)
+    offset = 2.0
+    weight = 0.5
+    n_forward_steps = 2
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=n_forward_steps + 1, epoch=0
+    ).to_device()
+
+    def make(corrector_loss: CorrectorLossConfig | None) -> TrainStepper:
+        return _init_train_stepper(
+            stepper=_corrector_loss_stepper(
+                _AddOne(), ConstantOffsetCorrection("a", offset)
+            ),
+            loss=StepLossConfig(type="MSE"),
+            corrector_loss=corrector_loss,
+        )
+
+    with_reg = make(
+        CorrectorLossConfig(
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2", weight=weight
+            )
+        )
+    )
+    baseline = make(None)
+    reg_out = with_reg.train_on_batch(data, optimization=NullOptimization())
+    base_out = baseline.train_on_batch(data, optimization=NullOptimization())
+    # a constant-offset delta in trivial (std 1) loss normalization gives an
+    # exact MSE penalty of offset**2 at every step
+    for step in range(n_forward_steps):
+        # the weighted penalty is folded into the per-step loss
+        torch.testing.assert_close(
+            reg_out.metrics[f"loss_step_{step}"],
+            base_out.metrics[f"loss_step_{step}"] + weight * offset**2,
+        )
+    # the batch total is the sum over the optimized steps
+    torch.testing.assert_close(
+        reg_out.metrics["loss"],
+        base_out.metrics["loss"] + n_forward_steps * weight * offset**2,
+    )
+    # the per-channel entries stay the main loss for that channel
+    assert reg_out.per_channel_losses is not None
+    assert base_out.per_channel_losses is not None
+    assert set(reg_out.per_channel_losses) == set(base_out.per_channel_losses)
+    for name, info in reg_out.per_channel_losses.items():
+        torch.testing.assert_close(info.loss, base_out.per_channel_losses[name].loss)
+    # no metric key of the penalty's own
+    assert not any("penalty" in name for name in reg_out.metrics)
+
+
+def test_both_features_together():
+    torch.manual_seed(0)
+    offset = 3.0
+    weight = 0.5
+    data = BatchData.new_for_testing(
+        names=["a"], n_samples=2, n_timesteps=2, epoch=0
+    ).to_device()
+    both = _init_train_stepper(
+        stepper=_corrector_loss_stepper(
+            _AddOne(), ConstantOffsetCorrection("a", offset)
+        ),
+        loss=StepLossConfig(type="MSE"),
+        corrector_loss=CorrectorLossConfig(
+            precorrector_optimization=PreCorrectorOptimizationConfig(
+                names_and_prefixes=["a"]
+            ),
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2", weight=weight
+            ),
+        ),
+    )
+    no_corrector = _init_train_stepper(
+        stepper=_corrector_loss_stepper(_AddOne()),
+        loss=StepLossConfig(type="MSE"),
+    )
+    both_out = both.train_on_batch(data, optimization=NullOptimization())
+    base_out = no_corrector.train_on_batch(data, optimization=NullOptimization())
+    # the main loss sees the pre-corrector outputs, and the weighted penalty
+    # is added on top
+    torch.testing.assert_close(
+        both_out.metrics["loss"], base_out.metrics["loss"] + weight * offset**2
+    )
+    torch.testing.assert_close(
+        both_out.metrics["loss_step_0"],
+        base_out.metrics["loss_step_0"] + weight * offset**2,
+    )
+    # the returned predictions stay fully corrected
+    ic = data.data["a"][:, 0]
+    torch.testing.assert_close(both_out.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
+
+
+@pytest.mark.parametrize("selected,trains", [("b", False), ("a", True)])
+def test_corrector_loss_errors_at_the_first_active_step(selected, trains):
+    # the build-time check covers the loss names, so a name the loss covers but
+    # the installed correction does not touch survives it and raises on the
+    # first step whose delta is non-empty.
+    torch.manual_seed(0)
+    data = BatchData.new_for_testing(
+        names=["a", "b"], n_samples=2, n_timesteps=2, epoch=0
+    ).to_device()
+    train_stepper = _init_train_stepper(
+        stepper=_corrector_loss_stepper(
+            _AddOne(), ConstantOffsetCorrection("a", 2.0), names=["a", "b"]
+        ),
+        loss=StepLossConfig(type="MSE"),
+        corrector_loss=CorrectorLossConfig(
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=[selected], norm="L2"
+            )
+        ),
+    )
+    if trains:
+        output = train_stepper.train_on_batch(data, optimization=NullOptimization())
+        assert torch.isfinite(output.metrics["loss"])
+    else:
+        with pytest.raises(ValueError, match="match none of the correction deltas"):
+            train_stepper.train_on_batch(data, optimization=NullOptimization())
+
+
+def _residual_stepper_config(
+    normalization: NetworkAndLossNormalizationConfig,
+    residual_prediction: ResidualPredictionConfig | None,
+    names: list[str],
+) -> StepperConfig:
+    """Single-module stepper config for the residual-prediction tests; the
+    module adds one in normalized space."""
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _AddOne()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=normalization,
+                    residual_prediction=residual_prediction,
+                )
+            ),
+        ),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+
+
+@pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
+def test_legacy_residual_prediction_bool_checkpoint_steps_identically(
+    tmp_path: pathlib.Path, legacy: bool
+):
+    """A checkpoint written when residual_prediction was a bool must keep
+    stepping exactly as it did. Config-level loading is not enough to promise
+    that: this goes through torch.save and load_stepper, the way inference
+    reaches a real checkpoint, and compares against the equivalent config
+    built the current way.
+    """
+
+    normalization = NetworkAndLossNormalizationConfig(
+        network=trivial_normalization(["a"]), residual=trivial_normalization(["a"])
+    )
+    current = _residual_stepper_config(
+        normalization, ResidualPredictionConfig() if legacy else None, names=["a"]
+    )
+    state = current.get_stepper(get_dataset_info()).get_state()
+    # Exactly what a pre-ResidualPredictionConfig checkpoint holds.
+    state["config"]["step"]["config"]["residual_prediction"] = legacy
+
+    path = tmp_path / "legacy_stepper"
+    torch.save({"stepper": state}, path)
+    loaded = load_stepper(path)
+
+    input_data = {"a": torch.rand(2, 5, 5).to(DEVICE)}
+    args = StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    expected = current.get_stepper(get_dataset_info()).step(args).output["a"]
+    torch.testing.assert_close(loaded.step(args).output["a"], expected)
+
+
+def test_step_residual_normalized_prediction():
+    """A unit network output must correspond to one residual std, added to
+    the input in physical units; residual means are never applied (the stats
+    convention pairs full-field centering with tendency stds)."""
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means=field_means, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.5, "b": 0.1}, stds=res_stds),
+        ),
+        ResidualPredictionConfig(normalized=True),
+        names,
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        expected = input_data[n] + res_stds[n] * network_output
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_step_hybrid_residual_normalized_prediction():
+    """The production case: one prognostic stepped as a residual-normalized
+    tendency while the other is predicted full-field, in the same step."""
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means=field_means, stds=field_stds),
+            residual=NormalizationConfig(means={n: 0.0 for n in names}, stds=res_stds),
+        ),
+        ResidualPredictionConfig(names=["a"], normalized=True),
+        names,
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        if n == "a":
+            expected = input_data[n] + res_stds[n] * network_output
+        else:
+            expected = network_output * field_stds[n] + field_means[n]
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
+    """Residual-stepped names are scored in tendency-std units and full-field
+    names in full-field-std units; scoring a full-field state error in tendency
+    units would inflate it by (field_std / tendency_std)^2."""
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=field_stds),
+            residual=NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds=res_stds),
+        ),
+        residual_prediction=ResidualPredictionConfig(names=["a"]),
+    )
+    stds = config.get_loss_normalizer().stds
+    assert stds["a"].item() == pytest.approx(res_stds["a"])
+    assert stds["b"].item() == pytest.approx(field_stds["b"])
+
+
+def test_normalized_residual_prediction_rejects_explicit_loss_normalization():
+    """residual_prediction.normalized needs a residual block, which cannot
+    coexist with an explicit loss block, so the option commits the loss to the
+    tendency convention. Say that here rather than sending the user round the
+    two-step dead end of 'add a residual block' then 'residual conflicts with
+    loss', neither of which names the option that forced it."""
+    with pytest.raises(ValueError, match="cannot be combined with normalization.loss"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=trivial_normalization(["a"]),
+                loss=trivial_normalization(["a"], std=2.0),
+            ),
+            residual_prediction=ResidualPredictionConfig(normalized=True),
+        )
+
+
+def test_normalized_residual_prediction_requires_residual_block():
+    with pytest.raises(ValueError, match="normalization.residual"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": torch.nn.Identity()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=trivial_normalization(["a"]),
+            ),
+            residual_prediction=ResidualPredictionConfig(normalized=True),
+        )
+
+
+def test_load_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
+    """Warm starts (parameter_init) load weights through load_stepper, and
+    must keep getting the stepper weights of a checkpoint that has EMA weights.
+    """
+    path = tmp_path / "ckpt.tar"
+    stepper_weights, _ = save_stepper_with_ema(path)
+
+    stepper = load_stepper(path)
+
+    assert_parameters_equal(stepper.modules, stepper_weights)

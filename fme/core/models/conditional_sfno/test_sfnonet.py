@@ -754,3 +754,115 @@ def test_clip_latent_global_means_envelope_synchronized_across_ranks():
     # different envelopes and this reduction would change the values.
     torch.testing.assert_close(dist.reduce_min(model._gm_min.clone()), model._gm_min)
     torch.testing.assert_close(dist.reduce_max(model._gm_max.clone()), model._gm_max)
+
+
+def _grads_after_backward(checkpointing: int):
+    """Gradient of every parameter after one backward at a checkpointing level."""
+    img_shape = (9, 18)
+    n_samples, n_channels = 2, 2
+    device = get_device()
+    torch.manual_seed(0)
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        checkpointing=checkpointing,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=n_channels,
+        out_chans=n_channels,
+    ).to(device)
+    context = Context(
+        embedding_scalar=torch.zeros(n_samples, 0, device=device),
+        labels=torch.zeros(n_samples, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    torch.manual_seed(1234)
+    x = torch.randn(n_samples, n_channels, *img_shape, device=device)
+    model(x, context).square().mean().backward()
+    return {
+        name: param.grad.clone() if param.grad is not None else None
+        for name, param in model.named_parameters()
+    }
+
+
+@pytest.mark.parametrize("checkpointing", [1, 2, 3])
+def test_checkpointing_gradients_match_uncheckpointed(checkpointing):
+    """Checkpointing recomputes activations, so it must not change gradients.
+
+    A dropped gradient fails here too: the reentrant checkpoint variant leaves
+    the encoder's parameters at grad=None, which no longer matches the
+    uncheckpointed reference.
+    """
+    reference = _grads_after_backward(0)
+    actual = _grads_after_backward(checkpointing)
+    assert set(actual) == set(reference)
+    for name, grad in reference.items():
+        torch.testing.assert_close(actual[name], grad, msg=f"gradient for {name}")
+
+
+def _latent_before_blocks(model, x: torch.Tensor, ctx: Context) -> torch.Tensor:
+    """The latent entering the first block, i.e. after any envelope clipping."""
+    latents: list[torch.Tensor] = []
+    handle = model.blocks[0].register_forward_pre_hook(
+        lambda _module, args: latents.append(args[0].detach().clone())
+    )
+    with torch.no_grad():
+        model(x, ctx)
+    handle.remove()
+    (latent,) = latents
+    return latent
+
+
+def _reference_clip(
+    latent: torch.Tensor, gm_min: torch.Tensor, gm_max: torch.Tensor
+) -> torch.Tensor:
+    """The previous branchy implementation of eval-mode envelope clipping."""
+    global_means = latent.mean(dim=(-2, -1), keepdim=True)
+    if torch.isfinite(gm_max).all():
+        clipped = torch.clamp(global_means, min=gm_min, max=gm_max)
+        return latent + (clipped - global_means)
+    return latent
+
+
+@pytest.mark.parametrize("envelope_set", [False, True])
+def test_clip_latent_global_means_eval_matches_branchy_reference(envelope_set: bool):
+    """Eval clipping is bit-identical to the previous `if`-based version, both
+    before any training forward (sentinel envelope, no-op) and after one
+    (finite envelope, clamp-and-shift)."""
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    x = 10.0 * torch.randn(4, 2, 9, 18, device=device)
+    model.eval()
+    raw_latent = _latent_before_blocks(model, x, ctx)  # sentinels: unclipped
+    if envelope_set:
+        model._gm_min.fill_(-0.01)
+        model._gm_max.fill_(0.01)
+        assert (raw_latent.mean(dim=(-2, -1)).abs() > 0.01).any()
+    actual = _latent_before_blocks(model, x, ctx)
+    expected = _reference_clip(raw_latent, model._gm_min, model._gm_max)
+    assert torch.equal(actual, expected)
+    assert torch.isfinite(actual).all()
+
+
+@pytest.mark.parametrize("envelope_set", [False, True])
+def test_clip_latent_global_means_eval_has_no_graph_breaks(envelope_set: bool):
+    """The sentinel check must not branch on a tensor value in Python, which
+    would split the compiled forward into three graphs."""
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    if envelope_set:
+        model._gm_min.fill_(-0.01)
+        model._gm_max.fill_(0.01)
+    model.eval()
+    x = torch.randn(4, 2, 9, 18, device=device)
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(model)(x, ctx)
+    finally:
+        torch._dynamo.reset()
+    assert explanation.graph_break_count == 0, explanation.break_reasons
+    assert explanation.graph_count == 1

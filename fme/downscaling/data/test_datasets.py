@@ -24,7 +24,7 @@ from fme.downscaling.data.datasets import (
     _sample_indices_with_region_sampling,
     patched_batch_gen_from_paired_loader,
 )
-from fme.downscaling.data.patching import Patch, _HorizontalSlice
+from fme.downscaling.data.patching import HorizontalSlice, Patch
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
 
 
@@ -492,12 +492,12 @@ def test_batch_data_generate_from_patches():
     batch = _make_batch_data_for_patching()
     patches = [
         Patch(
-            input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
-            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+            input_slice=HorizontalSlice(y=slice(1, 3), x=slice(None)),
+            output_slice=HorizontalSlice(y=slice(None), x=slice(None)),
         ),
         Patch(
-            input_slice=_HorizontalSlice(y=slice(0, 2), x=slice(2, 3)),
-            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+            input_slice=HorizontalSlice(y=slice(0, 2), x=slice(2, 3)),
+            output_slice=HorizontalSlice(y=slice(None), x=slice(None)),
         ),
     ]
     generated = list(batch.generate_from_patches(patches))
@@ -522,8 +522,8 @@ def test_batch_data_generate_from_patches():
 def test_batch_data_apply_patch_already_patched_raises():
     batch = _make_batch_data_for_patching()
     patch = Patch(
-        input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
-        output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        input_slice=HorizontalSlice(y=slice(1, 3), x=slice(None)),
+        output_slice=HorizontalSlice(y=slice(None), x=slice(None)),
     )
     (patched,) = list(batch.generate_from_patches([patch]))
     with pytest.raises(ValueError, match="previously patched"):
@@ -542,8 +542,8 @@ def _make_patches(
         slices_x = [slice(None)] * len(slices_y)
     return [
         Patch(
-            input_slice=_HorizontalSlice(y=sy, x=sx),
-            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+            input_slice=HorizontalSlice(y=sy, x=sx),
+            output_slice=HorizontalSlice(y=slice(None), x=slice(None)),
         )
         for sy, sx in zip(slices_y, slices_x)
     ]

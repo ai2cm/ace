@@ -26,7 +26,6 @@ from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
-    _get_segment_label,
     get_initial_condition,
     main,
     run_segmented_inference,
@@ -44,6 +43,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.generics.inference import get_segment_label
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -179,7 +179,7 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
     single_dir = tmp_path / "non_segmented_run"
     monkeypatch.setenv("WANDB_NAME", "myrun")
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(make_config(run_dir, 3), 2)
         assert [run["name"] for run in wandb.runs] == [
             "myrun-segment_20000101T06",
@@ -302,7 +302,7 @@ def test_get_segment_label_raises_on_collision():
 
     # hour-precision format is too coarse to distinguish 45min-apart segments
     with pytest.raises(ValueError, match="same label"):
-        _get_segment_label(initialization_time, timestep, 1, n_forward_steps)
+        get_segment_label(initialization_time, timestep, 1, n_forward_steps)
 
 
 def save_noise_conditioned_stepper(
@@ -442,7 +442,9 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
         with open(config_path, "w") as f:
             yaml.dump(dataclasses.asdict(config), f)
         with mock_wandb() as wandb:
-            wandb.configure(log_to_wandb=False)
+            wandb.configure(
+                log_to_wandb=False, metrics_log_dir=str(tmp_path / "metrics")
+            )
             main(config_path, segments)
 
     # Two segments of 3 steps each, seeded.

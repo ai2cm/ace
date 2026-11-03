@@ -1,9 +1,13 @@
 import pytest
 import torch
 
-from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
+from fme.ace.aggregator.loss_metrics import (
+    PerChannelLossAggregator,
+    PerStepLossAggregator,
+)
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.loss import ChannelLossInfo
 
 
 def test_per_step_loss_aggregator_means_over_uneven_key_sets():
@@ -63,3 +67,36 @@ def test_per_step_loss_aggregator_mismatched_ranks(empty_rank):
         count = sum(r + 1 for r in contributors)
         expected[f"val/mean/loss_step_{step}"] = total / count
     assert logs == pytest.approx(expected)
+
+
+def test_per_channel_loss_aggregator_insertion_order_independent():
+    """get_logs must produce identical results regardless of recording order.
+
+    PerChannelLossAggregator.get_logs calls dist.reduce_mean per key.
+    reduce_mean wraps all_reduce, which matches by call position — so if
+    two ranks iterate keys in different orders, the collectives pair wrong
+    variables and produce means over mixed channels. This test verifies
+    that the log keys and values are independent of insertion order.
+    """
+    device = get_device()
+    data_forward = {
+        "z_var": ChannelLossInfo(loss=torch.tensor(1.0, device=device), count=2),
+        "a_var": ChannelLossInfo(loss=torch.tensor(3.0, device=device), count=2),
+        "m_var": ChannelLossInfo(loss=torch.tensor(5.0, device=device), count=2),
+    }
+    data_reverse = {
+        "m_var": ChannelLossInfo(loss=torch.tensor(5.0, device=device), count=2),
+        "a_var": ChannelLossInfo(loss=torch.tensor(3.0, device=device), count=2),
+        "z_var": ChannelLossInfo(loss=torch.tensor(1.0, device=device), count=2),
+    }
+
+    agg_forward = PerChannelLossAggregator()
+    agg_forward.record(data_forward)
+    logs_forward = agg_forward.get_logs("train")
+
+    agg_reverse = PerChannelLossAggregator()
+    agg_reverse.record(data_reverse)
+    logs_reverse = agg_reverse.get_logs("train")
+
+    assert logs_forward == logs_reverse
+    assert list(logs_forward.keys()) == sorted(logs_forward.keys())

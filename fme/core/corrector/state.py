@@ -52,6 +52,16 @@ class CorrectorState:
             self.global_dry_air_mass = self.global_dry_air_mass.pin_memory()
         return self
 
+    def select_sample_slice(self, sample_slice: slice) -> "CorrectorState":
+        """Select a contiguous range of samples."""
+        return CorrectorState(
+            global_dry_air_mass=(
+                None
+                if self.global_dry_air_mass is None
+                else self.global_dry_air_mass[sample_slice]
+            ),
+        )
+
     def broadcast_ensemble(self, n_ensemble: int) -> "CorrectorState":
         if self.global_dry_air_mass is None:
             return CorrectorState()

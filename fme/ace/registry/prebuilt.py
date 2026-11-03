@@ -1,4 +1,6 @@
 import dataclasses
+from collections.abc import Mapping
+from typing import Any
 
 from torch import nn
 
@@ -16,6 +18,10 @@ class PreBuiltBuilder(ModuleConfig):
     """
 
     module: nn.Module
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
 
     def build(
         self,
