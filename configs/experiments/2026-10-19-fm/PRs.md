@@ -27,3 +27,13 @@ listed here.
 | [#1610](https://github.com/ai2cm/ace/pull/1610) | Compile every module with CUDA graphs (reduce-overhead) | yyexela |
 | [#1611](https://github.com/ai2cm/ace/pull/1611) | Batch EMA weight update with foreach kernels | yyexela |
 | [#1612](https://github.com/ai2cm/ace/pull/1612) | Fix Swin padding geometry: consistent CPB latitudes, window-multiple fill, and mirror-mode lat coords | yyexela |
+| [#1615](https://github.com/ai2cm/ace/pull/1615) | Add checkpoint weight averaging (model soup) | yyexela |
+| [#1617](https://github.com/ai2cm/ace/pull/1617) | Add per-sample global-mean drift inference aggregator | yyexela |
+
+## Deferred
+
+These PRs are open as drafts and are not merged into this branch.
+
+| PR | Title | Author |
+|----|-------|--------|
+| [#1618](https://github.com/ai2cm/ace/pull/1618) | Drift-gated soup checkpoint selection in trainer | yyexela |
