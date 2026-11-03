@@ -348,8 +348,35 @@ def test_fill_value_overrides_unmatched_key_raises(key):
         fill_value="mean",
         fill_value_overrides={key: 0.0},
     )
-    with pytest.raises(ValueError, match="match no channel"):
+    with pytest.raises(ValueError, match="match no masked channel"):
         config.build(mask=mask, means=means)
+
+
+def test_fill_value_overrides_key_selecting_only_excluded_channels_raises():
+    """An excluded channel is never filled, so an override for it is a no-op."""
+    mask, _, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value="mean",
+        exclude_names_and_prefixes=["sst"],
+        fill_value_overrides={"sst": 0.0},
+    )
+    with pytest.raises(ValueError, match="match no masked channel"):
+        config.build(mask=mask, means=means)
+
+
+def test_fill_value_overrides_masked_channel_missing_from_means_raises():
+    """With overrides set, means lists the channels to fill, even for a float."""
+    mask, data, means = _overrides_setup()
+    del means["sst"]
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"thetao_": 0.0},
+    )
+    masking = config.build(mask=mask, means=means)
+    with pytest.raises(KeyError, match="missing key 'sst'"):
+        masking(data)
 
 
 def test_fill_value_overrides_requires_means():
