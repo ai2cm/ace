@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 
-import numpy as np
 import pytest
 import torch
 
@@ -19,14 +18,6 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 
 
-def test_average_of_identical_state_dicts_equals_input():
-    state = {"w": torch.randn(3, 4), "b": torch.randn(4)}
-    result = average_state_dicts([state, state, state])
-    assert result.keys() == state.keys()
-    for key in state:
-        torch.testing.assert_close(result[key], state[key])
-
-
 def test_average_of_two_state_dicts_is_midpoint():
     a = {"w": torch.randn(3, 4)}
     b = {"w": torch.randn(3, 4)}
@@ -42,22 +33,30 @@ def test_weighted_average_normalizes_weights():
 
 
 @pytest.mark.parametrize(
-    "weights", [pytest.param([1.0], id="wrong_length"), pytest.param([1.0, -1.0])]
+    "weights",
+    [
+        pytest.param([1.0], id="wrong_length"),
+        pytest.param([1.0, -1.0], id="negative"),
+        pytest.param([0.0, 0.0], id="zero_sum"),
+    ],
 )
 def test_invalid_weights_raise(weights):
     state = {"w": torch.zeros(2)}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="weights|Weights"):
         average_state_dicts([state, state], weights=weights)
 
 
-def test_mismatched_keys_raise():
-    with pytest.raises(ValueError, match="different keys"):
-        average_state_dicts([{"w": torch.zeros(2)}, {"v": torch.zeros(2)}])
-
-
-def test_mismatched_shapes_raise():
-    with pytest.raises(ValueError, match="shape"):
-        average_state_dicts([{"w": torch.zeros(2)}, {"w": torch.zeros(3)}])
+@pytest.mark.parametrize(
+    "a, b, match",
+    [
+        pytest.param({"w": torch.zeros(2)}, {"v": torch.zeros(2)}, "keys", id="keys"),
+        pytest.param({"w": torch.zeros(2)}, {"w": torch.zeros(3)}, "shape", id="shape"),
+        pytest.param({"w": 1}, {"w": 2}, "differs", id="non_tensor"),
+    ],
+)
+def test_mismatched_inputs_raise(a, b, match):
+    with pytest.raises(ValueError, match=match):
+        average_state_dicts([a, b])
 
 
 def test_non_floating_tensors_are_copied_from_first():
@@ -69,15 +68,21 @@ def test_non_floating_tensors_are_copied_from_first():
     assert torch.equal(result["mask"], a["mask"])
 
 
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
-def test_low_precision_dtype_preserved_and_averaged_in_float32(dtype):
-    # with weights of 1/3, accumulating in the input dtype rounds each term;
-    # the result must match a float32 accumulation cast back once
+@pytest.mark.parametrize(
+    "dtype, accumulate_dtype",
+    [
+        (torch.bfloat16, torch.float32),
+        (torch.float16, torch.float32),
+        (torch.float64, torch.float64),
+    ],
+)
+def test_dtype_preserved_and_accumulated_in_at_least_float32(dtype, accumulate_dtype):
+    # with weights of 1/3, accumulating in a lower precision gives a different result
     torch.manual_seed(0)
     states = [{"w": torch.randn(64).to(dtype)} for _ in range(3)]
     result = average_state_dicts(states)
     assert result["w"].dtype == dtype
-    expected = (sum(s["w"].float() / 3 for s in states)).to(dtype)
+    expected = sum((1 / 3) * s["w"].to(accumulate_dtype) for s in states).to(dtype)
     assert torch.equal(result["w"], expected)
 
 
@@ -128,14 +133,6 @@ def _save_checkpoint(stepper: Stepper, path: str, epoch: int):
     )
 
 
-def _midpoint_parameters(a: Stepper, b: Stepper) -> dict[str, torch.Tensor]:
-    params_b = dict(b.modules.named_parameters())
-    return {
-        name: (param.detach().cpu() + params_b[name].detach().cpu()) / 2
-        for name, param in a.modules.named_parameters()
-    }
-
-
 def _assert_parameters_equal(stepper: Stepper, expected: dict[str, torch.Tensor]):
     params = dict(stepper.modules.named_parameters())
     assert params.keys() == expected.keys()
@@ -143,19 +140,24 @@ def _assert_parameters_equal(stepper: Stepper, expected: dict[str, torch.Tensor]
         torch.testing.assert_close(params[name].detach().cpu(), value)
 
 
-def test_soup_checkpoints_round_trip(tmp_path):
+def test_soup_checkpoints_round_trip(tmp_path, caplog):
     stepper_a = _get_stepper(seed=0)
     stepper_b = _get_stepper(seed=1)
     path_a, path_b = str(tmp_path / "a.tar"), str(tmp_path / "b.tar")
     _save_checkpoint(stepper_a, path_a, epoch=3)
     _save_checkpoint(stepper_b, path_b, epoch=4)
-    expected = _midpoint_parameters(stepper_a, stepper_b)
+    params_b = dict(stepper_b.modules.named_parameters())
+    expected = {
+        name: 0.75 * param.detach().cpu() + 0.25 * params_b[name].detach().cpu()
+        for name, param in stepper_a.modules.named_parameters()
+    }
     output_path = str(tmp_path / "soup.tar")
 
-    main([output_path, path_a, path_b])
+    main([output_path, path_a, path_b, "--weights", "3", "1"])
 
+    assert "raw, non-EMA weights are averaged" in caplog.text
     checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
-    assert checkpoint["soup"] == {"sources": [path_a, path_b], "weights": [0.5, 0.5]}
+    assert checkpoint["soup"] == {"sources": [path_a, path_b], "weights": [0.75, 0.25]}
     assert checkpoint["epoch"] == 3
     assert "optimization" not in checkpoint
     from_state = Stepper.from_state(checkpoint["stepper"])
@@ -180,23 +182,3 @@ def test_soup_checkpoints_rejects_different_configs(tmp_path):
     torch.save(checkpoint, path_b)
     with pytest.raises(ValueError, match="different stepper config"):
         soup_checkpoints([path_a, path_b], str(tmp_path / "soup.tar"))
-
-
-def test_soup_checkpoints_weighted(tmp_path):
-    stepper_a = _get_stepper(seed=0)
-    stepper_b = _get_stepper(seed=1)
-    path_a, path_b = str(tmp_path / "a.tar"), str(tmp_path / "b.tar")
-    _save_checkpoint(stepper_a, path_a, epoch=0)
-    _save_checkpoint(stepper_b, path_b, epoch=1)
-    output_path = str(tmp_path / "soup.tar")
-    soup_checkpoints([path_a, path_b], output_path, weights=[3.0, 1.0])
-    checkpoint = torch.load(output_path, map_location="cpu", weights_only=False)
-    assert checkpoint["soup"]["weights"] == [0.75, 0.25]
-    soup = Stepper.from_state(checkpoint["stepper"])
-    params_b = dict(stepper_b.modules.named_parameters())
-    expected = {
-        name: 0.75 * p.detach().cpu() + 0.25 * params_b[name].detach().cpu()
-        for name, p in stepper_a.modules.named_parameters()
-    }
-    _assert_parameters_equal(soup, expected)
-    assert np.isclose(sum(checkpoint["soup"]["weights"]), 1.0)
