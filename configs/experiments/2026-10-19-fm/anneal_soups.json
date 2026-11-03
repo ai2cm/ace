@@ -1,0 +1,13 @@
+{
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a1-smoke": {
+    "dataset_id": "01M6FTRASDFZKR22CMJMDZ32CS",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a1-smoke-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6FMB3MC5ZWWMMYA2YSMHHYT",
+    "epochs": [
+      1,
+      2
+    ],
+    "commit": "dadf6a27e59834ac930a6de35c0dc7a695822f6d"
+  }
+}
