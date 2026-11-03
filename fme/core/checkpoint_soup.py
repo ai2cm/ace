@@ -179,6 +179,72 @@ def _weights_key(stepper_state: Mapping[str, Any]) -> str:
     )
 
 
+def soup_checkpoint_dicts(
+    checkpoints: Sequence[Mapping[str, Any]],
+    sources: Sequence[str],
+    weights: Sequence[float] | None = None,
+) -> dict[str, Any]:
+    """Average the stepper weights of several loaded training checkpoints.
+
+    In-memory counterpart of :func:`soup_checkpoints`, which documents the
+    layout of the result.
+
+    Args:
+        checkpoints: The loaded checkpoints to average.
+        sources: A description of each checkpoint (e.g. its path), recorded
+            in the result and used in error messages.
+        weights: Optional non-negative weight per checkpoint, normalized to
+            sum to one. If None, a uniform average is taken.
+
+    Returns:
+        The averaged checkpoint.
+
+    Raises:
+        ValueError: If the checkpoints have different stepper configs or
+            module states that cannot be averaged.
+    """
+    if len(sources) != len(checkpoints):
+        raise ValueError(
+            f"Got {len(sources)} sources for {len(checkpoints)} checkpoints."
+        )
+    normalized = _normalized_weights(len(checkpoints), weights)
+    stepper_states = [checkpoint["stepper"] for checkpoint in checkpoints]
+    for source, stepper_state in zip(sources[1:], stepper_states[1:]):
+        if not _states_equal(stepper_state["config"], stepper_states[0]["config"]):
+            raise ValueError(
+                f"Checkpoint {source} has a different stepper config "
+                f"than {sources[0]}."
+            )
+    weights_key = _weights_key(stepper_states[0])
+    for source, stepper_state in zip(sources[1:], stepper_states[1:]):
+        if _weights_key(stepper_state) != weights_key:
+            raise ValueError(
+                f"Checkpoint {source} has a different stepper state layout "
+                f"than {sources[0]}."
+            )
+    averaged = _average_nested_states(
+        [stepper_state[weights_key] for stepper_state in stepper_states], normalized
+    )
+
+    output = {
+        key: value
+        for key, value in checkpoints[0].items()
+        if key not in _DROPPED_CHECKPOINT_KEYS
+    }
+    output["stepper"] = {**stepper_states[0], weights_key: averaged}
+    if EMA_CHECKPOINT_KEY in output:
+        output[EMA_CHECKPOINT_KEY] = {
+            key: value
+            for key, value in output[EMA_CHECKPOINT_KEY].items()
+            if key != _EMA_PARAMS_KEY
+        }
+    output[SOUP_CHECKPOINT_KEY] = {
+        "sources": [str(source) for source in sources],
+        "weights": normalized,
+    }
+    return output
+
+
 def soup_checkpoints(
     paths: Sequence[str],
     output_path: str,
@@ -214,43 +280,11 @@ def soup_checkpoints(
         ValueError: If the checkpoints have different stepper configs or
             module states that cannot be averaged.
     """
-    normalized = _normalized_weights(len(paths), weights)
+    _normalized_weights(len(paths), weights)  # validate before loading
     checkpoints = [
         torch.load(path, map_location="cpu", weights_only=False) for path in paths
     ]
-    stepper_states = [checkpoint["stepper"] for checkpoint in checkpoints]
-    for path, stepper_state in zip(paths[1:], stepper_states[1:]):
-        if not _states_equal(stepper_state["config"], stepper_states[0]["config"]):
-            raise ValueError(
-                f"Checkpoint {path} has a different stepper config than {paths[0]}."
-            )
-    weights_key = _weights_key(stepper_states[0])
-    for path, stepper_state in zip(paths[1:], stepper_states[1:]):
-        if _weights_key(stepper_state) != weights_key:
-            raise ValueError(
-                f"Checkpoint {path} has a different stepper state layout "
-                f"than {paths[0]}."
-            )
-    averaged = _average_nested_states(
-        [stepper_state[weights_key] for stepper_state in stepper_states], normalized
-    )
-
-    output = {
-        key: value
-        for key, value in checkpoints[0].items()
-        if key not in _DROPPED_CHECKPOINT_KEYS
-    }
-    output["stepper"] = {**stepper_states[0], weights_key: averaged}
-    if EMA_CHECKPOINT_KEY in output:
-        output[EMA_CHECKPOINT_KEY] = {
-            key: value
-            for key, value in output[EMA_CHECKPOINT_KEY].items()
-            if key != _EMA_PARAMS_KEY
-        }
-    output[SOUP_CHECKPOINT_KEY] = {
-        "sources": [str(path) for path in paths],
-        "weights": normalized,
-    }
+    output = soup_checkpoint_dicts(checkpoints, sources=paths, weights=weights)
     torch.save(output, output_path)
 
 

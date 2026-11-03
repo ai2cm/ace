@@ -617,7 +617,8 @@ class TestGetInferenceCallback:
                 output_dir="/tmp/out",
                 save_per_epoch_diagnostics=False,
             )
-            return callback(epoch=epoch)
+            logs, error, _ = callback(epoch=epoch)
+            return logs, error
 
     def test_epoch_not_in_inference_epochs_returns_empty(self):
         entries = [self._make_entry("inference")]
