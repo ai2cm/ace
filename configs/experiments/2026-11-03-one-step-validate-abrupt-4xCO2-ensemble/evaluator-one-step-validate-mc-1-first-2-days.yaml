@@ -1,0 +1,245 @@
+# arg: --dataset 01JQKRW7XSB1QJQSXAEY3G7D1C:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar
+#
+# One-step validation of 2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1
+# (best_inference_ckpt.tar) on the first 2 days of each member of the 36-member
+# SHiELD-SOM abrupt-4xCO2 ensemble. The data are 6-hourly, so subset stop: 8
+# gives the 8 one-step samples (t0->t1, ..., t7->t8) whose targets fall in
+# the first 2 days. Validation uses the evaluator's validation section, and
+# the evaluator still requires an inference rollout, so it is a minimal one: a
+# single 1-step forecast with no file output.
+#
+# Multi-call is disabled because the ensemble data has no multi-call targets.
+# Loss weights match the original fine-tuning config so val/mean/loss is
+# comparable to training.
+experiment_dir: /results
+checkpoint_path: /ckpt.tar
+stepper_override:
+  multi_call: null
+logging:
+  project: ace-som
+  entity: ai2cm
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+validation:
+  loader:
+    batch_size: 8
+    num_data_workers: 4
+    prefetch_factor: 4
+    dataset:
+      concat:
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0001.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0002.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0003.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0004.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0005.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0006.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0007.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0008.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0009.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0010.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0011.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0012.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0013.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0014.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0015.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0016.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0017.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0018.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0019.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0020.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0021.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0022.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0023.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0024.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0025.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0026.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0027.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0028.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0029.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0030.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0031.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0032.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0033.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0034.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0035.zarr
+        engine: zarr
+        subset:
+          stop: 8
+      - data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+        file_pattern: abrupt4xCO2-ic_0036.zarr
+        engine: zarr
+        subset:
+          stop: 8
+  stepper_training:
+    n_forward_steps: 1
+    loss:
+      type: MSE
+      weights:
+        air_temperature_0: 0.5
+        air_temperature_1: 0.5
+        eastward_wind_0: 0.5
+        northward_wind_0: 0.5
+        specific_total_water_0: 0.5
+        specific_total_water_1: 0.25
+        specific_total_water_2: 0.5
+        PRATEsfc: 0.5
+        h500: 10
+        TMP850: 5
+        Q2m: 0.5
+        DLWRFsfc: 2
+        ULWRFsfc: 5
+        USWRFsfc: 2
+        DSWRFsfc: 2
+        USWRFtoa: 2
+        tendency_of_total_water_path_due_to_advection: 0.5
+# Minimal inference rollout (required by the evaluator).
+n_forward_steps: 1
+forward_steps_in_memory: 1
+loader:
+  dataset:
+    data_path: /climate-default/2025-02-07-vertically-resolved-1deg-c96-shield-som-abrupt-4xCO2-ensemble-fme-dataset
+    file_pattern: abrupt4xCO2-ic_0001.zarr
+    engine: zarr
+  start_indices:
+    n_initial_conditions: 1
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
