@@ -4,13 +4,12 @@ cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs1|01M
 
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs0|01M6F6T0WE3QZEJGZD8QJ656AM|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs1|01M6F6TG1YV1YHJZCWZKQK04ZZ|training|best_inference_ckpt|normal|--min-runtime 8h
 # Coupled century evals of best_inference_ckpt, held for the job watcher (task auto_launch); --config-dir configs/experiments/cm4_eval_4deg/coupled. mse-rs0 = Troy's FTalt cde1 01M6F5MMCRPE60DSMYGVP9XGP7 (trained on exper/2026-10-29-4deg-hybrid-fto-ftalt).
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs0|01M6F5MMCRPE60DSMYGVP9XGP7|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs0|01M6F5MMCRPE60DSMYGVP9XGP7|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs0|01M6F5MMCRPE60DSMYGVP9XGP7|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs0|01M6F5MMCRPE60DSMYGVP9XGP7|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs1|01M6F6SK5HHVBW5VCYZ70YC6F4|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mse-rs1|01M6F6SK5HHVBW5VCYZ70YC6F4|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs0|01M6F6T0WE3QZEJGZD8QJ656AM|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs0|01M6F6T0WE3QZEJGZD8QJ656AM|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs1|01M6F6TG1YV1YHJZCWZKQK04ZZ|pending_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
-cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs1|01M6F6TG1YV1YHJZCWZKQK04ZZ|pending_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs1|01M6F6TG1YV1YHJZCWZKQK04ZZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt_cde1|mae-rs1|01M6F6TG1YV1YHJZCWZKQK04ZZ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
