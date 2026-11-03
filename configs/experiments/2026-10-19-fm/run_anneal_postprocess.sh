@@ -25,7 +25,7 @@ export PYTHONPATH="$(git rev-parse --show-toplevel)"
 DRY=()
 [[ "${DRY_RUN:-0}" == "1" ]] && DRY=(--dry-run)
 
-python update_beaker_map.py "${DRY[@]}"
+python update_beaker_map.py ${DRY[@]+"${DRY[@]}"}
 
 python - "$@" <<'PY'
 import os, sys
@@ -38,8 +38,8 @@ if skipped and os.environ.get("ALLOW_PARTIAL") != "1":
     sys.exit("Not all anneal runs have succeeded; set ALLOW_PARTIAL=1 to go on.")
 PY
 
-python make_soup_checkpoints.py "${DRY[@]}" "$@"
+python make_soup_checkpoints.py ${DRY[@]+"${DRY[@]}"} "$@"
 python submit_anneal_eval_jobs.py --ckpts C,B,P --families J1,J3,J4 \
-  --skip-if-in-beaker "${DRY[@]}" "$@"
+  --skip-if-in-beaker ${DRY[@]+"${DRY[@]}"} "$@"
 
 echo "Done. Commit and push wandb_to_beaker_map.json and anneal_soups.json."

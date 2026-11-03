@@ -20,7 +20,14 @@ parents' -bestinf jobs ran (generate_inference_configs.py):
   J4  {base}-ckpt{X}-{kind}              six SOM / ERA5 4xCO2 and control kinds,
                                          evaluator mode
 
-{base} is the anneal run name for C and B and the parent run name for P.
+{base} is the parent run name for P and, for C and B, the anneal run name
+shortened by eval_job_base(): the parent prefix
+`ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-` becomes
+`ace2-fm-nc-sfno-anneal-` (Beaker rejects experiment names over 128
+characters, and the full names reach 137), e.g.
+ace2-fm-nc-sfno-anneal-s0-maskon-anneal-a0-ckptC-sst-era5-p0k. Only the eval
+job / wandb run names are shortened; the {run}-ckptC dataset keeps the full
+run name.
 The "-bestinf" suffix of J1 names the eval suite (as in the parents' job
 names), not the checkpoint.
 
@@ -49,10 +56,17 @@ import pathlib
 from typing import NamedTuple
 
 import yaml
-from _beaker_listing import OK, fetch_experiments_by_name
+from _beaker_listing import OK, existing_job_names, fetch_experiments_by_name
 from _inference_common import CHECKPOINT_PATH, INFERENCE_CONFIGS_DIR, WANDB_PROJECT
 from _submit_common import check_configs_at_head, drop_jobs_in_beaker, submit_job
-from create_anneal_jobs import ARMS, PARENT_CHECKPOINT, SMOKE_SEED, parent_job_name
+from create_anneal_jobs import (
+    ARMS,
+    JOB_PREFIX,
+    PARENT_CHECKPOINT,
+    PARENT_STEM,
+    SMOKE_SEED,
+    parent_job_name,
+)
 from generate_inference_configs import (
     EVAL_SUITE_CONFIGS,
     PAPER_KINDS,
@@ -83,6 +97,11 @@ VALIDATE_FAMILY = {"J1": "eval", "J3": "sst", "J4": "paper-era5"}
 J1_SUITE = EVAL_SUITE_CONFIGS["eval"]
 J1_SUFFIX = "-bestinf"
 P_J1_SUFFIX = "-lastema"  # submit_inference_jobs.py --ckpt lastema
+# Beaker experiment names are limited to 128 characters; C/B eval job names
+# replace the anneal run's parent prefix with a short one (see eval_job_base).
+BEAKER_NAME_LIMIT = 128
+LONG_RUN_PREFIX = f"{JOB_PREFIX}{PARENT_STEM}-"
+SHORT_RUN_PREFIX = "ace2-fm-nc-sfno-anneal-"
 
 
 class Job(NamedTuple):
@@ -91,6 +110,40 @@ class Job(NamedTuple):
     config: str  # filename in inference_configs/
     dataset_id: str
     checkpoint_path: str  # inside dataset_id, mounted at /ckpt.tar
+
+
+def eval_job_base(run: str) -> str:
+    """Stem of the C/B eval job names of anneal run `run`: the parent prefix
+    `ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-`
+    replaced by `ace2-fm-nc-sfno-anneal-`, keeping the
+    `s{k}-mask{on,off}-anneal-a{N}[-smoke]` tail.
+    """
+    if not run.startswith(LONG_RUN_PREFIX):
+        raise ValueError(f"{run} does not start with {LONG_RUN_PREFIX}")
+    return SHORT_RUN_PREFIX + run[len(LONG_RUN_PREFIX) :]
+
+
+def legacy_job_name(name: str) -> str | None:
+    """Unshortened name of a C/B eval job (None for P jobs). Nine s0-maskon-a0
+    ckptC jobs were submitted under these names on 2026-11-03 before the
+    128-character limit stopped the submission.
+    """
+    if name.startswith(SHORT_RUN_PREFIX):
+        return LONG_RUN_PREFIX + name[len(SHORT_RUN_PREFIX) :]
+    return None
+
+
+def drop_jobs_under_legacy_name(jobs: list[Job], workspace: str) -> list[Job]:
+    """`jobs` without those whose unshortened name succeeded or is running."""
+    existing = existing_job_names(workspace)
+    pending = []
+    for job in jobs:
+        legacy = legacy_job_name(job.name)
+        if legacy is not None and legacy in existing:
+            print(f"Skipping (in Beaker under unshortened name): {job.name}")
+        else:
+            pending.append(job)
+    return pending
 
 
 def family_jobs(base: str, family: str, j1_config: str, j1_suffix: str):
@@ -208,7 +261,7 @@ def main() -> None:
                 ckpt_dataset, ckpt_path = dataset, CHECKPOINT_PATH
             for family in args.families:
                 for name, config in family_jobs(
-                    f"{run}-ckpt{ckpt}", family, j1_config, j1_suffix
+                    f"{eval_job_base(run)}-ckpt{ckpt}", family, j1_config, j1_suffix
                 ):
                     jobs.append(Job(name, family, config, ckpt_dataset, ckpt_path))
 
@@ -239,6 +292,11 @@ def main() -> None:
                 ):
                     jobs.append(Job(name, family, config, dataset, PARENT_CHECKPOINT))
 
+    too_long = [job.name for job in jobs if len(job.name) > BEAKER_NAME_LIMIT]
+    if too_long:
+        raise SystemExit(f"Job names over {BEAKER_NAME_LIMIT} characters: {too_long}")
+    if args.skip_if_in_beaker:
+        jobs = drop_jobs_under_legacy_name(jobs, args.beaker_workspace)
     jobs = drop_jobs_in_beaker(jobs, lambda job: job.name, args)
     if not jobs:
         print("Nothing to submit.")

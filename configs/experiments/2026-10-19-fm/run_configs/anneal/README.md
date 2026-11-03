@@ -186,7 +186,19 @@ Scripts (in `../../`):
   idempotent, so rerun it later). `DRY_RUN=1` prints only. Afterwards commit
   `wandb_to_beaker_map.json` and `anneal_soups.json`.
 
-Job names (`{base}` = anneal run name for C and B, parent run name for P):
+Job names (`{base}` = parent run name for P; for C and B, the anneal run
+name with the parent prefix
+`ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-`
+replaced by `ace2-fm-nc-sfno-anneal-`, e.g.
+`ace2-fm-nc-sfno-anneal-s0-maskon-anneal-a0-ckptC-sst-era5-p0k`;
+`submit_anneal_eval_jobs.eval_job_base`). Beaker rejects experiment names
+over 128 characters and the unshortened names reach 137. Only eval job and
+wandb run names are shortened: the `{run}-ckptC` datasets and the P jobs keep
+the full names. Exception: the nine `s0-maskon-anneal-a0-ckptC` J1, J3 and
+`som-*` J4 jobs were submitted on 2026-11-03 under the unshortened name
+(`ace2-fm-nc-sfno-fm-a2-cond-...-balanced-s0-maskon-anneal-a0-ckptC-...`)
+before the limit stopped the submission; `--skip-if-in-beaker` treats them as
+their shortened twins while they are running or succeeded.
 
 | family | job / wandb run name | mode, config | wandb group |
 |---|---|---|---|
@@ -204,7 +216,7 @@ suites only), so the 120 `{parent}-ckptP-...` J3/J4 jobs (10 parents x 12)
 were submitted on 2026-11-03 under the anneal wandb groups above. The global-mean
 drift aggregator (#1617) is on by default in every evaluator config, so J1
 entries longer than ~2 years log `{entry}/global_mean_drift/...`.
-Longest job name: 137 characters (`...-s0-maskoff-anneal-a5-ckptC-era5-control-dataCO2-10yr-sstprescribed-eval`).
+Longest job name: 94 characters (`ace2-fm-nc-sfno-anneal-s0-maskoff-anneal-a5-ckptC-era5-control-dataCO2-10yr-sstprescribed-eval`); the submitter refuses names over 128.
 
 ### Post-processing smoke test (a1 smoke run)
 
