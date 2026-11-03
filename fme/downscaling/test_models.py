@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from unittest.mock import MagicMock
 
@@ -17,11 +18,13 @@ from fme.downscaling.data import (
     StaticInput,
     StaticInputs,
 )
+from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.models import (
     CheckpointModelConfig,
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
+    UpsamplingConfig,
     _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
@@ -210,6 +213,7 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
+    upsampling: UpsamplingConfig | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -231,6 +235,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
+        upsampling=upsampling or UpsamplingConfig(),
     ).build(
         coarse_shape,
         downscale_factor,
@@ -889,3 +894,81 @@ def test__build_variable_loss_weight_tensor():
     assert torch.allclose(weighted_loss[:, 0], loss[:, 0] * 0.5)
     assert torch.allclose(weighted_loss[:, 1], loss[:, 1])
     assert torch.allclose(weighted_loss[:, 2], loss[:, 2] * 2.0)
+
+
+def _get_upsampling_test_model() -> DiffusionModel:
+    fine_coords = make_fine_coords((16, 32))
+    return _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        use_fine_topography=False,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+        upsampling=UpsamplingConfig(mode="bilinear", align_corners=True),
+    )
+
+
+def test_upsampling_config_default_for_new_models():
+    assert UpsamplingConfig() == UpsamplingConfig(mode="bicubic", align_corners=False)
+
+
+def test_upsampling_config_raises_for_align_corners_with_unsupported_mode():
+    with pytest.raises(ValueError, match="align_corners"):
+        UpsamplingConfig(mode="nearest", align_corners=True)
+
+
+def test_model_uses_configured_upsampling():
+    model = _get_upsampling_test_model()
+    coarse = torch.randn(2, 1, 8, 16, device=get_device())
+    expected = interpolate(coarse, 2, mode="bilinear", align_corners=True)
+    torch.testing.assert_close(model._interpolate(coarse), expected)
+    assert not torch.allclose(
+        model._interpolate(coarse),
+        interpolate(coarse, 2, mode="bicubic", align_corners=False),
+    )
+
+
+def test_upsampling_config_round_trips_through_checkpoint(tmp_path):
+    model = _get_upsampling_test_model()
+    expected = UpsamplingConfig(mode="bilinear", align_corners=True)
+    assert DiffusionModel.from_state(model.get_state()).config.upsampling == (expected)
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+    loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert loaded.config.upsampling == expected
+
+
+def test_upsampling_backwards_compatibility(tmp_path):
+    """Checkpoints saved without upsampling config use the legacy settings."""
+    model = _get_upsampling_test_model()
+    state = model.get_state()
+    del state["config"]["upsampling"]
+    legacy = UpsamplingConfig(mode="bicubic", align_corners=True)
+    assert DiffusionModel.from_state(state).config.upsampling == legacy
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": state}, checkpoint_path)
+    loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert loaded.config.upsampling == legacy
+
+
+@pytest.mark.parametrize("key", ["module", "upsampling"])
+def test_checkpoint_config_model_updates_raises_for_frozen_keys(key):
+    with pytest.raises(ValueError, match=f"'{key}' cannot be updated"):
+        CheckpointModelConfig(checkpoint_path="unused.ckpt", model_updates={key: {}})
+
+
+def test_validate_upsampling_matches_state():
+    model = _get_upsampling_test_model()
+    model.validate_upsampling_matches_state(model.get_state())
+    legacy_state = model.get_state()
+    del legacy_state["config"]["upsampling"]
+    with pytest.raises(ValueError, match="upsampling"):
+        model.validate_upsampling_matches_state(legacy_state)
+
+
+def test_upsampling_config_from_state():
+    assert UpsamplingConfig.from_state(None) == UpsamplingConfig(
+        mode="bicubic", align_corners=True
+    )
+    config = UpsamplingConfig(mode="bilinear", align_corners=False)
+    assert UpsamplingConfig.from_state(dataclasses.asdict(config)) == config
