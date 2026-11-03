@@ -151,3 +151,77 @@ Job names are `ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced
 | `s4-maskoff-anneal-a5` | [01M6FTBQRZ8PD63X1GA8F76FVX](https://beaker.org/ex/01M6FTBQRZ8PD63X1GA8F76FVX) |
 
 `s3-maskon-anneal-a1` came back from gantry as `...-anneal-a1-da4649c` (a 7-hex suffix that `_beaker_listing.canonical_name` does not strip); it was renamed in Beaker to the canonical name. Its wandb run name is unaffected.
+
+## Post-processing
+
+Three checkpoints per anneal run are evaluated:
+
+| ckpt | what | Beaker dataset : file mounted at `/ckpt.tar` |
+|---|---|---|
+| P | parent epoch-150 EMA (the anneal start point) | parent result dataset : `training_checkpoints/ema_ckpt_0150.tar` |
+| C | uniform soup (`fme.core.checkpoint_soup`) of the run's `ema_ckpt_0016.tar` ... `ema_ckpt_0020.tar` | `{run}-ckptC` (account `yyexela`, workspace `ai2/ace`) : `soup_ckpt.tar` |
+| B | `best_inference_ckpt.tar` (lowest `aimip_checkpoint_era5` time-mean RMSE) | run result dataset : `training_checkpoints/best_inference_ckpt.tar` |
+
+Scripts (in `../../`):
+
+- `make_soup_checkpoints.py`: fetches the five EMA checkpoints of each
+  succeeded run (`beaker dataset fetch --prefix`, scratch
+  `/tmp/ace-anneal-soups/{run}/`, deleted afterwards unless
+  `--keep-scratch`), soups them with this checkout's fme, checks the soup
+  loads (`soup` entry with the sources and uniform weights, no
+  `optimization`), uploads it as dataset `{run}-ckptC` (description: sources,
+  source dataset, commit) and records it in `anneal_soups.json`
+  (run -> dataset id, name, file, source dataset, epochs, commit). Skips runs
+  still training and runs whose `{run}-ckptC` exists (`--force` uploads a
+  timestamped `{run}-ckptC-YYYYMMDDTHHMMSS` instead). `--epochs` overrides
+  16-20; `--arms/--seeds/--only/--smoke` select runs.
+- `submit_anneal_eval_jobs.py`: submits the eval jobs through
+  `run-ace-inference-job.sh` with the configs the parents' `-bestinf` jobs ran
+  (`inference_configs/`). `--ckpts C,B[,P]` (default C,B), `--families
+  J1,J3,J4` (default all), `--entries` (J1 reduced to these suite entries),
+  `--skip-if-in-beaker`, `--dry-run`, same selection flags.
+- `run_anneal_postprocess.sh`: refresh `wandb_to_beaker_map.json`, soup all,
+  submit all (`--ckpts C,B,P --skip-if-in-beaker`). Stops unless all 30 runs
+  succeeded (`ALLOW_PARTIAL=1` to go on with the finished ones; every step is
+  idempotent, so rerun it later). `DRY_RUN=1` prints only. Afterwards commit
+  `wandb_to_beaker_map.json` and `anneal_soups.json`.
+
+Job names (`{base}` = anneal run name for C and B, parent run name for P):
+
+| family | job / wandb run name | mode, config | wandb group |
+|---|---|---|---|
+| J1 | `{base}-ckpt{C,B}-bestinf` | suite, `ace-eval-suite-config-4deg-2026-06-26-windows.yaml` (all 14 entries, incl. `10year` = ERA5 2015-24, `10year_insample`, `long_46year`, `long_46year_constant_co2`, the C96 entries) | `ace2-fm-anneal-eval-2026-10-19` |
+| J3 | `{base}-ckpt{C,B,P}-sst-{era5,c96}-p{0,2,4}k` | inference, `ace-inference-sst-config-4deg-{grid}-{grid}-{level}.yaml` | `ace2-fm-anneal-sst-perts-2026-10-19` |
+| J4 | `{base}-ckpt{C,B,P}-{kind}`, kind in `som-{abrupt-4xCO2,control-dataCO2}-ens-sstslab-eval`, `era5-{abrupt-4xCO2,control-dataCO2}-{10yr,ens}-sstprescribed-eval` | evaluator, `ace-paper-{kind}-config-4deg.yaml` | `ace2-fm-anneal-paper-2026-10-19` |
+
+"-bestinf" in the J1 name names the eval suite (as in the parents' job
+names), not the checkpoint. P's J1 is the parent's existing
+`{parent}-lastema` suite (`submit_inference_jobs.py --ckpt lastema`, wandb
+group `ace2-fm-eval-lastema-2026-10-19`; succeeded for all 10 balanced
+parents); a `{parent}-ckptP-bestinf` is submitted only if that job has not
+succeeded. P's J3 and J4 did not exist (the `-lastema` jobs cover the eval
+suites only), so the 120 `{parent}-ckptP-...` J3/J4 jobs (10 parents x 12)
+were submitted on 2026-11-03 under the anneal wandb groups above. The global-mean
+drift aggregator (#1617) is on by default in every evaluator config, so J1
+entries longer than ~2 years log `{entry}/global_mean_drift/...`.
+Longest job name: 137 characters (`...-s0-maskoff-anneal-a5-ckptC-era5-control-dataCO2-10yr-sstprescribed-eval`).
+
+### Post-processing smoke test (a1 smoke run)
+
+`make_soup_checkpoints.py --smoke --arms a1 --epochs 1 2` souped
+`ema_ckpt_0001.tar` + `ema_ckpt_0002.tar` of dataset
+01M6FMB3MC5ZWWMMYA2YSMHHYT into `...-anneal-a1-smoke-ckptC`
+(01M6FTRASDFZKR22CMJMDZ32CS). `submit_anneal_eval_jobs.py --smoke --arms a1
+--families J1 --entries 10year` ran the J1 `10year` entry only (suite
+`ace-eval-suite-config-4deg-2026-06-26-windows-only-10year.yaml`) for C and B.
+Both exited 0 (about 4 min of inference each) and wrote
+`10year/time_mean_diagnostics.nc`; drift keys logged.
+
+| | C (soup ep 1-2) | B (best_inference, ep 1) | parent s0-maskon `-lastema` (P) | parent `-bestinf` |
+|---|---|---|---|---|
+| Beaker experiment | 01M6FV1T1T4YWEHAJB46V7DJ6R | 01M6FV1X6VNKPFY8JFZMV1D8VD | | |
+| wandb run | `pq3ipruq` | `kkjigw2n` | `msqsxc4y` | `ftx434fy` |
+| `10year/time_mean/rmse/TMP2m` (K) | 0.2775 | 0.2815 | 0.2851 | 0.3128 |
+| `10year/time_mean_norm/rmse/channel_mean` | 0.04802 | 0.04918 | | |
+| `10year/global_mean_drift/max_abs_t` | 2693 | 2693 | | |
+
