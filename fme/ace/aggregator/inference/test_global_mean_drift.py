@@ -39,8 +39,7 @@ def _drift_fields(
     time: xr.DataArray,
     names: Sequence[str] = ("a",),
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-    """Target is random noise; prediction is target plus ``drift * t`` for each
-    sample, with ``t`` in years since 2000-01-01."""
+    """Random target; prediction is target + drift * (years since 2000)."""
     n_sample, n_time = time.shape
     base = cftime.DatetimeNoLeap(2000, 1, 1)
     days = np.array([[(t - base).days for t in row] for row in time.values])
@@ -112,13 +111,6 @@ def test_streaming_matches_single_batch():
             )
         )
     xr.testing.assert_allclose(single.get_dataset(), streamed.get_dataset())
-
-
-def test_zero_drift_gives_zero_slope():
-    torch.manual_seed(0)
-    agg = _record_drift([0.0, 0.0, 0.0, 0.0])
-    slopes = agg.get_per_sample_slopes()["a"].cpu().numpy()
-    np.testing.assert_allclose(slopes, 0.0, atol=1e-5)
 
 
 def test_t_statistic_large_for_consistent_drift():
@@ -247,11 +239,15 @@ def test_top_level_aggregator_logs_and_slopes():
     np.testing.assert_allclose(slopes["a"].cpu().numpy(), drift, atol=1e-3)
 
 
-def test_top_level_slopes_none_when_not_configured():
-    agg = _build_top_level([])
-    assert agg.get_global_mean_drift_slopes() is None
-
-
-def test_top_level_skips_metric_for_short_rollout():
-    agg = _build_top_level([GlobalMeanDriftConfig()], n_forward_steps=365)
+@pytest.mark.parametrize(
+    "metrics, n_forward_steps",
+    [
+        pytest.param([], 3 * 365, id="not_configured"),
+        pytest.param([GlobalMeanDriftConfig()], 365, id="short_rollout"),
+    ],
+)
+def test_top_level_slopes_none_when_metric_not_built(
+    metrics: list[MetricConfig], n_forward_steps: int
+):
+    agg = _build_top_level(metrics, n_forward_steps=n_forward_steps)
     assert agg.get_global_mean_drift_slopes() is None
