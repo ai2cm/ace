@@ -29,6 +29,7 @@ from _beaker_listing import (  # noqa: E402
     NamedExperiment,
     canonical_name,
     experiment_status,
+    job_status,
     list_experiments,
 )
 from submit_fm_jobs import (  # noqa: E402
@@ -55,7 +56,8 @@ RESUME_MARK = "Resuming training from"
 COLUMNS = (
     "Architecture",
     "Finished",
-    "Running or queued",
+    "Running",
+    "Queued",
     "Failed/other",
     "Min epoch",
     "Max epoch",
@@ -94,6 +96,13 @@ def newest_by_name(text: str) -> dict[str, NamedExperiment]:
         name: NamedExperiment(name, experiment_status(e), e)
         for name, e in newest.items()
     }
+
+
+def _queued(named: NamedExperiment) -> bool:
+    """A running experiment whose unfinished job has not started yet."""
+    jobs = named.experiment.get("jobs") or []
+    pending = [j for j in jobs if job_status(j) == "running"]
+    return bool(pending) and not pending[-1].get("status", {}).get("started")
 
 
 ARCHS = ("sfno", "swin-v2.2", "swin-v2.2-res")
@@ -239,7 +248,10 @@ def main() -> None:
         ]
         # Epoch columns cover finished and running jobs only; failed/canceled
         # or deleted jobs would pull them toward 0.
-        live = [n for n, st in zip(arch_names, statuses) if st in (OK, "running")]
+        live_pairs = [
+            (n, s) for n, s in zip(arch_names, statuses) if s in (OK, "running")
+        ]
+        live = [n for n, _ in live_pairs]
         eps = [prog[n][0] for n in live] or [0]
         times = [train_seconds(by_name[n]) for n in live]
 
@@ -250,7 +262,8 @@ def main() -> None:
         row = (
             arch,
             sum(s == OK for s in statuses),
-            sum(s == "running" for s in statuses),
+            sum(s == "running" and not _queued(by_name[n]) for n, s in live_pairs),
+            sum(s == "running" and _queued(by_name[n]) for n, s in live_pairs),
             sum(s not in (OK, "running") for s in statuses),
             min(eps),
             max(eps),
