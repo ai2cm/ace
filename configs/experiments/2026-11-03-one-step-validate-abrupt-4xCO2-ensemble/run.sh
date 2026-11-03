@@ -52,4 +52,7 @@ run_validation() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.evaluator "$CONFIG_PATH"
 }
 
-run_validation "evaluator-one-step-validate-mc-1.yaml" "2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1-one-step-validate-abrupt-4xCO2-ensemble"
+# run_validation "evaluator-one-step-validate-mc-1.yaml" "2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1-one-step-validate-abrupt-4xCO2-ensemble"
+run_validation "evaluator-one-step-validate-mc-1-first-7-days.yaml" "2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1-one-step-validate-abrupt-4xCO2-ensemble-first-7-days"
+run_validation "evaluator-one-step-validate-mc-1-1xCO2-control.yaml" "2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1-one-step-validate-1xCO2-control"
+run_validation "evaluator-one-step-validate-mc-1-1xCO2-control-first-7-days.yaml" "2025-03-30-ace-som-rp-ga-b16-energy-fine-tune-mc-1-one-step-validate-1xCO2-control-first-7-days"
