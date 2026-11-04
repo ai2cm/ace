@@ -22,10 +22,12 @@ from dataclasses import dataclass
 DEFAULT_WORKSPACE = "ai2/ace"
 DEFAULT_TEXT = "ace2-fm-"
 
-# Gantry's collision suffix: a dash and four lowercase hex digits at the very
-# end of the name. An epoch segment such as `-e07` is three characters and
-# never matches, and no FM job-name segment is itself four hex digits.
-_HASH_SUFFIX = re.compile(r"-[0-9a-f]{4}$")
+# Gantry's collision suffix: a dash and four, or occasionally seven (seen
+# 2026-11-04: `...-sstprescribed-eval-4da4e15`), lowercase hex digits at the
+# very end of the name. Every character must be hex, so tails such as `-p0k`,
+# `-ens` or an epoch segment `-e07` never match, and no FM job-name segment is
+# itself four or seven hex digits.
+_HASH_SUFFIX = re.compile(r"-(?:[0-9a-f]{4}|[0-9a-f]{7})$")
 
 # How a job ended. Beaker sets `canceled`/`canceledCode` both on a job a user
 # stopped and on one the scheduler preempted; a preempted job also carries a

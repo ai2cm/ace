@@ -9,7 +9,6 @@ count for their shortened twins). Lists failed and canceled jobs at the end.
 """
 
 import argparse
-import re
 
 from _beaker_listing import (
     CANCELED,
@@ -56,13 +55,6 @@ def main() -> None:
     )
     args = parser.parse_args()
     experiments = fetch_experiments_by_name(args.workspace)
-    # Gantry occasionally appends a 7-hex suffix (seen: `...-eval-4da4e15`),
-    # which _beaker_listing.canonical_name (4 hex) keeps; fold those in here
-    # when no experiment carries the plain name.
-    for name in list(experiments):
-        plain = re.sub(r"-[0-9a-f]{7}$", "", name)
-        if plain != name and plain not in experiments:
-            experiments[plain] = experiments[name]
     runs = sorted(anneal_run_names(), key=lambda r: (r.split("-anneal-")[-1], r))
     totals = {(c, f): dict.fromkeys(STATES, 0) for c in CKPTS for f in FAMILIES}
     failed: list[tuple[str, str, str]] = []
