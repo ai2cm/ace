@@ -1,7 +1,8 @@
 """Submit inference jobs on a checkpoint of the 2026-10-19 runs.
 
-Runs: the nc-sfno four-source training runs (_inference_common.
-inference_run_names; no e3sm, no swin) whose Beaker experiment succeeded.
+Runs: the four-source training runs of one architecture (--arch, default
+sfno: nc-sfno; swin-v2.2: nc-swin-v2.2; _inference_common.ARCHS and
+inference_run_names; no e3sm, no diagnostics) whose Beaker experiment succeeded.
 Runs still training are listed as skipped; re-run with --skip-if-in-beaker
 once they finish to submit only what is missing. Each job mounts the run's
 training_checkpoints/best_inference_ckpt.tar at /ckpt.tar and runs a
@@ -24,10 +25,11 @@ Checkpoint (--ckpt, default bestinf; _inference_common.CHECKPOINTS):
 
 --ckpt lastema applies to the eval-suite families only; it swaps the job
 name's "-bestinf" for "-lastema" and logs to a "-lastema" wandb group.
---old-runs (lastema, eval family only) adds the 2026-06-26 baselines
-(_inference_common.OLD_RUNS: era5-a1, fm-a2-cond, c96-a1), each on the eval
-suite of its old -bestinf job, so their last-epoch EMA scores cover the same
-entries as their best-inference ones.
+--old-runs (lastema, eval family only) adds the arch's 2026-06-26 baselines
+(_inference_common.OLD_RUNS[arch]: era5-a1, fm-a2-cond, c96-a1; nc-sfno for
+sfno, nc-swin-v2.1 for swin-v2.2), each on the eval suite of its old -bestinf
+job, so their last-epoch EMA scores cover the same entries as their
+best-inference ones.
 
 Gantry clones the repository at HEAD, so the configs must be committed and
 pushed before a real submission; this is checked unless --dry-run is given.
@@ -35,7 +37,8 @@ Every config a submission uses is validated against this checkout's fme
 first (--dry-run validates too, so a dry run proves the configs load).
 
 Usage:
-    python submit_inference_jobs.py [--family FAMILY ...] [--run RUN ...]
+    python submit_inference_jobs.py [--arch {sfno,swin-v2.2}]
+                                    [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
                                     [--ckpt {bestinf,lastema}] [--old-runs]
@@ -55,8 +58,10 @@ from typing import NamedTuple
 
 from _beaker_listing import fetch_experiments_by_name
 from _inference_common import (
+    ARCHS,
     BEAKER_MAP_PATH,
     CHECKPOINTS,
+    DEFAULT_ARCH,
     INFERENCE_CONFIGS_DIR,
     OLD_RUNS,
     WANDB_PROJECT,
@@ -156,7 +161,7 @@ def family_jobs(
 def resolve_runs(
     args: argparse.Namespace,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    runs = inference_run_names()
+    runs = inference_run_names(args.arch)
     if args.run is not None:
         unknown = sorted(set(args.run) - set(runs))
         if unknown:
@@ -202,6 +207,12 @@ def validate_configs(families_configs: list[tuple[str, str]]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--arch",
+        choices=list(ARCHS),
+        default=DEFAULT_ARCH,
+        help=f"Architecture of the training runs (default: {DEFAULT_ARCH}).",
     )
     parser.add_argument(
         "--family",
@@ -263,8 +274,8 @@ def main() -> None:
         "--old-runs",
         action="store_true",
         help=(
-            "Also submit the 2026-06-26 baselines (OLD_RUNS) on their old eval "
-            "suites; needs --ckpt lastema and --family eval."
+            "Also submit the arch's 2026-06-26 baselines (OLD_RUNS[arch]) on "
+            "their old eval suites; needs --ckpt lastema and --family eval."
         ),
     )
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
@@ -303,7 +314,7 @@ def main() -> None:
         suffix = CHECKPOINTS[args.ckpt][1]
         jobs += [
             Job(f"{run}{suffix}", "eval", config, dataset, groups["eval"])
-            for run, (dataset, config) in sorted(OLD_RUNS.items())
+            for run, (dataset, config) in sorted(OLD_RUNS[args.arch].items())
         ]
     if args.job_name is not None:
         unknown = sorted(set(args.job_name) - {job.name for job in jobs})

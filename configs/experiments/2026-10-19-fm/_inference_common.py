@@ -36,30 +36,53 @@ CHECKPOINTS = {
     "lastema": ("training_checkpoints/ema_ckpt_0150.tar", "-lastema"),
 }
 
-# The 2026-06-26 single/two-dataset baselines (wandb group
-# ace2-fm-norm-ablation-2026-06-26) the notebook compares against: run name ->
-# (training result dataset, eval-suite config in inference_configs/). The
-# configs are the suites of their old -bestinf jobs, copied unchanged.
-OLD_RUNS = {
-    "ace2-fm-nc-sfno-era5-a1": (
-        "01M0ZHY0XK03PKWZ5PVVRAGP7W",
-        "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-era5-a1.yaml",
-    ),
-    "ace2-fm-nc-sfno-fm-a2-cond": (
-        "01M13B36FHZZJQX0A1HW5YJVYC",
-        "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-fm-a2-cond.yaml",
-    ),
-    "ace2-fm-nc-sfno-c96-a1": (
-        "01M11FKTJ6H2HJ61S3HAWXKQ25",
-        "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-c96-a1.yaml",
-    ),
+# The architectures of the inference families (submit_inference_jobs.py
+# --arch): arch -> run-config token. The runs of an arch are its four-source
+# training cells, balanced and unbalanced; the e3sm cells, the res variants
+# (variants/, not globbed) and one-off diagnostics are left out.
+ARCHS = {
+    "sfno": "nc-sfno",
+    "swin-v2.2": "nc-swin-v2.2",
 }
-
-# The training runs these inference families cover: the nc-sfno cells of the
-# four-source mix, balanced and unbalanced. The e3sm cells, the swin cells and
-# one-off diagnostics are left out.
-INFERENCE_ARCH = "nc-sfno"
+DEFAULT_ARCH = "sfno"
 EXCLUDED_TOKENS = ("-e3sm", "-diag", "-smoke")
+
+# The 2026-06-26 single/two-dataset baselines (wandb group
+# ace2-fm-norm-ablation-2026-06-26) the notebooks compare against, per arch:
+# run name -> (training result dataset, eval-suite config in
+# inference_configs/). The configs are the suites of their old -bestinf jobs
+# (fme eac5362, wandb group ace2-fm-eval-2026-09-28), copied unchanged. The
+# swin-v2.2 notebook's baselines are the swin-v2.1 runs.
+OLD_RUNS = {
+    "sfno": {
+        "ace2-fm-nc-sfno-era5-a1": (
+            "01M0ZHY0XK03PKWZ5PVVRAGP7W",
+            "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-era5-a1.yaml",
+        ),
+        "ace2-fm-nc-sfno-fm-a2-cond": (
+            "01M13B36FHZZJQX0A1HW5YJVYC",
+            "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-fm-a2-cond.yaml",
+        ),
+        "ace2-fm-nc-sfno-c96-a1": (
+            "01M11FKTJ6H2HJ61S3HAWXKQ25",
+            "ace-eval-suite-config-4deg-2026-06-26-old-nc-sfno-c96-a1.yaml",
+        ),
+    },
+    "swin-v2.2": {
+        "ace2-fm-nc-swin-v2.1-era5-a1": (
+            "01M37Q293G4CEMYMP58RWJJN77",
+            "ace-eval-suite-config-4deg-2026-06-26-old-nc-swin-v2.1-era5-a1.yaml",
+        ),
+        "ace2-fm-nc-swin-v2.1-fm-a2-cond": (
+            "01M3B08B44195SG3A5RRXDKEF3",
+            "ace-eval-suite-config-4deg-2026-06-26-old-nc-swin-v2.1-fm-a2-cond.yaml",
+        ),
+        "ace2-fm-nc-swin-v2.1-c96-a1": (
+            "01M399A3NWG2V9SMA7D5SYHMYR",
+            "ace-eval-suite-config-4deg-2026-06-26-old-nc-swin-v2.1-c96-a1.yaml",
+        ),
+    },
+}
 
 
 def training_config_names() -> list[str]:
@@ -71,9 +94,11 @@ def training_config_names() -> list[str]:
     )
 
 
-def inference_run_names() -> list[str]:
-    """Job names of the training runs that get inference jobs."""
-    prefix = f"{CONFIG_PREFIX}{INFERENCE_ARCH}-"
+def inference_run_names(arch: str = DEFAULT_ARCH) -> list[str]:
+    """Job names of the training runs of `arch` (ARCHS) that get inference
+    jobs.
+    """
+    prefix = f"{CONFIG_PREFIX}{ARCHS[arch]}-"
     return [
         config_to_job_name(name)
         for name in training_config_names()
