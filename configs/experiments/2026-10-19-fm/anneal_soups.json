@@ -24,6 +24,20 @@
     ],
     "commit": "dadf6a27e59834ac930a6de35c0dc7a695822f6d"
   },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a0": {
+    "dataset_id": "01M6J2B1WP0CXZ4VC1AQ6NJ0H7",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a0-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6HW7HAAXG2C368DPNVK1RJF",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "c9d6063113d905af81f2918a5c6d978de769a8f5"
+  },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a0": {
     "dataset_id": "01M6HVGMGNAQEQC6079HFP63Q5",
     "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a0-ckptC",
@@ -51,5 +65,19 @@
       20
     ],
     "commit": "a8a7ec5d966dc27290b42fca7af38a7aa7060b95"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a0": {
+    "dataset_id": "01M6J2CA4988WPJ69FDR1P4XCN",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a0-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6HW6XVZA1YHBXSSMB2EXWE1",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "c9d6063113d905af81f2918a5c6d978de769a8f5"
   }
 }
