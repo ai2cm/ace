@@ -224,8 +224,8 @@ runs succeeded). 25 new `{run}-ckptC` soups (a1-a5 x s0-s4; a0 soups from
 J4 300); with the 130 a0 jobs, 780 C/B jobs over 30 runs, plus 120 P J3/J4.
 One job got a 7-hex gantry suffix
 (`...-s2-maskoff-anneal-a5-ckptB-era5-control-dataCO2-ens-sstprescribed-eval-4da4e15`),
-which `_beaker_listing.canonical_name` does not strip, so `--skip-if-in-beaker`
-would resubmit it. Status table: `python anneal_eval_status.py` (from `../../`,
+`canonical_name` strips 4- and 7-hex gantry suffixes since 2e191a5d7; reruns
+skip it. Status table: `python anneal_eval_status.py` (from `../../`,
 `PYTHONPATH` = repo root).
 
 ### Post-processing smoke test (a1 smoke run)
