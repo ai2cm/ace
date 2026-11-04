@@ -1,4 +1,18 @@
 {
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskoff-anneal-a5": {
+    "dataset_id": "01M6KXFRF626Q3XS4B5SENMCDD",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskoff-anneal-a5-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6FTAR0PCABEKHZNR2JE28PC",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a0": {
     "dataset_id": "01M6HVFBDXPQXE6SA9125MZCFQ",
     "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a0-ckptC",
@@ -13,6 +27,20 @@
     ],
     "commit": "a8a7ec5d966dc27290b42fca7af38a7aa7060b95"
   },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a1": {
+    "dataset_id": "01M6KWX780HZD6QRZ43WMFG7D9",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a1-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6J4A1D5CFGHWT82A80MXGT4",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a1-smoke": {
     "dataset_id": "01M6FTRASDFZKR22CMJMDZ32CS",
     "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a1-smoke-ckptC",
@@ -23,6 +51,62 @@
       2
     ],
     "commit": "dadf6a27e59834ac930a6de35c0dc7a695822f6d"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a2": {
+    "dataset_id": "01M6KX1RETP2TJPTDN1XVVBQG4",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a2-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6HW84X39XCWFDG4RA76WQQ0",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a3": {
+    "dataset_id": "01M6KX6D3SGVNCQAWDS5V1M8N2",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a3-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQAEKQH2AD4NDYZARF2KFH",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a4": {
+    "dataset_id": "01M6KXAHWGA8DCK5MF21449Y2E",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s0-maskon-anneal-a4-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQEQEY24NM9ES2V071K3C8",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskoff-anneal-a5": {
+    "dataset_id": "01M6KXGPYAB6KFXWY0HK0VC39D",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskoff-anneal-a5-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JVHPDCM71DSHVH0S3KRE4E",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
   },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a0": {
     "dataset_id": "01M6J2B1WP0CXZ4VC1AQ6NJ0H7",
@@ -38,6 +122,76 @@
     ],
     "commit": "c9d6063113d905af81f2918a5c6d978de769a8f5"
   },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a1": {
+    "dataset_id": "01M6KWY15RNJBNN83Q18HVRXZS",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a1-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JDZBTN54G7J5BMF5CT9HGC",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a2": {
+    "dataset_id": "01M6KX2P9ZB6KDVBHQ00PK810Z",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a2-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JH3PRJFY7EHFCAJ7HVT4XG",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a3": {
+    "dataset_id": "01M6KX78Y7EDSCA8P3A4DFN6BT",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a3-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JB3AK58A1T6Q37RB77QPB2",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a4": {
+    "dataset_id": "01M6KXBA5YS82R7C3HDKEEP7TW",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s1-maskon-anneal-a4-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQEQK0C7KXFSJ45Z8P09SV",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskoff-anneal-a5": {
+    "dataset_id": "01M6KXHJHFKXCZGA462BGY9J83",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskoff-anneal-a5-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6KMCY16WCVB8JCE3783NWZ7",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a0": {
     "dataset_id": "01M6HVGMGNAQEQC6079HFP63Q5",
     "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a0-ckptC",
@@ -51,6 +205,76 @@
       20
     ],
     "commit": "a8a7ec5d966dc27290b42fca7af38a7aa7060b95"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a1": {
+    "dataset_id": "01M6KWZ2BDBEVNETEDB57BPNF0",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a1-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6J4A1MMMCPBYCXG9Q2QHWDT",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a2": {
+    "dataset_id": "01M6KX3PB8F7564HABRMRDAKKT",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a2-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JPB0VQ1DAHVYF2RN3RA1Y1",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a3": {
+    "dataset_id": "01M6KX84VJDSBN12TK5A3K0M7K",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a3-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQFMQKJ2MDMY8GZJCYBRPW",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a4": {
+    "dataset_id": "01M6KXC2MVPDGXQPDGQJARTCWF",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s2-maskon-anneal-a4-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6J1A2FQDM1FCZ3QESFGPBC2",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskoff-anneal-a5": {
+    "dataset_id": "01M6KXJC7H7H7WCAPSQM0M0R7T",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskoff-anneal-a5-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JVHBGG976FFQHCCVVCR2JF",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
   },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a0": {
     "dataset_id": "01M6HVHTCTQAZ8VPPF7588YPHD",
@@ -66,6 +290,76 @@
     ],
     "commit": "a8a7ec5d966dc27290b42fca7af38a7aa7060b95"
   },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a1": {
+    "dataset_id": "01M6KX00ETP2Z0KNGRM13QGSYZ",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a1-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6HT4Y1KS3B31Q1EJKHPGHWG",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a2": {
+    "dataset_id": "01M6KX4K38SFWQJJKG90H5SGA7",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a2-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6K4ZZZQVDZATVRB0SKTYFQW",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a3": {
+    "dataset_id": "01M6KX8XW0PHYB805BA4M9NC5M",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a3-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQ4N9TPHE76BNF30ANTA8J",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a4": {
+    "dataset_id": "01M6KXCXQ15T0EV8231JQXA88X",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s3-maskon-anneal-a4-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6J5495TPSHK3Y0VPWTCH12A",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskoff-anneal-a5": {
+    "dataset_id": "01M6KXKHB66Y61GKB7A2M58MBD",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskoff-anneal-a5-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6FTBQS6N77MQZ8TV3CCYRZ3",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
   "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a0": {
     "dataset_id": "01M6J2CA4988WPJ69FDR1P4XCN",
     "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a0-ckptC",
@@ -79,5 +373,61 @@
       20
     ],
     "commit": "c9d6063113d905af81f2918a5c6d978de769a8f5"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a1": {
+    "dataset_id": "01M6KX0YH7C8Q67N1VZVJ74BP2",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a1-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6HS2S95FVG6Y4KR7TFHM4AY",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a2": {
+    "dataset_id": "01M6KX5C7SCMWGSVX4ZRJHQ9DX",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a2-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQ4NEQT84W9M2TQBW94TV9",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a3": {
+    "dataset_id": "01M6KX9RD31VNNK2NEN233P152",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a3-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6K4ZEDFQCSKZH15C7YCYZ3C",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
+  },
+  "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a4": {
+    "dataset_id": "01M6KXDRH5YGPZX82NHM8AY3WP",
+    "dataset_name": "ace2-fm-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced-s4-maskon-anneal-a4-ckptC",
+    "file": "soup_ckpt.tar",
+    "source_dataset": "01M6JQYKENVJR2VF4DQHBX551G",
+    "epochs": [
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "commit": "7fcd89e254a86e95c13ab48df7ab2e35fd2ea1ca"
   }
 }

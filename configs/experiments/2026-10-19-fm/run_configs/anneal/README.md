@@ -218,6 +218,16 @@ drift aggregator (#1617) is on by default in every evaluator config, so J1
 entries longer than ~2 years log `{entry}/global_mean_drift/...`.
 Longest job name: 94 characters (`ace2-fm-nc-sfno-anneal-s0-maskoff-anneal-a5-ckptC-era5-control-dataCO2-10yr-sstprescribed-eval`); the submitter refuses names over 128.
 
+2026-11-04: full post-processing run (`./run_anneal_postprocess.sh`, all 30
+runs succeeded). 25 new `{run}-ckptC` soups (a1-a5 x s0-s4; a0 soups from
+2026-11-03), 30 in `anneal_soups.json`. 650 new C/B eval jobs (J1 50, J3 300,
+J4 300); with the 130 a0 jobs, 780 C/B jobs over 30 runs, plus 120 P J3/J4.
+One job got a 7-hex gantry suffix
+(`...-s2-maskoff-anneal-a5-ckptB-era5-control-dataCO2-ens-sstprescribed-eval-4da4e15`),
+which `_beaker_listing.canonical_name` does not strip, so `--skip-if-in-beaker`
+would resubmit it. Status table: `python anneal_eval_status.py` (from `../../`,
+`PYTHONPATH` = repo root).
+
 ### Post-processing smoke test (a1 smoke run)
 
 `make_soup_checkpoints.py --smoke --arms a1 --epochs 1 2` souped
