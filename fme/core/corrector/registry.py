@@ -310,9 +310,12 @@ class BatchCoinFlipCorrector(CorrectorABC):
 
     def start_train_batch(self) -> None:
         if self._training:
+            dist = Distributed.get_instance()
             coin = torch.rand(1, device=get_device())
-            # spatial ranks must agree: correctors may run spatial collectives
-            coin = Distributed.get_instance().broadcast_spatial(coin)
+            # all ranks take the data-parallel root's draw
+            coin = dist.broadcast_spatial(coin)
+            coin = coin * float(dist.data_parallel_rank == 0)
+            coin = dist.reduce_sum(coin)
             self._corrector_disabled = bool(coin.item() < 0.5)
         self._wrapped.start_train_batch()
 
