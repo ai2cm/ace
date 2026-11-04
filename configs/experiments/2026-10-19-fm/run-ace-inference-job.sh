@@ -2,13 +2,15 @@
 # Submit one inference job on a training checkpoint via gantry.
 #
 #   run-ace-inference-job.sh MODE CONFIG_FILENAME JOB_NAME JOB_GROUP \
-#       RESULTS_DATASET [CHECKPOINT_PATH]
+#       RESULTS_DATASET [CHECKPOINT_PATH] [WANDB_NAME]
 #
 # MODE selects the entry point and how the config is validated first:
 #   suite      run_eval_suite.py (evaluator suite, one wandb run)
 #   evaluator  python -m fme.ace.evaluator
 #   inference  python -m fme.ace.inference
 # CHECKPOINT_PATH inside RESULTS_DATASET is mounted at /ckpt.tar.
+# WANDB_NAME (default JOB_NAME) is the wandb run name; JOB_NAME is the Beaker
+# experiment and task name.
 # Set SKIP_VALIDATE=1 when the caller has validated the config already.
 # Ported from the 2026-06-26 run-ace-eval.sh / run-ace-evaluator.sh /
 # run-ace-inference.sh. The gantry options follow run-ace-train.sh (same
@@ -26,8 +28,9 @@ JOB_NAME="$3"
 JOB_GROUP="$4"
 EXISTING_RESULTS_DATASET="$5"
 CHECKPOINT_PATH="${6:-training_checkpoints/best_inference_ckpt.tar}"
+WANDB_NAME="${7:-$JOB_NAME}"
 if [[ -z "$EXISTING_RESULTS_DATASET" ]]; then
-  echo "usage: $0 MODE CONFIG_FILENAME JOB_NAME JOB_GROUP RESULTS_DATASET [CHECKPOINT_PATH]" >&2
+  echo "usage: $0 MODE CONFIG_FILENAME JOB_NAME JOB_GROUP RESULTS_DATASET [CHECKPOINT_PATH] [WANDB_NAME]" >&2
   exit 2
 fi
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -87,7 +90,7 @@ gantry run \
   --min-runtime 4h \
   "${cluster_args[@]}" \
   --env WANDB_USERNAME="$WANDB_USERNAME" \
-  --env WANDB_NAME="$JOB_NAME" \
+  --env WANDB_NAME="$WANDB_NAME" \
   --env WANDB_JOB_TYPE=inference \
   --env WANDB_RUN_GROUP="$JOB_GROUP" \
   --env WANDB_PROJECT="$WANDB_PROJECT" \

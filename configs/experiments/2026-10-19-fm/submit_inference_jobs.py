@@ -23,8 +23,13 @@ Checkpoint (--ckpt, default bestinf; _inference_common.CHECKPOINTS):
   bestinf     training_checkpoints/best_inference_ckpt.tar  (EMA weights)
   lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch)
 
---ckpt lastema applies to the eval-suite families only; it swaps the job
-name's "-bestinf" for "-lastema" and logs to a "-lastema" wandb group.
+--ckpt lastema: eval-suite job names swap "-bestinf" for "-lastema"; sst and
+paper job names (which carry no checkpoint suffix) get "-lastema" appended.
+Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS). Where
+the lastema name would pass Beaker's 128-character limit (the balanced runs'
+ERA5 paper kinds), only the Beaker experiment name is shortened
+(beaker_job_name: "-era5-c96-piC-1pct-cm4-xshield-" becomes "-4src-"); the
+wandb run name stays the full one.
 --old-runs (lastema, eval family only) adds the arch's 2026-06-26 baselines
 (_inference_common.OLD_RUNS[arch]: era5-a1, fm-a2-cond, c96-a1; nc-sfno for
 sfno, nc-swin-v2.1 for swin-v2.2), each on the eval suite of its old -bestinf
@@ -97,6 +102,9 @@ LASTEMA_WANDB_GROUPS = {
     "eval": "ace2-fm-eval-lastema-2026-10-19",
     "cm4xshield": "ace2-fm-cm4xshield-eval-lastema-2026-10-19",
     "cm4-1pct": "ace2-fm-cm4xshield-eval-lastema-2026-10-19",
+    "sst": "ace2-fm-sst-perts-lastema-2026-10-19",
+    "paper-som": "ace2-fm-paper-lastema-2026-10-19",
+    "paper-era5": "ace2-fm-paper-lastema-2026-10-19",
 }
 # run-ace-inference-job.sh MODE per family.
 MODES = {
@@ -107,6 +115,10 @@ MODES = {
     "paper-som": "evaluator",
     "paper-era5": "evaluator",
 }
+# Beaker rejects experiment names over 128 characters.
+BEAKER_NAME_LIMIT = 128
+LONG_SOURCES_TOKEN = "-era5-c96-piC-1pct-cm4-xshield-"
+SHORT_SOURCES_TOKEN = "-4src-"
 EVAL_SUITE_NAME_SUFFIXES = {
     "eval": "-bestinf",
     "cm4xshield": "-cm4xshield-bestinf",
@@ -115,11 +127,24 @@ EVAL_SUITE_NAME_SUFFIXES = {
 
 
 class Job(NamedTuple):
-    name: str
+    name: str  # Beaker experiment name
     family: str
     config: str  # filename in inference_configs/
     dataset_id: str
     wandb_group: str
+    wandb_name: str
+
+
+def beaker_job_name(name: str) -> str:
+    """`name`, or, if over BEAKER_NAME_LIMIT, `name` with LONG_SOURCES_TOKEN
+    replaced by SHORT_SOURCES_TOKEN (the wandb run name stays `name`).
+    """
+    if len(name) <= BEAKER_NAME_LIMIT:
+        return name
+    short = name.replace(LONG_SOURCES_TOKEN, SHORT_SOURCES_TOKEN, 1)
+    if len(short) > BEAKER_NAME_LIMIT:
+        raise ValueError(f"job name over {BEAKER_NAME_LIMIT} characters: {short}")
+    return short
 
 
 def family_jobs(
@@ -132,18 +157,18 @@ def family_jobs(
 ) -> list[tuple[str, str]]:
     """(job name, config filename) of one run's jobs in one family, narrowed
     by `kinds` (paper families) and `sst_grids`/`sst_levels` (sst). `ckpt`
-    sets the eval-suite job-name suffix (CHECKPOINTS).
+    sets the eval-suite job-name suffix and, unless bestinf, the suffix
+    appended to sst and paper job names (CHECKPOINTS).
     """
     if family in EVAL_SUITE_CONFIGS:
         suffix = EVAL_SUITE_NAME_SUFFIXES[family].replace(
             "-bestinf", CHECKPOINTS[ckpt][1]
         )
         return [(f"{run}{suffix}", EVAL_SUITE_CONFIGS[family])]
-    if ckpt != "bestinf":
-        raise ValueError(f"--ckpt {ckpt} applies to the eval-suite families only")
+    suffix = "" if ckpt == "bestinf" else CHECKPOINTS[ckpt][1]
     if family == "sst":
         return [
-            (f"{run}-sst-{grid}-{level}", sst_config_filename(grid, level))
+            (f"{run}-sst-{grid}-{level}{suffix}", sst_config_filename(grid, level))
             for grid in SST_GRIDS
             if sst_grids is None or grid in sst_grids
             for level in SST_PERTURBATIONS
@@ -151,7 +176,7 @@ def family_jobs(
         ]
     if family in ("paper-som", "paper-era5"):
         return [
-            (f"{run}-{kind}", paper_config_filename(kind))
+            (f"{run}-{kind}{suffix}", paper_config_filename(kind))
             for kind, (kind_family, _) in PAPER_KINDS.items()
             if kind_family == family and (kinds is None or kind in kinds)
         ]
@@ -268,7 +293,7 @@ def main() -> None:
         "--ckpt",
         choices=list(CHECKPOINTS),
         default="bestinf",
-        help="Checkpoint to evaluate (default: bestinf); lastema: eval suites only.",
+        help="Checkpoint to evaluate (default: bestinf).",
     )
     parser.add_argument(
         "--old-runs",
@@ -281,12 +306,6 @@ def main() -> None:
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
-    if args.ckpt != "bestinf":
-        bad = sorted(set(args.family) - set(EVAL_SUITE_CONFIGS))
-        if bad:
-            raise SystemExit(
-                f"--ckpt {args.ckpt} applies to eval-suite families only, not {bad}"
-            )
     if args.old_runs and (args.ckpt != "lastema" or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
     checkpoint_path = CHECKPOINTS[args.ckpt][0]
@@ -303,7 +322,7 @@ def main() -> None:
     print()
 
     jobs = [
-        Job(name, family, config, ready[run], groups[family])
+        Job(beaker_job_name(name), family, config, ready[run], groups[family], name)
         for family in args.family
         for run in sorted(ready)
         for name, config in family_jobs(
@@ -313,7 +332,14 @@ def main() -> None:
     if args.old_runs:
         suffix = CHECKPOINTS[args.ckpt][1]
         jobs += [
-            Job(f"{run}{suffix}", "eval", config, dataset, groups["eval"])
+            Job(
+                f"{run}{suffix}",
+                "eval",
+                config,
+                dataset,
+                groups["eval"],
+                f"{run}{suffix}",
+            )
             for run, (dataset, config) in sorted(OLD_RUNS[args.arch].items())
         ]
     if args.job_name is not None:
@@ -348,6 +374,7 @@ def main() -> None:
                 job.wandb_group,
                 job.dataset_id,
                 checkpoint_path,
+                job.wandb_name,
             ],
             wandb_project=WANDB_PROJECT,
             args=args,
