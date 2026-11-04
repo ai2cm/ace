@@ -58,10 +58,9 @@ class StaticSpatialMaskingConfig:
         exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
             to exclude when applying the mask.
         fill_value_overrides: Per-channel overrides of ``fill_value``, keyed by
-            name or prefix as in ``exclude_names_and_prefixes``. The longest
-            matching key wins. A key matching no masked channel raises. When
-            set, a masked channel missing from the normalizer means raises a
-            ``KeyError``.
+            name or prefix as in ``exclude_names_and_prefixes``. Each key must
+            match at least one masked input, and no two keys may match the same
+            one.
 
     """
 
@@ -76,70 +75,83 @@ class StaticSpatialMaskingConfig:
                 f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
 
-    def _resolve_fill_values(
+    def _resolve_overrides(
         self, names: Iterable[str]
     ) -> dict[str, Literal["mean"] | float]:
-        """The fill value for each of ``names``; the longest matching key wins."""
+        """The override fill value for each of ``names`` that a key matches."""
         overrides = self.fill_value_overrides or {}
-        channels = list(names)
-        unselected = NameAndPrefixSelection(tuple(overrides)).unmatched_entries(
-            channels
-        )
-        if unselected:
+        names = list(names)
+        unmatched = NameAndPrefixSelection(tuple(overrides)).unmatched_entries(names)
+        if unmatched:
             raise ValueError(
-                f"fill_value_overrides keys match no masked channel: {unselected}"
+                f"fill_value_overrides keys match no masked input: {unmatched}"
             )
         matchers = {key: NameAndPrefixMatcher([key]) for key in overrides}
         resolved: dict[str, Literal["mean"] | float] = {}
-        for channel in channels:
-            selecting = [
-                key for key, matcher in matchers.items() if matcher.match(channel)
-            ]
-            resolved[channel] = (
-                overrides[max(selecting, key=len)] if selecting else self.fill_value
+        overlapping: set[tuple[str, ...]] = set()
+        for name in names:
+            keys = [key for key, matcher in matchers.items() if matcher.match(name)]
+            if len(keys) > 1:
+                overlapping.add(tuple(sorted(keys)))
+            elif keys:
+                resolved[name] = overrides[keys[0]]
+        if overlapping:
+            raise ValueError(
+                "fill_value_overrides keys match the same input: "
+                f"{sorted(overlapping)}"
             )
         return resolved
 
-    def build(self, mask: HasGetSpatialMask, means: TensorMapping | None = None):
+    def build(
+        self,
+        mask: HasGetSpatialMask,
+        means: TensorMapping | None = None,
+        names: Iterable[str] | None = None,
+    ):
         """
         Build StaticSpatialMasking.
 
+        Args:
+            mask: Provides the mask for each variable.
+            means: Normalizer means, required where a "mean" fill applies.
+            names: Input names, required when ``fill_value_overrides`` is set.
         """
         exclude = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
-        if not self.fill_value_overrides:
-            if self.fill_value != "mean":
-                fill = torch.as_tensor(float(self.fill_value))
-                return StaticSpatialMasking(
-                    mask_value=self.mask_value,
-                    fill_value=collections.defaultdict(lambda: fill),
-                    mask=mask,
-                    exclude=exclude,
-                )
-            if means is None:
+        fill_mapping: dict[str, torch.Tensor] = {}
+        if self.fill_value_overrides:
+            if names is None:
                 raise ValueError(
-                    "fill_values mapping required by build unless configured "
-                    "fill_value is a float."
+                    "names required by build when fill_value_overrides is set."
                 )
+            masked = [
+                name
+                for name in names
+                if not exclude.match(name)
+                and mask.get_mask_tensor_for(name) is not None
+            ]
+            for name, value in self._resolve_overrides(masked).items():
+                if value != "mean":
+                    fill_mapping[name] = torch.as_tensor(float(value))
+                elif means is None:
+                    raise ValueError(
+                        "means required by build for a 'mean' fill_value_overrides "
+                        "value."
+                    )
+                else:
+                    fill_mapping[name] = means[name]
+        if self.fill_value != "mean":
+            default = torch.as_tensor(float(self.fill_value))
             return StaticSpatialMasking(
                 mask_value=self.mask_value,
-                fill_value=means,
+                fill_value=collections.defaultdict(lambda: default, fill_mapping),
                 mask=mask,
                 exclude=exclude,
             )
         if means is None:
-            raise ValueError(
-                "fill_values mapping required by build when fill_value_overrides "
-                "is set."
-            )
-        fill_mapping = {
-            name: means[name] if value == "mean" else torch.as_tensor(float(value))
-            for name, value in self._resolve_fill_values(
-                name for name in means if not exclude.match(name)
-            ).items()
-        }
+            raise ValueError("means required by build when fill_value is 'mean'.")
         return StaticSpatialMasking(
             mask_value=self.mask_value,
-            fill_value=fill_mapping,
+            fill_value={**means, **fill_mapping},
             mask=mask,
             exclude=exclude,
         )

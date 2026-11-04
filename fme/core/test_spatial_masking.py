@@ -61,7 +61,7 @@ def test_masking_config():
         mask_value=1,
         fill_value="mean",
     )
-    with pytest.raises(ValueError, match="fill_values mapping required"):
+    with pytest.raises(ValueError, match="means required"):
         _ = config.build(_Mask(mask_2d=torch.ones(1, 1)))
 
 
@@ -268,7 +268,7 @@ def test_fill_value_overrides_apply_per_channel():
         fill_value="mean",
         fill_value_overrides={"thetao_": 0.0, "deptho": 0.0},
     )
-    out = config.build(mask=mask, means=means)(data)
+    out = config.build(mask=mask, means=means, names=data)(data)
     expected = {
         "sst": means["sst"].item(),  # default "mean"
         "sos": means["sos"].item(),  # default "mean"
@@ -293,36 +293,25 @@ def test_fill_value_overrides_key_does_not_select_similar_name(key):
         fill_value="mean",
         fill_value_overrides={key: 0.0},
     )
-    out = config.build(mask=mask, means=means)(data)
+    out = config.build(mask=mask, means=means, names=data)(data)
     assert out["so_0"][_MASKED_CELL].item() == pytest.approx(0.0)
     assert out["sos"][_MASKED_CELL].item() == pytest.approx(means["sos"].item())
 
 
-def test_fill_value_overrides_exact_name_beats_prefix():
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"thetao_": 1.0, "thetao_1": "mean"},  # prefix and exact name
+        {"thetao": 1.0, "thetao_": 2.0},  # bare name and prefix
+    ],
+)
+def test_fill_value_overrides_overlapping_keys_raise(overrides):
     mask, data, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
-        mask_value=0,
-        fill_value=0.0,
-        fill_value_overrides={"thetao_": 1.0, "thetao_1": "mean"},
+        mask_value=0, fill_value=0.0, fill_value_overrides=overrides
     )
-    out = config.build(mask=mask, means=means)(data)
-    assert out["sst"][_MASKED_CELL].item() == pytest.approx(0.0)  # default float
-    assert out["thetao_0"][_MASKED_CELL].item() == pytest.approx(1.0)  # prefix
-    assert out["thetao_1"][_MASKED_CELL].item() == pytest.approx(
-        means["thetao_1"].item()
-    )  # exact name wins
-
-
-def test_fill_value_overrides_longest_key_wins():
-    """The bare name selects the same channels as the prefix, so the prefix wins."""
-    mask, data, means = _overrides_setup()
-    config = StaticSpatialMaskingConfig(
-        mask_value=0,
-        fill_value=0.0,
-        fill_value_overrides={"thetao": 1.0, "thetao_": 2.0},
-    )
-    out = config.build(mask=mask, means=means)(data)
-    assert out["thetao_0"][_MASKED_CELL].item() == pytest.approx(2.0)
+    with pytest.raises(ValueError, match="match the same input"):
+        config.build(mask=mask, means=means, names=data)
 
 
 @pytest.mark.parametrize(
@@ -333,50 +322,80 @@ def test_fill_value_overrides_longest_key_wins():
     ],
 )
 def test_fill_value_overrides_unmatched_key_raises(key):
-    mask, _, means = _overrides_setup()
+    mask, data, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value="mean",
         fill_value_overrides={key: 0.0},
     )
-    with pytest.raises(ValueError, match="match no masked channel"):
-        config.build(mask=mask, means=means)
+    with pytest.raises(ValueError, match="match no masked input"):
+        config.build(mask=mask, means=means, names=data)
 
 
-def test_fill_value_overrides_key_selecting_only_excluded_channels_raises():
-    mask, _, means = _overrides_setup()
+@pytest.mark.parametrize(
+    "key, exclude",
+    [
+        ("sst", ["sst"]),  # excluded input
+        ("mask_ignored", None),  # input with no mask
+        ("output_only", None),  # in means but not an input
+    ],
+)
+def test_fill_value_overrides_key_selecting_no_masked_input_raises(key, exclude):
+    mask, data, means = _overrides_setup()
+    extra = {name: torch.tensor(1.0) for name in ["mask_ignored", "output_only"]}
     config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value="mean",
-        exclude_names_and_prefixes=["sst"],
-        fill_value_overrides={"sst": 0.0},
+        exclude_names_and_prefixes=exclude,
+        fill_value_overrides={key: 0.0},
     )
-    with pytest.raises(ValueError, match="match no masked channel"):
+    with pytest.raises(ValueError, match="match no masked input"):
+        config.build(mask=mask, means={**means, **extra}, names=[*data, "mask_ignored"])
+
+
+def test_fill_value_overrides_float_fill_value_needs_no_means():
+    mask, data, _ = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=3.5,
+        fill_value_overrides={"thetao_": 0.0},
+    )
+    out = config.build(mask=mask, means=None, names=data)(data)
+    assert out["sst"][_MASKED_CELL].item() == pytest.approx(3.5)
+    assert out["thetao_0"][_MASKED_CELL].item() == pytest.approx(0.0)
+
+
+def test_fill_value_overrides_mean_override_requires_means():
+    mask, data, _ = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"thetao_": "mean"},
+    )
+    with pytest.raises(ValueError, match="means required"):
+        config.build(mask=mask, means=None, names=data)
+
+
+def test_fill_value_overrides_requires_names():
+    mask, _, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"thetao_": 0.0},
+    )
+    with pytest.raises(ValueError, match="names required"):
         config.build(mask=mask, means=means)
 
 
-def test_fill_value_overrides_masked_channel_missing_from_means_raises():
-    mask, data, means = _overrides_setup()
-    del means["sst"]
+def test_empty_fill_value_overrides_acts_as_unset():
+    mask, data, _ = _overrides_setup()
     config = StaticSpatialMaskingConfig(
-        mask_value=0,
-        fill_value=0.0,
-        fill_value_overrides={"thetao_": 0.0},
+        mask_value=0, fill_value=0.0, fill_value_overrides={}
     )
-    masking = config.build(mask=mask, means=means)
-    with pytest.raises(KeyError, match="missing key 'sst'"):
-        masking(data)
-
-
-def test_fill_value_overrides_requires_means():
-    mask, _, _ = _overrides_setup()
-    config = StaticSpatialMaskingConfig(
-        mask_value=0,
-        fill_value=0.0,
-        fill_value_overrides={"thetao_": 0.0},
-    )
-    with pytest.raises(ValueError, match="fill_values mapping required"):
-        config.build(mask=mask, means=None)
+    out = config.build(mask=mask, means=None)(data)
+    for name in data:
+        assert out[name][_MASKED_CELL].item() == pytest.approx(0.0), name
+        assert out[name][_UNMASKED_CELL].item() == pytest.approx(7.0), name
 
 
 def test_fill_value_overrides_bad_value_rejected_on_load():
@@ -401,7 +420,7 @@ def test_fill_value_applies_to_channels_no_override_selects(fill_value, override
     config = StaticSpatialMaskingConfig(
         mask_value=0, fill_value=fill_value, fill_value_overrides=overrides
     )
-    out = config.build(mask=mask, means=means)(data)
+    out = config.build(mask=mask, means=means, names=data)(data)
     for name in data:
         if overrides is not None and name in overrides:
             continue
