@@ -11,7 +11,9 @@
 #   cde1-evals - the same centennials of the cde1 FTO and FTO->FTalt runs' best_inference_ckpt.
 #   cde1-ftalt-evals - the same for the cde1 direct FTalt. Its centennials on the mae-ftalt branch failed to load the
 #            checkpoint (copied_outputs, which only this branch defines), so it is evaluated here.
-#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta cde1 ftalt-evals cde1-evals cde1-ftalt-evals
+#   cde1-fto-ep8-evals - the cde1 FTO's centennials from best_ckpt.tar (epoch 8, EMA) instead of best_inference_ckpt
+#            (epoch 1, the corrector-off epoch), to test whether its drift comes from that checkpoint.
+#   DRY_RUN=1 ./launch-4deg-enso-stage-runs.sh ftalt fta cde1 ftalt-evals cde1-evals cde1-ftalt-evals cde1-fto-ep8-evals
 set -euo pipefail
 WANDB_USERNAME="${WANDB_USERNAME:-elynnwu}"
 [ "$WANDB_USERNAME" = elynnwu ] || { echo "WANDB_USERNAME must be elynnwu, got $WANDB_USERNAME"; exit 1; }
@@ -60,8 +62,8 @@ launch_ftalt() {
     -- torchrun --nproc_per_node=2 -m fme.coupled.train "$CFG"
 }
 
-launch_centennials() {   # <job prefix> <results dataset> <description>
-  local S CFG TAG JOB
+launch_centennials() {   # <job prefix> <results dataset> <description> [checkpoint file]
+  local S CFG TAG JOB CKPT="${4:-best_inference_ckpt.tar}"
   for S in piC 1pct; do
     case "$S" in
       piC)  CFG=coupled-evaluator-config-piC-ic0151-200yr-4deg-singleckpt.yaml;  TAG=piC-ic0151-200yr ;;
@@ -72,7 +74,7 @@ launch_centennials() {   # <job prefix> <results dataset> <description>
       --description "$3: ${TAG} coupled free rollout" \
       --min-runtime 8h \
       --env WANDB_NAME="$JOB" --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ppad-4deg-centennial \
-      --dataset "$2:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
+      --dataset "$2:training_checkpoints/${CKPT}:/ckpt.tar" \
       --gpus 1 --shared-memory 100GiB \
       -- python -I -m fme.coupled.evaluator "${SCRIPT_PATH}/eval/${CFG}" \
         --override data_writer.ocean.save_monthly_files=false
@@ -107,6 +109,12 @@ launch_cde1_ftalt_evals() {
     "4deg ppad ${A} direct FTalt cde1 selected checkpoint"
 }
 
+launch_cde1_fto_ep8_evals() {
+  local A=resid-ohc-cap0005-ppad-fmean
+  launch_centennials "samudra-ppad4deg-${A}-coupled-ft-ens-cde1-ep8" "$FTO_CDE1_DS" \
+    "4deg ppad ${A} FTO cde1 epoch-8 best_ckpt" best_ckpt.tar
+}
+
 launch_cde1() {
   local A=resid-ohc-cap0005-ppad-fmean V OCEAN DESC JOB CFG
   for V in ens jointens-spb jointens-spb-fto-then-ftalt; do
@@ -138,6 +146,7 @@ for set in "$@"; do
     cde1) launch_cde1 ;;
     cde1-evals) launch_cde1_evals ;;
     cde1-ftalt-evals) launch_cde1_ftalt_evals ;;
-    *) echo "unknown set $set (ftalt|fta|ftalt-evals|cde1|cde1-evals|cde1-ftalt-evals)"; exit 1 ;;
+    cde1-fto-ep8-evals) launch_cde1_fto_ep8_evals ;;
+    *) echo "unknown set $set (ftalt|fta|ftalt-evals|cde1|cde1-evals|cde1-ftalt-evals|cde1-fto-ep8-evals)"; exit 1 ;;
   esac
 done
