@@ -1,9 +1,10 @@
 # 4-degree ablations of ACE2.2's recipe
 
 Ablations of ACE2.2's recipe at 4 degrees daily in AIMIP mode. Each arm removes or swaps one of
-ACE2.2's recipe choices, starting from an ACE2.2-like control; the last arm combines two of them. The whole-recipe comparison is the
-ACE2.5 recipe in `../2026-10-23-ace25-aimip-4deg/`. Every arm has seeds 0-3 and is scored on its
-1979-2014 trend and its +4 K response.
+ACE2.2's recipe choices, starting from an ACE2.2-like control; the no-GMR + diagnostic arm
+combines two of them. The whole-recipe comparison is the ACE2.5 recipe in
+`../2026-10-23-ace25-aimip-4deg/`. Every arm has seeds 0-3 and is scored on its 1979-2014 trend
+and its +4 K response.
 
 | arm | pretrain | fine-tune | change from the control |
 |---|---|---|---|
@@ -13,6 +14,7 @@ ACE2.5 recipe in `../2026-10-23-ace25-aimip-4deg/`. Every arm has seeds 0-3 and 
 | `ace22-like-4deg-no-bottleneck` | `ace22-pretrain-no-bottleneck.yaml` | `ace22-finetune.yaml` | all channels through one spectral filter |
 | `ace22-like-4deg-ace25-ft` | the control's (no new pretrain) | `ace22-finetune-ace25.yaml` | control pretrain + ACE2.5's fine-tune (10 epochs, 3 steps, loss on every step) |
 | `ace22-like-4deg-no-gmr-diagnostic-near-surface` | `ace22-pretrain-no-gmr-diagnostic-near-surface.yaml` | `ace22-finetune.yaml` | no global mean removal and near-surface fields diagnosed (two changes) |
+| `ace22-like-4deg-gmr-without-tmp2m` | `ace22-pretrain-gmr-without-tmp2m.yaml` | `ace22-finetune.yaml` | TMP2m left out of global mean removal, still prognostic |
 
 `ace22-like-4deg-ace25-ft` is not the ACE2.5 recipe: it fine-tunes the control's ACE2.2-like
 pretrains with ACE2.5's fine-tune schedule. The ACE2.5 recipe (its own pretrain and fine-tune) is
