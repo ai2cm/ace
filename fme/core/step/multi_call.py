@@ -318,6 +318,9 @@ class MultiCallStep(StepABC):
     def set_epoch(self, epoch: int) -> None:
         self._wrapped_step.set_epoch(epoch)
 
+    def start_train_batch(self) -> None:
+        self._wrapped_step.start_train_batch()
+
     def step(
         self,
         args: StepArgs,

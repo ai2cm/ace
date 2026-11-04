@@ -428,6 +428,14 @@ class StepABC(abc.ABC):
         """
         pass
 
+    def start_train_batch(self) -> None:
+        """Called by the train stepper at the start of each batch.
+
+        Default implementation is a no-op. Steps which wrap another step must
+        forward the call to the wrapped step.
+        """
+        pass
+
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:
         """

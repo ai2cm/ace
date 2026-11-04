@@ -455,6 +455,9 @@ class SecondaryModuleStep(StepABC):
     def set_epoch(self, epoch: int) -> None:
         self._corrector.set_epoch(epoch)
 
+    def start_train_batch(self) -> None:
+        self._corrector.start_train_batch()
+
     def get_state(self):
         """
         Returns:

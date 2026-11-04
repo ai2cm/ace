@@ -740,6 +740,7 @@ def test_atmosphere_corrector_config_fields_are_exercised():
         "keep_gradient_through_clamps",
         "clip_frozen_precipitation",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
+        "corrector_disabled_batches",  # inherited batch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
     assert actual == expected, (

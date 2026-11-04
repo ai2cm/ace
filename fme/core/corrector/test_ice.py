@@ -42,6 +42,7 @@ def test_ice_corrector_config_fields_are_known():
     expected = {
         "budget_correction",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
+        "corrector_disabled_batches",  # inherited batch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(IceCorrectorConfig)}
     assert actual == expected, (

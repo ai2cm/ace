@@ -4,10 +4,13 @@ from collections.abc import Mapping
 from typing import Any, Protocol, Self, final
 
 import dacite
+import torch
 
 from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
+from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -24,9 +27,12 @@ class CorrectorConfigABC(abc.ABC):
             which the corrector is not applied to train-mode steps. The
             corrector is always applied in eval mode (validation, inline
             inference and standalone inference).
+        corrector_disabled_batches: If true, each training batch flips a fair
+            coin to disable the corrector for that batch's train-mode steps.
     """
 
     corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
+    corrector_disabled_batches: bool = dataclasses.field(default=False, kw_only=True)
 
     def __post_init__(self):
         if self.corrector_disabled_epochs < 0:
@@ -61,6 +67,8 @@ class CorrectorConfigABC(abc.ABC):
             dataset_info: Information about the dataset the corrector runs on.
         """
         corrector = self._get_corrector(dataset_info)
+        if self.corrector_disabled_batches:
+            corrector = BatchCoinFlipCorrector(wrapped=corrector)
         if self.corrector_disabled_epochs == 0:
             return corrector
         return EpochScheduledCorrector(
@@ -128,6 +136,12 @@ class CorrectorABC(abc.ABC):
 
     def set_epoch(self, epoch: int) -> None:
         """Called by the stepper at the start of each training epoch.
+
+        Default implementation is a no-op.
+        """
+
+    def start_train_batch(self) -> None:
+        """Called by the train stepper at the start of each batch.
 
         Default implementation is a no-op.
         """
@@ -236,6 +250,9 @@ class EpochScheduledCorrector(CorrectorABC):
         self._corrector_disabled = epoch <= self._disabled_epochs
         self._wrapped.set_epoch(epoch)
 
+    def start_train_batch(self) -> None:
+        self._wrapped.start_train_batch()
+
     def get_state(self) -> dict[str, Any]:
         state: dict[str, Any] = {}
         if self._disabled_epochs > 0:
@@ -266,6 +283,53 @@ class EpochScheduledCorrector(CorrectorABC):
     ) -> CorrectorOutput:
         if self._corrector_disabled and self._training:
             # Nothing was applied: pass the data through with empty diagnostics.
+            return CorrectorOutput(
+                corrected=dict(gen_data), corrector_state=corrector_state
+            )
+        return self._wrapped(input_data, gen_data, forcing_data, corrector_state)
+
+
+class BatchCoinFlipCorrector(CorrectorABC):
+    """Wrap a corrector so a fair coin, flipped at the start of each training
+    batch, decides whether it is skipped for that batch's train-mode steps.
+    Always applied in eval mode.
+    """
+
+    def __init__(self, wrapped: CorrectorABC):
+        self._wrapped = wrapped
+        self._corrector_disabled = False
+        self._training = True
+
+    def train(self, mode: bool = True) -> "BatchCoinFlipCorrector":
+        self._training = mode
+        self._wrapped.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._wrapped.set_epoch(epoch)
+
+    def start_train_batch(self) -> None:
+        if self._training:
+            coin = torch.rand(1, device=get_device())
+            # spatial ranks must agree: correctors may run spatial collectives
+            coin = Distributed.get_instance().broadcast_spatial(coin)
+            self._corrector_disabled = bool(coin.item() < 0.5)
+        self._wrapped.start_train_batch()
+
+    def get_state(self) -> dict[str, Any]:
+        return self._wrapped.get_state()
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        self._wrapped.load_state(state)
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> CorrectorOutput:
+        if self._corrector_disabled and self._training:
             return CorrectorOutput(
                 corrected=dict(gen_data), corrector_state=corrector_state
             )

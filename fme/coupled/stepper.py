@@ -929,6 +929,10 @@ class CoupledStepper:
         self.atmosphere.set_epoch(epoch)
         self.ocean.set_epoch(epoch)
 
+    def start_train_batch(self) -> None:
+        self.atmosphere.start_train_batch()
+        self.ocean.start_train_batch()
+
     def get_state(self):
         """
         Returns:
@@ -2216,6 +2220,7 @@ class CoupledTrainStepper(
         )
 
         metrics = ComponentStepMetrics()
+        self._stepper.start_train_batch()
         # Draws this batch's rollout window and (when
         # optimize_single_component_per_batch) the single-component selection,
         # in the required order.

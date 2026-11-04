@@ -1521,6 +1521,9 @@ class Stepper:
     def set_train(self) -> None:
         self._step_obj.train()
 
+    def start_train_batch(self) -> None:
+        self._step_obj.start_train_batch()
+
     def set_epoch(self, epoch: int) -> None:
         self._step_obj.set_epoch(epoch)
         for module in self.modules:
@@ -1748,6 +1751,7 @@ class TrainStepper(
                 and the normalized batch data.
         """
         self._loss_schedule.init_for_epoch(data.epoch)
+        self._stepper.start_train_batch()
         n_data_steps = data.time.shape[1] - self.n_ic_timesteps
         n_loss_steps = self._loss_schedule.sample(n_data_steps)
         if self._config.pushforward_steps >= n_loss_steps:
@@ -2021,7 +2025,8 @@ class StepperOverrideConfig:
         if self.corrector != "keep" and not self.corrector.training_is_default():
             raise ValueError(
                 "StepperOverrideConfig.corrector must not set training-only "
-                "options such as corrector_disabled_epochs."
+                "options such as corrector_disabled_epochs or "
+                "corrector_disabled_batches."
             )
 
 

@@ -1025,6 +1025,7 @@ def test_ocean_corrector_config_fields_are_known():
         "keep_gradient_through_clamps",
         "zos_global_mean_correction",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
+        "corrector_disabled_batches",  # inherited batch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(OceanCorrectorConfig)}
     assert actual == expected, (

@@ -35,10 +35,11 @@ class CorrectorSelector(CorrectorConfigABC):
 
     def __post_init__(self):
         super().__post_init__()
-        if self.corrector_disabled_epochs != 0:
+        if self.corrector_disabled_epochs != 0 or self.corrector_disabled_batches:
             raise ValueError(
-                "corrector_disabled_epochs must be set on the wrapped corrector "
-                "config (inside `config:`), not on the CorrectorSelector."
+                "corrector_disabled_epochs and corrector_disabled_batches must be "
+                "set on the wrapped corrector config (inside `config:`), not on "
+                "the CorrectorSelector."
             )
         self._corrector_config_instance = self.registry.get(self.type, self.config)
 
@@ -48,7 +49,11 @@ class CorrectorSelector(CorrectorConfigABC):
         A scheduled corrector cannot load state from a checkpoint trained
         without a schedule, and the schedule has no effect at inference.
         """
-        return self._corrector_config_instance.corrector_disabled_epochs == 0
+        config = self._corrector_config_instance
+        return (
+            config.corrector_disabled_epochs == 0
+            and not config.corrector_disabled_batches
+        )
 
     @classmethod
     def register(cls, type_name):

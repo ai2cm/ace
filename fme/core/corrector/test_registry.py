@@ -13,6 +13,7 @@ from fme.core.corrector.ice import IceCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
+    BatchCoinFlipCorrector,
     CorrectionSequence,
     CorrectorABC,
     CorrectorConfigABC,
@@ -211,6 +212,38 @@ def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
     enabled = corrector({}, gen_data, {}, None)
     assert set(enabled.modified_names) == {"a"}
     torch.testing.assert_close(enabled.diagnostics.delta["a"], torch.full((2, 2), 1.0))
+
+
+def test_corrector_disabled_batches_with_disabled_epochs():
+    config = AtmosphereCorrectorConfig(
+        corrector_disabled_epochs=1, corrector_disabled_batches=True
+    )
+    built = _get_corrector(config)
+    assert isinstance(built, EpochScheduledCorrector)
+    assert isinstance(built._wrapped, BatchCoinFlipCorrector)
+
+    wrapped = CorrectionSequence([ConstantOffsetCorrection("a", 1.0)])
+    corrector = EpochScheduledCorrector(
+        wrapped=BatchCoinFlipCorrector(wrapped=wrapped), disabled_epochs=1
+    )
+    gen_data = {"a": torch.zeros(2, 2)}
+    corrector.train(True)
+    corrector.set_epoch(2)
+    torch.manual_seed(0)
+    applied_per_batch = []
+    for _ in range(20):
+        corrector.start_train_batch()
+        applied = [
+            "a" in corrector({}, gen_data, {}, None).modified_names for _ in range(3)
+        ]
+        assert len(set(applied)) == 1  # one coin per batch, not per step
+        applied_per_batch.append(applied[0])
+    assert set(applied_per_batch) == {True, False}
+
+    corrector.eval()
+    for _ in range(5):
+        corrector.start_train_batch()
+        assert "a" in corrector({}, gen_data, {}, None).modified_names
 
 
 @CorrectorSelector.register("_test_deprecated_key_corrector")

@@ -438,6 +438,7 @@ def test_apply_coupled_overrides_accepts_corrector():
         "type": "atmosphere_corrector",
         "config": {},
         "corrector_disabled_epochs": 0,
+        "corrector_disabled_batches": False,
     }
     assert set(config.ocean_forcing_window_names) == ocean_forcing_names_before
 
