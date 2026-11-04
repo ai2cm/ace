@@ -19,3 +19,5 @@ cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs2|01M6JHN5
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mse-rs3|01M6JHNK492SDJEYC369JNQQ8Q|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs2|01M6JHP230VQFHR0CTMT0XJMNE|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-coupled_hybrid_fmean_mae_alt|mae-rs3|01M6JHPFZWZWYJMXPQ2PZ9ASKX|training|best_inference_ckpt|normal|--min-runtime 8h
