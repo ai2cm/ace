@@ -12,4 +12,4 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_cde25|rs0|trained|normal|jupiter|4||3|a
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|trained|normal|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=50|8h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.corrector.config.ocean_heat_content_correction=null|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.corrector.config.ocean_heat_content_correction=false|8h
