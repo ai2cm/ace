@@ -187,6 +187,16 @@ run_training "ace2s-finetune-shared-tnorm.yaml" "1deg-daily-ace2s-shared-tnorm-f
 # wandb name so the run keeps its id; beaker suffixes the experiment name).
 run_training "ace2s-pretrain-6hourly-resume.yaml" "1deg-6h-ace2s-pretrain-rs0" 8
 
+# spectral_ratio ablations (1/2, 1/4, 1/16; baseline is 1/8 = 0.125)
+run_training "ace2s-pretrain-sr0p5.yaml" "1deg-daily-ace2s-sr0p5-pretrain-rs0" 8
+run_training "ace2s-pretrain-sr0p25.yaml" "1deg-daily-ace2s-sr0p25-pretrain-rs0" 8
+run_training "ace2s-pretrain-sr0p0625.yaml" "1deg-daily-ace2s-sr0p0625-pretrain-rs0" 8
+
+# spectral_ratio ablation fine-tunes (staged; fill in pretrain result datasets)
+run_training "ace2s-finetune-sr0p5.yaml" "1deg-daily-ace2s-sr0p5-ft3-detached-rs0" 8
+run_training "ace2s-finetune-sr0p25.yaml" "1deg-daily-ace2s-sr0p25-ft3-detached-rs0" 8
+run_training "ace2s-finetune-sr0p0625.yaml" "1deg-daily-ace2s-sr0p0625-ft3-detached-rs0" 8
+
 # 4-degree arm (one GPU; needs the regenerated 2026-09-08 4-degree daily store on weka)
 run_training "ace2s-pretrain-4deg.yaml" "4deg-daily-ace2s-pretrain-rs0" 1
 
