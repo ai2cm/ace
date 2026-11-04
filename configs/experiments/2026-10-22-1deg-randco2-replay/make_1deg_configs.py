@@ -154,6 +154,33 @@ arms["hybridsstdiag-alt-replay"] = (
         "-alt-replay). = -hybridsstdiag-alt + replay (Troy 2026-11-02). Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
     ],
 )
+# 2026-11-04 (Troy): both replay arms again with the atmosphere swapped for Spencer's 1deg random-CO2 ACE2.5 rs1
+# (cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft-rs1-train, wandb wb3jfw7u, beaker
+# 01M6DWYW0AG9N7MCGFC1B3Q7SQ). Same variables, normalization and training data as the ACE2S rs1; the builder adds
+# grouped filters and a spectral bottleneck. The replay keeps the ACE2S arms' step schedule so the pairs differ only in
+# the atmosphere. Launch with ATMOS_DS=01M6DWYW0RWBN0X33ABS98T0AH.
+ace2p5_builder = yaml.safe_load(
+    (HERE / "inputs/ace2p5-randco2v2-ft-rs1-config.yaml").read_text()
+)["stepper"]["step"]["config"]["builder"]
+for tag, base in (
+    ("ace2p5-alt-replay", rep),
+    ("ace2p5-hybridsstdiag-alt-replay", hyb_rep),
+):
+    c = copy.deepcopy(base)
+    b = c["stepper"]["atmosphere"]["stepper"]["step"]["config"]["builder"]
+    assert b["type"] == ace2p5_builder["type"]
+    b["config"] = {
+        **ace2p5_builder["config"],
+        "checkpointing": b["config"]["checkpointing"],
+    }
+    arms[tag] = (
+        c,
+        [
+            f"= -{tag.removeprefix('ace2p5-')} with the atmosphere swapped for the 1deg random-CO2 ACE2.5 rs1 (wandb",
+            "wb3jfw7u), Troy 2026-11-04. Launch with ATMOS_DS=01M6DWYW0RWBN0X33ABS98T0AH"
+            + (" OCEAN_DS=01M626JPB247BQWSE0GN35SAXR." if "hybrid" in tag else "."),
+        ],
+    )
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(
