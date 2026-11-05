@@ -1,5 +1,6 @@
 import logging
 import os
+import weakref
 from unittest import mock
 
 import pytest
@@ -16,10 +17,13 @@ from fme.core.compile import (
     compile_enabled,
     compile_module,
     is_compile_enabled,
+    release_grads_from_cudagraphs,
+    uses_cudagraphs,
     without_cudagraphs,
 )
 from fme.core.device import force_cpu, get_device
-from fme.core.optimization import Checkpoint
+from fme.core.optimization import Checkpoint, OptimizationConfig
+from fme.core.scheduler import SchedulerConfig
 from fme.core.testing import skip_unless_cuda
 
 
@@ -340,6 +344,157 @@ def test_cudagraph_rollouts_match_eager(checkpoint_after: int | None):
         torch.stack(actual_outputs).square().sum().backward()
         for p, e in zip(net.parameters(), expected_grads):
             torch.testing.assert_close(p.grad, e, atol=1e-5, rtol=1e-5)
+    # the compiled graphs ran as CUDA graphs rather than falling back
+    manager = cudagraph_trees.get_manager(
+        torch.cuda.current_device(), create_if_none_exists=False
+    )
+    assert manager is not None and len(manager.roots) > 0
+
+
+def _accumulating_optimization(module: torch.nn.Module):
+    return OptimizationConfig(
+        optimizer_type="Adam",
+        lr=0.0,  # keep the weights fixed, so every batch has the same reference
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={},
+        use_gradient_accumulation=True,
+    ).build(torch.nn.ModuleList([module]), max_epochs=1)
+
+
+class _StaticBufferMul(torch.autograd.Function):
+    """``(w * x).sum()`` whose backward, like a backward compiled with CUDA
+    graph trees, returns the gradient of ``w`` in the same buffer on every
+    call, registered as a CUDA graph "cached tensor"."""
+
+    buffer: torch.Tensor | None = None
+
+    @staticmethod
+    def forward(ctx, w, x):
+        ctx.save_for_backward(x)
+        return (w * x).sum()
+
+    @staticmethod
+    def backward(ctx, grad):
+        (x,) = ctx.saved_tensors
+        if _StaticBufferMul.buffer is None:
+            _StaticBufferMul.buffer = torch.empty_like(x)
+            torch._C._add_cached_tensor(_StaticBufferMul.buffer)
+        _StaticBufferMul.buffer.copy_(grad * x)
+        return _StaticBufferMul.buffer, None
+
+
+def test_accumulated_grads_are_copied_out_of_cudagraph_buffers():
+    """With gradient accumulation, the gradient autograd stores from a CUDA
+    graph's output buffer is copied out of it, so the next backward, which
+    writes into the same buffer, accumulates onto the copy instead of adding
+    the buffer to itself (which gave twice the last step's gradient)."""
+    if not hasattr(torch._C, "_add_cached_tensor") or not hasattr(
+        torch._C, "_set_cached_tensors_enabled"
+    ):
+        pytest.skip("torch has no CUDA graph cached tensors")
+    with mock.patch.object(fme.core.compile, "_CUDAGRAPH_MODULES", weakref.WeakSet()):
+        compiled = _compile_with_cudagraph_mode(torch.nn.Identity())
+        assert uses_cudagraphs()
+        model = torch.nn.Linear(3, 1, bias=False)
+        weight = model.weight
+        optimization = _accumulating_optimization(model)
+        x1 = torch.tensor([[1.0, 2.0, 3.0]])
+        x2 = torch.tensor([[10.0, 20.0, 30.0]])
+        # cudagraph trees enable cached tensors when they create their manager
+        # and disable them on reset
+        torch._C._set_cached_tensors_enabled(True)
+        _StaticBufferMul.buffer = None
+        try:
+            optimization.accumulate_loss(_StaticBufferMul.apply(weight, x1))
+            optimization.accumulate_loss(_StaticBufferMul.apply(weight, x2))
+            assert weight.grad is not None
+            torch.testing.assert_close(weight.grad, x1 + x2)
+            buffer = _StaticBufferMul.buffer
+            assert buffer is not None
+            assert (
+                weight.grad.untyped_storage().data_ptr()
+                != buffer.untyped_storage().data_ptr()
+            )
+        finally:
+            if _StaticBufferMul.buffer is not None:
+                torch._C._remove_cached_tensor(_StaticBufferMul.buffer)
+                _StaticBufferMul.buffer = None
+            # matches the state the autouse dynamo_hygiene fixture leaves:
+            # its torch._dynamo.reset() resets cudagraph trees, so no CUDA
+            # graph tree manager relies on cached tensors being enabled
+            torch._C._set_cached_tensors_enabled(False)
+        del compiled
+
+
+def test_release_grads_from_cudagraphs_without_cudagraphs_keeps_grads():
+    """Without modules replaying CUDA graphs, gradients are left as they are,
+    so accumulation costs no copies."""
+    param = torch.nn.Parameter(torch.zeros(2))
+    param.grad = torch.ones(2)
+    grad = param.grad
+    with mock.patch.object(fme.core.compile, "_CUDAGRAPH_MODULES", weakref.WeakSet()):
+        assert not uses_cudagraphs()
+        release_grads_from_cudagraphs([param])
+    assert param.grad is grad
+
+
+class _FirstBatchVariant(torch.nn.Module):
+    """Like SFNO's per-epoch reset, a Python flag read in forward makes the
+    first batch of every epoch run a second compiled graph."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(8, 16), torch.nn.GELU(), torch.nn.Linear(16, 8)
+        )
+        self.first_batch = False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.first_batch:
+            x = 2 * x
+        return self.net(x)
+
+
+@pytest.mark.timeout(300)
+def test_cudagraph_gradient_accumulation_matches_eager():
+    """With gradient accumulation, every rollout step runs its own backward,
+    and the next step's forward begins a new CUDA graph tree generation while
+    the gradients autograd took from the compiled backward's output buffers
+    are still accumulating. Over a curriculum of growing rollouts, with a
+    second graph variant in the first batch of each epoch, the first epoch
+    warms up both variants, the second records the first-batch variant across
+    a step boundary, and later epochs replay across step boundaries, with
+    accumulated gradients matching eager throughout."""
+    skip_unless_cuda()
+    torch.manual_seed(0)
+    device = get_device()
+    net = _FirstBatchVariant().to(device)
+    compiled = compile_module(net, backend="inductor")
+    optimization = _accumulating_optimization(net)
+    x = torch.randn(4, 8, device=device)
+    for n_steps in (1, 2, 2, 4, 4):
+        for batch in range(2):
+            net.first_batch = batch == 0
+            net.zero_grad(set_to_none=True)
+            state = x
+            for _ in range(n_steps):
+                state = net(state)
+                state.square().mean().backward()
+                state = state.detach()
+            expected = [p.grad.clone() for p in net.parameters()]
+            net.zero_grad(set_to_none=True)
+            state = x
+            for _ in range(n_steps):
+                state = compiled(state)
+                optimization.accumulate_loss(state.square().mean())
+                state = optimization.detach_if_using_gradient_accumulation(
+                    {"x": state}
+                )["x"]
+            actual = [p.grad.clone() for p in net.parameters()]
+            optimization.step_weights()
+            for a, e in zip(actual, expected):
+                torch.testing.assert_close(a, e, atol=1e-5, rtol=1e-5)
     # the compiled graphs ran as CUDA graphs rather than falling back
     manager = cudagraph_trees.get_manager(
         torch.cuda.current_device(), create_if_none_exists=False

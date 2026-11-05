@@ -10,7 +10,11 @@ import numpy as np
 import torch
 from torch import nn
 
-from fme.core.compile import without_cudagraphs
+from fme.core.compile import (
+    release_grads_from_cudagraphs,
+    uses_cudagraphs,
+    without_cudagraphs,
+)
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.optimization import OptimizationABC
@@ -246,7 +250,22 @@ class Optimization(OptimizationABC):
         self._validate_loss(loss)
         self._accumulated_loss += loss
         if self._use_gradient_accumulation:
+            # the next step's forward may begin a new CUDA graph tree
+            # generation, which would overwrite gradients still held in a
+            # compiled backward's output buffers; autograd only stores such
+            # buffers into gradients that are unset before this backward
+            unset = (
+                [
+                    p
+                    for group in self.optimizer.param_groups
+                    for p in group["params"]
+                    if p.grad is None
+                ]
+                if uses_cudagraphs()
+                else []
+            )
             self._backward(loss)
+            release_grads_from_cudagraphs(unset)
 
     def get_accumulated_loss(self) -> torch.Tensor:
         return self._accumulated_loss
