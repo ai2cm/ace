@@ -100,9 +100,10 @@ def _split_muon_parameters(
 ]:
     """Split parameters into (Muon, spectral Muon, AdamW) lists.
 
-    Parameters with ``ndim >= 2`` go to Muon unless their name contains one
-    of ``adamw_names`` (→ AdamW) or ``spectral_names`` (→ spectral Muon,
-    for SFNO per-mode complex filter weights). All others go to AdamW.
+    A parameter whose name contains one of ``spectral_names`` goes to
+    spectral Muon (SFNO per-mode complex filter weights), and one whose name
+    contains one of ``adamw_names`` goes to AdamW. Other parameters with
+    ``ndim >= 2`` go to Muon, and the rest to AdamW.
 
     Raises:
         ValueError: If an entry of ``adamw_names`` or ``spectral_names``
@@ -123,7 +124,10 @@ def _split_muon_parameters(
                 f"Parameter {name!r} matches both adamw_names and "
                 f"spectral_names; each parameter can belong to only one group."
             )
-        if spectral_match and param.ndim >= 2:
+        if spectral_match:
+            # Muon validates these, so a pattern matching a parameter that
+            # is not a spectral filter weight raises instead of silently
+            # falling back to another group.
             spectral_params.append(param)
         elif param.ndim >= 2 and not adamw_match:
             muon_params.append(param)
@@ -423,13 +427,16 @@ class OptimizationConfig:
             projections that Muon's unit-scale first step would move off
             zero. Every entry must match at least one parameter.
         spectral_names: Muon only. Substrings of parameter names whose
-            parameters are SFNO spectral filter weights — shape
-            ``(groups, modes_lat, C_in, C_out, 2)`` with real/imaginary in
-            the last dimension. These receive per-mode complex
+            parameters are conditional SFNO per-mode filter weights
+            (``filter_type: linear``; e.g. ``filter.filter.weight``), of
+            shape ``(groups, modes, C_out, C_in, 2)`` with real/imaginary
+            parts in the last dimension. These receive per-mode complex
             orthogonalization (unitary Newton-Schulz) instead of the
-            standard real ``(shape[0], -1)`` Muon update. Every entry must
-            match at least one parameter. A parameter must not match both
-            ``adamw_names`` and ``spectral_names``.
+            standard real ``(shape[0], -1)`` Muon update. Every matched
+            parameter must be a :class:`fme.core.muon.SpectralFilterParameter`
+            (other SFNO filter weights, such as the modulus SFNO's, raise).
+            Every entry must match at least one parameter, and a parameter
+            must not match both ``adamw_names`` and ``spectral_names``.
         enable_automatic_mixed_precision: Whether to use automatic mixed
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
@@ -501,16 +508,13 @@ class OptimizationConfig:
                     "Muon requires kwargs['adamw_lr'], the learning rate of "
                     "its AdamW parameter group."
                 )
-        elif len(self.adamw_names) > 0 or len(self.spectral_names) > 0:
-            names = []
-            if self.adamw_names:
-                names.append("adamw_names")
-            if self.spectral_names:
-                names.append("spectral_names")
-            raise ValueError(
-                f"{', '.join(names)} only used with optimizer_type='Muon', got "
-                f"optimizer_type={self.optimizer_type!r}."
-            )
+        else:
+            for field_name in ("adamw_names", "spectral_names"):
+                if len(getattr(self, field_name)) > 0:
+                    raise ValueError(
+                        f"{field_name} is only used with optimizer_type='Muon', "
+                        f"got optimizer_type={self.optimizer_type!r}."
+                    )
 
     @property
     def has_lr_schedule(self) -> bool:
