@@ -18,6 +18,10 @@ checkpoint. Each seed's stage-2 `best_inference_ckpt.tar` is scored as ACE2.2-ER
 - the control and +4 K SST pair (`inference-{control,p4k}.yaml`, the same configs with only the
   file labels' model token changed), initial condition 1978-09-30 and inference seed 1.
 
+The selected arm's selected seed, `ace22-no-gmr-diagnostic-near-surface` seed 2, then runs stage 3
+(`plev-ft.yaml`): ACE2.2-ERA5's pressure-level fine-tune with this arm's stepper, from the same
+`best_inference_ckpt.tar`.
+
 `clip_latent_global_means` stays on. It acts only at inference, so each scoring job also runs on a
 copy of the checkpoint with the clip disabled (`clip_off.py`).
 

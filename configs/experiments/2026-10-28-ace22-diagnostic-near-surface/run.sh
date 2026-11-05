@@ -11,7 +11,11 @@ export GRPC_VERBOSITY=ERROR
 #
 # Each seed runs stage 1 (1-step pretrain) -> stage 2 (multi-step fine-tune from stage 1's
 # best_ckpt.tar) -> the 1979-2014 rollout and the control / +4 K SST pair on stage 2's
-# best_inference_ckpt.tar, each as trained and with the latent clip off.
+# best_inference_ckpt.tar, each as trained and with the latent clip off. The selected arm's
+# selected seed then runs stage 3 (pressure-level fine-tune, plev-ft.yaml) from that same
+# checkpoint:
+#
+#   ace22-no-gmr-diagnostic-near-surface  seed 2
 #
 # Safe to rerun at any point. Each job is launched only if its beaker experiment does not
 # exist yet and the stage it depends on has a job that exited 0; that job's result dataset
@@ -28,6 +32,8 @@ declare -A STAGE1_CONFIG=(
 )
 # Set ARMS to launch only some arms, e.g. to hold one back while GPUs are short:
 #   ARMS=ace22-no-gmr-diagnostic-near-surface bash run.sh
+# Arm -> the one seed that runs stage 3, chosen after stage 2 on the 1979-2014 rollouts.
+declare -A STAGE3_SEED=([ace22-no-gmr-diagnostic-near-surface]=2)
 ARMS=${ARMS:-"ace22-no-gmr-diagnostic-near-surface ace22-diagnostic-near-surface"}
 for ARM in $ARMS; do
     [[ -n "${STAGE1_CONFIG[$ARM]}" ]] || { echo "ERROR: unknown arm $ARM" >&2; exit 1; }
@@ -144,6 +150,10 @@ for ARM in $ARMS; do
         TRAIN="torchrun --nproc_per_node $TRAIN_GPUS -m fme.ace.train /tmp/config.yaml --override seed=$SEED"
         stage "$STAGE1" "$SCRIPT_DIR/${STAGE1_CONFIG[$ARM]}" "" "" "$ARM" training "$TRAIN"
         stage "$STAGE2" "$SCRIPT_DIR/multi-step-ft.yaml" "$STAGE1" /weights "$ARM" training "$TRAIN"
+        if [[ "${STAGE3_SEED[$ARM]:-}" == "$SEED" ]]; then
+            stage "$ARM-stage3-rs$SEED" "$SCRIPT_DIR/plev-ft.yaml" "$STAGE2" /weights "$ARM" \
+                training "$TRAIN"
+        fi
         stage "$ARM-long36-rs$SEED" "$SCRIPT_DIR/long36-evaluator-config.yaml" \
             "$STAGE2" "$CKPT:/ckpt.tar" "$ARM" inference "$EVAL"
         stage "$ARM-long36-clipoff-rs$SEED" "$SCRIPT_DIR/long36-evaluator-config.yaml" \
