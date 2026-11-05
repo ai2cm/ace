@@ -52,7 +52,7 @@ jobs:
             --beaker-image "$(cat latest_deps_only_image.txt)" \
             --workspace ${{ env.BEAKER_WORKSPACE }} \
             --priority low \
-            --min-runtime 20m \
+            --min-runtime 0m \
             --cluster ai2/saturn-cirrascale \
             --cluster ai2/jupiter \
             --cluster ai2/ceres-cirrascale \
