@@ -442,7 +442,7 @@ def _run_inference(tmp_path: pathlib.Path, config: InferenceConfig) -> None:
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
 
 
