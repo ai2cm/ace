@@ -2,43 +2,43 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # 1deg full-field + replay coupled fine-tune (1deg-randco2rs1-fmean-alt-replay; Beaker 01M61RBH49PFKN105CG631SHAJ, W&B nvp6c3zz),
 # finished 2026-11-04: epoch 7 EMA (also best_inference_ckpt; epoch 8 did not beat it). Main arm.
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic1|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic2|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic3|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic4|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic5|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic6|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic7|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic8|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic9|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic10|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic11|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic12|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic13|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic14|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic15|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic16|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic17|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic18|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic19|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic20|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic21|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic22|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic23|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic24|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic25|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic26|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic27|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic28|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic29|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic30|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic31|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic32|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic33|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic34|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic35|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic36|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
-fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic1-100yr|ema_ckpt_0007|high|--min-runtime 24h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic1|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic2|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic3|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic4|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic5|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic6|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic7|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic8|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic9|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic10|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic11|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic12|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic13|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic14|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic15|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic16|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic17|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic18|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic19|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic20|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic21|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic22|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic23|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic24|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic25|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic26|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic27|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic28|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic29|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic30|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic31|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic32|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic33|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic34|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic35|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|inf_submitted_cm4-abrupt4xCO2-ic36|ema_ckpt_0007|high|--min-runtime 2h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_inf_cm4-abrupt4xCO2-ic1-100yr|ema_ckpt_0007|high|--min-runtime 8h||01M6FH7QKV2M8Q39N5TVX2602B|ai2/ace|titan
 
 # 1deg full-field coupled fine-tune without replay (1deg-randco2rs1-fmean-alt; Beaker 01M5XK1S9K4ACFBZDMAFRAWPF3, W&B 6vllla2w):
 # epoch 7 EMA. Control for what replay buys.
@@ -78,7 +78,7 @@ fmean1deg-cft-rs1||01M5XK1S9K4ACFBZDMAFRAWPF3|run_inf_cm4-abrupt4xCO2-ic33|ema_c
 fmean1deg-cft-rs1||01M5XK1S9K4ACFBZDMAFRAWPF3|run_inf_cm4-abrupt4xCO2-ic34|ema_ckpt_0007|high|--min-runtime 2h||01M6191SK89DCY94QXXHHHBYNC|ai2/ace|titan
 fmean1deg-cft-rs1||01M5XK1S9K4ACFBZDMAFRAWPF3|run_inf_cm4-abrupt4xCO2-ic35|ema_ckpt_0007|high|--min-runtime 2h||01M6191SK89DCY94QXXHHHBYNC|ai2/ace|titan
 fmean1deg-cft-rs1||01M5XK1S9K4ACFBZDMAFRAWPF3|run_inf_cm4-abrupt4xCO2-ic36|ema_ckpt_0007|high|--min-runtime 2h||01M6191SK89DCY94QXXHHHBYNC|ai2/ace|titan
-fmean1deg-cft-rs1||01M5XK1S9K4ACFBZDMAFRAWPF3|run_inf_cm4-abrupt4xCO2-ic1-100yr|ema_ckpt_0007|high|--min-runtime 24h||01M6191SK89DCY94QXXHHHBYNC|ai2/ace|titan
+fmean1deg-cft-rs1||01M5XK1S9K4ACFBZDMAFRAWPF3|run_inf_cm4-abrupt4xCO2-ic1-100yr|ema_ckpt_0007|high|--min-runtime 8h||01M6191SK89DCY94QXXHHHBYNC|ai2/ace|titan
 
 # Not run from this branch: the 1deg hybrid-residual SST-diagnostic fine-tune (1deg-randco2rs1-fmean-hybridsstdiag-alt;
 # Beaker 01M64JR109MDKK6T533BR90HMM, W&B c9u19gok, results 01M67TP4VK8W5NDVJWVNBG55BN best_inference_ckpt = epoch 7) trained
