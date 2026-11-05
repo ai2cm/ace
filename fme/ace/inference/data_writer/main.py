@@ -31,6 +31,7 @@ from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
 from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
+from .zarr import ZarrWriterConfig
 
 PairedSubwriter: TypeAlias = (
     PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
@@ -164,20 +165,21 @@ class DataWriterConfig:
                     dataset_metadata=dataset_metadata,
                 )
             )
-        files = self.files or []
-        if build_subwriters:
-            for writer_config in files:
-                writers.append(
-                    writer_config.build_paired(
-                        experiment_dir=experiment_dir,
-                        initial_condition_times=initial_condition_times,
-                        n_timesteps=n_timesteps,
-                        timestep=timestep,
-                        variable_metadata=variable_metadata,
-                        coords=coords,
-                        dataset_metadata=dataset_metadata,
-                    )
-                )
+        local_writers: list[PairedSubwriter] = []
+        build_args = dict(
+            experiment_dir=experiment_dir,
+            initial_condition_times=initial_condition_times,
+            n_timesteps=n_timesteps,
+            timestep=timestep,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
+        for writer_config in self.files or []:
+            if isinstance(writer_config.format, ZarrWriterConfig):
+                local_writers.append(writer_config.build_paired(**build_args))
+            elif build_subwriters:
+                writers.append(writer_config.build_paired(**build_args))
         step_diagnostics_writer: StepDiagnosticsWriter | None = None
         if build_subwriters:
             step_diagnostics_writer = self._build_step_diagnostics_writer(
@@ -189,6 +191,7 @@ class DataWriterConfig:
             )
         return PairedDataWriter(
             writers=writers,
+            local_writers=local_writers,
             path=experiment_dir,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -279,17 +282,31 @@ class DataWriterConfig:
                     )
                 )
             for writer_config in self.files or []:
-                writers.append(
-                    writer_config.build(
-                        experiment_dir=experiment_dir,
-                        initial_condition_times=initial_condition_times,
-                        n_timesteps=n_timesteps,
-                        timestep=timestep,
-                        variable_metadata=variable_metadata,
-                        coords=coords,
-                        dataset_metadata=dataset_metadata,
+                if not isinstance(writer_config.format, ZarrWriterConfig):
+                    writers.append(
+                        writer_config.build(
+                            experiment_dir=experiment_dir,
+                            initial_condition_times=initial_condition_times,
+                            n_timesteps=n_timesteps,
+                            timestep=timestep,
+                            variable_metadata=variable_metadata,
+                            coords=coords,
+                            dataset_metadata=dataset_metadata,
+                        )
                     )
-                )
+        local_writers: list[Subwriter] = []
+        build_args = dict(
+            experiment_dir=experiment_dir,
+            initial_condition_times=initial_condition_times,
+            n_timesteps=n_timesteps,
+            timestep=timestep,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
+        for writer_config in self.files or []:
+            if isinstance(writer_config.format, ZarrWriterConfig):
+                local_writers.append(writer_config.build(**build_args))
         step_diagnostics_writer: StepDiagnosticsWriter | None = None
         if build_subwriters:
             step_diagnostics_writer = self._build_step_diagnostics_writer(
@@ -301,6 +318,7 @@ class DataWriterConfig:
             )
         return DataWriter(
             writers=writers,
+            local_writers=local_writers,
             path=experiment_dir,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -362,11 +380,12 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
         step_diagnostics_writer: StepDiagnosticsWriter | None = None,
+        local_writers: list[PairedSubwriter] | None = None,
     ):
         """
         Args:
-            writers: The sub-writers to dispatch each batch to, already built by
-                `DataWriterConfig.build_paired`.
+            writers: Gathered sub-writers that receive gathered data on the
+                data-parallel root only (netCDF writers, monthly writers).
             path: Path to write single-snapshot netCDF file(s) via `write`.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
@@ -375,8 +394,11 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 prediction, or None to not write them. Held separately from
                 the paired sub-writers: it consumes only the prediction's
                 diagnostics, not the target/prediction pair.
+            local_writers: Sub-writers that receive local (ungathered) data on
+                every rank (zarr file writers that do their own region writes).
         """
         self._writers = writers
+        self._local_writers = local_writers or []
         self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.coords = coords
@@ -406,14 +428,24 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Append a batch of data to the file.
 
-        Under multi-GPU inference, gathers tensor data and time from all
-        data-parallel ranks to root before dispatching to subwriters.
-        Non-root ranks return early (their subwriter lists are empty, but the
-        gather collectives must still be called by every rank).
+        Local writers (zarr) receive local data on every rank before the
+        gather.  Gathered writers (netCDF) receive gathered data on the
+        data-parallel root after the gather; non-root ranks return early
+        once the collectives are done.
 
         Args:
             batch: Prediction and target data.
         """
+        for writer in self._local_writers:
+            writer.append_batch(
+                target=dict(batch.reference),
+                prediction=dict(batch.prediction),
+                batch_time=batch.time,
+            )
+
+        if not self._writers and self._step_diagnostics_writer is None:
+            return
+
         dist = Distributed.get_instance()
         prediction = _gather_tensor_dict(dict(batch.prediction), dist)
         target = _gather_tensor_dict(dict(batch.reference), dist)
@@ -445,11 +477,15 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        for writer in self._local_writers:
+            writer.flush()
         if self._step_diagnostics_writer is not None:
             self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
+            writer.finalize()
+        for writer in self._local_writers:
             writer.finalize()
         if self._step_diagnostics_writer is not None:
             self._step_diagnostics_writer.finalize()
@@ -542,12 +578,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
         step_diagnostics_writer: StepDiagnosticsWriter | None = None,
+        local_writers: list[Subwriter] | None = None,
     ):
         """
         Args:
-            writers: The sub-writers to dispatch each batch to, already built by
-                `DataWriterConfig.build`. Empty for HEALPix (`face`)
-                coordinates, which are not yet supported.
+            writers: Gathered sub-writers that receive gathered data on the
+                data-parallel root only (netCDF writers, monthly writers).
+                Empty for HEALPix (`face`) coordinates.
             path: Directory within which to write single-snapshot netCDF file(s)
                 via `write`.
             variable_metadata: Metadata for each variable to be written to the file.
@@ -557,8 +594,11 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 prediction, or None to not write them. Held separately from
                 the sub-writers: it consumes only the prediction's
                 diagnostics.
+            local_writers: Sub-writers that receive local (ungathered) data on
+                every rank (zarr file writers that do their own region writes).
         """
         self._writers = writers
+        self._local_writers = local_writers or []
         self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.variable_metadata = variable_metadata
@@ -570,16 +610,23 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         Append prediction data to the file. The prognostic data
         and forcing data are merged before writing.
 
-        Under multi-GPU inference, gathers tensor data and time from all
-        data-parallel ranks to root before dispatching to subwriters.
-        Non-root ranks return early after participating in the gather
-        collectives.
+        Local writers (zarr) receive local data on every rank before the
+        gather.  Gathered writers (netCDF) receive gathered data on the
+        data-parallel root after the gather; non-root ranks return early
+        once the collectives are done.
 
         Args:
             batch: Paired data to be written.
         """
-        dist = Distributed.get_instance()
         merged = {**batch.prediction, **batch.forcing}
+
+        for writer in self._local_writers:
+            writer.append_batch(data=merged, batch_time=batch.time)
+
+        if not self._writers and self._step_diagnostics_writer is None:
+            return
+
+        dist = Distributed.get_instance()
         gathered_data = _gather_tensor_dict(merged, dist)
         time = _gather_time(batch.time, dist)
         if batch.step_diagnostics is not None:
@@ -608,11 +655,15 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        for writer in self._local_writers:
+            writer.flush()
         if self._step_diagnostics_writer is not None:
             self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
+            writer.finalize()
+        for writer in self._local_writers:
             writer.finalize()
         if self._step_diagnostics_writer is not None:
             self._step_diagnostics_writer.finalize()
