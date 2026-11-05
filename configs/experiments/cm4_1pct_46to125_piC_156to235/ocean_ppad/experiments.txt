@@ -30,3 +30,5 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_piC-
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|01M6MCZ7HXV9Z9G7WNZ43ME29S|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs1|01M6MZZ7JFW8KAA4HW25FMQR4V|training|best_inference_ckpt|normal|--min-runtime 8h
