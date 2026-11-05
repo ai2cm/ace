@@ -43,33 +43,47 @@ class LatLonRegion(Region):
         return self._regional_weights
 
 
-def compute_power_spectrum(
+def compute_power_spectrum_by_sample(
     data: xr.DataArray,
     fs=1,
     time_dim: int = TIME_DIM,
     sample_dim: int = SAMPLE_DIM,
 ):
     """
-    Compute the power spectrum of the input data.
+    Compute the power spectral density of each sample of the input data.
+
+    The returned density is one-sided and normalized so that its integral over
+    frequency equals the mean square of the sample, i.e. it has units of the
+    squared data units per cycle per year.
 
     Args:
-        data: A tensor of size n_time_steps containing the data.
+        data: An array of shape (n_samples, n_time_steps) containing the data.
         fs: The sampling frequency, defaults to 1 sample per month.
         time_dim: Time dimension index
         sample_dim: Sample dimension index
+
+    Returns:
+        The frequencies in cycles per year, and the power spectral density with
+        the same shape as the input data along the sample dimension.
     """
-    if len(data.shape) == 2:
-        uhat = np.fft.rfft(data, axis=time_dim)
-        power = np.abs(uhat) ** 2
-        power = power.mean(axis=sample_dim)
-    else:
+    if len(data.shape) != 2:
         raise ValueError(
             "Expected indicies to be of shape (sample, time) when calculating "
             f"power spectrum, got {data.shape}"
         )
-    n_samples = data.shape[time_dim]
-    freqs = np.fft.rfftfreq(n_samples, d=1 / fs)
+    n_times = data.shape[time_dim]
+    freqs = np.fft.rfftfreq(n_times, d=1 / fs)
     freqs_per_year = freqs / fs * 12.0
+    samples_per_year = 12.0 * fs
+    uhat = np.fft.rfft(data, axis=time_dim)
+    power = np.abs(uhat) ** 2 / (n_times * samples_per_year)
+    # the one-sided density must count the power of the negative frequencies,
+    # which are not their own mirror image only at zero and Nyquist frequency
+    doubled = np.ones(freqs.shape)
+    doubled[1:] = 2.0
+    if n_times % 2 == 0:
+        doubled[-1] = 1.0
+    power = power * np.expand_dims(doubled, axis=sample_dim)
     return freqs_per_year, power
 
 
@@ -94,10 +108,10 @@ def _compute_sample_mean_std(
     return std_by_sample.mean().item()
 
 
-def _calculate_sample_average_power_spectrum(
+def _calculate_power_spectrum_by_sample(
     timeseries: xr.DataArray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute power spectrum averaged across samples.
+    """Compute the power spectrum of each sample of a timeseries.
 
     Handles the case where samples have different lengths by truncating to
     the shortest length.
@@ -121,7 +135,18 @@ def _calculate_sample_average_power_spectrum(
             for data_array in data_arrays
         ]
     )
-    return compute_power_spectrum(all_data)
+    return compute_power_spectrum_by_sample(all_data)
+
+
+def _calculate_sample_average_power_spectrum(
+    timeseries: xr.DataArray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute power spectrum averaged across samples.
+
+    See :func:`_calculate_power_spectrum_by_sample`.
+    """
+    freqs_per_year, power = _calculate_power_spectrum_by_sample(timeseries)
+    return freqs_per_year, power.mean(axis=SAMPLE_DIM)
 
 
 def anomalies_from_monthly_climo(

@@ -8,8 +8,10 @@ import numpy as np
 import pytest
 import xarray as xr
 import zarr
+from zarrs import ZarrsCodecPipeline
 
 from fme.core.writer import (
+    ZARRS_WRITE_THREADS,
     ZarrWriter,
     _initialize_zarr,
     _insert_into_zarr,
@@ -322,6 +324,59 @@ def test_ZarrWriter_read_batch_round_trips_a_slice(tmp_path):
     read_all = writer.read_batch(["var"], position_slices={})
     assert read_all["var"].shape == (4, NLAT, NLON)
     np.testing.assert_array_equal(read_all["var"][:2], 0.0)
+
+
+def _spy_on(method):
+    return patch.object(
+        ZarrsCodecPipeline,
+        method,
+        autospec=True,
+        side_effect=getattr(ZarrsCodecPipeline, method),
+    )
+
+
+def test_ZarrWriter_uses_zarrs_pipeline_for_local_store(tmp_path):
+    """The writer's I/O must go through zarrs, not silently fall back to zarr's
+    default pipeline. The spies prove zarr built the zarrs pipeline at all: for a
+    store zarrs does not support, zarr substitutes its default pipeline without a
+    warning, even in strict mode. Strict mode covers the other fallback, where the
+    zarrs pipeline hands unsupported metadata or dtypes to its own Python
+    implementation instead of raising."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    data = np.random.rand(2, NLAT, NLON).astype("f4")
+    with (
+        zarr.config.set({"codec_pipeline.strict": True}),
+        _spy_on("write") as zarrs_write,
+        _spy_on("read") as zarrs_read,
+    ):
+        writer.record_batch(data={"var": data}, position_slices={"time": slice(0, 2)})
+        read = writer.read_batch(["var"], position_slices={"time": slice(0, 2)})
+    assert zarrs_write.called
+    assert zarrs_read.called
+    np.testing.assert_array_equal(read["var"], data)
+
+
+def test_ZarrWriter_caps_zarrs_threads(tmp_path):
+    """A pool of one thread per logical CPU burns several times the CPU of a small
+    pool for the same wall time, so the writer builds its arrays with a capped pool."""
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2}, overwrite_check=False)
+    max_workers_at_write = []
+
+    def record_and_write(*args, **kwargs):
+        max_workers_at_write.append(zarr.config.get("threading.max_workers"))
+        return ZarrsCodecPipeline.write(*args, **kwargs)
+
+    with patch.object(
+        ZarrsCodecPipeline, "write", autospec=True, side_effect=record_and_write
+    ):
+        writer.record_batch(
+            data={"var": np.random.rand(2, NLAT, NLON).astype("f4")},
+            position_slices={"time": slice(0, 2)},
+        )
+    assert max_workers_at_write == [ZARRS_WRITE_THREADS]
+    assert zarr.config.get("threading.max_workers") is None
 
 
 def _create_multi_var_store(path, names, n_times=4):

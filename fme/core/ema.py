@@ -30,8 +30,8 @@ SOFTWARE.
 import contextlib
 import dataclasses
 import logging
-from collections.abc import Iterable, Iterator
-from typing import Protocol
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any, Protocol
 
 import torch
 from torch import nn
@@ -45,6 +45,10 @@ class HasNamedParameters(Protocol):
     ) -> Iterator[tuple[str, nn.Parameter]]: ...
 
     def parameters(self) -> Iterator[nn.Parameter]: ...
+
+
+EMA_CHECKPOINT_KEY = "ema"
+"""Key under which a training checkpoint stores ``EMATracker.get_state()``."""
 
 
 @dataclasses.dataclass
@@ -89,6 +93,8 @@ class EMATracker:
     This tracks the moving average of the parameters of a model, and has methods
     that can be used to temporarily replace the parameters of the model with its EMA.
     """
+
+    _PARAMS_KEY = "ema_params"
 
     def __init__(
         self, model: HasNamedParameters, decay: float, faster_decay_at_start=True
@@ -211,22 +217,27 @@ class EMATracker:
         for c_param, param in zip(self._stored_params, parameters):
             param.data.copy_(c_param.data)
 
-    def get_state(self):
+    def get_state(self, include_params: bool = True):
         """
         Get the state of the EMA tracker.
+
+        Args:
+            include_params: Whether to include the EMA weights.
 
         Returns:
             The state of the EMA tracker.
         """
-        return {
+        state = {
             "decay": self.decay.clone(),
             "num_updates": self.num_updates.clone(),
             "faster_decay_at_start": self._faster_decay_at_start,
             "module_name_to_ema_name": dict(self._module_name_to_ema_name),
-            "ema_params": {
-                name: param.clone().detach() for name, param in self._ema_params.items()
-            },
         }
+        if include_params:
+            state[self._PARAMS_KEY] = {
+                name: param.clone().detach() for name, param in self._ema_params.items()
+            }
+        return state
 
     def load_ema_state_for_finetuning(self, state: dict):
         """Load EMA running state from a checkpoint for fine-tuning.
@@ -246,7 +257,7 @@ class EMATracker:
                 (e.g. from a checkpoint saved without
                 ``include_optimization=True``).
         """
-        if "ema_params" not in state:
+        if self._PARAMS_KEY not in state:
             raise ValueError(
                 "EMA state does not contain ema_params. Only ckpt.tar "
                 "checkpoints (saved with include_optimization=True) "
@@ -257,7 +268,7 @@ class EMATracker:
         self._module_name_to_ema_name = state["module_name_to_ema_name"]
         self._ema_params = {
             name: param.to(device, copy=True)
-            for name, param in state["ema_params"].items()
+            for name, param in state[self._PARAMS_KEY].items()
         }
 
     @classmethod
@@ -277,14 +288,81 @@ class EMATracker:
         ema = cls(model, float(state["decay"]), state["faster_decay_at_start"])
         ema.num_updates = state["num_updates"].to(device, copy=True)
         ema._module_name_to_ema_name = state["module_name_to_ema_name"]
-        if "ema_params" in state:
+        if cls._PARAMS_KEY in state:
             ema._ema_params = {
                 name: param.to(device, copy=True)
-                for name, param in state["ema_params"].items()
+                for name, param in state[cls._PARAMS_KEY].items()
             }
         else:
             logging.warning("EMA params not found in state and will not be restored.")
         return ema
+
+    @classmethod
+    def copy_params_from_state(
+        cls, state: Mapping[str, Any], model: HasNamedParameters
+    ) -> bool:
+        """
+        Overwrite a model's parameters with the EMA weights in a state.
+
+        Parameters are matched by the name map stored in the state, not by
+        ``requires_grad``, so parameters the EMA does not track keep their
+        current values.
+
+        Args:
+            state: The state of an EMA tracker, as returned by ``get_state``.
+            model: The model to copy the EMA weights into.
+
+        Returns:
+            Whether the state contains EMA weights, which were copied.
+        """
+        if cls._PARAMS_KEY not in state:
+            return False
+        parameters = dict(model.named_parameters())
+        ema_params = state[cls._PARAMS_KEY]
+        with torch.no_grad():
+            for name, ema_name in state["module_name_to_ema_name"].items():
+                if name not in parameters:
+                    raise ValueError(
+                        f"EMA-tracked parameter {name} is not a parameter of the model."
+                    )
+                parameters[name].copy_(ema_params[ema_name])
+        return True
+
+
+def load_ema_params_if_available(
+    checkpoint: Mapping[str, Any], model: HasNamedParameters, checkpoint_path: str
+) -> bool:
+    """Overwrite a model's parameters with the EMA weights in a training checkpoint.
+
+    Only checkpoints saved with their optimization state (e.g. ``ckpt.tar``)
+    contain EMA weights. Other checkpoints (e.g. ``best_ckpt.tar``,
+    ``ema_ckpt_XXXX.tar``) store no EMA weights, but may already hold EMA
+    weights as their stepper weights if they were saved with EMA applied.
+
+    Parameters the EMA does not track (e.g. frozen parameters) keep their
+    current values.
+
+    Args:
+        checkpoint: A checkpoint as saved by the ``Trainer``.
+        model: The model built from the checkpoint's stepper state.
+        checkpoint_path: Path the checkpoint was loaded from, used in log
+            messages.
+
+    Returns:
+        Whether EMA weights were found and copied into the model.
+    """
+    ema_state = checkpoint.get(EMA_CHECKPOINT_KEY, {})
+    if EMATracker.copy_params_from_state(ema_state, model):
+        logging.info(
+            f"Using EMA weights from {checkpoint_path} "
+            f"(num_updates={int(ema_state['num_updates'])})."
+        )
+        return True
+    logging.info(
+        f"Checkpoint {checkpoint_path} does not contain EMA weights, "
+        "using the stepper weights."
+    )
+    return False
 
 
 def _load_finetune_ema_state(ema: EMATracker, checkpoint_path: str):
@@ -298,11 +376,11 @@ def _load_finetune_ema_state(ema: EMATracker, checkpoint_path: str):
     weights, optimizer, etc.) is transferred to the training device.
     """
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    if "ema" not in checkpoint:
+    if EMA_CHECKPOINT_KEY not in checkpoint:
         raise ValueError(
             f"Checkpoint at {checkpoint_path} does not contain EMA state. "
             "Only training checkpoints (ckpt.tar) contain EMA state."
         )
-    ema_state = checkpoint["ema"]
+    ema_state = checkpoint[EMA_CHECKPOINT_KEY]
     del checkpoint
     ema.load_ema_state_for_finetuning(ema_state)

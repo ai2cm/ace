@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import unittest.mock
 from collections.abc import Callable, Collection
+from typing import Any
 
 import dacite
 import pytest
@@ -647,6 +648,37 @@ def test_step_applies_wrapper(config: StepSelector):
     assert wrapper.call_count == multi_calls * len(step.modules)
     for module in step.modules:
         wrapper.assert_any_call(module)
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_step_wrapper_does_not_persist(config: StepSelector):
+    """The per-call wrapper applies to that call only.
+
+    Activation checkpointing passes a wrapper that returns a plain function
+    rather than an nn.Module, so a step that stored the wrapped result would
+    lose its modules (and its state) after one checkpointed forward pass.
+    """
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(config, img_shape)
+    args = StepArgs(
+        input=get_tensor_dict(step.input_names, img_shape, n_samples=2),
+        next_step_input_data=get_tensor_dict(
+            step.next_step_input_names, img_shape, n_samples=2
+        ),
+        labels=None,
+    )
+    state_before = step.get_state()
+    modules_before = list(step.modules)
+
+    def to_plain_function(module: nn.Module) -> Callable[..., Any]:
+        return lambda *args, **kwargs: module(*args, **kwargs)
+
+    step.step(args=args, wrapper=to_plain_function)
+    step.step(args=args, wrapper=to_plain_function)
+
+    assert list(step.modules) == modules_before
+    assert step.get_state().keys() == state_before.keys()
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
@@ -2430,25 +2462,38 @@ def test_single_module_step_config_loads_legacy_residual_prediction_bool(
     state = _residual_names_config().get_state()
     state["residual_prediction"] = legacy
     config = SingleModuleStepConfig.from_state(state)
-    assert (config.residual_prediction is not None) == legacy
+    assert (config._residual_prediction_config is not None) == legacy
     assert config.residual_names == expected_names
 
 
 def test_residual_prediction_names_must_not_be_empty():
-    """[] would silently disable residual prediction; only None means "all"."""
+    """[] would silently disable residual prediction; only None means "all".
+
+    The from_state case also pins the error's quality: this must be validated
+    through the parent config, because dacite would mask a ValueError raised
+    inside ResidualPredictionConfig itself (a union member) behind a generic
+    UnionMatchError that names neither the field nor the problem.
+    """
     with pytest.raises(ValueError, match="must not be empty"):
-        ResidualPredictionConfig(names=[])
+        _residual_names_config(residual_prediction=ResidualPredictionConfig(names=[]))
+    state = _residual_names_config().get_state()
+    state["residual_prediction"] = {"names": []}
+    with pytest.raises(ValueError, match="must not be empty"):
+        SingleModuleStepConfig.from_state(state)
 
 
 @pytest.mark.parametrize("legacy", [True, False], ids=["enabled", "disabled"])
 def test_single_module_step_config_accepts_legacy_bool_directly(legacy):
-    """The config is public API (exported from fme.ace), so the deprecated bool
+    """The config is public API (exported from fme.ace), so the bool spelling
     must keep working for direct construction, not only for serialized state."""
     config = _residual_names_config(residual_prediction=legacy)
+    # the public field keeps the given spelling; internal readers use the
+    # normalized private attribute
+    assert config.residual_prediction is legacy
     if legacy:
-        assert config.residual_prediction == ResidualPredictionConfig()
+        assert config._residual_prediction_config == ResidualPredictionConfig()
     else:
-        assert config.residual_prediction is None
+        assert config._residual_prediction_config is None
 
 
 def test_multi_call_loss_scaling_follows_wrapped_residual_names():

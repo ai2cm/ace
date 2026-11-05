@@ -1224,7 +1224,7 @@ def get_stepper_config(
     atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
     ocean_corrector: CorrectorSelector | None = None,
-    atmosphere_corrector: CorrectorSelector | None = None,
+    atmosphere_corrector: AtmosphereCorrectorConfig | CorrectorSelector | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1248,7 +1248,6 @@ def get_stepper_config(
 
     ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
     atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
-
     if ocean_corrector is None:
         ocean_corrector = CorrectorSelector("ocean_corrector", {})
     atmosphere_corrector_config: AtmosphereCorrectorConfig | CorrectorSelector

@@ -49,6 +49,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
@@ -60,7 +61,16 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing import mock_wandb
+from fme.core.testing import (
+    get_dataset_info,
+    mock_wandb,
+    trivial_network_and_loss_normalization,
+)
+from fme.core.testing.ema import (
+    ScaledIdentity,
+    assert_parameters_equal,
+    save_checkpoint_with_ema,
+)
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
@@ -85,6 +95,7 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    corrector: AtmosphereCorrectorConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -94,6 +105,8 @@ def save_plus_one_stepper(
         normalization_names = all_names
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
+    if corrector is None:
+        corrector = AtmosphereCorrectorConfig()
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -129,6 +142,7 @@ def save_plus_one_stepper(
                                         ),
                                     ),
                                     ocean=ocean,
+                                    corrector=corrector,
                                 ),
                             ),
                         ),
@@ -332,7 +346,7 @@ def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: 
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
@@ -418,7 +432,7 @@ def inference_helper(
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -598,7 +612,7 @@ def test_inference_writer_boundaries(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -630,10 +644,13 @@ def test_inference_writer_boundaries(
     # check time mean metrics
     tol = 1e-4  # relative tolerance
     grad_mag_tol = tol
+    grad_mag_atol = 0.0
     if using_gpu():
         # GPU test cases have higher error
         tol = 5e-4
         grad_mag_tol = 3e-3
+        # the percent diff can be near zero, where float32 noise exceeds any rtol
+        grad_mag_atol = 1e-4
     np.testing.assert_allclose(
         metrics.root_mean_squared_error(
             tar_time_mean, gen_time_mean, area_weights
@@ -677,6 +694,7 @@ def test_inference_writer_boundaries(
             ).item(),
             log["inference/mean/weighted_grad_mag_percent_diff/var"],
             rtol=grad_mag_tol,
+            atol=grad_mag_atol,
         )
         np.testing.assert_allclose(
             metrics.weighted_mean(gen_i, area_weights, dim=(-2, -1)).item(),
@@ -902,7 +920,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         inference_logs = wandb.get_logs()
 
@@ -1428,7 +1446,7 @@ def test_inference_ensembles(n_ensemble_per_ic, tmp_path: pathlib.Path):
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(
             yaml_config=str(config_filename),
         )
@@ -1614,7 +1632,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        wandb.configure(log_to_wandb=True)
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
@@ -1635,3 +1653,64 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
         ), f"Inference metrics should still be present"
 
     assert os.path.isdir(tmp_path / "validation")
+
+
+def save_stepper_with_ema(
+    path: pathlib.Path,
+) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    """Save a stepper checkpoint with EMA weights, as in a training ckpt.tar.
+
+    Returns:
+        The saved stepper weights and EMA weights.
+    """
+    names = ["a"]
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": ScaledIdentity()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=trivial_network_and_loss_normalization(names),
+                )
+            ),
+        ),
+    )
+    stepper = config.get_stepper(dataset_info=get_dataset_info())
+    return save_checkpoint_with_ema(stepper, path)
+
+
+@pytest.mark.parametrize(
+    "use_ema_if_available, expect_ema",
+    [(None, True), (True, True), (False, False)],
+    ids=["default", "enabled", "disabled"],
+)
+def test_inference_evaluator_config_load_stepper_uses_ema_weights(
+    tmp_path: pathlib.Path, use_ema_if_available: bool | None, expect_ema: bool
+):
+    checkpoint_path = tmp_path / "ckpt.tar"
+    stepper_weights, ema_weights = save_stepper_with_ema(checkpoint_path)
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=1,
+        forward_steps_in_memory=1,
+        checkpoint_path=str(checkpoint_path),
+        logging=LoggingConfig(),
+        loader=InferenceDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path="unused"),
+            start_indices=InferenceInitialConditionIndices(
+                n_initial_conditions=1, first=0, interval=1
+            ),
+        ),
+    )
+    if use_ema_if_available is not None:
+        config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
+
+    stepper = config.load_stepper()
+
+    assert_parameters_equal(
+        stepper.modules, ema_weights if expect_ema else stepper_weights
+    )

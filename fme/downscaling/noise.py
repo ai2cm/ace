@@ -128,8 +128,7 @@ def ou_mixing_matrix(tau: torch.Tensor, length_scale: float) -> torch.Tensor:
     Args:
         tau: Normalized frame times, shape ``(T,)``, as in
             ``brownian_bridge_mixing_matrix``.
-        length_scale: OU decorrelation length, in the same units as ``tau``
-            (hours, for this codebase's frame times).
+        length_scale: OU decorrelation length, in the same units as ``tau``.
     """
     return _interior_cholesky_mixing_matrix(
         tau, lambda s, t: torch.exp(-torch.abs(s - t) / length_scale)
