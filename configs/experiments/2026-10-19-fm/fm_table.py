@@ -7,8 +7,10 @@ epochs", so an epoch counts only once its training, validation and inline
 inference are all done. Finished jobs count as max_epochs; never-started jobs
 count as 0. Train time is the running wall time summed over an experiment's
 jobs (preemption retries included, queueing excluded). Epoch and train-time
-columns cover finished and running jobs only. The -e3sm configs are excluded.
-All values are measured; there are no estimates.
+columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
+excluded; the 2026-11-05 v2 runs (submit_fm_v2_jobs.py, 100 epochs) get one
+row per architecture and data arm. All values are measured; there are no
+estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed/other" counts only experiments that exist and failed or were canceled.
@@ -37,11 +39,13 @@ from _beaker_listing import (  # noqa: E402
 )
 from submit_fm_jobs import (  # noqa: E402
     ARCH_CHOICES,
+    V2_ARCH_CHOICES,
     config_to_job_name,
     select_configs,
 )
 
 MAX_EPOCHS = 150
+V2_MAX_EPOCHS = 100
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
 EPOCH_RE = re.compile(r"Starting training step for model trained for (\d+) complete")
@@ -109,16 +113,34 @@ def _queued(named: NamedExperiment) -> bool:
     return bool(pending) and not pending[-1].get("status", {}).get("started")
 
 
-ARCHS = ("sfno", "swin-v2.2", "swin-v2.2-res")
+ARCHS = (
+    "sfno",
+    "swin-v2.2",
+    "swin-v2.2-res",
+    "sfno-v2",
+    "sfno-v2-e3sm",
+    "swin-v2.2-v2",
+    "swin-v2.2-v2-e3sm",
+)
+# Job-name tags of the v2 runs, longest first: they extend the old tags.
+V2_TAGS = (("-nc-swin-v2.2-v2-", "swin-v2.2-v2"), ("-nc-sfno-v2-", "sfno-v2"))
 # One-off variant configs, kept out of run_configs/ so batch submits skip them.
 VARIANTS_DIR = pathlib.Path(__file__).parent / "variants"
 
 
 def arch_of(name: str) -> str:
+    for tag, arch in V2_TAGS:
+        if tag in name:
+            return f"{arch}-e3sm" if "-e3sm-" in name else arch
     for arch in ("swin-v2.2-res", "swin-v2.2"):
         if f"-{arch}-" in name:
             return arch
     return "sfno"
+
+
+def max_epochs_of(arch: str) -> int:
+    v2_rows = {row for _, base in V2_TAGS for row in (base, f"{base}-e3sm")}
+    return V2_MAX_EPOCHS if arch in v2_rows else MAX_EPOCHS
 
 
 def train_seconds(named) -> float:
@@ -146,8 +168,10 @@ def _median(values: list[float]) -> float | None:
     return statistics.median(values) if values else None
 
 
-# Inline inference runs the two aimip evaluators every epoch and all others
+# Inline inference runs the aimip evaluator(s) every epoch and all others
 # with `epochs: {start: 0, step: 10}`, i.e. after epochs 1, 11, 21, ...
+# This holds for the v2 runs too (aimip_checkpoint_era5 every epoch, the 10yr
+# and 46yr ERA5 runs every 10).
 HEAVY_INFERENCE_EVERY = 10
 
 
@@ -203,7 +227,7 @@ def _run_log(job_id: str) -> str:
     ).stdout
 
 
-def progress(named) -> tuple[int, Seconds]:
+def progress(named, max_epochs: int) -> tuple[int, Seconds]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference)) over the logs of every run (preemption retry) of the
     experiment, finished or not.
@@ -214,7 +238,7 @@ def progress(named) -> tuple[int, Seconds]:
     jobs = named.experiment.get("jobs") or []
     started = [j for j in jobs if "started" in j.get("status", {})]
     if not started:
-        return (MAX_EPOCHS if named.status == OK else 0), none
+        return (max_epochs if named.status == OK else 0), none
     intervals: Intervals = ([], [], [], [])
     done = 0
     for job in started:
@@ -223,7 +247,7 @@ def progress(named) -> tuple[int, Seconds]:
         for acc, values in zip(intervals, epoch_intervals(log)):
             acc.extend(values)
     if named.status == OK:
-        done = MAX_EPOCHS
+        done = max_epochs
     full, train, light, heavy = intervals
     return done, (_median(full), _median(train), _median(light), _median(heavy))
 
@@ -233,7 +257,9 @@ def main() -> None:
         config_to_job_name(c)
         for c in select_configs(None, ARCH_CHOICES)
         if "e3sm" not in c
-    ] + [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
+    ]
+    names += [config_to_job_name(c) for c in select_configs(None, V2_ARCH_CHOICES)]
+    names += [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
     # List per architecture by the names' longest common prefix: the broad
     # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
     # while each narrow one takes ~1 s.
@@ -242,7 +268,15 @@ def main() -> None:
         arch_names = [n for n in names if arch_of(n) == arch]
         by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
     with ThreadPoolExecutor(20) as ex:
-        prog = dict(zip(names, ex.map(lambda n: progress(by_name.get(n)), names)))
+        prog = dict(
+            zip(
+                names,
+                ex.map(
+                    lambda n: progress(by_name.get(n), max_epochs_of(arch_of(n))),
+                    names,
+                ),
+            )
+        )
     print("| " + " | ".join(COLUMNS) + " |")
     print("|" + "---|" * len(COLUMNS))
     for arch in ARCHS:
