@@ -26,3 +26,5 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_fm|rs2|01M4VR9W53MRAP10786FVSDP12|tra
 
 cm4_1pct_46to125_piC_156to235-ocean_socorr_ln_fm|rs0|01M50AAJGD1DCEAXAT1H32ZHZS|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_ln_fm|rs0|01M50AAJGD1DCEAXAT1H32ZHZS|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_cdb|rs0|01M6N12HR8FTSF69XW65PANKP8|training|best_inference_ckpt|normal|--min-runtime 8h
