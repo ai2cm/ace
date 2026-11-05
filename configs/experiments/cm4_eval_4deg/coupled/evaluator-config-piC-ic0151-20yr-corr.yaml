@@ -1,0 +1,43 @@
+# 20-yr coupled piControl from IC 0151 for corrector diagnostics (ace#1404 logs the
+# corrector's per-realm changes as time_mean_norm/correction_magnitude); no regional writers.
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval_4deg/coupled
+experiment_dir: /results
+n_coupled_steps: 1476  # 82 x coupled_steps_in_memory, 20.2 yr
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
+        engine: zarr
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
