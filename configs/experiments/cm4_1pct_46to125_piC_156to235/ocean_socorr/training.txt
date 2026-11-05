@@ -12,4 +12,4 @@ cm4_1pct_46to125_piC_156to235-ocean_socorr_ln_fm|rs0|trained|high|jupiter|4||3|a
 cm4_1pct_46to125_piC_156to235-ocean_socorr_ln_fm|rs1|skip|normal|jupiter|4||3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.norm=layer|8h
 cm4_1pct_46to125_piC_156to235-ocean_socorr_ln_fm|rs2|skip|normal|jupiter|4||3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.step.config.builder.config.norm=layer|8h
 
-cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_cdb|rs0|trained|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.corrector.config.corrector_disabled_batches=true|8h
+cm4_1pct_46to125_piC_156to235-ocean_socorr_fm_cdb|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.step.config.corrector.config.corrector_disabled_batches=true|8h
