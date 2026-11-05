@@ -270,7 +270,8 @@ def release_grads_from_cudagraphs(params: Iterable[torch.Tensor]) -> None:
 
     Call this after each backward whose gradients accumulate into those of a
     later backward before the optimizer consumes them, as with gradient
-    accumulation over the steps of a rollout. The outputs of a compiled
+    accumulation over the steps of a rollout, passing the parameters whose
+    ``.grad`` was unset before that backward. The outputs of a compiled
     backward are CUDA graph "cached tensors", which autograd steals into an
     unset ``.grad`` without copying. The next step's forward then begins a new
     CUDA graph tree generation while that ``.grad`` still aliases the pool: if
@@ -278,13 +279,15 @@ def release_grads_from_cudagraphs(params: Iterable[torch.Tensor]) -> None:
     tensor output of CUDAGraphs that has been overwritten by a subsequent
     run"), and if it was replayed, the next backward writes its gradient into
     the same buffer and accumulates it onto itself, giving twice the last
-    step's gradient. Later backwards accumulate in place into the copies.
+    step's gradient. A ``.grad`` that was already set is accumulated into in
+    place, so it never aliases the pool and needs no copy, and later backwards
+    accumulate in place into the copies.
 
     Without CUDA graphs this does nothing, so it costs nothing.
 
     Args:
-        params: The parameters whose gradients to release, e.g. all parameters
-            of an optimizer.
+        params: The parameters whose gradients to release, e.g. those of an
+            optimizer whose ``.grad`` was unset before the backward.
     """
     if not uses_cudagraphs():
         return

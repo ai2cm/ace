@@ -420,6 +420,9 @@ def test_accumulated_grads_are_copied_out_of_cudagraph_buffers():
             if _StaticBufferMul.buffer is not None:
                 torch._C._remove_cached_tensor(_StaticBufferMul.buffer)
                 _StaticBufferMul.buffer = None
+            # matches the state the autouse dynamo_hygiene fixture leaves:
+            # its torch._dynamo.reset() resets cudagraph trees, so no CUDA
+            # graph tree manager relies on cached tensors being enabled
             torch._C._set_cached_tensors_enabled(False)
         del compiled
 
@@ -459,9 +462,10 @@ def test_cudagraph_gradient_accumulation_matches_eager():
     and the next step's forward begins a new CUDA graph tree generation while
     the gradients autograd took from the compiled backward's output buffers
     are still accumulating. Over a curriculum of growing rollouts, with a
-    second graph variant in the first batch of each epoch, the compiled
-    backwards are warmed up, recorded and replayed across these boundaries,
-    and the accumulated gradients match eager."""
+    second graph variant in the first batch of each epoch, the first epoch
+    warms up both variants, the second records the first-batch variant across
+    a step boundary, and later epochs replay across step boundaries, with
+    accumulated gradients matching eager throughout."""
     skip_unless_cuda()
     torch.manual_seed(0)
     device = get_device()
@@ -469,7 +473,7 @@ def test_cudagraph_gradient_accumulation_matches_eager():
     compiled = compile_module(net, backend="inductor")
     optimization = _accumulating_optimization(net)
     x = torch.randn(4, 8, device=device)
-    for n_steps in (1, 1, 1, 2, 2, 4, 4):
+    for n_steps in (1, 2, 2, 4, 4):
         for batch in range(2):
             net.first_batch = batch == 0
             net.zero_grad(set_to_none=True)
