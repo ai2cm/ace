@@ -738,7 +738,8 @@ def _force_conserve_ocean_heat_content(
         for k in range(n_levels)
     }
     global_origin_ocean_heat_content = area_weighted_mean(
-        OceanData(origin_data, vertical_coordinate).ocean_heat_content,
+        OceanData(origin_data, vertical_coordinate).ocean_heat_content
+        * forcing.sea_surface_fraction,
         keepdim=True,
         name="ocean_heat_content",
     )
@@ -797,7 +798,8 @@ def _force_conserve_ocean_heat_content(
                 torch.ones_like(gen_potential_temperature)
                 * SPECIFIC_HEAT_OF_SEA_WATER_CM4
                 * DENSITY_OF_SEA_WATER_CM4
-            ),
+            )
+            * forcing.sea_surface_fraction,
             keepdim=True,
             name="ocean_heat_content",
         )

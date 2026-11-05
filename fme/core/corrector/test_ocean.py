@@ -626,8 +626,18 @@ def _partial_land_ohc_budget_case(hfds_type: str) -> _PartialLandOHCBudgetCase:
     )
 
 
+@pytest.mark.parametrize(
+    "method, origin_deg_C",
+    [
+        ("scaled_temperature", 0.0),
+        ("scaled_temperature", -2.0),
+        ("uniform_temperature", 0.0),
+    ],
+)
 @pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
-def test_ocean_heat_content_correction_partial_land_budget(hfds_type: str):
+def test_ocean_heat_content_correction_partial_land_budget(
+    hfds_type: str, method: str, origin_deg_C: float
+):
     """The corrected state closes sum(a s H_out) = sum(a s H_in) + sum(a F) dt,
     H per unit ocean area and F per unit total cell area.
     """
@@ -639,7 +649,8 @@ def test_ocean_heat_content_correction_partial_land_budget(hfds_type: str):
     dt = 5 * 86400.0
     config = OceanCorrectorConfig(
         ocean_heat_content_correction=OceanHeatContentBudgetConfig(
-            method="scaled_temperature",
+            method=cast(Any, method),
+            origin_deg_C=origin_deg_C,
         )
     )
     corrector = config._build(case.ops, depth, datetime.timedelta(seconds=dt))
@@ -656,6 +667,8 @@ def test_ocean_heat_content_correction_partial_land_budget(hfds_type: str):
         rtol=1e-10,
         atol=0.0,
     )
+    if method != "scaled_temperature" or origin_deg_C != 0.0:
+        return
 
     # closed-form ratio, independent of OceanData
     cprho = SPECIFIC_HEAT_OF_SEA_WATER_CM4 * DENSITY_OF_SEA_WATER_CM4
