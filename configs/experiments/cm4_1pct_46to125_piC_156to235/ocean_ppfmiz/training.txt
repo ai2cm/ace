@@ -1,5 +1,9 @@
 group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0|8h
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs1|train|normal|jupiter|4||3|ai2/ace|seed=1|4h
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs2|train|normal|jupiter|4||3|ai2/ace|seed=2|4h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs0|training|urgent|jupiter|4||3|ai2/ace|seed=0|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs1|training|normal|jupiter|4||3|ai2/ace|seed=1|4h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs2|training|normal|jupiter|4||3|ai2/ace|seed=2|4h
+
+# pchfds = percorrector optim for hfds_total_area
+
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz_pchfds|rs0|train|high|jupiter|4||3|ai2/ace|seed=0 'stepper_training.corrector_loss.precorrector_optimization.names_and_prefixes=[hfds_total_area]'|8h

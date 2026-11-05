@@ -5,7 +5,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 75 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~54,750 iterations
+max_epochs: 50 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~54,750 iterations
 inference:
   - name: inference_1pct
     weight: 1.0
@@ -70,7 +70,7 @@ logging:
   log_to_file: true
   project: ace-samudra-cm4
   entity: ai2cm
-  metrics_log_dir: /results/metrics
+  metrics_log_dir: metrics
 train_loader:
   batch_size: 16
   num_data_workers: 8
