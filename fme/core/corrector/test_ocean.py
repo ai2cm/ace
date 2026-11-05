@@ -667,6 +667,50 @@ def test_ocean_heat_content_correction_partial_land_budget(hfds_type: str):
     )
 
 
+def _to_float32(data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    return {k: v.float() for k, v in data.items()}
+
+
+@pytest.mark.parametrize("dtype", [torch.float64, torch.float32])
+@pytest.mark.parametrize("origin_deg_C", [0.0, -2.0, -273.15])
+def test_ocean_heat_content_correction_origin_partial_land_budget(
+    origin_deg_C: float, dtype: torch.dtype
+):
+    """For any origin, the corrected state adds the flux budget to the
+    s-weighted heat content: sum(a s (H_out - H_in)) = sum(a F) dt.
+    """
+    case = _partial_land_ohc_budget_case("gen")
+    depth = case.depth_coordinate
+    input_data, gen_data = case.input_data, case.gen_data
+    forcing_data = case.forcing_data
+    if dtype == torch.float32:
+        input_data = _to_float32(input_data)
+        gen_data = _to_float32(gen_data)
+        forcing_data = _to_float32(forcing_data)
+        depth = DepthCoordinate(depth.idepth.float(), depth.mask.float())
+    dt = 5 * 86400.0
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature", origin_deg_C=origin_deg_C
+        )
+    )
+    corrector = config._build(case.ops, depth, datetime.timedelta(seconds=dt))
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    assert corrected["thetao_0"].dtype == dtype
+
+    def to_float64(data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {k: v.double() for k, v in data.items()}
+
+    s, area = case.sea_surface_fraction, case.area
+    h_in = OceanData(to_float64(input_data), case.depth_coordinate).ocean_heat_content
+    h_out = OceanData(to_float64(corrected), case.depth_coordinate).ocean_heat_content
+    realized = torch.nansum(area * s * (h_out - h_in))
+    target = torch.nansum(area * case.net_energy_flux_total_area) * dt
+    # float32 output rounds each temperature to ~1e-7 relative
+    rtol = 1e-9 if dtype == torch.float64 else 1e-2
+    torch.testing.assert_close(realized, target, rtol=rtol, atol=0.0)
+
+
 def _salt_coordinates(nlat: int, nlon: int) -> LatLonCoordinates:
     return LatLonCoordinates(
         lat=torch.linspace(-80.0, 80.0, nlat), lon=torch.arange(nlon) * 360.0 / nlon
@@ -1122,7 +1166,8 @@ def test_ocean_heat_content_correction_origin_closes_budget(origin_deg_C):
 
 
 def test_ocean_heat_content_correction_zero_origin_matches_scaling_about_zero():
-    # The origin = 0 branch reproduces the r * theta arithmetic exactly.
+    # The origin = 0 branch reproduces r * theta (to roundoff: it is applied as
+    # theta + (r - 1) * theta in float64).
     unaccounted = 0.1
     (
         ops,
@@ -1159,8 +1204,10 @@ def test_ocean_heat_content_correction_zero_origin_matches_scaling_about_zero():
     ratio = (_global_ohc(input_dict) + expected_change) / _global_ohc(gen_dict)
 
     for name in ["thetao_0", "thetao_1"]:
-        assert torch.equal(corrected[name], gen_dict[name] * ratio)
-    assert torch.equal(corrected["sst"], (gen_dict["sst"] - 273.15) * ratio + 273.15)
+        torch.testing.assert_close(corrected[name], gen_dict[name] * ratio)
+    torch.testing.assert_close(
+        corrected["sst"], (gen_dict["sst"] - 273.15) * ratio + 273.15
+    )
 
 
 def test_ocean_heat_content_budget_config_defaults_to_zero_origin():

@@ -709,26 +709,30 @@ def _force_conserve_ocean_heat_content(
         )
     gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
-    global_gen_ocean_heat_content = area_weighted_mean(
-        gen.ocean_heat_content * forcing.sea_surface_fraction,
-        keepdim=True,
-        name="ocean_heat_content",
-    )
-    global_input_ocean_heat_content = area_weighted_mean(
-        input.ocean_heat_content * forcing.sea_surface_fraction,
-        keepdim=True,
-        name="ocean_heat_content",
-    )
-    # Heat content of a uniform ocean at the origin temperature, computed through
-    # the same depth-integral path so the dz and mask handling is identical. It
-    # cancels out of the closure, leaving H(theta_final) = H_target for any origin.
+    # Closure in increment form, in float64: r - 1 = (<s (H_in - H_gen)> + dH)
+    # / <s H_T0(gen)>, with H_T0 the heat content of (thetao - origin). Forming r
+    # from absolute heat contents loses dH to float32 roundoff when the origin
+    # is far below ocean temperatures (e.g. 0 K).
     n_levels = gen.sea_water_potential_temperature.shape[-1]
-    origin_data = {
-        f"thetao_{k}": torch.full_like(gen.data[f"thetao_{k}"], origin_deg_C)
+    gen_minus_origin = {
+        f"thetao_{k}": gen.data[f"thetao_{k}"].double() - origin_deg_C
         for k in range(n_levels)
     }
-    global_origin_ocean_heat_content = area_weighted_mean(
-        OceanData(origin_data, vertical_coordinate).ocean_heat_content,
+    input_minus_gen = {
+        f"thetao_{k}": input.data[f"thetao_{k}"].double()
+        - gen.data[f"thetao_{k}"].double()
+        for k in range(n_levels)
+    }
+    sea_surface_fraction = forcing.sea_surface_fraction.double()
+    global_gen_ocean_heat_content_about_origin = area_weighted_mean(
+        OceanData(gen_minus_origin, vertical_coordinate).ocean_heat_content
+        * sea_surface_fraction,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    global_input_minus_gen_ocean_heat_content = area_weighted_mean(
+        OceanData(input_minus_gen, vertical_coordinate).ocean_heat_content
+        * sea_surface_fraction,
         keepdim=True,
         name="ocean_heat_content",
     )
@@ -757,23 +761,21 @@ def _force_conserve_ocean_heat_content(
     expected_change_ocean_heat_content = (
         energy_flux_global_mean + unaccounted_heating
     ) * timestep_seconds
-    heat_content_correction_ratio = (
-        global_input_ocean_heat_content
-        + expected_change_ocean_heat_content
-        - global_origin_ocean_heat_content
-    ) / (global_gen_ocean_heat_content - global_origin_ocean_heat_content)
-    # apply same temperature correction to all vertical layers, scaling the
-    # departure from the origin rather than the temperature itself
+    ratio_minus_one = (
+        global_input_minus_gen_ocean_heat_content
+        + expected_change_ocean_heat_content.double()
+    ) / global_gen_ocean_heat_content_about_origin
+    # theta_c = origin + r (theta - origin), applied as theta + (r - 1)(theta - origin)
     out: TensorDict = {}
     for k in range(n_levels):
         name = f"thetao_{k}"
         out[name] = (
-            gen.data[name] - origin_deg_C
-        ) * heat_content_correction_ratio + origin_deg_C
+            gen.data[name].double() + ratio_minus_one * gen_minus_origin[name]
+        ).to(gen.data[name].dtype)
     if "sst" in gen.data:
-        out["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN - origin_deg_C
-        ) * heat_content_correction_ratio + (FREEZING_TEMPERATURE_KELVIN + origin_deg_C)
+        sst = gen.data["sst"]  # assuming sst in Kelvin
+        sst_minus_origin = sst.double() - FREEZING_TEMPERATURE_KELVIN - origin_deg_C
+        out["sst"] = (sst.double() + ratio_minus_one * sst_minus_origin).to(sst.dtype)
     return out
 
 
