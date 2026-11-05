@@ -24,3 +24,5 @@ rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs1|01M6DWYW0AG9N7MCGFC1B3Q7SQ|r
 rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M6DWZ9YNC8ENFKRT9BMRE1JJ|ai2/ace|h100
 rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M6DWZ9YNC8ENFKRT9BMRE1JJ|ai2/ace|h100
 rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 1h||01M6DWZ9YNC8ENFKRT9BMRE1JJ|ai2/ace|h100
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs0|01M6PS1W8WEMQER3GW2ZY2V5XF|training|best_inference_ckpt|normal|--min-runtime 8h
