@@ -98,10 +98,16 @@ while read PRETRAINING; do
     require_job_name_length "$JOB_NAME"
 
     # Get experiment IDs and datasets
-    ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
-    OCEAN_EXPER_ID=$(get_experiment_from_wandb "$OCEAN_PROJECT" "$OCEAN_WANDB_ID")
-    EXISTING_RESULTS_ATMOS_DATASET=$(get_beaker_dataset_from_experiment "$ATMOS_EXPER_ID")
-    EXISTING_RESULTS_OCEAN_DATASET=$(get_beaker_dataset_from_experiment "$OCEAN_EXPER_ID")
+    ATMOS_EXPER_ID=""
+    OCEAN_EXPER_ID=""
+    if [[ -z $EXISTING_RESULTS_ATMOS_DATASET ]]; then
+        ATMOS_EXPER_ID=$(get_experiment_from_wandb "$ATMOS_PROJECT" "$ATMOS_WANDB_ID")
+        EXISTING_RESULTS_ATMOS_DATASET=$(get_beaker_dataset_from_experiment "$ATMOS_EXPER_ID")
+    fi
+    if [[ -z $EXISTING_RESULTS_OCEAN_DATASET ]]; then
+        OCEAN_EXPER_ID=$(get_experiment_from_wandb "$OCEAN_PROJECT" "$OCEAN_WANDB_ID")
+        EXISTING_RESULTS_OCEAN_DATASET=$(get_beaker_dataset_from_experiment "$OCEAN_EXPER_ID")
+    fi
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"

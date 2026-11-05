@@ -520,6 +520,8 @@ PRETRAINING_COLUMNS=(
     skip_or_train:STATUS priority:PRIORITY cluster:CLUSTER n_gpus:N_GPUS
     shared_mem:SHARED_MEM retries:RETRIES workspace:WORKSPACE
     override:OVERRIDE_ARGS min_runtime:MIN_RUNTIME
+    results_dataset_ocean:EXISTING_RESULTS_OCEAN_DATASET
+    results_dataset_atmos:EXISTING_RESULTS_ATMOS_DATASET
 )
 FINETUNING_COLUMNS=(
     group:GROUP tag:TAG wandb_project:WANDB_PROJECT wandb_id:WANDB_ID

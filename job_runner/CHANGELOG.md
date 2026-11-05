@@ -19,6 +19,9 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] Training scripts create `experiments.txt` with its header if missing
 - [FEAT] `{evaluate,inference}.sh --dry-run` validates each unique config and
   override set once, skipping repeats
+- [FEAT] `pretraining.txt` columns `results_dataset_ocean` and
+  `results_dataset_atmos` override the wandb-resolved results datasets in
+  `coupled_train.sh`
 
 ### Changed
 
