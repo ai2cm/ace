@@ -83,6 +83,15 @@ def test_upload_spec_ensemble_uses_combined_stats(tmp_path):
     )
 
 
+def test_upload_spec_description_names_excluded_runs(tmp_path):
+    config = _config(ENSEMBLE_CONFIG, tmp_path)
+    assert config.stats.exclude_runs
+    spec = _upload_spec(config)
+    assert spec is not None
+    for run in config.stats.exclude_runs:
+        assert run in spec.description
+
+
 def test_upload_spec_none_without_beaker_dataset(tmp_path):
     config = _config(SINGLE_CONFIG, tmp_path, beaker_dataset=None)
     assert config.stats.beaker_dataset is None

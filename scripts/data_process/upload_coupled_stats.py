@@ -32,11 +32,14 @@ class UploadSpec:
 def _describe(config: CreateCoupledDatasetsConfig) -> str:
     start = config.stats.start_date or "start of run"
     end = config.stats.end_date or "end of run"
-    return (
+    description = (
         f"Coefficients for normalization for coupled datasets "
         f"{config.version}-{config.family_name} in {config.output_directory}. "
         f"Computed from {start} to {end}."
     )
+    if config.stats.exclude_runs:
+        description += f" Excluding runs {', '.join(config.stats.exclude_runs)}."
+    return description
 
 
 def _upload_spec(config: CreateCoupledDatasetsConfig) -> UploadSpec | None:
