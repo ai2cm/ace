@@ -1,0 +1,194 @@
+import dataclasses
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
+
+import torch
+
+from fme.ace.registry.registry import ModuleConfig, ModuleSelector
+from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
+from fme.core.dataset_info import DatasetInfo
+from fme.core.models.conditional_sfno.fieldsfno import (
+    FieldSFNONetConfig,
+    get_lat_lon_fieldsfno,
+)
+from fme.core.models.conditional_sfno.layers import ContextConfig
+
+
+@ModuleSelector.register("NoiseConditionedFieldSFNO")
+@dataclasses.dataclass
+class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
+    """
+    Configuration for a noise-conditioned field-space SFNO model.
+
+    The network's residual stream is the field itself: there is no encoder,
+    decoder, or latent embedding. Forcing inputs condition the layer norms
+    (alongside noise, labels, and the positional embedding) instead of being
+    part of the residual stream, and diagnostic outputs start from learned
+    initial values and are evolved like prognostic fields.
+
+    Channel contract: the step passes channels in config order, so the step's
+    ``in_names`` must list the prognostic names first (in the same order as
+    ``out_names``) followed by the forcing names, and ``out_names`` must list
+    the prognostic names first followed by the diagnostic names. Any extra
+    input channels the step packs after ``in_names`` are treated as forcing.
+    The builder checks the channel counts against ``n_prognostic_channels``
+    but cannot check the names.
+
+    Attributes:
+        n_prognostic_channels: Number of prognostic channels, i.e. names in
+            both ``in_names`` and ``out_names``.
+        filter_type: Type of spectral filter to use.
+        noise_embed_dim: Dimension of the noise embedding.
+        noise_type: Type of noise to use for conditioning.
+        context_pos_embed_dim: Dimension of the position embedding to use
+            for conditioning.
+        label_embed_dim: Dimension of the learned label embedding space.
+            When > 0, a shared linear layer maps one-hot labels to this
+            embedding dimension before downstream conditioning layers.
+            When 0 (default), one-hot labels are used directly.
+        forcing_embed_dim: Width of the forcing embedding that conditions
+            the layer norms.
+        forcing_encoder_layers: Number of 1x1 convolution layers in the
+            forcing encoder.
+        global_layer_norm: Whether to reduce along the spatial domain when
+            applying layer normalization.
+        num_layers: Number of blocks (spectral filter and MLP) in the model.
+        use_mlp: Whether to use an MLP in each block.
+        mlp_ratio: Ratio of the MLP hidden dimension to the number of
+            output channels.
+        activation_function: Activation function to use.
+        drop_rate: Dropout rate inside the MLPs.
+        drop_path_rate: Stochastic depth rate.
+        hard_thresholding_fraction: Fraction of spectral modes to retain.
+        checkpointing: Gradient checkpointing level.
+        data_grid: Grid type for spherical harmonic transforms.
+        filter_residual: Whether to filter each block's inner skip through a
+            SHT round-trip.
+        filter_output: Whether to filter the model's update (output minus
+            input state) through a SHT round-trip.
+        local_blocks: List of block indices to use discrete-conditional
+            convolution (DISCO) blocks, which apply local filters.
+        affine_norms: Whether to use element-wise affine parameters in the
+            normalization layers.
+        filter_num_groups: Number of groups to use in grouped convolutions
+            for the spectral filter. Must divide the number of output channels.
+        filter_preserves_global_mean: If True, the spectral filter preserves
+            the l=0 (global mean) spherical harmonic coefficient.
+        gamma_init: Initial value of each block's residual gates; 1e-12
+            (the FieldSpaceNN default) makes the model the identity at init.
+    """
+
+    n_prognostic_channels: int
+    filter_type: Literal["linear", "makani-linear"] = "linear"
+    noise_embed_dim: int = 256
+    noise_type: Literal["isotropic", "gaussian"] = "gaussian"
+    context_pos_embed_dim: int = 0
+    label_embed_dim: int = 0
+    forcing_embed_dim: int = 32
+    forcing_encoder_layers: int = 2
+    global_layer_norm: bool = False
+    num_layers: int = 12
+    use_mlp: bool = True
+    mlp_ratio: float = 2.0
+    activation_function: str = "gelu"
+    drop_rate: float = 0.0
+    drop_path_rate: float = 0.0
+    hard_thresholding_fraction: float = 1.0
+    checkpointing: int = 0
+    # healpix not supported due to assumptions about number of spatial dims
+    data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
+    filter_residual: bool = False
+    filter_output: bool = False
+    local_blocks: list[int] | None = None
+    affine_norms: bool = False
+    filter_num_groups: int = 1
+    filter_preserves_global_mean: bool = False
+    gamma_init: float = 1e-12
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(state)
+
+    def __post_init__(self):
+        if self.n_prognostic_channels < 1:
+            raise ValueError("n_prognostic_channels must be at least 1")
+
+    def _net_config(self) -> FieldSFNONetConfig:
+        return FieldSFNONetConfig(
+            filter_type=self.filter_type,
+            global_layer_norm=self.global_layer_norm,
+            num_layers=self.num_layers,
+            use_mlp=self.use_mlp,
+            mlp_ratio=self.mlp_ratio,
+            activation_function=self.activation_function,
+            forcing_embed_dim=self.forcing_embed_dim,
+            forcing_encoder_layers=self.forcing_encoder_layers,
+            drop_rate=self.drop_rate,
+            drop_path_rate=self.drop_path_rate,
+            hard_thresholding_fraction=self.hard_thresholding_fraction,
+            checkpointing=self.checkpointing,
+            filter_num_groups=self.filter_num_groups,
+            filter_residual=self.filter_residual,
+            filter_output=self.filter_output,
+            local_blocks=self.local_blocks,
+            affine_norms=self.affine_norms,
+            filter_preserves_global_mean=self.filter_preserves_global_mean,
+            gamma_init=self.gamma_init,
+        )
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        dataset_info: DatasetInfo,
+    ):
+        if n_in_channels < self.n_prognostic_channels:
+            raise ValueError(
+                f"n_in_channels ({n_in_channels}) is smaller than "
+                f"n_prognostic_channels ({self.n_prognostic_channels})"
+            )
+        if n_out_channels < self.n_prognostic_channels:
+            raise ValueError(
+                f"n_out_channels ({n_out_channels}) is smaller than "
+                f"n_prognostic_channels ({self.n_prognostic_channels})"
+            )
+        n_labels = len(dataset_info.all_labels)
+        if self.label_embed_dim > 0:
+            effective_label_dim = self.label_embed_dim
+        else:
+            effective_label_dim = n_labels
+
+        net = get_lat_lon_fieldsfno(
+            params=self._net_config(),
+            prognostic_chans=self.n_prognostic_channels,
+            forcing_chans=n_in_channels - self.n_prognostic_channels,
+            diagnostic_chans=n_out_channels - self.n_prognostic_channels,
+            img_shape=dataset_info.img_shape,
+            data_grid=self.data_grid,
+            context_config=ContextConfig(
+                embed_dim_scalar=0,
+                embed_dim_pos=self.context_pos_embed_dim,
+                embed_dim_noise=self.noise_embed_dim,
+                embed_dim_labels=effective_label_dim,
+            ),
+        )
+        inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None
+        if self.noise_type == "isotropic":
+            inverse_sht = net.itrans_up
+            lmax = int(getattr(net.itrans_up, "lmax"))
+            mmax = int(getattr(net.itrans_up, "mmax"))
+        else:
+            inverse_sht = None
+            lmax = 0
+            mmax = 0
+        return NoiseConditionedModel(
+            net,
+            embed_dim_noise=self.noise_embed_dim,
+            embed_dim_pos=self.context_pos_embed_dim,
+            n_labels=n_labels,
+            label_embed_dim=self.label_embed_dim,
+            img_shape=dataset_info.img_shape,
+            inverse_sht=inverse_sht,
+            lmax=lmax,
+            mmax=mmax,
+        )

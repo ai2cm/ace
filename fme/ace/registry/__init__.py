@@ -1,6 +1,7 @@
 # import modules so they are registered
 from fme.core.models import mlp as _mlp
 
+from . import field_sfno as _field_sfno
 from . import land_net as _landnet
 from . import local_net as _localnet
 from . import m2lines as _m2lines
@@ -11,3 +12,4 @@ from . import swin_transformer as _swin
 from .registry import ModuleSelector
 
 del _prebuilt, _sfno, _m2lines, _landnet, _localnet, _sfno_crps, _mlp, _swin
+del _field_sfno
