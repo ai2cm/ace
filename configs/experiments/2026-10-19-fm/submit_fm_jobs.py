@@ -39,6 +39,12 @@ CONFIG_PREFIX = "ace-train-config-4deg-"
 # CONFIG_PREFIX. Matching is exact-tag, so `nc-swin-v2` never selects a
 # `nc-swin-v2.2` config (or vice versa).
 ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1", "nc-swin-v2.2")
+# Architecture tags of the 2026-11-05 v2 runs, submitted by
+# submit_fm_v2_jobs.py (4 GPUs, their own wandb group). They extend the tags
+# above (`nc-sfno-v2-...` starts with `nc-sfno-`), so configs are matched on
+# their longest tag: `--arch nc-sfno` here never selects a v2 config.
+V2_ARCH_CHOICES = ("nc-sfno-v2", "nc-swin-v2.2-v2")
+ALL_ARCH_TAGS = ARCH_CHOICES + V2_ARCH_CHOICES
 # Beaker defaults for add_beaker_args, shared with submit_inference_jobs.py so
 # inference jobs land where training jobs do. Keep in step with the
 # BEAKER_* defaults in run-ace-train.sh / run-ace-inference-job.sh.
@@ -62,17 +68,26 @@ def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
     # from scratch, and eval suites use a different prefix. `-diag` configs
     # are one-off diagnostics submitted by hand via run-ace-train.sh; they
     # are short runs that would waste a slot here.
-    arch_prefixes = tuple(f"{CONFIG_PREFIX}{arch}-" for arch in archs)
     return sorted(
         path.name
         for path in RUN_CONFIGS_DIR.glob("*.yaml")
-        if path.name.startswith(arch_prefixes)
+        if arch_tag(path.name) in archs
         and stem_matches_version(path.stem, version)
         and not path.name.endswith("-finetune.yaml")
         and not path.name.endswith("-cooldown.yaml")
         and not path.name.endswith("-bestinfcooldown.yaml")
         and not path.name.endswith("-diag.yaml")
     )
+
+
+def arch_tag(config_filename: str) -> str | None:
+    """The longest architecture tag directly after CONFIG_PREFIX, if any."""
+    matches = [
+        tag
+        for tag in ALL_ARCH_TAGS
+        if config_filename.startswith(f"{CONFIG_PREFIX}{tag}-")
+    ]
+    return max(matches, key=len) if matches else None
 
 
 def config_to_job_name(config_filename: str) -> str:
