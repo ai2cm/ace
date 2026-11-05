@@ -31,8 +31,12 @@ Changes from the parents, identical for both arms:
   Validation evaluates only the steps the train stepper would for the epoch.
 - LR 1e-4 constant to epoch 70, then linear to 0 over epochs 71-100 (stepped
   per epoch). Swin keeps the parent's 2-epoch linear warmup.
-- SFNO only: torch.compile without CUDA graphs (FME_COMPILE_MODE=default,
-  see COMPILE_MODE), as its multi-step training fails under CUDA graphs.
+- Both architectures run fme's default torch.compile mode (reduce-overhead,
+  CUDA graphs). Multi-step training under CUDA graphs needs the fix from
+  ai2cm/ace#1610 (accumulated grads cloned out of the CUDA-graph pool),
+  merged into this branch; before it, the SFNO smoke failed at the 2-step
+  milestone with "accessing tensor output of CUDAGraphs that has been
+  overwritten by a subsequent run".
 - Inline inference: only aimip_checkpoint_era5 (every epoch, weight 1.0) and,
   every 10 epochs, 10year_oosample_varying_co2_era5 and
   long_46year_varying_co2_era5.
@@ -62,15 +66,6 @@ SMOKE_CONFIGS_DIR = RUN_CONFIGS_DIR / "v2-smoke"
 CONFIG_PREFIX = "ace-train-config-4deg-"
 
 SEEDS = (0, 1, 2, 3, 4)
-# torch.compile mode per architecture (FME_COMPILE_MODE); None keeps fme's
-# default (reduce-overhead). The default
-# reduce-overhead mode replays CUDA graphs, and multi-step training then fails
-# in backward with "accessing tensor output of CUDAGraphs that has been
-# overwritten by a subsequent run" (sfnonet decoder output of step 1
-# overwritten by step 2; first seen in the 2026-11-05 SFNO smoke at the
-# 2-step milestone). "default" compiles without CUDA graphs. The swin smoke
-# ran 1, 2 and 4 steps under reduce-overhead without error.
-COMPILE_MODE: dict[str, str | None] = {"nc-sfno-v2": "default", "nc-swin-v2.2-v2": None}
 MAX_EPOCHS = 100
 
 # arch tag -> (parent arch tag, embed_dim)
@@ -242,9 +237,6 @@ def header(arch: str, arm: str, smoke: bool) -> str:
         f"# Parent: run_configs/{parent}",
         "# See create_fm_v2_jobs.py for every change from the parent.",
     ]
-    if COMPILE_MODE[arch] is not None:
-        # run-ace-train.sh passes `# arg:` lines to gantry; see COMPILE_MODE.
-        lines.append(f"# arg: --env FME_COMPILE_MODE={COMPILE_MODE[arch]}")
     if smoke:
         lines.append("# Smoke test: 3 epochs, 256 samples/epoch, all inference.")
     return "\n".join(lines) + "\n"
