@@ -1,12 +1,14 @@
 import contextlib
 import logging
 import os
-from collections.abc import Generator
+import weakref
+from collections.abc import Generator, Iterable
 from typing import Any
 
 import torch
 import torch_harmonics.distributed as thd
 from torch import nn
+from torch.utils._pytree import tree_map_only
 
 from fme.core.device import get_device
 
@@ -49,10 +51,43 @@ def _parse_compile_backend_env(value: str | None) -> str | None:
     return _validate_backend(value, "FME_COMPILE_BACKEND")
 
 
+DEFAULT_COMPILE_MODE = "reduce-overhead"
+"""The ``torch.compile`` mode of modules compiled with inductor, unless
+``FME_COMPILE_MODE`` or the caller sets one.
+
+``reduce-overhead`` replays the compiled kernels as CUDA graphs, which removes
+the per-kernel CPU launch cost that otherwise bounds the step time of networks
+made of many small kernels. Other backends take no mode, and inductor skips
+CUDA graphs on other devices."""
+
+
+def _parse_compile_mode_env(value: str | None) -> str | None:
+    # an empty value (FME_COMPILE_MODE=) is treated as unset
+    if value is None or value == "":
+        return None
+    available = list(torch._inductor.list_mode_options())
+    if value not in available:
+        raise ValueError(
+            f"FME_COMPILE_MODE must name an inductor mode, got {value!r}; "
+            f"available modes are {available}."
+        )
+    return value
+
+
+def _uses_cudagraphs(backend: Any, mode: str | None) -> bool:
+    if backend != "inductor" or mode is None:
+        return False
+    return bool(torch._inductor.list_mode_options(mode).get("triton.cudagraphs"))
+
+
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
 _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
 )
+_MODE_OVERRIDE: str | None = _parse_compile_mode_env(os.environ.get("FME_COMPILE_MODE"))
+# compiled modules that replay CUDA graphs, see without_cudagraphs and
+# release_grads_from_cudagraphs
+_CUDAGRAPH_MODULES: "weakref.WeakSet[nn.Module]" = weakref.WeakSet()
 _LOGGED_AUTO_SKIP = False
 _LOGGED_SPATIAL_SPLIT_SKIP = False
 RECOMPILE_LIMIT = 32
@@ -179,10 +214,83 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     a particular backend needs that backend, while the configured one is only a
     default.
 
+    With the inductor backend, named by the string ``"inductor"``, the mode is
+    the one ``kwargs`` sets, else the ``FME_COMPILE_MODE`` environment variable
+    (e.g. ``default`` to turn CUDA graphs off, trading launch overhead for the
+    memory CUDA graph pools hold), else :data:`DEFAULT_COMPILE_MODE`. When
+    the mode replays CUDA graphs, outputs of the compiled module are cloned,
+    so a later replay cannot overwrite or free them.
+
     Args:
         module: The module to compile.
         kwargs: Forwarded to ``torch.compile``.
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())
-    return torch.compile(module, **kwargs)
+    if kwargs["backend"] == "inductor":
+        kwargs.setdefault("mode", _MODE_OVERRIDE or DEFAULT_COMPILE_MODE)
+    compiled = torch.compile(module, **kwargs)
+    if _uses_cudagraphs(kwargs["backend"], kwargs.get("mode")):
+        compiled.register_forward_hook(_clone_outputs)
+        _CUDAGRAPH_MODULES.add(compiled)
+    return compiled
+
+
+def _clone_outputs(module: nn.Module, args: Any, output: Any) -> Any:
+    # A CUDA graph writes its outputs to the same static buffers on every
+    # replay, and CUDA graph trees free a replay's outputs once a later call
+    # begins a new generation. Callers keep outputs across calls (e.g. the
+    # steps of a rollout), so hand them copies. The hook runs outside the
+    # compiled region.
+    return tree_map_only(torch.Tensor, torch.Tensor.clone, output)
+
+
+def without_cudagraphs(module: nn.Module) -> nn.Module:
+    """The module ``torch.compile`` was called on, when ``module`` was
+    compiled by :func:`compile_module` to replay CUDA graphs, and ``module``
+    itself otherwise.
+    """
+    if module in _CUDAGRAPH_MODULES:
+        # _orig_mod is how a torch.compile'd nn.Module exposes the module it
+        # compiles
+        return module._orig_mod
+    return module
+
+
+def uses_cudagraphs() -> bool:
+    """Whether any live module compiled by :func:`compile_module` replays
+    CUDA graphs.
+    """
+    return len(_CUDAGRAPH_MODULES) > 0
+
+
+def release_grads_from_cudagraphs(params: Iterable[torch.Tensor]) -> None:
+    """Replace each defined ``.grad`` of ``params`` with a copy outside the
+    CUDA graph memory pool, when any module replays CUDA graphs.
+
+    Call this after each backward whose gradients accumulate into those of a
+    later backward before the optimizer consumes them, as with gradient
+    accumulation over the steps of a rollout, passing the parameters whose
+    ``.grad`` was unset before that backward. The outputs of a compiled
+    backward are CUDA graph "cached tensors", which autograd steals into an
+    unset ``.grad`` without copying. The next step's forward then begins a new
+    CUDA graph tree generation while that ``.grad`` still aliases the pool: if
+    the backward's graph was being recorded, the gradient is freed ("accessing
+    tensor output of CUDAGraphs that has been overwritten by a subsequent
+    run"), and if it was replayed, the next backward writes its gradient into
+    the same buffer and accumulates it onto itself, giving twice the last
+    step's gradient. A ``.grad`` that was already set is accumulated into in
+    place, so it never aliases the pool and needs no copy, and later backwards
+    accumulate in place into the copies.
+
+    Without CUDA graphs this does nothing, so it costs nothing.
+
+    Args:
+        params: The parameters whose gradients to release, e.g. those of an
+            optimizer whose ``.grad`` was unset before the backward.
+    """
+    if not uses_cudagraphs():
+        return
+    for param in params:
+        if param.grad is not None:
+            param.grad = param.grad.clone()

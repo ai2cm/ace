@@ -9,6 +9,11 @@ import numpy as np
 import torch
 from torch import nn
 
+from fme.core.compile import (
+    release_grads_from_cudagraphs,
+    uses_cudagraphs,
+    without_cudagraphs,
+)
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
@@ -20,9 +25,16 @@ class Checkpoint:
         self._kwargs = kwargs
 
     def __call__(self, module: nn.Module):
+        # A module compiled with CUDA graphs runs uncompiled when
+        # checkpointed. Its recomputation happens during the backward pass,
+        # and calling it there can begin a new CUDA graph tree generation,
+        # which frees the saved activations of earlier steps whose backward
+        # has not run yet.
+        checkpointed_module = without_cudagraphs(module)
+
         def wrapped(*args):
             return torch.utils.checkpoint.checkpoint(
-                module,
+                checkpointed_module,
                 *args,
                 use_reentrant=False,
                 **self._kwargs,
@@ -168,7 +180,22 @@ class Optimization(OptimizationABC):
         self._validate_loss(loss)
         self._accumulated_loss += loss
         if self._use_gradient_accumulation:
+            # the next step's forward may begin a new CUDA graph tree
+            # generation, which would overwrite gradients still held in a
+            # compiled backward's output buffers; autograd only stores such
+            # buffers into gradients that are unset before this backward
+            unset = (
+                [
+                    p
+                    for group in self.optimizer.param_groups
+                    for p in group["params"]
+                    if p.grad is None
+                ]
+                if uses_cudagraphs()
+                else []
+            )
             self._backward(loss)
+            release_grads_from_cudagraphs(unset)
 
     def get_accumulated_loss(self) -> torch.Tensor:
         return self._accumulated_loss

@@ -423,17 +423,22 @@ def _build_compile_unsupported_module() -> Module:
 
 
 def test_compile_unsupported_builder_runs_eagerly_without_tracing(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ):
     """A builder declaring compilation unsupported is left uncompiled, with the
-    declared reason logged, and never reaches torch.compile, since tracing an
-    untraceable module can take minutes before falling back."""
+    declared reason logged once however many steps compile it, and never
+    reaches torch.compile, since tracing an untraceable module can take minutes
+    before falling back."""
+    monkeypatch.setattr(
+        fme.core.registry.module, "_LOGGED_COMPILE_UNSUPPORTED_REASONS", set()
+    )
     module = _build_compile_unsupported_module()
     with caplog.at_level(logging.INFO), mock.patch("torch.compile") as mock_compile:
         compiled = module.compile()
+        module.compile()
     mock_compile.assert_not_called()
     assert not compiled.is_compiled
-    assert "not traceable" in caplog.text
+    assert caplog.text.count("not traceable") == 1
 
 
 def test_registered_builder_without_compile_reason_compiles():

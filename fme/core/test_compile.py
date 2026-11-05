@@ -1,21 +1,30 @@
 import logging
 import os
+import weakref
 from unittest import mock
 
 import pytest
 import torch
+from torch._inductor import cudagraph_trees
 
 import fme.core.compile
 from fme.core.compile import (
     RECOMPILE_LIMIT,
     _parse_compile_backend_env,
     _parse_compile_env,
+    _parse_compile_mode_env,
     compile_backend,
     compile_enabled,
     compile_module,
     is_compile_enabled,
+    release_grads_from_cudagraphs,
+    uses_cudagraphs,
+    without_cudagraphs,
 )
-from fme.core.device import force_cpu
+from fme.core.device import force_cpu, get_device
+from fme.core.optimization import Checkpoint, OptimizationConfig
+from fme.core.scheduler import SchedulerConfig
+from fme.core.testing import skip_unless_cuda
 
 
 @pytest.mark.parametrize(
@@ -43,6 +52,20 @@ def test_parse_compile_backend_env(value: str | None, expected: str | None | typ
             _parse_compile_backend_env(value)
     else:
         assert _parse_compile_backend_env(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [(None, None), ("", None), ("default", "default")]
+    + [("reduce-overhead", "reduce-overhead")]
+    + [(value, ValueError) for value in ["not_a_mode", " ", "Default"]],
+)
+def test_parse_compile_mode_env(value: str | None, expected: str | None | type):
+    if expected is ValueError:
+        with pytest.raises(ValueError, match="FME_COMPILE_MODE must name"):
+            _parse_compile_mode_env(value)
+    else:
+        assert _parse_compile_mode_env(value) == expected
 
 
 def _use_auto(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,6 +167,21 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
             {"backend": "aot_eager", "fullgraph": True},
             id="explicit_backend_wins",
         ),
+        pytest.param(
+            {"backend": "inductor"},
+            {"backend": "inductor", "mode": "reduce-overhead"},
+            id="inductor_uses_cudagraphs",
+        ),
+        pytest.param(
+            {"backend": "inductor", "mode": "default"},
+            {"backend": "inductor", "mode": "default"},
+            id="explicit_mode_wins",
+        ),
+        pytest.param(
+            {"backend": "inductor", "mode": None},
+            {"backend": "inductor", "mode": None},
+            id="explicit_none_mode_wins",
+        ),
     ],
 )
 def test_compile_module_backend(kwargs: dict, expected: dict):
@@ -154,3 +192,311 @@ def test_compile_module_backend(kwargs: dict, expected: dict):
     ):
         compile_module(net, **kwargs)
     mock_compile.assert_called_once_with(net, **expected)
+
+
+def test_configured_mode_applies_to_inductor_only(monkeypatch: pytest.MonkeyPatch):
+    """FME_COMPILE_MODE (e.g. default, to turn CUDA graphs off) sets the mode of
+    inductor compiles that do not set one, and other backends take no mode."""
+    monkeypatch.setattr(fme.core.compile, "_MODE_OVERRIDE", "default")
+    net = torch.nn.Linear(2, 2)
+    with mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile:
+        compile_module(net, backend="inductor")
+        compile_module(net, backend="aot_eager")
+    assert mock_compile.call_args_list == [
+        mock.call(net, backend="inductor", mode="default"),
+        mock.call(net, backend="aot_eager"),
+    ]
+
+
+_real_compile = torch.compile
+
+
+def _compile_with_cudagraph_mode(net: torch.nn.Module) -> torch.nn.Module:
+    # compile as if with CUDA graphs, but run eagerly so the test needs neither
+    # CUDA nor inductor
+    with mock.patch(
+        "torch.compile", side_effect=lambda m, **_: _real_compile(m, backend="eager")
+    ):
+        return compile_module(net, backend="inductor", mode="reduce-overhead")
+
+
+def test_cudagraph_compiled_module_outputs_are_copies():
+    """Outputs of a module compiled with CUDA graphs never share memory with
+    the compiled graph, so a later CUDA graph replay cannot overwrite outputs a
+    caller kept, while gradients still flow through them."""
+    x = torch.randn(2, 2, requires_grad=True)
+    out = _compile_with_cudagraph_mode(torch.nn.Identity())(x)
+    assert out.untyped_storage().data_ptr() != x.untyped_storage().data_ptr()
+    torch.testing.assert_close(out, x)
+    out.sum().backward()
+    assert x.grad is not None
+    torch.testing.assert_close(x.grad, torch.ones_like(x))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"backend": "eager"}, id="eager"),
+        pytest.param({"backend": "inductor", "mode": "default"}, id="no_cudagraphs"),
+    ],
+)
+def test_module_compiled_without_cudagraphs_returns_outputs_uncopied(kwargs: dict):
+    """Without CUDA graphs, outputs are not copied, which would only cost an
+    extra allocation and copy per call."""
+    x = torch.randn(2, 2)
+    out = compile_module(torch.nn.Identity(), **kwargs)(x)
+    assert out.untyped_storage().data_ptr() == x.untyped_storage().data_ptr()
+
+
+def test_without_cudagraphs():
+    net = torch.nn.Linear(2, 2)
+    assert without_cudagraphs(_compile_with_cudagraph_mode(net)) is net
+    compiled = compile_module(net, backend="eager")
+    assert without_cudagraphs(compiled) is compiled
+    assert without_cudagraphs(net) is net
+
+
+class _RecordsCompiling(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(2, 2)
+        self.compiling: list[bool] = []
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.compiling.append(torch.compiler.is_compiling())
+        return self.linear(x)
+
+
+def test_checkpointed_cudagraph_module_runs_eagerly():
+    """Activation checkpointing recomputes the forward pass during backward,
+    where calling a module compiled with CUDA graphs could free saved
+    activations of other steps, so a checkpointed module compiled with CUDA
+    graphs runs (and recomputes) uncompiled, with the same gradients as the
+    plain module."""
+    net = _RecordsCompiling()
+    compiled = _compile_with_cudagraph_mode(net)
+    x = torch.randn(3, 2)
+    compiled(x)
+    assert net.compiling == [True]
+
+    net.compiling.clear()
+    Checkpoint({})(compiled)(x).sum().backward()
+    assert net.compiling == [False, False]  # forward, then recomputation
+    checkpointed_grad = net.linear.weight.grad.clone()
+    net.zero_grad()
+    net(x).sum().backward()
+    torch.testing.assert_close(checkpointed_grad, net.linear.weight.grad)
+
+
+def test_checkpointed_module_without_cudagraphs_stays_compiled():
+    """Without CUDA graphs, checkpointed steps keep the compiled speedup."""
+    net = _RecordsCompiling()
+    compiled = compile_module(net, backend="aot_eager")
+    Checkpoint({})(compiled)(torch.randn(3, 2)).sum().backward()
+    assert net.compiling[0]
+
+
+def _rollout(
+    step: torch.nn.Module,
+    x: torch.Tensor,
+    n_steps: int,
+    checkpoint_after: int | None = None,
+) -> list[torch.Tensor]:
+    outputs = []
+    for i in range(n_steps):
+        if checkpoint_after is not None and i >= checkpoint_after:
+            x = Checkpoint({})(step)(x)
+        else:
+            x = step(x)
+        outputs.append(x)
+    return outputs
+
+
+@pytest.mark.timeout(300)
+@pytest.mark.parametrize("checkpoint_after", [None, 1])
+def test_cudagraph_rollouts_match_eager(checkpoint_after: int | None):
+    """Under CUDA graphs, as in production, multi-step rollouts keep every
+    step's output intact and train like eager: in inference, where each call
+    starts a new CUDA graph tree generation, and in training, with and without
+    activation checkpointing of later steps. Repeated iterations exercise
+    both recording and replaying the graphs."""
+    skip_unless_cuda()
+    torch.manual_seed(0)
+    device = get_device()
+    net = torch.nn.Sequential(
+        torch.nn.Linear(8, 16), torch.nn.GELU(), torch.nn.Linear(16, 8)
+    ).to(device)
+    compiled = compile_module(net, backend="inductor")
+    x = torch.randn(4, 8, device=device)
+    n_steps = 3
+    for _ in range(3):
+        with torch.no_grad():
+            expected = _rollout(net, x, n_steps)
+            actual = _rollout(compiled, x, n_steps)
+        for a, e in zip(actual, expected):
+            torch.testing.assert_close(a, e, atol=1e-5, rtol=1e-5)
+
+        net.zero_grad(set_to_none=True)
+        torch.stack(_rollout(net, x, n_steps)).square().sum().backward()
+        expected_grads = [p.grad.clone() for p in net.parameters()]
+        net.zero_grad(set_to_none=True)
+        actual_outputs = _rollout(compiled, x, n_steps, checkpoint_after)
+        torch.stack(actual_outputs).square().sum().backward()
+        for p, e in zip(net.parameters(), expected_grads):
+            torch.testing.assert_close(p.grad, e, atol=1e-5, rtol=1e-5)
+    # the compiled graphs ran as CUDA graphs rather than falling back
+    manager = cudagraph_trees.get_manager(
+        torch.cuda.current_device(), create_if_none_exists=False
+    )
+    assert manager is not None and len(manager.roots) > 0
+
+
+def _accumulating_optimization(module: torch.nn.Module):
+    return OptimizationConfig(
+        optimizer_type="Adam",
+        lr=0.0,  # keep the weights fixed, so every batch has the same reference
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={},
+        use_gradient_accumulation=True,
+    ).build(torch.nn.ModuleList([module]), max_epochs=1)
+
+
+class _StaticBufferMul(torch.autograd.Function):
+    """``(w * x).sum()`` whose backward, like a backward compiled with CUDA
+    graph trees, returns the gradient of ``w`` in the same buffer on every
+    call, registered as a CUDA graph "cached tensor"."""
+
+    buffer: torch.Tensor | None = None
+
+    @staticmethod
+    def forward(ctx, w, x):
+        ctx.save_for_backward(x)
+        return (w * x).sum()
+
+    @staticmethod
+    def backward(ctx, grad):
+        (x,) = ctx.saved_tensors
+        if _StaticBufferMul.buffer is None:
+            _StaticBufferMul.buffer = torch.empty_like(x)
+            torch._C._add_cached_tensor(_StaticBufferMul.buffer)
+        _StaticBufferMul.buffer.copy_(grad * x)
+        return _StaticBufferMul.buffer, None
+
+
+def test_accumulated_grads_are_copied_out_of_cudagraph_buffers():
+    """With gradient accumulation, the gradient autograd stores from a CUDA
+    graph's output buffer is copied out of it, so the next backward, which
+    writes into the same buffer, accumulates onto the copy instead of adding
+    the buffer to itself (which gave twice the last step's gradient)."""
+    if not hasattr(torch._C, "_add_cached_tensor") or not hasattr(
+        torch._C, "_set_cached_tensors_enabled"
+    ):
+        pytest.skip("torch has no CUDA graph cached tensors")
+    with mock.patch.object(fme.core.compile, "_CUDAGRAPH_MODULES", weakref.WeakSet()):
+        compiled = _compile_with_cudagraph_mode(torch.nn.Identity())
+        assert uses_cudagraphs()
+        model = torch.nn.Linear(3, 1, bias=False)
+        weight = model.weight
+        optimization = _accumulating_optimization(model)
+        x1 = torch.tensor([[1.0, 2.0, 3.0]])
+        x2 = torch.tensor([[10.0, 20.0, 30.0]])
+        # cudagraph trees enable cached tensors when they create their manager
+        # and disable them on reset
+        torch._C._set_cached_tensors_enabled(True)
+        _StaticBufferMul.buffer = None
+        try:
+            optimization.accumulate_loss(_StaticBufferMul.apply(weight, x1))
+            optimization.accumulate_loss(_StaticBufferMul.apply(weight, x2))
+            assert weight.grad is not None
+            torch.testing.assert_close(weight.grad, x1 + x2)
+            buffer = _StaticBufferMul.buffer
+            assert buffer is not None
+            assert (
+                weight.grad.untyped_storage().data_ptr()
+                != buffer.untyped_storage().data_ptr()
+            )
+        finally:
+            if _StaticBufferMul.buffer is not None:
+                torch._C._remove_cached_tensor(_StaticBufferMul.buffer)
+                _StaticBufferMul.buffer = None
+            # matches the state the autouse dynamo_hygiene fixture leaves:
+            # its torch._dynamo.reset() resets cudagraph trees, so no CUDA
+            # graph tree manager relies on cached tensors being enabled
+            torch._C._set_cached_tensors_enabled(False)
+        del compiled
+
+
+def test_release_grads_from_cudagraphs_without_cudagraphs_keeps_grads():
+    """Without modules replaying CUDA graphs, gradients are left as they are,
+    so accumulation costs no copies."""
+    param = torch.nn.Parameter(torch.zeros(2))
+    param.grad = torch.ones(2)
+    grad = param.grad
+    with mock.patch.object(fme.core.compile, "_CUDAGRAPH_MODULES", weakref.WeakSet()):
+        assert not uses_cudagraphs()
+        release_grads_from_cudagraphs([param])
+    assert param.grad is grad
+
+
+class _FirstBatchVariant(torch.nn.Module):
+    """Like SFNO's per-epoch reset, a Python flag read in forward makes the
+    first batch of every epoch run a second compiled graph."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = torch.nn.Sequential(
+            torch.nn.Linear(8, 16), torch.nn.GELU(), torch.nn.Linear(16, 8)
+        )
+        self.first_batch = False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.first_batch:
+            x = 2 * x
+        return self.net(x)
+
+
+@pytest.mark.timeout(300)
+def test_cudagraph_gradient_accumulation_matches_eager():
+    """With gradient accumulation, every rollout step runs its own backward,
+    and the next step's forward begins a new CUDA graph tree generation while
+    the gradients autograd took from the compiled backward's output buffers
+    are still accumulating. Over a curriculum of growing rollouts, with a
+    second graph variant in the first batch of each epoch, the first epoch
+    warms up both variants, the second records the first-batch variant across
+    a step boundary, and later epochs replay across step boundaries, with
+    accumulated gradients matching eager throughout."""
+    skip_unless_cuda()
+    torch.manual_seed(0)
+    device = get_device()
+    net = _FirstBatchVariant().to(device)
+    compiled = compile_module(net, backend="inductor")
+    optimization = _accumulating_optimization(net)
+    x = torch.randn(4, 8, device=device)
+    for n_steps in (1, 2, 2, 4, 4):
+        for batch in range(2):
+            net.first_batch = batch == 0
+            net.zero_grad(set_to_none=True)
+            state = x
+            for _ in range(n_steps):
+                state = net(state)
+                state.square().mean().backward()
+                state = state.detach()
+            expected = [p.grad.clone() for p in net.parameters()]
+            net.zero_grad(set_to_none=True)
+            state = x
+            for _ in range(n_steps):
+                state = compiled(state)
+                optimization.accumulate_loss(state.square().mean())
+                state = optimization.detach_if_using_gradient_accumulation(
+                    {"x": state}
+                )["x"]
+            actual = [p.grad.clone() for p in net.parameters()]
+            optimization.step_weights()
+            for a, e in zip(actual, expected):
+                torch.testing.assert_close(a, e, atol=1e-5, rtol=1e-5)
+    # the compiled graphs ran as CUDA graphs rather than falling back
+    manager = cudagraph_trees.get_manager(
+        torch.cuda.current_device(), create_if_none_exists=False
+    )
+    assert manager is not None and len(manager.roots) > 0

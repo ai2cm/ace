@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+# Model code may reduce across ranks inside a forward pass (e.g. the SFNO
+# latent global mean envelope). Under torch.compile such a collective would be
+# traced into the compiled graph and, with CUDA graphs, captured into one; NCCL
+# then cannot finalize or abort its communicator until that graph is destroyed,
+# which CUDA graph trees only do at interpreter exit, after the process group is
+# destroyed, so shutdown hangs. Running the reductions eagerly, as a graph
+# break, keeps collectives out of CUDA graphs.
+_eager_collective = torch.compiler.disable
+
 
 class SpatialParallelismNotImplemented(NotImplementedError):
     """Raised when a code path is incompatible with spatial parallelism."""
@@ -254,6 +263,7 @@ class Distributed:
         """
         return self._distributed.local_batch_size(batch_size)
 
+    @_eager_collective
     def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reduce a tensor representing a mean across all processes.
@@ -291,6 +301,7 @@ class Distributed:
             tensor_shape, data_parallel_dim=data_parallel_dim
         )
 
+    @_eager_collective
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reduce a tensor representing a sum across all processes.
@@ -302,6 +313,7 @@ class Distributed:
         """
         return self._distributed.reduce_sum(tensor)
 
+    @_eager_collective
     def reduce_min(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reduce a tensor representing a min across all processes.
@@ -310,6 +322,7 @@ class Distributed:
         """
         return self._distributed.reduce_min(tensor)
 
+    @_eager_collective
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reduce a tensor representing a max across all processes.
