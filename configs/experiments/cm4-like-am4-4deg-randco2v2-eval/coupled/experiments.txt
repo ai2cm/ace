@@ -40,4 +40,10 @@ ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|inf_done_cm4-abrup
 ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|inf_done_cm4-abrupt4xCO2-ic36|best_inference_ckpt|high|--min-runtime 1h||01M61P2YDVP9CKQ8KMJVCYQMH9|ai2/ace|titan
 
 # 100-year extension of abrupt-4xCO2 ensemble member 1 (same checkpoint)
-ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|run_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M61P2YDVP9CKQ8KMJVCYQMH9|ai2/ace|titan
+ppad4deg-resid-cft-rco2rs2-replay||01M5ZKH8M52F6H7W6Y0CF8EHCD|inf_submitted_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M61P2YDVP9CKQ8KMJVCYQMH9|ai2/ace|titan
+
+# samudra-ppad4deg-resid-ice-ppad-sstdiag-fmean-coupled-ft-jointens-spb-rco2rs2-replay (Beaker 01M6JJ8JSYSX47YCEEFD087996, W&B 51hjuqs2),
+# finished 2026-11-05: final best_inference_ckpt. Residual sea ice as well as thetao, sst an output-only diagnostic and mean
+# fill in masked regions; trained on troya/2026-10-29-1deg-hybrid-sstdiag-coupled-ft (1a0f9a3cb), which this branch contains.
+# 100-year abrupt-4xCO2 extension of ensemble member 1 only.
+ppad4deg-resid-ice-sstdiag-fmean-cft-rco2rs2-replay||01M6JJ8JSYSX47YCEEFD087996|run_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M6JJ8JT632APD7M2VD6VHP9J|ai2/ace|titan
