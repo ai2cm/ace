@@ -20,6 +20,7 @@ import torch.nn as nn
 
 from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.distributed.distributed import Distributed
+from fme.core.muon import SpectralFilterParameter
 
 from .activations import ComplexReLU
 
@@ -126,7 +127,7 @@ def _contract_dhconv(
 
     Args:
         xc: Complex input tensor of shape (batch_size, group, in_channels, nlat, nlon)
-        weight: Weight tensor of shape (group, in_channels, out_channels, nlat, 2)
+        weight: Weight tensor of shape (group, nlat, out_channels, in_channels, 2)
 
     Returns:
         Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
@@ -237,7 +238,7 @@ class SpectralConvS2(nn.Module):
             spectral_channels // num_groups,
         ]
 
-        self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
+        self.weight = SpectralFilterParameter(scale * torch.randn(*weight_shape, 2))
 
         self.lora_rank = lora_rank
         if lora_rank > 0:
