@@ -11,3 +11,16 @@ cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs0|01M6DWYBKGFB
 cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs1|01M6DWYW0AG9N7MCGFC1B3Q7SQ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Held-out random-CO2 (ic_0003) evals, final best_inference_ckpt from each fine-tuning run. Submit with:
+# job_runner/evaluate.sh configs/experiments/cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235/atmos_ace2p5 . \
+#   --config-dir configs/experiments/cm4-like-am4-randco2v2-eval
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs0|01M6DWYBKGFB9WYVBMRQWEFAXD|run_randco2-1xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWYBKR9DV86ACH14J9ZPEC|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs0|01M6DWYBKGFB9WYVBMRQWEFAXD|run_randco2-2xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWYBKR9DV86ACH14J9ZPEC|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs0|01M6DWYBKGFB9WYVBMRQWEFAXD|run_randco2-4xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWYBKR9DV86ACH14J9ZPEC|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs1|01M6DWYW0AG9N7MCGFC1B3Q7SQ|run_randco2-1xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWYW0RWBN0X33ABS98T0AH|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs1|01M6DWYW0AG9N7MCGFC1B3Q7SQ|run_randco2-2xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWYW0RWBN0X33ABS98T0AH|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs1|01M6DWYW0AG9N7MCGFC1B3Q7SQ|run_randco2-4xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWYW0RWBN0X33ABS98T0AH|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|run_randco2-1xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWZ9YNC8ENFKRT9BMRE1JJ|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|run_randco2-2xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWZ9YNC8ENFKRT9BMRE1JJ|ai2/ace|titan
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2p5-ft|rs2|01M6DWZ9Y6EBNA57DPBV4NRNZD|run_randco2-4xCO2-ic3|best_inference_ckpt|low|--min-runtime 0h||01M6DWZ9YNC8ENFKRT9BMRE1JJ|ai2/ace|titan
