@@ -120,6 +120,67 @@ arms["alt-replay"] = (
         "troya/2026-10-20-coupled-ft-atmosphere-replay (train_loader_atmosphere_only + stepper_training.atmosphere_only).",
     ],
 )
+# 2026-10-29 (Troy): the same alternating baseline with the ocean swapped for the 1deg hybrid residual + diagnosed-SST
+# pretrain (thetao residual, sst output-only; wandb ace-samudra-cm4/jrgclj2f), the paper-1 recipe candidate. Needs the
+# coupled-stepper ocean_ic_names fix and the OceanData sst fallback (both cherry-picked onto this branch).
+hyb_ocean = yaml.safe_load(
+    (HERE / "inputs/samudra-resid-ohc-ppad-sstdiag-fmean-1deg-config.yaml").read_text()
+)["stepper"]
+for k in STRIP:
+    hyb_ocean.pop(k, None)
+hyb_corr = hyb_ocean["step"]["config"]["corrector"]["config"]
+hyb_corr["corrector_disabled_epochs"] = 0
+hyb_ocean["step"]["config"]["builder"]["config"]["checkpoint_strategy"] = "all"
+assert "sst" not in hyb_ocean["step"]["config"]["in_names"]
+assert "sst" in hyb_ocean["step"]["config"]["out_names"]
+hyb = copy.deepcopy(cfg)
+hyb["stepper"]["ocean"]["stepper"] = hyb_ocean
+arms["hybridsstdiag-alt"] = (
+    hyb,
+    [
+        "1deg alternating coupled fine-tune of the random-CO2 ACE2S rs1 with the 1deg HYBRID RESIDUAL + DIAGNOSED-SST",
+        "Samudra (James's ocean_ppad_fmean rs0 recipe with thetao_0..18 residual and sst output-only; wandb jrgclj2f).",
+        "Identical to -alt otherwise (Troy 2026-10-29). Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
+    ],
+)
+# 2026-11-02 (Troy): the hybrid residual + diagnosed-SST ocean WITH random-CO2 replay = the paper-1 1deg candidate.
+hyb_rep = copy.deepcopy(rep)
+hyb_rep["stepper"]["ocean"]["stepper"] = copy.deepcopy(hyb_ocean)
+arms["hybridsstdiag-alt-replay"] = (
+    hyb_rep,
+    [
+        "1deg alternating coupled fine-tune of the random-CO2 ACE2S rs1 with the 1deg HYBRID RESIDUAL + DIAGNOSED-SST",
+        "Samudra (wandb jrgclj2f) WITH RANDOM-CO2 REPLAY (a third of batches atmosphere-only on the random-CO2 stores, as",
+        "-alt-replay). = -hybridsstdiag-alt + replay (Troy 2026-11-02). Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
+    ],
+)
+# 2026-11-04 (Troy): both replay arms again with the atmosphere swapped for Spencer's 1deg random-CO2 ACE2.5 rs1
+# (cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft-rs1-train, wandb wb3jfw7u, beaker
+# 01M6DWYW0AG9N7MCGFC1B3Q7SQ). Same variables, normalization and training data as the ACE2S rs1; the builder adds
+# grouped filters and a spectral bottleneck. The replay keeps the ACE2S arms' step schedule so the pairs differ only in
+# the atmosphere. Launch with ATMOS_DS=01M6DWYW0RWBN0X33ABS98T0AH.
+ace2p5_builder = yaml.safe_load(
+    (HERE / "inputs/ace2p5-randco2v2-ft-rs1-config.yaml").read_text()
+)["stepper"]["step"]["config"]["builder"]
+for tag, base in (
+    ("ace2p5-alt-replay", rep),
+    ("ace2p5-hybridsstdiag-alt-replay", hyb_rep),
+):
+    c = copy.deepcopy(base)
+    b = c["stepper"]["atmosphere"]["stepper"]["step"]["config"]["builder"]
+    assert b["type"] == ace2p5_builder["type"]
+    b["config"] = {
+        **ace2p5_builder["config"],
+        "checkpointing": b["config"]["checkpointing"],
+    }
+    arms[tag] = (
+        c,
+        [
+            f"= -{tag.removeprefix('ace2p5-')} with the atmosphere swapped for the 1deg random-CO2 ACE2.5 rs1 (wandb",
+            "wb3jfw7u), Troy 2026-11-04. Launch with ATMOS_DS=01M6DWYW0RWBN0X33ABS98T0AH"
+            + (" OCEAN_DS=01M626JPB247BQWSE0GN35SAXR." if "hybrid" in tag else "."),
+        ],
+    )
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(

@@ -221,3 +221,17 @@ def test_getitem():
         AttributeError, match="object has no attribute 'nonexistent_field'"
     ):
         _ = ocean_data["nonexistent_field"]
+
+
+def test_sea_surface_temperature_falls_back_to_top_layer():
+    thetao_0 = torch.tensor([[1.0, 20.0]])
+    data = {"thetao_0": thetao_0, "thetao_1": thetao_0 - 1.0}
+    torch.testing.assert_close(
+        OceanData(data).sea_surface_temperature, thetao_0 + 273.15
+    )
+    with_sst = {**data, "sst": torch.tensor([[280.0, 290.0]])}
+    torch.testing.assert_close(
+        OceanData(with_sst).sea_surface_temperature, with_sst["sst"]
+    )
+    with pytest.raises(KeyError):
+        OceanData({"so_0": thetao_0}).sea_surface_temperature

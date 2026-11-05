@@ -82,6 +82,31 @@ class ResidualPredictionConfig:
                 )
 
 
+@dataclasses.dataclass
+class CopiedOutputConfig:
+    """
+    An output overwritten with an affine copy of another output at the end of
+    every step: ``name = scale * source + offset``. Use it to diagnose an
+    output from another instead of predicting it, e.g. sea surface temperature
+    from the top ocean layer (``source: thetao_0, offset: 273.15``). The
+    network still has a channel for ``name`` (so the variable keeps its loss,
+    metrics and coupled-interface role), but its prediction is discarded;
+    give it a zero loss weight so that channel receives no gradient.
+
+    Parameters:
+        name: Output to overwrite. Must be in ``out_names``.
+        source: Output to copy from. Must be in ``out_names`` and must not
+            itself be a copied output.
+        scale: Factor applied to ``source``.
+        offset: Constant added after scaling.
+    """
+
+    name: str
+    source: str
+    scale: float = 1.0
+    offset: float = 0.0
+
+
 @StepSelector.register("single_module")
 @StepSelector.register("default")
 @dataclasses.dataclass
@@ -115,6 +140,9 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        copied_outputs: Outputs overwritten with an affine copy of another
+            output after the corrector, ocean and prescribed-prognostic steps,
+            see ``CopiedOutputConfig``. Applied at training and inference.
         input_dropout: Optional training-time input channel dropout. When set,
             a random subset of input channels is zeroed on each optimized
             training step, with the same mask broadcast across the whole
@@ -141,9 +169,26 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
+    copied_outputs: list[CopiedOutputConfig] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        copied_names = [c.name for c in self.copied_outputs]
+        if len(set(copied_names)) != len(copied_names):
+            raise ValueError(f"copied_outputs names repeat: {copied_names}")
+        for c in self.copied_outputs:
+            for label, value in (("name", c.name), ("source", c.source)):
+                if value not in self.out_names:
+                    raise ValueError(
+                        f"copied_outputs {label} '{value}' must be in out_names: "
+                        f"{self.out_names}"
+                    )
+            if c.source == c.name:
+                raise ValueError(f"copied_outputs '{c.name}' copies from itself")
+            if c.source in copied_names:
+                raise ValueError(
+                    f"copied_outputs source '{c.source}' is itself a copied output"
+                )
         residual_prediction = self.residual_prediction
         if isinstance(residual_prediction, bool):
             # bool spelling: True = every prognostic, False = disabled
@@ -565,6 +610,7 @@ class SingleModuleStep(StepABC):
             global_mean_removal=self._global_mean_removal,
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
+            copied_outputs=self._config.copied_outputs,
         )
 
     def _draw_input_dropout_mask(self) -> TensorMapping | None:
@@ -730,6 +776,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
+    copied_outputs: Collection[CopiedOutputConfig] | None = None,
 ) -> StepOutput:
     """
     Step the model forward one timestep given input data.
@@ -769,6 +816,9 @@ def step_with_adjustments(
             the corrector and any updates are written back into the returned
             ``StepperState``; the other fields (e.g. ``random_state``) pass
             through unchanged. Pass-through unchanged when no corrector is set.
+        copied_outputs: Outputs overwritten last with ``scale * source + offset``
+            of another output, so they follow every adjustment made to the
+            source. Their corrector deltas are dropped like prescribed names.
 
     Returns:
         A ``StepOutput`` carrying the denormalized data at the next time step,
@@ -855,12 +905,19 @@ def step_with_adjustments(
     # corrector's delta for that variable no longer describes the returned output.
     # Drop prescribed names from the reported delta (a no-op for names the
     # corrector never modified).
-    if prescribed_prognostic_names:
+    overwritten = set(prescribed_prognostic_names)
+    for copied in copied_outputs or ():
+        output = {
+            **output,
+            copied.name: copied.scale * output[copied.source] + copied.offset,
+        }
+        overwritten.add(copied.name)
+    if overwritten:
         diagnostics = CorrectorDiagnostics(
             delta={
                 name: value
                 for name, value in diagnostics.delta.items()
-                if name not in prescribed_prognostic_names
+                if name not in overwritten
             }
         )
     return StepOutput(

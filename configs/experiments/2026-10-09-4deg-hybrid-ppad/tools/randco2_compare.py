@@ -56,6 +56,9 @@ _after = {}
 _LABEL_1DEG = {
     "rco2rs1-1deg-alt": "rco2 rs1, alternating coupled FT ep{ep} (lifted, EMA)",
     "rco2rs1-1deg-alt-replay": "rco2 rs1, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "rco2rs1-1deg-hybridsstdiag-alt-replay": "rco2 rs1, hybrid-residual diagnosed-SST ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "ace2p5rs1-1deg-alt-replay": "ACE2.5 rco2 rs1, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "ace2p5rs1-1deg-hybridsstdiag-alt-replay": "ACE2.5 rco2 rs1, hybrid-residual diagnosed-SST ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
 }
 _LABEL = {
     "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",
@@ -80,6 +83,7 @@ if RES == "1deg":
         "ace2sft-rs0 (never saw randCO2), before": PREFIX
         + "-{x}xCO2-ic3-ace2sft-rs0-before",
         "rco2 rs1 (1deg), before": PREFIX + "-{x}xCO2-ic3-rco2rs1-before",
+        "ACE2.5 rco2 rs1 (1deg), before": PREFIX + "-{x}xCO2-ic3-ace2p5rs1-before",
     }
 for _r in api.runs(
     PROJECT,

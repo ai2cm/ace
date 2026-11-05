@@ -6,6 +6,7 @@ import torch
 
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
+    FREEZING_TEMPERATURE_KELVIN,
     REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
@@ -133,8 +134,21 @@ class OceanData:
 
     @property
     def sea_surface_temperature(self) -> torch.Tensor:
-        """Returns surface temperature."""
-        return self._get("sea_surface_temperature")
+        """Returns the sea surface temperature in K.
+
+        Falls back to the top potential-temperature layer (degC) + 273.15 when
+        no "sst" field is present, e.g. when sst is an output-only diagnostic
+        of the ocean model and the step input carries only the prognostic
+        layers. The training stores define sst this way (exactly on UFS and
+        GLORYS, to 0.03 K rms on CM4).
+        """
+        try:
+            return self._get("sea_surface_temperature")
+        except KeyError:
+            top_layer = self._prefix_map["sea_water_potential_temperature"][0] + "0"
+            if top_layer in self.data:
+                return self.data[top_layer] + FREEZING_TEMPERATURE_KELVIN
+            raise
 
     @property
     def sea_surface_height_above_geoid(self) -> torch.Tensor:
