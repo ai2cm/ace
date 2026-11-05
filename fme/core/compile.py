@@ -2,7 +2,7 @@ import contextlib
 import logging
 import os
 import weakref
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from typing import Any
 
 import torch
@@ -85,7 +85,8 @@ _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
 )
 _MODE_OVERRIDE: str | None = _parse_compile_mode_env(os.environ.get("FME_COMPILE_MODE"))
-# compiled modules that replay CUDA graphs, see without_cudagraphs
+# compiled modules that replay CUDA graphs, see without_cudagraphs and
+# release_grads_from_cudagraphs
 _CUDAGRAPH_MODULES: "weakref.WeakSet[nn.Module]" = weakref.WeakSet()
 _LOGGED_AUTO_SKIP = False
 _LOGGED_SPATIAL_SPLIT_SKIP = False
@@ -254,3 +255,39 @@ def without_cudagraphs(module: nn.Module) -> nn.Module:
         # compiles
         return module._orig_mod
     return module
+
+
+def uses_cudagraphs() -> bool:
+    """Whether any live module compiled by :func:`compile_module` replays
+    CUDA graphs.
+    """
+    return len(_CUDAGRAPH_MODULES) > 0
+
+
+def release_grads_from_cudagraphs(params: Iterable[torch.Tensor]) -> None:
+    """Replace each defined ``.grad`` of ``params`` with a copy outside the
+    CUDA graph memory pool, when any module replays CUDA graphs.
+
+    Call this after each backward whose gradients accumulate into those of a
+    later backward before the optimizer consumes them, as with gradient
+    accumulation over the steps of a rollout. The outputs of a compiled
+    backward are CUDA graph "cached tensors", which autograd steals into an
+    unset ``.grad`` without copying. The next step's forward then begins a new
+    CUDA graph tree generation while that ``.grad`` still aliases the pool: if
+    the backward's graph was being recorded, the gradient is freed ("accessing
+    tensor output of CUDAGraphs that has been overwritten by a subsequent
+    run"), and if it was replayed, the next backward writes its gradient into
+    the same buffer and accumulates it onto itself, giving twice the last
+    step's gradient. Later backwards accumulate in place into the copies.
+
+    Without CUDA graphs this does nothing, so it costs nothing.
+
+    Args:
+        params: The parameters whose gradients to release, e.g. all parameters
+            of an optimizer.
+    """
+    if not uses_cudagraphs():
+        return
+    for param in params:
+        if param.grad is not None:
+            param.grad = param.grad.clone()
