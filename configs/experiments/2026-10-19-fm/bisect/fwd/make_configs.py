@@ -245,7 +245,7 @@ def build():
     arms["F0l-c96label"] = f0l
     # Seed replicates to size run-to-run noise in the gain trajectory
     # (F1n came out above F1, so seed noise may be large).
-    for base_arm, cfg in (("F0-v21", f0), ("F1-v22data", f1)):
+    for base_arm, cfg in (("F0-v21", f0), ("F1-v22data", f1), ("F1n-nocm4", f1n)):
         rep = copy.deepcopy(cfg)
         rep["seed"] = 1
         arms[f"{base_arm}-s1"] = rep
