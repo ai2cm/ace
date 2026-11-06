@@ -37,6 +37,9 @@ class MockDistributed:
     def gather(self, tensor: torch.Tensor) -> list[torch.Tensor]:
         return [tensor for i in range(self.world_size)]
 
+    def data_parallel_gather(self, tensor: torch.Tensor) -> list[torch.Tensor]:
+        return self.gather(tensor)
+
     def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         """
         Note this uses the actual implementation but mocks the underlying

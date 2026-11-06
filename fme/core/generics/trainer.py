@@ -62,6 +62,7 @@ from typing import Any, Generic, Protocol, TypeVar
 import torch
 
 import fme
+from fme.core.checkpoint_soup import soup_checkpoints
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
 from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
@@ -70,6 +71,11 @@ from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
     InferenceSummary,
+)
+from fme.core.generics.checkpoint_selection import (
+    CheckpointSelectionConfig,
+    CheckpointSelector,
+    epoch_drift,
 )
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
 from fme.core.generics.inference import run_inference
@@ -159,6 +165,15 @@ class TrainerParams:
             checkpoint for each epoch where best_inference_error achieves a
             new minimum.
         lr_tuning: Optional learning-rate tuning configuration.
+        checkpoint_selection: Optional configuration for writing
+            ``soup_ckpt.tar``, the average of the EMA epoch checkpoints of a
+            drift-gated window of inference epochs. Requires
+            ``save_checkpoint`` and EMA epoch checkpoints saved every epoch.
+        checkpoint_selection_drift_log_keys: Inference log keys holding the
+            per-epoch drift statistic (maximum absolute drift t-statistic) of
+            each inference entry with weight > 0, used to gate
+            ``checkpoint_selection``. An epoch's drift is the maximum over the
+            keys present in its inference logs.
     """
 
     experiment_dir: str
@@ -175,7 +190,52 @@ class TrainerParams:
     evaluate_before_training: bool
     save_best_inference_epoch_checkpoints: bool
     lr_tuning: LRTuningConfig | None
+    checkpoint_selection: CheckpointSelectionConfig | None = None
+    checkpoint_selection_drift_log_keys: Sequence[str] = ()
 
+    def __post_init__(self):
+        validate_checkpoint_selection(
+            self.checkpoint_selection,
+            max_epochs=self.max_epochs,
+            save_checkpoint=self.save_checkpoint,
+            ema_checkpoint_save_epochs=self.ema_checkpoint_save_epochs,
+        )
+
+
+def validate_checkpoint_selection(
+    checkpoint_selection: CheckpointSelectionConfig | None,
+    max_epochs: int,
+    save_checkpoint: bool,
+    ema_checkpoint_save_epochs: Slice | None,
+) -> None:
+    """Check that the checkpoints averaged by soup selection will be saved.
+
+    Raises:
+        ValueError: If checkpoint selection is configured but checkpoints are
+            not saved, or EMA epoch checkpoints are not saved every epoch.
+    """
+    if checkpoint_selection is None:
+        return
+    if not save_checkpoint:
+        raise ValueError(
+            "checkpoint_selection requires save_checkpoint to be true, since the "
+            "soup checkpoint is averaged from saved EMA epoch checkpoints."
+        )
+    missing = [
+        epoch
+        for epoch in range(1, max_epochs + 1)
+        if not epoch_checkpoint_enabled(epoch, max_epochs, ema_checkpoint_save_epochs)
+    ]
+    if missing:
+        raise ValueError(
+            "checkpoint_selection averages the EMA epoch checkpoints of a window "
+            "of epochs, so ema_checkpoint_save_epochs must include every epoch "
+            "(e.g. ema_checkpoint_save_epochs: {start: 1}), but it excludes "
+            f"epochs {missing[:10]}{'...' if len(missing) > 10 else ''}."
+        )
+
+
+CHECKPOINT_SELECTION_KEY = "checkpoint_selection"
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
 TO = TypeVar("TO", bound="TrainOutputABC")  # train output
@@ -214,6 +274,10 @@ class CheckpointPaths:
 
     def best_inference_epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
+
+    @property
+    def soup_checkpoint_path(self) -> str:
+        return os.path.join(self.checkpoint_dir, "soup_ckpt.tar")
 
 
 class Trainer:
@@ -300,6 +364,13 @@ class Trainer:
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
         self._ema = build_ema(stepper.modules)  # build before restore_checkpoint
+        # build before restore_checkpoint
+        self._checkpoint_selector: CheckpointSelector | None = None
+        if params.checkpoint_selection is not None:
+            self._checkpoint_selector = CheckpointSelector(params.checkpoint_selection)
+        # epochs of the soup written by this job, None until one is written so
+        # that a resumed job rewrites the soup of its restored selection
+        self._soup_written_epochs: list[int] | None = None
 
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
@@ -495,6 +566,9 @@ class Trainer:
             # updated state rather than recomputed (min(nan, x) is nan, which
             # let a diverged epoch report itself as the best)
             self._update_best_metrics(valid_loss, inference_error)
+            selection_logs = self._update_checkpoint_selection(
+                valid_loss, inference_error, inference_logs
+            )
 
             with self.validation_context():
                 additional_logs = self._end_of_epoch_callback(self._epochs_trained)
@@ -505,6 +579,7 @@ class Trainer:
                 **valid_logs,
                 **inference_logs,
                 **additional_logs,
+                **selection_logs,
                 **{
                     "lr": lr,
                     "epoch": self._epochs_trained,
@@ -697,29 +772,22 @@ class Trainer:
     ):
         if not Distributed.get_instance().is_root():
             raise RuntimeError("Only the root process should save checkpoints")
-        # save to a temporary file in case we get pre-empted during save
-        temporary_location = os.path.join(
-            os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
-        )
-        try:
-            data = {
-                "num_batches_seen": self.num_batches_seen,
-                "current_epoch_num_batches_seen": self._current_epoch_num_batches_seen,
-                "epoch": self._epochs_trained,
-                "best_validation_loss": self._best_validation_loss,
-                "best_inference_error": self._best_inference_error,
-                "stepper": self.stepper.get_state(),
-                EMA_CHECKPOINT_KEY: self._ema.get_state(
-                    include_params=include_optimization
-                ),
-            }
-            if include_optimization:
-                data["optimization"] = self.optimization.get_state()
-            torch.save(data, temporary_location)
-            os.replace(temporary_location, checkpoint_path)
-        finally:
-            if os.path.exists(temporary_location):
-                os.remove(temporary_location)
+        data = {
+            "num_batches_seen": self.num_batches_seen,
+            "current_epoch_num_batches_seen": self._current_epoch_num_batches_seen,
+            "epoch": self._epochs_trained,
+            "best_validation_loss": self._best_validation_loss,
+            "best_inference_error": self._best_inference_error,
+            "stepper": self.stepper.get_state(),
+            EMA_CHECKPOINT_KEY: self._ema.get_state(
+                include_params=include_optimization
+            ),
+        }
+        if include_optimization:
+            data["optimization"] = self.optimization.get_state()
+        if self._checkpoint_selector is not None:
+            data[CHECKPOINT_SELECTION_KEY] = self._checkpoint_selector.get_state()
+        _atomic_save(data, checkpoint_path)
 
     def restore_checkpoint(self, checkpoint_path):
         """
@@ -764,6 +832,78 @@ class Trainer:
             self._best_inference_error = inference_error
             is_best_inference = True
         return is_best_validation, is_best_inference
+
+    def _update_checkpoint_selection(
+        self,
+        valid_loss: float,
+        inference_error: float | None,
+        inference_logs: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Record this epoch for soup checkpoint selection.
+
+        Runs on the root rank only, which holds the complete inference logs and
+        saves checkpoints. Must be called once per epoch, after inference.
+
+        Returns:
+            Logs describing the currently chosen soup window.
+        """
+        selector = self._checkpoint_selector
+        config = self.params.checkpoint_selection
+        if (
+            selector is None
+            or config is None
+            or not Distributed.get_instance().is_root()
+        ):
+            return {}
+        if inference_error is not None:
+            selector.record(
+                epoch=self._epochs_trained,
+                score=inference_error,
+                valid_loss=valid_loss,
+                drift=epoch_drift(
+                    inference_logs, self.params.checkpoint_selection_drift_log_keys
+                ),
+            )
+            if config.mode == "best_window":
+                selector.evaluate_current_window()
+        if (
+            config.mode == "final_window"
+            and self._epochs_trained == self.params.max_epochs
+        ):
+            selector.evaluate_current_window()
+        logs = selector.get_logs()
+        if logs:
+            logging.info(f"Soup checkpoint selection: {logs}")
+        return logs
+
+    def _maybe_save_soup_checkpoint(self):
+        """Write the soup of the chosen window, if it changed since last written.
+
+        Must be called after the current epoch's EMA epoch checkpoint is saved.
+        """
+        selector = self._checkpoint_selector
+        if selector is None:
+            return
+        chosen = selector.chosen
+        if chosen is None or chosen.epochs == self._soup_written_epochs:
+            return
+        paths = [self.paths.ema_epoch_checkpoint_path(epoch) for epoch in chosen.epochs]
+        missing = [path for path in paths if not os.path.isfile(path)]
+        if missing:
+            logging.warning(
+                f"Not writing soup checkpoint for epochs {chosen.epochs}, "
+                f"missing EMA epoch checkpoints {missing}."
+            )
+            return
+        logging.info(
+            f"Saving soup checkpoint of epochs {chosen.epochs} "
+            f"(status {selector.status}) to {self.paths.soup_checkpoint_path}"
+        )
+        _atomic_write(
+            self.paths.soup_checkpoint_path,
+            lambda path: soup_checkpoints(paths, path),
+        )
+        self._soup_written_epochs = list(chosen.epochs)
 
     def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
         if self.params.validate_using_ema:
@@ -814,6 +954,7 @@ class Trainer:
             logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
             with self._ema_context():
                 self.save_checkpoint(ema_epoch_checkpoint_path)
+        self._maybe_save_soup_checkpoint()
         if self._epoch_checkpoint_enabled(self._epochs_trained):
             epoch_checkpoint_path = self.paths.epoch_checkpoint_path(
                 self._epochs_trained
@@ -994,6 +1135,28 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer._ema = EMATracker.from_state(
         checkpoint[EMA_CHECKPOINT_KEY], trainer.stepper.modules
     )
+    if (
+        trainer._checkpoint_selector is not None
+        and CHECKPOINT_SELECTION_KEY in checkpoint
+    ):
+        trainer._checkpoint_selector.load_state(checkpoint[CHECKPOINT_SELECTION_KEY])
+
+
+def _atomic_save(data: Mapping[str, Any], checkpoint_path: str):
+    _atomic_write(checkpoint_path, lambda path: torch.save(data, path))
+
+
+def _atomic_write(checkpoint_path: str, write: Callable[[str], None]):
+    # write to a temporary file in case we get pre-empted during save
+    temporary_location = os.path.join(
+        os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
+    )
+    try:
+        write(temporary_location)
+        os.replace(temporary_location, checkpoint_path)
+    finally:
+        if os.path.exists(temporary_location):
+            os.remove(temporary_location)
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
