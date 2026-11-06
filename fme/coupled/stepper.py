@@ -852,10 +852,7 @@ class ComponentStepPrediction:
         stepper_state: StepperState | None,
         corrector_diagnostics: CorrectorDiagnostics,
     ):
-        # corrector_diagnostics is required, not defaulted: this class is the
-        # seam where the component StepOutput's diagnostics would otherwise be
-        # dropped, so a new construction site must say what it carries rather
-        # than silently defaulting to empty.
+        # required so no construction site silently drops the step's diagnostics
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
