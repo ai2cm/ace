@@ -28,12 +28,14 @@ data, label sampling, model and EMA decay, is copied verbatim):
   roundtrip is a projection, so it would leave an already-roundtripped field
   unchanged. Validation and inline inference use ERA5 and C96 only.
 - EMA checkpoints every 5 epochs, `ema_checkpoint_save_epochs: {start: 5,
-  step: 5}` (5, 10, ..., 100), and the every-10-epoch inline inference entries
-  (10year_oosample_varying_co2_era5, long_46year_varying_co2_era5) on the same
-  epochs, `epochs: {start: 4, step: 5}`, as in create_fm_v3_jobs.py.
+  step: 5}` (5, 10, ..., 100), as in create_fm_v3_jobs.py. The heavy inline
+  inference entries (10year_oosample_varying_co2_era5,
+  long_46year_varying_co2_era5) keep the parent's every-10-epoch schedule
+  (epochs 1, 11, ..., 91).
 
 Differences from sfno-v3 that remain: no fork (so the optimizer and EMA are
-not reset at epoch 40) and EMA checkpoints every 5 epochs from the start.
+not reset at epoch 40), EMA checkpoints every 5 epochs from the start, and
+heavy inline inference every 10 epochs rather than every 5.
 
 Smoke config (`--smoke`) goes to run_configs/v3-smoke/: the s0
 fm-e3sm-balanced config cut to 3 epochs, with sampled steps from epoch 2,
@@ -60,7 +62,6 @@ from create_fm_v3_jobs import (
     SMOKE_CONFIGS_DIR,
     SMOKE_INFERENCE_STEPS,
     SMOKE_SEED,
-    SPARSE_INFERENCE_EPOCHS,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -108,7 +109,6 @@ def make_config(parent: dict) -> dict:
             assert entry["epochs"] == {"start": 0, "step": 1}
         else:
             assert entry["epochs"] == {"start": 0, "step": 10}, entry["name"]
-            entry["epochs"] = dict(SPARSE_INFERENCE_EPOCHS)
 
     training = cfg["stepper_training"]
     assert "parameter_init" not in training

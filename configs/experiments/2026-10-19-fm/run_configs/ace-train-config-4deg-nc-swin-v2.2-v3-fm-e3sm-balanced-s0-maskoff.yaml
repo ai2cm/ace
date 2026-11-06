@@ -113,8 +113,8 @@ inference:
 - name: 10year_oosample_varying_co2_era5
   weight: 0.0
   epochs:
-    start: 4
-    step: 5
+    start: 0
+    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
@@ -165,8 +165,8 @@ inference:
 - name: long_46year_varying_co2_era5
   weight: 0.0
   epochs:
-    start: 4
-    step: 5
+    start: 0
+    step: 10
   n_forward_steps: 16794
   forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
