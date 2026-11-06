@@ -202,8 +202,23 @@ def build():
     f3 = copy.deepcopy(f2)
     f3["stepper"]["step"]["config"]["builder"]["config"]["embed_dim"] = 256
 
+    # F1 sub-bisection (F0 -> F1 raised the gain; normalization stats for
+    # era5/c96 are near-identical between F0 and F1, so the data mix is the
+    # suspect). Only the era5 samples carry any (-1)^(i+j) content; c96 and
+    # CM4 have none. F1 cut era5's share of samples from 45% to 12%.
+    # F1n: F1 without the cm4 and xshield labels (era5 share back to 43%).
+    f1n = copy.deepcopy(f1)
+    f1n["train_loader"]["label_sampling"]["weights"].update(cm4=0, xshield=0)
+    # F1e: all F1 data, era5 upweighted to v2.1's 45% share of samples.
+    f1e = copy.deepcopy(f1)
+    w = f1e["train_loader"]["label_sampling"]["weights"]
+    others = sum(v for k, v in w.items() if k != "era5")
+    w["era5"] = round(others * 0.448 / (1 - 0.448))
+
     arms["F0-v21"] = f0
     arms["F1-v22data"] = f1
+    arms["F1n-nocm4"] = f1n
+    arms["F1e-era5share"] = f1e
     arms["F2-levels2"] = f2
     arms["F3-embed256"] = f3
     return arms
