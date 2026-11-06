@@ -146,26 +146,41 @@ class EMATracker:
 
         self.num_updates += 1
         if self._faster_decay_at_start:
-            decay = min(self.decay, (1 + self.num_updates) / (10 + self.num_updates))
+            # torch.minimum keeps the decay on device; Python's min would
+            # synchronize with the device on every update.
+            decay = torch.minimum(
+                self.decay, (1 + self.num_updates) / (10 + self.num_updates)
+            )
 
         with torch.no_grad():
-            module_parameters = dict(model.named_parameters())
-
-            for key in module_parameters:
-                if module_parameters[key].requires_grad:
+            ema_params: list[torch.Tensor] = []
+            params: list[torch.Tensor] = []
+            for key, param in model.named_parameters():
+                if param.requires_grad:
                     ema_name = self._module_name_to_ema_name[key]
-                    self._ema_params[ema_name] = self._ema_params[ema_name].type_as(
-                        module_parameters[key]
-                    )
-                    self._ema_params[ema_name].sub_(
-                        (1.0 - decay)
-                        * (self._ema_params[ema_name] - module_parameters[key])
-                    )
+                    ema_param = self._ema_params[ema_name]
+                    if (
+                        ema_param.dtype != param.dtype
+                        or ema_param.device != param.device
+                    ):
+                        ema_param = ema_param.to(param)
+                        self._ema_params[ema_name] = ema_param
+                    ema_params.append(ema_param)
+                    params.append(param)
                 elif key in self._module_name_to_ema_name:
                     raise ValueError(
                         f"Expected model parameter {key} to require gradient, "
                         "but it does not"
                     )
+            # ema -= (1 - decay) * (ema - param), batched over all parameters
+            # with foreach kernels: a model with ~1000 parameter tensors
+            # otherwise launches ~3000 small kernels per update. _foreach_lerp_
+            # would take one kernel, but it only accepts a Python scalar
+            # weight, and converting the on-device decay would synchronize.
+            if ema_params:
+                diff = torch._foreach_sub(ema_params, params)
+                torch._foreach_mul_(diff, 1.0 - decay)
+                torch._foreach_sub_(ema_params, diff)
 
     @contextlib.contextmanager
     def applied_params(self, model: HasNamedParameters) -> Iterator[None]:
