@@ -83,6 +83,11 @@ class FieldSFNONetConfig:
             ``round(embed_dim * spectral_ratio)``.
         filter_residual: Whether to pass each block's inner skip through a
             SHT round-trip.
+        block_inner_skip: Whether each block adds a learned 1x1 convolution
+            of the spectral filter's input to its output before the
+            activation, as ``SphericalFourierNeuralOperatorNet`` always
+            does. With the field itself as the residual stream this skip
+            may be redundant with the block's gated residual.
         filter_output: Whether to pass the network's update (output minus
             input state) through a SHT round-trip.
         local_blocks: Indices of blocks that use discrete-continuous
@@ -114,6 +119,7 @@ class FieldSFNONetConfig:
     checkpointing: int = 0
     filter_num_groups: int = 1
     filter_residual: bool = False
+    block_inner_skip: bool = True
     filter_output: bool = False
     local_blocks: list[int] | None = None
     affine_norms: bool = False
@@ -193,7 +199,8 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
     Two gated residual updates on the field ``x``:
 
     1. ``u = proj_in(norm0(x))``, ``y = proj_out(act(filter(u) + inner_skip(u)))``,
-       then ``x = (1 + gamma_res) * x + gamma * y``
+       then ``x = (1 + gamma_res) * x + gamma * y`` (the ``inner_skip`` term
+       is omitted when ``block_inner_skip`` is False)
     2. ``z = mlp(norm1(x))``, then ``x = (1 + gamma_res') * x + gamma' * z``
 
     ``proj_in``/``proj_out`` are 1x1 convolutions between the ``n_channels``
@@ -218,6 +225,7 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
         use_mlp: bool = True,
         checkpointing: int = 0,
         filter_residual: bool = False,
+        block_inner_skip: bool = True,
         affine_norms: bool = False,
         filter_num_groups: int = 1,
         filter_preserves_global_mean: bool = False,
@@ -241,7 +249,9 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             num_groups=filter_num_groups,
             preserve_global_mean=filter_preserves_global_mean,
         )
-        self.inner_skip = nn.Conv2d(spectral_dim, spectral_dim, 1)
+        self.inner_skip: nn.Module | None = (
+            nn.Conv2d(spectral_dim, spectral_dim, 1) if block_inner_skip else None
+        )
         self.act_layer = act_layer()
         self.proj_out = nn.Conv2d(spectral_dim, n_channels, 1)
         self.gate_filter = GatedResidual(n_channels, gamma_init)
@@ -276,8 +286,9 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             u = self.proj_in(x_norm)
         with timer.child("filter") as filter_timer:
             y, residual = self.filter(u, timer=filter_timer)
-        with timer.child("inner_skip"):
-            y = y + self.inner_skip(residual)
+        if self.inner_skip is not None:
+            with timer.child("inner_skip"):
+                y = y + self.inner_skip(residual)
         with timer.child("activation"):
             y = self.act_layer(y)
         with timer.child("proj_out"):
@@ -395,6 +406,7 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
                     use_mlp=params.use_mlp,
                     checkpointing=params.checkpointing,
                     filter_residual=params.filter_residual,
+                    block_inner_skip=params.block_inner_skip,
                     affine_norms=params.affine_norms,
                     filter_num_groups=params.filter_num_groups,
                     filter_preserves_global_mean=params.filter_preserves_global_mean,

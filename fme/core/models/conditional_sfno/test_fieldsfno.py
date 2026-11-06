@@ -107,6 +107,7 @@ def test_output_shape(
         pytest.param({"checkpointing": 3}, 0, id="checkpoint_blocks"),
         pytest.param({"local_blocks": [1]}, 0, id="local_block"),
         pytest.param({"filter_residual": True}, 0, id="filter_residual"),
+        pytest.param({"block_inner_skip": False}, 0, id="no_inner_skip"),
         pytest.param({"filter_num_groups": 4}, 0, id="grouped_filter"),
         pytest.param({"spectral_ratio": 0.5}, 0, id="spectral_ratio"),
         pytest.param(
@@ -241,6 +242,14 @@ def test_forcing_slot_in_context_config_rejected():
 def test_invalid_config_raises(kwargs, match):
     with pytest.raises(ValueError, match=match):
         FieldSFNONetConfig(**kwargs)
+
+
+def test_block_inner_skip_option():
+    net, _, _ = _build(5, 3, 2)
+    assert isinstance(net.blocks[0].inner_skip, torch.nn.Conv2d)
+    net, _, _ = _build(5, 3, 2, block_inner_skip=False)
+    assert net.blocks[0].inner_skip is None
+    assert not any("inner_skip" in name for name, _ in net.named_parameters())
 
 
 def test_branch_widths_follow_embed_dim():

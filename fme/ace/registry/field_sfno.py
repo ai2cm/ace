@@ -75,6 +75,9 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
         data_grid: Grid type for spherical harmonic transforms.
         filter_residual: Whether to filter each block's inner skip through a
             SHT round-trip.
+        block_inner_skip: Whether each block adds a learned 1x1 convolution
+            of the spectral filter's input to its output before the
+            activation (the standard SFNO always does).
         filter_output: Whether to filter the model's update (output minus
             input state) through a SHT round-trip.
         local_blocks: List of block indices to use discrete-continuous
@@ -112,6 +115,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
     # healpix not supported due to assumptions about number of spatial dims
     data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
     filter_residual: bool = False
+    block_inner_skip: bool = True
     filter_output: bool = False
     local_blocks: list[int] | None = None
     affine_norms: bool = False
@@ -147,6 +151,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             checkpointing=self.checkpointing,
             filter_num_groups=self.filter_num_groups,
             filter_residual=self.filter_residual,
+            block_inner_skip=self.block_inner_skip,
             filter_output=self.filter_output,
             local_blocks=self.local_blocks,
             affine_norms=self.affine_norms,
