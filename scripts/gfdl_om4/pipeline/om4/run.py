@@ -63,6 +63,7 @@ from ..ocean_emulators_port import (
 from ..postprocess import (
     DERIVATION_ATTR,
     ChunkContext,
+    append_derivation,
     assert_postprocess_inputs,
     provenance_attrs,
 )
@@ -107,8 +108,57 @@ def land_nan_exempt_names(level_count: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _time_block_mean_factor(stream: StreamConfig) -> int:
+    """Source timesteps per output timestep of a stream (1 unless coarsened)."""
+    return stream.time_block_mean_factor or 1
+
+
+def _select_whole_blocks(
+    ds: xr.Dataset,
+    factor: int,
+    start_time: str | None,
+    end_time: str | None,
+    context: str,
+) -> xr.Dataset:
+    """Select the ``factor``-step blocks of ``ds``, anchored to its first
+    timestep, whose final timestamps (their output labels) fall within the
+    inclusive time range.
+
+    Raises if ``factor`` does not evenly divide the full time axis, rather
+    than silently dropping a trailing partial block.
+    """
+    size = ds.sizes[TIME_DIM]
+    if size % factor:
+        raise AssertionError(
+            f"{context}: time_block_mean_factor {factor} does not evenly divide "
+            f"the {size} timesteps of the source store"
+        )
+    n_blocks = size // factor
+    if start_time is None and end_time is None:
+        return ds
+    labels = ds.indexes[TIME_DIM][factor - 1 :: factor]
+    selected = labels.slice_indexer(start_time, end_time)
+    first, stop = selected.start or 0, selected.stop
+    stop = n_blocks if stop is None else stop
+    return ds.isel({TIME_DIM: slice(first * factor, max(stop, first) * factor)})
+
+
+def stream_output_time(stream: StreamConfig, ds: xr.Dataset) -> xr.DataArray:
+    """The output time coordinate of a stream opened by :func:`open_stream`:
+    its own time coordinate, or for a coarsened stream the final timestamp of
+    each block."""
+    factor = _time_block_mean_factor(stream)
+    return ds[TIME_DIM].isel({TIME_DIM: slice(factor - 1, None, factor)})
+
+
 def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
-    """Open a stream's variables lazily, time-subset, with fail-fast checks."""
+    """Open a stream's variables lazily, time-subset, with fail-fast checks.
+
+    A coarsened stream is returned at its source time resolution, selected
+    in whole averaging blocks; the block means are taken per chunk in the beam
+    pipeline (see :func:`_coarsen`) and its output time coordinate is
+    :func:`stream_output_time`.
+    """
     ds = xr.open_zarr(
         make_zarr_store(stream.store), chunks=None, decode_timedelta=False
     )
@@ -138,7 +188,17 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
         # cross-stream time-alignment assertion enforces the coincidence.
         stride = stream.time_subsample_stride
         ds = ds.isel({TIME_DIM: slice(stride - 1, None, stride)})
-    if config.start_time is not None or config.end_time is not None:
+    if stream.time_block_mean_factor is not None:
+        # Blocks are anchored to the raw time grid for the same reason as the
+        # subsample, and the time range selects whole blocks by their labels.
+        ds = _select_whole_blocks(
+            ds,
+            stream.time_block_mean_factor,
+            config.start_time,
+            config.end_time,
+            f"stream {stream.name!r}",
+        )
+    elif config.start_time is not None or config.end_time is not None:
         ds = ds.sel({TIME_DIM: slice(config.start_time, config.end_time)})
     if ds.sizes[TIME_DIM] == 0:
         raise AssertionError(
@@ -180,12 +240,12 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     return wetmask
 
 
-def _assert_time_alignment(datasets: dict[str, xr.Dataset]) -> xr.DataArray:
-    """Assert all streams share an identical time coordinate; return it."""
-    names = list(datasets)
-    reference = datasets[names[0]][TIME_DIM]
+def _assert_time_alignment(times: dict[str, xr.DataArray]) -> xr.DataArray:
+    """Assert all streams share an identical output time coordinate; return it."""
+    names = list(times)
+    reference = times[names[0]]
     for name in names[1:]:
-        other = datasets[name][TIME_DIM]
+        other = times[name]
         if (
             reference.sizes[TIME_DIM] != other.sizes[TIME_DIM]
             or not (reference.values == other.values).all()
@@ -325,8 +385,8 @@ def _rotate_pairs(
                 "valid zeros by the source) treated as invalid; " + rotation_note
             )
         ds = ds.drop_vars([u_name, v_name])
-        ds[u_name] = u.assign_attrs(u_attrs, **{DERIVATION_ATTR: rotation_note})
-        ds[v_name] = v.assign_attrs(v_attrs, **{DERIVATION_ATTR: rotation_note})
+        ds[u_name] = append_derivation(u.assign_attrs(u_attrs), rotation_note)
+        ds[v_name] = append_derivation(v.assign_attrs(v_attrs), rotation_note)
     return ds
 
 
@@ -410,6 +470,40 @@ def _process_chunk(
     return output
 
 
+def _coarsen(ds: xr.Dataset, time_offset: int, factor: int) -> tuple[int, xr.Dataset]:
+    """Average a source-resolution chunk of a coarsened stream over its
+    ``factor``-step blocks.
+
+    The chunk must hold whole blocks (the read width is a multiple of
+    ``factor``, and :func:`open_stream` selects the stream in whole blocks).
+    Returns the chunk's time offset re-expressed in output timesteps, and the
+    block means labeled with each block's final timestamp. NaN anywhere in a
+    block propagates to its mean, so a time-varying footprint still fails the
+    wetmask assertion downstream.
+    """
+    size = ds.sizes[TIME_DIM]
+    if time_offset % factor or size % factor:
+        raise AssertionError(
+            f"chunk at time offset {time_offset} with {size} timesteps does not "
+            f"hold whole {factor}-step blocks"
+        )
+    start = time_offset // factor
+    labels = ds[TIME_DIM].values[factor - 1 :: factor]
+    coarsened = (
+        ds.drop_vars(TIME_DIM)
+        .coarsen({TIME_DIM: factor})
+        .mean(skipna=False, keep_attrs=True)
+        .assign_coords({TIME_DIM: labels})
+    )
+    note = (
+        f"mean over {factor}-step blocks of the source time axis, labeled "
+        "with each block's final time"
+    )
+    for name in coarsened.data_vars:
+        append_derivation(coarsened[name], note)
+    return start, coarsened
+
+
 def process_chunk(
     key: xbeam.Key,
     ds: xr.Dataset,
@@ -419,11 +513,18 @@ def process_chunk(
     weights_url: str | None = None,
     target_grid_name: str | None = None,
 ) -> tuple[xbeam.Key, xr.Dataset]:
-    """Beam entry point: process one (time, level) chunk of a stream."""
+    """Beam entry point: process one (time, level) chunk of a stream.
+
+    A chunk of a coarsened stream arrives at source time resolution and is
+    first averaged to output resolution (see :func:`_coarsen`).
+    """
     assert stream is not None
     assert wetmask is not None
     assert weights_url is not None
     assert target_grid_name is not None
+    time_offset = key.offsets[TIME_DIM]
+    if stream.time_block_mean_factor is not None:
+        time_offset, ds = _coarsen(ds, time_offset, stream.time_block_mean_factor)
     level_index = key.offsets.get(LEVEL_DIM)
     if level_index is not None:
         wetmask = wetmask.isel({LEVEL_DIM: level_index}, drop=True)
@@ -440,7 +541,7 @@ def process_chunk(
         level_index,
     )
     new_key = xbeam.Key(
-        {TIME_DIM: key.offsets[TIME_DIM], "lat": 0, "lon": 0},
+        {TIME_DIM: time_offset, "lat": 0, "lon": 0},
         vars=frozenset(output.data_vars),
     )
     return new_key, output
@@ -595,23 +696,22 @@ def build_template(
     for name, ds in stream_datasets.items():
         stream = streams_by_name[name]
         ds_3d, ds_2d = _split_stream(ds)
-        first = {TIME_DIM: slice(0, 1)}
+        # One output timestep: one averaging block of a coarsened stream.
+        first = {TIME_DIM: slice(0, _time_block_mean_factor(stream))}
+        chunks = []
         if ds_2d.data_vars:
-            key = xbeam.Key({TIME_DIM: 0})
-            _, out = process_chunk(
-                key,
-                ds_2d.isel(first).load(),
-                stream,
-                wetmask,
-                config.weights_url,
-                config.target_grid,
-            )
-            pieces.append(out)
+            chunks.append((xbeam.Key({TIME_DIM: 0}), ds_2d.isel(first)))
         for k in range(ds_3d.sizes.get(LEVEL_DIM, 0)):
-            key = xbeam.Key({TIME_DIM: 0, LEVEL_DIM: k})
+            chunks.append(
+                (
+                    xbeam.Key({TIME_DIM: 0, LEVEL_DIM: k}),
+                    ds_3d.isel({**first, LEVEL_DIM: slice(k, k + 1)}),
+                )
+            )
+        for key, chunk in chunks:
             _, out = process_chunk(
                 key,
-                ds_3d.isel({**first, LEVEL_DIM: slice(k, k + 1)}).load(),
+                chunk.load(),
                 stream,
                 wetmask,
                 config.weights_url,
@@ -676,6 +776,10 @@ def _get_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--config", required=True, help="Path to the YAML config")
     parser.add_argument(
+        "--member",
+        help="Ensemble-member name substituted into the config's URLs",
+    )
+    parser.add_argument(
         "--start-time",
         help="Override the config's inclusive time-range start (e.g. 0151-01-06)",
     )
@@ -703,7 +807,7 @@ def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
 
-    config = load_config(args.config)
+    config = load_config(args.config, args.member)
     if args.start_time is not None:
         config.start_time = args.start_time
     if args.end_time is not None:
@@ -736,17 +840,25 @@ def main():
         int(wetmask.isel({LEVEL_DIM: -1}).sum()),
     )
 
+    streams_by_name = {stream.name: stream for stream in config.streams}
     stream_datasets = {
         stream.name: open_stream(stream, config) for stream in config.streams
     }
-    output_time = _assert_time_alignment(stream_datasets)
-    if args.num_timesteps is not None:
-        output_time = output_time.isel({TIME_DIM: slice(0, args.num_timesteps)})
-        stream_datasets = {
-            name: ds.isel({TIME_DIM: slice(0, args.num_timesteps)})
+    output_time = _assert_time_alignment(
+        {
+            name: stream_output_time(streams_by_name[name], ds)
             for name, ds in stream_datasets.items()
         }
+    )
+    if args.num_timesteps is not None:
+        output_time = output_time.isel({TIME_DIM: slice(0, args.num_timesteps)})
+        for name, ds in stream_datasets.items():
+            factor = _time_block_mean_factor(streams_by_name[name])
+            n_source = args.num_timesteps * factor
+            stream_datasets[name] = ds.isel({TIME_DIM: slice(0, n_source)})
     if config.shift_timestamps_to_avg_interval_midpoint:
+        # Valid only for streams with one source step per output step, hence
+        # the config's exclusion of time_block_mean_factor.
         output_time = _shift_timestamps_to_midpoint(output_time)
         stream_datasets = {
             name: ds.assign_coords({TIME_DIM: output_time.values})
@@ -789,7 +901,6 @@ def main():
 
     output_store = make_zarr_store(config.output.path, read_only=False)
 
-    streams_by_name = {stream.name: stream for stream in config.streams}
     logger.info("[pipeline] starting; writing to %s", config.output.path)
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
         for name, ds in stream_datasets.items():
@@ -797,12 +908,15 @@ def main():
             branches = []
             ds_3d, ds_2d = _split_stream(ds)
             # Read at the source's own time-chunk width so each source chunk
-            # is fetched once, not once per timestep it holds.
+            # is fetched once, not once per timestep it holds; a coarsened
+            # stream widens that to a multiple of its factor so every read
+            # chunk holds whole averaging blocks.
+            factor = _time_block_mean_factor(stream)
             if ds_3d.data_vars:
-                width = source_time_chunk_size(ds_3d)
+                width = math.lcm(source_time_chunk_size(ds_3d), factor)
                 branches.append((f"{name}_3d", ds_3d, {TIME_DIM: width, LEVEL_DIM: 1}))
             if ds_2d.data_vars:
-                width = source_time_chunk_size(ds_2d)
+                width = math.lcm(source_time_chunk_size(ds_2d), factor)
                 branches.append((f"{name}_2d", ds_2d, {TIME_DIM: width}))
             for label, branch_ds, chunks in branches:
                 n_chunks = int(
@@ -820,12 +934,14 @@ def main():
                     n_chunks,
                     chunks[TIME_DIM],
                 )
+                # Output timesteps per chunk once any coarsening has run.
+                output_width = chunks[TIME_DIM] // factor
                 split_chunks = {
                     TIME_DIM: shard_aligned_chunk_size(
-                        chunks[TIME_DIM], config.output.time_shard_size
+                        output_width, config.output.time_shard_size
                     )
                 }
-                if split_chunks[TIME_DIM] != chunks[TIME_DIM]:
+                if split_chunks[TIME_DIM] != output_width:
                     logger.info(
                         "[stream:%s] splitting to %d before consolidating into "
                         "%d-wide shards; the %d-wide read does not align with "
@@ -833,7 +949,7 @@ def main():
                         label,
                         split_chunks[TIME_DIM],
                         config.output.time_shard_size,
-                        chunks[TIME_DIM],
+                        output_width,
                     )
                 (
                     p

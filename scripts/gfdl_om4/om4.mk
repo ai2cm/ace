@@ -30,8 +30,13 @@ generate_face_masks_1pctco2:
 
 CONFIG ?= configs/om4-picontrol-1deg-5daily.yaml
 
+# Ensemble configs carry a {member} placeholder in their URLs; set MEMBER to
+# resolve it. Left empty for single-simulation configs.
+MEMBER ?=
+MEMBER_FLAG = $(if $(MEMBER),--member $(MEMBER))
+
 SMOKE_OUTPUT_ROOT ?= gs://vcm-ml-scratch/jamesd/gfdl-om4-test
-SMOKE_OUTPUT_PATH = $(SMOKE_OUTPUT_ROOT)/smoke-$(notdir $(basename $(CONFIG))).zarr
+SMOKE_OUTPUT_PATH = $(SMOKE_OUTPUT_ROOT)/smoke-$(notdir $(basename $(CONFIG)))$(if $(MEMBER),-$(MEMBER)).zarr
 
 # A few timesteps of $(CONFIG) through the DirectRunner into a throwaway
 # store: every chunk's footprint must equal the wetmask (the run fails
@@ -40,13 +45,13 @@ SMOKE_OUTPUT_PATH = $(SMOKE_OUTPUT_ROOT)/smoke-$(notdir $(basename $(CONFIG))).z
 smoke_test:
 	-gsutil -m -q rm -r $(SMOKE_OUTPUT_PATH) 2> /dev/null
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.run \
-		--config $(CONFIG) \
+		--config $(CONFIG) $(MEMBER_FLAG) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(SMOKE_OUTPUT_PATH) \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.check_output \
-		--config $(CONFIG) \
+		--config $(CONFIG) $(MEMBER_FLAG) \
 		--output-path $(SMOKE_OUTPUT_PATH) \
 		--expected-timesteps $(SMOKE_NUM_TIMESTEPS)
 
@@ -79,7 +84,7 @@ smoke_test_1pctco2_4deg_1daily:
 smoke_test_repeat_fails:
 	gsutil -q ls $(SMOKE_OUTPUT_PATH)/zarr.json > /dev/null 2>&1 || $(MAKE) smoke_test
 	! conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.run \
-		--config $(CONFIG) \
+		--config $(CONFIG) $(MEMBER_FLAG) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(SMOKE_OUTPUT_PATH) \
 		--runner DirectRunner \
@@ -111,7 +116,7 @@ smoke_tests_1daily: check_wetmask_equivalence_1daily \
 dataflow: check_dataflow_image
 	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		./run-dataflow.sh om4 DataflowRunner $(CONFIG)
+		./run-dataflow.sh om4 DataflowRunner $(CONFIG) $(MEMBER_FLAG)
 
 dataflow_picontrol_1deg:
 	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg-5daily.yaml
@@ -137,6 +142,88 @@ dataflow_1pctco2_1deg_1daily:
 dataflow_1pctco2_4deg_1daily:
 	$(MAKE) dataflow CONFIG=configs/cm4-1pctCO2-4deg-1daily.yaml
 
+# CM4 abrupt-4xCO2 ensemble: one 5-daily and one 1-daily store per member and
+# resolution, from one config per resolution and frequency. Members are 90-day
+# or 1-year runs started from different piControl states.
+ABRUPT_4XCO2_MEMBERS = $(addprefix ic_,$(shell seq -f %04g 1 36))
+ABRUPT_4XCO2_1DEG_CONFIG = configs/cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily.yaml
+ABRUPT_4XCO2_4DEG_CONFIG = configs/cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily.yaml
+ABRUPT_4XCO2_1DEG_1DAILY_CONFIG = configs/cm4-abrupt-4xCO2-ensemble-ocean-1deg-1daily.yaml
+ABRUPT_4XCO2_4DEG_1DAILY_CONFIG = configs/cm4-abrupt-4xCO2-ensemble-ocean-4deg-1daily.yaml
+ABRUPT_4XCO2_SMOKE_MEMBER ?= $(firstword $(ABRUPT_4XCO2_MEMBERS))
+
+# One artifact for the whole ensemble, scanned from the first (1-year)
+# member. The ensemble-wide wetmask check below and the run-time staleness
+# assertion guard its use for the other members.
+generate_face_masks_abrupt_4xco2:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.face_masks \
+		--config $(ABRUPT_4XCO2_1DEG_CONFIG) \
+		--member $(firstword $(ABRUPT_4XCO2_MEMBERS)) \
+		--stream snapshot_ocean \
+		--output-url $(FACE_MASKS_URL_ROOT)/cm4-abrupt-4xCO2-2026-10-16 \
+		--start-time 0301-01-06 \
+		--end-time 0302-01-01 \
+		--expected-surface-count-u 16960 \
+		--expected-surface-count-v 16694
+
+check_wetmask_equivalence_abrupt_4xco2:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.check_member_wetmask_equivalence \
+		--config $(ABRUPT_4XCO2_1DEG_CONFIG) \
+		--members $(ABRUPT_4XCO2_MEMBERS)
+
+smoke_test_abrupt_4xco2_1deg:
+	$(MAKE) smoke_test CONFIG=$(ABRUPT_4XCO2_1DEG_CONFIG) MEMBER=$(ABRUPT_4XCO2_SMOKE_MEMBER)
+
+smoke_test_abrupt_4xco2_4deg:
+	$(MAKE) smoke_test CONFIG=$(ABRUPT_4XCO2_4DEG_CONFIG) MEMBER=$(ABRUPT_4XCO2_SMOKE_MEMBER)
+
+smoke_tests_abrupt_4xco2: check_wetmask_equivalence_abrupt_4xco2 \
+	smoke_test_abrupt_4xco2_1deg smoke_test_abrupt_4xco2_4deg
+	$(MAKE) smoke_test_repeat_fails CONFIG=$(ABRUPT_4XCO2_1DEG_CONFIG) \
+		MEMBER=$(ABRUPT_4XCO2_SMOKE_MEMBER)
+
+smoke_test_abrupt_4xco2_1deg_1daily:
+	$(MAKE) smoke_test CONFIG=$(ABRUPT_4XCO2_1DEG_1DAILY_CONFIG) MEMBER=$(ABRUPT_4XCO2_SMOKE_MEMBER)
+
+smoke_test_abrupt_4xco2_4deg_1daily:
+	$(MAKE) smoke_test CONFIG=$(ABRUPT_4XCO2_4DEG_1DAILY_CONFIG) MEMBER=$(ABRUPT_4XCO2_SMOKE_MEMBER)
+
+# The 1-daily configs read the same wetmask stores as the 5-daily ones, so
+# the 5-daily ensemble wetmask check covers them.
+smoke_tests_abrupt_4xco2_1daily: check_wetmask_equivalence_abrupt_4xco2 \
+	smoke_test_abrupt_4xco2_1deg_1daily smoke_test_abrupt_4xco2_4deg_1daily
+	$(MAKE) smoke_test_repeat_fails CONFIG=$(ABRUPT_4XCO2_1DEG_1DAILY_CONFIG) \
+		MEMBER=$(ABRUPT_4XCO2_SMOKE_MEMBER)
+
+# Per-member production launches, e.g.
+# make dataflow_abrupt_4xco2_1deg_ic_0001 or
+# make dataflow_abrupt_4xco2_1deg_1daily_ic_0001. Each is an independent
+# Dataflow job writing its own store under the config's dated parent prefix.
+# A 1-daily target also matches the 5-daily pattern of its resolution; make
+# picks the pattern with the shortest stem, which is the 1-daily one.
+dataflow_abrupt_4xco2_1deg_%:
+	$(MAKE) dataflow CONFIG=$(ABRUPT_4XCO2_1DEG_CONFIG) MEMBER=$*
+
+dataflow_abrupt_4xco2_4deg_%:
+	$(MAKE) dataflow CONFIG=$(ABRUPT_4XCO2_4DEG_CONFIG) MEMBER=$*
+
+dataflow_abrupt_4xco2_1deg_1daily_%:
+	$(MAKE) dataflow CONFIG=$(ABRUPT_4XCO2_1DEG_1DAILY_CONFIG) MEMBER=$*
+
+dataflow_abrupt_4xco2_4deg_1daily_%:
+	$(MAKE) dataflow CONFIG=$(ABRUPT_4XCO2_4DEG_1DAILY_CONFIG) MEMBER=$*
+
+dataflow_abrupt_4xco2_1deg_all: $(addprefix dataflow_abrupt_4xco2_1deg_,$(ABRUPT_4XCO2_MEMBERS))
+
+dataflow_abrupt_4xco2_4deg_all: $(addprefix dataflow_abrupt_4xco2_4deg_,$(ABRUPT_4XCO2_MEMBERS))
+
+dataflow_abrupt_4xco2_1deg_1daily_all: $(addprefix dataflow_abrupt_4xco2_1deg_1daily_,$(ABRUPT_4XCO2_MEMBERS))
+
+dataflow_abrupt_4xco2_4deg_1daily_all: $(addprefix dataflow_abrupt_4xco2_4deg_1daily_,$(ABRUPT_4XCO2_MEMBERS))
+
+# The per-member targets are deliberately absent: make skips implicit-rule
+# search for a phony target, which would leave the pattern rules above with
+# nothing to match.
 .PHONY: generate_face_masks \
 	generate_face_masks_picontrol generate_face_masks_1pctco2 smoke_test \
 	smoke_test_picontrol_1deg smoke_test_picontrol_4deg \
@@ -148,4 +235,10 @@ dataflow_1pctco2_4deg_1daily:
 	dataflow dataflow_picontrol_1deg \
 	dataflow_picontrol_4deg dataflow_1pctco2_1deg dataflow_1pctco2_4deg \
 	dataflow_picontrol_1deg_1daily dataflow_picontrol_4deg_1daily \
-	dataflow_1pctco2_1deg_1daily dataflow_1pctco2_4deg_1daily
+	dataflow_1pctco2_1deg_1daily dataflow_1pctco2_4deg_1daily \
+	generate_face_masks_abrupt_4xco2 check_wetmask_equivalence_abrupt_4xco2 \
+	smoke_test_abrupt_4xco2_1deg smoke_test_abrupt_4xco2_4deg \
+	smoke_tests_abrupt_4xco2 dataflow_abrupt_4xco2_1deg_all \
+	dataflow_abrupt_4xco2_4deg_all smoke_test_abrupt_4xco2_1deg_1daily \
+	smoke_test_abrupt_4xco2_4deg_1daily smoke_tests_abrupt_4xco2_1daily \
+	dataflow_abrupt_4xco2_1deg_1daily_all dataflow_abrupt_4xco2_4deg_1daily_all
