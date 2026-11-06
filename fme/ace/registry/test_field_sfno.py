@@ -1,5 +1,6 @@
 import dataclasses
 
+import dacite
 import pytest
 import torch
 
@@ -93,7 +94,7 @@ def test_from_state_round_trip():
     )
     state = dataclasses.asdict(builder)
     assert NoiseConditionedFieldSFNOBuilder.from_state(state) == builder
-    with pytest.raises(Exception):
+    with pytest.raises(dacite.UnexpectedDataError):
         NoiseConditionedFieldSFNOBuilder.from_state({**state, "embed_dim": 4})
 
 

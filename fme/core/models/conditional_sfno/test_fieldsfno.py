@@ -1,4 +1,3 @@
-import dataclasses
 import os
 
 import pytest
@@ -250,10 +249,9 @@ def test_state_dict_round_trip():
         torch.testing.assert_close(net(x, context), net2(x, context))
 
 
-def test_context_replace_is_used_without_forcing():
-    """A net with no forcing channels leaves the context untouched."""
+def test_no_forcing_leaves_context_untouched():
     net, x, context = _build(5, 0, 2)
     assert net.forcing_encoder is None
-    replaced = dataclasses.replace(context)
-    net(x, replaced)
-    assert replaced.embedding_forcing is None
+    before = context.asdict()
+    net(x, context)
+    assert context.asdict() == before
