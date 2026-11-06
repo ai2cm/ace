@@ -4,10 +4,10 @@ A variant of ``SphericalFourierNeuralOperatorNet`` whose residual stream is
 the field itself rather than a learned latent, in the spirit of the
 field-space attention network of FieldSpaceNN
 (https://github.com/FREVA-CLINT/FieldSpaceNN). There is no encoder, decoder,
-positional embedding, or big skip: each block's spectral filter and MLP act
-at field width and are added back onto the field through learned gates
-initialized near zero, so the network starts as the identity map on the
-prognostic fields.
+positional embedding, or big skip: each block's spectral filter and MLP
+read the field, compute at their own widths (set by ``embed_dim``), and are
+added back onto the field through learned gates initialized near zero, so
+the network starts as the identity map on the prognostic fields.
 
 The network starts as the identity map on the prognostic channels, so it
 already predicts persistence at initialization. Use it with the step's
@@ -53,12 +53,20 @@ class FieldSFNONetConfig:
     Attributes:
         filter_type: Type of spectral filter to use ('linear', 'makani-linear',
             'local').
+        embed_dim: Base width of the block branches. The MLP hidden layer has
+            ``int(embed_dim * mlp_ratio)`` channels and the spectral filter
+            runs on ``round(embed_dim * spectral_ratio)`` channels; neither
+            depends on the number of fields.
+        spectral_ratio: Fraction of ``embed_dim`` the spectral filter runs
+            on. Each block projects the field to
+            ``round(embed_dim * spectral_ratio)`` channels with a 1x1
+            convolution, applies the filter (and inner skip) at that width,
+            and projects back to the field channels.
         global_layer_norm: Whether to reduce along the spatial domain when
             applying layer normalization.
         num_layers: Number of field-space FNO blocks.
         use_mlp: Whether to use an MLP in each block.
-        mlp_ratio: Ratio of the MLP hidden dimension to the number of
-            field channels.
+        mlp_ratio: Ratio of the MLP hidden dimension to ``embed_dim``.
         activation_function: Activation function name ('relu', 'gelu', 'silu').
         forcing_embed_dim: Width of the forcing embedding that conditions the
             layer norms. Ignored when the model has no forcing channels.
@@ -71,7 +79,8 @@ class FieldSFNONetConfig:
         checkpointing: Gradient checkpointing level (0 = none, >=2 checkpoints
             the MLPs, >=3 checkpoints whole blocks).
         filter_num_groups: Number of groups in the spectral filter's grouped
-            convolution. Must divide the number of output channels.
+            convolution. Must divide the spectral filter width
+            ``round(embed_dim * spectral_ratio)``.
         filter_residual: Whether to pass each block's inner skip through a
             SHT round-trip.
         filter_output: Whether to pass the network's update (output minus
@@ -81,13 +90,17 @@ class FieldSFNONetConfig:
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
         filter_preserves_global_mean: If True, the spectral filter preserves
-            the l=0 (global mean) spherical harmonic coefficient.
+            the l=0 (global mean) spherical harmonic coefficient of its
+            (projected) input; the projections around the filter are
+            pointwise, so no spectral mixing changes the global mean.
         gamma_init: Initial value of the residual gates. Each block computes
             ``x = (1 + gamma_res) * x + gamma * branch(x)``; the FieldSpaceNN
             default of 1e-12 makes every block the identity at init.
     """
 
     filter_type: Literal["linear", "makani-linear", "local"] = "linear"
+    embed_dim: int = 256
+    spectral_ratio: float = 1.0
     global_layer_norm: bool = False
     num_layers: int = 12
     use_mlp: bool = True
@@ -117,12 +130,44 @@ class FieldSFNONetConfig:
             raise ValueError("forcing_encoder_layers must be at least 1")
         if self.forcing_embed_dim < 1:
             raise ValueError("forcing_embed_dim must be at least 1")
+        if self.embed_dim < 1:
+            raise ValueError("embed_dim must be at least 1")
+        if not 0.0 < self.spectral_ratio <= 1.0:
+            raise ValueError(
+                f"spectral_ratio must be in (0, 1], got {self.spectral_ratio}"
+            )
+        if self.spectral_dim < 1:
+            raise ValueError(
+                f"spectral_ratio={self.spectral_ratio} with "
+                f"embed_dim={self.embed_dim} yields no spectral channels"
+            )
+        if self.spectral_dim % self.filter_num_groups != 0:
+            raise ValueError(
+                f"filter_num_groups={self.filter_num_groups} must divide the "
+                f"spectral filter width round(embed_dim * spectral_ratio)="
+                f"{self.spectral_dim}"
+            )
+        if int(self.embed_dim * self.mlp_ratio) < 1:
+            raise ValueError(
+                f"mlp_ratio={self.mlp_ratio} with embed_dim={self.embed_dim} "
+                "yields no MLP hidden channels"
+            )
         if self.local_blocks is not None:
             bad = [i for i in self.local_blocks if not 0 <= i < self.num_layers]
             if bad:
                 raise ValueError(
                     f"local_blocks {bad} out of range for num_layers={self.num_layers}"
                 )
+
+    @property
+    def spectral_dim(self) -> int:
+        """Width the spectral filter runs on."""
+        return round(self.embed_dim * self.spectral_ratio)
+
+    @property
+    def mlp_hidden_dim(self) -> int:
+        """Width of the MLP hidden layer."""
+        return int(self.embed_dim * self.mlp_ratio)
 
 
 class GatedResidual(nn.Module):
@@ -147,11 +192,13 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
 
     Two gated residual updates on the field ``x``:
 
-    1. ``y = act(filter(norm0(x)) + inner_skip(norm0(x)))``, then
-       ``x = (1 + gamma_res) * x + gamma * y``
+    1. ``u = proj_in(norm0(x))``, ``y = proj_out(act(filter(u) + inner_skip(u)))``,
+       then ``x = (1 + gamma_res) * x + gamma * y``
     2. ``z = mlp(norm1(x))``, then ``x = (1 + gamma_res') * x + gamma' * z``
 
-    The spectral filter and MLP both take and return ``n_channels`` channels.
+    ``proj_in``/``proj_out`` are 1x1 convolutions between the ``n_channels``
+    field channels and the ``spectral_dim`` channels the filter runs on; the
+    MLP maps ``n_channels`` through ``mlp_hidden_dim`` back to ``n_channels``.
     """
 
     def __init__(
@@ -159,11 +206,12 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
         forward_transform: nn.Module,
         inverse_transform: nn.Module,
         n_channels: int,
+        spectral_dim: int,
+        mlp_hidden_dim: int,
         img_shape: tuple[int, int],
         context_config: ContextConfig,
         filter_type: str = "linear",
         global_layer_norm: bool = False,
-        mlp_ratio: float = 2.0,
         drop_rate: float = 0.0,
         drop_path: float = 0.0,
         act_layer: type[nn.Module] = nn.GELU,
@@ -183,17 +231,19 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             context_config=context_config,
             elementwise_affine=affine_norms,
         )
+        self.proj_in = nn.Conv2d(n_channels, spectral_dim, 1)
         self.filter = SpectralFilterLayer(
             forward_transform,
             inverse_transform,
-            n_channels,
+            spectral_dim,
             filter_type,
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
             preserve_global_mean=filter_preserves_global_mean,
         )
-        self.inner_skip = nn.Conv2d(n_channels, n_channels, 1)
+        self.inner_skip = nn.Conv2d(spectral_dim, spectral_dim, 1)
         self.act_layer = act_layer()
+        self.proj_out = nn.Conv2d(spectral_dim, n_channels, 1)
         self.gate_filter = GatedResidual(n_channels, gamma_init)
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         if use_mlp:
@@ -206,7 +256,7 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             )
             self.mlp: nn.Module | None = MLP(
                 in_features=n_channels,
-                hidden_features=int(n_channels * mlp_ratio),
+                hidden_features=mlp_hidden_dim,
                 act_layer=act_layer,
                 drop_rate=drop_rate,
                 checkpointing=checkpointing,
@@ -222,12 +272,16 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
     ) -> torch.Tensor:
         with timer.child("norm0") as norm0_timer:
             x_norm = self.norm0(x, context, timer=norm0_timer)
+        with timer.child("proj_in"):
+            u = self.proj_in(x_norm)
         with timer.child("filter") as filter_timer:
-            y, residual = self.filter(x_norm, timer=filter_timer)
+            y, residual = self.filter(u, timer=filter_timer)
         with timer.child("inner_skip"):
             y = y + self.inner_skip(residual)
         with timer.child("activation"):
             y = self.act_layer(y)
+        with timer.child("proj_out"):
+            y = self.proj_out(y)
         x = self.gate_filter(x, self.drop_path(y))
         if self.mlp is not None:
             assert self.norm1 is not None and self.gate_mlp is not None
@@ -329,11 +383,12 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
                     forward_transform=trans_down,
                     inverse_transform=itrans_up,
                     n_channels=self.out_chans,
+                    spectral_dim=params.spectral_dim,
+                    mlp_hidden_dim=params.mlp_hidden_dim,
                     img_shape=img_shape,
                     context_config=context_config,
                     filter_type="local" if i in local_blocks else params.filter_type,
                     global_layer_norm=params.global_layer_norm,
-                    mlp_ratio=params.mlp_ratio,
                     drop_rate=params.drop_rate,
                     drop_path=dpr[i],
                     act_layer=act_layer,

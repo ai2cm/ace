@@ -57,12 +57,28 @@ def test_too_few_channels_raises(n_in, n_out):
         )
 
 
-def test_groups_must_divide_output_channels():
-    builder = NoiseConditionedFieldSFNOBuilder(
-        n_prognostic_channels=4, num_layers=1, filter_num_groups=4
-    )
+def test_groups_must_divide_spectral_width():
     with pytest.raises(ValueError, match="filter_num_groups"):
-        builder.build(n_in_channels=5, n_out_channels=7, dataset_info=_dataset_info())
+        NoiseConditionedFieldSFNOBuilder(
+            n_prognostic_channels=4, embed_dim=10, filter_num_groups=4
+        )
+
+
+def test_branch_widths_independent_of_channels():
+    builder = NoiseConditionedFieldSFNOBuilder(
+        n_prognostic_channels=2,
+        num_layers=1,
+        noise_embed_dim=4,
+        embed_dim=8,
+        spectral_ratio=0.5,
+        mlp_ratio=2.0,
+    )
+    model = builder.build(
+        n_in_channels=3, n_out_channels=5, dataset_info=_dataset_info()
+    )
+    block = model.conditional_model.blocks[0]
+    assert block.proj_in.weight.shape[:2] == (4, 5)
+    assert block.mlp.fwd[0].weight.shape[:2] == (16, 5)
 
 
 def test_invalid_network_option_raises_at_config():
@@ -95,7 +111,7 @@ def test_from_state_round_trip():
     state = dataclasses.asdict(builder)
     assert NoiseConditionedFieldSFNOBuilder.from_state(state) == builder
     with pytest.raises(dacite.UnexpectedDataError):
-        NoiseConditionedFieldSFNOBuilder.from_state({**state, "embed_dim": 4})
+        NoiseConditionedFieldSFNOBuilder.from_state({**state, "not_an_option": 4})
 
 
 def test_module_state_round_trip():

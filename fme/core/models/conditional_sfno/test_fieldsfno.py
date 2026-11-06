@@ -46,6 +46,7 @@ def _build(
     **config_kwargs,
 ):
     config_kwargs.setdefault("filter_type", "linear")
+    config_kwargs.setdefault("embed_dim", 16)
     config_kwargs.setdefault("num_layers", 2)
     config_kwargs.setdefault("forcing_embed_dim", 8)
     config = FieldSFNONetConfig(**config_kwargs)
@@ -106,7 +107,14 @@ def test_output_shape(
         pytest.param({"checkpointing": 3}, 0, id="checkpoint_blocks"),
         pytest.param({"local_blocks": [1]}, 0, id="local_block"),
         pytest.param({"filter_residual": True}, 0, id="filter_residual"),
-        pytest.param({"filter_num_groups": 7}, 0, id="grouped_filter"),
+        pytest.param({"filter_num_groups": 4}, 0, id="grouped_filter"),
+        pytest.param({"spectral_ratio": 0.5}, 0, id="spectral_ratio"),
+        pytest.param(
+            {"spectral_ratio": 0.5, "filter_num_groups": 2, "local_blocks": [0]},
+            0,
+            id="spectral_ratio_grouped_local",
+        ),
+        pytest.param({"mlp_ratio": 0.25}, 0, id="narrow_mlp"),
         pytest.param({"filter_preserves_global_mean": True}, 0, id="preserve_gm"),
         pytest.param({"global_layer_norm": True}, 0, id="global_layer_norm"),
         pytest.param({"affine_norms": True}, 0, id="affine_norms"),
@@ -222,11 +230,28 @@ def test_forcing_slot_in_context_config_rejected():
         ({"forcing_encoder_layers": 0}, "forcing_encoder_layers"),
         ({"forcing_embed_dim": 0}, "forcing_embed_dim"),
         ({"local_blocks": [2], "num_layers": 2}, "local_blocks"),
+        ({"embed_dim": 0}, "embed_dim"),
+        ({"spectral_ratio": 0.0}, "spectral_ratio"),
+        ({"spectral_ratio": 1.5}, "spectral_ratio"),
+        ({"embed_dim": 8, "spectral_ratio": 0.01}, "no spectral channels"),
+        ({"embed_dim": 8, "spectral_ratio": 0.5, "filter_num_groups": 3}, "divide"),
+        ({"embed_dim": 8, "mlp_ratio": 0.1}, "no MLP hidden channels"),
     ],
 )
 def test_invalid_config_raises(kwargs, match):
     with pytest.raises(ValueError, match=match):
         FieldSFNONetConfig(**kwargs)
+
+
+def test_branch_widths_follow_embed_dim():
+    """The filter and MLP widths come from embed_dim, not the field count."""
+    net, _, _ = _build(5, 3, 2, embed_dim=12, spectral_ratio=0.5, mlp_ratio=3.0)
+    block = net.blocks[0]
+    assert block.proj_in.weight.shape[:2] == (6, 7)
+    assert block.proj_out.weight.shape[:2] == (7, 6)
+    assert block.inner_skip.weight.shape[:2] == (6, 6)
+    assert block.mlp.fwd[0].weight.shape[:2] == (36, 7)
+    assert block.mlp.fwd[-1].weight.shape[:2] == (7, 36)
 
 
 def test_fieldsfno_output_is_unchanged():

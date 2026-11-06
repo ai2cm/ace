@@ -43,6 +43,13 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
         n_prognostic_channels: Number of prognostic channels, i.e. names in
             both ``in_names`` and ``out_names``.
         filter_type: Type of spectral filter to use.
+        embed_dim: Base width of the block branches: the MLP hidden layer is
+            ``int(embed_dim * mlp_ratio)`` wide and the spectral filter runs
+            on ``round(embed_dim * spectral_ratio)`` channels, independent of
+            the number of fields.
+        spectral_ratio: Fraction of ``embed_dim`` the spectral filter runs
+            on; each block projects the field to that width with a 1x1
+            convolution before the filter and back after it.
         noise_embed_dim: Dimension of the noise embedding.
         noise_type: Type of noise to use for conditioning.
         context_pos_embed_dim: Dimension of the position embedding to use
@@ -59,8 +66,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             applying layer normalization.
         num_layers: Number of blocks (spectral filter and MLP) in the model.
         use_mlp: Whether to use an MLP in each block.
-        mlp_ratio: Ratio of the MLP hidden dimension to the number of
-            output channels.
+        mlp_ratio: Ratio of the MLP hidden dimension to ``embed_dim``.
         activation_function: Activation function to use.
         drop_rate: Dropout rate inside the MLPs.
         drop_path_rate: Stochastic depth rate.
@@ -76,7 +82,8 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
         filter_num_groups: Number of groups to use in grouped convolutions
-            for the spectral filter. Must divide the number of output channels.
+            for the spectral filter. Must divide the spectral filter width
+            ``round(embed_dim * spectral_ratio)``.
         filter_preserves_global_mean: If True, the spectral filter preserves
             the l=0 (global mean) spherical harmonic coefficient.
         gamma_init: Initial value of each block's residual gates; 1e-12
@@ -85,6 +92,8 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
 
     n_prognostic_channels: int
     filter_type: Literal["linear", "makani-linear"] = "linear"
+    embed_dim: int = 256
+    spectral_ratio: float = 1.0
     noise_embed_dim: int = 256
     noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     context_pos_embed_dim: int = 0
@@ -123,6 +132,8 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
     def _net_config(self) -> FieldSFNONetConfig:
         return FieldSFNONetConfig(
             filter_type=self.filter_type,
+            embed_dim=self.embed_dim,
+            spectral_ratio=self.spectral_ratio,
             global_layer_norm=self.global_layer_norm,
             num_layers=self.num_layers,
             use_mlp=self.use_mlp,
@@ -158,12 +169,6 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             raise ValueError(
                 f"n_out_channels ({n_out_channels}) is smaller than "
                 f"n_prognostic_channels ({self.n_prognostic_channels})"
-            )
-        if n_out_channels % self.filter_num_groups != 0:
-            raise ValueError(
-                f"filter_num_groups ({self.filter_num_groups}) must divide "
-                f"n_out_channels ({n_out_channels}), the width of the spectral "
-                "filter in this model"
             )
         n_labels = len(dataset_info.all_labels)
         if self.label_embed_dim > 0:

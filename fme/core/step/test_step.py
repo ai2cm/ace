@@ -221,6 +221,7 @@ def get_single_module_field_sfno_selector(
                     config=dataclasses.asdict(
                         NoiseConditionedFieldSFNOBuilder(
                             n_prognostic_channels=2,
+                            embed_dim=8,
                             noise_embed_dim=4,
                             context_pos_embed_dim=2,
                             forcing_embed_dim=4,
