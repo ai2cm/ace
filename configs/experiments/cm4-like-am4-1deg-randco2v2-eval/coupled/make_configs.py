@@ -91,12 +91,15 @@ MONTHLY_ATMOS_NAMES = [
     "surface_temperature",
     "total_frozen_precipitation_rate",
     "PRATEsfc",
+    "net_energy_flux_toa_into_atmosphere",  # derived
 ]
 MONTHLY_OCEAN_NAMES = [
     "hfds_total_area",
     "thetao_0",
     "thetao_18",
     "ocean_sea_ice_fraction",
+    "ocean_heat_content",  # derived
+    "ocean_heat_content_tendency",  # derived
 ]
 
 MONTHLY_COMMENT = """
