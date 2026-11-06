@@ -131,6 +131,23 @@ def _split_muon_parameters(
     return muon_params, spectral_params, adamw_params
 
 
+def _default_foreach(
+    parameters: Sequence[torch.nn.Parameter], kwargs: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Keep torch's multi-tensor ("foreach") Adam default for models with
+    SpectralFilterParameter weights.
+
+    torch only defaults to the faster foreach implementation when every
+    parameter's type is exactly ``Tensor`` or ``Parameter``, so a single
+    ``SpectralFilterParameter`` would silently select the per-tensor loop.
+    """
+    if "foreach" in kwargs or "fused" in kwargs:
+        return kwargs
+    if not any(isinstance(p, SpectralFilterParameter) for p in parameters):
+        return kwargs
+    return {**kwargs, "foreach": all(p.is_cuda for p in parameters)}
+
+
 def _build_optimizer(
     optimizer_type: Literal["Adam", "FusedAdam", "AdamW", "Muon"],
     named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
@@ -150,6 +167,8 @@ def _build_optimizer(
             **kwargs,
         )
     parameters = [param for _, param in named_parameters]
+    if optimizer_type in ("Adam", "AdamW"):
+        kwargs = _default_foreach(parameters, kwargs)
     if optimizer_type == "FusedAdam":
         return torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
     elif optimizer_type == "Adam":

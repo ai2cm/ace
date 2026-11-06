@@ -663,6 +663,9 @@ def _spectral_step(param: SpectralFilterParameter, grad: torch.Tensor, lr: float
     [
         # conditional SFNO: (groups, modes, C_out, C_in, 2)
         dict(shape=(2, 3, 4, 6, 2), in_dim=3, out_dim=2, dtype=torch.float32),
+        # more outputs than inputs, e.g. LoRA B or an attention input layer
+        dict(shape=(2, 3, 6, 4, 2), in_dim=3, out_dim=2, dtype=torch.float32),
+        dict(shape=(2, 4, 6, 3), in_dim=1, out_dim=2, dtype=torch.complex64),
         # modulus/makani SFNO: (C_in, C_out, modes_lat, modes_lon, 2)
         dict(shape=(6, 4, 2, 3, 2), in_dim=0, out_dim=1, dtype=torch.float32),
         # complex makani SFNO: (groups, C_in, C_out, modes_lat, modes_lon)
@@ -811,3 +814,26 @@ def test_spectral_muon_state_round_trip():
 
     for (name, p1), p2 in zip(model.state_dict().items(), model2.state_dict().values()):
         torch.testing.assert_close(p1, p2, msg=name)
+
+
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW"])
+def test_adam_keeps_foreach_default_with_spectral_parameters(optimizer_type):
+    """torch would fall back to its per-tensor loop for a model containing a
+    Parameter subclass; the build restores the foreach default."""
+    model = _SpectralModel().to(fme.get_device())
+    optimization = _build(model, OptimizationConfig(optimizer_type=optimizer_type))
+    expected = fme.get_device().type == "cuda"
+    assert optimization.optimizer.defaults["foreach"] is expected
+
+
+def test_adam_foreach_with_spectral_parameters_steps():
+    torch.manual_seed(0)
+    model = _SpectralModel().to(fme.get_device())
+    optimization = _build(
+        model, OptimizationConfig(optimizer_type="Adam", kwargs={"foreach": True})
+    )
+    assert optimization.optimizer.defaults["foreach"] is True
+    original = model.spectral_weight.detach().clone()
+    _train_steps(model, optimization, torch.randn(4, 8, device=fme.get_device()), 1)
+    assert isinstance(model.spectral_weight, SpectralFilterParameter)
+    assert not torch.equal(model.spectral_weight.detach(), original)
