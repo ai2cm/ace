@@ -26,15 +26,19 @@ aimip_checkpoint_era5 selection entry and logging are copied verbatim):
   only (`optimize_last_step_only: true`); create_anneal_jobs.MULTI_STEP. This
   replaces the parent's 1 -> 2 (epoch 41) -> 4 (epoch 71) step schedule with
   the loss on every step.
-- EMA checkpoints every 5 epochs, `ema_checkpoint_save_epochs: {start: 5,
-  step: 5}`: epochs 5, 10, ..., 60 (the slice runs over range(max_epochs + 1),
-  so its index is the 1-based epoch number).
+- EMA checkpoints every 10 epochs on the 10-epoch boundaries,
+  `ema_checkpoint_save_epochs: {start: 10, step: 10}`: epochs 10, 20, ..., 60
+  (the slice runs over range(max_epochs + 1), so its index is the 1-based
+  epoch number), i.e. parent-equivalent epochs 50, 60, ..., 100.
 - The every-10-epoch inline inference entries (10year_oosample_varying_co2_era5,
-  long_46year_varying_co2_era5) run every 5 epochs on the same epochs as the
-  EMA checkpoints, `epochs: {start: 4, step: 5}`: the inline inference slice
-  runs over the list of epochs 1..max_epochs, so index 4 is epoch 5, giving
-  epochs 5, 10, ..., 60. (The parent's {start: 0, step: 10} runs them on epochs
-  1, 11, ..., 91, one epoch after each of its EMA checkpoints 10, 20, ..., 100.)
+  long_46year_varying_co2_era5) run on the same epochs as the EMA checkpoints,
+  `epochs: {start: 9, step: 10}`: the inline inference slice runs over the list
+  of epochs 1..max_epochs, so index 9 is epoch 10, giving epochs 10, 20, ...,
+  60. (The parent's {start: 0, step: 10} runs them on epochs 1, 11, ..., 91,
+  one epoch after each of its EMA checkpoints 10, 20, ..., 100.)
+- `evaluate_before_training: true`: validation and every inline inference
+  entry also run at epoch 0 on the loaded parent ema_ckpt_0040 weights, so the
+  fork point (parent-equivalent epoch 40) has the same diagnostics.
 
 Smoke config (`--smoke`) goes to run_configs/v3-smoke/, which no submit script
 globs except submit_fm_v3_jobs.py --smoke: the s0 fm-e3sm-balanced config cut
@@ -76,7 +80,7 @@ PARENT_CHECKPOINT = f"training_checkpoints/ema_ckpt_{FORK_EPOCH:04d}.tar"
 MAX_EPOCHS = 60
 CONSTANT_EPOCHS = 30
 DECAY_EPOCHS = MAX_EPOCHS - CONSTANT_EPOCHS
-SAVE_EVERY = 5
+SAVE_EVERY = 10
 # Same epochs, two indexing conventions (see the module docstring).
 EMA_CHECKPOINT_SAVE_EPOCHS = {"start": SAVE_EVERY, "step": SAVE_EVERY}
 SPARSE_INFERENCE_EPOCHS = {"start": SAVE_EVERY - 1, "step": SAVE_EVERY}
@@ -129,8 +133,10 @@ def make_config(parent: dict) -> dict:
     assert "resume_results" not in cfg
     assert cfg["max_epochs"] == 100
     assert cfg["ema_checkpoint_save_epochs"] == {"start": 10, "step": 10}
+    assert "evaluate_before_training" not in cfg
     cfg["max_epochs"] = MAX_EPOCHS
     cfg["ema_checkpoint_save_epochs"] = dict(EMA_CHECKPOINT_SAVE_EPOCHS)
+    cfg["evaluate_before_training"] = True
 
     for entry in cfg["inference"]:
         if entry["name"] == SELECTION_ENTRY:

@@ -953,3 +953,4 @@ train_aggregator:
 ema_checkpoint_save_epochs:
   start: 1
   step: 1
+evaluate_before_training: true
