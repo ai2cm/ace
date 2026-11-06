@@ -955,6 +955,24 @@ def test_sht_roundtrip_variables_missing_variable(mock_monthly_netcdfs):
         xarray_dataset_constructor(config, mock_monthly_netcdfs.var_names.all_names, 2)
 
 
+def test_sht_roundtrip_variables_nans(mock_monthly_netcdfs_with_nans):
+    names = mock_monthly_netcdfs_with_nans.var_names.all_names
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs_with_nans.tmpdir,
+        sht_roundtrip_variables=["foo"],
+    )
+    dataset = xarray_dataset_constructor(config, names, 2)
+    with pytest.raises(ValueError, match="foo.*NaN"):
+        dataset[0]
+    config_filled = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs_with_nans.tmpdir,
+        sht_roundtrip_variables=["foo"],
+        fill_nans=FillNaNsConfig(),
+    )
+    data = xarray_dataset_constructor(config_filled, names, 2)[0][0]
+    assert not torch.isnan(data["foo"]).any()
+
+
 def test_sht_roundtrip_variables_requires_latlon():
     with pytest.raises(ValueError, match="latlon"):
         XarrayDataConfig(

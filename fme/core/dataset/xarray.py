@@ -668,10 +668,16 @@ class XarrayDataset(DatasetABC):
         nlat, nlon = self._horizontal_coordinates.shape[-2:]
         return _SHTRoundtrip(nlat, nlon, grid=self._horizontal_coordinates.grid)
 
-    def _apply_sht_roundtrip(self, tensors: TensorDict, names: Iterable[str]):
+    def _apply_sht_roundtrip(self, tensors: TensorDict, names: Iterable[str]) -> None:
         if self._sht_roundtrip is None:
             return
         for name in self._sht_roundtrip_names.intersection(names):
+            if torch.isnan(tensors[name]).any():
+                # a roundtrip would spread the NaNs over the whole field
+                raise ValueError(
+                    f"sht_roundtrip_variables variable '{name}' contains NaNs; "
+                    "use fill_nans to fill them before the roundtrip."
+                )
             tensors[name] = self._sht_roundtrip(tensors[name])
 
     def _load_time_invariant_tensors(self) -> dict[str, torch.Tensor]:
