@@ -165,4 +165,4 @@ hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|inf_submitted_cm4-abrupt4x
 
 # Separate 100-year extension of member 1 for the hybrid-residual + replay arm that writes monthly means of selected
 # atmosphere and ocean outputs (see MONTHLY_*_NAMES in make_configs.py).
-hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_inf_cm4-abrupt4xCO2-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h||01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|titan
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_inf_cm4-abrupt4xCO2-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h||01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|h100
