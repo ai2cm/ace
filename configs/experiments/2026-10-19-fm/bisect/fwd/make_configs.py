@@ -219,6 +219,18 @@ def build():
     arms["F1-v22data"] = f1
     arms["F1n-nocm4"] = f1n
     arms["F1e-era5share"] = f1e
+    # Pooled (network/residual) stats split: they set the loss weights and
+    # the pinned inputs; the per-group era5/c96 stats are near-identical.
+    v21n = v21_normalization(f1["stepper"]["step"]["config"]["normalization"])
+    v22n = f1["stepper"]["step"]["config"]["normalization"]
+    f0p = copy.deepcopy(f0)  # v2.1 setup, v2.2 pooled stats
+    for k in ("network", "residual"):
+        f0p["stepper"]["step"]["config"]["normalization"][k] = copy.deepcopy(v22n[k])
+    f1p = copy.deepcopy(f1)  # v2.2 setup, v2.1 pooled stats
+    for k in ("network", "residual"):
+        f1p["stepper"]["step"]["config"]["normalization"][k] = copy.deepcopy(v21n[k])
+    arms["F0p-v22pooled"] = f0p
+    arms["F1p-v21pooled"] = f1p
     # Seed replicates to size run-to-run noise in the gain trajectory
     # (F1n came out above F1, so seed noise may be large).
     for base_arm, cfg in (("F0-v21", f0), ("F1-v22data", f1)):
