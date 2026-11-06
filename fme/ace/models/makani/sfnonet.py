@@ -23,8 +23,8 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 
-# get spectral transforms from torch_harmonics
-import torch_harmonics as th
+# get spectral transforms from fme.core.sht
+import fme.core.sht as th
 from torch.utils.checkpoint import checkpoint
 
 from .layers import MLP, DropPath, EncoderDecoder, InverseRealFFT2, RealFFT2
