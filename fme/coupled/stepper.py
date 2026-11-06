@@ -1373,7 +1373,7 @@ class CoupledStepper:
         prognostic_state = CoupledPrognosticState(
             ocean_data=gen_data.ocean_data.get_end(
                 self.ocean.prognostic_names,
-                self.n_ic_timesteps,
+                self.ocean.n_ic_timesteps,
             ),
             atmosphere_data=gen_data.atmosphere_data.get_end(
                 self.atmosphere.prognostic_names,
