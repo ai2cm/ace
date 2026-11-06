@@ -448,6 +448,7 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
 
     coords = {"lat": np.arange(n_lat), "lon": np.arange(n_lon)}
 
+    writers: list[PairedSubwriter] = []
     if dist.is_data_parallel_root():
         raw_writer = PairedRawDataWriter(
             path=experiment_dir,
@@ -457,9 +458,7 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
             coords=coords,
             dataset_metadata=DatasetMetadata(),
         )
-        writers: list[PairedSubwriter] = [raw_writer]
-    else:
-        writers: list[PairedSubwriter] = []
+        writers = [raw_writer]
 
     writer = PairedDataWriter(
         writers=writers,
@@ -471,8 +470,12 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
 
     prediction = {"temp": torch.full((n_local, 1, n_lat, n_lon), float(rank))}
     target = {"temp": torch.full((n_local, 1, n_lat, n_lon), float(rank) + 100)}
+    local_ic_start = rank * n_local
     time = xr.DataArray(
-        [[cftime.DatetimeProlepticGregorian(2020, 2, 1 + s)] for s in range(n_local)],
+        [
+            [global_ic_times[local_ic_start + s] + datetime.timedelta(days=1)]
+            for s in range(n_local)
+        ],
         dims=["sample", "time"],
     )
     batch = PairedData(

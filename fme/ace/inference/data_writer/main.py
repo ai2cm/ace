@@ -443,9 +443,6 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 batch_time=batch.time,
             )
 
-        if not self._writers and self._step_diagnostics_writer is None:
-            return
-
         dist = Distributed.get_instance()
         prediction = _gather_tensor_dict(dict(batch.prediction), dist)
         target = _gather_tensor_dict(dict(batch.reference), dist)
@@ -622,9 +619,6 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
 
         for writer in self._local_writers:
             writer.append_batch(data=merged, batch_time=batch.time)
-
-        if not self._writers and self._step_diagnostics_writer is None:
-            return
 
         dist = Distributed.get_instance()
         gathered_data = _gather_tensor_dict(merged, dist)
