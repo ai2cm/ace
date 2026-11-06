@@ -60,6 +60,7 @@ RUN_SCRIPT = HERE / "run-ace-anneal.sh"
 WANDB_GROUP = "ace2-fm-2026-11-06"
 N_GPUS = "4"
 BUDGET = "ai2/atec-climate"  # as run-ace-anneal.sh
+PARENT_LIST_TEXT = "ace2-fm-nc-sfno-v2-fm-"
 EMA_CKPT_RE = re.compile(r"training_checkpoints/ema_ckpt_(\d{4})\.tar")
 
 
@@ -214,7 +215,9 @@ def main() -> None:
     jobs = drop_jobs_in_beaker(jobs, lambda job: job[1]["JOB_NAME"], args)
 
     print("Looking for parent checkpoints in Beaker...")
-    experiments = list_experiments(args.beaker_workspace)
+    # Parents only: the broad default "ace2-fm-" listing matches ~9k
+    # experiments and times out; the parents share this prefix.
+    experiments = list_experiments(args.beaker_workspace, text=PARENT_LIST_TEXT)
     ready = []
     for path, header in jobs:
         parent = header["PARENT_JOB"]
