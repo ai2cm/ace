@@ -1,4 +1,5 @@
 import dataclasses
+import os
 
 import pytest
 import torch
@@ -9,17 +10,29 @@ from fme.core.models.conditional_sfno.fieldsfno import (
     get_lat_lon_fieldsfno,
 )
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.testing.regression import validate_tensor
 
+DIR = os.path.abspath(os.path.dirname(__file__))
 IMG_SHAPE = (9, 18)
 N_SAMPLES = 4
+FILTER_TYPES = ["linear", "makani-linear"]
 
 
-def _context(n_samples: int, embed_dim_noise: int, embed_dim_pos: int) -> Context:
+def _context(
+    n_samples: int,
+    embed_dim_noise: int,
+    embed_dim_pos: int,
+    embed_dim_labels: int = 0,
+) -> Context:
     device = get_device()
     return Context(
         embedding_scalar=None,
         embedding_pos=torch.randn(n_samples, embed_dim_pos, *IMG_SHAPE, device=device),
-        labels=None,
+        labels=(
+            torch.randn(n_samples, embed_dim_labels, device=device)
+            if embed_dim_labels > 0
+            else None
+        ),
         noise=torch.randn(n_samples, embed_dim_noise, *IMG_SHAPE, device=device),
     )
 
@@ -30,11 +43,13 @@ def _build(
     diagnostic: int,
     embed_dim_noise: int = 4,
     embed_dim_pos: int = 3,
+    embed_dim_labels: int = 0,
     **config_kwargs,
 ):
-    config = FieldSFNONetConfig(
-        filter_type="makani-linear", num_layers=2, forcing_embed_dim=8, **config_kwargs
-    )
+    config_kwargs.setdefault("filter_type", "linear")
+    config_kwargs.setdefault("num_layers", 2)
+    config_kwargs.setdefault("forcing_embed_dim", 8)
+    config = FieldSFNONetConfig(**config_kwargs)
     net = get_lat_lon_fieldsfno(
         params=config,
         prognostic_chans=prognostic,
@@ -45,35 +60,99 @@ def _build(
         context_config=ContextConfig(
             embed_dim_scalar=0,
             embed_dim_noise=embed_dim_noise,
-            embed_dim_labels=0,
+            embed_dim_labels=embed_dim_labels,
             embed_dim_pos=embed_dim_pos,
         ),
     ).to(get_device())
-    context = _context(N_SAMPLES, embed_dim_noise, embed_dim_pos)
+    context = _context(N_SAMPLES, embed_dim_noise, embed_dim_pos, embed_dim_labels)
     x = torch.randn(N_SAMPLES, prognostic + forcing, *IMG_SHAPE, device=get_device())
     return net, x, context
+
+
+def _open_gates(net: torch.nn.Module, value: float = 0.5):
+    """Set every gate and forcing-conditioning weight so the branches act."""
+    with torch.no_grad():
+        for name, param in net.named_parameters():
+            if "gamma" in name or "_forcing" in name:
+                param.fill_(value)
 
 
 @pytest.mark.parametrize(
     "prognostic, forcing, diagnostic",
     [(5, 3, 2), (5, 0, 2), (5, 3, 0), (1, 0, 0)],
 )
+@pytest.mark.parametrize("filter_type", FILTER_TYPES)
 @pytest.mark.parametrize("filter_output", [False, True])
 @pytest.mark.parametrize("use_mlp", [False, True])
-def test_output_shape(prognostic, forcing, diagnostic, filter_output, use_mlp):
+def test_output_shape(
+    prognostic, forcing, diagnostic, filter_type, filter_output, use_mlp
+):
     net, x, context = _build(
-        prognostic, forcing, diagnostic, filter_output=filter_output, use_mlp=use_mlp
+        prognostic,
+        forcing,
+        diagnostic,
+        filter_type=filter_type,
+        filter_output=filter_output,
+        use_mlp=use_mlp,
     )
     out = net(x, context)
     assert out.shape == (N_SAMPLES, prognostic + diagnostic, *IMG_SHAPE)
     assert torch.isfinite(out).all()
 
 
-def test_identity_at_init():
+@pytest.mark.parametrize(
+    "config_kwargs, embed_dim_labels",
+    [
+        pytest.param({"checkpointing": 2}, 0, id="checkpoint_mlp"),
+        pytest.param({"checkpointing": 3}, 0, id="checkpoint_blocks"),
+        pytest.param({"local_blocks": [1]}, 0, id="local_block"),
+        pytest.param({"filter_residual": True}, 0, id="filter_residual"),
+        pytest.param({"filter_num_groups": 7}, 0, id="grouped_filter"),
+        pytest.param({"filter_preserves_global_mean": True}, 0, id="preserve_gm"),
+        pytest.param({"global_layer_norm": True}, 0, id="global_layer_norm"),
+        pytest.param({"affine_norms": True}, 0, id="affine_norms"),
+        pytest.param({"drop_path_rate": 0.5, "drop_rate": 0.1}, 0, id="dropout"),
+        pytest.param({"activation_function": "silu"}, 0, id="silu"),
+        pytest.param({"forcing_encoder_layers": 1}, 0, id="linear_forcing_encoder"),
+        pytest.param({}, 3, id="labels"),
+    ],
+)
+def test_options_forward_backward(config_kwargs, embed_dim_labels):
+    """Every option runs forward and backward with every parameter trained."""
+    prognostic, forcing, diagnostic = 5, 3, 2
+    net, x, context = _build(
+        prognostic,
+        forcing,
+        diagnostic,
+        embed_dim_labels=embed_dim_labels,
+        gamma_init=0.5,
+        **config_kwargs,
+    )
+    _open_gates(net)
+    out = net(x, context)
+    assert out.shape == (N_SAMPLES, prognostic + diagnostic, *IMG_SHAPE)
+    out.sum().backward()
+    missing = [
+        name
+        for name, param in net.named_parameters()
+        if param.requires_grad and param.grad is None
+    ]
+    assert missing == []
+
+
+@pytest.mark.parametrize("filter_type", FILTER_TYPES)
+@pytest.mark.parametrize("filter_output", [False, True])
+def test_identity_at_init(filter_type, filter_output):
     """With the default gates the net returns the prognostic inputs and zero
     diagnostics."""
     prognostic, forcing, diagnostic = 5, 3, 2
-    net, x, context = _build(prognostic, forcing, diagnostic)
+    net, x, context = _build(
+        prognostic,
+        forcing,
+        diagnostic,
+        filter_type=filter_type,
+        filter_output=filter_output,
+    )
     out = net(x, context)
     torch.testing.assert_close(out[:, :prognostic], x[:, :prognostic])
     torch.testing.assert_close(
@@ -85,10 +164,7 @@ def test_gates_open_updates():
     """Opening the gates makes the output depend on the blocks."""
     prognostic, forcing, diagnostic = 5, 3, 2
     net, x, context = _build(prognostic, forcing, diagnostic)
-    with torch.no_grad():
-        for name, param in net.named_parameters():
-            if "gamma" in name:
-                param.fill_(1.0)
+    _open_gates(net, 1.0)
     out = net(x, context)
     assert not torch.allclose(out[:, :prognostic], x[:, :prognostic])
     assert not torch.allclose(
@@ -99,15 +175,20 @@ def test_gates_open_updates():
 def test_forcing_conditions_output():
     prognostic, forcing, diagnostic = 5, 3, 2
     net, x, context = _build(prognostic, forcing, diagnostic)
-    with torch.no_grad():
-        for name, param in net.named_parameters():
-            if "gamma" in name or "W_scale_forcing" in name or "W_bias_forcing" in name:
-                param.fill_(0.5)
+    _open_gates(net)
     out_a = net(x, context)
     x_b = x.clone()
     x_b[:, prognostic:] = torch.randn_like(x_b[:, prognostic:])
     out_b = net(x_b, context)
     assert not torch.allclose(out_a, out_b)
+
+
+def test_forward_does_not_mutate_context():
+    net, x, context = _build(5, 3, 2)
+    before = context.asdict()
+    net(x, context)
+    assert context.embedding_forcing is None
+    assert context.asdict() == before
 
 
 def test_wrong_input_channels_raises():
@@ -117,7 +198,7 @@ def test_wrong_input_channels_raises():
 
 
 def test_forcing_slot_in_context_config_rejected():
-    config = FieldSFNONetConfig(filter_type="makani-linear", num_layers=1)
+    config = FieldSFNONetConfig(filter_type="linear", num_layers=1)
     with pytest.raises(ValueError, match="embed_dim_forcing"):
         get_lat_lon_fieldsfno(
             params=config,
@@ -135,25 +216,44 @@ def test_forcing_slot_in_context_config_rejected():
         )
 
 
-def test_gradients_reach_all_parameters():
-    prognostic, forcing, diagnostic = 5, 3, 2
-    net, x, context = _build(prognostic, forcing, diagnostic, gamma_init=0.5)
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"activation_function": "tanh"}, "activation function"),
+        ({"forcing_encoder_layers": 0}, "forcing_encoder_layers"),
+        ({"forcing_embed_dim": 0}, "forcing_embed_dim"),
+        ({"local_blocks": [2], "num_layers": 2}, "local_blocks"),
+    ],
+)
+def test_invalid_config_raises(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        FieldSFNONetConfig(**kwargs)
+
+
+def test_fieldsfno_output_is_unchanged():
+    torch.manual_seed(0)
+    net, x, context = _build(5, 3, 2, gamma_init=0.5)
+    _open_gates(net)
     with torch.no_grad():
-        for name, param in net.named_parameters():
-            if "W_scale_forcing" in name or "W_bias_forcing" in name:
-                param.fill_(0.5)
-    net(x, context).sum().backward()
-    missing = [
-        name
-        for name, param in net.named_parameters()
-        if param.requires_grad and param.grad is None
-    ]
-    assert missing == []
+        output = net(x, context)
+    validate_tensor(
+        output, os.path.join(DIR, "testdata/test_fieldsfno_output_is_unchanged.pt")
+    )
 
 
-def test_context_replace_keeps_other_slots():
-    """The net adds the forcing embedding without dropping the other slots."""
-    context = _context(N_SAMPLES, 4, 3)
-    replaced = dataclasses.replace(context, embedding_forcing=torch.zeros(1))
-    assert replaced.noise is context.noise
-    assert replaced.embedding_pos is context.embedding_pos
+def test_state_dict_round_trip():
+    net, x, context = _build(5, 3, 2, gamma_init=0.5)
+    _open_gates(net)
+    net2, _, _ = _build(5, 3, 2, gamma_init=0.5)
+    net2.load_state_dict(net.state_dict())
+    with torch.no_grad():
+        torch.testing.assert_close(net(x, context), net2(x, context))
+
+
+def test_context_replace_is_used_without_forcing():
+    """A net with no forcing channels leaves the context untouched."""
+    net, x, context = _build(5, 0, 2)
+    assert net.forcing_encoder is None
+    replaced = dataclasses.replace(context)
+    net(x, replaced)
+    assert replaced.embedding_forcing is None

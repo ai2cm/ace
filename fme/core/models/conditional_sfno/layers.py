@@ -211,10 +211,10 @@ class ConditionalLayerNorm(nn.Module):
             self.W_bias_pos = None
         if self.embed_dim_forcing > 0:
             # no bias as it is already handled in the non-2d layers
-            self.W_scale_forcing = nn.Conv2d(
+            self.W_scale_forcing: nn.Conv2d | None = nn.Conv2d(
                 self.embed_dim_forcing, self.n_channels, kernel_size=1, bias=False
             )
-            self.W_bias_forcing = nn.Conv2d(
+            self.W_bias_forcing: nn.Conv2d | None = nn.Conv2d(
                 self.embed_dim_forcing, self.n_channels, kernel_size=1, bias=False
             )
         else:

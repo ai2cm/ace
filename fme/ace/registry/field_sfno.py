@@ -26,6 +26,11 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
     part of the residual stream, and diagnostic outputs start from learned
     initial values and are evolved like prognostic fields.
 
+    The model is the identity on the prognostic fields at initialization, so
+    it already predicts persistence. Use it with the step's
+    ``residual_prediction`` off; with it on, the step would predict twice the
+    input at initialization.
+
     Channel contract: the step passes channels in config order, so the step's
     ``in_names`` must list the prognostic names first (in the same order as
     ``out_names``) followed by the forcing names, and ``out_names`` must list
@@ -66,7 +71,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             SHT round-trip.
         filter_output: Whether to filter the model's update (output minus
             input state) through a SHT round-trip.
-        local_blocks: List of block indices to use discrete-conditional
+        local_blocks: List of block indices to use discrete-continuous
             convolution (DISCO) blocks, which apply local filters.
         affine_norms: Whether to use element-wise affine parameters in the
             normalization layers.
@@ -112,6 +117,8 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
     def __post_init__(self):
         if self.n_prognostic_channels < 1:
             raise ValueError("n_prognostic_channels must be at least 1")
+        # validate the network options at config load rather than at build
+        self._net_config()
 
     def _net_config(self) -> FieldSFNONetConfig:
         return FieldSFNONetConfig(
@@ -152,6 +159,12 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
                 f"n_out_channels ({n_out_channels}) is smaller than "
                 f"n_prognostic_channels ({self.n_prognostic_channels})"
             )
+        if n_out_channels % self.filter_num_groups != 0:
+            raise ValueError(
+                f"filter_num_groups ({self.filter_num_groups}) must divide "
+                f"n_out_channels ({n_out_channels}), the width of the spectral "
+                "filter in this model"
+            )
         n_labels = len(dataset_info.all_labels)
         if self.label_embed_dim > 0:
             effective_label_dim = self.label_embed_dim
@@ -175,6 +188,8 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
         inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None
         if self.noise_type == "isotropic":
             inverse_sht = net.itrans_up
+            # itrans_up is typed as nn.Module; lmax and mmax are its int
+            # attributes, read via getattr so mypy accepts the int() call.
             lmax = int(getattr(net.itrans_up, "lmax"))
             mmax = int(getattr(net.itrans_up, "mmax"))
         else:

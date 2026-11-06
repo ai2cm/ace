@@ -9,6 +9,11 @@ at field width and are added back onto the field through learned gates
 initialized near zero, so the network starts as the identity map on the
 prognostic fields.
 
+The network starts as the identity map on the prognostic channels, so it
+already predicts persistence at initialization. Use it with the step's
+``residual_prediction`` off: a step that adds the network output onto the
+input would predict twice the input at initialization.
+
 Channel contract (not enforced on names; order channels in configs to match):
 
 - input channels are ``[prognostic..., forcing...]``: the first
@@ -349,7 +354,6 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
         prognostic = x[:, : self.prognostic_chans]
         if self.diagnostic_init is None:
             return prognostic
-        assert self.diagnostic_init is not None
         diagnostic = self.diagnostic_init.to(dtype=x.dtype).expand(
             x.shape[0], self.diagnostic_chans, *x.shape[-2:]
         )
