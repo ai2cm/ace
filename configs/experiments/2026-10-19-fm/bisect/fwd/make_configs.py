@@ -231,6 +231,18 @@ def build():
         f1p["stepper"]["step"]["config"]["normalization"][k] = copy.deepcopy(v21n[k])
     arms["F0p-v22pooled"] = f0p
     arms["F1p-v21pooled"] = f1p
+    # Label split: F0 with amip/ramped/som collapsed into one c96 label (as
+    # in v2.2); data, subsets and stats stay v2.1.
+    f0l = copy.deepcopy(f0)
+    for e in f0l["train_loader"]["dataset"]["concat"]:
+        if e["labels"] != ["era5"]:
+            e["labels"] = ["c96"]
+    w = f0l["train_loader"]["label_sampling"]["weights"]
+    w["c96"] = w.pop("amip") + w.pop("ramped") + w.pop("som")
+    g = f0l["stepper"]["step"]["config"]["normalization"]["grouped"]["groups"]
+    g["c96"] = g.pop("amip")
+    del g["ramped"], g["som"]
+    arms["F0l-c96label"] = f0l
     # Seed replicates to size run-to-run noise in the gain trajectory
     # (F1n came out above F1, so seed noise may be large).
     for base_arm, cfg in (("F0-v21", f0), ("F1-v22data", f1)):
