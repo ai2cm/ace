@@ -178,29 +178,44 @@ def test_layers_spectral_attention_weights_are_tagged(cls, fft: bool):
     }
 
 
-def _modules_with_spectral_weights():
+def _module_with_spectral_weights(name: str) -> nn.Module:
     sht, isht = _transforms()
-    return {
-        "modulus_conv": ModulusConv(sht, isht, IN, OUT, use_tensorly=False),
-        "makani_conv": MakaniConv(sht, isht, IN, OUT),
-        "conditional_makani_conv": ConditionalMakaniConv(
-            sht, isht, IN, OUT, num_groups=2
-        ),
-        "fcn3_conv": FCN3Conv(sht, isht, IN, OUT, num_groups=2),
-        "conditional_conv_lora": ConditionalConv(sht, isht, 4, 4, lora_rank=2),
-        "modulus_attention": ModulusAttention(
+    if name == "modulus_conv":
+        return ModulusConv(sht, isht, IN, OUT, use_tensorly=False)
+    if name == "makani_conv":
+        return MakaniConv(sht, isht, IN, OUT)
+    if name == "conditional_makani_conv":
+        return ConditionalMakaniConv(sht, isht, IN, OUT, num_groups=2)
+    if name == "fcn3_conv":
+        return FCN3Conv(sht, isht, IN, OUT, num_groups=2)
+    if name == "conditional_conv_lora":
+        return ConditionalConv(sht, isht, 4, 4, lora_rank=2)
+    if name == "modulus_attention":
+        return ModulusAttention(
             sht, isht, 4, operator_type="l-dependant", spectral_layers=2
-        ),
-        "conditional_attention": ConditionalAttention(sht, isht, 4, spectral_layers=2),
-    }
+        )
+    if name == "conditional_attention":
+        return ConditionalAttention(sht, isht, 4, spectral_layers=2)
+    raise ValueError(name)
 
 
-@pytest.mark.parametrize("name", list(_modules_with_spectral_weights()))
+@pytest.mark.parametrize(
+    "name",
+    [
+        "modulus_conv",
+        "makani_conv",
+        "conditional_makani_conv",
+        "fcn3_conv",
+        "conditional_conv_lora",
+        "modulus_attention",
+        "conditional_attention",
+    ],
+)
 def test_muon_steps_every_tagged_weight(name: str):
     """Spectral Muon steps each layer's tagged weights, including matrices with
     more output than input channels."""
     torch.manual_seed(0)
-    module = _modules_with_spectral_weights()[name]
+    module = _module_with_spectral_weights(name)
     tagged = _tagged(module)
     assert tagged
     config = OptimizationConfig(
