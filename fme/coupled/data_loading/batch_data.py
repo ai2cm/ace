@@ -191,6 +191,15 @@ class CoupledBatchData:
         )
 
 
+def _paired_realm_data(
+    realm: str, prediction: BatchData, reference: BatchData
+) -> PairedData:
+    try:
+        return PairedData.from_batch_data(prediction=prediction, reference=reference)
+    except ValueError as err:
+        raise ValueError(f"{realm}: {err}") from err
+
+
 @dataclasses.dataclass
 class CoupledPairedData:
     """
@@ -208,12 +217,10 @@ class CoupledPairedData:
         reference: CoupledBatchData,
     ) -> "CoupledPairedData":
         return CoupledPairedData(
-            ocean_data=PairedData.from_batch_data(
-                prediction=prediction.ocean_data,
-                reference=reference.ocean_data,
+            ocean_data=_paired_realm_data(
+                "ocean", prediction.ocean_data, reference.ocean_data
             ),
-            atmosphere_data=PairedData.from_batch_data(
-                prediction=prediction.atmosphere_data,
-                reference=reference.atmosphere_data,
+            atmosphere_data=_paired_realm_data(
+                "atmosphere", prediction.atmosphere_data, reference.atmosphere_data
             ),
         )

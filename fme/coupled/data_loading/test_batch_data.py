@@ -204,7 +204,9 @@ def test_from_coupled_batch_data_rejects_mismatched_time(mismatched_realm: str):
             ocean_data=reference.ocean_data,
             atmosphere_data=shifted.atmosphere_data,
         )
-    with pytest.raises(ValueError, match="time coordinate must be the same"):
+    with pytest.raises(
+        ValueError, match=f"^{mismatched_realm}: .*time coordinate must be the same"
+    ):
         CoupledPairedData.from_coupled_batch_data(prediction, reference)
 
 
