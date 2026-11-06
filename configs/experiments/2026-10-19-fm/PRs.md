@@ -29,6 +29,7 @@ listed here.
 | [#1612](https://github.com/ai2cm/ace/pull/1612) | Fix Swin padding geometry: consistent CPB latitudes, window-multiple fill, and mirror-mode lat coords | yyexela |
 | [#1615](https://github.com/ai2cm/ace/pull/1615) | Add checkpoint weight averaging (model soup) | yyexela |
 | [#1617](https://github.com/ai2cm/ace/pull/1617) | Add per-sample global-mean drift inference aggregator | yyexela |
+| [#1620](https://github.com/ai2cm/ace/pull/1620) | Add per-dataset spherical harmonic roundtrip of selected variables | yyexela |
 
 ## Deferred
 
