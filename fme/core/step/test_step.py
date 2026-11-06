@@ -12,6 +12,7 @@ import torch
 from torch import nn
 
 import fme
+from fme.ace.registry.field_sfno import NoiseConditionedFieldSFNOBuilder
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
@@ -195,6 +196,41 @@ def get_single_module_noise_conditioned_selector(
                     secondary_diagnostic_names=["diagnostic_rad"],
                     network=ModuleSelector(type="MLP", config={}),
                 ),
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_single_module_field_sfno_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    """Field-space SFNO with the channel contract it relies on: in_names list
+    the prognostics first then the forcings, out_names the prognostics first
+    then the diagnostics."""
+    normalization = get_network_and_loss_normalization_config(
+        names=["prog_a", "prog_b", "forcing_shared", "diagnostic_main"],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedFieldSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedFieldSFNOBuilder(
+                            n_prognostic_channels=2,
+                            embed_dim=8,
+                            noise_embed_dim=4,
+                            context_pos_embed_dim=2,
+                            forcing_embed_dim=4,
+                            num_layers=2,
+                        )
+                    ),
+                ),
+                in_names=["prog_a", "prog_b", "forcing_shared"],
+                out_names=["prog_a", "prog_b", "diagnostic_main"],
                 normalization=normalization,
             ),
         ),
@@ -495,6 +531,7 @@ SELECTOR_GETTERS = [
     get_separate_radiation_selector,
     get_single_module_selector,
     get_single_module_noise_conditioned_selector,
+    get_single_module_field_sfno_selector,
     get_single_module_include_input_step_selector,
     get_secondary_module_selector,
     get_multi_call_selector,
@@ -583,6 +620,32 @@ def test_label_conditioned_step():
     local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
     assert output["diagnostic_main"].shape == (1, local_h, local_w)
     assert output["diagnostic_rad"].shape == (1, local_h, local_w)
+
+
+def test_field_sfno_step_is_persistence_at_init():
+    """The field-space SFNO starts as the identity on its prognostic channels,
+    so the step predicts persistence before training. This also pins the
+    channel ordering contract the builder cannot check by name."""
+    torch.manual_seed(0)
+    dist = Distributed.get_instance()
+    step = get_step(get_single_module_field_sfno_selector(), DEFAULT_IMG_SHAPE)
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=2
+    )
+    input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
+    next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+        wrapper=lambda x: x,
+    ).output
+    for name in ["prog_a", "prog_b"]:
+        torch.testing.assert_close(output[name], input_data[name])
+    assert torch.isfinite(output["diagnostic_main"]).all()
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)

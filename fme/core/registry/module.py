@@ -71,6 +71,7 @@ class ModuleConfig(abc.ABC):
 
 CONDITIONAL_BUILDERS = [
     "NoiseConditionedSFNO",
+    "NoiseConditionedFieldSFNO",
     "LocalNet",
     "SwinTransformer",
     "NoiseConditionedSwinTransformer",
