@@ -22,6 +22,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
+
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
 
@@ -239,11 +241,24 @@ class SpectralAttention2d(nn.Module):
         assert inverse_transform.mmax == self.modes_lon
 
         # weights
-        w = [self.scale * torch.randn(self.embed_dim, self.hidden_size, 2)]
+        # contracted as "bixy,io->boxy"
+        w = [
+            SpectralFilterParameter(
+                self.scale * torch.randn(self.embed_dim, self.hidden_size, 2),
+                in_dim=0,
+                out_dim=1,
+            )
+        ]
         # w = [self.scale * torch.randn(self.embed_dim + 2*self.embed_freqs, self.hidden_size, 2)]
         # w = [self.scale * torch.randn(self.embed_dim + 4*self.embed_freqs, self.hidden_size, 2)]
         for l in range(1, self.spectral_layers):
-            w.append(self.scale * torch.randn(self.hidden_size, self.hidden_size, 2))
+            w.append(
+                SpectralFilterParameter(
+                    self.scale * torch.randn(self.hidden_size, self.hidden_size, 2),
+                    in_dim=0,
+                    out_dim=1,
+                )
+            )
         self.w = nn.ParameterList(w)
 
         if bias:
@@ -254,8 +269,10 @@ class SpectralAttention2d(nn.Module):
                 ]
             )
 
-        self.wout = nn.Parameter(
-            self.scale * torch.randn(self.hidden_size, self.embed_dim, 2)
+        self.wout = SpectralFilterParameter(
+            self.scale * torch.randn(self.hidden_size, self.embed_dim, 2),
+            in_dim=0,
+            out_dim=1,
         )
 
         self.drop = nn.Dropout(drop_rate) if drop_rate > 0.0 else nn.Identity()
@@ -350,10 +367,23 @@ class SpectralAttentionS2(nn.Module):
         assert inverse_transform.mmax == self.modes_lon
 
         # weights
-        w = [self.scale * torch.randn(self.embed_dim, self.hidden_size, 2)]
+        # contracted as "bixy,io->boxy"
+        w = [
+            SpectralFilterParameter(
+                self.scale * torch.randn(self.embed_dim, self.hidden_size, 2),
+                in_dim=0,
+                out_dim=1,
+            )
+        ]
         # w = [self.scale * torch.randn(self.embed_dim + 4*self.embed_freqs, self.hidden_size, 2)]
         for l in range(1, self.spectral_layers):
-            w.append(self.scale * torch.randn(self.hidden_size, self.hidden_size, 2))
+            w.append(
+                SpectralFilterParameter(
+                    self.scale * torch.randn(self.hidden_size, self.hidden_size, 2),
+                    in_dim=0,
+                    out_dim=1,
+                )
+            )
         self.w = nn.ParameterList(w)
 
         if bias:
@@ -364,8 +394,10 @@ class SpectralAttentionS2(nn.Module):
                 ]
             )
 
-        self.wout = nn.Parameter(
-            self.scale * torch.randn(self.hidden_size, self.embed_dim, 2)
+        self.wout = SpectralFilterParameter(
+            self.scale * torch.randn(self.hidden_size, self.embed_dim, 2),
+            in_dim=0,
+            out_dim=1,
         )
 
         self.drop = nn.Dropout(drop_rate) if drop_rate > 0.0 else nn.Identity()

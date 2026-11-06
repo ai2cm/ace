@@ -56,8 +56,12 @@ from typing import Any
 
 import torch
 
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
+
 _MUON_FLAG = "use_muon"
+_SPECTRAL_FLAG = "spectral"
 ADJUST_LR_FNS = (None, "original", "match_rms_adamw")
+
 
 # Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
@@ -102,6 +106,50 @@ def _zeropower_via_newtonschulz(
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     return ortho_grad
+
+
+def _zeropower_via_newtonschulz_complex(
+    grad: torch.Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> torch.Tensor:
+    """Batched complex orthogonalization via Newton-Schulz iteration.
+
+    Extends :func:`_zeropower_via_newtonschulz` to complex matrices: for each
+    matrix in the batch, converges to UV^H (the unitary factor from the SVD).
+    Uses Hermitian conjugate (.mH) in place of transpose.
+
+    Args:
+        grad: Complex tensor of shape ``(batch, M, N)``.
+        ns_coefficients: ``(a, b, c)`` polynomial coefficients.
+        ns_steps: Number of Newton-Schulz iterations.
+        eps: Epsilon for norm clamping.
+
+    Returns:
+        Complex tensor of the same shape, approximately unitary per slice.
+    """
+    if ns_steps >= 100:
+        raise ValueError(
+            "Number of steps must be less than 100 for computational efficiency"
+        )
+    if grad.ndim != 3 or not grad.is_complex():
+        raise ValueError("Input must be a 3D complex tensor (batch, M, N)")
+    a, b, c = ns_coefficients
+    X = grad.to(torch.complex64)
+    transposed = X.size(-2) > X.size(-1)
+    if transposed:
+        X = X.mH
+    norms = torch.linalg.norm(X, dim=(-2, -1), keepdim=True).real.clamp(min=eps)
+    X = X / norms
+    for _ in range(ns_steps):
+        A = X @ X.mH
+        B = b * A + c * (A @ A)
+        X = a * X + B @ X
+    if transposed:
+        # resolve the lazy conjugate so callers can view_as_real the result
+        X = X.mH.resolve_conj()
+    return X
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
@@ -151,6 +199,62 @@ def muon(
         param.add_(update, alpha=-adjusted_lr)
 
 
+def spectral_muon(
+    params: list[SpectralFilterParameter],
+    grads: list[torch.Tensor],
+    momentum_bufs: list[torch.Tensor],
+    *,
+    lr: float,
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+) -> None:
+    """Muon update for spectral filter weights.
+
+    Each parameter holds one complex ``(C_out, C_in)`` matrix per spectral
+    mode, laid out as its :class:`SpectralFilterParameter` ``out_dim`` and
+    ``in_dim`` describe. The update orthogonalizes each matrix independently
+    via the complex Newton-Schulz iteration.
+
+    With ``adjust_lr_fn="match_rms_adamw"`` the step is scaled by an extra
+    ``sqrt(2)``: a semi-unitary complex matrix has entries of mean squared
+    modulus ``1 / max(C_out, C_in)``, split evenly between the real and
+    imaginary parts, so without it each real component of the update (the
+    unit AdamW normalizes, for complex parameters too) would be
+    ``1 / sqrt(2)`` of the RMS the rule targets.
+    """
+    for i, param in enumerate(params):
+        grad = grads[i]
+        buf = momentum_bufs[i]
+        buf.lerp_(grad, 1 - momentum)
+        update = grad.lerp(buf, momentum) if nesterov else buf
+
+        if not update.is_complex():
+            update = torch.view_as_complex(update.contiguous())
+        # (..., C_out, C_in): the remaining axes index independent matrices.
+        matrices = update.movedim((param.out_dim, param.in_dim), (-2, -1))
+        batch_shape = matrices.shape[:-2]
+        Co, Ci = matrices.shape[-2:]
+        ortho = _zeropower_via_newtonschulz_complex(
+            matrices.reshape(-1, Co, Ci), ns_coefficients, ns_steps, eps
+        )
+        ortho = ortho.reshape(*batch_shape, Co, Ci).movedim(
+            (-2, -1), (param.out_dim, param.in_dim)
+        )
+        if not param.is_complex():
+            ortho = torch.view_as_real(ortho)
+
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, torch.Size([Co, Ci]))
+        if adjust_lr_fn == "match_rms_adamw":
+            adjusted_lr *= math.sqrt(2.0)
+        param.mul_(1 - lr * weight_decay)
+        param.add_(ortho.to(param.dtype), alpha=-adjusted_lr)
+
+
 def _as_matrix(t: torch.Tensor) -> tuple[torch.Tensor, bool]:
     """Return a ``(shape[0], -1)`` matrix of ``t`` and whether it is a copy
     (``t`` not contiguous) that must be written back after an in-place update.
@@ -185,8 +289,12 @@ class Muon(torch.optim.Optimizer):
     """Muon for matrix parameters plus AdamW for the rest.
 
     Parameter group 0 is the Muon group (its ``lr`` is the Muon learning
-    rate); group 1, present only if ``adamw_params`` is non-empty, is the
-    AdamW group. Each group carries a ``use_muon`` flag.
+    rate); group 1, if ``spectral_params`` is non-empty, is the spectral
+    Muon group (per-mode complex orthogonalization for spectral filter
+    weights);
+    the last group, if ``adamw_params`` is non-empty, is the AdamW group.
+    Each group carries a ``use_muon`` flag (True for both Muon groups) and
+    a ``spectral`` flag.
 
     Gradient-norm clipping barely changes the Muon update's size (it is
     orthogonalized), so it matters mainly for the AdamW group.
@@ -200,6 +308,10 @@ class Muon(torch.optim.Optimizer):
     Args:
         muon_params: Parameters with ``ndim >= 2`` to update with Muon.
         adamw_params: Parameters to update with AdamW.
+        spectral_params: Spectral filter weights, each a
+            :class:`SpectralFilterParameter`, to update with per-mode
+            complex Muon. Shares the Muon group's lr, momentum,
+            weight_decay, ns_steps, and adjust_lr_fn.
         lr: Muon learning rate.
         momentum: Muon momentum coefficient.
         nesterov: Whether Muon uses Nesterov momentum.
@@ -227,15 +339,17 @@ class Muon(torch.optim.Optimizer):
         adamw_betas: tuple[float, float] = (0.9, 0.999),
         adamw_eps: float = 1e-8,
         adamw_weight_decay: float = 0.0,
+        spectral_params: Iterable[torch.nn.Parameter] = (),
     ):
         muon_params = list(muon_params)
         adamw_params = list(adamw_params)
+        spectral_params = list(spectral_params)
         if adjust_lr_fn not in ADJUST_LR_FNS:
             raise ValueError(
                 f"Muon adjust_lr_fn must be one of {list(ADJUST_LR_FNS)}, "
                 f"got {adjust_lr_fn!r}."
             )
-        if len(muon_params) == 0:
+        if len(muon_params) == 0 and len(spectral_params) == 0:
             raise ValueError("Muon requires at least one parameter with ndim >= 2.")
         for p in muon_params:
             if p.ndim < 2:
@@ -247,6 +361,24 @@ class Muon(torch.optim.Optimizer):
                     "Muon does not support complex parameters; route them to "
                     "the AdamW group."
                 )
+        for p in spectral_params:
+            if not isinstance(p, SpectralFilterParameter):
+                raise ValueError(
+                    "Spectral Muon parameters must be SpectralFilterParameter "
+                    "instances, which record the per-mode matrix layout, got "
+                    f"{type(p).__name__} of shape {tuple(p.shape)}."
+                )
+            if p.dtype not in (
+                torch.float32,
+                torch.float64,
+                torch.complex64,
+                torch.complex128,
+            ):
+                raise ValueError(
+                    "Spectral Muon parameters must be float32/float64 (with "
+                    "real/imaginary parts in the last dimension) or "
+                    f"complex64/complex128, got {p.dtype}."
+                )
         param_groups: list[dict[str, Any]] = [
             {
                 "params": muon_params,
@@ -257,8 +389,23 @@ class Muon(torch.optim.Optimizer):
                 "ns_steps": ns_steps,
                 "adjust_lr_fn": adjust_lr_fn,
                 _MUON_FLAG: True,
+                _SPECTRAL_FLAG: False,
             }
         ]
+        if len(spectral_params) > 0:
+            param_groups.append(
+                {
+                    "params": spectral_params,
+                    "lr": lr,
+                    "momentum": momentum,
+                    "nesterov": nesterov,
+                    "weight_decay": weight_decay,
+                    "ns_steps": ns_steps,
+                    "adjust_lr_fn": adjust_lr_fn,
+                    _MUON_FLAG: True,
+                    _SPECTRAL_FLAG: True,
+                }
+            )
         if len(adamw_params) > 0:
             param_groups.append(
                 {
@@ -268,6 +415,7 @@ class Muon(torch.optim.Optimizer):
                     "eps": adamw_eps,
                     "weight_decay": adamw_weight_decay,
                     _MUON_FLAG: False,
+                    _SPECTRAL_FLAG: False,
                 }
             )
         super().__init__(param_groups, dict())
@@ -286,7 +434,10 @@ class Muon(torch.optim.Optimizer):
             with torch.enable_grad():
                 loss = closure()
         for group in self.param_groups:
-            if group[_MUON_FLAG]:
+            # Groups saved before the spectral group existed have no flag.
+            if group.get(_SPECTRAL_FLAG, False):
+                self._spectral_muon_step(group)
+            elif group[_MUON_FLAG]:
                 self._muon_step(group)
             else:
                 self._adamw_step(group)
@@ -337,6 +488,37 @@ class Muon(torch.optim.Optimizer):
         )
         for t, matrix in write_back:
             t.copy_(matrix.view(t.shape))
+
+    def _spectral_muon_step(self, group: dict[str, Any]) -> None:
+        params: list[SpectralFilterParameter] = []
+        grads: list[torch.Tensor] = []
+        bufs: list[torch.Tensor] = []
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            state = self.state[p]
+            if len(state) == 0:
+                state["momentum_buffer"] = torch.zeros_like(
+                    p, memory_format=torch.contiguous_format
+                )
+            params.append(p)
+            grads.append(p.grad)
+            bufs.append(state["momentum_buffer"])
+        if len(params) == 0:
+            return
+        spectral_muon(
+            params,
+            grads,
+            bufs,
+            lr=group["lr"],
+            weight_decay=group["weight_decay"],
+            momentum=group["momentum"],
+            nesterov=group["nesterov"],
+            ns_coefficients=(DEFAULT_A, DEFAULT_B, DEFAULT_C),
+            ns_steps=group["ns_steps"],
+            eps=EPS,
+            adjust_lr_fn=group["adjust_lr_fn"],
+        )
 
     def _adamw_step(self, group: dict[str, Any]) -> None:
         for p in group["params"]:
@@ -391,11 +573,26 @@ def check_muon_state_dict_compatible(
             "fresh instead of resuming it."
         )
     if current_is_muon:
-        current_flags = [g[_MUON_FLAG] for g in optimizer.param_groups]
-        saved_flags = [g.get(_MUON_FLAG) for g in state_dict["param_groups"]]
+        current_flags = [
+            (g[_MUON_FLAG], g.get(_SPECTRAL_FLAG, False))
+            for g in optimizer.param_groups
+        ]
+        saved_flags = [
+            (g.get(_MUON_FLAG), g.get(_SPECTRAL_FLAG, False))
+            for g in state_dict["param_groups"]
+        ]
         if current_flags != saved_flags:
+            hint = ""
+            if any(spectral for _, spectral in current_flags) and not any(
+                spectral for _, spectral in saved_flags
+            ):
+                hint = (
+                    " The saved state predates the spectral Muon group, which "
+                    "the current model's SpectralFilterParameter weights use."
+                )
             raise ValueError(
-                "Muon optimizer state has a different Muon/AdamW group layout "
-                f"(use_muon flags {saved_flags}) than the current optimizer "
-                f"({current_flags})."
+                "Muon optimizer state has a different group layout "
+                f"(flags {saved_flags}) than the current optimizer "
+                f"({current_flags}).{hint} Start the optimizer state fresh "
+                "instead of resuming it."
             )

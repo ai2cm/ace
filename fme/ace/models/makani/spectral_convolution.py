@@ -21,6 +21,7 @@ import math
 import tensorly as tl
 import torch
 import torch.nn as nn
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 tl.set_backend("pytorch")
 
@@ -101,7 +102,14 @@ class SpectralConv(nn.Module):
         # seemingly the first weight is not really complex, so we need to account for that
         scale[0] *= math.sqrt(2.0)
         init = scale * torch.randn(*weight_shape, dtype=torch.complex64)
-        self.weight = nn.Parameter(torch.view_as_real(init))
+        if self.separable:
+            # a per-channel scale per mode, not a channel matrix
+            self.weight = nn.Parameter(torch.view_as_real(init))
+        else:
+            # (C_in, C_out, modes...), contracted as "bixy,ioxy->boxy"
+            self.weight = SpectralFilterParameter(
+                torch.view_as_real(init), in_dim=0, out_dim=1
+            )
 
         if self.operator_type == "dhconv":
             self.weight.is_shared_mp = ["matmul", "w"]
