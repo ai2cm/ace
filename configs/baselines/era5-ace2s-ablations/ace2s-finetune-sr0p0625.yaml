@@ -1,4 +1,4 @@
-# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+# arg: --dataset 01M6KQFMBRB0WWKB14C4X68VB2:/weights
 #
 # spectral_ratio 0.0625 arm, stage 2: 3-step detached fine-tune of the
 # spectral_ratio 0.0625 pretrain (ace2s-pretrain-sr0p0625.yaml). Paper recipe
