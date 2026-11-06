@@ -9,7 +9,9 @@ interpolated to the ERA5 6-hourly stamps; before the first UFS stamp (1994-01-05
 merged atmosphere member to start at the ocean's first time and run to the member's END, so this store must end exactly
 where the ERA5 store ends, 2025-12-31T18, for the merged members to share one time axis). Dims are named
 latitude/longitude like the ERA5 store it is merged with (fme's MergeDatasetConfig takes the FIRST source for a
-variable that both hold, so this store goes first in the merge). Built year by year (the VM has 29 GB).
+variable that both hold, so this store goes first in the merge). Because the merged dataset's properties (incl. the
+vertical coordinate the dry-air corrector needs) come from the FIRST member, the ERA5 ak_*/bk_* scalars are copied in
+too, as the CM4 coupled-atmosphere stores carry them. Built year by year (the VM has 29 GB).
 """
 import sys
 import dask.array as da
@@ -36,8 +38,11 @@ print("loading 5-day ice", flush=True)
 sic = ufs["ocean_sea_ice_fraction"].load().fillna(0.0).astype("float32")  # (2175, 180, 360)
 CH = 28
 nt = len(times)
+akbk = era[[v for v in era.data_vars if v.startswith(("ak_", "bk_"))]].load()
+assert len(akbk.data_vars) == 18
 skel = xr.Dataset(
     {
+        **{v: ((), akbk[v].values, dict(akbk[v].attrs)) for v in akbk.data_vars},
         "land_fraction": (("latitude", "longitude"), lf, {"long_name": "land fraction (UFS/MOM6)", "units": "1"}),
         "sea_surface_fraction": (("latitude", "longitude"), ssf, {"long_name": "ocean fraction of the cell (UFS/MOM6)", "units": "1"}),
         "sea_ice_fraction": (("time", "latitude", "longitude"), da.zeros((nt, 180, 360), dtype="float32", chunks=(CH, 180, 360)), {"long_name": "sea ice fraction of the whole cell (UFS concentration x sea_surface_fraction), 5-daily ice linearly interpolated to 6-hourly", "units": "1"}),
@@ -47,7 +52,7 @@ skel = xr.Dataset(
 )
 skel.attrs["source"] = "fractions from gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-5day/2026-10-06-ufs-replay-ocean-1deg-19level-1994-2023.zarr on the ERA5 2026-03-19 1deg 6-hourly time axis (1994-2023)"
 skel.to_zarr(out, mode="w", consolidated=False, compute=False)
-skel[["land_fraction", "sea_surface_fraction"]].to_zarr(out, mode="r+", consolidated=False)
+skel[["land_fraction", "sea_surface_fraction", *akbk.data_vars]].to_zarr(out, mode="r+", consolidated=False)
 print("skeleton written", dict(skel.sizes), flush=True)
 years = sorted(set(times.year))
 LAST = pd.Timestamp(sic.time.values[-1])
