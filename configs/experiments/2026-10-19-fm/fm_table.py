@@ -9,8 +9,12 @@ count as 0. Train time is the running wall time summed over an experiment's
 jobs (preemption retries included, queueing excluded). Epoch and train-time
 columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
 excluded; the 2026-11-05 v2 runs (submit_fm_v2_jobs.py, 100 epochs) get one
-row per architecture and data arm. All values are measured; there are no
-estimates.
+row per architecture and data arm. The 2026-11-06 v3 runs (create_fm_v3_jobs.py,
+60 epochs) fork the sfno v2 runs at v2 epoch 40; their epochs count from 0 at
+the fork, not from 40. The 2026-11-06 swin-v2.2-v3 runs
+(create_fm_v3_swin_jobs.py, 100 epochs) train from scratch. Of the older swin
+runs none are tracked for now (ARCHS); their logs are not read. All values are
+measured; there are no estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed/other" counts only experiments that exist and failed or were canceled.
@@ -39,6 +43,8 @@ from _beaker_listing import (  # noqa: E402
 )
 from submit_fm_jobs import (  # noqa: E402
     ARCH_CHOICES,
+    CONFIG_PREFIX,
+    RUN_CONFIGS_DIR,
     V2_ARCH_CHOICES,
     config_to_job_name,
     select_configs,
@@ -113,23 +119,39 @@ def _queued(named: NamedExperiment) -> bool:
     return bool(pending) and not pending[-1].get("status", {}).get("started")
 
 
+# Rows to track. The swin rows ("swin-v2.2", "swin-v2.2-res", "swin-v2.2-v2",
+# "swin-v2.2-v2-e3sm") are left out for now.
 ARCHS = (
     "sfno",
-    "swin-v2.2",
-    "swin-v2.2-res",
     "sfno-v2",
     "sfno-v2-e3sm",
-    "swin-v2.2-v2",
-    "swin-v2.2-v2-e3sm",
+    "sfno-v3",
+    "sfno-v3-e3sm",
+    "swin-v2.2-v3",
+    "swin-v2.2-v3-e3sm",
 )
 # Job-name tags of the v2 runs, longest first: they extend the old tags.
 V2_TAGS = (("-nc-swin-v2.2-v2-", "swin-v2.2-v2"), ("-nc-sfno-v2-", "sfno-v2"))
+# Job-name tags of the v3 runs and their max epochs: sfno v2 runs forked at
+# epoch 40 and retrained for 60 more, and swin runs trained from scratch for
+# 100. Checked before V2_TAGS (neither contains a v2 tag, but keep the newest
+# tags first).
+V3_TAGS = (("-nc-sfno-v3-", "sfno-v3"), ("-nc-swin-v2.2-v3-", "swin-v2.2-v3"))
+V3_MAX_EPOCHS = {"sfno-v3": 60, "swin-v2.2-v3": 100}
+# Expected v3 configs, so the rows count "Not submitted" before
+# create_fm_v3_jobs.py has written them; used per data arm when run_configs/
+# has no v3 config for that arm.
+V3_FALLBACK_CONFIGS = tuple(
+    f"ace-train-config-4deg-nc-sfno-v3-fm-{arm}balanced-s{seed}-maskoff.yaml"
+    for arm in ("", "e3sm-")
+    for seed in range(5)
+)
 # One-off variant configs, kept out of run_configs/ so batch submits skip them.
 VARIANTS_DIR = pathlib.Path(__file__).parent / "variants"
 
 
 def arch_of(name: str) -> str:
-    for tag, arch in V2_TAGS:
+    for tag, arch in V3_TAGS + V2_TAGS:
         if tag in name:
             return f"{arch}-e3sm" if "-e3sm-" in name else arch
     for arch in ("swin-v2.2-res", "swin-v2.2"):
@@ -140,6 +162,13 @@ def arch_of(name: str) -> str:
 
 def max_epochs_of(arch: str) -> int:
     v2_rows = {row for _, base in V2_TAGS for row in (base, f"{base}-e3sm")}
+    v3_rows = {
+        row: V3_MAX_EPOCHS[base]
+        for _, base in V3_TAGS
+        for row in (base, f"{base}-e3sm")
+    }
+    if arch in v3_rows:
+        return v3_rows[arch]
     return V2_MAX_EPOCHS if arch in v2_rows else MAX_EPOCHS
 
 
@@ -252,6 +281,22 @@ def progress(named, max_epochs: int) -> tuple[int, Seconds]:
     return done, (_median(full), _median(train), _median(light), _median(heavy))
 
 
+def v3_job_names() -> list[str]:
+    """Job names of the v3 training configs in run_configs/, per data arm,
+    falling back to V3_FALLBACK_CONFIGS for an arm with none written yet.
+    """
+    found = [
+        p.name
+        for tag, _ in V3_TAGS
+        for p in sorted(RUN_CONFIGS_DIR.glob(f"{CONFIG_PREFIX}{tag[1:]}*.yaml"))
+        if not p.stem.endswith(("-finetune", "-cooldown", "-bestinfcooldown", "-diag"))
+    ]
+    names = [config_to_job_name(c) for c in found]
+    arms = {arch_of(n) for n in names}
+    fallback = [config_to_job_name(c) for c in V3_FALLBACK_CONFIGS]
+    return names + [n for n in fallback if arch_of(n) not in arms]
+
+
 def main() -> None:
     names = [
         config_to_job_name(c)
@@ -260,6 +305,10 @@ def main() -> None:
     ]
     names += [config_to_job_name(c) for c in select_configs(None, V2_ARCH_CHOICES)]
     names += [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
+    names += v3_job_names()
+    # Dedupe: a v3 config in run_configs/ is also selected above as nc-sfno
+    # (its longest known arch tag), unless submit_fm_jobs.py learns "nc-sfno-v3".
+    names = [n for n in dict.fromkeys(names) if arch_of(n) in ARCHS]
     # List per architecture by the names' longest common prefix: the broad
     # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
     # while each narrow one takes ~1 s.
