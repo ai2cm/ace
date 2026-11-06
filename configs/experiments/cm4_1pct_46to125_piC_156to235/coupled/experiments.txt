@@ -60,6 +60,10 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62A
 1deg-randco2rs1-fmean-hybridsstdiag-alt||01M64JR109MDKK6T533BR90HMM|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
 1deg-randco2rs1-fmean-hybridsstdiag-alt||01M64JR109MDKK6T533BR90HMM|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
+# troy's training runs with the same ocean init as cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|ran_1pct-ic0001-130yr|ema_ckpt_0007|high|--min-runtime 8h
+fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|ran_piC-ic0151-200yr|ema_ckpt_0007|high|--min-runtime 8h
+
 # troy's training runs with the hybrid SST Samudra + random CO2 replay
-hybrid1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_1pct-ic0001-130yr|ema_ckpt_0007|high|--min-runtime 8h
-hybrid1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|run_piC-ic0151-200yr|ema_ckpt_0007|high|--min-runtime 8h
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_1pct-ic0001-130yr|ema_ckpt_0007|high|--min-runtime 8h
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_piC-ic0151-200yr|ema_ckpt_0007|high|--min-runtime 8h
