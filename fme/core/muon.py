@@ -147,7 +147,8 @@ def _zeropower_via_newtonschulz_complex(
         B = b * A + c * (A @ A)
         X = a * X + B @ X
     if transposed:
-        X = X.mH
+        # resolve the lazy conjugate so callers can view_as_real the result
+        X = X.mH.resolve_conj()
     return X
 
 
