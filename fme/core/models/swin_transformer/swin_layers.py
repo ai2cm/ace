@@ -41,7 +41,6 @@ blocks operate on tensors with a trailing channel dimension, i.e. shape
 ``(B, H, W, C)``.
 """
 
-import math
 from typing import Literal
 
 import torch
@@ -78,9 +77,9 @@ class WindowAttention2D(nn.Module):
     """Multi-head self-attention within 2D windows with continuous position bias.
 
     Uses a 2-layer MLP (CPB, Swin V2-style) over log-spaced coordinate offsets
-    instead of a lookup-table RPB. When ``lat_mean`` is supplied at forward
-    time, the longitude offsets are scaled by ``cos(lat)`` so that the bias
-    reflects physical arc-length rather than pixel-index distance.
+    instead of a lookup-table RPB. When ``cos_lat`` is supplied at forward
+    time, the longitude offsets are scaled by it so that the bias reflects
+    physical arc-length rather than pixel-index distance.
 
     Args:
         dim: Number of input channels.
@@ -145,7 +144,7 @@ class WindowAttention2D(nn.Module):
         self,
         x: torch.Tensor,
         mask: torch.Tensor | None = None,
-        lat_mean: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Apply windowed attention.
 
@@ -154,9 +153,9 @@ class WindowAttention2D(nn.Module):
                 ``N = ws_h * ws_w``.
             mask: Optional attention mask of shape ``(nW, N, N)`` for the
                 shifted-window case.
-            lat_mean: Optional ``(nW,)`` tensor of mean latitude in degrees
-                for each spatial window. When provided, longitude offsets are
-                scaled by ``cos(lat)`` to reflect physical arc-length.
+            cos_lat: Optional ``(nW,)`` tensor of the mean ``cos(lat)`` of
+                each spatial window. When provided, longitude offsets are
+                scaled by it to reflect physical arc-length.
         """
         B_, N, C = x.shape
         qkv = (
@@ -170,19 +169,18 @@ class WindowAttention2D(nn.Module):
         attn = (q @ k.transpose(-2, -1)) / (norm_q * norm_k).clamp(min=1e-6)
         attn = attn / self.tau.clamp(min=0.01)
 
-        if lat_mean is None:
+        if cos_lat is None:
             bias = 16.0 * torch.sigmoid(
                 self.cpb_mlp(self.relative_coords_log)
             )  # (N*N, num_heads)
             bias = bias.permute(1, 0).reshape(self.num_heads, N, N)
             attn = attn + bias.unsqueeze(0)
         else:
-            nW = lat_mean.shape[0]
-            lat_rad = lat_mean * (math.pi / 180.0)  # (nW,)
+            nW = cos_lat.shape[0]
             h_coords = self.relative_coords_base[:, 0]  # (N*N,)
-            w_coords = self.relative_coords_base[:, 1].unsqueeze(0) * torch.cos(
-                lat_rad
-            ).unsqueeze(1)  # (nW, N*N)
+            w_coords = self.relative_coords_base[:, 1].unsqueeze(0) * cos_lat.unsqueeze(
+                1
+            )  # (nW, N*N)
             coords = torch.stack(
                 [h_coords.unsqueeze(0).expand(nW, -1), w_coords], dim=-1
             )  # (nW, N*N, 2)
@@ -335,6 +333,9 @@ class SwinTransformerBlock(nn.Module):
             ``ConditionalLayerNorm``-based noise conditioning.
         context_config: Required when ``conditioning="cln"``; passed to each
             ``ConditionalLayerNorm``.
+        cpb_hidden_dim: Hidden dimension of the CPB MLP.
+        cos_lat: Optional ``(H,)`` ``cos(lat)`` of the (padded) feature-map
+            rows, used for cos-lat CPB scaling.
     """
 
     def __init__(
@@ -351,7 +352,7 @@ class SwinTransformerBlock(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
-        lat_coords: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ):
         super().__init__()
         self.dim = dim
@@ -385,7 +386,9 @@ class SwinTransformerBlock(nn.Module):
         self.mlp = _build_mlp(mlp_layer, dim, int(dim * mlp_ratio))
 
         self.register_buffer("attn_mask", self._build_mask(), persistent=False)
-        self.register_buffer("lat_coords", lat_coords, persistent=False)
+        self.register_buffer(
+            "window_cos_lat", self._window_cos_lat(cos_lat), persistent=False
+        )
 
     def _build_mask(self) -> torch.Tensor | None:
         sh, sw = self.shift_size
@@ -408,6 +411,21 @@ class SwinTransformerBlock(nn.Module):
         )
         return attn_mask
 
+    def _window_cos_lat(self, cos_lat: torch.Tensor | None) -> torch.Tensor | None:
+        """Mean ``cos(lat)`` of each window, ``(nW,)``, or ``None``.
+
+        Averages ``cos`` rather than latitude, so shifted windows that wrap
+        across both poles stay polar instead of averaging to the equator.
+        """
+        if cos_lat is None:
+            return None
+        H, W = self.input_resolution
+        ws_h, ws_w = self.window_size
+        sh, _ = self.shift_size
+        cos_lat = torch.roll(cos_lat, -sh)
+        cos_lat_h = cos_lat.reshape(H // ws_h, ws_h).mean(1)  # (nH_win,)
+        return cos_lat_h.repeat_interleave(W // ws_w)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -419,19 +437,6 @@ class SwinTransformerBlock(nn.Module):
         sh, sw = self.shift_size
         _, _, _, C = x.shape
 
-        if self.lat_coords is not None:
-            lat_shifted = (
-                torch.roll(self.lat_coords, -sh) if sh != 0 else self.lat_coords
-            )
-            nH_win = H // ws_h
-            nW_win = W // ws_w
-            lat_mean_h = lat_shifted[:H].reshape(nH_win, ws_h).mean(1)  # (nH_win,)
-            lat_mean: torch.Tensor | None = (
-                lat_mean_h.unsqueeze(1).expand(-1, nW_win).reshape(-1)
-            )
-        else:
-            lat_mean = None
-
         if self.conditioning == "cln":
             shortcut = x
             if sh > 0 or sw > 0:
@@ -439,7 +444,9 @@ class SwinTransformerBlock(nn.Module):
             else:
                 h = x
             h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
-            attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
+            attn_windows = self.attn(
+                h_windows, mask=self.attn_mask, cos_lat=self.window_cos_lat
+            )
             attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
             h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
             if sh > 0 or sw > 0:
@@ -466,7 +473,9 @@ class SwinTransformerBlock(nn.Module):
             else:
                 h = x
             h_windows = window_partition_2d(h, ws_h, ws_w).view(-1, ws_h * ws_w, C)
-            attn_windows = self.attn(h_windows, mask=self.attn_mask, lat_mean=lat_mean)
+            attn_windows = self.attn(
+                h_windows, mask=self.attn_mask, cos_lat=self.window_cos_lat
+            )
             attn_windows = attn_windows.view(-1, ws_h, ws_w, C)
             h = window_reverse_2d(attn_windows, ws_h, ws_w, H, W)
             if sh > 0 or sw > 0:
@@ -564,6 +573,8 @@ class BasicLayer(nn.Module):
         conditioning: ``"adaln"`` (default) or ``"cln"``.
         context_config: Required when ``conditioning="cln"``; forwarded to each
             block's ``ConditionalLayerNorm``.
+        cpb_hidden_dim: Hidden dimension of each block's CPB MLP.
+        cos_lat: Optional ``(H,)`` row ``cos(lat)`` for cos-lat CPB scaling.
     """
 
     def __init__(
@@ -581,7 +592,7 @@ class BasicLayer(nn.Module):
         conditioning: Literal["adaln", "cln"] = "adaln",
         context_config: ContextConfig | None = None,
         cpb_hidden_dim: int = 64,
-        lat_coords: torch.Tensor | None = None,
+        cos_lat: torch.Tensor | None = None,
     ):
         super().__init__()
         if len(drop_path) != depth:
@@ -604,7 +615,7 @@ class BasicLayer(nn.Module):
                     conditioning=conditioning,
                     context_config=context_config,
                     cpb_hidden_dim=cpb_hidden_dim,
-                    lat_coords=lat_coords,
+                    cos_lat=cos_lat,
                 )
                 for i in range(depth)
             ]
