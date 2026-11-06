@@ -11,7 +11,9 @@ each selected child this script:
    job whose result dataset starts as a copy of the previous one, so any job
    from epoch 40 on holds it; datasets of finished jobs are preferred over
    that of a running job); a child whose parent has no such dataset yet is
-   skipped with a message;
+   skipped with a message. A running job's dataset is uncommitted and cannot
+   be mounted, so when it is the only holder the checkpoint is copied into a
+   new committed dataset `<child>-parent-ema_ckpt_0040` (reused if present);
 3. submits run-ace-anneal.sh with N_GPUS=4 (as the parents) and that checkpoint
    mounted at /parent_ckpt.tar (stepper_training.parameter_init.weights_path),
    into wandb group WANDB_GROUP.
@@ -34,8 +36,11 @@ Usage:
 """
 
 import argparse
+import json
+import pathlib
 import re
 import subprocess
+import tempfile
 from collections.abc import Iterable
 
 from _beaker_listing import RUNNING, canonical_name, job_status, list_experiments
@@ -54,6 +59,7 @@ from submit_fm_jobs import HERE, WANDB_PROJECT, add_default_beaker_args
 RUN_SCRIPT = HERE / "run-ace-anneal.sh"
 WANDB_GROUP = "ace2-fm-2026-11-06"
 N_GPUS = "4"
+BUDGET = "ai2/atec-climate"  # as run-ace-anneal.sh
 EMA_CKPT_RE = re.compile(r"training_checkpoints/ema_ckpt_(\d{4})\.tar")
 
 
@@ -87,21 +93,96 @@ def ema_checkpoints(dataset: str) -> list[str]:
 
 def find_checkpoint(
     parent: str, experiments: list[dict], accept_latest: bool
-) -> tuple[str, str] | None:
-    """(result dataset, checkpoint path) holding the parent's PARENT_CHECKPOINT,
-    or, with `accept_latest`, its latest EMA checkpoint when that is missing.
+) -> tuple[str, str, bool] | None:
+    """(result dataset, checkpoint path, dataset belongs to a running job)
+    holding the parent's PARENT_CHECKPOINT, or, with `accept_latest`, its
+    latest EMA checkpoint when that is missing.
     """
-    latest: tuple[str, str] | None = None
+    latest: tuple[str, str, bool] | None = None
     for job in parent_jobs(parent, experiments):
         dataset = job.get("result", {}).get("beaker")
         if not dataset:
             continue
+        running = job_status(job) == RUNNING
         checkpoints = ema_checkpoints(dataset)
         if PARENT_CHECKPOINT in checkpoints:
-            return dataset, PARENT_CHECKPOINT
+            return dataset, PARENT_CHECKPOINT, running
         if checkpoints and (latest is None or checkpoints[-1] > latest[1]):
-            latest = dataset, checkpoints[-1]
+            latest = dataset, checkpoints[-1], running
     return latest if accept_latest else None
+
+
+def committed_copy(
+    dataset: str, checkpoint: str, child: str, workspace: str, dry_run: bool
+) -> str:
+    """A committed dataset holding only `checkpoint` (same path) copied from
+    `dataset`, reusing one made by an earlier call.
+
+    A running job's result dataset is uncommitted and Beaker refuses to mount
+    it, so a parent whose only copy of the checkpoint is in its running job's
+    dataset is forked from this copy instead.
+    """
+    name = f"{child}-parent-{pathlib.PurePath(checkpoint).stem}"
+    whoami = subprocess.run(
+        ["beaker", "account", "whoami", "--format", "json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    account = json.loads(whoami.stdout)[0]["name"]
+    existing = subprocess.run(
+        ["beaker", "dataset", "get", f"{account}/{name}", "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    if existing.returncode == 0:
+        found = json.loads(existing.stdout)
+        found = found[0] if isinstance(found, list) else found
+        if found.get("committed"):
+            print(f"  reusing committed copy {name} ({found['id']})")
+            return found["id"]
+    if dry_run:
+        print(f"  would copy {checkpoint} from uncommitted {dataset} to {name}")
+        return f"<copy of {dataset}>"
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(
+            [
+                "beaker",
+                "dataset",
+                "fetch",
+                dataset,
+                "--prefix",
+                checkpoint,
+                "--output",
+                tmp,
+            ],
+            check=True,
+        )
+        created = subprocess.run(
+            [
+                "beaker",
+                "dataset",
+                "create",
+                tmp,
+                "--name",
+                name,
+                "--workspace",
+                workspace,
+                "--budget",
+                BUDGET,
+                "--desc",
+                f"{checkpoint} of {dataset}, for {child}",
+                "--format",
+                "json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    out = json.loads(created.stdout)
+    dataset_id = (out[0] if isinstance(out, list) else out)["id"]
+    print(f"  copied {checkpoint} from uncommitted {dataset} to {name} ({dataset_id})")
+    return dataset_id
 
 
 def main() -> None:
@@ -139,8 +220,16 @@ def main() -> None:
                 f"{header['JOB_NAME']} <- {parent}"
             )
             continue
-        dataset, checkpoint = found
+        dataset, checkpoint, running = found
         print(f"Parent {parent}: {checkpoint} in dataset {dataset}")
+        if running:
+            dataset = committed_copy(
+                dataset,
+                checkpoint,
+                header["JOB_NAME"],
+                args.beaker_workspace,
+                args.dry_run,
+            )
         ready.append((path, header, dataset, checkpoint))
     print(f"{len(ready)} to submit.")
 
