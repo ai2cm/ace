@@ -56,23 +56,11 @@ from typing import Any
 
 import torch
 
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
+
 _MUON_FLAG = "use_muon"
 _SPECTRAL_FLAG = "spectral"
 ADJUST_LR_FNS = (None, "original", "match_rms_adamw")
-
-
-class SpectralFilterParameter(torch.nn.Parameter):
-    """A per-mode complex spectral filter weight.
-
-    Marks a parameter of shape ``(groups, modes, C_out, C_in, 2)``, where each
-    ``(C_out, C_in)`` slice at a given mode is an independent complex matrix
-    stored as real/imaginary parts in the last dimension. This is the layout
-    the spectral Muon update assumes, and :class:`Muon` accepts only
-    parameters of this type in its spectral group: other 5D weights ending in
-    a size-2 dimension (e.g. the modulus SFNO's
-    ``(C_in, C_out, modes_lat, modes_lon, 2)`` filter) cannot be told apart
-    by shape alone.
-    """
 
 
 # Copied from PyTorch (torch/optim/_muon.py, v2.10.0).
@@ -211,7 +199,7 @@ def muon(
 
 
 def spectral_muon(
-    params: list[torch.Tensor],
+    params: list[SpectralFilterParameter],
     grads: list[torch.Tensor],
     momentum_bufs: list[torch.Tensor],
     *,
@@ -224,17 +212,18 @@ def spectral_muon(
     eps: float,
     adjust_lr_fn: str | None,
 ) -> None:
-    """Muon update for SFNO spectral filter weights.
+    """Muon update for spectral filter weights.
 
-    Each parameter has shape ``(groups, modes, C_out, C_in, 2)`` where the
-    last dimension stores real/imaginary parts. The update orthogonalizes
-    each per-mode ``(C_out, C_in)`` complex matrix independently via the
-    complex Newton-Schulz iteration.
+    Each parameter holds one complex ``(C_out, C_in)`` matrix per spectral
+    mode, laid out as its :class:`SpectralFilterParameter` ``out_dim`` and
+    ``in_dim`` describe. The update orthogonalizes each matrix independently
+    via the complex Newton-Schulz iteration.
 
     With ``adjust_lr_fn="match_rms_adamw"`` the step is scaled by an extra
     ``sqrt(2)``: a semi-unitary complex matrix has entries of mean squared
     modulus ``1 / max(C_out, C_in)``, split evenly between the real and
-    imaginary parts, so without it each real element of the update would be
+    imaginary parts, so without it each real component of the update (the
+    unit AdamW normalizes, for complex parameters too) would be
     ``1 / sqrt(2)`` of the RMS the rule targets.
     """
     for i, param in enumerate(params):
@@ -243,20 +232,26 @@ def spectral_muon(
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
 
-        G, L, Co, Ci = update.shape[:-1]
-        update_c = torch.view_as_complex(update.contiguous())
-        update_c = update_c.reshape(G * L, Co, Ci)
-        ortho_c = _zeropower_via_newtonschulz_complex(
-            update_c, ns_coefficients, ns_steps, eps
+        if not update.is_complex():
+            update = torch.view_as_complex(update.contiguous())
+        # (..., C_out, C_in): the remaining axes index independent matrices.
+        matrices = update.movedim((param.out_dim, param.in_dim), (-2, -1))
+        batch_shape = matrices.shape[:-2]
+        Co, Ci = matrices.shape[-2:]
+        ortho = _zeropower_via_newtonschulz_complex(
+            matrices.reshape(-1, Co, Ci), ns_coefficients, ns_steps, eps
         )
-        ortho_c = ortho_c.reshape(G, L, Co, Ci)
-        ortho_real = torch.view_as_real(ortho_c)
+        ortho = ortho.reshape(*batch_shape, Co, Ci).movedim(
+            (-2, -1), (param.out_dim, param.in_dim)
+        )
+        if not param.is_complex():
+            ortho = torch.view_as_real(ortho)
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, torch.Size([Co, Ci]))
         if adjust_lr_fn == "match_rms_adamw":
             adjusted_lr *= math.sqrt(2.0)
         param.mul_(1 - lr * weight_decay)
-        param.add_(ortho_real.to(param.dtype), alpha=-adjusted_lr)
+        param.add_(ortho.to(param.dtype), alpha=-adjusted_lr)
 
 
 def _as_matrix(t: torch.Tensor) -> tuple[torch.Tensor, bool]:
@@ -294,7 +289,8 @@ class Muon(torch.optim.Optimizer):
 
     Parameter group 0 is the Muon group (its ``lr`` is the Muon learning
     rate); group 1, if ``spectral_params`` is non-empty, is the spectral
-    Muon group (per-mode complex orthogonalization for SFNO filter weights);
+    Muon group (per-mode complex orthogonalization for spectral filter
+    weights);
     the last group, if ``adamw_params`` is non-empty, is the AdamW group.
     Each group carries a ``use_muon`` flag (True for both Muon groups) and
     a ``spectral`` flag.
@@ -311,9 +307,8 @@ class Muon(torch.optim.Optimizer):
     Args:
         muon_params: Parameters with ``ndim >= 2`` to update with Muon.
         adamw_params: Parameters to update with AdamW.
-        spectral_params: SFNO spectral filter weights, each a
-            :class:`SpectralFilterParameter` of shape
-            ``(groups, modes, C_out, C_in, 2)``, to update with per-mode
+        spectral_params: Spectral filter weights, each a
+            :class:`SpectralFilterParameter`, to update with per-mode
             complex Muon. Shares the Muon group's lr, momentum,
             weight_decay, ns_steps, and adjust_lr_fn.
         lr: Muon learning rate.
@@ -369,20 +364,19 @@ class Muon(torch.optim.Optimizer):
             if not isinstance(p, SpectralFilterParameter):
                 raise ValueError(
                     "Spectral Muon parameters must be SpectralFilterParameter "
-                    "instances (the conditional SFNO's per-mode filter "
-                    f"weight), got {type(p).__name__} of shape "
-                    f"{tuple(p.shape)}."
+                    "instances, which record the per-mode matrix layout, got "
+                    f"{type(p).__name__} of shape {tuple(p.shape)}."
                 )
-            if p.ndim != 5 or p.shape[-1] != 2:
+            if p.dtype not in (
+                torch.float32,
+                torch.float64,
+                torch.complex64,
+                torch.complex128,
+            ):
                 raise ValueError(
-                    "Spectral Muon parameters must have shape "
-                    "(groups, modes, C_out, C_in, 2), "
-                    f"got shape {tuple(p.shape)}."
-                )
-            if p.dtype not in (torch.float32, torch.float64):
-                raise ValueError(
-                    "Spectral Muon parameters must be float32 or float64 to "
-                    f"be viewed as complex, got {p.dtype}."
+                    "Spectral Muon parameters must be float32/float64 (with "
+                    "real/imaginary parts in the last dimension) or "
+                    f"complex64/complex128, got {p.dtype}."
                 )
         param_groups: list[dict[str, Any]] = [
             {
@@ -495,7 +489,7 @@ class Muon(torch.optim.Optimizer):
             t.copy_(matrix.view(t.shape))
 
     def _spectral_muon_step(self, group: dict[str, Any]) -> None:
-        params: list[torch.Tensor] = []
+        params: list[SpectralFilterParameter] = []
         grads: list[torch.Tensor] = []
         bufs: list[torch.Tensor] = []
         for p in group["params"]:
@@ -587,8 +581,17 @@ def check_muon_state_dict_compatible(
             for g in state_dict["param_groups"]
         ]
         if current_flags != saved_flags:
+            hint = ""
+            if any(spectral for _, spectral in current_flags) and not any(
+                spectral for _, spectral in saved_flags
+            ):
+                hint = (
+                    " The saved state predates the spectral Muon group, which "
+                    "the current model's SpectralFilterParameter weights use."
+                )
             raise ValueError(
                 "Muon optimizer state has a different group layout "
                 f"(flags {saved_flags}) than the current optimizer "
-                f"({current_flags})."
+                f"({current_flags}).{hint} Start the optimizer state fresh "
+                "instead of resuming it."
             )

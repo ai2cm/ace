@@ -2,15 +2,17 @@ import copy
 import math
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 import torch.nn as nn
 
 import fme
 from fme.core import muon as fme_muon
-from fme.core.muon import Muon, SpectralFilterParameter
+from fme.core.muon import Muon
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 
 class _ConvNet(nn.Module):
@@ -502,7 +504,7 @@ def _spectral_weight(
     in_channels: int = 8,
     dtype: torch.dtype = torch.float32,
 ) -> SpectralFilterParameter:
-    """Create a fake SFNO spectral filter weight (groups, modes, C_out, C_in, 2)."""
+    """A conditional-SFNO-layout spectral weight (groups, modes, C_out, C_in, 2)."""
     return SpectralFilterParameter(
         torch.randn(
             groups,
@@ -512,7 +514,9 @@ def _spectral_weight(
             2,
             device=fme.get_device(),
             dtype=dtype,
-        )
+        ),
+        in_dim=3,
+        out_dim=2,
     )
 
 
@@ -535,9 +539,9 @@ class _SpectralModel(nn.Module):
 
 
 def test_spectral_muon_grouping():
+    """SpectralFilterParameter weights go to the spectral group with no config."""
     model = _SpectralModel().to(fme.get_device())
-    config = _muon_config(spectral_names=["spectral_weight"])
-    optimization = _build(model, config)
+    optimization = _build(model, _muon_config())
     groups = optimization.optimizer.param_groups
     muon_group = groups[0]
     spectral_group = groups[1]
@@ -548,32 +552,36 @@ def test_spectral_muon_grouping():
     assert spectral_group["spectral"] is True
     assert adamw_group["use_muon"] is False
     assert id(model.linear.weight) in {id(p) for p in muon_group["params"]}
-    assert id(model.spectral_weight) in {id(p) for p in spectral_group["params"]}
+    assert {id(p) for p in spectral_group["params"]} == {id(model.spectral_weight)}
     assert id(model.bias) in {id(p) for p in adamw_group["params"]}
     assert id(model.linear.bias) in {id(p) for p in adamw_group["params"]}
+
+
+def test_spectral_muon_no_spectral_group_without_spectral_parameters():
+    model = _ConvNet().to(fme.get_device())
+    optimization = _build(model, _muon_config())
+    assert [g["spectral"] for g in optimization.optimizer.param_groups] == [
+        False,
+        False,
+    ]
+
+
+def test_adamw_names_overrides_spectral_routing():
+    model = _SpectralModel().to(fme.get_device())
+    optimization = _build(model, _muon_config(adamw_names=["spectral_weight"]))
+    groups = optimization.optimizer.param_groups
+    assert [g["spectral"] for g in groups] == [False, False]
+    adamw_group = next(g for g in groups if not g["use_muon"])
+    assert id(model.spectral_weight) in {id(p) for p in adamw_group["params"]}
 
 
 def test_spectral_muon_step_reduces_loss():
     torch.manual_seed(0)
     model = _SpectralModel().to(fme.get_device())
-    config = _muon_config(spectral_names=["spectral_weight"])
-    optimization = _build(model, config)
+    optimization = _build(model, _muon_config())
     x = torch.randn(4, 8, device=fme.get_device())
     losses = _train_steps(model, optimization, x, n=3)
     assert losses[-1] < losses[0]
-
-
-def test_spectral_muon_step_modifies_weight():
-    torch.manual_seed(0)
-    device = fme.get_device()
-    w = _spectral_weight(1, 4, 8)
-    original = w.detach().clone()
-    dummy = nn.Parameter(torch.randn(3, 3, device=device))
-    optimizer = Muon([dummy], [], lr=0.02, adamw_lr=1e-3, spectral_params=[w])
-    w.grad = torch.randn_like(w)
-    dummy.grad = torch.randn_like(dummy)
-    optimizer.step()
-    assert not torch.equal(w.detach(), original)
 
 
 def test_complex_ns_produces_approximately_unitary():
@@ -615,15 +623,9 @@ def test_complex_ns_tall_and_wide():
         torch.testing.assert_close(product, identity, atol=0.5, rtol=0)
 
 
-def test_spectral_muon_invalid_shape_raises():
-    p = SpectralFilterParameter(torch.randn(4, 8, 8))
-    with pytest.raises(ValueError, match="groups, modes, C_out, C_in, 2"):
-        Muon([nn.Parameter(torch.randn(3, 3))], [], lr=0.02, spectral_params=[p])
-
-
 def test_spectral_muon_rejects_unmarked_parameter():
-    """A 5D weight ending in 2 that is not a SpectralFilterParameter (e.g. the
-    modulus SFNO's (C_in, C_out, modes_lat, modes_lon, 2) filter) raises."""
+    """A plain parameter passed as a spectral parameter raises: its matrix
+    axes are unknown."""
     p = nn.Parameter(torch.randn(8, 8, 4, 5, 2))
     with pytest.raises(ValueError, match="SpectralFilterParameter"):
         Muon([nn.Parameter(torch.randn(3, 3))], [], lr=0.02, spectral_params=[p])
@@ -631,32 +633,11 @@ def test_spectral_muon_rejects_unmarked_parameter():
 
 def test_spectral_muon_rejects_bfloat16():
     p = _spectral_weight(dtype=torch.bfloat16)
-    with pytest.raises(ValueError, match="float32 or float64"):
+    with pytest.raises(ValueError, match="float32"):
         Muon([nn.Parameter(torch.randn(3, 3))], [], lr=0.02, spectral_params=[p])
 
 
-def test_spectral_names_matching_non_spectral_parameter_raises():
-    """A spectral_names pattern that matches an ordinary parameter (here a 1D
-    bias) raises instead of silently routing it to another group."""
-    model = _SpectralModel().to(fme.get_device())
-    with pytest.raises(ValueError, match="SpectralFilterParameter"):
-        _build(model, _muon_config(spectral_names=["spectral_weight", "bias"]))
-
-
-def test_spectral_muon_orthogonalizes_each_mode_independently():
-    """Each (C_out, C_in) slice is orthogonalized on its own, matching a
-    per-slice complex Newton-Schulz, even when slice magnitudes differ by
-    orders of magnitude and the matrix is non-square with modes != channels."""
-    torch.manual_seed(0)
-    device = fme.get_device()
-    groups, modes, c_out, c_in = 2, 3, 4, 6
-    param = _spectral_weight(groups, modes, c_out, c_in)
-    original = param.detach().clone()
-    scales = 10.0 ** torch.arange(groups * modes, device=device).reshape(
-        groups, modes, 1, 1, 1
-    )
-    grad = torch.randn_like(param) * scales
-    lr = 0.1
+def _spectral_step(param: SpectralFilterParameter, grad: torch.Tensor, lr: float):
     with torch.no_grad():
         fme_muon.spectral_muon(
             [param],
@@ -675,32 +656,79 @@ def test_spectral_muon_orthogonalizes_each_mode_independently():
             eps=fme_muon.EPS,
             adjust_lr_fn=None,
         )
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        # conditional SFNO: (groups, modes, C_out, C_in, 2)
+        dict(shape=(2, 3, 4, 6, 2), in_dim=3, out_dim=2, dtype=torch.float32),
+        # modulus/makani SFNO: (C_in, C_out, modes_lat, modes_lon, 2)
+        dict(shape=(6, 4, 2, 3, 2), in_dim=0, out_dim=1, dtype=torch.float32),
+        # complex makani SFNO: (groups, C_in, C_out, modes_lat, modes_lon)
+        dict(shape=(2, 6, 4, 3, 2), in_dim=1, out_dim=2, dtype=torch.complex64),
+    ],
+)
+def test_spectral_muon_orthogonalizes_each_mode_independently(layout):
+    """Each (C_out, C_in) matrix along the declared axes is orthogonalized on
+    its own, matching a per-matrix complex Newton-Schulz, even when matrix
+    magnitudes differ by orders of magnitude."""
+    torch.manual_seed(0)
+    device = fme.get_device()
+    in_dim, out_dim = layout["in_dim"], layout["out_dim"]
+    param = SpectralFilterParameter(
+        torch.randn(layout["shape"], device=device, dtype=layout["dtype"]),
+        in_dim=in_dim,
+        out_dim=out_dim,
+    )
+    original = param.detach().clone()
+    grad = torch.randn_like(param)
+    as_complex = (
+        (lambda t: t) if param.is_complex() else (lambda t: torch.view_as_complex(t))
+    )
+    # matrices as (..., C_out, C_in), complex
+    grad_matrices = as_complex(grad).movedim((out_dim, in_dim), (-2, -1))
+    batch_shape = grad_matrices.shape[:-2]
+    scales = 10.0 ** torch.arange(batch_shape.numel(), device=device).reshape(
+        batch_shape
+    )
+    grad_matrices = grad_matrices * scales[..., None, None]
+    grad_complex = grad_matrices.movedim((-2, -1), (out_dim, in_dim))
+    grad = grad_complex if param.is_complex() else torch.view_as_real(grad_complex)
+    c_out, c_in = grad_matrices.shape[-2:]
+    lr = 0.1
+    _spectral_step(param, grad.contiguous(), lr)
     adjusted_lr = fme_muon._adjust_lr(lr, None, torch.Size([c_out, c_in]))
-    step = (original - param.detach()) / adjusted_lr
-    for g in range(groups):
-        for m in range(modes):
-            expected = fme_muon._zeropower_via_newtonschulz_complex(
-                torch.view_as_complex(grad[g, m].contiguous())[None],
-                (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
-                fme_muon.DEFAULT_NS_STEPS,
-                fme_muon.EPS,
-            )[0]
-            actual = torch.view_as_complex(step[g, m].contiguous())
-            torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
-            singular_values = torch.linalg.svdvals(actual)
-            assert singular_values.min() > 0.5
-            assert singular_values.max() < 1.3
+    step = as_complex((original - param.detach()) / adjusted_lr)
+    step_matrices = step.movedim((out_dim, in_dim), (-2, -1))
+    for index in np.ndindex(*batch_shape):
+        expected = fme_muon._zeropower_via_newtonschulz_complex(
+            grad_matrices[index][None],
+            (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
+            fme_muon.DEFAULT_NS_STEPS,
+            fme_muon.EPS,
+        )[0]
+        actual = step_matrices[index]
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+        singular_values = torch.linalg.svdvals(actual)
+        assert singular_values.min() > 0.5
+        assert singular_values.max() < 1.3
 
 
-def test_spectral_muon_match_rms_adamw_targets_real_element_rms():
+@pytest.mark.parametrize("complex_storage", [False, True])
+def test_spectral_muon_match_rms_adamw_targets_real_element_rms(complex_storage):
     """With match_rms_adamw, each real element of the spectral update has the
-    same RMS (0.2 * lr) the rule gives a real Muon update."""
+    same RMS (0.2 * lr) the rule gives a real Muon update, whether the weight
+    is stored as a real view or as a complex tensor."""
     torch.manual_seed(0)
     channels, lr = 16, 0.1
     rms = {}
     for kind in ("spectral", "real"):
         if kind == "spectral":
-            param: torch.Tensor = _spectral_weight(1, 8, channels, channels)
+            data = torch.randn(1, 8, channels, channels, 2, device=fme.get_device())
+            if complex_storage:
+                data = torch.view_as_complex(data)
+            param: torch.Tensor = SpectralFilterParameter(data, in_dim=3, out_dim=2)
         else:
             param = nn.Parameter(
                 torch.randn(channels, channels, device=fme.get_device())
@@ -717,57 +745,56 @@ def test_spectral_muon_match_rms_adamw_targets_real_element_rms():
         else:
             optimizer = Muon([param], [], **kwargs)
         optimizer.step()
-        rms[kind] = (param.detach() - original).pow(2).mean().sqrt().item() / lr
+        delta = param.detach() - original
+        if delta.is_complex():
+            delta = torch.view_as_real(delta)
+        rms[kind] = delta.pow(2).mean().sqrt().item() / lr
     assert rms["spectral"] == pytest.approx(rms["real"], rel=0.1)
     assert rms["spectral"] == pytest.approx(0.2, rel=0.25)
 
 
-def test_spectral_muon_loads_state_saved_without_spectral_flag():
+def test_muon_loads_state_saved_without_spectral_flag():
     """Optimizer state saved before the spectral group existed (no "spectral"
-    key in its param groups) loads and steps."""
+    key in its param groups) loads and steps for a model without spectral
+    weights."""
     torch.manual_seed(0)
     config = _muon_config()
-    model = _SpectralModel().to(fme.get_device())
+    model = _ConvNet().to(fme.get_device())
     optimization = _build(model, config)
-    x = torch.randn(4, 8, device=fme.get_device())
-    _train_steps(model, optimization, x, n=2)
+    _train_steps(model, optimization, _data(), n=2)
     saved_state = copy.deepcopy(optimization.get_state())
     for group in saved_state["optimizer_state_dict"]["param_groups"]:
         del group["spectral"]
 
-    model2 = _SpectralModel().to(fme.get_device())
+    model2 = _ConvNet().to(fme.get_device())
     model2.load_state_dict(model.state_dict())
     optimization2 = _build(model2, config)
     optimization2.load_state(saved_state)
-    _train_steps(model2, optimization2, x, n=1)
+    _train_steps(model2, optimization2, _data(), n=1)
 
 
-def test_spectral_names_unmatched_raises():
+@pytest.mark.parametrize("finetune", [False, True])
+def test_load_pre_spectral_state_into_spectral_model_raises(finetune: bool):
+    """A two-group state saved before spectral weights were routed to their own
+    group cannot be resumed by a model with SpectralFilterParameter weights."""
     model = _SpectralModel().to(fme.get_device())
-    with pytest.raises(ValueError, match="matched no parameter"):
-        _build(model, _muon_config(spectral_names=["no_such_param"]))
+    optimization = _build(model, _muon_config(adamw_names=["spectral_weight"]))
+    _train_steps(model, optimization, torch.randn(4, 8, device=fme.get_device()), 1)
+    saved_state = copy.deepcopy(optimization.get_state())
+    for group in saved_state["optimizer_state_dict"]["param_groups"]:
+        del group["spectral"]
 
-
-def test_spectral_and_adamw_overlap_raises():
-    model = _SpectralModel().to(fme.get_device())
-    with pytest.raises(ValueError, match="matches both"):
-        _build(
-            model,
-            _muon_config(
-                adamw_names=["spectral_weight"],
-                spectral_names=["spectral_weight"],
-            ),
-        )
-
-
-def test_spectral_names_without_muon_raises():
-    with pytest.raises(ValueError, match="only used with optimizer_type='Muon'"):
-        OptimizationConfig(optimizer_type="AdamW", spectral_names=["spectral_weight"])
+    optimization2 = _build(_SpectralModel().to(fme.get_device()), _muon_config())
+    with pytest.raises(ValueError, match="predates the spectral Muon group"):
+        if finetune:
+            optimization2.load_optimizer_state_for_finetuning(saved_state)
+        else:
+            optimization2.load_state(saved_state)
 
 
 def test_spectral_muon_state_round_trip():
     torch.manual_seed(0)
-    config = _muon_config(spectral_names=["spectral_weight"])
+    config = _muon_config()
     model = _SpectralModel().to(fme.get_device())
     optimization = _build(model, config)
     x = torch.randn(4, 8, device=fme.get_device())

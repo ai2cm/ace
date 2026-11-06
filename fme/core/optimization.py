@@ -14,6 +14,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -92,56 +93,40 @@ _MUON_KWARGS = frozenset(
 def _split_muon_parameters(
     named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
     adamw_names: Sequence[str],
-    spectral_names: Sequence[str] = (),
 ) -> tuple[
     list[torch.nn.Parameter],
-    list[torch.nn.Parameter],
+    list[SpectralFilterParameter],
     list[torch.nn.Parameter],
 ]:
     """Split parameters into (Muon, spectral Muon, AdamW) lists.
 
-    A parameter whose name contains one of ``spectral_names`` goes to
-    spectral Muon (SFNO per-mode complex filter weights), and one whose name
-    contains one of ``adamw_names`` goes to AdamW. Other parameters with
-    ``ndim >= 2`` go to Muon, and the rest to AdamW.
+    Parameters whose name contains one of ``adamw_names`` go to AdamW.
+    Of the rest, :class:`SpectralFilterParameter` instances go to spectral
+    Muon, other parameters with ``ndim >= 2`` to Muon, and all others to
+    AdamW.
 
     Raises:
-        ValueError: If an entry of ``adamw_names`` or ``spectral_names``
-            matches no parameter name, or a name matches both lists.
+        ValueError: If an entry of ``adamw_names`` matches no parameter name.
     """
     muon_params: list[torch.nn.Parameter] = []
-    spectral_params: list[torch.nn.Parameter] = []
+    spectral_params: list[SpectralFilterParameter] = []
     adamw_params: list[torch.nn.Parameter] = []
-    unmatched_adamw = set(adamw_names)
-    unmatched_spectral = set(spectral_names)
+    unmatched = set(adamw_names)
     for name, param in named_parameters:
-        adamw_match = {p for p in adamw_names if p in name}
-        spectral_match = {p for p in spectral_names if p in name}
-        unmatched_adamw -= adamw_match
-        unmatched_spectral -= spectral_match
-        if adamw_match and spectral_match:
-            raise ValueError(
-                f"Parameter {name!r} matches both adamw_names and "
-                f"spectral_names; each parameter can belong to only one group."
-            )
-        if spectral_match:
-            # Muon validates these, so a pattern matching a parameter that
-            # is not a spectral filter weight raises instead of silently
-            # falling back to another group.
+        matches = {pattern for pattern in adamw_names if pattern in name}
+        unmatched -= matches
+        if matches:
+            adamw_params.append(param)
+        elif isinstance(param, SpectralFilterParameter):
             spectral_params.append(param)
-        elif param.ndim >= 2 and not adamw_match:
+        elif param.ndim >= 2:
             muon_params.append(param)
         else:
             adamw_params.append(param)
-    if unmatched_adamw:
+    if unmatched:
         raise ValueError(
             "OptimizationConfig.adamw_names entries matched no parameter "
-            f"name: {sorted(unmatched_adamw)}"
-        )
-    if unmatched_spectral:
-        raise ValueError(
-            "OptimizationConfig.spectral_names entries matched no parameter "
-            f"name: {sorted(unmatched_spectral)}"
+            f"name: {sorted(unmatched)}"
         )
     return muon_params, spectral_params, adamw_params
 
@@ -152,11 +137,10 @@ def _build_optimizer(
     lr: float,
     kwargs: Mapping[str, Any],
     adamw_names: Sequence[str] = (),
-    spectral_names: Sequence[str] = (),
 ) -> torch.optim.Optimizer:
     if optimizer_type == "Muon":
         muon_params, spectral_params, adamw_params = _split_muon_parameters(
-            named_parameters, adamw_names, spectral_names
+            named_parameters, adamw_names
         )
         return Muon(
             muon_params,
@@ -401,7 +385,13 @@ class OptimizationConfig:
             parameter with ``ndim >= 2`` (conv kernels are flattened to
             ``(out_channels, -1)``) with Muon's orthogonalized momentum, and
             all other parameters (biases, norm affines) plus those selected
-            by ``adamw_names`` with AdamW, in a second parameter group.
+            by ``adamw_names`` with AdamW, in a separate parameter group.
+            Spectral filter weights
+            (:class:`fme.core.spectral_filter_parameter.SpectralFilterParameter`,
+            used by the SFNO implementations) not selected by ``adamw_names``
+            get a third group, which orthogonalizes each spectral mode's
+            complex channel matrix separately instead of flattening the
+            weight.
             Grouping is by ``ndim`` alone, so a norm affine over several
             dimensions (e.g. ``LayerNorm([C, H, W])``) goes to Muon unless
             listed in ``adamw_names``.
@@ -426,17 +416,6 @@ class OptimizationConfig:
             routed to the AdamW group instead of Muon, e.g. zero-initialized
             projections that Muon's unit-scale first step would move off
             zero. Every entry must match at least one parameter.
-        spectral_names: Muon only. Substrings of parameter names whose
-            parameters are conditional SFNO per-mode filter weights
-            (``filter_type: linear``; e.g. ``filter.filter.weight``), of
-            shape ``(groups, modes, C_out, C_in, 2)`` with real/imaginary
-            parts in the last dimension. These receive per-mode complex
-            orthogonalization (unitary Newton-Schulz) instead of the
-            standard real ``(shape[0], -1)`` Muon update. Every matched
-            parameter must be a :class:`fme.core.muon.SpectralFilterParameter`
-            (other SFNO filter weights, such as the modulus SFNO's, raise).
-            Every entry must match at least one parameter, and a parameter
-            must not match both ``adamw_names`` and ``spectral_names``.
         enable_automatic_mixed_precision: Whether to use automatic mixed
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
@@ -482,7 +461,6 @@ class OptimizationConfig:
     )
     resume_optimizer_ckpt_path: str | None = None
     adamw_names: list[str] = dataclasses.field(default_factory=list)
-    spectral_names: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -508,13 +486,11 @@ class OptimizationConfig:
                     "Muon requires kwargs['adamw_lr'], the learning rate of "
                     "its AdamW parameter group."
                 )
-        else:
-            for field_name in ("adamw_names", "spectral_names"):
-                if len(getattr(self, field_name)) > 0:
-                    raise ValueError(
-                        f"{field_name} is only used with optimizer_type='Muon', "
-                        f"got optimizer_type={self.optimizer_type!r}."
-                    )
+        elif len(self.adamw_names) > 0:
+            raise ValueError(
+                "adamw_names is only used with optimizer_type='Muon', got "
+                f"optimizer_type={self.optimizer_type!r}."
+            )
 
     @property
     def has_lr_schedule(self) -> bool:
@@ -535,7 +511,6 @@ class OptimizationConfig:
             self.lr,
             self.kwargs,
             adamw_names=self.adamw_names,
-            spectral_names=self.spectral_names,
         )
         scheduler = self.scheduler.build(optimizer, max_epochs)
         optimization = Optimization(
