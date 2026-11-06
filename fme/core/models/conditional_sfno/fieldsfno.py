@@ -284,7 +284,6 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
                 "context_config.embed_dim_forcing is set by the network from "
                 "params.forcing_embed_dim; pass it as 0"
             )
-        self.img_shape = img_shape
         self.prognostic_chans = prognostic_chans
         self.forcing_chans = forcing_chans
         self.diagnostic_chans = diagnostic_chans
