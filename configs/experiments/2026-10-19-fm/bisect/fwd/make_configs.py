@@ -219,6 +219,12 @@ def build():
     arms["F1-v22data"] = f1
     arms["F1n-nocm4"] = f1n
     arms["F1e-era5share"] = f1e
+    # Seed replicates to size run-to-run noise in the gain trajectory
+    # (F1n came out above F1, so seed noise may be large).
+    for base_arm, cfg in (("F0-v21", f0), ("F1-v22data", f1)):
+        rep = copy.deepcopy(cfg)
+        rep["seed"] = 1
+        arms[f"{base_arm}-s1"] = rep
     arms["F2-levels2"] = f2
     arms["F3-embed256"] = f3
     return arms
