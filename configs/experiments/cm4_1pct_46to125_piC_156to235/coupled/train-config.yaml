@@ -577,6 +577,8 @@ stepper:
               spectral_transform: sht
               affine_norms: true
               normalize_big_skip: true
+              filter_num_groups: 16
+              spectral_ratio: 0.125
           normalization:
             network:
               global_means_path: /atmos_stats/centering.nc
