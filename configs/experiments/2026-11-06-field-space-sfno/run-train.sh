@@ -148,3 +148,5 @@ run_training "pretrain-fieldsfno-rs1.yaml" "fieldsfno-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-noskip-rs1.yaml" "fieldsfno-noskip-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-pos64-rs1.yaml" "fieldsfno-pos64-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-noskip-pos64-rs1.yaml" "fieldsfno-noskip-pos64-pretrain-rs1" 8
+run_training "pretrain-fieldsfno-noskip-pos64-e1024-rs1.yaml" "fieldsfno-noskip-pos64-e1024-pretrain-rs1" 8
+run_training "pretrain-fieldsfno-noskip-pos64-l16-rs1.yaml" "fieldsfno-noskip-pos64-l16-pretrain-rs1" 8
