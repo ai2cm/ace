@@ -71,11 +71,40 @@ forcing_loader:
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: {save_monthly}{ocean_names}
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: false
+    save_monthly_files: {save_monthly}{atmos_names}
 """
+
+MONTHLY_ATMOS_NAMES = [
+    "air_temperature_0",
+    "air_temperature_7",
+    "LHTFLsfc",
+    "SHTFLsfc",
+    "DSWRFsfc",
+    "USWRFsfc",
+    "DLWRFsfc",
+    "ULWRFsfc",
+    "ULWRFtoa",
+    "USWRFtoa",
+    "surface_temperature",
+    "total_frozen_precipitation_rate",
+    "PRATEsfc",
+]
+MONTHLY_OCEAN_NAMES = [
+    "hfds_total_area",
+    "thetao_0",
+    "thetao_18",
+    "ocean_sea_ice_fraction",
+]
+
+MONTHLY_COMMENT = """
+# Writes monthly means of a subset of the atmosphere and ocean outputs."""
+
+
+def _names_yaml(names: list[str]) -> str:
+    return "\n    names:" + "".join(f"\n      - {n}" for n in names)
 
 EXTENSION_COMMENT = """
 # Initial conditions and forcing are as in inference-config-cm4-abrupt4xCO2-ic1.yaml,
@@ -116,23 +145,31 @@ def main():
             member=member,
             ocean_repeats="",
             atmos_repeats="",
+            save_monthly="false",
+            ocean_names="",
+            atmos_names="",
         )
         (HERE / f"inference-config-cm4-abrupt4xCO2-ic{member}.yaml").write_text(text)
-    text = TEMPLATE.format(
-        description=f"extension of ensemble member 1 of {len(times)}",
-        time=format_time(times[0]),
-        co2=CO2_4X,
-        extra_comment=EXTENSION_COMMENT,
-        n_coupled_steps=7300,
-        duration="100-year",
-        steps_comment="100 years of 5-day ocean steps",
-        in_memory=4,
-        static_forcing=STATIC_FORCING,
-        member=1,
-        ocean_repeats="\n      n_repeats: 500",
-        atmos_repeats="\n          n_repeats: 2",
-    )
-    (HERE / "inference-config-cm4-abrupt4xCO2-ic1-100yr.yaml").write_text(text)
+    for suffix, monthly in [("", False), ("-monthly", True)]:
+        text = TEMPLATE.format(
+            description=f"extension of ensemble member 1 of {len(times)}",
+            time=format_time(times[0]),
+            co2=CO2_4X,
+            extra_comment=EXTENSION_COMMENT + (MONTHLY_COMMENT if monthly else ""),
+            n_coupled_steps=7300,
+            duration="100-year",
+            steps_comment="100 years of 5-day ocean steps",
+            in_memory=4,
+            static_forcing=STATIC_FORCING,
+            member=1,
+            ocean_repeats="\n      n_repeats: 500",
+            atmos_repeats="\n          n_repeats: 2",
+            save_monthly="true" if monthly else "false",
+            ocean_names=_names_yaml(MONTHLY_OCEAN_NAMES) if monthly else "",
+            atmos_names=_names_yaml(MONTHLY_ATMOS_NAMES) if monthly else "",
+        )
+        name = f"inference-config-cm4-abrupt4xCO2-ic1-100yr{suffix}.yaml"
+        (HERE / name).write_text(text)
 
 
 if __name__ == "__main__":
