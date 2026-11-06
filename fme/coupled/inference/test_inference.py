@@ -1,6 +1,7 @@
 import dataclasses
 import os
 import pathlib
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -437,13 +438,16 @@ def _setup_with_ocean_corrector(
     )
 
 
-def _run_inference(tmp_path: pathlib.Path, config: InferenceConfig) -> None:
+def _run_inference(
+    tmp_path: pathlib.Path, config: InferenceConfig
+) -> list[dict[str, Any]]:
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
         main(yaml_config=str(config_filename))
+        return wandb.get_logs()
 
 
 @pytest.mark.medium_duration
@@ -455,7 +459,7 @@ def test_inference_writes_step_diagnostics_per_realm(tmp_path: pathlib.Path):
         ocean_save_step_diagnostics=True,
         atmosphere_save_step_diagnostics=True,
     )
-    _run_inference(tmp_path, config)
+    wandb_logs = _run_inference(tmp_path, config)
     deltas_path = tmp_path / "ocean" / "step_diagnostics" / "correction_deltas.nc"
     assert deltas_path.exists()
     ds = xr.open_dataset(deltas_path, decode_timedelta=False)
@@ -471,6 +475,11 @@ def test_inference_writes_step_diagnostics_per_realm(tmp_path: pathlib.Path):
         tmp_path / "atmosphere" / "step_diagnostics" / "correction_deltas.nc"
     )
     assert not atmos_deltas_path.exists()
+    # the correction metrics are logged for the corrected realm only
+    magnitude_key = "inference/time_mean_norm/correction_magnitude/o_prog"
+    assert any(log.get(magnitude_key, 0.0) > 0.0 for log in wandb_logs)
+    correction_keys = {key for log in wandb_logs for key in log if "correction" in key}
+    assert all("o_prog" in key for key in correction_keys)
 
 
 @pytest.mark.medium_duration

@@ -21,6 +21,8 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.registry import CorrectionSequence
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -30,9 +32,10 @@ from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.typing_ import TensorMapping
 from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
@@ -2512,23 +2515,44 @@ def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
             assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
 
 
+class _SteppedOffsetCorrection:
+    """Adds ``offset + k * increment`` to one named field on its k-th call
+    (k = 0, 1, ...), returning only that field.
+    """
+
+    def __init__(self, name: str, offset: float, increment: float):
+        self._name = name
+        self._offset = offset
+        self._increment = increment
+        self._n_calls = 0
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[dict, CorrectorState | None]:
+        offset = self._offset + self._n_calls * self._increment
+        self._n_calls += 1
+        return {self._name: gen_data[self._name] + offset}, corrector_state
+
+
 def _get_coupler_and_ic_for_step_diagnostics(
     ocean_offset: float | None,
     atmosphere_offset: float | None,
     n_forward_times_ocean: int = 2,
     n_forward_times_atmosphere: int = 4,
     n_samples: int = 2,
+    offset_increment: float = 0.0,
 ):
     """Build a coupler and initial condition for step-diagnostics tests,
-    injecting a constant-offset corrector on each realm whose offset is
-    not None. The atmosphere corrector targets "a_prog" rather than the
-    prescribed surface-temperature variable, which the SST prescription
-    (running after the corrector) forbids.
+    injecting an offset corrector on each realm whose offset is not None;
+    the offset grows by ``offset_increment`` per step. The atmosphere
+    corrector targets "a_prog" rather than the prescribed
+    surface-temperature variable, which the SST prescription (running
+    after the corrector) forbids.
     """
-    from fme.core.corrector.registry import CorrectionSequence
-    from fme.core.corrector.test_registry import ConstantOffsetCorrection
-    from fme.core.step.single_module import SingleModuleStep
-
     coupler, coupled_data, _, _ = get_stepper_and_batch(
         ocean_in_names=["sst", "mask_0"],
         ocean_out_names=["sst"],
@@ -2541,12 +2565,12 @@ def _get_coupler_and_ic_for_step_diagnostics(
     if ocean_offset is not None:
         assert isinstance(coupler.ocean._step_obj, SingleModuleStep)
         coupler.ocean._step_obj._corrector = CorrectionSequence(
-            [ConstantOffsetCorrection("sst", ocean_offset)]
+            [_SteppedOffsetCorrection("sst", ocean_offset, offset_increment)]
         )
     if atmosphere_offset is not None:
         assert isinstance(coupler.atmosphere._step_obj, SingleModuleStep)
         coupler.atmosphere._step_obj._corrector = CorrectionSequence(
-            [ConstantOffsetCorrection("a_prog", atmosphere_offset)]
+            [_SteppedOffsetCorrection("a_prog", atmosphere_offset, offset_increment)]
         )
     data = coupled_data.data
     ic = CoupledPrognosticState(
@@ -2606,6 +2630,32 @@ def test_predict_paired_step_diagnostics_both_realms():
     torch.testing.assert_close(
         atmos_delta, torch.full_like(atmos_delta, atmosphere_offset)
     )
+
+
+def test_predict_paired_step_diagnostics_follow_step_order():
+    ocean_offset, atmosphere_offset, increment = 1.5, -0.5, 0.25
+    n_steps = {"ocean": 2, "atmosphere": 4}
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=ocean_offset,
+        atmosphere_offset=atmosphere_offset,
+        n_forward_times_ocean=n_steps["ocean"],
+        n_forward_times_atmosphere=n_steps["atmosphere"],
+        offset_increment=increment,
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    for realm, realm_data, name, offset in [
+        ("ocean", paired_data.ocean_data, "sst", ocean_offset),
+        ("atmosphere", paired_data.atmosphere_data, "a_prog", atmosphere_offset),
+    ]:
+        assert realm_data.step_diagnostics is not None
+        delta = realm_data.step_diagnostics.delta[name]
+        assert delta.shape[1] == n_steps[realm]
+        for t in range(n_steps[realm]):
+            torch.testing.assert_close(
+                delta[:, t],
+                torch.full_like(delta[:, t], offset + t * increment),
+                msg=f"{realm} step {t}",
+            )
 
 
 def test_predict_attaches_step_diagnostics():

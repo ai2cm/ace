@@ -451,9 +451,14 @@ def _divide_by(std: float):
 
 
 def _build_evaluator_aggregator_for_correction(
-    ocean_std: float, atmosphere_std: float, n_time: int
+    ocean_std: float,
+    atmosphere_std: float,
+    n_time: int,
+    config: InferenceEvaluatorAggregatorConfig | None = None,
 ):
-    return InferenceEvaluatorAggregatorConfig().build(
+    if config is None:
+        config = InferenceEvaluatorAggregatorConfig()
+    return config.build(
         dataset_info=_coupled_ds_info(2, 2),
         n_timesteps_ocean=n_time,
         n_timesteps_atmosphere=n_time,
@@ -497,6 +502,24 @@ def test_inference_evaluator_aggregator_silent_without_step_diagnostics():
     summary = agg.get_summary_logs()
     assert "time_mean_norm/correction_magnitude/ocean_var" in summary
     assert not any("correction" in key and "atmos_var" in key for key in summary)
+
+
+def test_inference_evaluator_aggregator_step_diagnostics_config_reaches_both_realms():
+    n_time = 3
+    config = InferenceEvaluatorAggregatorConfig(
+        step_diagnostics=StepDiagnosticsMetricConfig(correction_scalars=False)
+    )
+    agg = _build_evaluator_aggregator_for_correction(
+        ocean_std=4.0, atmosphere_std=2.0, n_time=n_time, config=config
+    )
+    inference_logs = agg.record_batch(
+        _make_correction_paired_data(
+            2, 2, n_time, ocean_delta=2.0, atmosphere_delta=3.0
+        )
+    )
+    summary = agg.get_summary_logs()
+    all_keys = set(summary) | {key for log in inference_logs for key in log}
+    assert not any("correction" in key for key in all_keys)
 
 
 @pytest.mark.parametrize(
