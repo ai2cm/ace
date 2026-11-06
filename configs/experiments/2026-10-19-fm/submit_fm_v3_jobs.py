@@ -130,17 +130,10 @@ def committed_copy(
         text=True,
     )
     account = json.loads(whoami.stdout)[0]["name"]
-    existing = subprocess.run(
-        ["beaker", "dataset", "get", f"{account}/{name}", "--format", "json"],
-        capture_output=True,
-        text=True,
-    )
-    if existing.returncode == 0:
-        found = json.loads(existing.stdout)
-        found = found[0] if isinstance(found, list) else found
-        if found.get("committed"):
-            print(f"  reusing committed copy {name} ({found['id']})")
-            return found["id"]
+    found = _committed_dataset_id(f"{account}/{name}")
+    if found is not None:
+        print(f"  reusing committed copy {name} ({found})")
+        return found
     if dry_run:
         print(f"  would copy {checkpoint} from uncommitted {dataset} to {name}")
         return f"<copy of {dataset}>"
@@ -158,7 +151,7 @@ def committed_copy(
             ],
             check=True,
         )
-        created = subprocess.run(
+        subprocess.run(
             [
                 "beaker",
                 "dataset",
@@ -172,17 +165,29 @@ def committed_copy(
                 BUDGET,
                 "--desc",
                 f"{checkpoint} of {dataset}, for {child}",
-                "--format",
-                "json",
             ],
             check=True,
-            capture_output=True,
-            text=True,
         )
-    out = json.loads(created.stdout)
-    dataset_id = (out[0] if isinstance(out, list) else out)["id"]
+    # `dataset create` prints upload progress, not JSON; look the dataset up.
+    dataset_id = _committed_dataset_id(f"{account}/{name}")
+    if dataset_id is None:
+        raise RuntimeError(f"dataset {account}/{name} was not created and committed")
     print(f"  copied {checkpoint} from uncommitted {dataset} to {name} ({dataset_id})")
     return dataset_id
+
+
+def _committed_dataset_id(full_name: str) -> str | None:
+    """The id of dataset `full_name` if it exists and is committed, else None."""
+    proc = subprocess.run(
+        ["beaker", "dataset", "get", full_name, "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    found = json.loads(proc.stdout)
+    found = found[0] if isinstance(found, list) else found
+    return found["id"] if found.get("committed") else None
 
 
 def main() -> None:
