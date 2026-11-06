@@ -2895,6 +2895,62 @@ def test_get_stepper_with_input_masking_raises():
         )
 
 
+def _get_stepper_with_fill_value_overrides(
+    fill_value_overrides: dict[str, Literal["mean"] | float],
+) -> Stepper:
+    in_names = ["thetao_0", "thetao_1", "zos", "forcing"]
+    out_names = ["thetao_0", "thetao_1", "zos", "diagnostic"]
+    mask = torch.ones(5, 5, device=fme.get_device())
+    mask[0, 0] = 0.0
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names), mean=5.0
+                    ),
+                )
+            ),
+        ),
+        input_masking=StaticSpatialMaskingConfig(
+            mask_value=0,
+            fill_value=0.0,
+            fill_value_overrides=fill_value_overrides,
+        ),
+    )
+    return config.get_stepper(
+        get_dataset_info(
+            spatial_mask_provider=SpatialMaskProvider(
+                {"mask_2d": mask, "mask_0": mask, "mask_1": mask}
+            )
+        )
+    )
+
+
+def test_get_stepper_fill_value_overrides_apply_to_inputs():
+    stepper = _get_stepper_with_fill_value_overrides({"thetao_": "mean", "zos": 1.0})
+    data = {
+        name: torch.full((1, 5, 5), 7.0, device=fme.get_device())
+        for name in ["thetao_0", "thetao_1", "zos", "forcing"]
+    }
+    out = stepper._input_process_func(data)
+    assert out["thetao_0"][0, 0, 0].item() == pytest.approx(5.0)  # mean
+    assert out["zos"][0, 0, 0].item() == pytest.approx(1.0)  # override
+    assert out["forcing"][0, 0, 0].item() == pytest.approx(0.0)  # fill_value
+    assert out["zos"][0, 1, 1].item() == pytest.approx(7.0)  # unmasked
+
+
+def test_get_stepper_fill_value_overrides_reject_output_only_key():
+    with pytest.raises(ValueError, match="match no masked input"):
+        _get_stepper_with_fill_value_overrides({"diagnostic": 1.0})
+
+
 @pytest.mark.parametrize("n_ensemble", [1, 3])
 def test_predict_with_derived_forcing(n_ensemble):
     insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)
