@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import fsspec
 import numpy as np
 import torch
+import torch_harmonics
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
@@ -395,6 +396,22 @@ def _get_spatial_mask_provider(
     return spatial_mask_provider
 
 
+class _SHTRoundtrip:
+    """Spherical harmonic roundtrip (grid -> spherical harmonics -> grid) over
+    the last two (lat, lon) dimensions, which removes grid-scale structure not
+    representable by the spherical harmonics of the grid.
+
+    Computed in float64 and cast back to the input dtype.
+    """
+
+    def __init__(self, nlat: int, nlon: int, grid: str):
+        self._sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).double()
+        self._isht = torch_harmonics.InverseRealSHT(nlat, nlon, grid=grid).double()
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self._isht(self._sht(tensor.double())).to(dtype=tensor.dtype)
+
+
 @dataclasses.dataclass
 class OverwriteConfig:
     """Configuration to overwrite field values in XarrayDataset.
@@ -537,6 +554,16 @@ class XarrayDataConfig(DatasetConfigABC):
             metadata in the files (or of the derived variable). For example, use
             ``{"global_mean_co2": VariableMetadataConfig(units="volume mixing
             ratio")}`` after converting CO2 from ppmv with ``overwrite``.
+        sht_roundtrip_variables: Optional names of variables to filter with a
+            spherical harmonic roundtrip (grid -> spherical harmonics -> grid),
+            which removes grid-scale structure not representable by the
+            spherical harmonics of the grid. Names are those exposed by the
+            dataset, i.e. after applying ``renamed_variables``, and may include
+            ``derived_variables``, which are roundtripped after being computed.
+            Applied before ``overwrite``.
+            Useful to make a dataset's variables consistently filtered, e.g.
+            when only some of them were roundtripped during data processing.
+            Requires ``spatial_dimensions="latlon"``.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -573,6 +600,7 @@ class XarrayDataConfig(DatasetConfigABC):
     variable_metadata: Mapping[str, VariableMetadataConfig] = dataclasses.field(
         default_factory=dict
     )
+    sht_roundtrip_variables: Sequence[str] = dataclasses.field(default_factory=list)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -634,6 +662,11 @@ class XarrayDataConfig(DatasetConfigABC):
             raise ValueError(
                 f"Unknown derived_variables {sorted(unknown)}, must be one of "
                 f"{sorted(DERIVED_VARIABLES)}."
+            )
+        if self.sht_roundtrip_variables and self.spatial_dimensions != "latlon":
+            raise ValueError(
+                "sht_roundtrip_variables requires spatial_dimensions='latlon', got "
+                f"'{self.spatial_dimensions}'."
             )
 
     @property
@@ -697,6 +730,7 @@ class XarrayDataset(DatasetABC):
             name: DERIVED_VARIABLES[name] for name in config.derived_variables
         }
         self._metadata_overrides = config.variable_metadata
+        self._sht_roundtrip_names = frozenset(config.sht_roundtrip_variables)
         self._raw_paths = get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
@@ -729,6 +763,7 @@ class XarrayDataset(DatasetABC):
         ) = self.configure_horizontal_coordinates(first_dataset)
         # inputs of derived variables are loaded even if not requested
         self._derived_input_names = self._get_derived_input_names(names)
+        self._sht_roundtrip = self._get_sht_roundtrip(first_dataset)
         (
             self._time_dependent_names,
             self._time_invariant_names,
@@ -823,6 +858,31 @@ class XarrayDataset(DatasetABC):
                         input_names.append(input_name)
         return input_names
 
+    def _get_sht_roundtrip(self, ds: xr.Dataset) -> _SHTRoundtrip | None:
+        if not self._sht_roundtrip_names:
+            return None
+        available = set(ds.data_vars) | set(self._derived_variables)
+        unknown = sorted(self._sht_roundtrip_names - available)
+        if unknown:
+            raise ValueError(
+                f"sht_roundtrip_variables given for variables {unknown} which are "
+                "not in the dataset."
+            )
+        nlat, nlon = self._horizontal_coordinates.shape[-2:]
+        return _SHTRoundtrip(nlat, nlon, grid=self._horizontal_coordinates.grid)
+
+    def _apply_sht_roundtrip(self, tensors: TensorDict, names: Iterable[str]) -> None:
+        if self._sht_roundtrip is None:
+            return
+        for name in self._sht_roundtrip_names.intersection(names):
+            if torch.isnan(tensors[name]).any():
+                # a roundtrip would spread the NaNs over the whole field
+                raise ValueError(
+                    f"sht_roundtrip_variables variable '{name}' contains NaNs; "
+                    "use fill_nans to fill them before the roundtrip."
+                )
+            tensors[name] = self._sht_roundtrip(tensors[name])
+
     def _load_time_invariant_tensors(self) -> dict[str, torch.Tensor]:
         """Load the time-invariant variables into memory.
 
@@ -844,6 +904,7 @@ class XarrayDataset(DatasetABC):
                 variable = variable.fillna(self.fill_nans.value)
             tensors[name] = as_alignable_tensor(variable, self.dims)
         file.close()
+        self._apply_sht_roundtrip(tensors, self._time_invariant_names)
         return tensors
 
     def _ensure_epoch_synchronized(self):
@@ -1176,6 +1237,8 @@ class XarrayDataset(DatasetABC):
         for n, tensor_list in arrays.items():
             tensors[n] = torch.cat(tensor_list)
         del arrays
+        # time-invariant variables are filtered once when loaded
+        self._apply_sht_roundtrip(tensors, self._time_dependent_names)
 
         # broadcast the time-invariant variables loaded at construction
         shape = [total_steps] + self._shape_excluding_time_after_selection
@@ -1190,6 +1253,7 @@ class XarrayDataset(DatasetABC):
 
         for name in self._derived_names:
             tensors[name] = self._derived_variables[name].compute(tensors)
+        self._apply_sht_roundtrip(tensors, self._derived_names)
         for name in self._derived_input_names:
             del tensors[name]
 
