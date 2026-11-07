@@ -1,9 +1,11 @@
 """C96-path artifact build and load, on a toy of lat-lon rectangles.
 
-O: 3 × 6 cells of 10° on lon 0–60, lat 0–30, dry on lon ≥ 30. C: two "tiles"
-(lon 0–30, 30–60) of 2 × 2 cells of 15°; tile 2 is all land. G: 2 × 3 cells
-of 20° × 15°; the J on lon 40–60 are land-only, those on lon 20–40 coastal.
-Areas are exact spherical rectangles on the unit sphere.
+O: 3 × 6 cells of 10° on lon 0–60, lat 0–30, dry on lon ≥ 30, on the tracer
+dims (yh, xh) with a rotation angle. C: two "tiles" (lon 0–30, 30–60) of
+2 × 2 cells of 15°; tile 2 is all land. G: 2 × 3 cells of 20° × 15°; the J on
+lon 40–60 are land-only, those on lon 20–40 coastal. Areas are exact
+spherical rectangles on the unit sphere. ``_toy(coast_lon=20)`` moves the
+coast into a C cell (lon 15–30).
 """
 
 import dataclasses
@@ -42,12 +44,7 @@ from .native_area import (
 from .ocean_emulators_port import regrid_normalized
 from .om4.postprocess import sea_ice
 from .postprocess import ChunkContext
-from .weights import (
-    REGRID_PATH_ATTR,
-    REGRID_PATH_DESCRIPTION_ATTR,
-    SOURCE_GRID_FILENAME,
-    WEIGHTS_FILENAME,
-)
+from .weights import REGRID_PATH_C96, SOURCE_GRID_FILENAME, WEIGHTS_FILENAME
 
 O_LON_B, O_LAT_B = np.arange(0.0, 61.0, 10.0), np.arange(0.0, 31.0, 10.0)
 C_TILE_LON_B = [np.array([0.0, 15.0, 30.0]), np.array([30.0, 45.0, 60.0])]
@@ -117,20 +114,30 @@ class Toy:
         return F @ (self.X * ratio[None, :])
 
 
-def _toy() -> Toy:
+def _toy(coast_lon: float = COAST_LON) -> Toy:
     o = _cells(O_LON_B, O_LAT_B)
     c = np.concatenate([_cells(lon_b, C_LAT_B) for lon_b in C_TILE_LON_B])
     g = _cells(G_LON_B, G_LAT_B)
-    wet = (0.5 * (o[:, 0] + o[:, 1]) < COAST_LON).astype(np.float64)
+    wet = (0.5 * (o[:, 0] + o[:, 1]) < coast_lon).astype(np.float64)
     X = _overlap(c, o) * wet[None, :]
-    # Exact 0 on the all-ocean tile, so f_J = 1 there exactly.
-    land = np.where(c[:, 0] >= COAST_LON, _area(*c.T), 0.0)
+    # Exact 0 on all-ocean C cells, so f_J = 1 there exactly.
+    land = np.where(c[:, 1] <= coast_lon, 0.0, _area(*c.T) - X.sum(axis=1))
     native_area = _area(*o.T) * (1.0 + 0.01 * (np.arange(len(o)) % 5))
     return Toy(X, land, _overlap(g, c), native_area, wet)
 
 
+O_DIMS = ("yh", "xh")
+
+
 def _source_grid() -> xr.Dataset:
-    return xe.util.grid_2d(0, 60, 10, 0, 30, 10)
+    """O on MOM6's tracer dims, with ``angle`` (degrees) for rotated pairs."""
+    grid = xe.util.grid_2d(0, 60, 10, 0, 30, 10).rename(
+        y="yh", x="xh", y_b="yh_b", x_b="xh_b"
+    )
+    angle = (
+        5.0 * np.arange(grid.sizes["xh"]) + 2.0 * np.arange(grid.sizes["yh"])[:, None]
+    )
+    return grid.assign(angle=(O_DIMS, angle))
 
 
 def _target_grid() -> xr.Dataset:
@@ -150,7 +157,7 @@ def _target_grid() -> xr.Dataset:
 def _on_source(values, name=None) -> xr.DataArray:
     shape = (len(O_LAT_B) - 1, len(O_LON_B) - 1)
     return xr.DataArray(
-        np.asarray(values, dtype=np.float64).reshape(shape), dims=("y", "x"), name=name
+        np.asarray(values, dtype=np.float64).reshape(shape), dims=O_DIMS, name=name
     )
 
 
@@ -425,8 +432,8 @@ def test_weights_raise_on_shape_mismatch():
 def test_built_artifact_attrs(tmp_path, monkeypatch):
     inputs = _built(tmp_path, monkeypatch)
     attrs = _attrs(inputs.output_url)
-    assert attrs[REGRID_PATH_ATTR] == "c96"
-    assert attrs[REGRID_PATH_DESCRIPTION_ATTR] == (
+    assert weights.read_regrid_path(inputs.output_url) == REGRID_PATH_C96
+    assert weights.read_regrid_path_description(inputs.output_url) == (
         f"OM4 0.25° tripolar -> C96 (CM4 xgrid) -> {TARGET} (fregrid conserve_order1)"
     )
     assert attrs["source_weights_url"] == URLS["xgrid"]
@@ -463,7 +470,7 @@ def test_build_without_land_static(tmp_path, monkeypatch):
     assert attrs["am4_land_static_url"] == NO_LAND_STATIC
     assert np.isnan(attrs["max_abs_cm4_ocean_fraction_minus_one_minus_lf_A"])
     assert np.isnan(attrs["rms_cm4_ocean_fraction_minus_one_minus_lf_A"])
-    assert attrs[REGRID_PATH_ATTR] == "c96"
+    assert weights.read_regrid_path(inputs.output_url) == REGRID_PATH_C96
 
 
 def test_land_fraction_gate_raises(tmp_path, monkeypatch):

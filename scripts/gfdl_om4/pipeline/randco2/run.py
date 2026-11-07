@@ -68,7 +68,16 @@ from ..postprocess import (
     provenance_attrs,
     provenance_run_attrs,
 )
-from ..weights import get_regridder, open_areacello, read_artifact_attrs
+from ..weights import (
+    C96_PATH_AREACELLO_DERIVATION,
+    C96_PATH_AREACELLO_LONG_NAME,
+    C96_PATH_SFTOF_DERIVATION,
+    get_regridder,
+    open_areacello,
+    read_artifact_attrs,
+    read_wet_columns_only,
+    regrid_path_attrs,
+)
 from ..zarr_io import (
     OUTPUT_DTYPE,
     TIME_DIM,
@@ -322,33 +331,43 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
             "mask_0": (ocean_area > 0).astype(np.float64),
         }
     )
+    wet_columns_only = read_wet_columns_only(config.weights_url)
     check_static_identities(
         NativeAreaStatics(stored, ocean_area),
         regridder,
         wetmask.expand_dims(LEVEL_DIM),
         native["areacello"],
+        wet_columns_only=wet_columns_only,
+        mask_source_urls=(
+            read_artifact_attrs(config.weights_url)["a_source_url"],
+            config.wetmask.store,
+        ),
     )
 
+    if wet_columns_only:
+        areacello_long_name = C96_PATH_AREACELLO_LONG_NAME
+        areacello_derivation = C96_PATH_AREACELLO_DERIVATION
+        sftof_derivation = C96_PATH_SFTOF_DERIVATION
+    else:
+        areacello_long_name = "target cell area covered by native ocean-grid cells"
+        areacello_derivation = (
+            "A_J = Σ_i O_Ji, native (MOM6) cell area overlapping the target "
+            "cell, from the weight artifact; 0 where no native cell overlaps"
+        )
+        sftof_derivation = (
+            "full-cell conservative regrid of native sftof with overlaps in "
+            "native cell areas; 0 where no native cell overlaps"
+        )
     statics = xr.Dataset()
     statics["areacello"] = area.astype(OUTPUT_DTYPE).assign_attrs(
-        long_name="target cell area covered by native ocean-grid cells",
+        long_name=areacello_long_name,
         units="m2",
-        **provenance_attrs(
-            config.weights_url,
-            "areacello",
-            "A_J = Σ_i O_Ji, native (MOM6) cell area overlapping the target "
-            "cell, from the weight artifact; 0 where no native cell overlaps",
-        ),
+        **provenance_attrs(config.weights_url, "areacello", areacello_derivation),
     )
     statics["sftof"] = sftof.astype(OUTPUT_DTYPE).assign_attrs(
         long_name="sea area percentage, regridded with native-area overlaps O",
         units="%",
-        **provenance_attrs(
-            config.statics.store,
-            "sftof",
-            "full-cell conservative regrid of native sftof with overlaps in "
-            "native cell areas; 0 where no native cell overlaps",
-        ),
+        **provenance_attrs(config.statics.store, "sftof", sftof_derivation),
     )
     statics["sea_surface_fraction"] = sea_surface_fraction.astype(
         OUTPUT_DTYPE
@@ -496,6 +515,8 @@ def main():
 
     logger.info("[weights] loading weight artifact from %s", config.weights_url)
     get_regridder(config.weights_url, config.target_grid)
+    regrid_path_root_attrs = regrid_path_attrs(config.weights_url)
+    logger.info("[weights] %s", regrid_path_root_attrs)
 
     logger.info("[statics] building static fields")
     statics = build_statics(config, wetmask)
@@ -506,6 +527,7 @@ def main():
     run_attrs = {
         NATIVE_AREA_CHECKS: {"a_over_a_tilde_spread": spread},
         **provenance_run_attrs(args.ace_commit, args.image_tag),
+        **regrid_path_root_attrs,
     }
     input_urls = sorted(
         {
