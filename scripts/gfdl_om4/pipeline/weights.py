@@ -58,6 +58,36 @@ SOURCE_GRID_FILENAME = "source_grid.nc"
 WEIGHTS_FILENAME = "weights.nc"
 AREACELLO_FILENAME = "areacello.nc"
 
+# weights.nc attrs. ``wet_columns_only = 1``: ŵ has no columns on dry native
+# cells (pipeline.c96_weights); absent on direct artifacts.
+WET_COLUMNS_ONLY_ATTR = "wet_columns_only"
+# The regrid path an artifact implements, and a readable description of it.
+# Each pipeline copies both to its store's root attrs.
+REGRID_PATH_ATTR = "regrid_path"
+REGRID_PATH_C96 = "c96"
+REGRID_PATH_DIRECT = "direct"
+REGRID_PATH_DESCRIPTION_ATTR = "regrid_path_description"
+
+# Static attrs on the C96 path, where areacello_J = W'_J0 / f_J is not a
+# geometric cell area (pipeline.native_area.cm4_chain_native_area_weights).
+C96_PATH_AREACELLO_LONG_NAME = (
+    "ocean area divided by ocean fraction; not a geometric cell area"
+)
+C96_PATH_AREACELLO_DERIVATION = (
+    "Ocean area of the cell, in native ocean-model cell areas, divided by "
+    "sea_surface_fraction; where sea_surface_fraction is 0, the cell's area from the "
+    "remap file. Not a geometric cell area: it jumps at coastlines and does not sum "
+    "to the area of the sphere. For ocean area use areacello * sea_surface_fraction, "
+    "not areacello alone. See scripts/gfdl_om4/README.md, section Native-area weights."
+)
+C96_PATH_SFTOF_DERIVATION = (
+    "Ocean percentage of the cell: 100 times the coupled model's exchange-grid ocean "
+    "fraction on the intermediate cubed-sphere grid, remapped to this grid; 0 on cells "
+    "with no ocean. areacello * sftof / 100 is the cell's ocean area in native "
+    "ocean-model cell areas. See scripts/gfdl_om4/README.md, section Native-area "
+    "weights."
+)
+
 
 def _upload(local_path: str, url: str) -> None:
     with open(local_path, "rb") as src, fsspec.open(url, "wb") as dst:
@@ -155,6 +185,48 @@ def read_artifact_attrs(weights_url: str) -> dict:
     with fsspec.open(_artifact_url(weights_url, WEIGHTS_FILENAME)) as f:
         with xr.open_dataset(f) as ds:
             return {name: np.asarray(ds.attrs[name]).item() for name in ARTIFACT_ATTRS}
+
+
+def _weights_attrs(weights_url: str) -> dict:
+    with fsspec.open(_artifact_url(weights_url, WEIGHTS_FILENAME)) as f:
+        with xr.open_dataset(f) as ds:
+            return dict(ds.attrs)
+
+
+def read_wet_columns_only(weights_url: str) -> bool:
+    """The artifact's ``wet_columns_only`` attr; ``False`` when absent."""
+    return bool(_weights_attrs(weights_url).get(WET_COLUMNS_ONLY_ATTR, False))
+
+
+def read_regrid_path(weights_url: str) -> str:
+    """The artifact's ``regrid_path`` attr: the only selector of the path.
+
+    Raises ``ValueError`` when absent."""
+    attrs = _weights_attrs(weights_url)
+    if REGRID_PATH_ATTR not in attrs:
+        raise ValueError(
+            f"{weights_url}: weights.nc lacks the attr {REGRID_PATH_ATTR!r}, which "
+            "names the regrid path. Rebuild the artifact with "
+            "pipeline.native_area_weights (direct path) or pipeline.c96_weights "
+            "(C96 path)."
+        )
+    return str(attrs[REGRID_PATH_ATTR])
+
+
+def read_regrid_path_description(weights_url: str) -> str | None:
+    """The artifact's ``regrid_path_description`` attr; ``None`` when absent."""
+    description = _weights_attrs(weights_url).get(REGRID_PATH_DESCRIPTION_ATTR)
+    return None if description is None else str(description)
+
+
+def regrid_path_attrs(weights_url: str) -> dict:
+    """Store root attrs naming the artifact's regrid path; the description
+    only when the artifact has one (informational, never branched on)."""
+    attrs = {REGRID_PATH_ATTR: read_regrid_path(weights_url)}
+    description = read_regrid_path_description(weights_url)
+    if description is not None:
+        attrs[REGRID_PATH_DESCRIPTION_ATTR] = description
+    return attrs
 
 
 def open_areacello(weights_url: str, target_grid_name: str) -> xr.DataArray:

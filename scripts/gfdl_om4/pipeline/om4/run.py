@@ -93,10 +93,15 @@ from ..postprocess import (
     provenance_run_attrs,
 )
 from ..weights import (
+    C96_PATH_AREACELLO_DERIVATION,
+    C96_PATH_AREACELLO_LONG_NAME,
+    C96_PATH_SFTOF_DERIVATION,
     get_regridder,
     open_areacello,
     open_source_grid,
     read_artifact_attrs,
+    read_wet_columns_only,
+    regrid_path_attrs,
 )
 from ..zarr_io import (
     OUTPUT_DTYPE,
@@ -633,6 +638,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         native["sftof"],
     )
     area_fields = area_statics.stored
+    wet_columns_only = read_wet_columns_only(config.weights_url)
     level_count = wetmask.sizes[LEVEL_DIM]
     statics = xr.Dataset()
 
@@ -662,25 +668,29 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
             "sftof / 100 = W'_J0 / A_J; usable to weight coastal cells",
         ),
     )
+    if wet_columns_only:
+        sftof_derivation = C96_PATH_SFTOF_DERIVATION
+        areacello_long_name = C96_PATH_AREACELLO_LONG_NAME
+        areacello_derivation = C96_PATH_AREACELLO_DERIVATION
+    else:
+        sftof_derivation = (
+            "Σ_i O_Ji sftof_i / A_J = 100 W'_J0 / A_J over the full cell "
+            f"(ŵ, A_J: {config.weights_url}); 0 on land and unmapped cells"
+        )
+        areacello_long_name = "cell area covered by native ocean-model cells"
+        areacello_derivation = (
+            "A_J = Σ_i O_Ji over native cells wet and dry, in native "
+            f"(MOM6) cell areas from {config.statics.store}; 0 on unmapped cells"
+        )
     statics["sftof"] = area_fields["sftof"].assign_attrs(
         long_name="ocean area percentage, regridded with native-area overlaps O",
         units="%",
-        **provenance_attrs(
-            config.statics.store,
-            "sftof",
-            "Σ_i O_Ji sftof_i / A_J = 100 W'_J0 / A_J over the full cell "
-            f"(ŵ, A_J: {config.weights_url}); 0 on land and unmapped cells",
-        ),
+        **provenance_attrs(config.statics.store, "sftof", sftof_derivation),
     )
     statics["areacello"] = area_fields["areacello"].assign_attrs(
-        long_name="cell area covered by native ocean-model cells",
+        long_name=areacello_long_name,
         units="m2",
-        **provenance_attrs(
-            config.weights_url,
-            "areacello",
-            "A_J = Σ_i O_Ji over native cells wet and dry, in native "
-            f"(MOM6) cell areas from {config.statics.store}; 0 on unmapped cells",
-        ),
+        **provenance_attrs(config.weights_url, "areacello", areacello_derivation),
     )
     for k in range(level_count):
         statics[f"h_prime_{k}"] = area_fields[f"h_prime_{k}"].assign_attrs(
@@ -724,7 +734,17 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     )
 
     check_static_identities(
-        area_statics, regridder, wetmask, native["areacello"], native["deptho"], deptho
+        area_statics,
+        regridder,
+        wetmask,
+        native["areacello"],
+        native["deptho"],
+        deptho,
+        wet_columns_only=wet_columns_only,
+        mask_source_urls=(
+            read_artifact_attrs(config.weights_url)["a_source_url"],
+            config.wetmask.store,
+        ),
     )
 
     # Enforce the land-NaN convention on everything not explicitly exempt.
@@ -1007,6 +1027,8 @@ def main():
 
     logger.info("[weights] loading weight artifact from %s", config.weights_url)
     get_regridder(config.weights_url, config.target_grid)
+    regrid_path_root_attrs = regrid_path_attrs(config.weights_url)
+    logger.info("[weights] %s", regrid_path_root_attrs)
 
     logger.info("[statics] building static fields")
     statics = build_statics(config, wetmask)
@@ -1017,6 +1039,7 @@ def main():
             config, stream_datasets, wetmask, native, output_time
         ),
         **provenance_run_attrs(args.ace_commit, args.image_tag),
+        **regrid_path_root_attrs,
     }
 
     input_urls = sorted(
