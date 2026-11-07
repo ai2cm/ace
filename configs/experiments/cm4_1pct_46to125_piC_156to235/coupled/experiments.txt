@@ -56,6 +56,16 @@ cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
 
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a0rs0|01M6Q579A8XX29G6PFR902HATD|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a2rs0|01M6Q582H6496X338DJDM4EHQJ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a0rs0|01M6Q58ZM66DJ3QW4CMDVSX2EM|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a1rs0|01M6Q59QR76XN1NKR0CFKYB5GA|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a2rs0|01M6Q5AFPB2MSKG45NP522BWVF|training|best_inference_ckpt|normal|--min-runtime 8h
+
 # troy's training runs with the hybrid SST Samudra
 1deg-randco2rs1-fmean-hybridsstdiag-alt||01M64JR109MDKK6T533BR90HMM|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
 1deg-randco2rs1-fmean-hybridsstdiag-alt||01M64JR109MDKK6T533BR90HMM|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
