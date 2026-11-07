@@ -41,6 +41,36 @@ level, wetmask ``wet``, Δz = ``deptho``, ``sftof``.
         --weights-url <C96-path artifact> \\
         --a-source-url <NATIVE_AREA_A_SOURCE_URL> \\
         --output-json <path or URL>/02-statics-F90.json
+
+Subcommand ``stores``: a C96-path store against its direct-path twin, same
+config and timesteps. p path in {direct, c96path}; per path p and timestep,
+sums over the J where the summand is finite:
+
+    C1:  Σ_J areacello_p,J sea_surface_fraction_p,J = Σ_i native_area_i wet_i0
+         scale Σ_i native_area_i wet_i0
+    C2:  Σ_J areacello_c96path,J sea_surface_fraction_c96path,J field_c96path,J
+       = Σ_J areacello_direct,J sea_surface_fraction_direct,J field_direct,J
+         scale max_p Σ_J areacello_p,J sea_surface_fraction_p,J |field_p,J|
+         (per-ocean-area fields, ``--c2-fields``)
+    C3:  Σ_J areacello_c96path,J field_c96path,J
+       = Σ_J areacello_direct,J field_direct,J
+         scale max_p Σ_J areacello_p,J |field_p,J|
+         (full-cell fields, ``--c3-fields``)
+
+each within ``AREA_RTOL · scale``. ``native_area_i`` and ``wet_i0`` (the
+surface of the run's wetmask) come from the C96 config through the pipeline's
+own readers. Report: the share of the C96 store's ocean area on
+
+    gained_band = {J : sea_surface_fraction_direct,J = 0,
+                       sea_surface_fraction_c96path,J > 0}
+
+The JSON is written before a failed item raises.
+
+    python -m pipeline.c96_checks stores --pipeline om4 \\
+        --c96-config <C96 test config> \\
+        --c96-store <C96 store> --direct-store <direct store> \\
+        --c2-fields tos hfds --c3-fields hfds_total_area \\
+        --output-json <path or URL>/04-stores-<config basename>.json
 """
 
 import argparse
@@ -66,13 +96,16 @@ from .native_area import (
 )
 from .ocean_emulators_port import regrid_normalized
 from .weights import (
+    REGRID_PATH_ATTR,
+    REGRID_PATH_C96,
+    REGRID_PATH_DIRECT,
     get_regridder,
     open_areacello,
     open_source_grid,
     read_artifact_attrs,
     read_wet_columns_only,
 )
-from .zarr_io import make_zarr_store
+from .zarr_io import TIME_DIM, make_zarr_store
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +454,140 @@ def run_statics(args: argparse.Namespace) -> dict:
     }
 
 
+def _ocean_sum(area: xr.DataArray, field: xr.DataArray) -> xr.DataArray:
+    """Σ_J area_J field_J over the J where the summand is finite, per time."""
+    summand = (area * field).astype(np.float64)
+    spatial = [d for d in summand.dims if d != TIME_DIM]
+    return summand.where(np.isfinite(summand), 0.0).sum(spatial)
+
+
+def _pair_item(lhs, rhs, scale) -> dict:
+    lhs, rhs, scale = (
+        np.atleast_1d(np.asarray(x, dtype=np.float64)) for x in (lhs, rhs, scale)
+    )
+    rel = np.abs(lhs - rhs) / scale
+    return {
+        "lhs": lhs.tolist(),
+        "rhs": rhs.tolist(),
+        "scale": scale.tolist(),
+        "max_abs_diff_over_scale": float(rel.max()),
+        "AREA_RTOL": AREA_RTOL,
+        "pass": bool(np.all(rel <= AREA_RTOL)),
+    }
+
+
+def stores_checks(
+    c96: xr.Dataset,
+    direct: xr.Dataset,
+    native_wet_area: float,
+    c2_fields: list[str],
+    c3_fields: list[str],
+) -> dict:
+    """C1–C3 between a C96-path and a direct-path store, and the
+    ``gained_band`` report; ``pass`` is the conjunction of every item."""
+    for ds, path in ((c96, REGRID_PATH_C96), (direct, REGRID_PATH_DIRECT)):
+        if ds.attrs.get(REGRID_PATH_ATTR) != path:
+            raise ValueError(
+                f"store root {REGRID_PATH_ATTR} is "
+                f"{ds.attrs.get(REGRID_PATH_ATTR)!r}; expected {path!r}"
+            )
+    xr.align(c96[TIME_DIM], direct[TIME_DIM], join="exact")
+    stores = {"direct": direct, "c96path": c96}
+    ocean_area = {
+        p: ds["areacello"].astype(np.float64) * ds["sea_surface_fraction"]
+        for p, ds in stores.items()
+    }
+    c1 = {
+        p: _pair_item(
+            _ocean_sum(ocean_area[p], xr.ones_like(ocean_area[p])),
+            native_wet_area,
+            native_wet_area,
+        )
+        for p in stores
+    }
+
+    def field_item(weight: dict, name: str) -> dict:
+        totals = {p: _ocean_sum(weight[p], stores[p][name]) for p in stores}
+        scale = np.maximum(
+            *(_ocean_sum(weight[p], abs(stores[p][name])).values for p in stores)
+        )
+        return _pair_item(totals["c96path"].values, totals["direct"].values, scale)
+
+    cell_area = {p: ds["areacello"].astype(np.float64) for p, ds in stores.items()}
+    c2 = {name: field_item(ocean_area, name) for name in c2_fields}
+    c3 = {name: field_item(cell_area, name) for name in c3_fields}
+    gained = (direct["sea_surface_fraction"] == 0) & (c96["sea_surface_fraction"] > 0)
+    c96_ocean_area = ocean_area["c96path"]
+    items = [*c1.values(), *c2.values(), *c3.values()]
+    return {
+        "pass": all(item["pass"] for item in items),
+        "time": [str(t) for t in c96[TIME_DIM].values],
+        "native_wet_area_m2": native_wet_area,
+        "C1": c1,
+        "C2": c2,
+        "C3": c3,
+        "reports": {
+            "gained_band_n_cells": int(gained.sum()),
+            "gained_band_ocean_area_share": float(
+                c96_ocean_area.where(gained, 0.0).sum() / c96_ocean_area.sum()
+            ),
+        },
+    }
+
+
+def _om4_native_wet_area(config_path: str) -> float:
+    from .om4 import config, run
+
+    cfg = config.load_config(config_path)
+    wetmask = run.load_wetmask(cfg)
+    native = run.load_native_statics(cfg, wetmask)
+    return float(native["areacello"].where(wetmask.isel({LEVEL_DIM: 0}), 0.0).sum())
+
+
+def _randco2_native_wet_area(config_path: str, member: str | None) -> float:
+    from .randco2 import config, run
+
+    cfg = config.load_config(config_path, member)
+    wet0 = run.load_wetmask(cfg)
+    native = run.load_native_statics(cfg, wet0)
+    return float(native["areacello"].where(wet0, 0.0).sum())
+
+
+def native_wet_area(pipeline: str, config_path: str, member: str | None) -> float:
+    """``Σ_i native_area_i wet_i0`` through the pipeline's own readers."""
+    if pipeline == "om4":
+        return _om4_native_wet_area(config_path)
+    return _randco2_native_wet_area(config_path, member)
+
+
+def _open_store(url: str, names: list[str]) -> xr.Dataset:
+    ds = xr.open_zarr(make_zarr_store(url), decode_timedelta=False)
+    return ds[names].load()
+
+
+def run_stores(args: argparse.Namespace) -> dict:
+    names = ["areacello", "sea_surface_fraction", *args.c2_fields, *args.c3_fields]
+    c96 = _open_store(args.c96_store, names)
+    direct = _open_store(args.direct_store, names)
+    result = stores_checks(
+        c96,
+        direct,
+        native_wet_area(args.pipeline, args.c96_config, args.member),
+        args.c2_fields,
+        args.c3_fields,
+    )
+    return {
+        "inputs": {
+            "pipeline": args.pipeline,
+            "c96_config": args.c96_config,
+            "member": args.member,
+            "c96_store": args.c96_store,
+            "direct_store": args.direct_store,
+        },
+        **result,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Checks of the C96 path, written to JSON."
@@ -448,12 +615,29 @@ def main() -> None:
         help="statics zarr store with areacello, wet, deptho, sftof",
     )
     sta.add_argument("--output-json", required=True)
+    sto = sub.add_parser("stores", help="C1–C3 between a C96 and a direct store")
+    sto.add_argument("--pipeline", required=True, choices=["om4", "randco2"])
+    sto.add_argument(
+        "--c96-config", required=True, help="config of the C96 run (native statics)"
+    )
+    sto.add_argument("--member", default=None, help="randco2 ensemble member")
+    sto.add_argument("--c96-store", required=True)
+    sto.add_argument("--direct-store", required=True)
+    sto.add_argument("--c2-fields", nargs="*", default=[], help="per-ocean-area")
+    sto.add_argument("--c3-fields", nargs="*", default=[], help="full-cell")
+    sto.add_argument("--output-json", required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    result = {"operators": run_operators, "statics": run_statics}[args.command](args)
+    result = {
+        "operators": run_operators,
+        "statics": run_statics,
+        "stores": run_stores,
+    }[args.command](args)
     with fsspec.open(args.output_json, "w") as f:
         json.dump(result, f, indent=1)
     logger.info(f"Wrote {args.output_json}")
+    if result.get("pass") is False:
+        raise AssertionError(f"failed items; see {args.output_json}")
 
 
 if __name__ == "__main__":
