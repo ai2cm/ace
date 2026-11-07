@@ -213,6 +213,184 @@ def assert_artifact_invariants(
 
 
 # ---------------------------------------------------------------------------
+# C96 path: O -> C96 (exchange grid) -> target (fregrid), no ESMF operator
+# ---------------------------------------------------------------------------
+#
+# c C96 cell; i, J as above:
+#
+#     X_ci  xgrid_ocean_area      L_c  xgrid_land_area     Y_Jc  fregrid_overlap
+#     ã_i = Σ_c X_ci              A^x_c = Σ_i X_ci + L_c
+#     F_Jc = Y_Jc / Σ_J Y_Jc                               share of c's area in J
+#     O_Ji = Σ_c F_Jc X_ci a_i / ã_i                       m_i = 1; no column else
+#     f_J  = Σ_c Y_Jc (Σ_i X_ci / A^x_c) / Σ_c Y_Jc        ocean fraction
+#     A_J  = Σ_i O_Ji / f_J  (f_J > 0);  Σ_c Y_Jc  (f_J = 0)
+#     ŵ_Ji = O_Ji / A_J
+
+
+def c96_to_gauss_share(
+    fregrid_overlap: scipy.sparse.spmatrix,
+) -> scipy.sparse.csr_matrix:
+    """F_Jc = Y_Jc / Σ_J Y_Jc; column c empty where Σ_J Y_Jc = 0."""
+    Y = scipy.sparse.csr_matrix(fregrid_overlap, dtype=np.float64)
+    c96_area = np.asarray(Y.sum(axis=0)).ravel()
+    inv = np.divide(1.0, c96_area, out=np.zeros_like(c96_area), where=c96_area > 0)
+    return (Y @ scipy.sparse.diags(inv)).tocsr()
+
+
+def cm4_ocean_fraction(
+    xgrid_ocean_area: scipy.sparse.spmatrix,
+    xgrid_land_area: np.ndarray,
+    fregrid_overlap: scipy.sparse.spmatrix,
+) -> np.ndarray:
+    """f_J = Σ_c Y_Jc (Σ_i X_ci / A^x_c) / Σ_c Y_Jc; 0 where Σ_c Y_Jc = 0."""
+    ocean_c = np.asarray(xgrid_ocean_area.sum(axis=1)).ravel()
+    c96_area = ocean_c + np.asarray(xgrid_land_area, dtype=np.float64).ravel()
+    # A^x_c = 0 contributes 0; the f_J = 1 gate on land-free J catches it.
+    fraction_c = np.divide(
+        ocean_c, c96_area, out=np.zeros_like(c96_area), where=c96_area > 0
+    )
+    Y = scipy.sparse.csr_matrix(fregrid_overlap, dtype=np.float64)
+    gauss_area = np.asarray(Y.sum(axis=1)).ravel()
+    return np.divide(
+        Y @ fraction_c, gauss_area, out=np.zeros_like(gauss_area), where=gauss_area > 0
+    )
+
+
+def _assert_same_set(lhs: np.ndarray, rhs: np.ndarray, context: str) -> None:
+    assert_close(
+        np.asarray(lhs, dtype=np.float64),
+        np.asarray(rhs, dtype=np.float64),
+        rtol=F64_RTOL,
+        scale=1.0,
+        context=context,
+    )
+
+
+def assert_c96_path_weights(
+    w_hat: scipy.sparse.spmatrix, overlap: scipy.sparse.spmatrix
+) -> None:
+    """ŵ ≥ 0;  support(ŵ) = support(O)"""
+    w_hat_data = w_hat.tocoo().data
+    if not (w_hat_data >= 0).all():
+        raise AssertionError(
+            f"{int((~(w_hat_data >= 0)).sum())} entries of ŵ are < 0 or NaN"
+        )
+    if _support(w_hat) != _support(overlap):
+        raise AssertionError("support(ŵ) ≠ support(O)")
+
+
+def cm4_chain_native_area_weights(
+    xgrid_ocean_area: scipy.sparse.spmatrix,
+    xgrid_land_area: np.ndarray,
+    fregrid_overlap: scipy.sparse.spmatrix,
+    native_area: np.ndarray,
+    wet: np.ndarray,
+    *,
+    source_urls: Mapping[str, str],
+) -> NativeAreaWeights:
+    """ŵ, A_J of the C96 path (module comment above), in native areas
+    ``native_area`` on ``wet`` columns. ``source_urls`` maps ``xgrid``,
+    ``fregrid``, ``native`` to their URLs, for error text only.
+
+    ``area`` is > 0 on every J; land-only J have empty ŵ rows.
+    ``max_rel_residual`` is NaN (no ESMPy step). Raises ``AssertionError``
+    on a failed build assert."""
+    X = scipy.sparse.csr_matrix(xgrid_ocean_area, dtype=np.float64)
+    Y = scipy.sparse.csr_matrix(fregrid_overlap, dtype=np.float64)
+    a = np.asarray(native_area, dtype=np.float64).ravel()
+    m = np.asarray(wet, dtype=np.float64).ravel()
+    xgrid_url, fregrid_url, native_url = (
+        source_urls[k] for k in ("xgrid", "fregrid", "native")
+    )
+    if X.shape[1] != a.size or a.shape != m.shape:
+        raise ValueError(
+            f"xgrid has {X.shape[1]} OM4 cells, native_area {a.size}, wet {m.size}"
+        )
+    if X.shape[0] != Y.shape[1]:
+        raise ValueError(f"xgrid has {X.shape[0]} C96 cells, fregrid {Y.shape[1]}")
+
+    a_tilde = np.asarray(X.sum(axis=0)).ravel()
+    _assert_same_set(
+        a_tilde > 0,
+        m == 1,
+        f"{{i : xgrid_om4_area_i > 0}} (xgrid {xgrid_url}) vs {{i : wet_i = 1}} "
+        f"(native {native_url}): differing OM4 cells",
+    )
+    share = c96_to_gauss_share(Y)
+    assert_close(
+        np.asarray(share.sum(axis=0)).ravel(),
+        1.0,
+        rtol=F64_RTOL,
+        scale=1.0,
+        context=f"Σ_J c96_to_gauss_share_Jc = 1 (fregrid {fregrid_url})",
+    )
+    ratio = np.divide(a, a_tilde, out=np.zeros_like(a), where=a_tilde > 0)
+    overlap = (share @ (X @ scipy.sparse.diags(ratio))).tocsr()
+    overlap.eliminate_zeros()
+    assert_close(
+        np.asarray(overlap.sum(axis=0)).ravel(),
+        a * m,
+        rtol=F64_RTOL,
+        scale=np.abs(a),
+        context="Σ_J overlap_c96path_Ji = native_area_i wet_i",
+    )
+
+    fraction = cm4_ocean_fraction(X, xgrid_land_area, Y)
+    assert_bound(
+        fraction,
+        lower=0.0,
+        upper=1.0,
+        rtol=F64_RTOL,
+        scale=1.0,
+        context=f"cm4_ocean_fraction_J (xgrid {xgrid_url}, fregrid {fregrid_url})",
+    )
+    ocean_area = np.asarray(overlap.sum(axis=1)).ravel()
+    _assert_same_set(
+        ocean_area > 0,
+        fraction > 0,
+        f"{{J : ocean_area_c96path_J0 > 0}} vs {{J : cm4_ocean_fraction_J > 0}} "
+        f"(xgrid {xgrid_url}, fregrid {fregrid_url}, native {native_url}): "
+        "differing target cells",
+    )
+    gauss_area = np.asarray(Y.sum(axis=1)).ravel()
+    area = np.where(
+        fraction > 0,
+        ocean_area / np.where(fraction > 0, fraction, 1.0),
+        gauss_area,
+    )
+    assert_bound(
+        (area > 0).astype(np.float64),
+        lower=1.0,
+        rtol=F64_RTOL,
+        scale=1.0,
+        context=f"areacello_c96path_J > 0 (fregrid {fregrid_url} covers every J)",
+    )
+    land_free = (Y @ np.asarray(xgrid_land_area, dtype=np.float64).ravel()) == 0
+    assert_close(
+        fraction[land_free],
+        1.0,
+        rtol=F64_RTOL,
+        scale=1.0,
+        context=(
+            "cm4_ocean_fraction_J = 1 where "
+            "Σ_c fregrid_overlap_Jc xgrid_land_area_c = 0 "
+            f"(xgrid {xgrid_url}, fregrid {fregrid_url})"
+        ),
+    )
+
+    w_hat = (scipy.sparse.diags(1.0 / area) @ overlap).tocsr()
+    w_hat.eliminate_zeros()
+    assert_c96_path_weights(w_hat, overlap)
+
+    mapped = ocean_area > 0
+    xgrid_wet_area = share @ (X @ m)  # Σ_c F_Jc Σ_i X_ci m_i
+    rho = ocean_area[mapped] / xgrid_wet_area[mapped]
+    rho_bar = (a * m).sum() / (a_tilde * m).sum()
+    spread = float(np.max(np.abs(rho / rho_bar - 1.0)))
+    return NativeAreaWeights(w_hat, area, float("nan"), spread)
+
+
+# ---------------------------------------------------------------------------
 # Statics (step 2): with ŵ loaded, Σ_i O_Ji y_i = A_J · regridder(y)_J
 # ---------------------------------------------------------------------------
 
@@ -346,6 +524,9 @@ def check_static_identities(
     areacello_native: xr.DataArray,
     deptho_native: xr.DataArray | None = None,
     deptho: xr.DataArray | None = None,
+    *,
+    wet_columns_only: bool = False,
+    mask_source_urls: tuple[str, str] | None = None,
 ) -> None:
     """Step-5 per-store asserts on the coarse statics, and static identities:
 
@@ -355,7 +536,19 @@ def check_static_identities(
     sftof_J = 100 where every i with O_Ji > 0 is ocean
     0 ≤ sftof_J ≤ 100;   sea_surface_fraction_J = W'_J0 / A_J    J ∉ Z
 
-    ``wetmask`` has dims ``(z_l, ...)``; one level for a surface-only store."""
+    ``wetmask`` has dims ``(z_l, ...)``; one level for a surface-only store.
+
+    ``wet_columns_only``: ŵ has columns only on the wet cells of the
+    artifact's own mask (C96 path), so instead
+
+    {i : Σ_J ŵ_Ji > 0} = {i : m_i0 = 1}               checked first
+    Σ_J W'_J0 = Σ_i a_i m_i0;   Σ_J ŵ_Ji A_J = a_i m_i0
+    and no sftof_J = 100 check (every J with a wet column passes its test).
+
+    ``mask_source_urls`` (artifact mask, ``wetmask``) names both masks in the
+    first gate's error; required with ``wet_columns_only``."""
+    if wet_columns_only and mask_source_urls is None:
+        raise ValueError("wet_columns_only=True needs mask_source_urls")
     stored = statics.stored
     area = stored["areacello"]
     n_levels = wetmask.sizes[LEVEL_DIM]
@@ -371,6 +564,19 @@ def check_static_identities(
         raise AssertionError(f"{int((Z & ocean).sum())} Z cells have mask_J0 = 1")
 
     m = wetmask.astype(np.float64)
+    m0 = m.isel({LEVEL_DIM: 0}, drop=True)
+    m_i0 = m0.transpose(*regridder.in_horiz_dims).values.ravel()
+    W = _finite_weights(regridder)
+    if wet_columns_only:
+        assert mask_source_urls is not None
+        artifact_mask_url, wetmask_url = mask_source_urls
+        columns = np.asarray(W.sum(axis=0)).ravel() > 0
+        n_differ = int((columns != (m_i0 == 1)).sum())
+        if n_differ:
+            raise AssertionError(
+                f"{{i : Σ_J ŵ_Ji > 0}} (wet columns of {artifact_mask_url}) ≠ "
+                f"{{i : m_i0 = 1}} (wetmask {wetmask_url}) on {n_differ} native cells"
+            )
     for k in range(n_levels):
         fraction = _regrid(regridder, m.isel({LEVEL_DIM: k}, drop=True)).fillna(0.0)
         today = (fraction > 0).values
@@ -381,7 +587,6 @@ def check_static_identities(
                 f"on {n_mismatch} cells"
             )
 
-    m0 = m.isel({LEVEL_DIM: 0}, drop=True)
     volume = statics.ocean_volume
     if deptho_native is not None and deptho is not None and volume is not None:
         H = deptho_native.fillna(0.0).astype(np.float64)
@@ -396,29 +601,47 @@ def check_static_identities(
         )
 
     a = areacello_native.astype(np.float64)
-    assert_close(
-        float(area.sum()),
-        float(a.sum()),
-        rtol=F64_RTOL,
-        scale=float(a.sum()),
-        context="Σ_J A_J = Σ_i a_i",
-    )
     a_i = a.transpose(*regridder.in_horiz_dims).values.ravel()
     A_J = area.transpose(*regridder.out_horiz_dims).values.ravel()
-    assert_close(
-        _finite_weights(regridder).T @ A_J,
-        a_i,
-        rtol=F64_RTOL,
-        scale=a_i,
-        context="Σ_J ŵ_Ji A_J = a_i",
-    )
+    if wet_columns_only:
+        native_total = float((a_i * m_i0).sum())
+        assert_close(
+            float(statics.ocean_area.sum()),
+            native_total,
+            rtol=F64_RTOL,
+            scale=native_total,
+            context="Σ_J W'_J0 = Σ_i a_i m_i0",
+        )
+        assert_close(
+            W.T @ A_J,
+            a_i * m_i0,
+            rtol=F64_RTOL,
+            scale=a_i,
+            context="Σ_J ŵ_Ji A_J = a_i m_i0",
+        )
+    else:
+        assert_close(
+            float(area.sum()),
+            float(a.sum()),
+            rtol=F64_RTOL,
+            scale=float(a.sum()),
+            context="Σ_J A_J = Σ_i a_i",
+        )
+        assert_close(
+            W.T @ A_J, a_i, rtol=F64_RTOL, scale=a_i, context="Σ_J ŵ_Ji A_J = a_i"
+        )
 
     sftof = stored["sftof"].values
-    # Exact zero: a sum of ŵ_Ji > 0 times (1 − m_i0) ∈ {0, 1} is 0 iff no land i.
-    all_ocean = (_regrid(regridder, 1.0 - m0) == 0).values
-    assert_close(
-        sftof[all_ocean], 100.0, rtol=F64_RTOL, scale=100.0, context="sftof_J = 100"
-    )
+    if not wet_columns_only:
+        # Exact zero: a sum of ŵ_Ji > 0 times (1 − m_i0) ∈ {0, 1} is 0 iff no land i.
+        all_ocean = (_regrid(regridder, 1.0 - m0) == 0).values
+        assert_close(
+            sftof[all_ocean],
+            100.0,
+            rtol=F64_RTOL,
+            scale=100.0,
+            context="sftof_J = 100",
+        )
     assert_bound(
         sftof, lower=0.0, upper=100.0, rtol=F64_RTOL, scale=100.0, context="sftof_J"
     )

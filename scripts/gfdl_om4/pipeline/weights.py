@@ -58,6 +58,14 @@ SOURCE_GRID_FILENAME = "source_grid.nc"
 WEIGHTS_FILENAME = "weights.nc"
 AREACELLO_FILENAME = "areacello.nc"
 
+# weights.nc attrs. ``wet_columns_only = 1``: ŵ has no columns on dry native
+# cells (pipeline.c96_weights); absent on direct artifacts.
+WET_COLUMNS_ONLY_ATTR = "wet_columns_only"
+# The regrid path an artifact implements, and a readable description of it.
+REGRID_PATH_ATTR = "regrid_path"
+REGRID_PATH_C96 = "c96"
+REGRID_PATH_DESCRIPTION_ATTR = "regrid_path_description"
+
 
 def _upload(local_path: str, url: str) -> None:
     with open(local_path, "rb") as src, fsspec.open(url, "wb") as dst:
@@ -155,6 +163,13 @@ def read_artifact_attrs(weights_url: str) -> dict:
     with fsspec.open(_artifact_url(weights_url, WEIGHTS_FILENAME)) as f:
         with xr.open_dataset(f) as ds:
             return {name: np.asarray(ds.attrs[name]).item() for name in ARTIFACT_ATTRS}
+
+
+def read_wet_columns_only(weights_url: str) -> bool:
+    """The artifact's ``wet_columns_only`` attr; ``False`` when absent."""
+    with fsspec.open(_artifact_url(weights_url, WEIGHTS_FILENAME)) as f:
+        with xr.open_dataset(f) as ds:
+            return bool(ds.attrs.get(WET_COLUMNS_ONLY_ATTR, False))
 
 
 def open_areacello(weights_url: str, target_grid_name: str) -> xr.DataArray:

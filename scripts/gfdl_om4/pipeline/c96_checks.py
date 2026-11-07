@@ -29,6 +29,18 @@ ratio quantiles and the Gaussian sphere fraction.
         --a-source-url <NATIVE_AREA_A_SOURCE_URL> \\
         --source-grid-weights-url <weight artifact holding source_grid.nc> \\
         --output-json <path or URL>/01-operators-F90.json
+
+Subcommand ``statics``: the C96-path artifact at ``--weights-url``, loaded by
+:func:`pipeline.weights.get_regridder`, through
+:func:`pipeline.native_area.native_area_statics` and
+:func:`pipeline.native_area.check_static_identities` (with the artifact's
+``wet_columns_only``) on the native statics of ``--a-source-url``: one
+level, wetmask ``wet``, Δz = ``deptho``, ``sftof``.
+
+    python -m pipeline.c96_checks statics --target-grid F90 \\
+        --weights-url <C96-path artifact> \\
+        --a-source-url <NATIVE_AREA_A_SOURCE_URL> \\
+        --output-json <path or URL>/02-statics-F90.json
 """
 
 import argparse
@@ -42,8 +54,24 @@ import xarray as xr
 
 from .cm4_xgrid import CM4Xgrid, read_cm4_xgrid, read_fregrid_remap
 from .grids import make_target_grid
-from .native_area import AREA_RTOL, F64_RTOL, assert_bound, assert_close
-from .weights import open_source_grid
+from .native_area import (
+    AREA_RTOL,
+    F64_RTOL,
+    LEVEL_DIM,
+    assert_bound,
+    assert_close,
+    check_static_identities,
+    level_thickness,
+    native_area_statics,
+)
+from .ocean_emulators_port import regrid_normalized
+from .weights import (
+    get_regridder,
+    open_areacello,
+    open_source_grid,
+    read_artifact_attrs,
+    read_wet_columns_only,
+)
 from .zarr_io import make_zarr_store
 
 logger = logging.getLogger(__name__)
@@ -314,6 +342,85 @@ def run_operators(args: argparse.Namespace) -> dict:
     }
 
 
+def statics_checks(
+    regridder,
+    area: xr.DataArray,
+    statics: xr.Dataset,
+    *,
+    wet_columns_only: bool,
+    mask_source_urls: tuple[str, str],
+) -> dict:
+    """``native_area_statics`` and ``check_static_identities`` on one-level
+    native ``statics`` (``areacello``, ``wet``, ``deptho``, ``sftof``);
+    raises on a failed identity."""
+    dims = regridder.in_horiz_dims
+    wet = statics["wet"].transpose(*dims) == 1
+    deptho = statics["deptho"].transpose(*dims).where(wet)
+    interfaces = np.array([0.0, float(deptho.max())])
+    wetmask = wet.expand_dims({LEVEL_DIM: [0.5 * interfaces[1]]})
+    dz = level_thickness(deptho, interfaces)
+    result = native_area_statics(
+        regridder, area, wetmask, dz, statics["sftof"].transpose(*dims)
+    )
+    deptho_J = regrid_normalized(deptho.to_dataset(name="deptho"), regridder, wet)[0][
+        "deptho"
+    ]
+    areacello = statics["areacello"].transpose(*dims).astype(np.float64)
+    check_static_identities(
+        result,
+        regridder,
+        wetmask,
+        areacello,
+        deptho,
+        deptho_J,
+        wet_columns_only=wet_columns_only,
+        mask_source_urls=mask_source_urls,
+    )
+    stored = result.stored
+    native_total = float(areacello.where(wet, 0.0).sum())
+    ocean_area = result.ocean_area
+    return {
+        "gates": {"check_static_identities": True},
+        "reports": {
+            "sum_ocean_area_over_native_wet_area_minus_one": float(
+                ocean_area.sum() / native_total - 1
+            ),
+            "n_target_cells": int(area.size),
+            "n_target_cells_with_ocean": int((ocean_area > 0).sum()),
+            "sea_surface_fraction_min": float(stored["sea_surface_fraction"].min()),
+            "sea_surface_fraction_max": float(stored["sea_surface_fraction"].max()),
+            "areacello_min_m2": float(stored["areacello"].min()),
+        },
+    }
+
+
+def run_statics(args: argparse.Namespace) -> dict:
+    regridder = get_regridder(args.weights_url, args.target_grid)
+    area = open_areacello(args.weights_url, args.target_grid)
+    wet_columns_only = read_wet_columns_only(args.weights_url)
+    artifact_a_source_url = read_artifact_attrs(args.weights_url)["a_source_url"]
+    statics = xr.open_zarr(
+        make_zarr_store(args.a_source_url), chunks=None, decode_timedelta=False
+    )[["areacello", "wet", "deptho", "sftof"]].load()
+    result = statics_checks(
+        regridder,
+        area,
+        statics,
+        wet_columns_only=wet_columns_only,
+        mask_source_urls=(artifact_a_source_url, args.a_source_url),
+    )
+    return {
+        "target_grid": args.target_grid,
+        "inputs": {
+            "weights_url": args.weights_url,
+            "a_source_url": args.a_source_url,
+            "artifact_a_source_url": artifact_a_source_url,
+        },
+        "wet_columns_only": wet_columns_only,
+        **result,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Checks of the C96 path, written to JSON."
@@ -332,9 +439,18 @@ def main() -> None:
         help="weight artifact prefix holding source_grid.nc (OM4 centers, corners)",
     )
     ops.add_argument("--output-json", required=True)
+    sta = sub.add_parser("statics", help="static identities of a C96-path artifact")
+    sta.add_argument("--target-grid", required=True, help="F90 or F22.5")
+    sta.add_argument("--weights-url", required=True, help="C96-path artifact prefix")
+    sta.add_argument(
+        "--a-source-url",
+        required=True,
+        help="statics zarr store with areacello, wet, deptho, sftof",
+    )
+    sta.add_argument("--output-json", required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    result = run_operators(args)
+    result = {"operators": run_operators, "statics": run_statics}[args.command](args)
     with fsspec.open(args.output_json, "w") as f:
         json.dump(result, f, indent=1)
     logger.info(f"Wrote {args.output_json}")

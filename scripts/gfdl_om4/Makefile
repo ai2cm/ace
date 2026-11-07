@@ -49,6 +49,40 @@ native_area_weights_four_degree:
 		--a-source-url $(NATIVE_AREA_A_SOURCE_URL) \
 		--output-url $(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-F22.5
 
+# C96-path weights (pipeline/c96_weights.py): OM4 -> C96 through CM4's exchange
+# grid, C96 -> target through fregrid's conserve_order1 remap files, in the
+# native areas of NATIVE_AREA_A_SOURCE_URL. source_grid.nc is copied from the
+# direct native-area artifact. An empty AM4_LAND_STATIC_URL_* skips the
+# land-fraction gate. Versioned apart from NATIVE_AREA_WEIGHTS_VERSION.
+C96_PATH_WEIGHTS_VERSION ?= c96-path-v1
+CM4_XGRID_TAR_URL ?= gs://vcm-ml-raw-flexible-retention/2026-10-30-CM4-exchange-grid/c96_OM4_025_grid_No_mg_drag_v20160808.tar
+FREGRID_REMAP_URL_F90 ?= gs://vcm-ml-raw-flexible-retention/2026-10-30-fregrid-remap-files/remap_C96_to_gaussian_grid_180_by_360_via_conserve_order1_interpolation.nc
+FREGRID_REMAP_URL_F22P5 ?= gs://vcm-ml-raw-flexible-retention/2026-10-30-fregrid-remap-files/remap_C96_to_gaussian_grid_45_by_90_via_conserve_order1_interpolation.nc
+AM4_LAND_STATIC_URL_F90 ?= gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-piControl-and-1pctCO2/regridded-zarrs/gaussian_grid_180_by_360/1pctCO2/land_static.zarr
+AM4_LAND_STATIC_URL_F22P5 ?= gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-piControl-and-1pctCO2/regridded-zarrs/gaussian_grid_45_by_90/1pctCO2/land_static.zarr
+
+c96_path_weights_one_degree:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.c96_weights \
+		--cm4-xgrid-tar-url $(CM4_XGRID_TAR_URL) \
+		--fregrid-remap-url $(FREGRID_REMAP_URL_F90) \
+		--target-grid F90 \
+		--a-source-url $(NATIVE_AREA_A_SOURCE_URL) \
+		--source-grid-weights-url $(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-F90 \
+		$(if $(AM4_LAND_STATIC_URL_F90),--am4-land-static-url $(AM4_LAND_STATIC_URL_F90)) \
+		--ace-commit $(ACE_COMMIT) \
+		--output-url $(WEIGHTS_URL_ROOT)/$(C96_PATH_WEIGHTS_VERSION)/om4-tripolar-0.25deg-via-cm4-c96-to-F90
+
+c96_path_weights_four_degree:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.c96_weights \
+		--cm4-xgrid-tar-url $(CM4_XGRID_TAR_URL) \
+		--fregrid-remap-url $(FREGRID_REMAP_URL_F22P5) \
+		--target-grid F22.5 \
+		--a-source-url $(NATIVE_AREA_A_SOURCE_URL) \
+		--source-grid-weights-url $(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-F22.5 \
+		$(if $(AM4_LAND_STATIC_URL_F22P5),--am4-land-static-url $(AM4_LAND_STATIC_URL_F22P5)) \
+		--ace-commit $(ACE_COMMIT) \
+		--output-url $(WEIGHTS_URL_ROOT)/$(C96_PATH_WEIGHTS_VERSION)/om4-tripolar-0.25deg-via-cm4-c96-to-F22.5
+
 SMOKE_NUM_TIMESTEPS ?= 6
 
 # Recorded in each store's root attrs (D22(a)): every run passes
@@ -86,7 +120,8 @@ check_dataflow_image:
 
 .PHONY: create_environment generate_weights generate_weights_one_degree \
 	generate_weights_four_degree native_area_weights_one_degree \
-	native_area_weights_four_degree build_dataflow push_dataflow enter \
+	native_area_weights_four_degree c96_path_weights_one_degree \
+	c96_path_weights_four_degree build_dataflow push_dataflow enter \
 	check_dataflow_image test
 
 include om4.mk randco2.mk
