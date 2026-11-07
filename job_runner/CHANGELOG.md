@@ -29,6 +29,9 @@ https://github.com/ai2cm/full-model/compare/job_runner
   launcher; training paths previously defaulted to `0`, which is backfill-only
 - Input-file columns are defined once per file in `lib.sh` (`*_COLUMNS`);
   `parse_row` reads rows and `input_header` writes headers from them
+- Training jobs write one NCCL debug log per host and process
+  (`/results/nccl_debug.%h.%p.log`); `NCCL_DEBUG` and `NCCL_DEBUG_FILE` can be
+  overridden from the launching environment
 - Remove `set_default_stats()`
 - Allow `--atmos_stats` and `--ocean_stats` to be used separately.
 - CLUSTER can be now be set for eval jobs
