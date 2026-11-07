@@ -1,5 +1,5 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|ace-samudra-coupled-cm4|8xx0pife|best_inference_ckpt|trained|high|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|ace-samudra-coupled-cm4|8xx0pife|best_inference_ckpt|train|high|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
 
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|ace-samudra-coupled-cm4|9bj993pv|best_inference_ckpt|train|high|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|ace-samudra-coupled-cm4|9bj993pv|best_inference_ckpt|training|high|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
