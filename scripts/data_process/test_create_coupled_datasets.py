@@ -498,8 +498,12 @@ def test_coupled_ts_without_sea_surface_adds_blended_atmosphere(tmp_path, monkey
     sea_ice = xr.open_zarr(str(ensemble_dir / "run-a-sea_ice.zarr")).load()
     xr.testing.assert_identical(sea_ice, sea_ice_before)
 
-    # ts_blend(t) = (1 - ocean_fraction(t_k)) * ts(t) + ocean_fraction(t_k) * sst(t_k)
     atmos = xr.open_zarr(str(ensemble_dir / "run-a-atmosphere.zarr")).load()
+    _assert_blended_atmosphere(atmos, sea_ice)
+
+
+def _assert_blended_atmosphere(atmos, sea_ice):
+    # ts_blend(t) = (1 - ocean_fraction(t_k)) * ts(t) + ocean_fraction(t_k) * sst(t_k)
     steps = np.arange(N_STRIDE_TIMES).reshape(-1, 1, 1)
     held = steps - (steps % STRIDE_STEPS)
     ocean_fraction = sea_ice["ocean_fraction"].values
@@ -508,6 +512,42 @@ def test_coupled_ts_without_sea_surface_adds_blended_atmosphere(tmp_path, monkey
     np.testing.assert_allclose(atmos["ocean_fraction"].values, ocean_fraction)
     np.testing.assert_allclose(
         atmos["sea_ice_fraction"].values, sea_ice["sea_ice_fraction"].values
+    )
+
+
+def test_coupled_ts_without_sea_surface_computes_sea_ice_in_same_run(tmp_path):
+    coupled_ts = CoupledSurfaceTemperatureConfig(how="interpolate_sst")
+    fresh_dir = tmp_path / "fresh"
+    rerun_dir = tmp_path / "rerun"
+    fresh_dir.mkdir()
+    rerun_dir.mkdir()
+    _sea_surface_ensemble_config(fresh_dir, coupled_ts).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+    _sea_surface_ensemble_config(rerun_dir, None).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+    _sea_surface_ensemble_config(rerun_dir, coupled_ts).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+
+    fresh = fresh_dir / "outputs" / "v1-synthetic"
+    rerun = rerun_dir / "outputs" / "v1-synthetic"
+    for run in ["run-a", "run-excluded"]:
+        assert (fresh / f"{run}-sea_ice.zarr").exists()
+        assert not (fresh / f"{run}-ocean.zarr").exists()
+    assert not (
+        fresh_dir / "outputs" / "v1-synthetic-stats" / "combined" / "ocean"
+    ).exists()
+
+    sea_ice = xr.open_zarr(str(fresh / "run-a-sea_ice.zarr")).load()
+    atmos = xr.open_zarr(str(fresh / "run-a-atmosphere.zarr")).load()
+    _assert_blended_atmosphere(atmos, sea_ice)
+    xr.testing.assert_identical(
+        sea_ice, xr.open_zarr(str(rerun / "run-a-sea_ice.zarr")).load()
+    )
+    xr.testing.assert_identical(
+        atmos, xr.open_zarr(str(rerun / "run-a-atmosphere.zarr")).load()
     )
 
 
