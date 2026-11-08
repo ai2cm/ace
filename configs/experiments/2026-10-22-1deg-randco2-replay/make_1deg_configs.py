@@ -181,6 +181,57 @@ for tag, base in (
             + (" OCEAN_DS=01M626JPB247BQWSE0GN35SAXR." if "hybrid" in tag else "."),
         ],
     )
+# 2026-11-08 (Troy): James's two-stage coupled FT recipe with the hybrid residual + diagnosed-SST ocean. Stage 1 = his
+# FTO (beaker 01M4SZFVA0A9XBQC502PPC217Q, ace 74f046947, inputs/james-1deg-fto-config.yaml): atmosphere frozen, ocean
+# trained on 4 coupled steps with the loss on every step, lr 7e-5, 8 epochs, max_grad_norm 1.0, seed 0. Stage 2 = his
+# alternating FT of the FTO's coupled best_inference checkpoint (beaker 01M5AR9ZMHXQPCNK2W8N18YQBS, ace e8b3f31f4,
+# inputs/james-1deg-ftfto-alt-config.yaml + the optimize_single_component_per_batch=true override): lr 1e-5, 3 epochs,
+# plus our random-CO2 replay. Only the ocean (hybrid, wandb jrgclj2f) and the atmosphere (the random-CO2 ACE2S rs1 the
+# replay needs; James used the plain ACE2S origLR-ft rs2) differ from James; his corrector_disabled_epochs 1 is kept.
+james_fto = yaml.safe_load((HERE / "inputs/james-1deg-fto-config.yaml").read_text())
+james_alt = yaml.safe_load(
+    (HERE / "inputs/james-1deg-ftfto-alt-config.yaml").read_text()
+)
+james_alt["stepper_training"]["optimize_single_component_per_batch"] = (
+    True  # his launch override
+)
+
+
+def _james_stage(base, james):
+    c = copy.deepcopy(base)
+    replay = c["stepper_training"].get("atmosphere_only")
+    c["stepper_training"] = copy.deepcopy(james["stepper_training"])
+    if replay is not None:
+        c["stepper_training"]["atmosphere_only"] = replay
+    c["optimization"] = {**copy.deepcopy(james["optimization"]), "max_grad_norm": 1.0}
+    c["max_epochs"] = james["max_epochs"]
+    c["seed"] = 0
+    c["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"][
+        "corrector_disabled_epochs"
+    ] = james["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"][
+        "corrector_disabled_epochs"
+    ]
+    return c
+
+
+arms["hybridsstdiag-jfto"] = (
+    _james_stage(hyb, james_fto),
+    [
+        "Stage 1 of James's coupled FT recipe (FTO: atmosphere frozen; beaker 01M4SZFVA0A9XBQC502PPC217Q) with the 1deg",
+        "HYBRID RESIDUAL + DIAGNOSED-SST Samudra (wandb jrgclj2f) and the random-CO2 ACE2S rs1, Troy 2026-11-08.",
+        "Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
+    ],
+)
+c = _james_stage(hyb_rep, james_alt)
+assert c["stepper_training"]["parameter_init"]["checkpoint_path"] == "/ckpt.tar"
+arms["hybridsstdiag-jfto-alt-replay"] = (
+    c,
+    [
+        "Stage 2 of James's coupled FT recipe (alternating FT of the FTO checkpoint; beaker 01M5AR9ZMHXQPCNK2W8N18YQBS)",
+        "WITH RANDOM-CO2 REPLAY, from the -hybridsstdiag-jfto best_inference checkpoint, Troy 2026-11-08.",
+        "Launch with CKPT_DS=<the -hybridsstdiag-jfto results dataset>.",
+    ],
+)
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(

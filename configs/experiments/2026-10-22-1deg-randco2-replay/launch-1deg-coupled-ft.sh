@@ -3,6 +3,7 @@
 # resources as Elynn's 1deg alternating runs (4 GPUs, 840 GiB shared memory). Troy 2026-10-22.
 #   ARM=alt ./launch-1deg-coupled-ft.sh            # alternating baseline
 #   ARM=alt-replay ./launch-1deg-coupled-ft.sh     # alternating + random-CO2 replay
+#   CKPT_DS=<coupled results> ARM=... ./launch-...  # mounts that coupled checkpoint at /ckpt.tar (stage-2 configs)
 set -euo pipefail
 ARM="${ARM:?alt or alt-replay}"
 COUPLED_STATS="${COUPLED_STATS:-01KXNT0RA6VX2YTZ8WJ936Q5RS}"      # 1deg cm4 coupled stats: coupled_atmosphere/ + ocean/
@@ -36,6 +37,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${OCEAN_DS}:${OCEAN_CKPT}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_DS}:${ATMOS_CKPT}:/atmos_ckpt.tar" \
   ${EXISTING_RESULTS_DS:+--dataset "${EXISTING_RESULTS_DS}:/existing-results"} \
+  ${CKPT_DS:+--dataset "${CKPT_DS}:${CKPT:-training_checkpoints/best_inference_ckpt.tar}:/ckpt.tar"} \
   --gpus "$N_GPUS" --shared-memory 840GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
   -- torchrun --nproc_per_node="${N_GPUS}" -m fme.coupled.train "${SCRIPT_PATH}/coupled/1deg-randco2rs1-fmean-${ARM}${EXISTING_RESULTS_DS:+-resume}.yaml" 2>&1) || true
