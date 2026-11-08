@@ -3,10 +3,14 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # --config-dir configs/experiments/cm4_eval/ocean
 
 
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs0|01M6HPQAPEW90ETHKK6M76H625|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs0|01M6HPQAPEW90ETHKK6M76H625|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs0|01M6HPQAPEW90ETHKK6M76H625|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs1|01M6HPQN9NBYJMER60BT5JE76A|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs1|01M6HPQN9NBYJMER60BT5JE76A|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs1|01M6HPQN9NBYJMER60BT5JE76A|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs2|01M6HPQZH3EZSTAWFV5BAH6BB6|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs2|01M6HPQZH3EZSTAWFV5BAH6BB6|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz|rs2|01M6HPQZH3EZSTAWFV5BAH6BB6|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppfmiz_pchfds|rs0|01M6PESE72N0ABZ64VCTTMMKMR|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz_pchfds|rs0|01M6PESE72N0ABZ64VCTTMMKMR|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppfmiz_pchfds|rs0|01M6PESE72N0ABZ64VCTTMMKMR|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
