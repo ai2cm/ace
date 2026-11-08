@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config
+
+# Extend the 1-epoch ACE2.5 random-CO2 fine-tunes (finetuning.txt) to 2 epochs. Constant LR, no scheduler, so the
+# extension follows the original LR schedule. results_dataset is resolved from W&B so it tracks the latest checkpoint.
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs0|ace2-cm4-atmos-noLSM|u0kd46r6|train|urgent|titan|4|400GiB|3|ai2/ace|max_epochs=2 resume_results.resume_wandb=true||||8h|
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs1|ace2-cm4-atmos-noLSM|wb3jfw7u|train|urgent|titan|4|400GiB|3|ai2/ace|max_epochs=2 resume_results.resume_wandb=true||||8h|
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft|rs2|ace2-cm4-atmos-noLSM|wtn7t6io|train|urgent|titan|4|400GiB|3|ai2/ace|max_epochs=2 resume_results.resume_wandb=true||||8h|

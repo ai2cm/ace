@@ -18,6 +18,7 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # - a2sLR = atmos_ace2s_origLR-ft
 # - randco2 = cm4_randco2_ic1and2_1pct_46to125_piC_156to235/atmos_ace2s-ft
 # - randco2v2 = cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235/atmos_ace2s_origLR-ft
+# - a2p5rco2v2 = cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5-ft
 
 # tags: o0a0rs0 = ocean rs0 + atmos rs0 + coupled rs0
 
@@ -53,4 +54,12 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|ace-s
 
 # coupled_clip-oppfm_randco2v2
 
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|tb6xf0ju|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a0rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|xjdq4p2y|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|tb6xf0ju|best_inference_ckpt|trained|high|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a2rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|a31k0j4l|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
+
+# coupled_clip-oppfm_a2p5rco2v2
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a0rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|u0kd46r6|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a1rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|wb3jfw7u|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a2rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|wtn7t6io|best_inference_ckpt|train|normal|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|4h
