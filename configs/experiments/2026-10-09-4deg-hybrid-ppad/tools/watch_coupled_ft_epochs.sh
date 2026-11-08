@@ -64,7 +64,13 @@ for j in e['jobs']:
       # the restart checkpoint is written at the end of train_one_epoch, BEFORE the epoch counter increments and before
       # the inline evaluation: the end-of-epoch-N file reads "epoch N-1, batches N*B (+B this epoch)"
       got=$(echo "$info" | sed -n 's/.*batches \([0-9]*\) .*/\1/p')
-      want=$((N * BATCHES_PER_EPOCH))
+      # BATCHES_PER_EPOCH=auto: take the epoch length from the checkpoint's own "+B this epoch" (a run whose epoch length
+      # is not known in advance, e.g. a new window length plus replay); an end-of-epoch-N file then has N*B batches
+      if [ "$BATCHES_PER_EPOCH" = auto ]; then
+        per=$(echo "$info" | sed -n 's/.*(+\([0-9]*\) this epoch).*/\1/p'); want=$((N * ${per:-0}))
+      else
+        want=$((N * BATCHES_PER_EPOCH))
+      fi
       if [ "${got:-0}" -ne "$want" ]; then
         if [ "${got:-0}" -gt "$want" ]; then
           log "epoch $N: ckpt.tar in $DS is already past epoch $N ($got > $want batches); checkpoint lost, not retrying"
