@@ -1,7 +1,7 @@
 # ufs1deg-noohc-ace2s512-fto-then-alt: alternating coupled fine-tune (Jeremy's one-component-per-batch recipe, Elynn's 1deg
-# template) of the FTO-stage ocean (lifted from ufs1deg-noohc-ace2s512-fto, /ocean_ckpt.tar) with the summer-2026 SamudrACE-UFS ERA5 ACE2S (embed 512, no bottleneck; wandb u9ek57d9, best_inference_ckpt)
+# template) of the FTO-stage corrector-free 1deg UFS Samudra (lifted from ufs1deg-noohc-ace2s512-fto, /ocean_ckpt.tar) with the summer-2026 SamudrACE-UFS ERA5 ACE2S (embed 512, no bottleneck; wandb u9ek57d9, best_inference_ckpt)
 # (/atmos_ckpt.tar, the original checkpoint). Stage 2 of the FTO -> alternating coupled FT recipe (Troy 2026-11-04).
-# Resume-launch (EXISTING_RESULTS_DS=<results dataset>): ARM=ace2s512 STAGE=fto-then-alt OCEAN_DS=<lifted FTO ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh
+# Resume-launch (EXISTING_RESULTS_DS=<results dataset>): OCEAN=noohc ARM=ace2s512 STAGE=fto-then-alt OCEAN_DS=<lifted FTO ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh
 experiment_dir: /results
 save_checkpoint: true
 ema_checkpoint_save_epochs:

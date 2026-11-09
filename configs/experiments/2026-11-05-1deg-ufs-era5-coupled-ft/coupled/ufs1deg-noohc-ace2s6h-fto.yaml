@@ -1,7 +1,7 @@
 # ufs1deg-noohc-ace2s6h-fto: FTO (ocean trained, atmosphere interactive but frozen, every batch an ocean update) of the
 # corrector-free 1deg UFS Samudra (resid-noohc-ppad-sstdiag-fmean-ufsft, /ocean_ckpt.tar) with
 # Jeremy McGibbon's 6-hourly ACE2S paper arm (12-step fine-tune, wandb cerls68n, ema_ckpt_0002) (/atmos_ckpt.tar). Stage 1 of the FTO -> alternating coupled FT recipe (Troy 2026-11-04).
-# Launch: ARM=ace2s6h STAGE=fto ./launch-1deg-ufs-era5-coupled-ft.sh
+# Launch: OCEAN=noohc ARM=ace2s6h STAGE=fto ./launch-1deg-ufs-era5-coupled-ft.sh
 experiment_dir: /results
 save_checkpoint: true
 ema_checkpoint_save_epochs:

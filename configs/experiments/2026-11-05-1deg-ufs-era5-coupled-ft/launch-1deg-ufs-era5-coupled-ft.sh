@@ -4,8 +4,10 @@
 #   ARM=ace2s6h  STAGE=fto ./launch-1deg-ufs-era5-coupled-ft.sh                                  # stage 1: FTO
 #   ARM=ace2s6h  STAGE=fto-then-alt OCEAN_DS=<lifted FTO ocean> ./launch-1deg-ufs-era5-coupled-ft.sh   # stage 2: alternating
 #   ARM=ace2s512 ...                                                                              # the summer-2026 ACE2S arm
+#   OCEAN=ohc ARM=ace2s6h ...                                                                      # corrector-kept UFS ocean (jobs samudra-ufs1deg-era5-ohc-*)
 #   EXISTING_RESULTS_DS=<results dataset> ...  continues a previous submission (the -resume config)
 set -euo pipefail
+OCEAN="${OCEAN:-noohc}"             # noohc = corrector-free UFS ocean (paper-2 line); ohc = scaled-temperature OHC corrector kept (2026-11-09 cooling test)
 ARM="${ARM:?ace2s6h or ace2s512}"
 STAGE="${STAGE:?fto or fto-then-alt}"
 case "$ARM" in
@@ -15,7 +17,12 @@ case "$ARM" in
 esac
 ATMOS_DS="${ATMOS_DS:-$ATMOS_DS_DEFAULT}"
 ATMOS_CKPT="${ATMOS_CKPT:-$ATMOS_CKPT_DEFAULT}"
-OCEAN_DS="${OCEAN_DS:-01M6H7NBRG4W31DHT2MKD4WBWA}"                 # samudra-ufs1deg-resid-noohc-ppad-sstdiag-fmean-ufsft results (wandb s5j0xr6o); stage 2 passes the lifted FTO ocean
+case "$OCEAN" in
+  noohc) OCEAN_DS_DEFAULT=01M6H7NBRG4W31DHT2MKD4WBWA; OTAG="" ;;      # samudra-ufs1deg-resid-noohc-ppad-sstdiag-fmean-ufsft results (wandb s5j0xr6o)
+  ohc)   OCEAN_DS_DEFAULT=01M6HWDXRVCZC1W5HFD5WPM19Z; OTAG="ohc-" ;;  # samudra-ufs1deg-resid-ohc-ppad-sstdiag-fmean-ufsft results (wandb 75s8184h)
+  *) echo "unknown OCEAN $OCEAN"; exit 1 ;;
+esac
+OCEAN_DS="${OCEAN_DS:-$OCEAN_DS_DEFAULT}"                           # stage 2 passes the lifted FTO ocean instead
 OCEAN_CKPT="${OCEAN_CKPT:-training_checkpoints/best_inference_ckpt.tar}"
 OCEAN_STATS_DS="${OCEAN_STATS_DS:-01M6F9VRGMY0NYX19R37PRTW92}"     # 1deg UFS 2026-10-06 stats + CM4 placeholder entries (coupled stages use UFS ocean + ERA5 atmosphere stats, Troy 2026-10-20)
 ATMOS_STATS_DS="${ATMOS_STATS_DS:-01KPC6VHH4H3D800KV4VX83KK9}"     # andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019 (both atmospheres' own stats)
@@ -31,14 +38,14 @@ SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
 case "$STAGE" in
-  fto) JOB="samudra-ufs1deg-era5-${ARM}-fto" ;;
-  fto-then-alt) JOB="samudra-ufs1deg-era5-${ARM}-fto-then-ftalt" ;;
+  fto) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto" ;;
+  fto-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-then-ftalt" ;;
   *) echo "unknown STAGE $STAGE"; exit 1 ;;
 esac
 JOB="${JOB}${TAG:+-$TAG}"
-CFG="${SCRIPT_PATH}/coupled/ufs1deg-noohc-${ARM}-${STAGE}${EXISTING_RESULTS_DS:+-resume}.yaml"
+CFG="${SCRIPT_PATH}/coupled/ufs1deg-${OCEAN}-${ARM}-${STAGE}${EXISTING_RESULTS_DS:+-resume}.yaml"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
-  --description "1deg UFS + ERA5 coupled FT, stage ${STAGE}, atmosphere ${ARM} (${ATMOS_DS}:${ATMOS_CKPT}), ocean ${OCEAN_DS}:${OCEAN_CKPT}" \
+  --description "1deg UFS + ERA5 coupled FT, stage ${STAGE}, ocean ${OCEAN}, atmosphere ${ARM} (${ATMOS_DS}:${ATMOS_CKPT}), ocean ${OCEAN_DS}:${OCEAN_CKPT}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
   --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
