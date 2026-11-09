@@ -54,3 +54,5 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs2-nohcpair|01M4HEGC3YTYN1JTB5YC
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_a|rs0|01M6Z7SGFHZGVC8FA65BQ3ACNP|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_a|rs1|01M6Z7SYG4EJ874PR3P09514K4|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_a|rs2|01M6Z7TCM3M74QQ2M9BJY545K0|training|best_inference_ckpt|normal|--min-runtime 8h
