@@ -77,7 +77,7 @@ def test_branch_widths_independent_of_channels():
         n_in_channels=3, n_out_channels=5, dataset_info=_dataset_info()
     )
     block = model.conditional_model.blocks[0]
-    assert block.proj_in.weight.shape[:2] == (4, 5)
+    assert block.proj_filter_in.weight.shape[:2] == (4, 5)
     assert block.mlp.fwd[0].weight.shape[:2] == (16, 5)
 
 

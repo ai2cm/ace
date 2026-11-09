@@ -211,20 +211,25 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
 
     With ``mlp_input="field"``, two gated residual updates on the field ``x``:
 
-    1. ``u = proj_in(norm0(x))``, ``y = proj_out(act(filter(u) + inner_skip(u)))``,
-       then ``x = (1 + gamma_res) * x + gamma * y`` (the ``inner_skip`` term
-       is omitted when ``block_inner_skip`` is False)
+    1. ``u = proj_filter_in(norm0(x))``,
+       ``y = proj_filter_out(act(filter(u) + inner_skip(u)))``, then
+       ``x = (1 + gamma_res) * x + gamma * y`` (the ``inner_skip`` term is
+       omitted when ``block_inner_skip`` is False)
     2. ``z = mlp(norm1(x))``, then ``x = (1 + gamma_res') * x + gamma' * z``
 
-    With ``mlp_input="filter"``, one gated update: ``y`` is computed as
-    above, then ``z = mlp(norm1(y))`` and ``x = (1 + gamma_res) * x + gamma * z``.
-    The filter branch's output reaches the field only through the MLP.
-    Without an MLP (``use_mlp=False``) only update 1 runs, whatever
-    ``mlp_input`` is.
+    With ``mlp_input="filter"``, one gated update:
+    ``v = act(filter(u) + inner_skip(u))`` (``spectral_dim`` channels, no
+    ``proj_filter_out``), ``z = mlp(norm1(v))`` and
+    ``x = (1 + gamma_res) * x + gamma * z``. The filter branch's output
+    reaches the field only through the MLP, which maps ``spectral_dim``
+    through ``mlp_hidden_dim`` to ``n_channels``, so there is no
+    field-width bottleneck between the filter and the MLP. Without an MLP
+    (``use_mlp=False``) only update 1 runs, whatever ``mlp_input`` is.
 
-    ``proj_in``/``proj_out`` are 1x1 convolutions between the ``n_channels``
-    field channels and the ``spectral_dim`` channels the filter runs on; the
-    MLP maps ``n_channels`` through ``mlp_hidden_dim`` back to ``n_channels``.
+    ``proj_filter_in``/``proj_filter_out`` are 1x1 convolutions between the
+    ``n_channels`` field channels and the ``spectral_dim`` channels the filter
+    runs on; with ``mlp_input="field"`` the MLP maps ``n_channels`` through
+    ``mlp_hidden_dim`` back to ``n_channels``.
     """
 
     def __init__(
@@ -264,7 +269,7 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             context_config=context_config,
             elementwise_affine=affine_norms,
         )
-        self.proj_in = nn.Conv2d(n_channels, spectral_dim, 1)
+        self.proj_filter_in = nn.Conv2d(n_channels, spectral_dim, 1)
         self.filter = SpectralFilterLayer(
             forward_transform,
             inverse_transform,
@@ -278,20 +283,25 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             nn.Conv2d(spectral_dim, spectral_dim, 1) if block_inner_skip else None
         )
         self.act_layer = act_layer()
-        self.proj_out = nn.Conv2d(spectral_dim, n_channels, 1)
+        mlp_reads_filter = use_mlp and mlp_input == "filter"
+        self.proj_filter_out: nn.Module | None = (
+            None if mlp_reads_filter else nn.Conv2d(spectral_dim, n_channels, 1)
+        )
         self.gate_filter = GatedResidual(n_channels, gamma_init)
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         if use_mlp:
+            mlp_in_channels = spectral_dim if mlp_reads_filter else n_channels
             self.norm1: nn.Module | None = ConditionalLayerNorm(
-                n_channels,
+                mlp_in_channels,
                 img_shape=img_shape,
                 global_layer_norm=global_layer_norm,
                 context_config=context_config,
                 elementwise_affine=affine_norms,
             )
             self.mlp: nn.Module | None = MLP(
-                in_features=n_channels,
+                in_features=mlp_in_channels,
                 hidden_features=mlp_hidden_dim,
+                out_features=n_channels,
                 act_layer=act_layer,
                 drop_rate=drop_rate,
                 checkpointing=checkpointing,
@@ -307,10 +317,36 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
     def forward(
         self, x: torch.Tensor, context: Context, timer: Timer = NullTimer()
     ) -> torch.Tensor:
+        y = self._filter_branch(x, context, timer)
+        if self.proj_filter_out is None:
+            # The MLP consumes the filter branch at its full spectral_dim
+            # width and projects to the field; the field is updated once, at
+            # the end of the block.
+            z = self._mlp_branch(y, context, timer)
+            x = self.gate_filter(x, self.drop_path(z))
+        else:
+            # The filter branch updates the field; the MLP, if any, then
+            # reads the updated field and updates it again.
+            with timer.child("proj_filter_out"):
+                y = self.proj_filter_out(y)
+            x = self.gate_filter(x, self.drop_path(y))
+            if self.mlp is not None:
+                assert self.gate_mlp is not None
+                z = self._mlp_branch(x, context, timer)
+                x = self.gate_mlp(x, self.drop_path(z))
+        return x
+
+    def _filter_branch(
+        self, x: torch.Tensor, context: Context, timer: Timer
+    ) -> torch.Tensor:
+        """norm0 -> proj_filter_in -> spectral filter (+ inner skip) -> activation.
+
+        Returns ``spectral_dim`` channels.
+        """
         with timer.child("norm0") as norm0_timer:
             x_norm = self.norm0(x, context, timer=norm0_timer)
-        with timer.child("proj_in"):
-            u = self.proj_in(x_norm)
+        with timer.child("proj_filter_in"):
+            u = self.proj_filter_in(x_norm)
         with timer.child("filter") as filter_timer:
             y, residual = self.filter(u, timer=filter_timer)
         if self.inner_skip is not None:
@@ -318,30 +354,17 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
                 y = y + self.inner_skip(residual)
         with timer.child("activation"):
             y = self.act_layer(y)
-        with timer.child("proj_out"):
-            y = self.proj_out(y)
-        if self.mlp is None:
-            x = self.gate_filter(x, self.drop_path(y))
-        elif self.mlp_input == "filter":
-            # The MLP consumes the filter branch; the field is updated once,
-            # at the end of the block.
-            assert self.norm1 is not None
-            with timer.child("norm1") as norm1_timer:
-                y_norm = self.norm1(y, context, timer=norm1_timer)
-            with timer.child("mlp"):
-                z = self.mlp(y_norm)
-            x = self.gate_filter(x, self.drop_path(z))
-        else:
-            # The filter branch updates the field, then the MLP reads the
-            # updated field and updates it again.
-            assert self.norm1 is not None and self.gate_mlp is not None
-            x = self.gate_filter(x, self.drop_path(y))
-            with timer.child("norm1") as norm1_timer:
-                x_norm = self.norm1(x, context, timer=norm1_timer)
-            with timer.child("mlp"):
-                z = self.mlp(x_norm)
-            x = self.gate_mlp(x, self.drop_path(z))
-        return x
+        return y
+
+    def _mlp_branch(
+        self, v: torch.Tensor, context: Context, timer: Timer
+    ) -> torch.Tensor:
+        """norm1 -> MLP. Returns ``n_channels`` channels."""
+        assert self.mlp is not None and self.norm1 is not None
+        with timer.child("norm1") as norm1_timer:
+            v_norm = self.norm1(v, context, timer=norm1_timer)
+        with timer.child("mlp"):
+            return self.mlp(v_norm)
 
 
 class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
