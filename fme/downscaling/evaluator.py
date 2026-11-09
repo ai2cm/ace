@@ -188,8 +188,9 @@ class EvaluatorConfig:
             self.experiment_dir, log_filename, config=config, resumable=True
         )
 
-    def _build_default_evaluator(self) -> Evaluator:
-        model = self.model.build()
+    def _build_default_evaluator(
+        self, model: DiffusionModel | DenoisingMoEPredictor
+    ) -> Evaluator:
         dataset = self.data.build(
             train=False,
             requirements=self.model.data_requirements,
@@ -224,8 +225,8 @@ class EvaluatorConfig:
     def _build_event_evaluator(
         self,
         event_config: PairedEventConfig,
+        model: DiffusionModel | DenoisingMoEPredictor,
     ) -> EventEvaluator:
-        model = self.model.build()
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
 
         dataset = event_config.get_paired_gridded_data(
@@ -261,10 +262,13 @@ class EvaluatorConfig:
         )
 
     def build(self) -> list[Evaluator | EventEvaluator]:
-        default_evaluator = self._build_default_evaluator()
+        # Built once and shared by every evaluator: building per event puts a
+        # separate copy of the weights on the GPU for each event.
+        model = self.model.build()
+        default_evaluator = self._build_default_evaluator(model)
         event_evaluators = []
         for event_config in self.events or []:
-            event_evaluator = self._build_event_evaluator(event_config)
+            event_evaluator = self._build_event_evaluator(event_config, model)
             event_evaluators.append(event_evaluator)
         return [default_evaluator] + event_evaluators
 

@@ -47,6 +47,10 @@ from fme.ace.models.makani_fcn3.mpu.layers import DistributedMLP
 # more distributed stuff
 from fme.ace.models.makani_fcn3.utils import comm
 
+# single-rank DISCO convolution: a fork of torch_harmonics' convolution which
+# avoids sparse tensors, so it can be traced by torch.compile
+from fme.core.disco import DiscreteContinuousConvS2
+
 
 # heuristic for finding theta_cutoff
 def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
@@ -93,7 +97,7 @@ class DiscreteContinuousEncoder(nn.Module):
         conv_handle = (
             thd.DistributedDiscreteContinuousConvS2
             if comm.get_size("spatial") > 1
-            else th.DiscreteContinuousConvS2
+            else DiscreteContinuousConvS2
         )
         self.conv = conv_handle(
             inp_chans,
@@ -217,6 +221,9 @@ class DiscreteContinuousDecoder(nn.Module):
                 grid_out=grid_out,
                 mode="bilinear",
             )
+            # torch-harmonics stores expand_poles as a 0-d tensor, and dynamo
+            # can't branch on a tensor without a graph break
+            self.upsample.expand_poles = bool(self.upsample.expand_poles)
 
         # heuristic for finding theta_cutoff
         # nto entirely clear if out or in shape should be used here with a
@@ -229,7 +236,7 @@ class DiscreteContinuousDecoder(nn.Module):
         conv_handle = (
             thd.DistributedDiscreteContinuousConvS2
             if comm.get_size("spatial") > 1
-            else th.DiscreteContinuousConvS2
+            else DiscreteContinuousConvS2
         )
         self.conv = conv_handle(
             inp_chans,
@@ -310,7 +317,7 @@ class NeuralOperatorBlock(nn.Module):
             conv_handle = (
                 thd.DistributedDiscreteContinuousConvS2
                 if comm.get_size("spatial") > 1
-                else th.DiscreteContinuousConvS2
+                else DiscreteContinuousConvS2
             )
             self.local_conv = conv_handle(
                 inp_chans,
