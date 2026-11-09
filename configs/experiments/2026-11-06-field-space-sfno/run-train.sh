@@ -157,3 +157,4 @@ run_training "pretrain-muon-4deg-rs1.yaml" "muon-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-g01-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-g01-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-g1-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-g1-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-pos64-mlpfilter-e1024-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-embed1024-4deg-pretrain-rs1" 1
