@@ -29,8 +29,42 @@ cm4_1pct_46to125_piC_156to235-ocean_ppad_cde50|rs0|01M4KC13J5ZCNH39V0DS6DXEKM|ra
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 cm4_1pct_46to125_piC_156to235-ocean_ppad|rs0|01M4HEEJZ1ZFF7455M7T48S6EC|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter+titan
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|01M6MCZ7HXV9Z9G7WNZ43ME29S|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config-dir configs/experiments/cm4_eval/ocean
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|01M6MCZ7HXV9Z9G7WNZ43ME29S|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|01M6MCZ7HXV9Z9G7WNZ43ME29S|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs1|01M6MZZ7JFW8KAA4HW25FMQR4V|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs1|01M6MZZ7JFW8KAA4HW25FMQR4V|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs1|01M6MZZ7JFW8KAA4HW25FMQR4V|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 
-cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs2|01M6MZZK1NQTPAHWW669WRKADH|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs2|01M6MZZK1NQTPAHWW669WRKADH|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs2|01M6MZZK1NQTPAHWW669WRKADH|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+
+# --config-dir configs/experiments/cm4_eval/ocean
+# C(ppad_fmean_nohc, SF): checkpoint corrector with ocean_heat_content_correction=scaled_temperature (= ppad_fmean's, minus training-only corrector_disabled_epochs); .scratch/2026-11-04-1337-ohc-corrector-upper-ocean-attribution/issues/11
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs0|01M6MCZ7HXV9Z9G7WNZ43ME29S|running_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h|stepper_override.corrector='{"type":"ocean_corrector","config":{"ocean_heat_content_correction":{"method":"scaled_temperature"},"surface_energy_flux_correction":{"method":"prescribed_open_ocean"},"force_positive_names":["so_0","so_1","so_2","so_3","so_4","so_5","so_6","so_7","so_8","so_9","so_10","so_11","so_12","so_13","so_14","so_15","so_16","so_17","so_18","sea_ice_volume"],"sea_ice_fraction_correction":{"sea_ice_fraction_name":"ocean_sea_ice_fraction","land_fraction_name":"land_fraction","remove_negative_ocean_fraction":false,"zero_where_ice_free_names":["sea_ice_volume","sfdsi","UI","VI"]},"zos_global_mean_correction":{"reference_global_mean":-0.00013}}}'
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs1|01M6MZZ7JFW8KAA4HW25FMQR4V|running_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h|stepper_override.corrector='{"type":"ocean_corrector","config":{"ocean_heat_content_correction":{"method":"scaled_temperature"},"surface_energy_flux_correction":{"method":"prescribed_open_ocean"},"force_positive_names":["so_0","so_1","so_2","so_3","so_4","so_5","so_6","so_7","so_8","so_9","so_10","so_11","so_12","so_13","so_14","so_15","so_16","so_17","so_18","sea_ice_volume"],"sea_ice_fraction_correction":{"sea_ice_fraction_name":"ocean_sea_ice_fraction","land_fraction_name":"land_fraction","remove_negative_ocean_fraction":false,"zero_where_ice_free_names":["sea_ice_volume","sfdsi","UI","VI"]},"zos_global_mean_correction":{"reference_global_mean":-0.00013}}}'
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc|rs2|01M6MZZK1NQTPAHWW669WRKADH|running_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h|stepper_override.corrector='{"type":"ocean_corrector","config":{"ocean_heat_content_correction":{"method":"scaled_temperature"},"surface_energy_flux_correction":{"method":"prescribed_open_ocean"},"force_positive_names":["so_0","so_1","so_2","so_3","so_4","so_5","so_6","so_7","so_8","so_9","so_10","so_11","so_12","so_13","so_14","so_15","so_16","so_17","so_18","sea_ice_volume"],"sea_ice_fraction_correction":{"sea_ice_fraction_name":"ocean_sea_ice_fraction","land_fraction_name":"land_fraction","remove_negative_ocean_fraction":false,"zero_where_ice_free_names":["sea_ice_volume","sfdsi","UI","VI"]},"zos_global_mean_correction":{"reference_global_mean":-0.00013}}}'
+
+# --config-dir configs/experiments/cm4_eval/ocean
+# C(ppad_fmean, SF) paired with C(ppad_fmean_nohc, SF) above: same config + override (= ppad_fmean's training corrector minus corrector_disabled_epochs); tag suffix -nohcpair avoids beaker name 01M6MCNYAPDZQP3SHJFR6MPYT1; .scratch/2026-11-04-1337-ohc-corrector-upper-ocean-attribution/issues/11
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs0-nohcpair|01M4HEFPANCBNHNH0FC5A8V4HV|run_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h|stepper_override.corrector='{"type":"ocean_corrector","config":{"ocean_heat_content_correction":{"method":"scaled_temperature"},"surface_energy_flux_correction":{"method":"prescribed_open_ocean"},"force_positive_names":["so_0","so_1","so_2","so_3","so_4","so_5","so_6","so_7","so_8","so_9","so_10","so_11","so_12","so_13","so_14","so_15","so_16","so_17","so_18","sea_ice_volume"],"sea_ice_fraction_correction":{"sea_ice_fraction_name":"ocean_sea_ice_fraction","land_fraction_name":"land_fraction","remove_negative_ocean_fraction":false,"zero_where_ice_free_names":["sea_ice_volume","sfdsi","UI","VI"]},"zos_global_mean_correction":{"reference_global_mean":-0.00013}}}'
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs1-nohcpair|01M4HEG18G10GVQB6ZAMZ10PH0|run_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h|stepper_override.corrector='{"type":"ocean_corrector","config":{"ocean_heat_content_correction":{"method":"scaled_temperature"},"surface_energy_flux_correction":{"method":"prescribed_open_ocean"},"force_positive_names":["so_0","so_1","so_2","so_3","so_4","so_5","so_6","so_7","so_8","so_9","so_10","so_11","so_12","so_13","so_14","so_15","so_16","so_17","so_18","sea_ice_volume"],"sea_ice_fraction_correction":{"sea_ice_fraction_name":"ocean_sea_ice_fraction","land_fraction_name":"land_fraction","remove_negative_ocean_fraction":false,"zero_where_ice_free_names":["sea_ice_volume","sfdsi","UI","VI"]},"zos_global_mean_correction":{"reference_global_mean":-0.00013}}}'
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean|rs2-nohcpair|01M4HEGC3YTYN1JTB5YCZEYB8C|run_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h|stepper_override.corrector='{"type":"ocean_corrector","config":{"ocean_heat_content_correction":{"method":"scaled_temperature"},"surface_energy_flux_correction":{"method":"prescribed_open_ocean"},"force_positive_names":["so_0","so_1","so_2","so_3","so_4","so_5","so_6","so_7","so_8","so_9","so_10","so_11","so_12","so_13","so_14","so_15","so_16","so_17","so_18","sea_ice_volume"],"sea_ice_fraction_correction":{"sea_ice_fraction_name":"ocean_sea_ice_fraction","land_fraction_name":"land_fraction","remove_negative_ocean_fraction":false,"zero_where_ice_free_names":["sea_ice_volume","sfdsi","UI","VI"]},"zos_global_mean_correction":{"reference_global_mean":-0.00013}}}'
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_a|rs0|01M6Z7SGFHZGVC8FA65BQ3ACNP|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_a|rs1|01M6Z7SYG4EJ874PR3P09514K4|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_a|rs2|01M6Z7TCM3M74QQ2M9BJY545K0|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_b|rs0|01M6Z7TVFNC6GQ7PENQRSEW2R2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_b|rs1|01M6Z7V9T8F3S6V9ZA2V0KW41R|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_b|rs2|01M6Z7VQ5MSP55FB9W5BDJ446V|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_c|rs0|01M6Z7W5R50SCNRT4SF3RN2VJ2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_c|rs1|01M6Z7WP12M84V048MVXFWT83M|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_fmean_nohc-ft_c|rs2|01M6Z7X74AN485S12Z4ZCMBCCW|training|best_inference_ckpt|normal|--min-runtime 8h
