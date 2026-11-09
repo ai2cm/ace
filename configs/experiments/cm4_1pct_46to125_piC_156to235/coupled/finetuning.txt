@@ -13,3 +13,5 @@ cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|ace-samud
 # joint fine-tuning of cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto
 
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|i6u2mxg6|best_inference_ckpt|trained|urgent|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfmiz_a2sLR-ft_fto|o0ep44a2rs0|ace-samudra-coupled-cm4|0a36qcfq|best_inference_ckpt|train|high|b200|4||3|ai2/ace|seed=0 optimization.max_grad_norm=1.0||8h
