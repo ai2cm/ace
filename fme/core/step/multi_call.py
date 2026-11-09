@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.corrector import CorrectorSelector
@@ -290,6 +291,9 @@ class MultiCallStep(StepABC):
         return self._config.extend_normalizer_with_multi_call_outputs(
             self._wrapped_step.normalizer
         )
+
+    def network_normalizer(self, labels: BatchLabels | None) -> StandardNormalizer:
+        return self._wrapped_step.network_normalizer(labels)
 
     @property
     def surface_temperature_name(self) -> str | None:
