@@ -171,3 +171,5 @@ stepper_training:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
+stepper:
+  checkpoint_path: /prior-results/training_checkpoints/ckpt.tar
