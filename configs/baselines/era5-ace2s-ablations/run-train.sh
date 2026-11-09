@@ -223,6 +223,9 @@ run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck
 
 # 6-hourly arm, stage 2: 3-step (18 h) detached fine-tune, horizon decided 2026-09-28
 run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
+# The 6-hourly arm evaluated in the paper (wandb cerls68n, beaker 01M46V2EPJTJXPGPTQM3RW0WHS)
+# was launched from experiment/ace2s-pushforward at 18799dab2 with this 12-step, 2-epoch config.
+run_training "ace2s-finetune-6hourly-12step.yaml" "1deg-6h-ace2s-ft12-detached-rs0" 8
 
 # Seed replicate pretrain resumes (40 → 120 epochs, added 2026-10-08)
 run_training "ace2s-pretrain-rs1-resume120.yaml" "1deg-daily-ace2s-pretrain-rs1" 8
