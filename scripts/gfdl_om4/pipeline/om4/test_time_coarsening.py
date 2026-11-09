@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import xarray as xr
+from packaging.version import Version
 
 from ..dims import TIME_DIM
 from ..postprocess import DERIVATION_ATTR
@@ -10,6 +11,20 @@ from .config import StreamConfig
 from .time_coarsening import coarsen, select_whole_blocks, stream_output_time
 
 VARIABLE = "tos"
+
+
+# xarray 2026.9.0's Dataset coarsen mean rejects the skipna argument that
+# coarsen passes. This is fixed upstream by
+# https://github.com/pydata/xarray/pull/11686, which is not yet released.
+xfail_with_xarray_2026_9_0 = pytest.mark.xfail(
+    Version(xr.__version__) == Version("2026.9.0"),
+    reason=(
+        "xarray 2026.9.0 only: Dataset coarsen mean rejects skipna "
+        "(pydata/xarray#11686)"
+    ),
+    raises=TypeError,
+    strict=True,
+)
 
 
 def _daily_source(n_days: int) -> xr.Dataset:
@@ -43,6 +58,7 @@ def _expected_block_means(source: xr.Dataset, factor: int) -> xr.DataArray:
     return da.isel({TIME_DIM: slice(factor - 1, None, factor)}).copy(data=data)
 
 
+@xfail_with_xarray_2026_9_0
 def test_chunkwise_coarsening_matches_block_means():
     factor, read_width = 5, 10
     source = _daily_source(20)
@@ -94,6 +110,7 @@ def test_factor_not_dividing_source_time_axis_raises():
         select_whole_blocks(_daily_source(21), 5, None, None, "test")
 
 
+@xfail_with_xarray_2026_9_0
 def test_nan_in_block_propagates_to_its_mean_only():
     factor = 5
     source = _daily_source(10)
