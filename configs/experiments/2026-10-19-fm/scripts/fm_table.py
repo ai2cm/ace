@@ -8,13 +8,10 @@ inference are all done. Finished jobs count as max_epochs; never-started jobs
 count as 0. Train time is the running wall time summed over an experiment's
 jobs (preemption retries included, queueing excluded). Epoch and train-time
 columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
-excluded; the 2026-11-05 v2 runs (submit_fm_v2_jobs.py, 100 epochs) get one
-row per architecture and data arm. The 2026-11-06 v3 runs (create_fm_v3_jobs.py,
-60 epochs) fork the sfno v2 runs at v2 epoch 40; their epochs count from 0 at
-the fork, not from 40. The 2026-11-06 swin-v2.2-v3 runs
-(create_fm_v3_swin_jobs.py, 100 epochs) train from scratch. Of the older swin
-runs none are tracked for now (ARCHS); their logs are not read. All values are
-measured; there are no estimates.
+excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
+row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced).
+Of the older swin runs none are tracked (ARCHS); their logs are not read. All
+values are measured; there are no estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed / Other" counts only experiments that exist and failed or were canceled.
@@ -45,15 +42,13 @@ from _beaker_listing import (  # noqa: E402
 )
 from submit_fm_jobs import (  # noqa: E402
     ARCH_CHOICES,
-    CONFIG_PREFIX,
-    RUN_CONFIGS_DIR,
     V2_ARCH_CHOICES,
     config_to_job_name,
     select_configs,
 )
 
 MAX_EPOCHS = 150
-V2_MAX_EPOCHS = 100
+V2_MAX_EPOCHS = 50
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
 EPOCH_RE = re.compile(r"Starting training step for model trained for (\d+) complete")
@@ -130,57 +125,45 @@ def _preemptions(named: NamedExperiment) -> int:
     )
 
 
-# Rows to track. The swin rows ("swin-v2.2", "swin-v2.2-res", "swin-v2.2-v2",
-# "swin-v2.2-v2-e3sm") are left out for now.
+# Rows to track: the v1 sfno runs and, per architecture, the three v2 data arms
+# (row suffix "-era5" for fm-era5, none for fm-balanced, "-e3sm" for
+# fm-e3sm-balanced). The older swin rows ("swin-v2.2", "swin-v2.2-res") are left
+# out.
 ARCHS = (
     "sfno",
+    "sfno-v2-era5",
     "sfno-v2",
     "sfno-v2-e3sm",
-    "sfno-v3",
-    "sfno-v3-e3sm",
-    "swin-v2.2-v3",
-    "swin-v2.2-v3-e3sm",
+    "swin-v2.2-v2-era5",
+    "swin-v2.2-v2",
+    "swin-v2.2-v2-e3sm",
 )
 # Job-name tags of the v2 runs, longest first: they extend the old tags.
 V2_TAGS = (("-nc-swin-v2.2-v2-", "swin-v2.2-v2"), ("-nc-sfno-v2-", "sfno-v2"))
-# Job-name tags of the v3 runs and their max epochs: sfno v2 runs forked at
-# epoch 40 and retrained for 60 more, and swin runs trained from scratch for
-# 100. Checked before V2_TAGS (neither contains a v2 tag, but keep the newest
-# tags first).
-V3_TAGS = (("-nc-sfno-v3-", "sfno-v3"), ("-nc-swin-v2.2-v3-", "swin-v2.2-v3"))
-V3_MAX_EPOCHS = {"sfno-v3": 60, "swin-v2.2-v3": 100}
-# Expected v3 configs, so the rows count "Not submitted" before
-# create_fm_v3_jobs.py has written them; used per data arm when run_configs/
-# has no v3 config for that arm.
-V3_FALLBACK_CONFIGS = tuple(
-    f"ace-train-config-4deg-nc-sfno-v3-fm-{arm}balanced-s{seed}-maskoff.yaml"
-    for arm in ("", "e3sm-")
-    for seed in range(5)
-)
+V2_ARM_SUFFIXES = (("-fm-era5-", "-era5"), ("-fm-e3sm-balanced-", "-e3sm"))
 # One-off variant configs, kept out of run_configs/ so batch submits skip them.
 VARIANTS_DIR = pathlib.Path(__file__).parent.parent / "variants"
 
 
 def arch_of(name: str) -> str:
-    for tag, arch in V3_TAGS + V2_TAGS:
+    for tag, arch in V2_TAGS:
         if tag in name:
-            return f"{arch}-e3sm" if "-e3sm-" in name else arch
+            for arm_tag, suffix in V2_ARM_SUFFIXES:
+                if arm_tag in name:
+                    return f"{arch}{suffix}"
+            return arch
     for arch in ("swin-v2.2-res", "swin-v2.2"):
         if f"-{arch}-" in name:
             return arch
     return "sfno"
 
 
+def is_v2(arch: str) -> bool:
+    return any(arch.startswith(base) for _, base in V2_TAGS)
+
+
 def max_epochs_of(arch: str) -> int:
-    v2_rows = {row for _, base in V2_TAGS for row in (base, f"{base}-e3sm")}
-    v3_rows = {
-        row: V3_MAX_EPOCHS[base]
-        for _, base in V3_TAGS
-        for row in (base, f"{base}-e3sm")
-    }
-    if arch in v3_rows:
-        return v3_rows[arch]
-    return V2_MAX_EPOCHS if arch in v2_rows else MAX_EPOCHS
+    return V2_MAX_EPOCHS if is_v2(arch) else MAX_EPOCHS
 
 
 def train_seconds(named) -> float:
@@ -208,15 +191,19 @@ def _median(values: list[float]) -> float | None:
     return statistics.median(values) if values else None
 
 
-# Inline inference runs the aimip evaluator(s) every epoch and all others
-# with `epochs: {start: 0, step: 10}`, i.e. after epochs 1, 11, 21, ...
-# This holds for the v2 runs too (aimip_checkpoint_era5 every epoch, the 10yr
-# and 46yr ERA5 runs every 10).
+# Inline inference runs the aimip evaluator(s) every epoch and all others every
+# 10 epochs: for the v1 runs with `epochs: {start: 0, step: 10}`, i.e. after
+# epochs 1, 11, 21, ...; for the v2 runs (the 10yr and 46yr ERA5 runs) with
+# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ..., 50.
 HEAVY_INFERENCE_EVERY = 10
 
 
-def _is_heavy_inference(epoch: int) -> bool:
-    return epoch % HEAVY_INFERENCE_EVERY == 1
+def heavy_inference_residue(arch: str) -> int:
+    return 0 if is_v2(arch) else 1
+
+
+def _is_heavy_inference(epoch: int, residue: int) -> bool:
+    return epoch % HEAVY_INFERENCE_EVERY == residue
 
 
 Seconds = tuple[float | None, float | None, float | None, float | None]
@@ -225,7 +212,7 @@ Seconds = tuple[float | None, float | None, float | None, float | None]
 Intervals = tuple[list[float], list[float], list[float], list[float]]
 
 
-def epoch_intervals(log: str) -> Intervals:
+def epoch_intervals(log: str, heavy_residue: int) -> Intervals:
     """Wall seconds of each (full epoch, training, inline inference on light
     epochs, inline inference on heavy every-10th epochs) in one run's log.
     """
@@ -253,7 +240,7 @@ def epoch_intervals(log: str) -> Intervals:
                 train.append((t2 - t1).total_seconds())
         elif p1 == "inference" and p2 == "training" and n2 == n1:
             seconds = (t2 - t1).total_seconds()
-            (heavy if _is_heavy_inference(n1) else light).append(seconds)
+            (heavy if _is_heavy_inference(n1, heavy_residue) else light).append(seconds)
     return full, train, light, heavy
 
 
@@ -267,12 +254,13 @@ def _run_log(job_id: str) -> str:
     ).stdout
 
 
-def progress(named, max_epochs: int) -> tuple[int, Seconds]:
+def progress(named, arch: str) -> tuple[int, Seconds]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference)) over the logs of every run (preemption retry) of the
     experiment, finished or not.
     """
     none: Seconds = (None, None, None, None)
+    max_epochs = max_epochs_of(arch)
     if named is None:
         return 0, none
     jobs = named.experiment.get("jobs") or []
@@ -284,28 +272,14 @@ def progress(named, max_epochs: int) -> tuple[int, Seconds]:
     for job in started:
         log = _run_log(job["id"])
         done = max(done, *(int(m.group(1)) for m in EPOCH_RE.finditer(log)), 0)
-        for acc, values in zip(intervals, epoch_intervals(log)):
+        for acc, values in zip(
+            intervals, epoch_intervals(log, heavy_inference_residue(arch))
+        ):
             acc.extend(values)
     if named.status == OK:
         done = max_epochs
     full, train, light, heavy = intervals
     return done, (_median(full), _median(train), _median(light), _median(heavy))
-
-
-def v3_job_names() -> list[str]:
-    """Job names of the v3 training configs in run_configs/, per data arm,
-    falling back to V3_FALLBACK_CONFIGS for an arm with none written yet.
-    """
-    found = [
-        p.name
-        for tag, _ in V3_TAGS
-        for p in sorted(RUN_CONFIGS_DIR.glob(f"{CONFIG_PREFIX}{tag[1:]}*.yaml"))
-        if not p.stem.endswith(("-finetune", "-cooldown", "-bestinfcooldown", "-diag"))
-    ]
-    names = [config_to_job_name(c) for c in found]
-    arms = {arch_of(n) for n in names}
-    fallback = [config_to_job_name(c) for c in V3_FALLBACK_CONFIGS]
-    return names + [n for n in fallback if arch_of(n) not in arms]
 
 
 def main() -> None:
@@ -316,9 +290,6 @@ def main() -> None:
     ]
     names += [config_to_job_name(c) for c in select_configs(None, V2_ARCH_CHOICES)]
     names += [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
-    names += v3_job_names()
-    # Dedupe: a v3 config in run_configs/ is also selected above as nc-sfno
-    # (its longest known arch tag), unless submit_fm_jobs.py learns "nc-sfno-v3".
     names = [n for n in dict.fromkeys(names) if arch_of(n) in ARCHS]
     # List per architecture by the names' longest common prefix: the broad
     # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
@@ -332,7 +303,7 @@ def main() -> None:
             zip(
                 names,
                 ex.map(
-                    lambda n: progress(by_name.get(n), max_epochs_of(arch_of(n))),
+                    lambda n: progress(by_name.get(n), arch_of(n)),
                     names,
                 ),
             )

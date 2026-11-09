@@ -1,0 +1,19 @@
+# Pooled normalization stats over the train concat of the fm-era5 arm, generated
+# from configs/experiments/2026-10-19-fm/run_configs/
+#   ace-train-config-4deg-nc-sfno-v2-fm-era5-s0-maskoff.yaml
+# (train_loader.dataset.concat is identical across the sfno-v2 and swin-v2.2-v2
+# fm-era5 s0/s1/s2 maskoff run configs), with the same store and time slices as
+# training, grouped by each entry's label. ERA5 is read from weka because its GCS
+# copy is stored under a different store name. Validation and inference datasets
+# are not included.
+dataset_pairs:
+  - dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    start_time: '1940-01-03'
+    end_time: '1993-12-31'
+    group: era5
+  - dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    start_time: '1995-01-01'
+    end_time: '2008-12-31'
+    group: era5
+groups:
+  - era5

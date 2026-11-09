@@ -9,9 +9,6 @@
 # training_checkpoints/ema_ckpt_0150.tar) from PARENT_DATASET at
 # /parent_ckpt.tar (stepper_training.parameter_init.weights_path) and takes the
 # Beaker experiment description as an argument.
-#
-# Also used by submit_fm_v3_jobs.py, which sets PARENT_CHECKPOINT to the v2
-# parent's training_checkpoints/ema_ckpt_0040.tar and N_GPUS=4.
 
 set -e
 
@@ -36,7 +33,7 @@ BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter ai2/titan ai2/saturn"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=${N_GPUS:-2}  # submit_fm_v3_jobs.py sets 4
+N_GPUS=${N_GPUS:-2}
 CONFIG_PATH="$SCRIPT_PATH/$CONFIG_FILENAME"
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script

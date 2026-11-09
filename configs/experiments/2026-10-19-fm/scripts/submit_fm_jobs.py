@@ -40,19 +40,12 @@ CONFIG_PREFIX = "ace-train-config-4deg-"
 # CONFIG_PREFIX. Matching is exact-tag, so `nc-swin-v2` never selects a
 # `nc-swin-v2.2` config (or vice versa).
 ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1", "nc-swin-v2.2")
-# Architecture tags of the 2026-11-05 v2 runs, submitted by
+# Architecture tags of the 2026-11-09 v2 runs, submitted by
 # submit_fm_v2_jobs.py (4 GPUs, their own wandb group). They extend the tags
 # above (`nc-sfno-v2-...` starts with `nc-sfno-`), so configs are matched on
 # their longest tag: `--arch nc-sfno` here never selects a v2 config.
 V2_ARCH_CHOICES = ("nc-sfno-v2", "nc-swin-v2.2-v2")
-# Architecture tags of the 2026-11-06 v3 runs. sfno-v3 (create_fm_v3_jobs.py)
-# forks the nc-sfno-v2 runs at epoch 40 and is submitted by submit_fm_v3_jobs.py
-# with the parent checkpoint mounted; swin-v2.2-v3 (create_fm_v3_swin_jobs.py)
-# trains from scratch and is submitted by submit_fm_v3_swin_jobs.py. Listed
-# here so that arch_tag never reads a v3 config as an older tag (e.g. `nc-sfno`,
-# which would submit an sfno-v3 config from scratch).
-V3_ARCH_CHOICES = ("nc-sfno-v3", "nc-swin-v2.2-v3")
-ALL_ARCH_TAGS = ARCH_CHOICES + V2_ARCH_CHOICES + V3_ARCH_CHOICES
+ALL_ARCH_TAGS = ARCH_CHOICES + V2_ARCH_CHOICES
 # Beaker defaults for add_beaker_args, shared with submit_inference_jobs.py so
 # inference jobs land where training jobs do. Keep in step with the
 # BEAKER_* defaults in run-ace-train.sh / run-ace-inference-job.sh.
