@@ -8,7 +8,7 @@ import os
 import re
 import warnings
 from collections import namedtuple
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
@@ -55,6 +55,7 @@ VariableNames = namedtuple(
         "time_dependent_names",
         "time_invariant_names",
         "static_derived_names",
+        "derived_names",
     ),
 )
 
@@ -226,6 +227,39 @@ class StaticDerivedData:
 
     def __getitem__(self, name: str) -> torch.Tensor:
         return self._get_xyz()[name]
+
+
+@dataclasses.dataclass(frozen=True)
+class _DerivedVariable:
+    """A variable computed from other variables in the dataset.
+
+    Parameters:
+        inputs: Names of the variables the derived variable is computed from.
+        compute: Computes the derived variable from a mapping containing the
+            inputs, each with shape [time, ...].
+        metadata: Metadata of the derived variable.
+    """
+
+    inputs: tuple[str, ...]
+    compute: Callable[[TensorDict], torch.Tensor]
+    metadata: VariableMetadata
+
+
+def _compute_ocean_fraction(tensors: TensorDict) -> torch.Tensor:
+    ocean_fraction = 1 - tensors["land_fraction"] - tensors["sea_ice_fraction"]
+    return ocean_fraction.clamp(min=0.0, max=1.0)
+
+
+DERIVED_VARIABLES: Mapping[str, _DerivedVariable] = {
+    "ocean_fraction": _DerivedVariable(
+        inputs=("land_fraction", "sea_ice_fraction"),
+        compute=_compute_ocean_fraction,
+        metadata=VariableMetadata(
+            units="",
+            long_name="ocean fraction (1 - land_fraction - sea_ice_fraction)",
+        ),
+    ),
+}
 
 
 def _get_protocol(path):
@@ -400,6 +434,50 @@ class OverwriteConfig:
 
 
 @dataclasses.dataclass
+class VariableMetadataConfig:
+    """Configuration to override the metadata of a variable in XarrayDataset.
+
+    Parameters:
+        units: Units of the variable. If None, the units in the dataset are kept.
+        long_name: Long name of the variable. If None, the long name in the
+            dataset is kept.
+    """
+
+    units: str | None = None
+    long_name: str | None = None
+
+    def apply(self, metadata: VariableMetadata) -> VariableMetadata:
+        return VariableMetadata(
+            units=self.units if self.units is not None else metadata.units,
+            long_name=(
+                self.long_name if self.long_name is not None else metadata.long_name
+            ),
+        )
+
+
+def _rename_variables(
+    ds: xr.Dataset, renamed_variables: Mapping[str, str]
+) -> xr.Dataset:
+    """Rename variables in a dataset opened from file.
+
+    The returned dataset does not close the underlying file when closed, so the
+    caller should keep and close the originally opened dataset.
+    """
+    if len(renamed_variables) == 0:
+        return ds
+    missing = [name for name in renamed_variables if name not in ds.data_vars]
+    if missing:
+        raise ValueError(f"Variables to rename not found in dataset: {missing}.")
+    existing = [name for name in renamed_variables.values() if name in ds.variables]
+    if existing:
+        raise ValueError(
+            f"Cannot rename variables to names which already exist in the "
+            f"dataset: {existing}."
+        )
+    return ds.rename_vars(renamed_variables)
+
+
+@dataclasses.dataclass
 class XarrayDataConfig(DatasetConfigABC):
     """
     Parameters:
@@ -435,6 +513,30 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        renamed_variables: Optional mapping from variable names in the files to
+            the names exposed by the dataset. Renaming is applied when the files
+            are opened, so all other options (e.g. ``overwrite``, ``fill_nans``)
+            and the requested variable names refer to the new names. For example,
+            to rename a CO2 variable stored in ppmv and convert it to a volume
+            mixing ratio, use ``renamed_variables={"carbon_dioxide":
+            "global_mean_co2"}`` with
+            ``overwrite=OverwriteConfig(multiply_scalar={"global_mean_co2": 1e-6})``.
+        derived_variables: Optional names of variables to compute from other
+            variables in the dataset, for datasets which do not store them. Each
+            name must be a key of ``DERIVED_VARIABLES``, which defines the
+            inputs and computation; it is an error for the files to already
+            contain a derived variable. The inputs are read using the names
+            after applying ``renamed_variables``, and the derived variable is
+            computed before ``overwrite`` is applied. The only available
+            variable is ``ocean_fraction``, computed as
+            ``1 - land_fraction - sea_ice_fraction`` clamped to [0, 1], which
+            is time-varying if either input is.
+        variable_metadata: Optional overrides of the metadata (units and long
+            name) of variables, keyed by the names exposed by the dataset, i.e.
+            after applying ``renamed_variables``. Fields left unset keep the
+            metadata in the files (or of the derived variable). For example, use
+            ``{"global_mean_co2": VariableMetadataConfig(units="volume mixing
+            ratio")}`` after converting CO2 from ppmv with ``overwrite``.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -466,6 +568,11 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
+    renamed_variables: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    derived_variables: Sequence[str] = dataclasses.field(default_factory=list)
+    variable_metadata: Mapping[str, VariableMetadataConfig] = dataclasses.field(
+        default_factory=dict
+    )
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -509,6 +616,25 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
+        new_names = list(self.renamed_variables.values())
+        if len(new_names) != len(set(new_names)):
+            raise ValueError(
+                "renamed_variables must not rename multiple variables to the same "
+                f"name, got {self.renamed_variables}."
+            )
+        renamed_away = set(self.renamed_variables) - set(new_names)
+        old_names = sorted(renamed_away & set(self.variable_metadata))
+        if old_names:
+            raise ValueError(
+                "variable_metadata must use the names after renaming, got "
+                f"renamed variables {old_names}."
+            )
+        unknown = set(self.derived_variables) - set(DERIVED_VARIABLES)
+        if unknown:
+            raise ValueError(
+                f"Unknown derived_variables {sorted(unknown)}, must be one of "
+                f"{sorted(DERIVED_VARIABLES)}."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -516,6 +642,14 @@ class XarrayDataConfig(DatasetConfigABC):
 
     def update_subset(self, subset: Slice | TimeSlice | RepeatedInterval):
         self.subset = subset
+
+    def get_available_names(self, file_names: Iterable[str]) -> set[str]:
+        """Names of the variables exposed by the dataset, given the names of
+        the variables stored in its files, i.e. after renaming and including
+        derived variables.
+        """
+        renamed = {self.renamed_variables.get(name, name) for name in file_names}
+        return renamed | set(self.derived_variables)
 
     def build(
         self,
@@ -558,6 +692,11 @@ class XarrayDataset(DatasetABC):
         self.spatial_dimensions = config.spatial_dimensions
         self.fill_nans = config.fill_nans
         self.subset_config = config.subset
+        self._renamed_variables = config.renamed_variables
+        self._derived_variables = {
+            name: DERIVED_VARIABLES[name] for name in config.derived_variables
+        }
+        self._metadata_overrides = config.variable_metadata
         self._raw_paths = get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
@@ -570,13 +709,16 @@ class XarrayDataset(DatasetABC):
             config.infer_timestep,
             max_sample_n_times=n_timesteps.max_value,
         )
-        first_dataset = xr.open_dataset(
+        first_file = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
             decode_timedelta=False,
             engine=self.engine,
             chunks=None,
         )
+        first_dataset = _rename_variables(first_file, self._renamed_variables)
+        self._check_derived_variables(first_dataset)
+        self._check_metadata_overrides(first_dataset)
         self._spatial_mask_provider = _get_spatial_mask_provider(
             first_dataset, self.dtype
         )
@@ -585,17 +727,30 @@ class XarrayDataset(DatasetABC):
             self._static_derived_data,
             _loaded_horizontal_dims,
         ) = self.configure_horizontal_coordinates(first_dataset)
+        # inputs of derived variables are loaded even if not requested
+        self._derived_input_names = self._get_derived_input_names(names)
         (
             self._time_dependent_names,
             self._time_invariant_names,
             self._static_derived_names,
+            self._derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._names = (
-            list(self._time_dependent_names)
-            + list(self._time_invariant_names)
-            + list(self._static_derived_names)
-        )
+        self._names = [
+            name
+            for name in (
+                list(self._time_dependent_names)
+                + list(self._time_invariant_names)
+                + list(self._static_derived_names)
+                + list(self._derived_names)
+            )
+            if name not in self._derived_input_names
+        ]
         self._missing_names = frozenset(set(names) - set(self._names))
+        # files are read per sample using the variable names stored in them
+        renamed_from = {new: old for old, new in self._renamed_variables.items()}
+        self._time_dependent_source_names = {
+            renamed_from.get(name, name): name for name in self._time_dependent_names
+        }
         self._get_variable_metadata(first_dataset)
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
@@ -616,13 +771,57 @@ class XarrayDataset(DatasetABC):
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
         self._check_isel_dimensions(first_dataset.sizes)
-        first_dataset.close()
+        first_file.close()
         self._time_invariant_tensors = self._load_time_invariant_tensors()
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
         self._local_epoch: int = -1
         self._global_epoch = torch.tensor(-1)
+
+    def _check_derived_variables(self, ds: xr.Dataset):
+        for name, derived in self._derived_variables.items():
+            if name in ds.variables:
+                raise ValueError(
+                    f"Cannot derive variable '{name}' which already exists in "
+                    "the dataset."
+                )
+            missing = [
+                input_name for input_name in derived.inputs if input_name not in ds
+            ]
+            if missing:
+                raise ValueError(
+                    f"Inputs {missing} needed to derive variable '{name}' are "
+                    "not in the dataset."
+                )
+
+    def _check_metadata_overrides(self, ds: xr.Dataset):
+        available = (
+            set(ds.data_vars)
+            | set(self._derived_variables)
+            | set(StaticDerivedData.names)
+        )
+        unknown = sorted(set(self._metadata_overrides) - available)
+        if unknown:
+            raise ValueError(
+                f"variable_metadata given for variables {unknown} which are not "
+                "in the dataset."
+            )
+
+    def _get_derived_input_names(self, requested_names: Sequence[str]) -> list[str]:
+        """Names of inputs of requested derived variables which are not
+        themselves requested.
+        """
+        input_names: list[str] = []
+        for name in requested_names:
+            if name in self._derived_variables:
+                for input_name in self._derived_variables[name].inputs:
+                    if (
+                        input_name not in requested_names
+                        and input_name not in input_names
+                    ):
+                        input_names.append(input_name)
+        return input_names
 
     def _load_time_invariant_tensors(self) -> dict[str, torch.Tensor]:
         """Load the time-invariant variables into memory.
@@ -636,15 +835,15 @@ class XarrayDataset(DatasetABC):
             return {}
         # opened directly rather than via _open_file so that closing this
         # handle cannot close one shared through the file handle cache
-        ds = _open_xr_dataset(self.full_paths[0], engine=self.engine)
-        ds = ds.isel(**self.isel)
+        file = _open_xr_dataset(self.full_paths[0], engine=self.engine)
+        ds = _rename_variables(file, self._renamed_variables).isel(**self.isel)
         tensors = {}
         for name in self._time_invariant_names:
             variable = ds[name].variable
             if self.fill_nans is not None:
                 variable = variable.fillna(self.fill_nans.value)
             tensors[name] = as_alignable_tensor(variable, self.dims)
-        ds.close()
+        file.close()
         return tensors
 
     def _ensure_epoch_synchronized(self):
@@ -740,8 +939,12 @@ class XarrayDataset(DatasetABC):
         for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
+            elif name in self._derived_variables:
+                result[name] = self._derived_variables[name].metadata
             else:
                 result[name] = VariableMetadata.from_attrs(ds[name].attrs)
+            if name in self._metadata_overrides:
+                result[name] = self._metadata_overrides[name].apply(result[name])
         self._variable_metadata = result
 
     def _get_files_stats(
@@ -781,14 +984,18 @@ class XarrayDataset(DatasetABC):
             time_dependent_names,
             time_invariant_names,
             static_derived_names,
-        ) = ([], [], [])
+            derived_names,
+        ) = ([], [], [], [])
         # Don't use open_mfdataset here, because it will give time-invariant
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
-        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as ds:
-            for name in self._names:
+        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as file:
+            ds = _rename_variables(file, self._renamed_variables)
+            for name in list(self._names) + self._derived_input_names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
+                elif name in self._derived_variables:
+                    derived_names.append(name)
                 elif name in ds:
                     dims = ds[name].dims
                     if "time" in dims:
@@ -802,13 +1009,19 @@ class XarrayDataset(DatasetABC):
                     )
                 else:
                     raise ValueError(f"Required variable not found in dataset: {name}.")
-        found = time_dependent_names + time_invariant_names + static_derived_names
+        found = (
+            time_dependent_names
+            + time_invariant_names
+            + static_derived_names
+            + derived_names
+        )
         logging.info(f"The required variables have been found in the dataset: {found}.")
 
         return VariableNames(
             time_dependent_names,
             time_invariant_names,
             static_derived_names,
+            derived_names,
         )
 
     def configure_horizontal_coordinates(
@@ -931,7 +1144,7 @@ class XarrayDataset(DatasetABC):
                     idx=start,
                     n_steps=n_steps,
                     path=self.full_paths[file_idx],
-                    names=self._time_dependent_names,
+                    names=list(self._time_dependent_source_names),
                     final_dims=self.dims,
                     final_shape=shape,
                     fill_nans=self.fill_nans,
@@ -944,15 +1157,15 @@ class XarrayDataset(DatasetABC):
                     idx=start,
                     n_steps=n_steps,
                     ds=ds,
-                    names=self._time_dependent_names,
+                    names=list(self._time_dependent_source_names),
                     final_dims=self.dims,
                     final_shape=shape,
                     fill_nans=self.fill_nans,
                 )
                 ds.close()
                 del ds
-            for n in self._time_dependent_names:
-                arrays.setdefault(n, []).append(tensor_dict[n])
+            for source, n in self._time_dependent_source_names.items():
+                arrays.setdefault(n, []).append(tensor_dict[source])
 
         tensors: TensorDict = {}
         for n, tensor_list in arrays.items():
@@ -969,6 +1182,11 @@ class XarrayDataset(DatasetABC):
             tensor = self._static_derived_data[name]
             horizontal_dims = [1] * tensor.ndim
             tensors[name] = tensor.repeat((total_steps, *horizontal_dims))
+
+        for name in self._derived_names:
+            tensors[name] = self._derived_variables[name].compute(tensors)
+        for name in self._derived_input_names:
+            del tensors[name]
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
