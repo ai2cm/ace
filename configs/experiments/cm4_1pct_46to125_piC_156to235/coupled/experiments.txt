@@ -65,3 +65,43 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a0rs0|01M6Q58Z
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a1rs0|01M6Q59QR76XN1NKR0CFKYB5GA|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a2rs0|01M6Q5AFPB2MSKG45NP522BWVF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# --config-dir configs/experiments/cm4_eval/coupled (job_runner/inference.sh)
+# Coupled abrupt-4xCO2: 36 90-day members branched from piControl, plus a 100-year extension of member 1 (W&B 8xx0pife).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic1|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic2|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic3|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic4|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic5|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic6|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic7|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic8|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic9|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic10|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic11|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic12|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic13|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic14|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic15|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic16|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic17|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic18|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic19|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic20|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic21|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic22|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic23|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic24|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic25|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic26|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic27|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic28|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic29|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic30|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic31|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic32|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic33|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic34|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic35|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic36|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR
