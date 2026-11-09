@@ -249,25 +249,25 @@ inference:
     persistence_names:
     - global_mean_co2
   aggregator: *id002
-- name: weather_2024_ensemble_varying_co2_era5
+- name: weather_1950_insample_ensemble_varying_co2_era5
   weight: 0.0
-  epochs: &id005
+  epochs: &weather_epochs
     start: 0
     step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
+  n_ensemble_per_ic: 4
   loader:
     start_indices:
       times:
-      - '2024-06-01T00:00:00'
-      - '2024-06-02T00:00:00'
-      - '2024-06-03T00:00:00'
-      - '2024-06-04T00:00:00'
-      - '2024-06-05T00:00:00'
-      - '2024-06-06T00:00:00'
-      - '2024-06-07T00:00:00'
-      - '2024-06-08T00:00:00'
+      - '1950-01-01T00:00:00'
+      - '1950-02-16T00:00:00'
+      - '1950-04-02T00:00:00'
+      - '1950-05-18T00:00:00'
+      - '1950-07-02T00:00:00'
+      - '1950-08-17T00:00:00'
+      - '1950-10-02T00:00:00'
+      - '1950-11-16T00:00:00'
     dataset:
       data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -275,7 +275,7 @@ inference:
       labels:
       - era5
     num_data_workers: 4
-  aggregator: &id006
+  aggregator: &weather_aggregator
     step_means:
     - step: 5
       target: denorm
@@ -312,86 +312,23 @@ inference:
       enabled: false
     ipo_index:
       enabled: false
-- name: weather_1994_ensemble_varying_co2_era5
+- name: weather_1950_insample_ensemble_constant_co2_era5
   weight: 0.0
-  epochs: &id003
-    start: 0
-    step: 10
+  epochs: *weather_epochs
   n_forward_steps: 5
   forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
+  n_ensemble_per_ic: 4
   loader:
     start_indices:
       times:
-      - '1994-06-01T00:00:00'
-      - '1994-06-02T00:00:00'
-      - '1994-06-03T00:00:00'
-      - '1994-06-04T00:00:00'
-      - '1994-06-05T00:00:00'
-      - '1994-06-06T00:00:00'
-      - '1994-06-07T00:00:00'
-      - '1994-06-08T00:00:00'
-    dataset:
-      data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-      engine: zarr
-      labels:
-      - era5
-    num_data_workers: 4
-  aggregator: &id004
-    step_means:
-    - step: 5
-      target: denorm
-      name: day_5
-      variables: *id001
-    - step: 5
-      target: norm
-      name: day_5_norm
-      variables: *id001
-    ensembles:
-    - step: 5
-      name: day_5_ensemble
-    mean_denorm:
-      enabled: false
-      target: denorm
-    mean_norm:
-      enabled: false
-      target: norm
-    power_spectrum:
-      enabled: false
-    zonal_mean:
-      enabled: false
-    time_mean_denorm:
-      enabled: false
-      target: denorm
-    time_mean_norm:
-      enabled: false
-      target: norm
-    annual:
-      enabled: false
-    enso_index:
-      enabled: false
-    enso_coefficient:
-      enabled: false
-    ipo_index:
-      enabled: false
-- name: weather_1994_ensemble_constant_co2_era5
-  weight: 0.0
-  epochs: *id003
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
-  loader:
-    start_indices:
-      times:
-      - '1994-06-01T00:00:00'
-      - '1994-06-02T00:00:00'
-      - '1994-06-03T00:00:00'
-      - '1994-06-04T00:00:00'
-      - '1994-06-05T00:00:00'
-      - '1994-06-06T00:00:00'
-      - '1994-06-07T00:00:00'
-      - '1994-06-08T00:00:00'
+      - '1950-01-01T00:00:00'
+      - '1950-02-16T00:00:00'
+      - '1950-04-02T00:00:00'
+      - '1950-05-18T00:00:00'
+      - '1950-07-02T00:00:00'
+      - '1950-08-17T00:00:00'
+      - '1950-10-02T00:00:00'
+      - '1950-11-16T00:00:00'
     dataset:
       data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -401,24 +338,24 @@ inference:
     num_data_workers: 4
     persistence_names:
     - global_mean_co2
-  aggregator: *id004
-- name: weather_2021_ensemble_varying_co2_era5
+  aggregator: *weather_aggregator
+- name: weather_2020_oosample_ensemble_varying_co2_era5
   weight: 0.0
-  epochs: *id005
+  epochs: *weather_epochs
   n_forward_steps: 5
   forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
+  n_ensemble_per_ic: 4
   loader:
     start_indices:
       times:
-      - '2021-06-01T00:00:00'
-      - '2021-06-02T00:00:00'
-      - '2021-06-03T00:00:00'
-      - '2021-06-04T00:00:00'
-      - '2021-06-05T00:00:00'
-      - '2021-06-06T00:00:00'
-      - '2021-06-07T00:00:00'
-      - '2021-06-08T00:00:00'
+      - '2020-01-01T00:00:00'
+      - '2020-02-16T00:00:00'
+      - '2020-04-02T00:00:00'
+      - '2020-05-17T00:00:00'
+      - '2020-07-02T00:00:00'
+      - '2020-08-17T00:00:00'
+      - '2020-10-01T00:00:00'
+      - '2020-11-16T00:00:00'
     dataset:
       data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -426,24 +363,24 @@ inference:
       labels:
       - era5
     num_data_workers: 4
-  aggregator: *id006
-- name: weather_2021_ensemble_constant_co2_era5
+  aggregator: *weather_aggregator
+- name: weather_2020_oosample_ensemble_constant_co2_era5
   weight: 0.0
-  epochs: *id005
+  epochs: *weather_epochs
   n_forward_steps: 5
   forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
+  n_ensemble_per_ic: 4
   loader:
     start_indices:
       times:
-      - '2021-06-01T00:00:00'
-      - '2021-06-02T00:00:00'
-      - '2021-06-03T00:00:00'
-      - '2021-06-04T00:00:00'
-      - '2021-06-05T00:00:00'
-      - '2021-06-06T00:00:00'
-      - '2021-06-07T00:00:00'
-      - '2021-06-08T00:00:00'
+      - '2020-01-01T00:00:00'
+      - '2020-02-16T00:00:00'
+      - '2020-04-02T00:00:00'
+      - '2020-05-17T00:00:00'
+      - '2020-07-02T00:00:00'
+      - '2020-08-17T00:00:00'
+      - '2020-10-01T00:00:00'
+      - '2020-11-16T00:00:00'
     dataset:
       data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -453,7 +390,7 @@ inference:
     num_data_workers: 4
     persistence_names:
     - global_mean_co2
-  aggregator: *id006
+  aggregator: *weather_aggregator
 - name: long_46year_varying_co2_era5
   weight: 0.0
   epochs:
@@ -614,150 +551,6 @@ inference:
       - c96
     num_data_workers: 4
   aggregator: *id008
-- name: weather_1994_ensemble_varying_co2_c96
-  weight: 0.0
-  epochs:
-    start: 0
-    step: 10
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
-  loader:
-    start_indices:
-      times:
-      - '1994-06-01T00:00:00'
-      - '1994-06-02T00:00:00'
-      - '1994-06-03T00:00:00'
-      - '1994-06-04T00:00:00'
-      - '1994-06-05T00:00:00'
-      - '1994-06-06T00:00:00'
-      - '1994-06-07T00:00:00'
-      - '1994-06-08T00:00:00'
-    dataset:
-      data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-      file_pattern: ic_0001.zarr
-      engine: zarr
-      labels:
-      - c96
-    num_data_workers: 4
-  aggregator: &id009
-    step_means:
-    - step: 5
-      target: denorm
-      name: day_5
-      variables: *id001
-    - step: 5
-      target: norm
-      name: day_5_norm
-      variables: *id001
-    ensembles:
-    - step: 5
-      name: day_5_ensemble
-    mean_denorm:
-      enabled: false
-      target: denorm
-    mean_norm:
-      enabled: false
-      target: norm
-    power_spectrum:
-      enabled: false
-    zonal_mean:
-      enabled: false
-    time_mean_denorm:
-      enabled: false
-      target: denorm
-    time_mean_norm:
-      enabled: false
-      target: norm
-    annual:
-      enabled: false
-    enso_index:
-      enabled: false
-    enso_coefficient:
-      enabled: false
-    ipo_index:
-      enabled: false
-- name: weather_1994_ensemble_constant_co2_c96
-  weight: 0.0
-  epochs:
-    start: 0
-    step: 10
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
-  loader:
-    start_indices:
-      times:
-      - '1994-06-01T00:00:00'
-      - '1994-06-02T00:00:00'
-      - '1994-06-03T00:00:00'
-      - '1994-06-04T00:00:00'
-      - '1994-06-05T00:00:00'
-      - '1994-06-06T00:00:00'
-      - '1994-06-07T00:00:00'
-      - '1994-06-08T00:00:00'
-    dataset:
-      data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-      file_pattern: AMIP-constant-CO2.zarr
-      engine: zarr
-      labels:
-      - c96
-    num_data_workers: 4
-  aggregator: *id009
-- name: weather_2021_ensemble_varying_co2_c96
-  weight: 0.0
-  epochs:
-    start: 0
-    step: 10
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
-  loader:
-    start_indices:
-      times:
-      - '2021-06-01T00:00:00'
-      - '2021-06-02T00:00:00'
-      - '2021-06-03T00:00:00'
-      - '2021-06-04T00:00:00'
-      - '2021-06-05T00:00:00'
-      - '2021-06-06T00:00:00'
-      - '2021-06-07T00:00:00'
-      - '2021-06-08T00:00:00'
-    dataset:
-      data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-      file_pattern: ic_0001.zarr
-      engine: zarr
-      labels:
-      - c96
-    num_data_workers: 4
-  aggregator: *id009
-- name: weather_2021_ensemble_constant_co2_c96
-  weight: 0.0
-  epochs:
-    start: 0
-    step: 10
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
-  n_ensemble_per_ic: 8
-  loader:
-    start_indices:
-      times:
-      - '2021-06-01T00:00:00'
-      - '2021-06-02T00:00:00'
-      - '2021-06-03T00:00:00'
-      - '2021-06-04T00:00:00'
-      - '2021-06-05T00:00:00'
-      - '2021-06-06T00:00:00'
-      - '2021-06-07T00:00:00'
-      - '2021-06-08T00:00:00'
-    dataset:
-      data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-      file_pattern: AMIP-constant-CO2.zarr
-      engine: zarr
-      labels:
-      - c96
-    num_data_workers: 4
-  aggregator: *id009
 - name: long_43year_varying_co2_c96
   weight: 0.0
   epochs:
