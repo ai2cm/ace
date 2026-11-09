@@ -4,8 +4,8 @@ Each config is submitted via run-ace-train.sh with N_GPUS=4 into the wandb
 group ace2-fm-2026-11-09. Job names follow submit_fm_jobs.config_to_job_name:
 ace-train-config-4deg-<stem>.yaml -> ace2-fm-<stem>.
 
-Beaker priority defaults to `high` for seed 0 and `normal` for every other
-seed; --beaker-priority overrides it for all seeds.
+Beaker priority defaults to `high` for seed 0 of the SFNO architecture and
+`normal` for everything else; --beaker-priority overrides it for all jobs.
 
 Usage:
     python submit_fm_v2_jobs.py [--arch {nc-sfno-v2,nc-swin-v2.2-v2} ...]
@@ -38,8 +38,9 @@ from submit_fm_jobs import (
 
 WANDB_GROUP = "ace2-fm-2026-11-09"
 N_GPUS = "4"
-FIRST_SEED_PRIORITY = "high"
-OTHER_SEED_PRIORITY = "normal"
+HIGH_PRIORITY_ARCH = "nc-sfno-v2"
+HIGH_PRIORITY = "high"
+DEFAULT_PRIORITY = "normal"
 NAME_RE = re.compile(r"-(?P<arm>fm-[a-z0-9-]+)-s(?P<seed>\d+)-maskoff\.yaml$")
 
 
@@ -51,8 +52,10 @@ def parse(config_filename: str) -> tuple[str, str, int]:
     return arch, match["arm"], int(match["seed"])
 
 
-def default_priority(seed: int) -> str:
-    return FIRST_SEED_PRIORITY if seed == SEEDS[0] else OTHER_SEED_PRIORITY
+def default_priority(arch: str, seed: int) -> str:
+    if arch == HIGH_PRIORITY_ARCH and seed == SEEDS[0]:
+        return HIGH_PRIORITY
+    return DEFAULT_PRIORITY
 
 
 def main() -> None:
@@ -63,7 +66,7 @@ def main() -> None:
     parser.add_argument("--arm", nargs="+", choices=list(ARMS), default=list(ARMS))
     parser.add_argument("--seed", nargs="+", type=int, default=list(SEEDS))
     add_default_beaker_args(parser)
-    # Per-seed default instead of the shared one; an explicit value wins.
+    # Per-(arch, seed) default instead of the shared one; an explicit value wins.
     parser.set_defaults(beaker_priority=None)
     args = parser.parse_args()
 
@@ -80,10 +83,10 @@ def main() -> None:
         check_configs_at_head([RUN_CONFIGS_DIR / name for name in configs])
     rel_dir = RUN_CONFIGS_DIR.relative_to(EXP_DIR)
     for config_filename in configs:
-        _, _, seed = parse(config_filename)
+        arch, _, seed = parse(config_filename)
         job_args = copy.copy(args)
         if args.beaker_priority is None:
-            job_args.beaker_priority = default_priority(seed)
+            job_args.beaker_priority = default_priority(arch, seed)
         submit_job(
             RUN_SCRIPT,
             [
