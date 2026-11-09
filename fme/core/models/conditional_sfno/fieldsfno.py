@@ -88,6 +88,13 @@ class FieldSFNONetConfig:
             activation, as ``SphericalFourierNeuralOperatorNet`` always
             does. With the field itself as the residual stream this skip
             may be redundant with the block's gated residual.
+        block_mlp_input: What each block's MLP reads. ``"field"``: the
+            block makes two gated updates to the field, the MLP reading the
+            field after the filter branch has updated it. ``"filter"``: the
+            MLP reads the filter branch's output directly and the block
+            makes one gated update at the end, so spectral changes need not
+            be written into the field before the MLP can act on them.
+            Ignored when ``use_mlp`` is False.
         filter_output: Whether to pass the network's update (output minus
             input state) through a SHT round-trip.
         local_blocks: Indices of blocks that use discrete-continuous
@@ -120,6 +127,7 @@ class FieldSFNONetConfig:
     filter_num_groups: int = 1
     filter_residual: bool = False
     block_inner_skip: bool = True
+    block_mlp_input: Literal["field", "filter"] = "field"
     filter_output: bool = False
     local_blocks: list[int] | None = None
     affine_norms: bool = False
@@ -127,6 +135,11 @@ class FieldSFNONetConfig:
     gamma_init: float = 1e-12
 
     def __post_init__(self):
+        if self.block_mlp_input not in ("field", "filter"):
+            raise ValueError(
+                f"block_mlp_input must be 'field' or 'filter', "
+                f"got {self.block_mlp_input!r}"
+            )
         if self.activation_function not in ACTIVATION_FUNCTIONS:
             raise ValueError(
                 f"Unknown activation function {self.activation_function}, "
@@ -196,12 +209,18 @@ class GatedResidual(nn.Module):
 class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
     """A Fourier neural operator block acting directly on field channels.
 
-    Two gated residual updates on the field ``x``:
+    With ``mlp_input="field"``, two gated residual updates on the field ``x``:
 
     1. ``u = proj_in(norm0(x))``, ``y = proj_out(act(filter(u) + inner_skip(u)))``,
        then ``x = (1 + gamma_res) * x + gamma * y`` (the ``inner_skip`` term
        is omitted when ``block_inner_skip`` is False)
     2. ``z = mlp(norm1(x))``, then ``x = (1 + gamma_res') * x + gamma' * z``
+
+    With ``mlp_input="filter"``, one gated update: ``y`` is computed as
+    above, then ``z = mlp(norm1(y))`` and ``x = (1 + gamma_res) * x + gamma * z``.
+    The filter branch's output reaches the field only through the MLP.
+    Without an MLP (``use_mlp=False``) only update 1 runs, whatever
+    ``mlp_input`` is.
 
     ``proj_in``/``proj_out`` are 1x1 convolutions between the ``n_channels``
     field channels and the ``spectral_dim`` channels the filter runs on; the
@@ -226,12 +245,18 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
         checkpointing: int = 0,
         filter_residual: bool = False,
         block_inner_skip: bool = True,
+        mlp_input: Literal["field", "filter"] = "field",
         affine_norms: bool = False,
         filter_num_groups: int = 1,
         filter_preserves_global_mean: bool = False,
         gamma_init: float = 1e-12,
     ):
         super().__init__()
+        if mlp_input not in ("field", "filter"):
+            raise ValueError(
+                f"mlp_input must be 'field' or 'filter', got {mlp_input!r}"
+            )
+        self.mlp_input = mlp_input
         self.norm0 = ConditionalLayerNorm(
             n_channels,
             img_shape=img_shape,
@@ -271,7 +296,9 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
                 drop_rate=drop_rate,
                 checkpointing=checkpointing,
             )
-            self.gate_mlp: GatedResidual | None = GatedResidual(n_channels, gamma_init)
+            self.gate_mlp: GatedResidual | None = (
+                GatedResidual(n_channels, gamma_init) if mlp_input == "field" else None
+            )
         else:
             self.norm1 = None
             self.mlp = None
@@ -293,9 +320,22 @@ class FieldSpaceFourierNeuralOperatorBlock(nn.Module):
             y = self.act_layer(y)
         with timer.child("proj_out"):
             y = self.proj_out(y)
-        x = self.gate_filter(x, self.drop_path(y))
-        if self.mlp is not None:
+        if self.mlp is None:
+            x = self.gate_filter(x, self.drop_path(y))
+        elif self.mlp_input == "filter":
+            # The MLP consumes the filter branch; the field is updated once,
+            # at the end of the block.
+            assert self.norm1 is not None
+            with timer.child("norm1") as norm1_timer:
+                y_norm = self.norm1(y, context, timer=norm1_timer)
+            with timer.child("mlp"):
+                z = self.mlp(y_norm)
+            x = self.gate_filter(x, self.drop_path(z))
+        else:
+            # The filter branch updates the field, then the MLP reads the
+            # updated field and updates it again.
             assert self.norm1 is not None and self.gate_mlp is not None
+            x = self.gate_filter(x, self.drop_path(y))
             with timer.child("norm1") as norm1_timer:
                 x_norm = self.norm1(x, context, timer=norm1_timer)
             with timer.child("mlp"):
@@ -407,6 +447,7 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
                     checkpointing=params.checkpointing,
                     filter_residual=params.filter_residual,
                     block_inner_skip=params.block_inner_skip,
+                    mlp_input=params.block_mlp_input,
                     affine_norms=params.affine_norms,
                     filter_num_groups=params.filter_num_groups,
                     filter_preserves_global_mean=params.filter_preserves_global_mean,

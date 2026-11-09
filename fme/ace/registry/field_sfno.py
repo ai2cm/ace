@@ -78,6 +78,11 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
         block_inner_skip: Whether each block adds a learned 1x1 convolution
             of the spectral filter's input to its output before the
             activation (the standard SFNO always does).
+        block_mlp_input: What each block's MLP reads: ``"field"`` (the
+            field after the filter branch's gated update; two updates per
+            block) or ``"filter"`` (the filter branch's output directly;
+            one gated update at the end of the block). Ignored when
+            ``use_mlp`` is False.
         filter_output: Whether to filter the model's update (output minus
             input state) through a SHT round-trip.
         local_blocks: List of block indices to use discrete-continuous
@@ -116,6 +121,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
     data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
     filter_residual: bool = False
     block_inner_skip: bool = True
+    block_mlp_input: Literal["field", "filter"] = "field"
     filter_output: bool = False
     local_blocks: list[int] | None = None
     affine_norms: bool = False
@@ -152,6 +158,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             filter_num_groups=self.filter_num_groups,
             filter_residual=self.filter_residual,
             block_inner_skip=self.block_inner_skip,
+            block_mlp_input=self.block_mlp_input,
             filter_output=self.filter_output,
             local_blocks=self.local_blocks,
             affine_norms=self.affine_norms,

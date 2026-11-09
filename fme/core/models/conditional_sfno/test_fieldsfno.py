@@ -108,6 +108,17 @@ def test_output_shape(
         pytest.param({"local_blocks": [1]}, 0, id="local_block"),
         pytest.param({"filter_residual": True}, 0, id="filter_residual"),
         pytest.param({"block_inner_skip": False}, 0, id="no_inner_skip"),
+        pytest.param({"block_mlp_input": "filter"}, 0, id="mlp_input_filter"),
+        pytest.param(
+            {"block_mlp_input": "filter", "block_inner_skip": False},
+            0,
+            id="mlp_input_filter_no_inner_skip",
+        ),
+        pytest.param(
+            {"block_mlp_input": "filter", "use_mlp": False},
+            0,
+            id="mlp_input_filter_no_mlp",
+        ),
         pytest.param({"filter_num_groups": 4}, 0, id="grouped_filter"),
         pytest.param({"spectral_ratio": 0.5}, 0, id="spectral_ratio"),
         pytest.param(
@@ -237,6 +248,7 @@ def test_forcing_slot_in_context_config_rejected():
         ({"embed_dim": 8, "spectral_ratio": 0.01}, "no spectral channels"),
         ({"embed_dim": 8, "spectral_ratio": 0.5, "filter_num_groups": 3}, "divide"),
         ({"embed_dim": 8, "mlp_ratio": 0.1}, "no MLP hidden channels"),
+        ({"block_mlp_input": "spectral"}, "block_mlp_input"),
     ],
 )
 def test_invalid_config_raises(kwargs, match):
@@ -250,6 +262,36 @@ def test_block_inner_skip_option():
     net, _, _ = _build(5, 3, 2, block_inner_skip=False)
     assert net.blocks[0].inner_skip is None
     assert not any("inner_skip" in name for name, _ in net.named_parameters())
+
+
+@pytest.mark.parametrize("block_mlp_input", ["field", "filter"])
+def test_block_mlp_input_filter_branch_reaches_field_only_through_mlp(
+    block_mlp_input,
+):
+    """With block_mlp_input='filter' the block has one gate, and once the
+    MLP's output layer is zeroed the filter branch cannot change the output;
+    with 'field' the filter branch has its own path to the field."""
+    net, x, context = _build(5, 3, 2, num_layers=1, block_mlp_input=block_mlp_input)
+    block = net.blocks[0]
+    if block_mlp_input == "filter":
+        assert block.gate_mlp is None
+        assert not any("gate_mlp" in name for name, _ in net.named_parameters())
+    else:
+        assert block.gate_mlp is not None
+    with torch.no_grad():
+        for name, p in block.named_parameters():
+            if name.startswith("gate_filter.") or name.startswith("gate_mlp."):
+                p.fill_(1.0)
+        last_conv = [m for m in block.mlp.modules() if isinstance(m, torch.nn.Conv2d)]
+        last_conv[-1].weight.zero_()
+        last_conv[-1].bias.zero_()
+        out_before = net(x, context)
+        block.proj_out.weight.add_(torch.randn_like(block.proj_out.weight))
+        out_after = net(x, context)
+    if block_mlp_input == "filter":
+        torch.testing.assert_close(out_before, out_after)
+    else:
+        assert not torch.allclose(out_before, out_after)
 
 
 def test_branch_widths_follow_embed_dim():
