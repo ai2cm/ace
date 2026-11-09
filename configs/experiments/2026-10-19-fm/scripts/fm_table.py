@@ -11,7 +11,7 @@ columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
 excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
 row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced,
 fm-spencer-balanced).
-Of the older swin runs none are tracked (ARCHS); their logs are not read. All
+The v1 sfno and older swin runs are not tracked (ARCHS); their logs are not read. All
 values are measured; there are no estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
@@ -126,12 +126,11 @@ def _preemptions(named: NamedExperiment) -> int:
     )
 
 
-# Rows to track: the v1 sfno runs and, per architecture, the four v2 data arms
+# Rows to track: per architecture, the four v2 data arms
 # (row suffix "-era5" for fm-era5, none for fm-balanced, "-e3sm" for
 # fm-e3sm-balanced, "-spencer" for fm-spencer-balanced). The older swin rows
 # ("swin-v2.2", "swin-v2.2-res") are left out.
 ARCHS = (
-    "sfno",
     "sfno-v2-era5",
     "sfno-v2",
     "sfno-v2-e3sm",
@@ -200,8 +199,9 @@ def _median(values: list[float]) -> float | None:
 
 # Inline inference runs the aimip evaluator(s) every epoch and all others every
 # 10 epochs: for the v1 runs with `epochs: {start: 0, step: 10}`, i.e. after
-# epochs 1, 11, 21, ...; for the v2 runs (the 10yr and 46yr ERA5 runs) with
-# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ..., 50.
+# epochs 1, 11, 21, ...; for the v2 runs (the 10yr and 46yr ERA5 runs and the
+# 5-day weather ensembles) with `epochs: {start: 9, step: 10}`, i.e. after
+# epochs 10, 20, ..., 50.
 HEAVY_INFERENCE_EVERY = 10
 
 
@@ -304,7 +304,10 @@ def main() -> None:
     by_name = {}
     for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
-        by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
+        # An empty row's common prefix is "", which would list the whole
+        # workspace.
+        if arch_names:
+            by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
     with ThreadPoolExecutor(20) as ex:
         prog = dict(
             zip(
