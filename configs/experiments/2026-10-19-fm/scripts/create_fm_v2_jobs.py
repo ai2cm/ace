@@ -69,8 +69,12 @@ Changes from the parents, identical for every arm:
   only).
 - Inline inference: aimip_checkpoint_era5 every epoch (weight 1, the only term
   of the best_inference_ckpt selection) and, on epochs 10, 20, ..., 50
-  (`epochs: {start: 9, step: 10}`), 10year_oosample_varying_co2_era5 and
-  long_46year_varying_co2_era5 (weight 0).
+  (`epochs: {start: 9, step: 10}`), 10year_oosample_varying_co2_era5,
+  long_46year_varying_co2_era5 and two 5-day ensemble weather forecasts,
+  weather_1950_era5 and weather_2020_era5 (all weight 0). These are the
+  parents' weather_{1950_insample,2020_oosample}_ensemble_varying_co2_era5,
+  renamed; the parents' constant_co2 weather variants are dropped (CO2 barely
+  changes over 5 days).
 
 The configs are written by a YAML round trip, so the parents' comments are
 not carried over; the header of each file points back to its parent.
@@ -131,6 +135,12 @@ HEAVY_INFERENCE = (
     "10year_oosample_varying_co2_era5",
     "long_46year_varying_co2_era5",
 )
+# 5-day ensemble weather forecasts (4 members x 8 ICs), on the same epochs.
+# parent entry name -> name in the run config (varying CO2 only).
+WEATHER_INFERENCE = {
+    "weather_1950_insample_ensemble_varying_co2_era5": "weather_1950_era5",
+    "weather_2020_oosample_ensemble_varying_co2_era5": "weather_2020_era5",
+}
 # Inline inference slices index the epochs 1..max_epochs, so index 9 is epoch 10.
 HEAVY_INFERENCE_EPOCHS = {"start": 9, "step": 10}
 # EMA checkpoint slices index range(max_epochs + 1), so index 1 is epoch 1.
@@ -257,9 +267,11 @@ def make_inference(parent_inference: list[dict]) -> list[dict]:
     selection = copy.deepcopy(by_name[SELECTION_INFERENCE])
     assert selection["epochs"] == {"start": 0, "step": 1}
     inference = [selection]
-    for name in HEAVY_INFERENCE:
+    renames = {name: name for name in HEAVY_INFERENCE} | WEATHER_INFERENCE
+    for name, new_name in renames.items():
         entry = copy.deepcopy(by_name[name])
         assert entry["epochs"] == {"start": 0, "step": 10}, name
+        entry["name"] = new_name
         entry["epochs"] = dict(HEAVY_INFERENCE_EPOCHS)
         inference.append(entry)
     return inference
