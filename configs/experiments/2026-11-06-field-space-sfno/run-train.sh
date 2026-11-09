@@ -117,7 +117,7 @@ run_training() {
 
   gantry run \
     --name "$job_name" \
-    --description 'Field-space SFNO vs ACE2S SFNO (Muon pretrain, 1deg daily)' \
+    --description 'Field-space SFNO vs ACE2S SFNO (Muon pretrain, daily ERA5)' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority "${PRIORITY:-normal}" \
@@ -152,3 +152,8 @@ run_training "pretrain-fieldsfno-noskip-pos64-rs1.yaml" "fieldsfno-noskip-pos64-
 run_training "pretrain-fieldsfno-noskip-pos64-e1024-rs1.yaml" "fieldsfno-noskip-pos64-e1024-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-noskip-pos64-l16-rs1.yaml" "fieldsfno-noskip-pos64-l16-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-pos64-mlpfilter-rs1.yaml" "fieldsfno-pos64-mlpfilter-pretrain-rs1" 8
+# 4deg daily mirrors (one GPU each; batch size 8 keeps steps/epoch equal to 1deg).
+run_training "pretrain-muon-4deg-rs1.yaml" "muon-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-pos64-mlpfilter-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-pos64-mlpfilter-g01-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-g01-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-pos64-mlpfilter-g1-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-g1-4deg-pretrain-rs1" 1
