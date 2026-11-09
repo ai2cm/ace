@@ -72,6 +72,15 @@ class StepConfigABC(abc.ABC):
         return frozenset(set(self.input_names).intersection(self.output_names))
 
     @property
+    def state_names(self) -> frozenset[str]:
+        """
+        Names carried from one step to the next and loaded at the initial
+        condition: the prognostic names, plus any output-only names a step
+        type reads from its input (e.g. for its corrector).
+        """
+        return self.prognostic_names
+
+    @property
     def residual_names(self) -> frozenset[str]:
         """
         Names whose loss errors are scored in residual (tendency) units when a
@@ -215,6 +224,10 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.residual_names
 
     @property
+    def state_names(self) -> frozenset[str]:
+        return self._step_config_instance.state_names
+
+    @property
     def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
@@ -335,6 +348,11 @@ class StepABC(abc.ABC):
     @final
     def prognostic_names(self) -> frozenset[str]:
         return self.config.prognostic_names
+
+    @property
+    @final
+    def state_names(self) -> frozenset[str]:
+        return self.config.state_names
 
     @property
     @final

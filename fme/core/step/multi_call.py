@@ -190,6 +190,10 @@ class MultiCallStepConfig(StepConfigABC):
         return self.wrapped_step.next_step_input_names
 
     @property
+    def state_names(self) -> frozenset[str]:
+        return self.wrapped_step.state_names
+
+    @property
     def loss_names(self) -> list[str]:
         if self.include_multi_call_in_loss:
             return sorted(self.output_names)

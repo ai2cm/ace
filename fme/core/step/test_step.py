@@ -22,6 +22,7 @@ from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
@@ -2542,3 +2543,30 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     # each variant matches its base variable's convention
     assert stds["a_double"] == pytest.approx(res_stds["a"])
     assert stds["b_double"] == pytest.approx(field_stds["b"])
+
+
+@pytest.mark.parametrize(
+    "corrector_config, expected",
+    [
+        ({}, {"thetao_0"}),
+        (
+            {"surface_energy_flux_correction": {"method": "prescribed"}},
+            {"thetao_0", "sst"},
+        ),
+    ],
+)
+def test_state_names_include_output_only_names_read_by_corrector(
+    corrector_config: dict[str, Any], expected: set[str]
+):
+    """An output-only sst is carried in the state (and loaded at the initial
+    condition) only when the corrector reads it from the step input."""
+    names = ["thetao_0", "sst", "hfds"]
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": nn.Identity()}),
+        in_names=["thetao_0"],
+        out_names=["thetao_0", "sst", "hfds"],
+        normalization=get_network_and_loss_normalization_config(names=names),
+        corrector=CorrectorSelector(type="ocean_corrector", config=corrector_config),
+    )
+    assert config.prognostic_names == {"thetao_0"}
+    assert config.state_names == expected

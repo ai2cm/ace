@@ -247,6 +247,16 @@ class SingleModuleStepConfig(StepConfigABC):
         return frozenset(config.names)
 
     @property
+    def state_names(self) -> frozenset[str]:
+        """The prognostic names plus the output names the corrector reads
+        from the step input, e.g. an output-only SST.
+        """
+        corrector_names = self.corrector.input_state_names.intersection(
+            self.output_names
+        )
+        return frozenset(self.prognostic_names.union(corrector_names))
+
+    @property
     def _normalize_names(self) -> frozenset[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
         return frozenset(set(self.in_names).union(self.output_names))

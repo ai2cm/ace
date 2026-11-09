@@ -22,7 +22,11 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
+from fme.core.ocean_data import (
+    OCEAN_FIELD_NAME_PREFIXES,
+    HasOceanDepthIntegral,
+    OceanData,
+)
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.spatial_mask_provider import (
     NullSpatialMaskProvider,
@@ -500,6 +504,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                         thickness_name
                     )
         return state_copy
+
+    @property
+    def input_state_names(self) -> frozenset[str]:
+        # the surface energy flux correction reads the input SST
+        if self.surface_energy_flux_correction is not None:
+            return frozenset(OCEAN_FIELD_NAME_PREFIXES["sea_surface_temperature"])
+        return frozenset()
 
     def _get_corrector(
         self,
