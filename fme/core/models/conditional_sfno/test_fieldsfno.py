@@ -268,16 +268,19 @@ def test_block_inner_skip_option():
 def test_block_mlp_input_filter_branch_reaches_field_only_through_mlp(
     block_mlp_input,
 ):
-    """With block_mlp_input='filter' the block has one gate, and once the
-    MLP's output layer is zeroed the filter branch cannot change the output;
-    with 'field' the filter branch has its own path to the field."""
+    """With block_mlp_input='filter' the block has one gate and no proj_filter_out,
+    and once the MLP's output layer is zeroed the filter branch cannot change
+    the output; with 'field' the filter branch has its own path to the field."""
     net, x, context = _build(5, 3, 2, num_layers=1, block_mlp_input=block_mlp_input)
     block = net.blocks[0]
     if block_mlp_input == "filter":
         assert block.gate_mlp is None
+        assert block.proj_filter_out is None
         assert not any("gate_mlp" in name for name, _ in net.named_parameters())
+        assert not any("proj_filter_out" in name for name, _ in net.named_parameters())
     else:
         assert block.gate_mlp is not None
+        assert block.proj_filter_out is not None
     with torch.no_grad():
         for name, p in block.named_parameters():
             if name.startswith("gate_filter.") or name.startswith("gate_mlp."):
@@ -286,7 +289,7 @@ def test_block_mlp_input_filter_branch_reaches_field_only_through_mlp(
         last_conv[-1].weight.zero_()
         last_conv[-1].bias.zero_()
         out_before = net(x, context)
-        block.proj_out.weight.add_(torch.randn_like(block.proj_out.weight))
+        block.proj_filter_in.weight.add_(torch.randn_like(block.proj_filter_in.weight))
         out_after = net(x, context)
     if block_mlp_input == "filter":
         torch.testing.assert_close(out_before, out_after)
@@ -298,8 +301,8 @@ def test_branch_widths_follow_embed_dim():
     """The filter and MLP widths come from embed_dim, not the field count."""
     net, _, _ = _build(5, 3, 2, embed_dim=12, spectral_ratio=0.5, mlp_ratio=3.0)
     block = net.blocks[0]
-    assert block.proj_in.weight.shape[:2] == (6, 7)
-    assert block.proj_out.weight.shape[:2] == (7, 6)
+    assert block.proj_filter_in.weight.shape[:2] == (6, 7)
+    assert block.proj_filter_out.weight.shape[:2] == (7, 6)
     assert block.inner_skip.weight.shape[:2] == (6, 6)
     assert block.mlp.fwd[0].weight.shape[:2] == (36, 7)
     assert block.mlp.fwd[-1].weight.shape[:2] == (7, 36)
