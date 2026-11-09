@@ -242,6 +242,9 @@ run_training "ace2s-finetune-120ep-rs3.yaml" "1deg-daily-ace2s-120ep-ft3-detache
 # Seed-0 pretrain resume (120 → 240 epochs, added 2026-11-09)
 run_training "ace2s-pretrain-rs0-resume240.yaml" "1deg-daily-no-corr-mean-pretrain-rs0" 8
 
+# Seed-0 fine-tune resume (30 → 80 epochs, added 2026-11-09)
+run_training "ace2s-finetune-rs0-resume80.yaml" "1deg-daily-no-corr-mean-ft3-detached-rs0" 8
+
 # 4-degree 6-hourly arm (one GPU; added 2026-10-08)
 run_training "ace2s-pretrain-4deg-6hourly.yaml" "4deg-6h-ace2s-pretrain-rs0" 1
 run_training "ace2s-finetune-4deg-6hourly.yaml" "4deg-6h-ace2s-ft-detached-rs0" 1
