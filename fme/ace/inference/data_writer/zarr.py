@@ -108,6 +108,21 @@ def ensure_numpy_coords(
 
 
 class ZarrWriterAdapter:
+    """Adapt the low-level ``ZarrWriter`` to the data-writer ``append_batch`` interface.
+
+    ``ZarrWriter`` writes named arrays into a zarr store by explicit position
+    slices.  This adapter translates the timestep-oriented ``append_batch``
+    calls (``dict[str, Tensor]`` + ``batch_time``) into the correct position
+    slices, manages lazy store initialization (the time coordinates are only
+    known at the first batch), and tracks the current lead-time offset.
+
+    Under multi-GPU inference each rank holds a contiguous block of samples.
+    ``sample_offset`` shifts the sample-dimension slice so every rank writes
+    to its own region of the shared store; the store is sized for the global
+    sample count (``len(initial_condition_times)``).  Store creation and the
+    cross-rank barrier are handled inside ``ZarrWriter.initialize_store``.
+    """
+
     _SAMPLE_DIM = 0
     _TIME_DIM = 1
 
@@ -124,6 +139,7 @@ class ZarrWriterAdapter:
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
         overwrite_check: bool = False,
+        sample_offset: int = 0,
     ):
         self.path = path
         self.dims = dims
@@ -132,6 +148,7 @@ class ZarrWriterAdapter:
         self.n_timesteps = n_timesteps
         self.initial_condition_times = initial_condition_times
         self.n_initial_conditions = len(self.initial_condition_times)
+        self._sample_offset = sample_offset
         self._current_timestep = 0
         self.variable_metadata = _variable_metadata_to_dict(variable_metadata)
 
@@ -189,13 +206,17 @@ class ZarrWriterAdapter:
             "time": lead_times_coord,
             "sample": np.arange(self.n_initial_conditions),
         }
+        n_local_samples = batch_time.sizes["sample"]
         self._writer = ZarrWriter(
             path=self.path,
             dims=self.dims,
             coords=ensure_numpy_coords(self._dim_coords),
             data_vars=self.data_vars,
             chunks=self.chunks,
-            shards={"time": batch_time.sizes["time"]},
+            shards={
+                "time": batch_time.sizes["time"],
+                "sample": n_local_samples,
+            },
             array_attributes=self.variable_metadata,
             group_attributes=self.dataset_metadata,
             time_units=TIMEDELTA_ENCODING_UNITS,
@@ -221,6 +242,7 @@ class ZarrWriterAdapter:
         batch_time: Time coordinate for each sample in the batch.
         """
         numpy_data = self._to_ndarray_mapping(data)
+        n_local_samples = batch_time.sizes["sample"]
         # Zarr store initialization needs the full time coordinate information,
         # which is not available until the first batch is seen.
         if self._writer is None:
@@ -237,7 +259,11 @@ class ZarrWriterAdapter:
                     "time": slice(
                         self._current_timestep,
                         self._current_timestep + batch_time.sizes["time"],
-                    )
+                    ),
+                    "sample": slice(
+                        self._sample_offset,
+                        self._sample_offset + n_local_samples,
+                    ),
                 },
             )
         self._current_timestep += batch_time.sizes["time"]
@@ -267,6 +293,7 @@ class SeparateICZarrWriterAdapter:
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
         overwrite_check: bool = False,
+        sample_offset: int = 0,
     ):
         self.path = path
         self.dims = dims
@@ -276,6 +303,7 @@ class SeparateICZarrWriterAdapter:
         self.n_timesteps = n_timesteps
         self.initial_condition_times = initial_condition_times
         self.n_initial_conditions = len(self.initial_condition_times)
+        self._sample_offset = sample_offset
         self._current_timestep = 0
         self.data_vars = data_vars
         self.chunks = chunks
@@ -324,9 +352,10 @@ class SeparateICZarrWriterAdapter:
                 calendar=first_batch_time.dt.calendar,
             )
             _coords["time"] = init_time_numeric + lead_time_microseconds
+            global_ic_index = self._sample_offset + s
             self._writers.append(
                 ZarrWriter(
-                    path=self.path.replace(".zarr", f"_ic{s:04d}.zarr"),
+                    path=self.path.replace(".zarr", f"_ic{global_ic_index:04d}.zarr"),
                     dims=self.dims,
                     coords=_coords,
                     data_vars=self.data_vars,

@@ -189,6 +189,20 @@ def reset_global_timer():
 
 
 @pytest.fixture(autouse=True)
+def reset_wandb():
+    # without this, a test that configures the WandB singleton leaves its
+    # disk metric logger pointing at that test's (since deleted) directory,
+    # and a later test that logs without configuring writes there
+    import fme.core.wandb
+
+    fme.core.wandb.singleton = None
+    yield
+    if fme.core.wandb.singleton is not None:
+        fme.core.wandb.singleton._disk_logger.close()
+    fme.core.wandb.singleton = None
+
+
+@pytest.fixture(autouse=True)
 def reset_post_abort_callbacks():
     # the registry is process-global and nothing clears it between tests:
     # without this, every Trainer built by an earlier test would still have
