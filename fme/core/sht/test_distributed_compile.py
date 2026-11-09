@@ -42,14 +42,7 @@ def _assert_compiled_matches_eager(
 
 @pytest.mark.parallel
 def test_compiled_sht_matches_eager():
-    """The distributed SHT runs repeatedly under torch.compile and matches
-    eager.
-
-    With both latitude and longitude split, torch-harmonics hands a complex
-    view of a real tensor to its polar transpose. Reusing the compiled code on
-    the second call fails in AOT autograd ("setStorage ... out of bounds")
-    unless the view is cloned first.
-    """
+    """The distributed SHT matches eager across repeated compiled calls."""
     torch.manual_seed(0)
     nlat, nlon = IMG_SHAPE
     sht = Distributed.get_instance().get_sht(nlat, nlon).to(get_device())
@@ -58,14 +51,7 @@ def test_compiled_sht_matches_eager():
 
 @pytest.mark.parallel
 def test_compiled_isht_matches_eager():
-    """The distributed inverse SHT runs repeatedly under torch.compile and
-    matches eager.
-
-    With longitude split and latitude not, torch-harmonics hands a complex view
-    of a real tensor to its azimuth transpose. The first call compiles the
-    transpose; reusing that compiled code on the next call fails in AOT
-    autograd ("setStorage ... out of bounds") unless the view is cloned first.
-    """
+    """The distributed inverse SHT matches eager across repeated compiled calls."""
     torch.manual_seed(0)
     nlat, nlon = IMG_SHAPE
     isht = Distributed.get_instance().get_isht(nlat, nlon).to(get_device())

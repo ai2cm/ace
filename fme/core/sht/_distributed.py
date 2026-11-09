@@ -1,24 +1,12 @@
-"""Distributed SHT helpers, with compile-safe distributed transforms.
+"""Distributed SHT helpers; import these from ``fme.core.sht``.
 
-Consumers should import these from ``fme.core.sht`` rather than reaching into
-``torch_harmonics.distributed`` directly.
-
-``DistributedRealSHT`` and ``DistributedInverseRealSHT`` are subclasses of the
-``torch_harmonics.distributed`` classes. Upstream passes the output of
-``torch.view_as_complex`` straight into a ``distributed_transpose`` (the polar
-transpose in the forward transform when latitude and longitude are both split,
-the azimuth transpose in the inverse transform when longitude is split and
-latitude is not). Under ``torch.compile``, AOT autograd regenerates that
-complex view of a real tensor with the wrong storage size and raises
-"setStorage ... out of bounds" on the second call, so a compiled network fails
-under spatial parallelism. The forward passes below are forked from
-torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The torch-harmonics
-Authors) and differ only in cloning that view, so the transposes receive a
-tensor that owns its storage. Recheck them against upstream whenever the
-torch-harmonics pin is bumped.
-
-The remaining names are unmodified re-exports from
-``torch_harmonics.distributed``.
+``DistributedRealSHT`` and ``DistributedInverseRealSHT`` fork the upstream
+``forward`` from torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The
+torch-harmonics Authors), adding a ``.clone()`` after ``torch.view_as_complex``.
+Without it, ``torch.compile`` (torch 2.7-2.9) raises "setStorage ... out of
+bounds" when that view is passed to a ``distributed_transpose``. Recheck
+against upstream when the torch-harmonics pin is bumped. Other names are
+unmodified re-exports.
 """
 
 import torch
