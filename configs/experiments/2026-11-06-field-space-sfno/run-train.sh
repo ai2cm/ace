@@ -14,6 +14,7 @@
 #
 # Usage (run FROM the configs directory that contains this script):
 #   ./run-train.sh                  # launch every run_training call below
+#   PRIORITY=high MIN_RUNTIME=8h ./run-train.sh <substr>   # override priority/min-runtime
 #   ./run-train.sh no-residual      # launch only calls whose config filename
 #                                   # or job name contains "no-residual"
 #   ./run-train.sh seed1 seed2      # multiple substrings = OR
@@ -119,8 +120,8 @@ run_training() {
     --description 'Field-space SFNO vs ACE2S SFNO (Muon pretrain, 1deg daily)' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
-    --priority normal \
-    --min-runtime 4h \
+    --priority "${PRIORITY:-normal}" \
+    --min-runtime "${MIN_RUNTIME:-4h}" \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
@@ -150,3 +151,4 @@ run_training "pretrain-fieldsfno-pos64-rs1.yaml" "fieldsfno-pos64-pretrain-rs1" 
 run_training "pretrain-fieldsfno-noskip-pos64-rs1.yaml" "fieldsfno-noskip-pos64-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-noskip-pos64-e1024-rs1.yaml" "fieldsfno-noskip-pos64-e1024-pretrain-rs1" 8
 run_training "pretrain-fieldsfno-noskip-pos64-l16-rs1.yaml" "fieldsfno-noskip-pos64-l16-pretrain-rs1" 8
+run_training "pretrain-fieldsfno-pos64-mlpfilter-rs1.yaml" "fieldsfno-pos64-mlpfilter-pretrain-rs1" 8
