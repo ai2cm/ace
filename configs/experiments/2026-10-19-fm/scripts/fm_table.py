@@ -64,7 +64,9 @@ PHASE_RE = re.compile(
     re.M,
 )
 RESUME_MARK = "Resuming training from"
-COLUMNS = (
+# Two tables with the same rows, so each fits a terminal: job counts and
+# epochs, then timings.
+COUNT_COLUMNS = (
     "Architecture",
     "Finished",
     "Running",
@@ -75,6 +77,9 @@ COLUMNS = (
     "Min epoch",
     "Max epoch",
     "Median epoch",
+)
+TIMING_COLUMNS = (
+    "Architecture",
     "s/epoch (median)",
     "s/epoch (median) (train)",
     "s/epoch (median) (inference, every epoch)",
@@ -318,8 +323,8 @@ def main() -> None:
                 ),
             )
         )
-    print("| " + " | ".join(COLUMNS) + " |")
-    print("|" + "---|" * len(COLUMNS))
+    count_rows = []
+    timing_rows = []
     for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
         statuses = [
@@ -338,23 +343,39 @@ def main() -> None:
             values = [s for n in live if (s := prog[n][1][i]) is not None]
             return f"{statistics.median(values):.0f}" if values else "-"
 
-        row = (
-            arch,
-            sum(s == OK for s in statuses),
-            sum(s == "running" and not _queued(by_name[n]) for n, s in live_pairs),
-            sum(s == "running" and _queued(by_name[n]) for n, s in live_pairs),
-            sum(s not in (OK, "running", "missing") for s in statuses),
-            sum(s == "missing" for s in statuses),
-            sum(_preemptions(by_name[n]) for n in arch_names if n in by_name),
-            min(eps),
-            max(eps),
-            f"{statistics.median(eps):g}",
-            median_column(0),
-            median_column(1),
-            median_column(2),
-            median_column(3),
-            format_duration(statistics.median(times)) if times else "-",
+        count_rows.append(
+            (
+                arch,
+                sum(s == OK for s in statuses),
+                sum(s == "running" and not _queued(by_name[n]) for n, s in live_pairs),
+                sum(s == "running" and _queued(by_name[n]) for n, s in live_pairs),
+                sum(s not in (OK, "running", "missing") for s in statuses),
+                sum(s == "missing" for s in statuses),
+                sum(_preemptions(by_name[n]) for n in arch_names if n in by_name),
+                min(eps),
+                max(eps),
+                f"{statistics.median(eps):g}",
+            )
         )
+        timing_rows.append(
+            (
+                arch,
+                median_column(0),
+                median_column(1),
+                median_column(2),
+                median_column(3),
+                format_duration(statistics.median(times)) if times else "-",
+            )
+        )
+    _print_table(COUNT_COLUMNS, count_rows)
+    print()
+    _print_table(TIMING_COLUMNS, timing_rows)
+
+
+def _print_table(columns: tuple[str, ...], rows: list[tuple]) -> None:
+    print("| " + " | ".join(columns) + " |")
+    print("|" + "---|" * len(columns))
+    for row in rows:
         print("| " + " | ".join(str(v) for v in row) + " |")
 
 
