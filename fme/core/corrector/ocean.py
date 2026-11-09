@@ -149,12 +149,31 @@ class OceanHeatContentBudgetConfig:
             at origin_deg_C instead of at 0 C. Heat content closure holds for any
             origin; only the spatial distribution of the correction changes. The
             default 0.0 reproduces scaling about 0 C exactly.
+        level_weights: Optional non-negative weight per depth level, used only
+            by "uniform_temperature": level k is shifted by the increment
+            times level_weights[k], with the increment set so the budget still
+            closes. Only the shape matters. None is a weight of 1 at every
+            level.
 
     """
 
     method: Literal["scaled_temperature", "uniform_temperature"]
     constant_unaccounted_heating: float = 0.0
     origin_deg_C: float = 0.0
+    level_weights: list[float] | None = None
+
+    def __post_init__(self):
+        if self.level_weights is None:
+            return
+        if self.method != "uniform_temperature":
+            raise ValueError(
+                "level_weights requires method='uniform_temperature', "
+                f"got {self.method!r}."
+            )
+        if any(w < 0.0 for w in self.level_weights):
+            raise ValueError("level_weights must be non-negative.")
+        if not any(w > 0.0 for w in self.level_weights):
+            raise ValueError("level_weights must have a positive entry.")
 
 
 def _require_sea_surface_fraction_weighting(
@@ -344,6 +363,7 @@ class OceanHeatContentCorrection:
     method: Literal["scaled_temperature", "uniform_temperature"]
     unaccounted_heating: float
     origin_deg_C: float = 0.0
+    level_weights: list[float] | None = None
 
     def __call__(
         self,
@@ -373,6 +393,7 @@ class OceanHeatContentCorrection:
             self.method,
             self.unaccounted_heating,
             self.origin_deg_C,
+            self.level_weights,
         )
         return corrected, corrector_state
 
@@ -577,6 +598,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.ocean_heat_content_correction.method,
                     self.ocean_heat_content_correction.constant_unaccounted_heating,
                     self.ocean_heat_content_correction.origin_deg_C,
+                    self.ocean_heat_content_correction.level_weights,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -688,6 +710,7 @@ def _force_conserve_ocean_heat_content(
     method: Literal["scaled_temperature", "uniform_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
     origin_deg_C: float = 0.0,
+    level_weights: list[float] | None = None,
 ) -> TensorDict:
     """Adjust the generated temperature to conserve global ocean heat content.
 
@@ -701,7 +724,8 @@ def _force_conserve_ocean_heat_content(
     in the vertical profile of the heat they deposit: ``scaled_temperature``
     multiplies every level by one global ratio, depositing heat as
     ``T_k * dz_k``; ``uniform_temperature`` adds one global increment to every
-    valid level, depositing heat as ``dz_k``.
+    valid level, depositing heat as ``dz_k``, or as ``w_k * dz_k`` with
+    ``level_weights`` w.
     """
     if method not in ("scaled_temperature", "uniform_temperature"):
         raise NotImplementedError(
@@ -791,11 +815,28 @@ def _force_conserve_ocean_heat_content(
                 FREEZING_TEMPERATURE_KELVIN + origin_deg_C
             )
     else:
+        if level_weights is None:
+            weights = torch.ones(
+                n_levels,
+                dtype=gen_potential_temperature.dtype,
+                device=gen_potential_temperature.device,
+            )
+        elif len(level_weights) != n_levels:
+            raise ValueError(
+                f"level_weights has {len(level_weights)} entries; "
+                f"thetao has {n_levels} levels."
+            )
+        else:
+            weights = torch.tensor(
+                level_weights,
+                dtype=gen_potential_temperature.dtype,
+                device=gen_potential_temperature.device,
+            )
         # must come from depth_integral over the same columns as the heat
         # content, or conservation is off by the difference between the two
         heat_capacity_per_area = area_weighted_mean(
             vertical_coordinate.depth_integral(
-                torch.ones_like(gen_potential_temperature)
+                weights.expand_as(gen_potential_temperature)
                 * SPECIFIC_HEAT_OF_SEA_WATER_CM4
                 * DENSITY_OF_SEA_WATER_CM4
             )
@@ -812,17 +853,16 @@ def _force_conserve_ocean_heat_content(
         is_masked_valid = (vertical_coordinate.mask > 0.0).to(
             dtype=gen_potential_temperature.dtype
         )
+        level_increment = (
+            temperature_increment.unsqueeze(-1) * weights * is_masked_valid
+        )
         for k in range(n_levels):
             name = f"thetao_{k}"
-            out[name] = gen.data[name] + temperature_increment * is_masked_valid.select(
-                -1, k
-            )
+            out[name] = gen.data[name] + level_increment.select(-1, k)
         if "sst" in gen.data:
             # no Kelvin offset needed, unlike the multiplicative path; sst is
             # not in the heat content integral
-            out["sst"] = gen.data[
-                "sst"
-            ] + temperature_increment * is_masked_valid.select(-1, 0)
+            out["sst"] = gen.data["sst"] + level_increment.select(-1, 0)
     return out
 
 

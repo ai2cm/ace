@@ -627,16 +627,20 @@ def _partial_land_ohc_budget_case(hfds_type: str) -> _PartialLandOHCBudgetCase:
 
 
 @pytest.mark.parametrize(
-    "method, origin_deg_C",
+    "method, origin_deg_C, level_weights",
     [
-        ("scaled_temperature", 0.0),
-        ("scaled_temperature", -2.0),
-        ("uniform_temperature", 0.0),
+        ("scaled_temperature", 0.0, None),
+        ("scaled_temperature", -2.0, None),
+        ("uniform_temperature", 0.0, None),
+        ("uniform_temperature", 0.0, [3.0, 0.5, 0.0]),
     ],
 )
 @pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
 def test_ocean_heat_content_correction_partial_land_budget(
-    hfds_type: str, method: str, origin_deg_C: float
+    hfds_type: str,
+    method: str,
+    origin_deg_C: float,
+    level_weights: list[float] | None,
 ):
     """The corrected state closes sum(a s H_out) = sum(a s H_in) + sum(a F) dt,
     H per unit ocean area and F per unit total cell area.
@@ -651,6 +655,7 @@ def test_ocean_heat_content_correction_partial_land_budget(
         ocean_heat_content_correction=OceanHeatContentBudgetConfig(
             method=cast(Any, method),
             origin_deg_C=origin_deg_C,
+            level_weights=level_weights,
         )
     )
     corrector = config._build(case.ops, depth, datetime.timedelta(seconds=dt))
@@ -667,6 +672,20 @@ def test_ocean_heat_content_correction_partial_land_budget(
         rtol=1e-10,
         atol=0.0,
     )
+    wet = s > 0
+    if method == "uniform_temperature":
+        w = torch.tensor(level_weights or [1.0, 1.0, 1.0], dtype=torch.float64)
+        increment = torch.stack(
+            [corrected[f"thetao_{k}"] - gen_data[f"thetao_{k}"] for k in range(3)],
+            -1,
+        )[wet]
+        delta_t = increment[:, 0] / w[0]
+        torch.testing.assert_close(
+            increment, delta_t.unsqueeze(-1) * w, rtol=1e-12, atol=1e-14
+        )
+        torch.testing.assert_close(
+            delta_t, delta_t[:1].expand_as(delta_t), rtol=1e-12, atol=0.0
+        )
     if method != "scaled_temperature" or origin_deg_C != 0.0:
         return
 
@@ -679,13 +698,91 @@ def test_ocean_heat_content_correction_partial_land_budget(
     H_in = (thetao_in * cprho * dz).sum(-1)
     H_gen = (thetao_gen * cprho * dz).sum(-1)
     r_expected = ((w * s * H_in).sum() + (w * flux).sum() * dt) / (w * s * H_gen).sum()
-    wet = s > 0
     torch.testing.assert_close(
         corrected["thetao_0"][wet] / gen_data["thetao_0"][wet],
         r_expected.expand(int(wet.sum())),
         rtol=1e-12,
         atol=0.0,
     )
+
+
+@pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
+def test_ocean_heat_content_level_weights_ones_equal_none(hfds_type: str):
+    case = _partial_land_ohc_budget_case(hfds_type)
+    timestep = datetime.timedelta(days=5)
+    out = {}
+    for key, level_weights in (("none", None), ("ones", [1.0, 1.0, 1.0])):
+        config = OceanCorrectorConfig(
+            ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+                method="uniform_temperature", level_weights=level_weights
+            )
+        )
+        corrector = config._build(case.ops, case.depth_coordinate, timestep)
+        out[key] = corrector(
+            case.input_data, case.gen_data, case.forcing_data, None
+        ).corrected
+    for name in out["none"]:
+        assert torch.equal(out["none"][name], out["ones"][name]), name
+
+
+def test_ocean_heat_content_level_weights_batched():
+    """Each batch member is corrected as it would be alone."""
+    cases = [_partial_land_ohc_budget_case(h) for h in ("gen", "gen")]
+    cases[1].gen_data["thetao_0"] = cases[1].gen_data["thetao_0"] + 0.3
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="uniform_temperature", level_weights=[3.0, 0.5, 0.0]
+        )
+    )
+    ops, depth = cases[0].ops, cases[0].depth_coordinate
+    corrector = config._build(ops, depth, datetime.timedelta(days=5))
+
+    def stack(key: str) -> dict[str, torch.Tensor]:
+        fields = [getattr(c, key) for c in cases]
+        return {n: torch.stack([f[n] for f in fields]) for n in fields[0]}
+
+    batched = corrector(
+        stack("input_data"), stack("gen_data"), stack("forcing_data"), None
+    ).corrected
+    for b, case in enumerate(cases):
+        alone = corrector(
+            case.input_data, case.gen_data, case.forcing_data, None
+        ).corrected
+        for name in alone:
+            torch.testing.assert_close(
+                batched[name][b], alone[name], rtol=1e-12, atol=0.0
+            )
+
+
+def test_ocean_heat_content_level_weights_wrong_length():
+    case = _partial_land_ohc_budget_case("gen")
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="uniform_temperature", level_weights=[1.0, 1.0]
+        )
+    )
+    corrector = config._build(
+        case.ops, case.depth_coordinate, datetime.timedelta(days=5)
+    )
+    with pytest.raises(ValueError, match="level_weights has 2 entries"):
+        corrector(case.input_data, case.gen_data, case.forcing_data, None)
+
+
+@pytest.mark.parametrize(
+    "method, level_weights, match",
+    [
+        ("scaled_temperature", [1.0, 1.0, 1.0], "requires method"),
+        ("uniform_temperature", [1.0, -0.1, 1.0], "non-negative"),
+        ("uniform_temperature", [0.0, 0.0, 0.0], "positive entry"),
+    ],
+)
+def test_ocean_heat_content_level_weights_invalid(
+    method: str, level_weights: list[float], match: str
+):
+    with pytest.raises(ValueError, match=match):
+        OceanHeatContentBudgetConfig(
+            method=cast(Any, method), level_weights=level_weights
+        )
 
 
 def _salt_coordinates(nlat: int, nlon: int) -> LatLonCoordinates:
