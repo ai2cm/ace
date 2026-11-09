@@ -3,3 +3,9 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|run_1pct-ic0001-130yr|ema_ckpt_0002|normal|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|run_piC-ic0151-200yr|ema_ckpt_0002|normal|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA
+
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|run_1pct-ic0001-130yr|ema_ckpt_0002|normal|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|run_piC-ic0151-200yr|ema_ckpt_0002|normal|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X
