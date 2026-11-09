@@ -220,8 +220,6 @@ run_training "ace2s-finetune-rs2.yaml" "1deg-daily-ace2s-ft3-detached-rs2" 8
 run_training "ace2s-finetune-rs3.yaml" "1deg-daily-ace2s-ft3-detached-rs3" 8
 run_training "ace2s-finetune-crps-only.yaml" "1deg-daily-ace2s-crps-only-ft3-detached-rs0" 8
 run_training "ace2s-finetune-no-bottleneck.yaml" "1deg-daily-ace2s-no-bottleneck-ft3-detached-rs0" 8
-# Redo from the pretrain's epoch-40 EMA checkpoint (2026-11-09; see the config header).
-run_training "ace2s-finetune-no-bottleneck-ep40.yaml" "1deg-daily-ace2s-no-bottleneck-ep40-ft3-detached-rs0" 8
 
 # 6-hourly arm, stage 2: 3-step (18 h) detached fine-tune, horizon decided 2026-09-28
 run_training "ace2s-finetune-6hourly.yaml" "1deg-6h-ace2s-ft3-detached-rs0" 8
@@ -240,6 +238,9 @@ run_training "ace2s-finetune-rs3-resume40.yaml" "1deg-daily-ace2s-ft3-detached-r
 run_training "ace2s-finetune-120ep-rs1.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs1" 8
 run_training "ace2s-finetune-120ep-rs2.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs2" 8
 run_training "ace2s-finetune-120ep-rs3.yaml" "1deg-daily-ace2s-120ep-ft3-detached-rs3" 8
+
+# Seed-0 pretrain resume (120 → 240 epochs, added 2026-11-09)
+run_training "ace2s-pretrain-rs0-resume240.yaml" "1deg-daily-no-corr-mean-pretrain-rs0" 8
 
 # 4-degree 6-hourly arm (one GPU; added 2026-10-08)
 run_training "ace2s-pretrain-4deg-6hourly.yaml" "4deg-6h-ace2s-pretrain-rs0" 1
