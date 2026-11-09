@@ -110,7 +110,7 @@ logging:
   log_to_file: true
   project: ace-samudra-coupled-cm4
   entity: ai2cm
-  metrics_log_dir: /results/metrics
+  metrics_log_dir: metrics
 train_loader:
   batch_size: 8
   num_data_workers: 2
@@ -303,15 +303,15 @@ stepper:
       input_masking:
         mask_value: 0
         fill_value: mean
-        exclude_names_and_prefixes:
-          - land_fraction
-          - sea_surface_fraction
         fill_value_overrides:
           ocean_sea_ice_fraction: 0.0
           sea_ice_volume: 0.0
           sfdsi: 0.0
           UI: 0.0
           VI: 0.0
+        exclude_names_and_prefixes:
+          - land_fraction
+          - sea_surface_fraction
       step:
         type: single_module
         config:
@@ -380,10 +380,6 @@ stepper:
                   - VI
               zos_global_mean_correction:
                 reference_global_mean: -0.00013
-              ocean_salt_content_correction:
-                method: scaled_salinity
-                budget_config:
-                  type: sea_surface_height
           next_step_forcing_names:
             - DLWRFsfc
             - DSWRFsfc
@@ -411,7 +407,7 @@ stepper:
             - northward_surface_wind_stress
             - total_frozen_precipitation_rate
             - sst
-            - SSH
+            - zos
             - so_0
             - so_1
             - so_2
@@ -495,7 +491,7 @@ stepper:
             - VI
           out_names:
             - sst
-            - SSH
+            - zos
             - so_0
             - so_1
             - so_2
@@ -581,7 +577,7 @@ stepper:
             - tauuo
             - tauvo
             - wfo
-            - zos
+            - SSH
   atmosphere:
     timedelta: 6h
     # stepper added by job_runner/create_coupled_finetune_config.sh
