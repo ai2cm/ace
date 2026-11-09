@@ -1,6 +1,6 @@
 """Generate the 2026-11-09 FM v2 run configs (wandb group ace2-fm-2026-11-09).
 
-18 runs: 2 architectures x 3 data arms x 3 seeds, all with input masking off.
+24 runs: 2 architectures x 4 data arms x 3 seeds, all with input masking off.
 Each run config is derived from a base config in base_configs/ (the "parent"),
 so everything not listed below is copied from the parent verbatim: loss,
 corrector, normalization groups and pinned variables (stats are replaced, see
@@ -28,6 +28,11 @@ Data arms (label sampling weights are equal across the arm's labels):
   E3SMv3 piControl, with the e3sm normalization group) plus the same extra c96
   members, so its training data is exactly fm-balanced's plus E3SM. era5, c96,
   cm4, xshield, e3sm at 0.2 each.
+- `fm-spencer-balanced`: same parent as fm-balanced, with exactly its data and
+  year splits (no extra c96 members, no E3SM) and its stats, the v2 stats
+  2026-10-22-fm-all-datasets-v2, which are pooled over exactly this data
+  (scripts/data_process/configs/fm-all-datasets-stats-v2.yaml). era5, c96,
+  cm4, xshield at 0.25 each.
 
 Extra c96 members (fm-balanced and fm-e3sm-balanced): the c96 SHiELD AMIP
 ic_0002 member (same year split as ic_0001) and c96 SOM members ic_0002..ic_0005
@@ -48,6 +53,8 @@ Changes from the parents, identical for every arm:
   arm under /climate-default/alexeyy/norm_ablation_0/2026-11-09-fm-v2-{era5,
   balanced,e3sm-balanced} (scripts/data_process/configs/fm-v2-*-stats.yaml);
   the e3sm group is groups/e3sm-filled (fill_e3sm_group_stats.py).
+  fm-spencer-balanced keeps its parent's v2 stats, which already match its
+  data.
 - Input masking off with presence channels: `include_channel_mask_inputs:
   true` and no `input_dropout` (the maskoff arm of create_fm_jobs.py).
 - max_epochs 50; EMA decay 0.9999 with validate_using_ema; EMA checkpoints
@@ -111,8 +118,11 @@ ARMS = {
     "fm-era5": "fm-era5-only",
     "fm-balanced": "fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced",
     "fm-e3sm-balanced": "fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-e3sm-balanced",
+    "fm-spencer-balanced": "fm-a2-cond-era5-c96-piC-1pct-cm4-xshield-balanced",
 }
 ERA5_ONLY_ARM = "fm-era5"
+# Arms that add the extra c96 members (extra_c96_entries) to the parent's data.
+EXTRA_C96_ARMS = ("fm-balanced", "fm-e3sm-balanced")
 
 # Normalization stats: each arm's stats are pooled over exactly that arm's
 # training data (scripts/data_process/configs/fm-v2-{arm}-stats.yaml), replacing
@@ -123,11 +133,14 @@ PARENT_STATS_ROOTS = {
     "fm-era5": f"{NORM_ROOT}/2026-10-22-fm-all-datasets-v2",
     "fm-balanced": f"{NORM_ROOT}/2026-10-22-fm-all-datasets-v2",
     "fm-e3sm-balanced": f"{NORM_ROOT}/2026-10-26-fm-all-datasets-v3",
+    "fm-spencer-balanced": f"{NORM_ROOT}/2026-10-22-fm-all-datasets-v2",
 }
 STATS_ROOTS = {
     "fm-era5": f"{NORM_ROOT}/2026-11-09-fm-v2-era5",
     "fm-balanced": f"{NORM_ROOT}/2026-11-09-fm-v2-balanced",
     "fm-e3sm-balanced": f"{NORM_ROOT}/2026-11-09-fm-v2-e3sm-balanced",
+    # The parent's v2 stats are pooled over exactly this arm's training data.
+    "fm-spencer-balanced": f"{NORM_ROOT}/2026-10-22-fm-all-datasets-v2",
 }
 
 SELECTION_INFERENCE = "aimip_checkpoint_era5"
@@ -216,7 +229,7 @@ def make_train_concat(parent_concat: list[dict], arm: str) -> list[dict]:
     concat = copy.deepcopy(parent_concat)
     if arm == ERA5_ONLY_ARM:
         assert _labels(concat) == ["era5"] and len(concat) == 2
-    else:
+    elif arm in EXTRA_C96_ARMS:
         existing = {(d["data_path"], d["file_pattern"]) for d in concat}
         for entry in extra_c96_entries():
             assert (entry["data_path"], entry["file_pattern"]) not in existing

@@ -9,7 +9,8 @@ seed; --beaker-priority overrides it for all seeds.
 
 Usage:
     python submit_fm_v2_jobs.py [--arch {nc-sfno-v2,nc-swin-v2.2-v2} ...]
-                                [--arm {fm-era5,fm-balanced,fm-e3sm-balanced} ...]
+                                [--arm {fm-era5,fm-balanced,fm-e3sm-balanced,
+                                       fm-spencer-balanced} ...]
                                 [--seed N ...] [--dry-run]
                                 [--skip-if-in-beaker] [--exclude-job NAME ...]
                                 [--beaker-workspace ...] [--beaker-cluster ...]
@@ -27,6 +28,7 @@ from submit_fm_jobs import (
     RUN_CONFIGS_DIR,
     RUN_SCRIPT,
     V2_ARCH_CHOICES,
+    WANDB_PREFIX,
     WANDB_PROJECT,
     add_default_beaker_args,
     arch_tag,
@@ -70,7 +72,10 @@ def main() -> None:
         _, arm, seed = parse(name)
         if arm in args.arm and seed in args.seed:
             names.append(name)
-    configs = drop_jobs_in_beaker(names, config_to_job_name, args)
+    # One narrow listing per architecture: the default "ace2-fm-" text matches
+    # ~9k experiments and takes many minutes.
+    list_texts = [f"{WANDB_PREFIX}{arch}-fm-" for arch in args.arch]
+    configs = drop_jobs_in_beaker(names, config_to_job_name, args, list_texts)
     if not args.dry_run:
         check_configs_at_head([RUN_CONFIGS_DIR / name for name in configs])
     rel_dir = RUN_CONFIGS_DIR.relative_to(EXP_DIR)

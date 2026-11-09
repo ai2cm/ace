@@ -12,7 +12,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Sequence
 from typing import TypeVar
 
-from _beaker_listing import existing_job_names
+from _beaker_listing import DEFAULT_TEXT, existing_job_names
 
 T = TypeVar("T")
 
@@ -68,23 +68,31 @@ def add_beaker_args(
 
 
 def drop_jobs_in_beaker(
-    jobs: Iterable[T], job_name: Callable[[T], str], args: argparse.Namespace
+    jobs: Iterable[T],
+    job_name: Callable[[T], str],
+    args: argparse.Namespace,
+    list_texts: Sequence[str] = (DEFAULT_TEXT,),
 ) -> list[T]:
     """`jobs` without those named by --exclude-job and, with
     --skip-if-in-beaker, without those already succeeded or running in Beaker.
 
-    One workspace listing per call, matched on the job name with gantry's
-    collision suffix stripped.
+    One workspace listing per entry of `list_texts` (experiments whose name
+    contains it), matched on the job name with gantry's collision suffix
+    stripped. Every job name must contain one of `list_texts`; pass narrower
+    texts than the default "ace2-fm-", which matches ~9k experiments and makes
+    the listing take many minutes.
     """
     jobs = list(jobs)
     excluded = set(args.exclude_job)
     existing: set[str] = set()
     if args.skip_if_in_beaker:
-        print(f"Listing experiments in {args.beaker_workspace}...")
-        existing = existing_job_names(args.beaker_workspace)
+        for text in list_texts:
+            print(f"Listing experiments in {args.beaker_workspace} matching {text}")
+            existing |= existing_job_names(args.beaker_workspace, text)
     pending = []
     for job in jobs:
         name = job_name(job)
+        assert any(text in name for text in list_texts), name
         if name in excluded:
             print(f"Skipping (excluded): {name}")
         elif name in existing:

@@ -9,7 +9,8 @@ count as 0. Train time is the running wall time summed over an experiment's
 jobs (preemption retries included, queueing excluded). Epoch and train-time
 columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
 excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
-row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced).
+row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced,
+fm-spencer-balanced).
 Of the older swin runs none are tracked (ARCHS); their logs are not read. All
 values are measured; there are no estimates.
 
@@ -125,22 +126,28 @@ def _preemptions(named: NamedExperiment) -> int:
     )
 
 
-# Rows to track: the v1 sfno runs and, per architecture, the three v2 data arms
+# Rows to track: the v1 sfno runs and, per architecture, the four v2 data arms
 # (row suffix "-era5" for fm-era5, none for fm-balanced, "-e3sm" for
-# fm-e3sm-balanced). The older swin rows ("swin-v2.2", "swin-v2.2-res") are left
-# out.
+# fm-e3sm-balanced, "-spencer" for fm-spencer-balanced). The older swin rows
+# ("swin-v2.2", "swin-v2.2-res") are left out.
 ARCHS = (
     "sfno",
     "sfno-v2-era5",
     "sfno-v2",
     "sfno-v2-e3sm",
+    "sfno-v2-spencer",
     "swin-v2.2-v2-era5",
     "swin-v2.2-v2",
     "swin-v2.2-v2-e3sm",
+    "swin-v2.2-v2-spencer",
 )
 # Job-name tags of the v2 runs, longest first: they extend the old tags.
 V2_TAGS = (("-nc-swin-v2.2-v2-", "swin-v2.2-v2"), ("-nc-sfno-v2-", "sfno-v2"))
-V2_ARM_SUFFIXES = (("-fm-era5-", "-era5"), ("-fm-e3sm-balanced-", "-e3sm"))
+V2_ARM_SUFFIXES = (
+    ("-fm-era5-", "-era5"),
+    ("-fm-e3sm-balanced-", "-e3sm"),
+    ("-fm-spencer-balanced-", "-spencer"),
+)
 # One-off variant configs, kept out of run_configs/ so batch submits skip them.
 VARIANTS_DIR = pathlib.Path(__file__).parent.parent / "variants"
 

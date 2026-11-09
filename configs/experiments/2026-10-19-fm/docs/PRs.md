@@ -54,15 +54,18 @@ training is done).
 
 ## FM v2 runs (2026-11-09)
 
-18 training runs from scratch, wandb group `ace2-fm-2026-11-09` (ai2cm/FM):
+24 training runs from scratch, wandb group `ace2-fm-2026-11-09` (ai2cm/FM):
 2 architectures of about equal parameter count (`nc-sfno-v2`: SFNO embed_dim
-1024, 52.6M params; `nc-swin-v2.2-v2`: Swin embed_dim 224, 50.9M params) x 3
+1024, 52.6M params; `nc-swin-v2.2-v2`: Swin embed_dim 224, 50.9M params) x 4
 data arms x 3 seeds, masking off, 4 GPUs (global batch 8). Jobs are
-`ace2-fm-nc-{sfno,swin-v2.2}-v2-fm-{era5,balanced,e3sm-balanced}-s{0..2}-maskoff`;
+`ace2-fm-nc-{sfno,swin-v2.2}-v2-fm-{era5,balanced,e3sm-balanced,spencer-balanced}-s{0..2}-maskoff`;
 s0 is submitted at Beaker priority high, s1/s2 at normal. `fm-era5` is the
-ERA5 training data alone; `fm-balanced` reuses the balanced parents' data and
-v2 stats; `fm-e3sm-balanced` adds E3SMv3 piControl (v3 stats), c96 AMIP
-ic_0002 and c96 SOM ic_0002..0005 (except held-out 1xCO2-ic_0005). Labels are
+ERA5 training data alone; `fm-spencer-balanced` is exactly the balanced
+parents' data (era5, c96, cm4, xshield) with their v2 stats; `fm-balanced` adds
+c96 AMIP ic_0002 and c96 SOM ic_0002..0005 (except held-out 1xCO2-ic_0005);
+`fm-e3sm-balanced` adds E3SMv3 piControl to fm-balanced. fm-era5, fm-balanced
+and fm-e3sm-balanced use stats pooled over exactly their own training data
+(`/climate-default/alexeyy/norm_ablation_0/2026-11-09-fm-v2-*`). Labels are
 sampled with equal weights, 2758 samples (time_buffer windows) per epoch in
 every arm, the fm-era5 default. 50 epochs: 1 forward step for epochs 1-40, 3
 steps (loss on every step, gradients detached) for 41-50; LR 1e-4 constant
