@@ -1,17 +1,24 @@
 """Shared constants and run discovery for the post-training inference jobs.
 
 The inference families (generate_inference_configs.py, submit_inference_jobs.py)
-evaluate the `best_inference_ckpt.tar` of each finished 2026-10-19 training
-run. A run is one config in run_configs/; its job name (and wandb name) comes
-from submit_fm_jobs.config_to_job_name. Which runs have finished, and which
+evaluate a checkpoint of each finished 2026-10-19 training run, and of each
+finished 2026-11-09 sfno-v2 run (--arch sfno-v2). A run is one config in
+run_configs/; its job name (and wandb name) comes from
+submit_fm_jobs.config_to_job_name. Which runs have finished, and which
 Beaker result dataset holds their checkpoints, is read from Beaker
 (_beaker_listing), not from wandb.
 """
 
 import pathlib
 
+import yaml
 from _beaker_listing import OK, NamedExperiment, fetch_experiments_by_name
-from submit_fm_jobs import CONFIG_PREFIX, RUN_CONFIGS_DIR, config_to_job_name
+from submit_fm_jobs import (
+    CONFIG_PREFIX,
+    RUN_CONFIGS_DIR,
+    WANDB_PREFIX,
+    config_to_job_name,
+)
 
 HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
@@ -31,22 +38,47 @@ MOUNTED_CHECKPOINT_PATH = "/ckpt.tar"
 # every ema_ckpt_XXXX.tar inside its EMA context (ckpt.tar instead holds the raw
 # weights, with the EMA weights in a side entry). ema_ckpt_0150.tar is the EMA
 # checkpoint of the last epoch (max_epochs 150, ema_checkpoint_save_epochs
-# start 5 step 5).
+# start 5 step 5); checkpoint_path swaps in the arch's last epoch
+# (LAST_EMA_EPOCHS) for archs with a different schedule.
 CHECKPOINTS = {
     "bestinf": (CHECKPOINT_PATH, "-bestinf"),
     "lastema": ("training_checkpoints/ema_ckpt_0150.tar", "-lastema"),
 }
+# Last EMA checkpoint epoch of archs whose runs do not train for 150 epochs:
+# the sfno-v2 runs (create_fm_v2_jobs.py) train 50 epochs with an EMA
+# checkpoint every epoch, so their last one is ema_ckpt_0050.tar.
+LAST_EMA_EPOCHS = {"sfno-v2": 50}
 
 # The architectures of the inference families (submit_inference_jobs.py
-# --arch): arch -> run-config token. The runs of an arch are its four-source
-# training cells, balanced and unbalanced; the e3sm cells, the res variants
-# (variants/, not globbed) and one-off diagnostics are left out.
+# --arch): arch -> run-config token. The token must be followed by "-fm-" in
+# the config name, so nc-sfno never selects an nc-sfno-v2 config. The runs of
+# sfno and swin-v2.2 are their four-source training cells, balanced and
+# unbalanced; the e3sm cells, the res variants (variants/, not globbed) and
+# one-off diagnostics are left out. The runs of sfno-v2 (wandb group
+# ace2-fm-2026-11-09, create_fm_v2_jobs.py) are all four of its data arms
+# (fm-era5, fm-balanced, fm-e3sm-balanced, fm-spencer-balanced) x 3 seeds.
 ARCHS = {
     "sfno": "nc-sfno",
     "swin-v2.2": "nc-swin-v2.2",
+    "sfno-v2": "nc-sfno-v2",
 }
 DEFAULT_ARCH = "sfno"
 EXCLUDED_TOKENS = ("-e3sm", "-diag", "-smoke")
+# Archs whose excluded tokens differ from EXCLUDED_TOKENS.
+EXCLUDED_TOKENS_BY_ARCH = {"sfno-v2": ("-diag", "-smoke")}
+# Date of the training wandb group of each arch whose runs are not the
+# 2026-10-19 ones; it replaces "2026-10-19" in the inference wandb group names
+# (submit_inference_jobs.wandb_groups).
+GROUP_DATES = {"sfno-v2": "2026-11-09"}
+DEFAULT_GROUP_DATE = "2026-10-19"
+# Config variant of the CM4/X-SHiELD suites (cm4xshield, cm4-1pct) per arch
+# (generate_inference_configs.CM4_XSHIELD_VARIANTS). The v2 runs train with
+# HGTsfc spherical-harmonic roundtripped on every cm4/xshield dataset, so
+# their suites read those datasets the same way.
+CM4_XSHIELD_VARIANT = {"sfno-v2": "v2"}
+# Training labels a run needs for the CM4/X-SHiELD suites to be in-sample; runs
+# without them (the sfno-v2 fm-era5 arm) get no cm4xshield / cm4-1pct jobs.
+CM4_XSHIELD_LABELS = ("cm4", "xshield")
 
 # The 2026-06-26 single/two-dataset baselines (wandb group
 # ace2-fm-norm-ablation-2026-06-26) the notebooks compare against, per arch:
@@ -99,13 +131,38 @@ def inference_run_names(arch: str = DEFAULT_ARCH) -> list[str]:
     """Job names of the training runs of `arch` (ARCHS) that get inference
     jobs.
     """
-    prefix = f"{CONFIG_PREFIX}{ARCHS[arch]}-"
+    prefix = f"{CONFIG_PREFIX}{ARCHS[arch]}-fm-"
+    excluded = EXCLUDED_TOKENS_BY_ARCH.get(arch, EXCLUDED_TOKENS)
     return [
         config_to_job_name(name)
         for name in training_config_names()
-        if name.startswith(prefix)
-        and not any(token in name for token in EXCLUDED_TOKENS)
+        if name.startswith(prefix) and not any(token in name for token in excluded)
     ]
+
+
+def run_config_path(run: str) -> pathlib.Path:
+    """run_configs/ training config of the run named `run`."""
+    return RUN_CONFIGS_DIR / f"{CONFIG_PREFIX}{run.removeprefix(WANDB_PREFIX)}.yaml"
+
+
+def run_train_labels(run: str) -> set[str]:
+    """Labels of every train_loader dataset of `run`'s training config."""
+    cfg = yaml.safe_load(run_config_path(run).read_text())
+    return {
+        label
+        for dataset in cfg["train_loader"]["dataset"]["concat"]
+        for label in dataset.get("labels", [])
+    }
+
+
+def checkpoint_path(ckpt: str, arch: str = DEFAULT_ARCH) -> str:
+    """File in a training result dataset that --ckpt `ckpt` mounts for `arch`
+    (CHECKPOINTS, with the last EMA epoch from LAST_EMA_EPOCHS).
+    """
+    path = CHECKPOINTS[ckpt][0]
+    if ckpt == "lastema" and arch in LAST_EMA_EPOCHS:
+        path = f"training_checkpoints/ema_ckpt_{LAST_EMA_EPOCHS[arch]:04d}.tar"
+    return path
 
 
 def anneal_run_names() -> list[str]:

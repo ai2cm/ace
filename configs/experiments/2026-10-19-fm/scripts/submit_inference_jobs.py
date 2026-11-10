@@ -1,8 +1,13 @@
-"""Submit inference jobs on a checkpoint of the 2026-10-19 runs.
+"""Submit inference jobs on a checkpoint of the 2026-10-19 and 2026-11-09 runs.
 
-Runs: the four-source training runs of one architecture (--arch, default
-sfno: nc-sfno; swin-v2.2: nc-swin-v2.2; _inference_common.ARCHS and
-inference_run_names; no e3sm, no diagnostics) whose Beaker experiment succeeded.
+Runs: the training runs of one architecture (--arch, default sfno: nc-sfno
+and swin-v2.2: nc-swin-v2.2, their four-source runs, no e3sm; sfno-v2:
+nc-sfno-v2, the 2026-11-09 runs of all four data arms;
+_inference_common.ARCHS and inference_run_names; no diagnostics) whose Beaker
+experiment succeeded. The cm4xshield and cm4-1pct families skip runs not
+trained on CM4 and X-SHiELD (the sfno-v2 fm-era5 arm), and use the arch's
+suite variant (sfno-v2: ...-cm4-xshield-v2.yaml / ...-cm4-1pct-v2.yaml,
+generate_inference_configs.CM4_XSHIELD_VARIANTS).
 Runs still training are listed as skipped; re-run with --skip-if-in-beaker
 once they finish to submit only what is missing. Each job mounts the run's
 training_checkpoints/best_inference_ckpt.tar at /ckpt.tar and runs a
@@ -21,11 +26,14 @@ Families (--family, default all):
 Checkpoint (--ckpt, default bestinf; _inference_common.CHECKPOINTS):
 
   bestinf     training_checkpoints/best_inference_ckpt.tar  (EMA weights)
-  lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch)
+  lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch;
+              ema_ckpt_0050.tar for sfno-v2, LAST_EMA_EPOCHS)
 
 --ckpt lastema: eval-suite job names swap "-bestinf" for "-lastema"; sst and
 paper job names (which carry no checkpoint suffix) get "-lastema" appended.
-Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS). Where
+Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS). The
+wandb groups of an arch with its own training date (GROUP_DATES; sfno-v2:
+2026-11-09) carry that date instead of 2026-10-19 (wandb_groups). Where
 the lastema name would pass Beaker's 128-character limit (the balanced runs'
 ERA5 paper kinds), only the Beaker experiment name is shortened
 (beaker_job_name: "-era5-c96-piC-1pct-cm4-xshield-" becomes "-4src-"); the
@@ -42,7 +50,7 @@ Every config a submission uses is validated against this checkout's fme
 first (--dry-run validates too, so a dry run proves the configs load).
 
 Usage:
-    python submit_inference_jobs.py [--arch {sfno,swin-v2.2}]
+    python submit_inference_jobs.py [--arch {sfno,swin-v2.2,sfno-v2}]
                                     [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
@@ -61,29 +69,35 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-from _beaker_listing import fetch_experiments_by_name
+from _beaker_listing import DEFAULT_TEXT, fetch_experiments_by_name
 from _inference_common import (
     ARCHS,
     BEAKER_MAP_PATH,
     CHECKPOINTS,
     DEFAULT_ARCH,
+    DEFAULT_GROUP_DATE,
+    GROUP_DATES,
     INFERENCE_CONFIGS_DIR,
     OLD_RUNS,
     WANDB_PROJECT,
+    checkpoint_path,
     finished_runs,
     inference_run_names,
 )
 from _submit_common import check_configs_at_head, drop_jobs_in_beaker, submit_job
 from generate_inference_configs import (
+    CM4_XSHIELD_FAMILIES,
     EVAL_SUITE_CONFIGS,
     FAMILIES,
     PAPER_KINDS,
     SST_GRIDS,
     SST_PERTURBATIONS,
+    arch_eval_suite_config,
+    cm4_xshield_runs,
     paper_config_filename,
     sst_config_filename,
 )
-from submit_fm_jobs import add_default_beaker_args
+from submit_fm_jobs import WANDB_PREFIX, add_default_beaker_args
 
 HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
@@ -107,6 +121,31 @@ LASTEMA_WANDB_GROUPS = {
     "paper-som": "ace2-fm-paper-lastema-2026-10-19",
     "paper-era5": "ace2-fm-paper-lastema-2026-10-19",
 }
+
+
+def wandb_groups(ckpt: str, arch: str) -> dict[str, str]:
+    """Family -> wandb group of `arch`'s jobs at `ckpt`: WANDB_GROUPS or
+    LASTEMA_WANDB_GROUPS, with the arch's GROUP_DATES date.
+    """
+    groups = WANDB_GROUPS if ckpt == "bestinf" else LASTEMA_WANDB_GROUPS
+    date = GROUP_DATES.get(arch, DEFAULT_GROUP_DATE)
+    return {
+        family: group.replace(DEFAULT_GROUP_DATE, date)
+        for family, group in groups.items()
+    }
+
+
+def listing_text(arch: str) -> str:
+    """Beaker `--text` filter covering `arch`'s training runs and their
+    inference jobs. sfno-v2 lists only its own names (the default "ace2-fm-"
+    matches ~9k experiments and takes many minutes); the other archs keep the
+    default, which also covers their --old-runs baselines.
+    """
+    if arch in GROUP_DATES:
+        return f"{WANDB_PREFIX}{ARCHS[arch]}-fm-"
+    return DEFAULT_TEXT
+
+
 # run-ace-inference-job.sh MODE per family.
 MODES = {
     "eval": "suite",
@@ -155,17 +194,19 @@ def family_jobs(
     sst_grids: list[str] | None = None,
     sst_levels: list[str] | None = None,
     ckpt: str = "bestinf",
+    arch: str = DEFAULT_ARCH,
 ) -> list[tuple[str, str]]:
     """(job name, config filename) of one run's jobs in one family, narrowed
     by `kinds` (paper families) and `sst_grids`/`sst_levels` (sst). `ckpt`
     sets the eval-suite job-name suffix and, unless bestinf, the suffix
-    appended to sst and paper job names (CHECKPOINTS).
+    appended to sst and paper job names (CHECKPOINTS). `arch` picks the
+    CM4/X-SHiELD suite variant (arch_eval_suite_config).
     """
     if family in EVAL_SUITE_CONFIGS:
         suffix = EVAL_SUITE_NAME_SUFFIXES[family].replace(
             "-bestinf", CHECKPOINTS[ckpt][1]
         )
-        return [(f"{run}{suffix}", EVAL_SUITE_CONFIGS[family])]
+        return [(f"{run}{suffix}", arch_eval_suite_config(family, arch))]
     suffix = "" if ckpt == "bestinf" else CHECKPOINTS[ckpt][1]
     if family == "sst":
         return [
@@ -200,8 +241,9 @@ def resolve_runs(
             r: f"not in {BEAKER_MAP_PATH.name}" for r in runs if r not in mapping
         }
         return ready, skipped
-    print(f"Listing experiments in {args.beaker_workspace}...")
-    experiments = fetch_experiments_by_name(args.beaker_workspace)
+    text = listing_text(args.arch)
+    print(f"Listing experiments in {args.beaker_workspace} matching {text}...")
+    experiments = fetch_experiments_by_name(args.beaker_workspace, text)
     return finished_runs(runs, experiments)
 
 
@@ -309,8 +351,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.old_runs and (args.ckpt != "lastema" or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
-    checkpoint_path = CHECKPOINTS[args.ckpt][0]
-    groups = WANDB_GROUPS if args.ckpt == "bestinf" else LASTEMA_WANDB_GROUPS
+    ckpt_file = checkpoint_path(args.ckpt, args.arch)
+    groups = wandb_groups(args.ckpt, args.arch)
+    cm4_xshield_ok = set(cm4_xshield_runs(args.arch))
 
     ready, skipped = resolve_runs(args)
     print(f"\n{len(ready)} run(s) with a succeeded training job:")
@@ -320,14 +363,27 @@ def main() -> None:
         print(f"{len(skipped)} run(s) skipped:")
         for run, reason in sorted(skipped.items()):
             print(f"  {run}  ({reason})")
+    no_cm4_xshield = sorted(set(ready) - cm4_xshield_ok)
+    if no_cm4_xshield and set(args.family) & set(CM4_XSHIELD_FAMILIES):
+        families = "/".join(CM4_XSHIELD_FAMILIES)
+        print(f"No {families} jobs (not trained on CM4/X-SHiELD):")
+        for run in no_cm4_xshield:
+            print(f"  {run}")
     print()
 
     jobs = [
         Job(beaker_job_name(name), family, config, ready[run], groups[family], name)
         for family in args.family
         for run in sorted(ready)
+        if family not in CM4_XSHIELD_FAMILIES or run in cm4_xshield_ok
         for name, config in family_jobs(
-            family, run, args.kind, args.sst_grid, args.sst_level, args.ckpt
+            family,
+            run,
+            args.kind,
+            args.sst_grid,
+            args.sst_level,
+            args.ckpt,
+            args.arch,
         )
     ]
     if args.old_runs:
@@ -348,7 +404,9 @@ def main() -> None:
         if unknown:
             raise SystemExit(f"--job-name not among the selected jobs: {unknown}")
         jobs = [job for job in jobs if job.name in args.job_name]
-    jobs = drop_jobs_in_beaker(jobs, lambda job: job.name, args)
+    jobs = drop_jobs_in_beaker(
+        jobs, lambda job: job.name, args, [listing_text(args.arch)]
+    )
     if not jobs:
         print("Nothing to submit.")
         return
@@ -374,7 +432,7 @@ def main() -> None:
                 job.name,
                 job.wandb_group,
                 job.dataset_id,
-                checkpoint_path,
+                ckpt_file,
                 job.wandb_name,
             ],
             wandb_project=WANDB_PROJECT,
@@ -389,6 +447,9 @@ def main() -> None:
     verb = "would be submitted" if args.dry_run else "submitted"
     summary = ", ".join(f"{family}: {n}" for family, n in counts.items())
     print(f"\n{len(jobs)} job(s) {verb} ({summary})")
+    print(f"Checkpoint: {ckpt_file}")
+    for family in counts:
+        print(f"wandb group ({family}): {groups[family]}")
     longest = max(jobs, key=lambda job: len(job.name))
     print(f"Longest job name ({len(longest.name)} chars): {longest.name}")
 

@@ -22,7 +22,13 @@ cm4xshield / cm4-1pct
     (renamed_variables, the 1e-6 CO2 rescale, derived ocean_fraction, label)
     without its time subset; the aggregator is the training config's
     ``10year_oosample_varying_co2_c96`` entry's. The 140-year 1pctCO2 run is
-    its own suite so it does not hold up the others.
+    its own suite so it does not hold up the others. The sfno-v2 runs
+    (2026-11-09) get their own variant, ``...-cm4-xshield-v2.yaml`` and
+    ``...-cm4-1pct-v2.yaml`` (CM4_XSHIELD_VARIANTS): its dataset entries are
+    copied from a v2 run config, so they carry the v2 runs'
+    ``sht_roundtrip_variables: [HGTsfc]``, and its aggregator is the v2
+    ``10year_oosample_varying_co2_era5`` entry's (the v2 runs have no c96
+    10-year entry; the two aggregators are equal).
 
 sst
     ``ace-inference-sst-config-4deg-{grid}-{label}-{level}.yaml``: free runs
@@ -39,7 +45,7 @@ paper-som / paper-era5
     evaluator with 36 initial conditions, so one job per run.
 
 Usage:
-    python generate_inference_configs.py [--family FAMILY ...]
+    python generate_inference_configs.py [--family FAMILY ...] [--out-dir DIR]
 """
 
 import argparse
@@ -50,13 +56,17 @@ from collections.abc import Callable
 import yaml
 from _inference_common import (
     ARCHS,
+    CM4_XSHIELD_LABELS,
+    CM4_XSHIELD_VARIANT,
     INFERENCE_CONFIGS_DIR,
     MOUNTED_CHECKPOINT_PATH,
     WANDB_ENTITY,
     WANDB_PROJECT,
     inference_run_names,
+    run_config_path,
+    run_train_labels,
 )
-from submit_fm_jobs import CONFIG_PREFIX, RUN_CONFIGS_DIR, WANDB_PREFIX
+from submit_fm_jobs import RUN_CONFIGS_DIR
 
 HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
@@ -64,9 +74,19 @@ EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scr
 # The training config the CM4/X-SHiELD loader entries and aggregator are copied
 # from. Every nc-sfno four-source config shares them (checked by
 # check_shared_sources); they differ in seed, masking and label balancing only.
-SOURCE_RUN_CONFIG = RUN_CONFIGS_DIR / (
-    "ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield"
-    "-s0-maskon.yaml"
+# The 2026-10-19 run configs are no longer in run_configs/; their balanced
+# parent in base_configs/ has the same entries (the suites it generates are
+# identical to those generated from the old ...-s0-maskon run config).
+SOURCE_RUN_CONFIG = (
+    EXP_DIR
+    / "base_configs"
+    / (
+        "ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-piC-1pct-cm4-xshield"
+        "-balanced.yaml"
+    )
+)
+V2_SOURCE_RUN_CONFIG = RUN_CONFIGS_DIR / (
+    "ace-train-config-4deg-nc-sfno-v2-fm-balanced-s0-maskoff.yaml"
 )
 OLD_INLINE_INFERENCE = (
     EXP_DIR
@@ -74,6 +94,15 @@ OLD_INLINE_INFERENCE = (
     / "2026-06-26-nc-sfno-fm-a2-cond-inline-inference.yaml"
 )
 TEN_YEAR_AGGREGATOR_ENTRY = "10year_oosample_varying_co2_c96"
+V2_TEN_YEAR_AGGREGATOR_ENTRY = "10year_oosample_varying_co2_era5"
+# CM4/X-SHiELD suite variant (_inference_common.CM4_XSHIELD_VARIANT; "" for
+# the 2026-10-19 archs) -> (training config its loader entries are copied
+# from, inline inference entry its aggregator, forward_steps_in_memory and
+# num_data_workers are copied from, config filename suffix).
+CM4_XSHIELD_VARIANTS = {
+    "": (SOURCE_RUN_CONFIG, TEN_YEAR_AGGREGATOR_ENTRY, ""),
+    "v2": (V2_SOURCE_RUN_CONFIG, V2_TEN_YEAR_AGGREGATOR_ENTRY, "-v2"),
+}
 
 # 2026-06-26 label -> 2026-10-19 label. Every 2026-06-26 SHiELD label (amip,
 # ramped, som) is c96 now.
@@ -88,6 +117,23 @@ EVAL_SUITE_CONFIGS = {
     "cm4xshield": f"{EVAL_SUITE_PREFIX}cm4-xshield.yaml",
     "cm4-1pct": f"{EVAL_SUITE_PREFIX}cm4-1pct.yaml",
 }
+CM4_XSHIELD_FAMILIES = ("cm4xshield", "cm4-1pct")
+
+
+def eval_suite_config(family: str, variant: str = "") -> str:
+    """Config filename of an eval-suite family; the CM4/X-SHiELD families
+    get the variant's suffix (CM4_XSHIELD_VARIANTS).
+    """
+    filename = EVAL_SUITE_CONFIGS[family]
+    if family not in CM4_XSHIELD_FAMILIES:
+        return filename
+    suffix = CM4_XSHIELD_VARIANTS[variant][2]
+    return filename.removesuffix(".yaml") + f"{suffix}.yaml"
+
+
+def arch_eval_suite_config(family: str, arch: str) -> str:
+    """Config filename of an eval-suite family for the runs of `arch`."""
+    return eval_suite_config(family, CM4_XSHIELD_VARIANT.get(arch, ""))
 
 
 def _logging() -> dict:
@@ -119,7 +165,8 @@ def _dump(cfg: dict, path: pathlib.Path, header: str = "") -> None:
         cfg, Dumper=_NoAliasDumper, default_flow_style=False, sort_keys=False
     )
     path.write_text(header + text)
-    print(f"Wrote {path.relative_to(EXP_DIR)}")
+    shown = path.relative_to(EXP_DIR) if path.is_relative_to(EXP_DIR) else path
+    print(f"Wrote {shown}")
 
 
 # --- evaluator suites -----------------------------------------------------------
@@ -206,11 +253,11 @@ def _train_dataset(train_cfg: dict, file_pattern: str) -> dict:
     return dataset
 
 
-def _ten_year_entry(train_cfg: dict) -> dict:
+def _ten_year_entry(train_cfg: dict, name: str = TEN_YEAR_AGGREGATOR_ENTRY) -> dict:
     for entry in train_cfg["inference"]:
-        if entry["name"] == TEN_YEAR_AGGREGATOR_ENTRY:
+        if entry["name"] == name:
             return entry
-    raise ValueError(f"no {TEN_YEAR_AGGREGATOR_ENTRY!r} entry in {SOURCE_RUN_CONFIG}")
+    raise ValueError(f"no {name!r} inline inference entry")
 
 
 CM4_PICONTROL = "2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr"
@@ -231,8 +278,10 @@ XSHIELD_10YEAR_STEPS = 3652  # 2014-01-01 .. 2024-01-01
 XSHIELD_START_TIMES = [f"2014-01-0{day}T00:00:00" for day in range(1, 5)]
 
 
-def _cm4_xshield_entries(train_cfg: dict, include_1pct: bool) -> list[dict]:
-    ten_year = _ten_year_entry(train_cfg)
+def _cm4_xshield_entries(
+    train_cfg: dict, include_1pct: bool, ten_year_name: str
+) -> list[dict]:
+    ten_year = _ten_year_entry(train_cfg, ten_year_name)
     aggregator = copy.deepcopy(ten_year["aggregator"])
     fsim = ten_year["forward_steps_in_memory"]
     workers = ten_year["loader"].get("num_data_workers", 4)
@@ -291,19 +340,23 @@ def _cm4_xshield_entries(train_cfg: dict, include_1pct: bool) -> list[dict]:
     return entries
 
 
-def build_cm4_xshield_suite() -> dict:
-    return _suite(_cm4_xshield_entries(_load_yaml(SOURCE_RUN_CONFIG), False))
+def build_cm4_xshield_suite(variant: str = "") -> dict:
+    source, ten_year_name, _ = CM4_XSHIELD_VARIANTS[variant]
+    return _suite(_cm4_xshield_entries(_load_yaml(source), False, ten_year_name))
 
 
-def build_cm4_1pct_suite() -> dict:
-    return _suite(_cm4_xshield_entries(_load_yaml(SOURCE_RUN_CONFIG), True))
+def build_cm4_1pct_suite(variant: str = "") -> dict:
+    source, ten_year_name, _ = CM4_XSHIELD_VARIANTS[variant]
+    return _suite(_cm4_xshield_entries(_load_yaml(source), True, ten_year_name))
 
 
-def check_shared_sources(run_config_paths: list[pathlib.Path]) -> None:
-    """Fail unless every run config shares SOURCE_RUN_CONFIG's CM4/X-SHiELD
-    loader entries and 10-year aggregator, so one suite fits all runs.
+def check_shared_sources(run_config_paths: list[pathlib.Path], variant: str) -> None:
+    """Fail unless every run config shares its variant's source config's
+    (CM4_XSHIELD_VARIANTS) CM4/X-SHiELD loader entries and 10-year aggregator,
+    so one suite fits all runs.
     """
-    reference = _load_yaml(SOURCE_RUN_CONFIG)
+    source, ten_year_name, _ = CM4_XSHIELD_VARIANTS[variant]
+    reference = _load_yaml(source)
     patterns = [CM4_PICONTROL, CM4_1PCT, XSHIELD] + [
         AM4_RANDOM_CO2.format(co2=f"{c}CO2") for c in ("1x", "2x", "4x")
     ]
@@ -313,10 +366,21 @@ def check_shared_sources(run_config_paths: list[pathlib.Path]) -> None:
             if _train_dataset(cfg, pattern) != _train_dataset(reference, pattern):
                 raise ValueError(f"{path.name}: {pattern} entry differs")
         if (
-            _ten_year_entry(cfg)["aggregator"]
-            != _ten_year_entry(reference)["aggregator"]
+            _ten_year_entry(cfg, ten_year_name)["aggregator"]
+            != _ten_year_entry(reference, ten_year_name)["aggregator"]
         ):
             raise ValueError(f"{path.name}: 10-year aggregator differs")
+
+
+def cm4_xshield_runs(arch: str) -> list[str]:
+    """Runs of `arch` trained on every CM4_XSHIELD_LABELS label, the ones
+    that get cm4xshield / cm4-1pct jobs.
+    """
+    return [
+        run
+        for run in inference_run_names(arch)
+        if set(CM4_XSHIELD_LABELS) <= run_train_labels(run)
+    ]
 
 
 # --- SST perturbations ------------------------------------------------------------
@@ -582,9 +646,15 @@ def family_configs(family: str) -> dict[str, dict]:
     if family == "eval":
         return {EVAL_SUITE_CONFIGS[family]: build_eval_suite()}
     if family == "cm4xshield":
-        return {EVAL_SUITE_CONFIGS[family]: build_cm4_xshield_suite()}
+        return {
+            eval_suite_config(family, variant): build_cm4_xshield_suite(variant)
+            for variant in CM4_XSHIELD_VARIANTS
+        }
     if family == "cm4-1pct":
-        return {EVAL_SUITE_CONFIGS[family]: build_cm4_1pct_suite()}
+        return {
+            eval_suite_config(family, variant): build_cm4_1pct_suite(variant)
+            for variant in CM4_XSHIELD_VARIANTS
+        }
     if family == "sst":
         return {
             sst_config_filename(grid, level): build_sst_config(grid, level)
@@ -609,18 +679,22 @@ def main() -> None:
         default=list(FAMILIES),
         help="Families to (re)generate (default: all).",
     )
-    args = parser.parse_args()
-    check_shared_sources(
-        [
-            RUN_CONFIGS_DIR / f"{CONFIG_PREFIX}{run.removeprefix(WANDB_PREFIX)}.yaml"
-            for arch in ARCHS
-            for run in inference_run_names(arch)
-        ]
+    parser.add_argument(
+        "--out-dir",
+        type=pathlib.Path,
+        default=INFERENCE_CONFIGS_DIR,
+        help="Directory to write to (default: inference_configs/).",
     )
+    args = parser.parse_args()
+    for arch in ARCHS:
+        check_shared_sources(
+            [run_config_path(run) for run in cm4_xshield_runs(arch)],
+            CM4_XSHIELD_VARIANT.get(arch, ""),
+        )
     header = "# Generated by generate_inference_configs.py; do not edit by hand.\n"
     for family in args.family:
         for filename, cfg in family_configs(family).items():
-            _dump(cfg, INFERENCE_CONFIGS_DIR / filename, header)
+            _dump(cfg, args.out_dir / filename, header)
 
 
 if __name__ == "__main__":
