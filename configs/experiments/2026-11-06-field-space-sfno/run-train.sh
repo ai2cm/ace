@@ -159,3 +159,6 @@ run_training "pretrain-fieldsfno-pos64-mlpfilter-g01-4deg-rs1.yaml" "fieldsfno-p
 run_training "pretrain-fieldsfno-pos64-mlpfilter-g1-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-g1-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-e1024-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-embed1024-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-e1024-l16-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-embed1024-l16-4deg-pretrain-rs1" 1
+# hidden_embed_dim 64 arms (1deg at 8 GPUs; 4deg at 1 GPU, launched with PRIORITY=high).
+run_training "pretrain-fieldsfno-pos64-mlpfilter-h64-rs1.yaml" "fieldsfno-pos64-mlpfilter-h64-pretrain-rs1" 8
+run_training "pretrain-fieldsfno-pos64-mlpfilter-h64-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-h64-4deg-pretrain-rs1" 1
