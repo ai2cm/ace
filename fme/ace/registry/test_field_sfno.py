@@ -81,6 +81,22 @@ def test_branch_widths_independent_of_channels():
     assert block.mlp.fwd[0].weight.shape[:2] == (16, 5)
 
 
+def test_hidden_embed_dim_widens_blocks_not_output():
+    builder = NoiseConditionedFieldSFNOBuilder(
+        n_prognostic_channels=2,
+        num_layers=1,
+        noise_embed_dim=4,
+        embed_dim=8,
+        hidden_embed_dim=3,
+    )
+    model = builder.build(
+        n_in_channels=3, n_out_channels=5, dataset_info=_dataset_info()
+    )
+    block = model.conditional_model.blocks[0]
+    assert block.proj_filter_in.weight.shape[1] == 5 + 3
+    assert model.conditional_model.hidden_init.shape == (1, 3, 1, 1)
+
+
 def test_invalid_network_option_raises_at_config():
     with pytest.raises(ValueError, match="activation function"):
         NoiseConditionedFieldSFNOBuilder(

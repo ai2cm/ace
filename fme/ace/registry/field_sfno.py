@@ -96,6 +96,13 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             the l=0 (global mean) spherical harmonic coefficient.
         gamma_init: Initial value of each block's residual gates; 1e-12
             (the FieldSpaceNN default) makes the model the identity at init.
+        hidden_embed_dim: Number of latent channels added to the residual
+            stream that correspond to no field. They start from learned
+            per-channel values (``hidden_init``, zero at init) like the
+            diagnostics, are updated by every block, and are not output, so
+            they only carry information between blocks. Route
+            ``hidden_init`` to AdamW (``adamw_names``) like
+            ``diagnostic_init`` when training with Muon.
     """
 
     n_prognostic_channels: int
@@ -128,6 +135,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
     filter_num_groups: int = 1
     filter_preserves_global_mean: bool = False
     gamma_init: float = 1e-12
+    hidden_embed_dim: int = 0
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -164,6 +172,7 @@ class NoiseConditionedFieldSFNOBuilder(ModuleConfig):
             affine_norms=self.affine_norms,
             filter_preserves_global_mean=self.filter_preserves_global_mean,
             gamma_init=self.gamma_init,
+            hidden_embed_dim=self.hidden_embed_dim,
         )
 
     def build(
