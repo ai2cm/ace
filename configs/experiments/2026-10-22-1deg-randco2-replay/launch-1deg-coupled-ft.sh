@@ -15,7 +15,17 @@ N_GPUS="${N_GPUS:-8}"   # 2026-10-27: 4 GPUs OOM in training at ~75 GiB (2 sampl
 PRIORITY="${PRIORITY:-high}"
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # guaranteed time before Beaker may preempt (gantry --min-runtime; 0 = any time)
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"
+# 2026-11-10: a results dataset is committed ~30 min after its job exits; gantry refuses a mount of an uncommitted
+# dataset ("uncommitted dataset"), which silently lost a chained launch. Wait for the commit before submitting.
+wait_committed() {
+  local ds="$1" t=0
+  until [ "$(beaker dataset get "$ds" --format json 2>/dev/null | jq -r '.[0].committed // empty')" != "" ]; do
+    [ $t -ge 7200 ] && { echo "dataset $ds still uncommitted after 2 h" >&2; return 1; }
+    sleep 60; t=$((t+60))
+  done
+}
 REPO_ROOT=$(git rev-parse --show-toplevel)
+[ -n "${CKPT_DS:-}" ] && wait_committed "${CKPT_DS:-}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')

@@ -8,7 +8,17 @@ CKPT_FILE="${CKPT_FILE:-ckpt.tar}"
 CFG="${CFG:-coupled-evaluator-config-piC-ic0151-200yr-1deg-singleckpt.yaml}"
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # gantry --min-runtime; 1deg template default
 PRIORITY="${PRIORITY:-high}"
+# 2026-11-10: a results dataset is committed ~30 min after its job exits; gantry refuses a mount of an uncommitted
+# dataset ("uncommitted dataset"), which silently lost a chained launch. Wait for the commit before submitting.
+wait_committed() {
+  local ds="$1" t=0
+  until [ "$(beaker dataset get "$ds" --format json 2>/dev/null | jq -r '.[0].committed // empty')" != "" ]; do
+    [ $t -ge 7200 ] && { echo "dataset $ds still uncommitted after 2 h" >&2; return 1; }
+    sleep 60; t=$((t+60))
+  done
+}
 REPO_ROOT=$(git rev-parse --show-toplevel)
+[ -n "$CKPT_DS" ] && wait_committed "$CKPT_DS"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
