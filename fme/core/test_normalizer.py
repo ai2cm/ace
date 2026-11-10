@@ -362,6 +362,43 @@ def test_load_from_files(fill_nans_on_normalize: bool, fill_nans_on_denormalize:
     assert "c" not in normalizer.stds
 
 
+@pytest.mark.parametrize("load_first", [True, False])
+def test_explicit_values_override_and_extend_files(load_first: bool):
+    mean_ds = get_scalar_dataset(["a", "b"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a", "b"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        config = NormalizationConfig(
+            global_means_path=tmp_path / "mean.nc",
+            global_stds_path=tmp_path / "std.nc",
+            means={"b": 5.0, "d": 7.0},
+            stds={"b": 6.0, "d": 8.0},
+            fill_nans_on_normalize=True,
+        )
+        if load_first:
+            config.load()
+        normalizer = config.build(["a", "b", "d"])
+    assert normalizer.means["a"] == 1.0
+    assert normalizer.stds["a"] == 2.0
+    assert normalizer.means["b"] == 5.0
+    assert normalizer.stds["b"] == 6.0
+    assert normalizer.means["d"] == 7.0
+    assert normalizer.stds["d"] == 8.0
+    assert normalizer.fill_nans_on_normalize
+
+
+def test_explicit_values_with_files_require_matching_keys():
+    with pytest.raises(ValueError, match="same keys"):
+        NormalizationConfig(
+            global_means_path="mean.nc",
+            global_stds_path="std.nc",
+            means={"b": 5.0},
+            stds={"c": 6.0},
+        )
+
+
 def test_cannot_build_without_load_or_files():
     mean_ds = get_scalar_dataset(["a", "b", "c"], fill_value=1.0)
     std_ds = get_scalar_dataset(["a", "b", "c"], fill_value=2.0)

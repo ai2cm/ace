@@ -37,6 +37,7 @@ from fme.core.typing_ import Slice, TensorDict
 
 from .data_typing import VariableMetadata
 from .dataset import DatasetABC, DatasetItem
+from .relative_humidity import RELATIVE_HUMIDITY_METADATA, DerivedRelativeHumidity
 from .utils import (
     as_alignable_tensor,
     get_horizontal_coordinates,
@@ -435,6 +436,14 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        derive_relative_humidity: If True, requested ``relative_humidity_<k>``
+            fields are not read from the data files but derived at load time
+            as ``specific_total_water_<k>`` divided by the Bolton (1980)
+            saturation specific humidity over liquid water at
+            ``air_temperature_<k>`` and the layer-mean pressure (from
+            ``PRESsfc`` and the dataset's ak/bk), all at the same time step.
+            No clipping is applied. Source fields loaded only for this are
+            not returned.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -466,6 +475,7 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
+    derive_relative_humidity: bool = False
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -549,6 +559,12 @@ class XarrayDataset(DatasetABC):
         allow_missing_variables: bool = False,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
+        self._derived_relative_humidity: DerivedRelativeHumidity | None = None
+        if config.derive_relative_humidity:
+            self._derived_relative_humidity = (
+                DerivedRelativeHumidity.from_requested_names(names)
+            )
+            names = self._derived_relative_humidity.load_names(names)
         self._names = names
         self._allow_missing_variables = allow_missing_variables
         self.path = config.data_path
@@ -599,6 +615,20 @@ class XarrayDataset(DatasetABC):
         self._get_variable_metadata(first_dataset)
 
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
+        if self._derived_relative_humidity is not None:
+            self._derived_relative_humidity.validate(self._vertical_coordinate)
+            missing_sources = self._missing_names & set(
+                self._derived_relative_humidity.source_names
+            )
+            if missing_sources:
+                raise ValueError(
+                    "Variables required to derive relative humidity are missing "
+                    f"from the dataset: {sorted(missing_sources)}."
+                )
+            for name in self._derived_relative_humidity.extra_names:
+                self._variable_metadata.pop(name, None)
+            for name in self._derived_relative_humidity.names:
+                self._variable_metadata[name] = RELATIVE_HUMIDITY_METADATA
         self.overwrite = config.overwrite
 
         self._nonspacetime_dims = get_nonspacetime_dimensions(
@@ -972,6 +1002,11 @@ class XarrayDataset(DatasetABC):
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
+
+        if self._derived_relative_humidity is not None:
+            tensors = self._derived_relative_humidity.apply(
+                tensors, self._vertical_coordinate
+            )
 
         # Apply field overwrites
         tensors = self.overwrite.apply(tensors)
