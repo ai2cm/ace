@@ -820,32 +820,32 @@ train_loader_atmosphere_only:
     merge:
     - concat:
       - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-1xCO2-ic_0001-sea_ice.zarr
+        file_pattern: random-CO2-1xCO2-ic_0001-atmosphere.zarr
         engine: zarr
         subset:
           start_time: '0153-01-01T06:00:00'
       - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-1xCO2-ic_0002-sea_ice.zarr
+        file_pattern: random-CO2-1xCO2-ic_0002-atmosphere.zarr
         engine: zarr
         subset:
           start_time: '0153-01-01T06:00:00'
       - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-2xCO2-ic_0001-sea_ice.zarr
+        file_pattern: random-CO2-2xCO2-ic_0001-atmosphere.zarr
         engine: zarr
         subset:
           start_time: '0153-01-01T06:00:00'
       - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-2xCO2-ic_0002-sea_ice.zarr
+        file_pattern: random-CO2-2xCO2-ic_0002-atmosphere.zarr
         engine: zarr
         subset:
           start_time: '0153-01-01T06:00:00'
       - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-4xCO2-ic_0001-sea_ice.zarr
+        file_pattern: random-CO2-4xCO2-ic_0001-atmosphere.zarr
         engine: zarr
         subset:
           start_time: '0153-01-01T06:00:00'
       - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2-coupled
-        file_pattern: random-CO2-4xCO2-ic_0002-sea_ice.zarr
+        file_pattern: random-CO2-4xCO2-ic_0002-atmosphere.zarr
         engine: zarr
         subset:
           start_time: '0153-01-01T06:00:00'

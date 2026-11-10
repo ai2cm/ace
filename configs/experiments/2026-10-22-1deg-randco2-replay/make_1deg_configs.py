@@ -223,6 +223,15 @@ arms["hybridsstdiag-jfto"] = (
     ],
 )
 c = _james_stage(hyb_rep, james_alt)
+# 2026-11-10 (James, ace PR #1623): the replay batches now read the per-member random-CO2-*-atmosphere.zarr stores, whose
+# surface_temperature is blended with the ocean slot's sst as in the piControl/1pct coupled atmosphere stores (the
+# -sea_ice.zarr stores carried AM4's own surface temperature). Same variables otherwise; the earlier replay arms keep
+# the -sea_ice.zarr stores they were trained on.
+for part in c["train_loader_atmosphere_only"]["dataset"]["merge"]:
+    for item in part["concat"]:
+        item["file_pattern"] = item["file_pattern"].replace(
+            "-sea_ice.zarr", "-atmosphere.zarr"
+        )
 assert c["stepper_training"]["parameter_init"]["checkpoint_path"] == "/ckpt.tar"
 arms["hybridsstdiag-jfto-alt-replay"] = (
     c,
