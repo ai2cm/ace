@@ -5,11 +5,13 @@
 #   ARM=ace2s6h  STAGE=fto-then-alt OCEAN_DS=<lifted FTO ocean> ./launch-1deg-ufs-era5-coupled-ft.sh   # stage 2: alternating
 #   ARM=ace2s512 ...                                                                              # the summer-2026 ACE2S arm
 #   OCEAN=ohc ARM=ace2s6h ...                                                                      # corrector-kept UFS ocean (jobs samudra-ufs1deg-era5-ohc-*)
+#   OCEAN=ohc ARM=ace2s6h STAGE=jfto ...                     # CM4 1deg two-stage template (James's recipe), stage 1 (Troy 2026-11-10)
+#   OCEAN=ohc ARM=ace2s6h STAGE=jfto-then-alt CKPT_DS=<jfto results> ...   # stage 2 from the stage-1 coupled checkpoint (/ckpt.tar)
 #   EXISTING_RESULTS_DS=<results dataset> ...  continues a previous submission (the -resume config)
 set -euo pipefail
 OCEAN="${OCEAN:-noohc}"             # noohc = corrector-free UFS ocean (paper-2 line); ohc = scaled-temperature OHC corrector kept (2026-11-09 cooling test)
 ARM="${ARM:?ace2s6h or ace2s512}"
-STAGE="${STAGE:?fto, fto-then-alt or fto-mse}"
+STAGE="${STAGE:?fto, fto-then-alt, fto-mse, jfto or jfto-then-alt}"
 case "$ARM" in
   ace2s6h)  ATMOS_DS_DEFAULT=01M49ERVM1DVWV12G5DRDXM0PC; ATMOS_CKPT_DEFAULT=training_checkpoints/ema_ckpt_0002.tar ;;        # 1deg-6h-ace2s-ft12-detached-rs0 (wandb cerls68n), the ACE2S paper's sixhourly checkpoint
   ace2s512) ATMOS_DS_DEFAULT=01KSVC6YS7C18SGYV4VPZYZ232; ATMOS_CKPT_DEFAULT=training_checkpoints/best_inference_ckpt.tar ;;  # ace2s-era5-multi-step-fine-tuning-no-var-weighting-rs0 (wandb u9ek57d9), the summer-2026 coupled runs' atmosphere
@@ -42,6 +44,8 @@ case "$STAGE" in
   fto) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto" ;;
   fto-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-then-ftalt" ;;
   fto-mse) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse" ;;
+  jfto) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-jfto" ;;                        # CM4 1deg two-stage template (James's recipe), stage 1
+  jfto-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-jfto-then-ftalt"; : "${CKPT_DS:?stage-2 needs CKPT_DS=<jfto results dataset>}" ;;
   *) echo "unknown STAGE $STAGE"; exit 1 ;;
 esac
 JOB="${JOB}${TAG:+-$TAG}"
@@ -62,6 +66,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --dataset "${OCEAN_DS}:${OCEAN_CKPT}:/ocean_ckpt.tar" \
   --dataset "${ATMOS_DS}:${ATMOS_CKPT}:/atmos_ckpt.tar" \
   --dataset "${FRAC_DS}:/era5frac/${FRAC_ZARR}" \
+  ${CKPT_DS:+--dataset "${CKPT_DS}:${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}:/ckpt.tar"} \
   ${EXISTING_RESULTS_DS:+--dataset "${EXISTING_RESULTS_DS}:/existing-results"} \
   --gpus "$N_GPUS" --shared-memory 840GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \

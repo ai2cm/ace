@@ -239,7 +239,62 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
     stm["ocean"]["n_steps"] = 4
     stm["ocean"]["optimize_last_step_only"] = False
     stm["ocean"]["loss"] = {"type": "MSE"}
+    # Troy 2026-11-10: use the latest CM4 1deg two-stage template (James's recipe as run for the CM4 hybrid diagnosed-SST
+    # Samudra with random-CO2 replay, ../2026-10-22-1deg-randco2-replay/coupled/*-hybridsstdiag-jfto[-alt-replay].yaml) for
+    # UFS too, minus the replay: stage 1 "jfto" = 4 coupled steps, ocean loss on every step of 4-step windows, 2-member
+    # EnsembleLoss, lr 7e-5, 8 epochs, corrector off in epoch 1, warm-up one epoch (CM4: 1460 iterations = 1 epoch; UFS:
+    # ~165 batches per epoch); stage 2 "jfto-then-alt" = alternating updates from the stage-1 coupled checkpoint (/ckpt.tar,
+    # both components; the atmosphere is unchanged by stage 1), 4 coupled steps, ocean every-step loss, atmosphere 1..80-step
+    # last-step-only schedule, lr 1e-5, 3 epochs, corrector off in epoch 1. The "fto"/"fto-then-alt" stages above are the
+    # earlier Elynn-template recipe (8 coupled steps, 1-8-step last-step-only ocean windows, 12 epochs).
+    BATCHES_PER_EPOCH = 165
+    jfto = copy.deepcopy(fto)
+    jfto["max_epochs"] = 8
+    jfto["optimization"]["scheduler"]["kwargs"]["total_iters"] = BATCHES_PER_EPOCH
+    stj = jfto["stepper_training"]
+    stj["n_coupled_steps"] = 4
+    stj["ocean"]["n_steps"] = 4
+    stj["ocean"]["optimize_last_step_only"] = False
+    stj["atmosphere"].pop(
+        "optimize_last_step_only", None
+    )  # frozen atmosphere; the CM4 template carries no such key
+    jfto["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"][
+        "corrector_disabled_epochs"
+    ] = 1
+    jalt = copy.deepcopy(alt)
+    jalt["max_epochs"] = 3
+    jalt["optimization"]["lr"] = 1.0e-05
+    jalt["optimization"]["scheduler"]["kwargs"]["total_iters"] = BATCHES_PER_EPOCH
+    sta = jalt["stepper_training"]
+    sta["n_coupled_steps"] = 4
+    sta["parameter_init"] = {"checkpoint_path": "/ckpt.tar"}
+    sta["ocean"]["parameter_init"] = {"weights_path": None}
+    sta["atmosphere"]["parameter_init"] = {"weights_path": None}
+    sta["ocean"]["n_steps"] = 4
+    sta["ocean"]["optimize_last_step_only"] = False
+    jalt["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"][
+        "corrector_disabled_epochs"
+    ] = 1
     stages = {
+        "jfto": (
+            jfto,
+            [
+                f"ufs1deg-{oc}-{arm}-jfto: FTO (ocean trained, atmosphere interactive but frozen) with the latest CM4 1deg two-stage",
+                "template (James's recipe, minus random-CO2 replay; Troy 2026-11-10): 4 coupled steps, ocean loss on every step,",
+                f"2-member EnsembleLoss, lr 7e-5, 8 epochs, corrector off in epoch 1. Ocean = {odesc}; atmosphere = {desc}.",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=jfto ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
+        "jfto-then-alt": (
+            jalt,
+            [
+                f"ufs1deg-{oc}-{arm}-jfto-then-alt: alternating coupled fine-tune from the ufs1deg-{oc}-{arm}-jfto coupled checkpoint",
+                "(/ckpt.tar, both components) with the latest CM4 1deg two-stage template (James's recipe, minus random-CO2 replay;",
+                "Troy 2026-11-10): 4 coupled steps, ocean every-step loss, atmosphere 1..80-step last-step-only schedule, lr 1e-5,",
+                f"3 epochs, corrector off in epoch 1. Ocean = {odesc}; atmosphere = {desc}.",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=jfto-then-alt CKPT_DS=<jfto results dataset> ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
         "fto-mse": (
             fto_mse,
             [
