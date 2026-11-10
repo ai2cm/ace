@@ -94,6 +94,24 @@ class DataWriterConfig:
             )
 
     @property
+    def _needs_gather(self) -> bool:
+        """True when any gathered (non-zarr) writer is enabled.
+
+        Rank-invariant: computed from config fields that are identical on
+        all ranks, so it is safe to use for collective-skip decisions.
+        """
+        has_netcdf_files = any(
+            not isinstance(f.format, ZarrWriterConfig)
+            for f in (self.files or [])
+        )
+        return (
+            self.save_prediction_files
+            or self.save_monthly_files
+            or self.save_step_diagnostics
+            or has_netcdf_files
+        )
+
+    @property
     def has_subwriters_enabled(self) -> bool:
         """True when any per-timestep output writer is enabled."""
         return (
@@ -130,6 +148,7 @@ class DataWriterConfig:
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
         build_subwriters = not is_multi_gpu or is_root
+        local_ic_times = initial_condition_times
         if is_multi_gpu:
             all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
             if is_root:
@@ -166,9 +185,8 @@ class DataWriterConfig:
                 )
             )
         local_writers: list[PairedSubwriter] = []
-        build_args = dict(
+        file_build_args = dict(
             experiment_dir=experiment_dir,
-            initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -177,9 +195,18 @@ class DataWriterConfig:
         )
         for writer_config in self.files or []:
             if isinstance(writer_config.format, ZarrWriterConfig):
-                local_writers.append(writer_config.build_paired(**build_args))
+                local_writers.append(
+                    writer_config.build_paired(
+                        initial_condition_times=local_ic_times, **file_build_args
+                    )
+                )
             elif build_subwriters:
-                writers.append(writer_config.build_paired(**build_args))
+                writers.append(
+                    writer_config.build_paired(
+                        initial_condition_times=initial_condition_times,
+                        **file_build_args,
+                    )
+                )
         step_diagnostics_writer: StepDiagnosticsWriter | None = None
         if build_subwriters:
             step_diagnostics_writer = self._build_step_diagnostics_writer(
@@ -192,6 +219,7 @@ class DataWriterConfig:
         return PairedDataWriter(
             writers=writers,
             local_writers=local_writers,
+            needs_gather=self._needs_gather,
             path=experiment_dir,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -241,6 +269,7 @@ class DataWriterConfig:
         dist = Distributed.get_instance()
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
+        local_ic_times = initial_condition_times
         if is_multi_gpu:
             all_ic_times = dist.data_parallel_gather_object(initial_condition_times)
             if is_root:
@@ -295,18 +324,19 @@ class DataWriterConfig:
                         )
                     )
         local_writers: list[Subwriter] = []
-        build_args = dict(
-            experiment_dir=experiment_dir,
-            initial_condition_times=initial_condition_times,
-            n_timesteps=n_timesteps,
-            timestep=timestep,
-            variable_metadata=variable_metadata,
-            coords=coords,
-            dataset_metadata=dataset_metadata,
-        )
         for writer_config in self.files or []:
             if isinstance(writer_config.format, ZarrWriterConfig):
-                local_writers.append(writer_config.build(**build_args))
+                local_writers.append(
+                    writer_config.build(
+                        experiment_dir=experiment_dir,
+                        initial_condition_times=local_ic_times,
+                        n_timesteps=n_timesteps,
+                        timestep=timestep,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
+                    )
+                )
         step_diagnostics_writer: StepDiagnosticsWriter | None = None
         if build_subwriters:
             step_diagnostics_writer = self._build_step_diagnostics_writer(
@@ -319,6 +349,7 @@ class DataWriterConfig:
         return DataWriter(
             writers=writers,
             local_writers=local_writers,
+            needs_gather=self._needs_gather,
             path=experiment_dir,
             variable_metadata=variable_metadata,
             coords=coords,
@@ -381,6 +412,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         dataset_metadata: DatasetMetadata,
         step_diagnostics_writer: StepDiagnosticsWriter | None = None,
         local_writers: list[PairedSubwriter] | None = None,
+        needs_gather: bool = True,
     ):
         """
         Args:
@@ -396,9 +428,12 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 diagnostics, not the target/prediction pair.
             local_writers: Sub-writers that receive local (ungathered) data on
                 every rank (zarr file writers that do their own region writes).
+            needs_gather: Whether any gathered writer is enabled. Rank-invariant
+                (computed from config), so safe for collective-skip decisions.
         """
-        self._writers = writers
+        self._post_gather_writers = writers
         self._local_writers = local_writers or []
+        self._needs_gather = needs_gather
         self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.coords = coords
@@ -443,6 +478,9 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 batch_time=batch.time,
             )
 
+        if not self._needs_gather:
+            return
+
         dist = Distributed.get_instance()
         prediction = _gather_tensor_dict(dict(batch.prediction), dist)
         target = _gather_tensor_dict(dict(batch.reference), dist)
@@ -458,7 +496,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         if prediction is None or target is None or time is None:
             raise RuntimeError("gather returned None on data-parallel root")
 
-        for writer in self._writers:
+        for writer in self._post_gather_writers:
             writer.append_batch(
                 target=target,
                 prediction=prediction,
@@ -472,7 +510,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Flush the data to disk.
         """
-        for writer in self._writers:
+        for writer in self._post_gather_writers:
             writer.flush()
         for writer in self._local_writers:
             writer.flush()
@@ -480,7 +518,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             self._step_diagnostics_writer.flush()
 
     def finalize(self):
-        for writer in self._writers:
+        for writer in self._post_gather_writers:
             writer.finalize()
         for writer in self._local_writers:
             writer.finalize()
@@ -576,6 +614,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         dataset_metadata: DatasetMetadata,
         step_diagnostics_writer: StepDiagnosticsWriter | None = None,
         local_writers: list[Subwriter] | None = None,
+        needs_gather: bool = True,
     ):
         """
         Args:
@@ -593,9 +632,12 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 diagnostics.
             local_writers: Sub-writers that receive local (ungathered) data on
                 every rank (zarr file writers that do their own region writes).
+            needs_gather: Whether any gathered writer is enabled. Rank-invariant
+                (computed from config), so safe for collective-skip decisions.
         """
-        self._writers = writers
+        self._post_gather_writers = writers
         self._local_writers = local_writers or []
+        self._needs_gather = needs_gather
         self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.variable_metadata = variable_metadata
@@ -620,6 +662,9 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         for writer in self._local_writers:
             writer.append_batch(data=merged, batch_time=batch.time)
 
+        if not self._needs_gather:
+            return
+
         dist = Distributed.get_instance()
         gathered_data = _gather_tensor_dict(merged, dist)
         time = _gather_time(batch.time, dist)
@@ -634,7 +679,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         if gathered_data is None or time is None:
             raise RuntimeError("gather returned None on data-parallel root")
 
-        for writer in self._writers:
+        for writer in self._post_gather_writers:
             writer.append_batch(
                 data=gathered_data,
                 batch_time=time,
@@ -647,7 +692,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         Flush the data to disk.
         """
-        for writer in self._writers:
+        for writer in self._post_gather_writers:
             writer.flush()
         for writer in self._local_writers:
             writer.flush()
@@ -655,7 +700,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             self._step_diagnostics_writer.flush()
 
     def finalize(self):
-        for writer in self._writers:
+        for writer in self._post_gather_writers:
             writer.finalize()
         for writer in self._local_writers:
             writer.finalize()

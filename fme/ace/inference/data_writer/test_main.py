@@ -384,7 +384,7 @@ def test_netcdf_build_paired_under_multi_gpu_builds_writers_on_root():
             dataset_metadata=DatasetMetadata(),
         )
         # Under single rank (the test default), subwriters should be built.
-        assert len(writer._writers) == 1
+        assert len(writer._post_gather_writers) == 1
 
 
 @pytest.mark.parallel
