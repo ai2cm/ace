@@ -210,18 +210,15 @@ def _get_step_diagnostics_setup(n_samples=2, n_times=4, n_lat=4, n_lon=5):
     return config, build_kwargs, batch, delta
 
 
-@pytest.mark.parametrize("builder", ["build_paired", "build"])
 @pytest.mark.parametrize("save_names", [None, ["a"]])
 @pytest.mark.parametrize("coarsen_factor", [1, 2])
-def test_step_diagnostics_writer_writes_delta_series(
-    builder, save_names, coarsen_factor
-):
+def test_step_diagnostics_writer_writes_delta_series(save_names, coarsen_factor):
     config, build_kwargs, batch, delta = _get_step_diagnostics_setup()
     config.names = save_names
     if coarsen_factor > 1:
         config.time_coarsen = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = getattr(config, builder)(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
         filename = os.path.join(tmpdir, "step_diagnostics", "correction_deltas.nc")
