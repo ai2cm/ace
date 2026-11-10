@@ -205,7 +205,7 @@ class TestDataWriter:
             save_prediction_files=True,
             save_monthly_files=True,
             names=None,
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -364,7 +364,7 @@ class TestDataWriter:
             save_prediction_files=True,
             save_monthly_files=True,
             names=save_names,
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=4,  # unused
@@ -438,7 +438,7 @@ class TestDataWriter:
             save_prediction_files=True,
             save_monthly_files=True,
             names=None,
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=3,
@@ -500,7 +500,7 @@ class TestDataWriter:
             names=None,
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
             files=[region_config],
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -637,7 +637,7 @@ class TestDataWriter:
             names=None,
             time_coarsen=None,
             files=[region_config],
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -713,7 +713,7 @@ def test_default_netcdf_writers_record_data_writer_io(tmp_path):
         ),
         dims=["sample", "time"],
     )
-    writer = DataWriterConfig().build_paired(
+    writer = DataWriterConfig().build(
         experiment_dir=str(tmp_path),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_times,

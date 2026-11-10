@@ -27,8 +27,8 @@ from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.inference.data_writer import (
+    CoupledDataWriter,
     CoupledDataWriterConfig,
-    CoupledPairedDataWriter,
     DatasetMetadata,
 )
 from fme.coupled.inference.loop import CoupledDeriver, run_coupled_dataset_comparison
@@ -390,7 +390,7 @@ class InferenceEvaluatorConfig:
     def get_data_writer(
         self,
         data: InferenceGriddedData,
-    ) -> CoupledPairedDataWriter:
+    ) -> CoupledDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
                 self.data_writer.ocean.time_coarsen.validate(
@@ -418,7 +418,7 @@ class InferenceEvaluatorConfig:
             "ocean": dataset_metadata,
             "atmosphere": dataset_metadata,
         }
-        return self.data_writer.build_paired(
+        return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,

@@ -33,7 +33,7 @@ from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .zarr import ZarrWriterConfig
 
-PairedSubwriter: TypeAlias = (
+Subwriter: TypeAlias = (
     PairedRawDataWriter | PairedTimeCoarsen | PairedMonthlyDataWriter | PairedFileWriter
 )
 
@@ -131,7 +131,7 @@ class DataWriterConfig:
         for file_config in self.files or []:
             file_config.validate_time_coarsen(forward_steps_in_memory, n_forward_steps)
 
-    def build_paired(
+    def build(
         self,
         experiment_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
@@ -140,7 +140,7 @@ class DataWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
-    ) -> "PairedDataWriter":
+    ) -> "DataWriter":
         dist = Distributed.get_instance()
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
@@ -155,9 +155,9 @@ class DataWriterConfig:
                         "data-parallel root"
                     )
                 initial_condition_times = np.concatenate(all_ic_times)
-        writers: list[PairedSubwriter] = []
+        writers: list[Subwriter] = []
         if self.save_prediction_files and build_subwriters:
-            raw_writer: PairedSubwriter = PairedRawDataWriter(
+            raw_writer: Subwriter = PairedRawDataWriter(
                 path=experiment_dir,
                 initial_condition_times=initial_condition_times,
                 save_names=self.names,
@@ -181,7 +181,7 @@ class DataWriterConfig:
                     dataset_metadata=dataset_metadata,
                 )
             )
-        local_writers: list[PairedSubwriter] = []
+        local_writers: list[Subwriter] = []
         for writer_config in self.files or []:
             if isinstance(writer_config.format, ZarrWriterConfig):
                 local_writers.append(
@@ -216,7 +216,7 @@ class DataWriterConfig:
                 coords=coords,
                 dataset_metadata=dataset_metadata,
             )
-        return PairedDataWriter(
+        return DataWriter(
             writers=writers,
             local_writers=local_writers,
             needs_gather=self._needs_gather,
@@ -301,16 +301,16 @@ def _gather_time(time: xr.DataArray, dist: Distributed) -> xr.DataArray | None:
     return xr.concat(parts, dim="sample")
 
 
-class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
+class DataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
-        writers: list[PairedSubwriter],
+        writers: list[Subwriter],
         path: str,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
         step_diagnostics_writer: StepDiagnosticsWriter | None = None,
-        local_writers: list[PairedSubwriter] | None = None,
+        local_writers: list[Subwriter] | None = None,
         needs_gather: bool = True,
     ):
         """

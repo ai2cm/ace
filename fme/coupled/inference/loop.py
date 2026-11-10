@@ -13,7 +13,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPrognosticState,
 )
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
-from fme.coupled.inference.data_writer import CoupledPairedDataWriter
+from fme.coupled.inference.data_writer import CoupledDataWriter
 from fme.coupled.typing_ import CoupledNames
 
 
@@ -38,7 +38,7 @@ def run_coupled_dataset_comparison(
     prediction_data: InferenceGriddedData,
     target_data: InferenceGriddedData,
     deriver: CoupledDeriver,
-    writer: CoupledPairedDataWriter | NullDataWriter | None = None,
+    writer: CoupledDataWriter | NullDataWriter | None = None,
     record_logs: Callable[[InferenceLogs], None] | None = None,
     all_names: CoupledNames | None = None,
 ) -> None:

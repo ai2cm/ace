@@ -21,7 +21,7 @@ from fme.ace.data_loading.getters import get_inference_data
 from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.main import DataWriter, DataWriterConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core import logging_utils
 from fme.core.cloud import makedirs
@@ -104,10 +104,8 @@ class BenchmarkConfig:
             ),
         )
 
-    def build_writer(
-        self, data: InferenceGriddedData, output_dir: str
-    ) -> PairedDataWriter:
-        return self.data_writer.build_paired(
+    def build_writer(self, data: InferenceGriddedData, output_dir: str) -> DataWriter:
+        return self.data_writer.build(
             experiment_dir=output_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps=self.n_forward_steps,

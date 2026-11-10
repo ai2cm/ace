@@ -23,7 +23,7 @@ from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig, local_ic_range
-from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.default_metadata import get_default_variable_metadata
 from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
@@ -283,10 +283,10 @@ class InferenceEvaluatorConfig:
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
-    ) -> PairedDataWriter:
+    ) -> DataWriter:
         # initial_condition_times from data.initial_time already has one entry per
         # sample (n_ic * n_ensemble_per_ic); do not repeat by n_ensemble_per_ic again.
-        return self.data_writer.build_paired(
+        return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             initial_condition_times=initial_condition_times,
             n_timesteps=self.n_forward_steps,
