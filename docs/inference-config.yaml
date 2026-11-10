@@ -20,3 +20,8 @@ forcing_loader:
   num_data_workers: 2
 data_writer:
   save_prediction_files: false
+  save_monthly_files: false
+  files:
+    - label: monthly_mean
+      time_coarsen:
+        method: monthly_mean
