@@ -1,0 +1,29 @@
+# Full-record OCEAN-ONLY rollout of a 1deg UFS ocean checkpoint forced by the replay's own surface fluxes: 1994-01-05T18 to
+# 2023-09, 2170 five-day steps, monthly surface/upper-ocean/ice fields. Control for the coupled cooling deep dive (Troy 2026-11-10):
+# run on the ocean-only fine-tune, the FTO-lifted ocean and the alternating-stage-lifted ocean to tell whether coupled training
+# changed the ocean's own heat bookkeeping or whether the cooling needs ACE's forcing. Touches 2002-2011: drift only, not skill.
+experiment_dir: /results
+n_forward_steps: 2170
+forward_steps_in_memory: 35
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '1994-01-05T18:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-10-06-ufs-replay-ocean-1deg-19level-1994-2023-cm4vars.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names: [sst, thetao_0, thetao_5, thetao_10, ocean_sea_ice_fraction, hfds_total_area]
+aggregator:
+  log_histograms: false
