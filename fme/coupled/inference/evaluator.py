@@ -129,6 +129,8 @@ class StandaloneComponentCheckpointsConfig:
             atmosphere output names (see CoupledStepperConfig).
         atmosphere_output_scale: Optional factors applied to atmosphere outputs
             before they force the ocean (see CoupledStepperConfig).
+        ocean_forcings_from_data: Ocean forcing names taken from the data instead
+            of the atmosphere (see CoupledStepperConfig).
 
     """
 
@@ -140,6 +142,7 @@ class StandaloneComponentCheckpointsConfig:
     atmosphere_stepper_override: StepperOverrideConfig | None = None
     atmosphere_output_rename: dict[str, str] | None = None
     atmosphere_output_scale: dict[str, float] | None = None
+    ocean_forcings_from_data: list[str] = dataclasses.field(default_factory=list)
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -159,6 +162,7 @@ class StandaloneComponentCheckpointsConfig:
             ocean_fraction_prediction=self.ocean_fraction_prediction,
             atmosphere_output_rename=self.atmosphere_output_rename,
             atmosphere_output_scale=self.atmosphere_output_scale,
+            ocean_forcings_from_data=self.ocean_forcings_from_data,
         )
 
     def load_stepper(self, use_ema_if_available: bool = False) -> CoupledStepper:
