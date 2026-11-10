@@ -165,4 +165,46 @@ hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|inf_submitted_cm4-abrupt4x
 
 # Separate 100-year extension of member 1 for the hybrid-residual + replay arm that writes monthly means of selected
 # atmosphere and ocean outputs (see MONTHLY_*_NAMES in make_configs.py).
-hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_inf_cm4-abrupt4xCO2-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h||01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|h100
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|inf_submitted_cm4-abrupt4xCO2-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h||01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|h100
+
+# 1deg hybrid-residual diagnosed-SST coupled fine-tune with replay and the ACE2.5 rs1 random-CO2 atmosphere
+# (1deg-randco2rs1-fmean-ace2p5-hybridsstdiag-alt-replay; Beaker 01M6MDJCXNY3FW7V6A6Y5ZVER9), finished 2026-11-07 after 8
+# epochs: epoch 7 EMA, for comparison with the other arms at epoch 7 (best_inference_ckpt is epoch 8). Same variables as
+# hybrid1deg-cft-rs1-replay; trained on troya/2026-10-29-1deg-hybrid-sstdiag-coupled-ft (3da5dc2b5), which this branch contains.
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic1|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic2|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic3|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic4|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic5|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic6|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic7|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic8|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic9|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic10|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic11|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic12|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic13|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic14|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic15|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic16|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic17|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic18|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic19|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic20|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic21|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic22|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic23|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic24|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic25|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic26|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic27|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic28|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic29|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic30|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic31|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic32|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic33|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic34|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic35|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic36|ema_ckpt_0007|high|--min-runtime 2h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic1-100yr|ema_ckpt_0007|high|--min-runtime 8h||01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|titan
