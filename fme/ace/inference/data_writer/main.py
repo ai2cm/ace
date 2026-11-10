@@ -101,8 +101,7 @@ class DataWriterConfig:
         all ranks, so it is safe to use for collective-skip decisions.
         """
         has_netcdf_files = any(
-            not isinstance(f.format, ZarrWriterConfig)
-            for f in (self.files or [])
+            not isinstance(f.format, ZarrWriterConfig) for f in (self.files or [])
         )
         return (
             self.save_prediction_files
@@ -185,26 +184,29 @@ class DataWriterConfig:
                 )
             )
         local_writers: list[PairedSubwriter] = []
-        file_build_args = dict(
-            experiment_dir=experiment_dir,
-            n_timesteps=n_timesteps,
-            timestep=timestep,
-            variable_metadata=variable_metadata,
-            coords=coords,
-            dataset_metadata=dataset_metadata,
-        )
         for writer_config in self.files or []:
             if isinstance(writer_config.format, ZarrWriterConfig):
                 local_writers.append(
                     writer_config.build_paired(
-                        initial_condition_times=local_ic_times, **file_build_args
+                        experiment_dir=experiment_dir,
+                        initial_condition_times=local_ic_times,
+                        n_timesteps=n_timesteps,
+                        timestep=timestep,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
                     )
                 )
             elif build_subwriters:
                 writers.append(
                     writer_config.build_paired(
+                        experiment_dir=experiment_dir,
                         initial_condition_times=initial_condition_times,
-                        **file_build_args,
+                        n_timesteps=n_timesteps,
+                        timestep=timestep,
+                        variable_metadata=variable_metadata,
+                        coords=coords,
+                        dataset_metadata=dataset_metadata,
                     )
                 )
         step_diagnostics_writer: StepDiagnosticsWriter | None = None
