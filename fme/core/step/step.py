@@ -428,6 +428,14 @@ class StepABC(abc.ABC):
         """
         pass
 
+    def get_corrector_logs(self) -> dict[str, float]:
+        """Scalars from the corrector's learned parts, to log once per epoch.
+
+        Default implementation returns none. Steps which wrap another step
+        must forward the call to the wrapped step.
+        """
+        return {}
+
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:
         """

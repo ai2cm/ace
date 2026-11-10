@@ -72,9 +72,35 @@ class CheckpointConfig:
             return NoCheckpoint()
 
 
+OPTIMIZER_PARAM_GROUP_ATTR = "optimizer_param_group"
+"""Attribute of an ``nn.Parameter`` holding optimizer hyperparameters (e.g.
+``lr``, ``weight_decay``) that override the configured ones for it."""
+
+
+def _param_groups(
+    parameters: Iterable[torch.nn.Parameter],
+) -> list[torch.nn.Parameter] | list[dict[str, Any]]:
+    """Parameters without overrides form the first group, in their order;
+    each distinct override set forms a further group.
+    """
+    default: list[torch.nn.Parameter] = []
+    overridden: dict[tuple, list[torch.nn.Parameter]] = {}
+    for parameter in parameters:
+        override = getattr(parameter, OPTIMIZER_PARAM_GROUP_ATTR, None)
+        if override:
+            overridden.setdefault(tuple(sorted(override.items())), []).append(parameter)
+        else:
+            default.append(parameter)
+    if not overridden:
+        return default
+    return [{"params": default}] + [
+        {"params": params, **dict(key)} for key, params in overridden.items()
+    ]
+
+
 def _build_optimizer(
     optimizer_type: Literal["Adam", "FusedAdam", "AdamW"],
-    parameters: Iterable[torch.nn.Parameter],
+    parameters: Iterable[torch.nn.Parameter] | Iterable[dict[str, Any]],
     lr: float,
     kwargs: Mapping[str, Any],
 ) -> torch.optim.Optimizer:
@@ -351,7 +377,7 @@ class OptimizationConfig:
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
         optimizer = _build_optimizer(
-            self.optimizer_type, parameters, self.lr, self.kwargs
+            self.optimizer_type, _param_groups(parameters), self.lr, self.kwargs
         )
         scheduler = self.scheduler.build(optimizer, max_epochs)
         optimization = Optimization(

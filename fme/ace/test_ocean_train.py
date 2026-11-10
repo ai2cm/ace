@@ -1,11 +1,13 @@
 import dataclasses
 import re
 import tempfile
+from typing import Any
 
 import numpy as np
 import pytest
 import torch
 import xarray as xr
+import yaml
 
 from fme.ace.inference.evaluator import main as inference_evaluator_main
 from fme.ace.testing import DimSizes, MonthlyReferenceData
@@ -600,3 +602,67 @@ def test_train_and_inference(tmp_path):
         assert len(ds) > 0
         for var in ds.data_vars:
             assert not np.isnan(ds[var].values).any()
+
+
+def _find_key(state: Any, key: str) -> Any:
+    """The first value stored under key in a nested checkpoint dict."""
+    if isinstance(state, dict):
+        if key in state:
+            return state[key]
+        for value in state.values():
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+@pytest.mark.medium_duration
+def test_train_learned_level_weights_from_parent(tmp_path):
+    """Fine-tune with learned OHC level weights from a parent trained without
+    them: w_k is logged per epoch, logit trains and is checkpointed with its
+    EMA, and standalone inference loads the checkpoint."""
+    parent_config, _ = _setup(tmp_path / "parent", log_to_wandb=False)
+    with mock_wandb():
+        train_main(yaml_config=parent_config)
+    parent_checkpoint = (
+        tmp_path / "parent" / "results" / "training_checkpoints" / "best_ckpt.tar"
+    )
+
+    train_config, inference_config = _setup(tmp_path / "lw", max_epochs=2)
+    with open(train_config) as f:
+        config = yaml.safe_load(f)
+    corrector = config["stepper"]["step"]["config"]["corrector"]["config"]
+    corrector["ocean_heat_content_correction"] = {
+        "method": "uniform_temperature",
+        "learned_level_weights": {"lr": 0.05},
+    }
+    config["stepper_training"]["parameter_init"] = {
+        "weights_path": str(parent_checkpoint)
+    }
+    config["ema"] = {"decay": 0.9}
+    config["validate_using_ema"] = True
+    with open(train_config, "w") as f:
+        yaml.safe_dump(config, f)
+
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        logs = wandb.get_logs()
+    names = [f"corrector/ohc_level_weight_{k}" for k in range(2)]
+    epoch_logs = [log for log in logs if names[0] in log]
+    assert [log["epoch"] for log in epoch_logs] == [1, 2]
+    for log in epoch_logs:
+        assert sum(log[name] for name in names) == pytest.approx(1.0)
+
+    checkpoint = torch.load(
+        tmp_path / "lw" / "results" / "training_checkpoints" / "ckpt.tar",
+        map_location="cpu",
+        weights_only=False,
+    )
+    logit = _find_key(checkpoint["stepper"], "corrector_modules")["ohc_level_weights"][
+        "logit"
+    ]
+    assert logit.abs().sum() > 0
+    assert any(name.endswith("logit") for name in checkpoint["ema"]["ema_params"])
+
+    with mock_wandb():
+        inference_evaluator_main(yaml_config=inference_config)

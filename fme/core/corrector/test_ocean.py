@@ -14,6 +14,8 @@ from fme.core.constants import (
 )
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.corrector.ocean import (
+    LearnedLevelWeights,
+    LearnedLevelWeightsConfig,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     OceanHeatContentCorrection,
@@ -783,6 +785,166 @@ def test_ocean_heat_content_level_weights_invalid(
         OceanHeatContentBudgetConfig(
             method=cast(Any, method), level_weights=level_weights
         )
+
+
+def _learned_level_weights_corrector(
+    case: _PartialLandOHCBudgetCase, logit: torch.Tensor | None = None
+) -> tuple[CorrectorABC, LearnedLevelWeights]:
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="uniform_temperature",
+            learned_level_weights=LearnedLevelWeightsConfig(),
+        )
+    )
+    corrector = config._build(
+        case.ops, case.depth_coordinate, datetime.timedelta(days=5)
+    )
+    learned = corrector.learned_modules()["ohc_level_weights"]
+    assert isinstance(learned, LearnedLevelWeights)
+    if logit is not None:
+        learned.load_state({"logit": logit.to(DEVICE)})
+    return corrector, learned
+
+
+@pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
+def test_ocean_heat_content_learned_level_weights_budget(hfds_type: str):
+    """At a random logit the budget closes and the increment is dT * w_k with
+    w = softmax(logit)."""
+    case = _partial_land_ohc_budget_case(hfds_type)
+    logit = torch.tensor([1.3, -0.4, 0.7])
+    corrector, _ = _learned_level_weights_corrector(case, logit)
+    with torch.no_grad():
+        corrected = corrector(
+            case.input_data, case.gen_data, case.forcing_data, None
+        ).corrected
+    depth, area, s = case.depth_coordinate, case.area, case.sea_surface_fraction
+    dt = datetime.timedelta(days=5).total_seconds()
+
+    def integral(field: torch.Tensor) -> torch.Tensor:
+        return torch.nansum(area * field)
+
+    h_in = OceanData(case.input_data, depth).ocean_heat_content
+    h_out = OceanData(corrected, depth).ocean_heat_content
+    torch.testing.assert_close(
+        integral(s * h_out),
+        integral(s * h_in) + integral(case.net_energy_flux_total_area) * dt,
+        rtol=1e-10,
+        atol=0.0,
+    )
+    wet = s > 0
+    w = torch.softmax(logit, dim=0).to(torch.float64)
+    increment = torch.stack(
+        [corrected[f"thetao_{k}"] - case.gen_data[f"thetao_{k}"] for k in range(3)],
+        -1,
+    )[wet]
+    delta_t = increment[:, 0] / w[0]
+    torch.testing.assert_close(
+        increment, delta_t.unsqueeze(-1) * w, rtol=1e-6, atol=1e-12
+    )
+
+
+def test_ocean_heat_content_learned_level_weights_gradient():
+    """A loss on the corrected output has a non-zero gradient in logit."""
+    case = _partial_land_ohc_budget_case("gen")
+    corrector, learned = _learned_level_weights_corrector(case)
+    corrected = corrector(
+        case.input_data, case.gen_data, case.forcing_data, None
+    ).corrected
+    target = {k: v + 0.1 * (i + 1) for i, (k, v) in enumerate(case.gen_data.items())}
+    loss = sum(
+        torch.nansum((corrected[f"thetao_{k}"] - target[f"thetao_{k}"]) ** 2)
+        for k in range(3)
+    )
+    assert isinstance(loss, torch.Tensor)
+    loss.backward()
+    logit = learned.torch_module.get_parameter("logit")
+    assert logit.grad is not None
+    assert logit.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
+def test_ocean_heat_content_learned_level_weights_zero_logit_is_uniform(
+    hfds_type: str,
+):
+    case = _partial_land_ohc_budget_case(hfds_type)
+    corrector, learned = _learned_level_weights_corrector(case)
+    assert torch.equal(
+        learned.torch_module.get_parameter("logit").detach().cpu(), torch.zeros(3)
+    )
+    uniform = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="uniform_temperature"
+        )
+    )._build(case.ops, case.depth_coordinate, datetime.timedelta(days=5))
+    with torch.no_grad():
+        out = corrector(
+            case.input_data, case.gen_data, case.forcing_data, None
+        ).corrected
+    expected = uniform(case.input_data, case.gen_data, case.forcing_data, None)
+    for name, value in expected.corrected.items():
+        torch.testing.assert_close(out[name], value, rtol=1e-12, atol=1e-12)
+
+
+def test_ocean_heat_content_learned_level_weights_logs_sum_to_one():
+    case = _partial_land_ohc_budget_case("gen")
+    _, learned = _learned_level_weights_corrector(case, torch.tensor([0.2, -1.0, 0.5]))
+    logs = learned.get_logs()
+    assert sorted(logs) == [f"corrector/ohc_level_weight_{k}" for k in range(3)]
+    assert sum(logs.values()) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        (
+            dict(
+                method="scaled_temperature",
+                learned_level_weights=LearnedLevelWeightsConfig(),
+            ),
+            "requires method",
+        ),
+        (
+            dict(
+                method="uniform_temperature",
+                level_weights=[1.0, 1.0, 1.0],
+                learned_level_weights=LearnedLevelWeightsConfig(),
+            ),
+            "exclusive",
+        ),
+    ],
+)
+def test_ocean_heat_content_learned_level_weights_invalid(
+    kwargs: dict[str, Any], match: str
+):
+    with pytest.raises(ValueError, match=match):
+        OceanHeatContentBudgetConfig(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "lr, weight_decay, match",
+    [(0.0, None, "lr must be positive"), (None, -0.1, "non-negative")],
+)
+def test_learned_level_weights_config_invalid(
+    lr: float | None, weight_decay: float | None, match: str
+):
+    with pytest.raises(ValueError, match=match):
+        LearnedLevelWeightsConfig(lr=lr, weight_decay=weight_decay)
+
+
+def test_learned_level_weights_config_from_yaml_dict():
+    config = dacite.from_dict(
+        OceanCorrectorConfig,
+        {
+            "ocean_heat_content_correction": {
+                "method": "uniform_temperature",
+                "learned_level_weights": {"lr": 0.01},
+            }
+        },
+        config=dacite.Config(strict=True),
+    )
+    ohc = config.ocean_heat_content_correction
+    assert ohc is not None
+    assert ohc.learned_level_weights == LearnedLevelWeightsConfig(lr=0.01)
 
 
 def _salt_coordinates(nlat: int, nlon: int) -> LatLonCoordinates:

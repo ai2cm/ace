@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
+from torch import nn
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
@@ -18,12 +19,15 @@ from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
     CorrectorConfigABC,
+    LearnedCorrectorModule,
 )
 from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
+from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
+from fme.core.optimization import OPTIMIZER_PARAM_GROUP_ATTR
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.spatial_mask_provider import (
     NullSpatialMaskProvider,
@@ -125,6 +129,82 @@ class SeaIceFractionConfig:
 
 
 @dataclasses.dataclass
+class LearnedLevelWeightsConfig:
+    """Learn the per-level weights of the "uniform_temperature" correction.
+
+    w = softmax(logit), with logit one trainable value per depth level,
+    initialised to 0 (w uniform, the unweighted correction). The optimizer
+    updates logit with the network.
+
+    Parameters:
+        lr: Learning rate for logit. None uses the optimization block's lr.
+        weight_decay: Weight decay for logit. None uses the optimization
+            block's. Decay pulls logit toward 0, that is toward uniform w.
+    """
+
+    lr: float | None = None
+    weight_decay: float | None = None
+
+    def __post_init__(self):
+        if self.lr is not None and self.lr <= 0.0:
+            raise ValueError(f"lr must be positive, got {self.lr}.")
+        if self.weight_decay is not None and self.weight_decay < 0.0:
+            raise ValueError(
+                f"weight_decay must be non-negative, got {self.weight_decay}."
+            )
+
+    def optimizer_param_group(self) -> dict[str, float]:
+        group = {"lr": self.lr, "weight_decay": self.weight_decay}
+        return {k: v for k, v in group.items() if v is not None}
+
+
+class LevelWeightLogit(nn.Module):
+    """w = softmax(logit) over depth levels; logit starts at 0 (uniform w)."""
+
+    def __init__(self, n_levels: int, optimizer_param_group: dict[str, float]):
+        super().__init__()
+        self.logit = nn.Parameter(torch.zeros(n_levels))
+        if optimizer_param_group:
+            setattr(self.logit, OPTIMIZER_PARAM_GROUP_ATTR, optimizer_param_group)
+
+    def forward(self) -> torch.Tensor:
+        return torch.softmax(self.logit, dim=0)
+
+
+class LearnedLevelWeights(LearnedCorrectorModule):
+    """Holds the trainable ``LevelWeightLogit`` and the callable the
+    correction uses, which is the distributed wrapper once wrapped.
+    """
+
+    def __init__(self, n_levels: int, config: LearnedLevelWeightsConfig):
+        self._module = LevelWeightLogit(n_levels, config.optimizer_param_group()).to(
+            get_device()
+        )
+        self._wrapped: nn.Module = self._module
+
+    @property
+    def torch_module(self) -> nn.Module:
+        return self._wrapped
+
+    def wrap_module(self, wrapper: Callable[[nn.Module], nn.Module]) -> None:
+        self._wrapped = wrapper(self._module)
+
+    def __call__(self) -> torch.Tensor:
+        return self._wrapped()
+
+    def get_state(self) -> dict[str, Any]:
+        return self._module.state_dict()
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        self._module.load_state_dict(state)
+
+    def get_logs(self) -> dict[str, float]:
+        with torch.no_grad():
+            weights = self._module().tolist()
+        return {f"corrector/ohc_level_weight_{k}": w for k, w in enumerate(weights)}
+
+
+@dataclasses.dataclass
 class OceanHeatContentBudgetConfig:
     """Configuration for ocean heat content budget correction.
 
@@ -154,6 +234,9 @@ class OceanHeatContentBudgetConfig:
             times level_weights[k], with the increment set so the budget still
             closes. Only the shape matters. None is a weight of 1 at every
             level.
+        learned_level_weights: Learn the level weights in training instead
+            of fixing them, used only by "uniform_temperature". Excludes
+            level_weights. None does not learn them.
 
     """
 
@@ -161,8 +244,19 @@ class OceanHeatContentBudgetConfig:
     constant_unaccounted_heating: float = 0.0
     origin_deg_C: float = 0.0
     level_weights: list[float] | None = None
+    learned_level_weights: LearnedLevelWeightsConfig | None = None
 
     def __post_init__(self):
+        if self.learned_level_weights is not None:
+            if self.method != "uniform_temperature":
+                raise ValueError(
+                    "learned_level_weights requires method='uniform_temperature', "
+                    f"got {self.method!r}."
+                )
+            if self.level_weights is not None:
+                raise ValueError(
+                    "level_weights and learned_level_weights are exclusive."
+                )
         if self.level_weights is None:
             return
         if self.method != "uniform_temperature":
@@ -364,6 +458,7 @@ class OceanHeatContentCorrection:
     unaccounted_heating: float
     origin_deg_C: float = 0.0
     level_weights: list[float] | None = None
+    learned_level_weights: LearnedLevelWeights | None = None
 
     def __call__(
         self,
@@ -393,7 +488,11 @@ class OceanHeatContentCorrection:
             self.method,
             self.unaccounted_heating,
             self.origin_deg_C,
-            self.level_weights,
+            (
+                self.level_weights
+                if self.learned_level_weights is None
+                else self.learned_level_weights()
+            ),
         )
         return corrected, corrector_state
 
@@ -571,6 +670,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
         corrections: list[Correction] = []
+        learned_modules: dict[str, LearnedCorrectorModule] = {}
         if len(self.force_positive_names) > 0:
             corrections.append(
                 ForcePositive(
@@ -590,15 +690,28 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                 SurfaceEnergyFluxCorrection(self.surface_energy_flux_correction.method)
             )
         if self.ocean_heat_content_correction is not None:
+            ohc_config = self.ocean_heat_content_correction
+            learned_level_weights: LearnedLevelWeights | None = None
+            if ohc_config.learned_level_weights is not None:
+                if vertical_coordinate is None:
+                    raise ValueError(
+                        "learned_level_weights requires a vertical coordinate."
+                    )
+                learned_level_weights = LearnedLevelWeights(
+                    vertical_coordinate.mask.shape[-1],
+                    ohc_config.learned_level_weights,
+                )
+                learned_modules["ohc_level_weights"] = learned_level_weights
             corrections.append(
                 OceanHeatContentCorrection(
                     area_weighted_mean,
                     vertical_coordinate,
                     timestep_seconds,
-                    self.ocean_heat_content_correction.method,
-                    self.ocean_heat_content_correction.constant_unaccounted_heating,
-                    self.ocean_heat_content_correction.origin_deg_C,
-                    self.ocean_heat_content_correction.level_weights,
+                    ohc_config.method,
+                    ohc_config.constant_unaccounted_heating,
+                    ohc_config.origin_deg_C,
+                    ohc_config.level_weights,
+                    learned_level_weights,
                 )
             )
         if self.ocean_salt_content_correction is not None:
@@ -626,7 +739,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     self.zos_global_mean_correction.reference_global_mean,
                 )
             )
-        return OceanCorrector(corrections)
+        return OceanCorrector(corrections, learned_modules)
 
 
 class OceanCorrector(CorrectionSequence):
@@ -710,7 +823,7 @@ def _force_conserve_ocean_heat_content(
     method: Literal["scaled_temperature", "uniform_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
     origin_deg_C: float = 0.0,
-    level_weights: list[float] | None = None,
+    level_weights: list[float] | torch.Tensor | None = None,
 ) -> TensorDict:
     """Adjust the generated temperature to conserve global ocean heat content.
 
@@ -827,7 +940,8 @@ def _force_conserve_ocean_heat_content(
                 f"thetao has {n_levels} levels."
             )
         else:
-            weights = torch.tensor(
+            # as_tensor keeps the graph of a learned (tensor) weight
+            weights = torch.as_tensor(
                 level_weights,
                 dtype=gen_potential_temperature.dtype,
                 device=gen_potential_temperature.device,

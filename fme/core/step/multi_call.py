@@ -318,6 +318,9 @@ class MultiCallStep(StepABC):
     def set_epoch(self, epoch: int) -> None:
         self._wrapped_step.set_epoch(epoch)
 
+    def get_corrector_logs(self) -> dict[str, float]:
+        return self._wrapped_step.get_corrector_logs()
+
     def step(
         self,
         args: StepArgs,

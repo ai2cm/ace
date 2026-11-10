@@ -14,13 +14,15 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
-from fme.core.registry import ModuleSelector
+from fme.core.optimization import OptimizationConfig
+from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
@@ -2510,3 +2512,99 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     # each variant matches its base variable's convention
     assert stds["a_double"] == pytest.approx(res_stds["a"])
     assert stds["b_double"] == pytest.approx(field_stds["b"])
+
+
+def _learned_level_weights_step(step_type: str = "single_module") -> StepABC:
+    n_levels = 3
+    img_shape = (4, 8)
+    names = [f"thetao_{k}" for k in range(n_levels)]
+    normalization = get_network_and_loss_normalization_config(names=names + ["hfds"])
+    corrector = CorrectorSelector(
+        type="ocean_corrector",
+        config={
+            "ocean_heat_content_correction": {
+                "method": "uniform_temperature",
+                "learned_level_weights": {"lr": 0.5},
+            }
+        },
+    )
+    builder = ModuleSelector(
+        type="SphericalFourierNeuralOperatorNet",
+        config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+    )
+    if step_type == "single_module":
+        config = dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=builder,
+                in_names=names,
+                out_names=names,
+                normalization=normalization,
+                corrector=corrector,
+            )
+        )
+    else:
+        config = dataclasses.asdict(
+            SecondaryModuleStepConfig(
+                builder=builder,
+                secondary_builder=builder,
+                in_names=names,
+                out_names=names,
+                secondary_out_names=["hfds"],
+                normalization=normalization,
+                corrector=corrector,
+            )
+        )
+    device = fme.get_device()
+    vertical_coordinate = DepthCoordinate(
+        torch.tensor([0.0, 10.0, 100.0, 1000.0], device=device),
+        torch.ones(*img_shape, n_levels, device=device),
+    )
+    dataset_info = get_dataset_info(
+        img_shape=img_shape, vertical_coordinate=vertical_coordinate, device=device
+    )
+    return StepSelector(type=step_type, config=config).get_step(
+        dataset_info, lambda _: None
+    )
+
+
+def _logit(step: StepABC) -> torch.Tensor:
+    return step.modules[-1].get_parameter("module.logit")
+
+
+def test_single_module_step_trains_and_checkpoints_learned_level_weights():
+    step = _learned_level_weights_step()
+    logit = _logit(step)
+    assert torch.equal(logit.detach().cpu(), torch.zeros(3))
+    optimization = OptimizationConfig(
+        optimizer_type="AdamW", lr=1e-4, kwargs={"weight_decay": 0.01}
+    ).build(step.modules, max_epochs=1)
+    groups = optimization.optimizer.param_groups
+    assert [p is logit for p in groups[-1]["params"]] == [True]
+    assert groups[-1]["lr"] == 0.5
+    weights = step.modules[-1]()
+    target = torch.tensor([0.7, 0.2, 0.1], device=weights.device)
+    optimization.accumulate_loss(((weights - target) ** 2).sum())
+    optimization.step_weights()
+    trained = logit.detach().clone()
+    assert not torch.equal(trained.cpu(), torch.zeros(3))
+    assert set(step.get_corrector_logs()) == {
+        f"corrector/ohc_level_weight_{k}" for k in range(3)
+    }
+
+    state = step.get_state()
+    assert torch.equal(
+        state["corrector_modules"]["ohc_level_weights"]["logit"], trained
+    )
+    restored = _learned_level_weights_step()
+    restored.load_state(state)
+    assert torch.equal(_logit(restored).detach(), trained)
+
+    del state["corrector_modules"]
+    from_parent = _learned_level_weights_step()
+    from_parent.load_state(state)
+    assert torch.equal(_logit(from_parent).detach().cpu(), torch.zeros(3))
+
+
+def test_secondary_module_step_rejects_learned_corrector_modules():
+    with pytest.raises(ValueError, match="does not train corrector modules"):
+        _learned_level_weights_step("secondary_module")

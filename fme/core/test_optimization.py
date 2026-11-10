@@ -10,6 +10,7 @@ import yaml
 
 import fme
 from fme.core.optimization import (
+    OPTIMIZER_PARAM_GROUP_ATTR,
     Checkpoint,
     CheckpointConfig,
     NoCheckpoint,
@@ -878,3 +879,22 @@ def test_optimization_config_passes_max_grad_norm():
         nn.ModuleList([model]), max_epochs=1
     )
     assert opt._max_grad_norm == 1.5
+
+
+def test_optimization_config_build_param_group_override():
+    """A parameter carrying overrides gets its own group after the default
+    group; without overrides there is a single group."""
+    plain = nn.Linear(2, 2)
+    special = nn.Linear(2, 1)
+    config = OptimizationConfig(
+        optimizer_type="AdamW", lr=1e-3, kwargs={"weight_decay": 0.01}
+    )
+    groups = config.build(nn.ModuleList([plain, special]), 1).optimizer.param_groups
+    assert len(groups) == 1
+    setattr(special.weight, OPTIMIZER_PARAM_GROUP_ATTR, {"lr": 0.5})
+    groups = config.build(nn.ModuleList([plain, special]), 1).optimizer.param_groups
+    assert len(groups) == 2
+    assert groups[0]["lr"] == 1e-3 and groups[1]["lr"] == 0.5
+    assert groups[0]["weight_decay"] == groups[1]["weight_decay"] == 0.01
+    assert [p is special.weight for p in groups[1]["params"]] == [True]
+    assert len(groups[0]["params"]) == 3

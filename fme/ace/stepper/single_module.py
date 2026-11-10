@@ -1117,6 +1117,10 @@ class Stepper:
     def n_ic_timesteps(self) -> int:
         return self._step_obj.n_ic_timesteps
 
+    def get_corrector_logs(self) -> dict[str, float]:
+        """Scalars from the corrector's learned parts, to log once per epoch."""
+        return self._step_obj.get_corrector_logs()
+
     @property
     def modules(self) -> nn.ModuleList:
         """
@@ -1919,6 +1923,9 @@ class TrainStepper(
     def get_base_weights(self):
         """Get the base weights of the underlying stepper."""
         return self._stepper.get_base_weights()
+
+    def get_corrector_logs(self) -> dict[str, float]:
+        return self._stepper.get_corrector_logs()
 
     @property
     def modules(self) -> nn.ModuleList:
