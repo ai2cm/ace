@@ -376,6 +376,18 @@ def test_fill_value_overrides_mean_override_requires_means():
         config.build(mask=mask, means=None, names=data)
 
 
+def test_fill_value_overrides_mean_override_missing_mean_raises():
+    mask, data, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"thetao_": "mean"},
+    )
+    means = {k: v for k, v in means.items() if k != "thetao_0"}
+    with pytest.raises(ValueError, match="has no normalizer mean"):
+        config.build(mask=mask, means=means, names=data)
+
+
 def test_fill_value_overrides_requires_names():
     mask, _, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(

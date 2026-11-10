@@ -137,6 +137,11 @@ class StaticSpatialMaskingConfig:
                         "means required by build for a 'mean' fill_value_overrides "
                         "value."
                     )
+                elif name not in means:
+                    raise ValueError(
+                        f"fill_value_overrides sets a 'mean' fill for {name!r}, "
+                        "which has no normalizer mean."
+                    )
                 else:
                     fill_mapping[name] = means[name]
         if self.fill_value != "mean":
