@@ -67,6 +67,7 @@ import json
 import pathlib
 import subprocess
 import sys
+from collections.abc import Iterable
 from typing import NamedTuple
 
 from _beaker_listing import DEFAULT_TEXT, fetch_experiments_by_name
@@ -225,6 +226,32 @@ def family_jobs(
     raise ValueError(f"unknown family {family!r}")
 
 
+def select_jobs(
+    families: Iterable[str],
+    runs: Iterable[str],
+    ckpt: str = "bestinf",
+    arch: str = DEFAULT_ARCH,
+    kinds: list[str] | None = None,
+    sst_grids: list[str] | None = None,
+    sst_levels: list[str] | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """(family, run, job name, config filename) of every job of `families`
+    on `runs` (sorted), family by family: family_jobs, without the
+    CM4/X-SHiELD families on runs not in cm4_xshield_runs(arch). The job name
+    is the wandb run name; beaker_job_name gives the Beaker experiment name.
+    """
+    cm4_xshield_ok = set(cm4_xshield_runs(arch))
+    return [
+        (family, run, name, config)
+        for family in families
+        for run in sorted(runs)
+        if family not in CM4_XSHIELD_FAMILIES or run in cm4_xshield_ok
+        for name, config in family_jobs(
+            family, run, kinds, sst_grids, sst_levels, ckpt, arch
+        )
+    ]
+
+
 def resolve_runs(
     args: argparse.Namespace,
 ) -> tuple[dict[str, str], dict[str, str]]:
@@ -373,17 +400,14 @@ def main() -> None:
 
     jobs = [
         Job(beaker_job_name(name), family, config, ready[run], groups[family], name)
-        for family in args.family
-        for run in sorted(ready)
-        if family not in CM4_XSHIELD_FAMILIES or run in cm4_xshield_ok
-        for name, config in family_jobs(
-            family,
-            run,
+        for family, run, name, config in select_jobs(
+            args.family,
+            ready,
+            args.ckpt,
+            args.arch,
             args.kind,
             args.sst_grid,
             args.sst_level,
-            args.ckpt,
-            args.arch,
         )
     ]
     if args.old_runs:
