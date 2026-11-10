@@ -18,7 +18,8 @@ class NormalizationConfig:
     Configuration for normalizing data.
 
     Either global_means_path and global_stds_path or explicit means and stds
-    must be provided.
+    must be provided. If both are provided, the explicit means and stds take
+    precedence over (or add to) the values in the netCDF files.
 
     Parameters:
         global_means_path: Path to a netCDF file containing global means.
@@ -45,10 +46,12 @@ class NormalizationConfig:
             self.global_means_path is not None and self.global_stds_path is not None
         )
         using_explicit = len(self.means) > 0 and len(self.stds) > 0
-        if using_path and using_explicit:
+        if using_path and set(self.means) != set(self.stds):
             raise ValueError(
-                "Cannot use both global_means_path and global_stds_path "
-                "and explicit means and stds."
+                "When combining global_means_path and global_stds_path with "
+                "explicit means and stds, the explicit means and stds must "
+                f"have the same keys, got means keys {sorted(self.means)} and "
+                f"stds keys {sorted(self.stds)}."
             )
         if not (using_path or using_explicit):
             raise ValueError(
@@ -75,6 +78,8 @@ class NormalizationConfig:
                 names=None,
                 defaults={"x": 1.0, "y": 1.0, "z": 1.0},
             )
+            means.update(self.means)
+            stds.update(self.stds)
             self.means = means
             self.stds = stds
             self.global_means_path = None
@@ -85,13 +90,21 @@ class NormalizationConfig:
             self.global_means_path is not None and self.global_stds_path is not None
         )
         if using_path:
-            return get_normalizer(
+            file_normalizer = get_normalizer(
                 global_means_path=self.global_means_path,
                 global_stds_path=self.global_stds_path,
-                names=names,
+                names=[n for n in names if n not in self.means],
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
             )
+            explicit_names = [n for n in names if n in self.means]
+            if len(explicit_names) == 0:
+                return file_normalizer
+            explicit_normalizer = StandardNormalizer(
+                means={k: torch.tensor(self.means[k]) for k in explicit_names},
+                stds={k: torch.tensor(self.stds[k]) for k in explicit_names},
+            )
+            return _combine_normalizers(file_normalizer, explicit_normalizer)
         else:
             means = {k: torch.tensor(self.means[k]) for k in names}
             stds = {k: torch.tensor(self.stds[k]) for k in names}
