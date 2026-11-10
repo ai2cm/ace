@@ -119,6 +119,12 @@ def test_output_shape(
             0,
             id="mlp_input_filter_no_mlp",
         ),
+        pytest.param({"hidden_embed_dim": 3}, 0, id="hidden_channels"),
+        pytest.param(
+            {"hidden_embed_dim": 3, "block_mlp_input": "filter", "checkpointing": 3},
+            0,
+            id="hidden_channels_mlp_input_filter_checkpointed",
+        ),
         pytest.param({"filter_num_groups": 4}, 0, id="grouped_filter"),
         pytest.param({"spectral_ratio": 0.5}, 0, id="spectral_ratio"),
         pytest.param(
@@ -249,6 +255,7 @@ def test_forcing_slot_in_context_config_rejected():
         ({"embed_dim": 8, "spectral_ratio": 0.5, "filter_num_groups": 3}, "divide"),
         ({"embed_dim": 8, "mlp_ratio": 0.1}, "no MLP hidden channels"),
         ({"block_mlp_input": "spectral"}, "block_mlp_input"),
+        ({"hidden_embed_dim": -1}, "hidden_embed_dim"),
     ],
 )
 def test_invalid_config_raises(kwargs, match):
@@ -295,6 +302,49 @@ def test_block_mlp_input_filter_branch_reaches_field_only_through_mlp(
         torch.testing.assert_close(out_before, out_after)
     else:
         assert not torch.allclose(out_before, out_after)
+
+
+@pytest.mark.parametrize("filter_output", [False, True])
+@pytest.mark.parametrize("diagnostic", [0, 2])
+def test_hidden_channels_ride_the_residual_stream(filter_output, diagnostic):
+    """Hidden channels widen the blocks and start from a learned zero init,
+    are not output, keep the identity at init, and once the gates open they
+    carry information between blocks (the output depends on hidden_init)."""
+    prognostic, forcing, hidden = 5, 3, 3
+    net, x, context = _build(
+        prognostic,
+        forcing,
+        diagnostic,
+        hidden_embed_dim=hidden,
+        filter_output=filter_output,
+    )
+    assert net.hidden_init.shape == (1, hidden, 1, 1)
+    assert torch.count_nonzero(net.hidden_init) == 0
+    width = prognostic + diagnostic + hidden
+    assert net.blocks[0].proj_filter_in.weight.shape[1] == width
+    assert net.blocks[0].gate_filter.gamma.shape[1] == width
+    out = net(x, context)
+    assert out.shape == (N_SAMPLES, prognostic + diagnostic, *IMG_SHAPE)
+    torch.testing.assert_close(out[:, :prognostic], x[:, :prognostic])
+    torch.testing.assert_close(
+        out[:, prognostic:], torch.zeros_like(out[:, prognostic:])
+    )
+    _open_gates(net)
+    with torch.no_grad():
+        out_zero_init = net(x, context)
+        net.hidden_init.fill_(1.0)
+        out_unit_init = net(x, context)
+    assert not torch.allclose(out_zero_init, out_unit_init)
+    if not filter_output:  # filter_output's SHT backward fails on CPU MKL
+        net(x, context).sum().backward()
+        assert net.hidden_init.grad is not None
+        assert torch.count_nonzero(net.hidden_init.grad) > 0
+
+
+def test_no_hidden_channels_adds_no_parameters():
+    net, _, _ = _build(5, 3, 2)
+    assert net.hidden_init is None
+    assert not any("hidden_init" in name for name, _ in net.named_parameters())
 
 
 def test_branch_widths_follow_embed_dim():

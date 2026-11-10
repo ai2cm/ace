@@ -27,7 +27,10 @@ Forcing channels are not part of the residual stream. They are encoded once
 by a small pointwise network and condition every conditional layer
 normalization through ``Context.embedding_forcing``. Diagnostic channels are
 initialized from learned per-channel values (zero at init) and then evolved
-by the blocks like the prognostic channels.
+by the blocks like the prognostic channels. ``hidden_embed_dim`` adds
+latent channels to the residual stream that correspond to no field: they
+are initialized like the diagnostics, evolved by the blocks, and dropped
+from the output, so they only carry information between blocks.
 """
 
 import dataclasses
@@ -108,6 +111,11 @@ class FieldSFNONetConfig:
         gamma_init: Initial value of the residual gates. Each block computes
             ``x = (1 + gamma_res) * x + gamma * branch(x)``; the FieldSpaceNN
             default of 1e-12 makes every block the identity at init.
+        hidden_embed_dim: Number of latent channels appended to the residual
+            stream. They correspond to no field: they start from learned
+            per-channel values (``hidden_init``, zero at init) like the
+            diagnostics, are updated by every block, and are not output, so
+            they only carry information between blocks.
     """
 
     filter_type: Literal["linear", "makani-linear", "local"] = "linear"
@@ -133,8 +141,13 @@ class FieldSFNONetConfig:
     affine_norms: bool = False
     filter_preserves_global_mean: bool = False
     gamma_init: float = 1e-12
+    hidden_embed_dim: int = 0
 
     def __post_init__(self):
+        if self.hidden_embed_dim < 0:
+            raise ValueError(
+                f"hidden_embed_dim must be >= 0, got {self.hidden_embed_dim}"
+            )
         if self.block_mlp_input not in ("field", "filter"):
             raise ValueError(
                 f"block_mlp_input must be 'field' or 'filter', "
@@ -381,6 +394,8 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
             output).
         forcing_chans: Number of forcing channels (input only).
         diagnostic_chans: Number of diagnostic channels (output only).
+            ``params.hidden_embed_dim`` further latent channels ride the
+            residual stream without being output.
         context_config: Dimensions of the externally provided context
             embeddings. ``embed_dim_forcing`` is set by this class from
             ``params.forcing_embed_dim`` and must be left at 0.
@@ -417,6 +432,8 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
         self.diagnostic_chans = diagnostic_chans
         self.in_chans = prognostic_chans + forcing_chans
         self.out_chans = prognostic_chans + diagnostic_chans
+        self.hidden_chans = params.hidden_embed_dim
+        self.state_chans = self.out_chans + self.hidden_chans
         self.checkpointing = params.checkpointing
         self.filter_output = params.filter_output
         self.trans_down = trans_down
@@ -430,6 +447,13 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
             )
         else:
             self.diagnostic_init = None
+
+        if self.hidden_chans > 0:
+            self.hidden_init: nn.Parameter | None = nn.Parameter(
+                torch.zeros(1, self.hidden_chans, 1, 1)
+            )
+        else:
+            self.hidden_init = None
 
         if forcing_chans > 0:
             layers: list[nn.Module] = []
@@ -456,7 +480,7 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
                 FieldSpaceFourierNeuralOperatorBlock(
                     forward_transform=trans_down,
                     inverse_transform=itrans_up,
-                    n_channels=self.out_chans,
+                    n_channels=self.state_chans,
                     spectral_dim=params.spectral_dim,
                     mlp_hidden_dim=params.mlp_hidden_dim,
                     img_shape=img_shape,
@@ -481,13 +505,18 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
         )
 
     def _initial_state(self, x: torch.Tensor) -> torch.Tensor:
-        prognostic = x[:, : self.prognostic_chans]
-        if self.diagnostic_init is None:
-            return prognostic
-        diagnostic = self.diagnostic_init.to(dtype=x.dtype).expand(
-            x.shape[0], self.diagnostic_chans, *x.shape[-2:]
-        )
-        return torch.cat((prognostic, diagnostic), dim=1)
+        """Residual stream at the first block: ``[prognostic, diagnostic,
+        hidden]``, the latter two broadcast from their learned initial values.
+        """
+        channels = [x[:, : self.prognostic_chans]]
+        for init in (self.diagnostic_init, self.hidden_init):
+            if init is not None:
+                channels.append(
+                    init.to(dtype=x.dtype).expand(
+                        x.shape[0], init.shape[1], *x.shape[-2:]
+                    )
+                )
+        return torch.cat(channels, dim=1)
 
     def forward(self, x: torch.Tensor, context: Context) -> torch.Tensor:
         if x.shape[-3] != self.in_chans:
@@ -508,10 +537,11 @@ class FieldSpaceSphericalFourierNeuralOperatorNet(nn.Module):
                 state = checkpoint(blk, state, context, use_reentrant=False)
             else:
                 state = blk(state, context)
+        out_in = state_in[:, : self.out_chans]
+        out = state[:, : self.out_chans]
         if self.filter_output:
-            update = state - state_in
-            state = state_in + self.itrans_up(self.trans_down(update))
-        return state
+            out = out_in + self.itrans_up(self.trans_down(out - out_in))
+        return out
 
 
 def get_lat_lon_fieldsfno(
