@@ -20,6 +20,7 @@ ATMOS_CKPT="${ATMOS_CKPT:-$ATMOS_CKPT_DEFAULT}"
 case "$OCEAN" in
   noohc) OCEAN_DS_DEFAULT=01M6H7NBRG4W31DHT2MKD4WBWA; OTAG="" ;;      # samudra-ufs1deg-resid-noohc-ppad-sstdiag-fmean-ufsft results (wandb s5j0xr6o)
   ohc)   OCEAN_DS_DEFAULT=01M6HWDXRVCZC1W5HFD5WPM19Z; OTAG="ohc-" ;;  # samudra-ufs1deg-resid-ohc-ppad-sstdiag-fmean-ufsft results (wandb 75s8184h)
+  ohc-uhm1p7) OCEAN_DS_DEFAULT=01M6HWDXRVCZC1W5HFD5WPM19Z; OTAG="ohc-uhm1p7-" ;;  # same ocean, corrector constant -1.7 W/m2 during coupled training
   *) echo "unknown OCEAN $OCEAN"; exit 1 ;;
 esac
 OCEAN_DS="${OCEAN_DS:-$OCEAN_DS_DEFAULT}"                           # stage 2 passes the lifted FTO ocean instead

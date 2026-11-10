@@ -95,7 +95,12 @@ OCEAN_FILES = {  # the two 1deg UFS fine-tunes of the CM4 hybrid-residual + diag
 OCEAN_DESC = {
     "noohc": "corrector-free 1deg UFS Samudra (resid-noohc-ppad-sstdiag-fmean-ufsft, /ocean_ckpt.tar)",
     "ohc": "corrector-kept 1deg UFS Samudra (resid-ohc-ppad-sstdiag-fmean-ufsft, scaled-temperature OHC corrector; /ocean_ckpt.tar)",
+    "ohc-uhm1p7": "corrector-kept 1deg UFS Samudra with constant_unaccounted_heating -1.7 W/m2 in the OHC corrector (the offset that matched the replay's 30-yr column heat at inference, 2026-11-10; /ocean_ckpt.tar)",
 }
+# the ohc ocean with a constant unaccounted heating in its corrector DURING coupled training (Troy 2026-11-10: the offset
+# experiments "potentially fix this problem"): same checkpoints as "ohc", only the corrector constant differs
+OCEAN_FILES["ohc-uhm1p7"] = OCEAN_FILES["ohc"]
+OCEAN_UH = {"ohc-uhm1p7": -1.7}
 
 
 def load_ocean(name):
@@ -105,7 +110,11 @@ def load_ocean(name):
     ocean = {k: v for k, v in ocean_cfg["stepper"].items() if k not in STRIP}
     corr = ocean["step"]["config"]["corrector"]["config"]
     assert corr["corrector_disabled_epochs"] == 0
-    assert ("ocean_heat_content_correction" in corr) == (name == "ohc")
+    assert ("ocean_heat_content_correction" in corr) == name.startswith("ohc")
+    if name in OCEAN_UH:
+        corr["ocean_heat_content_correction"]["constant_unaccounted_heating"] = (
+            OCEAN_UH[name]
+        )
     assert (
         "sst" not in ocean["step"]["config"]["in_names"]
         and "sst" in ocean["step"]["config"]["out_names"]
