@@ -885,6 +885,47 @@ def test_ocean_heat_content_learned_level_weights_zero_logit_is_uniform(
         torch.testing.assert_close(out[name], value, rtol=1e-12, atol=1e-12)
 
 
+def _free_tcp_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_ocean_heat_content_learned_level_weights_corrects_through_ddp():
+    """The corrector runs with logit wrapped in DistributedDataParallel as
+    on GPU, where device_ids is set and DDP's forward indexes its inputs.
+    """
+    if torch.distributed.is_initialized():
+        pytest.skip("a process group is already initialized")
+    torch.distributed.init_process_group(
+        "gloo",
+        init_method=f"tcp://127.0.0.1:{_free_tcp_port()}",
+        rank=0,
+        world_size=1,
+    )
+    try:
+        case = _partial_land_ohc_budget_case("gen")
+        corrector, learned = _learned_level_weights_corrector(case)
+
+        def wrap(module: torch.nn.Module) -> torch.nn.Module:
+            ddp = torch.nn.parallel.DistributedDataParallel(module)
+            ddp.device_ids = [0]  # DDP keeps device_ids only for CUDA modules
+            return ddp
+
+        learned.wrap_module(wrap)
+        corrected = corrector(
+            case.input_data, case.gen_data, case.forcing_data, None
+        ).corrected
+        loss = sum(torch.nansum(corrected[f"thetao_{k}"] ** 2) for k in range(3))
+        assert isinstance(loss, torch.Tensor)
+        loss.backward()
+        assert learned.torch_module.get_parameter("module.logit").grad is not None
+    finally:
+        torch.distributed.destroy_process_group()
+
+
 def test_ocean_heat_content_learned_level_weights_logs_sum_to_one():
     case = _partial_land_ohc_budget_case("gen")
     _, learned = _learned_level_weights_corrector(case, torch.tensor([0.2, -1.0, 0.5]))

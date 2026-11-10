@@ -167,7 +167,9 @@ class LevelWeightLogit(nn.Module):
         if optimizer_param_group:
             setattr(self.logit, OPTIMIZER_PARAM_GROUP_ATTR, optimizer_param_group)
 
-    def forward(self) -> torch.Tensor:
+    def forward(self, ddp_input: torch.Tensor) -> torch.Tensor:
+        # ddp_input is unused: DistributedDataParallel with device_ids
+        # indexes its moved positional inputs, so forward needs one.
         return torch.softmax(self.logit, dim=0)
 
 
@@ -181,6 +183,7 @@ class LearnedLevelWeights(LearnedCorrectorModule):
             get_device()
         )
         self._wrapped: nn.Module = self._module
+        self._ddp_input = torch.empty(0, device=get_device())
 
     @property
     def torch_module(self) -> nn.Module:
@@ -190,7 +193,7 @@ class LearnedLevelWeights(LearnedCorrectorModule):
         self._wrapped = wrapper(self._module)
 
     def __call__(self) -> torch.Tensor:
-        return self._wrapped()
+        return self._wrapped(self._ddp_input)
 
     def get_state(self) -> dict[str, Any]:
         return self._module.state_dict()
@@ -200,7 +203,7 @@ class LearnedLevelWeights(LearnedCorrectorModule):
 
     def get_logs(self) -> dict[str, float]:
         with torch.no_grad():
-            weights = self._module().tolist()
+            weights = self._module(self._ddp_input).tolist()
         return {f"corrector/ohc_level_weight_{k}": w for k, w in enumerate(weights)}
 
 

@@ -2581,7 +2581,7 @@ def test_single_module_step_trains_and_checkpoints_learned_level_weights():
     groups = optimization.optimizer.param_groups
     assert [p is logit for p in groups[-1]["params"]] == [True]
     assert groups[-1]["lr"] == 0.5
-    weights = step.modules[-1]()
+    weights = step.modules[-1](torch.empty(0))
     target = torch.tensor([0.7, 0.2, 0.1], device=weights.device)
     optimization.accumulate_loss(((weights - target) ** 2).sum())
     optimization.step_weights()
