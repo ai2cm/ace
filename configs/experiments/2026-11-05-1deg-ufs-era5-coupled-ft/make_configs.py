@@ -219,7 +219,27 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
     }
     at["loss_weight"] = 0.0
     at["n_steps"] = 0
+    # FTO with the ocean-only fine-tune's deterministic recipe (MSE, 4-step windows, loss on every step, 1 member) instead of the
+    # 2-member CRPS last-step-only recipe: the coupled cooling deep dive's discriminator (2026-11-10). Ocean-only rollouts of the
+    # FTO-lifted ocean cool under replay fluxes, so coupled training itself enlarges the ocean's heat sink; this tells whether
+    # the loss/window recipe or the ACE forcing does it.
+    fto_mse = copy.deepcopy(fto)
+    stm = fto_mse["stepper_training"]
+    stm["n_coupled_steps"] = 4
+    stm["n_ensemble"] = 1
+    stm["ocean"]["n_steps"] = 4
+    stm["ocean"]["optimize_last_step_only"] = False
+    stm["ocean"]["loss"] = {"type": "MSE"}
     stages = {
+        "fto-mse": (
+            fto_mse,
+            [
+                f"ufs1deg-{oc}-{arm}-fto-mse: FTO as ufs1deg-{oc}-{arm}-fto but with the ocean-only fine-tune's deterministic recipe",
+                "(MSE loss on every step of 4-step windows, 1 member) instead of 2-member CRPS on the last step of 1-8-step windows:",
+                "the coupled cooling deep dive's loss-recipe discriminator (2026-11-10).",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=fto-mse ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
         "fto": (
             fto,
             [
