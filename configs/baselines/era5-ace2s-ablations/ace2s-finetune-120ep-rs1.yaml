@@ -1,8 +1,7 @@
-# arg: --dataset PRETRAIN_RESULT_DATASET:/weights
+# arg: --dataset 01M4NCSW16FRV3F2ES1XDH5H3A:/weights
 #
-# Fine-tune of the 120-epoch seed-1 pretrain. Fill in
-# PRETRAIN_RESULT_DATASET once the pretrain's resume120 finishes.
-# Otherwise identical to ace2s-finetune-rs1.yaml.
+# Fine-tune of the 120-epoch seed-1 pretrain (nlapreyi at epoch 120).
+# 3-step detached, 10 epochs. Otherwise identical to ace2s-finetune-rs1.yaml.
 seed: 1
 experiment_dir: /results
 save_checkpoint: true
