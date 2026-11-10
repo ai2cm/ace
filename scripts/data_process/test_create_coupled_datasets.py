@@ -2,6 +2,7 @@
 tiny synthetic atmosphere and ocean zarr stores in a temporary directory."""
 
 import dataclasses
+import os
 
 import numpy as np
 import pytest
@@ -25,11 +26,13 @@ from create_coupled_datasets import (  # noqa: E402
     InputDatasetsConfig,
     InputEnsembleConfig,
     InputStatsConfig,
+    NullCoupledInputDatasetConfig,
 )
 from create_window_avg_dataset import WindowAvgDatasetConfig  # noqa: E402
 from merge_stats import STATS_NC_FILE_NAMES  # noqa: E402
 from writer_utils import OutputWriterConfig  # noqa: E402
 
+DIRNAME = os.path.abspath(os.path.dirname(__file__))
 NLAT = 4
 NLON = 8
 N_ATMOS_TIMES = 40  # 6-hourly steps covering ten days
@@ -314,7 +317,11 @@ def _strided_route_inputs(tmp_path):
         {
             "sea_surface_fraction": _da(1.0 - land, dims=("lat", "lon")),
             "ocean_sea_ice_fraction": _da(sic),
-            "sst": _da(np.full_like(sic, 275.0)),
+            "sst": _da(
+                np.broadcast_to(
+                    (300.0 + steps).reshape(-1, 1, 1), (len(times), NLAT, NLON)
+                ).copy()
+            ),
         }
     )
     atmos_path = str(tmp_path / "atmos.zarr")
@@ -411,3 +418,160 @@ def test_exclude_runs_on_single_dataset_raises(tmp_path):
     config = _make_config(tmp_path)
     with pytest.raises(ValueError, match="only supported for ensemble"):
         dataclasses.replace(config, stats=CoupledStatsConfig(exclude_runs=["run-a"]))
+
+
+@pytest.mark.parametrize("with_sea_surface", [False, True])
+def test_validate_coupled_ts_requires_ocean_input(tmp_path, with_sea_surface):
+    single = _make_config(tmp_path)
+    coupled = single.coupled_datasets
+    if not with_sea_surface:
+        coupled = dataclasses.replace(coupled, coupled_sea_surface=None)
+    coupled.validate(single.input_datasets)
+    without_ocean = dataclasses.replace(
+        single.input_datasets, ocean=NullCoupledInputDatasetConfig()
+    )
+    with pytest.raises(ValueError, match="ocean input dataset"):
+        coupled.validate(without_ocean)
+
+
+def _sea_surface_ensemble_config(tmp_path, coupled_ts):
+    """Ensemble config shaped like the random-CO2 ones: a 5-day strided
+    sea-surface ocean slot, no coupled_sea_surface and no ocean stats. Inputs
+    are written on the first call and reused after."""
+    atmos_path = str(tmp_path / "atmos.zarr")
+    ocean_path = str(tmp_path / "sea_surface.zarr")
+    if not os.path.exists(atmos_path):
+        _strided_route_inputs(tmp_path)
+        _write_fake_stats_dir(tmp_path / "atmosphere-stats", "uncoupled_atmos_var")
+    run = EnsembleRunConfig(
+        atmosphere=CoupledInputDatasetConfig(zarr_path=atmos_path, time_chunk_size=10),
+        ocean=CoupledInputDatasetConfig(
+            zarr_path=ocean_path, time_chunk_size=10, time_stride="5D"
+        ),
+    )
+    return CreateCoupledDatasetsConfig(
+        version="v1",
+        family_name="synthetic",
+        output_directory=str(tmp_path / "outputs"),
+        coupled_datasets=CoupledDatasetsConfig(
+            coupled_sea_ice=CoupledSeaIceConfig(include_ts=True),
+            coupled_ts=coupled_ts,
+            output_writer=OutputWriterConfig(n_split=1),
+        ),
+        input_datasets=InputEnsembleConfig(
+            runs={"run-a": run, "run-excluded": run},
+            stats=InputStatsConfig(atmosphere_dir=str(tmp_path / "atmosphere-stats")),
+            climate_data_type="CM4",
+        ),
+        stats=CoupledStatsConfig(exclude_runs=["run-excluded"]),
+    )
+
+
+def test_coupled_ts_without_sea_surface_adds_blended_atmosphere(tmp_path, monkeypatch):
+    _sea_surface_ensemble_config(tmp_path, coupled_ts=None).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+    ensemble_dir = tmp_path / "outputs" / "v1-synthetic"
+    stats_dir = tmp_path / "outputs" / "v1-synthetic-stats"
+    sea_ice_before = xr.open_zarr(str(ensemble_dir / "run-a-sea_ice.zarr")).load()
+    assert not (stats_dir / "combined" / "coupled_atmosphere").exists()
+
+    # the existing sea ice stores must be read, not recomputed
+    def _fail(*args, **kwargs):
+        raise AssertionError("recomputed the existing coupled sea ice")
+
+    monkeypatch.setattr(create_coupled_datasets, "compute_coupled_sea_ice", _fail)
+    config = _sea_surface_ensemble_config(
+        tmp_path, coupled_ts=CoupledSurfaceTemperatureConfig(how="interpolate_sst")
+    )
+    config.write_coupled_datasets(debug=False, subsample=False)
+
+    for run in ["run-a", "run-excluded"]:
+        assert (ensemble_dir / f"{run}-atmosphere.zarr").exists()
+        assert not (ensemble_dir / f"{run}-ocean.zarr").exists()
+    assert not (stats_dir / "run-excluded").exists()
+    for category in ["uncoupled_atmosphere", "coupled_atmosphere"]:
+        for fname in STATS_NC_FILE_NAMES:
+            assert (stats_dir / "combined" / category / fname).exists()
+    assert not (stats_dir / "combined" / "ocean").exists()
+
+    sea_ice = xr.open_zarr(str(ensemble_dir / "run-a-sea_ice.zarr")).load()
+    xr.testing.assert_identical(sea_ice, sea_ice_before)
+
+    atmos = xr.open_zarr(str(ensemble_dir / "run-a-atmosphere.zarr")).load()
+    _assert_blended_atmosphere(atmos, sea_ice)
+
+
+def _assert_blended_atmosphere(atmos, sea_ice):
+    # ts_blend(t) = (1 - ocean_fraction(t_k)) * ts(t) + ocean_fraction(t_k) * sst(t_k)
+    steps = np.arange(N_STRIDE_TIMES).reshape(-1, 1, 1)
+    held = steps - (steps % STRIDE_STEPS)
+    ocean_fraction = sea_ice["ocean_fraction"].values
+    expected = (1 - ocean_fraction) * (270.0 + steps) + ocean_fraction * (300.0 + held)
+    np.testing.assert_allclose(atmos["surface_temperature"].values, expected)
+    np.testing.assert_allclose(atmos["ocean_fraction"].values, ocean_fraction)
+    np.testing.assert_allclose(
+        atmos["sea_ice_fraction"].values, sea_ice["sea_ice_fraction"].values
+    )
+
+
+def test_coupled_ts_without_sea_surface_computes_sea_ice_in_same_run(tmp_path):
+    coupled_ts = CoupledSurfaceTemperatureConfig(how="interpolate_sst")
+    fresh_dir = tmp_path / "fresh"
+    rerun_dir = tmp_path / "rerun"
+    fresh_dir.mkdir()
+    rerun_dir.mkdir()
+    _sea_surface_ensemble_config(fresh_dir, coupled_ts).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+    _sea_surface_ensemble_config(rerun_dir, None).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+    _sea_surface_ensemble_config(rerun_dir, coupled_ts).write_coupled_datasets(
+        debug=False, subsample=False
+    )
+
+    fresh = fresh_dir / "outputs" / "v1-synthetic"
+    rerun = rerun_dir / "outputs" / "v1-synthetic"
+    for run in ["run-a", "run-excluded"]:
+        assert (fresh / f"{run}-sea_ice.zarr").exists()
+        assert not (fresh / f"{run}-ocean.zarr").exists()
+    assert not (
+        fresh_dir / "outputs" / "v1-synthetic-stats" / "combined" / "ocean"
+    ).exists()
+
+    sea_ice = xr.open_zarr(str(fresh / "run-a-sea_ice.zarr")).load()
+    atmos = xr.open_zarr(str(fresh / "run-a-atmosphere.zarr")).load()
+    _assert_blended_atmosphere(atmos, sea_ice)
+    xr.testing.assert_identical(
+        sea_ice, xr.open_zarr(str(rerun / "run-a-sea_ice.zarr")).load()
+    )
+    xr.testing.assert_identical(
+        atmos, xr.open_zarr(str(rerun / "run-a-atmosphere.zarr")).load()
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "configs/CM4-like-AM4-random-CO2-ensemble-coupled.yaml",
+        "configs/CM4-like-AM4-random-CO2-ensemble-coupled-4deg.yaml",
+    ],
+)
+def test_random_co2_configs_write_blended_atmosphere(path):
+    config = CreateCoupledDatasetsConfig.from_file(os.path.join(DIRNAME, path))
+    coupled = config.coupled_datasets
+    assert coupled.coupled_ts is not None
+    assert coupled.coupled_sea_surface is None
+    ensemble = config.input_datasets
+    assert isinstance(ensemble, InputEnsembleConfig)
+    for run in ensemble.runs.values():
+        coupled.validate(
+            InputDatasetsConfig(
+                climate_data_type=ensemble.climate_data_type,
+                stats=ensemble.stats,
+                atmosphere=run.atmosphere,
+                ocean=run.ocean,
+                sea_ice=run.sea_ice,
+            )
+        )
