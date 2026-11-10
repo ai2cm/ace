@@ -11,8 +11,12 @@ max_consecutive_non_finite_losses.
 Architectures (tag directly after `ace-train-config-4deg-`), sized to about the
 same parameter count:
 - nc-sfno-v2: NoiseConditionedSFNO, embed_dim 1024 (parent 512), 52.6M params.
-- nc-swin-v2.2-v2: NoiseConditionedSwinTransformer, embed_dim 224 (parent 256),
-  50.9M params.
+- nc-swin-v2.2-v2: NoiseConditionedSwinTransformer, embed_dim 256 (as the
+  parent), 66.3M params. embed_dim 224 (50.9M, closer to parity) crashed every
+  run in the first compiled backward (inductor compile subprocess died); its
+  head dims of 56/28 are not multiples of 8. With 4/8 heads the embed_dim must
+  be a multiple of 64, so parity is 192 (37.6M) or 256 (66.3M); 256 is the
+  parent's compile-tested size.
 
 Data arms (label sampling weights are equal across the arm's labels):
 - `fm-era5`: parent nc-*-fm-era5-only, the balanced base config restricted to
@@ -111,7 +115,7 @@ LR = 1e-4
 # arch tag -> (parent arch tag, parent embed_dim, embed_dim)
 ARCHS = {
     "nc-sfno-v2": ("nc-sfno", 512, 1024),
-    "nc-swin-v2.2-v2": ("nc-swin-v2.2", 256, 224),
+    "nc-swin-v2.2-v2": ("nc-swin-v2.2", 256, 256),
 }
 # arm name (in the config name) -> parent data stem
 ARMS = {

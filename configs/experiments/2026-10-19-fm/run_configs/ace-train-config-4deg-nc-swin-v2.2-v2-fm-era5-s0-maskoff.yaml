@@ -652,7 +652,7 @@ stepper:
       builder:
         type: NoiseConditionedSwinTransformer
         config:
-          embed_dim: 224
+          embed_dim: 256
           noise_embed_dim: 32
           depth_multiplier: 1
           num_heads:
