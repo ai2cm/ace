@@ -115,9 +115,7 @@ class DataWriterConfig:
             if self.names is not None:
                 entry["names"] = list(self.names)
             if self.time_coarsen is not None:
-                entry["time_coarsen"] = {
-                    "coarsen_factor": self.time_coarsen.coarsen_factor
-                }
+                entry["time_coarsen"] = dataclasses.asdict(self.time_coarsen)
             entries.append(entry)
         if self.save_monthly_files:
             entry = {"label": "monthly_mean"}

@@ -757,8 +757,8 @@ def test_legacy_file_flags_warn_when_enabled(kwargs, expected_flags):
     with pytest.warns(FutureWarning, match="deprecated") as record:
         DataWriterConfig(**kwargs)
     message = str(record[0].message)
-    for flag in expected_flags:
-        assert flag in message
+    for flag in ["save_prediction_files", "save_monthly_files"]:
+        assert (flag in message) == (flag in expected_flags)
     assert "files:" in message
 
 
