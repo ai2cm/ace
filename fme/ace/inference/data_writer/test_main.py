@@ -210,18 +210,15 @@ def _get_step_diagnostics_setup(n_samples=2, n_times=4, n_lat=4, n_lon=5):
     return config, build_kwargs, batch, delta
 
 
-@pytest.mark.parametrize("builder", ["build_paired", "build"])
 @pytest.mark.parametrize("save_names", [None, ["a"]])
 @pytest.mark.parametrize("coarsen_factor", [1, 2])
-def test_step_diagnostics_writer_writes_delta_series(
-    builder, save_names, coarsen_factor
-):
+def test_step_diagnostics_writer_writes_delta_series(save_names, coarsen_factor):
     config, build_kwargs, batch, delta = _get_step_diagnostics_setup()
     config.names = save_names
     if coarsen_factor > 1:
         config.time_coarsen = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = getattr(config, builder)(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
         filename = os.path.join(tmpdir, "step_diagnostics", "correction_deltas.nc")
@@ -250,7 +247,7 @@ def test_no_step_diagnostics_output_by_default_or_without_corrector():
     # flag off: no step-diagnostics output at all
     config.save_step_diagnostics = False
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
@@ -259,7 +256,7 @@ def test_no_step_diagnostics_output_by_default_or_without_corrector():
     config.save_step_diagnostics = True
     batch_no_diagnostics = dataclasses.replace(batch, step_diagnostics=None)
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch_no_diagnostics)
         writer.finalize()
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
@@ -269,7 +266,7 @@ def test_no_step_diagnostics_output_by_default_or_without_corrector():
         batch, step_diagnostics=StepDiagnostics(delta={})
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch_empty_delta)
         writer.finalize()
         assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
@@ -345,8 +342,8 @@ def test_gather_time_single_rank():
     xr.testing.assert_equal(result, time)
 
 
-def test_netcdf_build_paired_under_multi_gpu_builds_writers_on_root():
-    """build_paired with netCDF-only config succeeds and creates subwriters
+def test_netcdf_build_under_multi_gpu_builds_writers_on_root():
+    """build with netCDF-only config succeeds and creates subwriters
     under simulated single-rank (root). This verifies the zarr guard is not
     triggered by netCDF writers."""
     n_lat, n_lon = 4, 5
@@ -374,7 +371,7 @@ def test_netcdf_build_paired_under_multi_gpu_builds_writers_on_root():
         save_step_diagnostics=False,
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = config.build_paired(
+        writer = config.build(
             experiment_dir=tmpdir,
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -425,12 +422,12 @@ def test_gather_time_parallel():
 
 
 @pytest.mark.parallel
-def test_paired_data_writer_gathers_and_writes(tmp_path):
-    """Under multi-GPU, PairedDataWriter gathers data to root and writes
+def test_data_writer_gathers_and_writes(tmp_path):
+    """Under multi-GPU, DataWriter gathers data to root and writes
     the full sample set. Non-root ranks produce no output files."""
     import cftime
 
-    from fme.ace.inference.data_writer.main import PairedDataWriter, PairedSubwriter
+    from fme.ace.inference.data_writer.main import DataWriter, Subwriter
     from fme.ace.inference.data_writer.raw import PairedRawDataWriter
 
     dist = Distributed.get_instance()
@@ -448,7 +445,7 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
 
     coords = {"lat": np.arange(n_lat), "lon": np.arange(n_lon)}
 
-    writers: list[PairedSubwriter] = []
+    writers: list[Subwriter] = []
     if dist.is_data_parallel_root():
         raw_writer = PairedRawDataWriter(
             path=experiment_dir,
@@ -460,7 +457,7 @@ def test_paired_data_writer_gathers_and_writes(tmp_path):
         )
         writers = [raw_writer]
 
-    writer = PairedDataWriter(
+    writer = DataWriter(
         writers=writers,
         path=experiment_dir,
         variable_metadata={},

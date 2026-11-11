@@ -3,7 +3,7 @@ import logging
 from collections.abc import Callable
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.inference.data_writer import PairedDataWriter
+from fme.ace.inference.data_writer import DataWriter
 from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
 from fme.core.generics.data import InferenceDataABC
@@ -32,7 +32,7 @@ def run_dataset_comparison(
     prediction_data: InferenceDataABC[PrognosticState, BatchData],
     target_data: InferenceDataABC[PrognosticState, BatchData],
     deriver: DeriverABC,
-    writer: PairedDataWriter | NullDataWriter | None = None,
+    writer: DataWriter | NullDataWriter | None = None,
     record_logs: Callable[[InferenceLogs], None] | None = None,
 ):
     if record_logs is None:

@@ -21,7 +21,7 @@ from fme.ace.data_loading.inference import (
     ForcingDataLoaderConfig,
     TimestampList,
 )
-from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
@@ -481,9 +481,9 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
     )
 
 
-def _paired_writer(tmp_path: pathlib.Path) -> PairedDataWriter:
-    """A minimal PairedDataWriter for exercising the full-state restart netCDF."""
-    return PairedDataWriter(
+def _data_writer(tmp_path: pathlib.Path) -> DataWriter:
+    """A minimal DataWriter for exercising the full-state restart netCDF."""
+    return DataWriter(
         writers=[],
         path=str(tmp_path),
         variable_metadata={},
@@ -515,7 +515,7 @@ def _prognostic_state(
 
 
 def _write_restart(tmp_path: pathlib.Path, state: PrognosticState) -> pathlib.Path:
-    _paired_writer(tmp_path).write(state, "restart.nc")
+    _data_writer(tmp_path).write(state, "restart.nc")
     return tmp_path / "restart.nc"
 
 

@@ -205,7 +205,7 @@ class TestDataWriter:
             save_prediction_files=True,
             save_monthly_files=True,
             names=None,
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -364,7 +364,7 @@ class TestDataWriter:
             save_prediction_files=True,
             save_monthly_files=True,
             names=save_names,
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=4,  # unused
@@ -438,7 +438,7 @@ class TestDataWriter:
             save_prediction_files=True,
             save_monthly_files=True,
             names=None,
-        ).build_paired(
+        ).build(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=3,
@@ -550,9 +550,15 @@ class TestDataWriter:
             expected_shape = (n_samples, n_timesteps // coarsen_factor, 4, 5)
             assert ds.temp.shape == expected_shape
             assert ds.valid_time.shape == expected_shape[:2]
-            assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
+            assert set(ds.data_vars) == {"temp", "pressure"}
             assert ds.attrs["title"] == "ACE autoregressive predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
+
+        with xr.open_dataset(
+            tmp_path / "autoregressive_target.nc",
+            decode_timedelta=False,
+        ) as ds:
+            assert set(ds.data_vars) == {"insolation"}
 
         with xr.open_dataset(
             tmp_path / "monthly_mean_predictions.nc", decode_timedelta=False
@@ -563,7 +569,7 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
-            assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
+            assert set(ds.data_vars) == {"temp", "pressure"}
             assert set(ds.coords) == {
                 "init_time",
                 "valid_time",
@@ -576,7 +582,7 @@ class TestDataWriter:
             assert ds.attrs["source.inference_version"] == "1.0"
 
         with xr.open_dataset(
-            tmp_path / "test_region.zarr", decode_timedelta=False
+            tmp_path / "test_region_predictions.zarr", decode_timedelta=False
         ) as ds:
             assert "pressure" in ds
             assert "temp" not in ds
@@ -586,7 +592,7 @@ class TestDataWriter:
                 assert key in ds.coords and key not in ds.data_vars
             assert ds.pressure.encoding["shards"][1] == batch_time.shape[1]
             assert ds.pressure.encoding["chunks"] == (1, 1, 2, 3)
-            assert ds.attrs["title"] == "ACE test region data"
+            assert ds.attrs["title"] == "ACE test region predictions data"
             assert ds.attrs["source.inference_version"] == "1.0"
 
     def test_append_batch_separate_ics(
@@ -683,7 +689,9 @@ class TestDataWriter:
                 )
                 + datetime.timedelta(hours=6) * i
             )
-            with xr.open_dataset(tmp_path / f"test_region_ic000{i}.zarr") as ds:
+            with xr.open_dataset(
+                tmp_path / f"test_region_predictions_ic000{i}.zarr"
+            ) as ds:
                 assert "pressure" in ds
                 assert "temp" in ds
                 assert ds.pressure.shape == (n_timesteps, n_lat, n_lon)
@@ -717,7 +725,7 @@ def test_default_netcdf_writers_record_data_writer_io(tmp_path):
     data = {"var": torch.rand(shape, device=get_device())}
     with GlobalTimer():
         timer = GlobalTimer.get_instance()
-        writer.append_batch(get_paired_data(data, {}, batch_time))
+        writer.append_batch(get_paired_data(data, data, batch_time))
         writer.finalize()
         durations = timer.get_durations()
     assert durations["data_writer_io"] > 0.0

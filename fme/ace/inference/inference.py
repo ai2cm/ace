@@ -25,7 +25,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
     local_ic_range,
 )
-from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import (
@@ -323,8 +323,8 @@ class InferenceConfig:
         timestep: datetime.timedelta,
         coords: Mapping[str, np.ndarray],
         variable_metadata: Mapping[str, VariableMetadata],
-    ) -> PairedDataWriter:
-        return self.data_writer.build_paired(
+    ) -> DataWriter:
+        return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
             initial_condition_times=initial_condition_times,

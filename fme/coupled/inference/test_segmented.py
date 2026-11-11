@@ -16,7 +16,7 @@ import yaml
 
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.inference import ExplicitIndices
-from fme.ace.inference.data_writer import PairedDataWriter
+from fme.ace.inference.data_writer import DataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.inference import ForcingDataLoaderConfig
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -29,7 +29,7 @@ from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.inference.data_writer import (
     ATMOSPHERE_OUTPUT_DIR_NAME,
     OCEAN_OUTPUT_DIR_NAME,
-    CoupledPairedDataWriter,
+    CoupledDataWriter,
 )
 from fme.coupled.inference.inference import (
     ComponentInitialConditionConfig,
@@ -178,9 +178,9 @@ def test_segmented_inference_rejects_ensemble(tmp_path):
         run_segmented_inference(config, 3)
 
 
-def _paired_writer(path: pathlib.Path) -> PairedDataWriter:
+def _data_writer(path: pathlib.Path) -> DataWriter:
     os.makedirs(path, exist_ok=True)
-    return PairedDataWriter(
+    return DataWriter(
         writers=[],
         path=str(path),
         variable_metadata={},
@@ -215,9 +215,9 @@ def _coupled_prognostic_state(
 def _write_coupled_restart(
     tmp_path: pathlib.Path, state: CoupledPrognosticState
 ) -> tuple[str, str]:
-    writer = CoupledPairedDataWriter(
-        ocean_writer=_paired_writer(tmp_path / OCEAN_OUTPUT_DIR_NAME),
-        atmosphere_writer=_paired_writer(tmp_path / ATMOSPHERE_OUTPUT_DIR_NAME),
+    writer = CoupledDataWriter(
+        ocean_writer=_data_writer(tmp_path / OCEAN_OUTPUT_DIR_NAME),
+        atmosphere_writer=_data_writer(tmp_path / ATMOSPHERE_OUTPUT_DIR_NAME),
     )
     writer.write(state, "restart.nc")
     return _restart_paths(str(tmp_path))

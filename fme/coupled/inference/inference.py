@@ -34,8 +34,8 @@ from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.inference.data_writer import (
     ATMOSPHERE_OUTPUT_DIR_NAME,
     OCEAN_OUTPUT_DIR_NAME,
+    CoupledDataWriter,
     CoupledDataWriterConfig,
-    CoupledPairedDataWriter,
     DatasetMetadata,
 )
 from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
@@ -232,7 +232,7 @@ class InferenceConfig:
     def get_data_writer(
         self,
         data: InferenceGriddedData,
-    ) -> CoupledPairedDataWriter:
+    ) -> CoupledDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
                 self.data_writer.ocean.time_coarsen.validate(
@@ -260,7 +260,7 @@ class InferenceConfig:
             "ocean": dataset_metadata,
             "atmosphere": dataset_metadata,
         }
-        return self.data_writer.build_paired(
+        return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,

@@ -7,7 +7,7 @@ import cftime
 import numpy.typing as npt
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.main import DataWriter, DataWriterConfig
 from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
@@ -38,7 +38,7 @@ class CoupledDataWriterConfig:
         default_factory=lambda: DataWriterConfig()
     )
 
-    def build_paired(
+    def build(
         self,
         experiment_dir: str,
         initial_condition_times: npt.NDArray[cftime.datetime],
@@ -49,13 +49,13 @@ class CoupledDataWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: CoupledCoords,
         dataset_metadata: dict[str, DatasetMetadata],
-    ) -> "CoupledPairedDataWriter":
+    ) -> "CoupledDataWriter":
         ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
         makedirs(ocean_dir, exist_ok=True)
         atmos_dir = os.path.join(experiment_dir, ATMOSPHERE_OUTPUT_DIR_NAME)
         makedirs(atmos_dir, exist_ok=True)
-        return CoupledPairedDataWriter(
-            ocean_writer=self.ocean.build_paired(
+        return CoupledDataWriter(
+            ocean_writer=self.ocean.build(
                 experiment_dir=ocean_dir,
                 initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_ocean,
@@ -64,7 +64,7 @@ class CoupledDataWriterConfig:
                 coords=coords.ocean,
                 dataset_metadata=dataset_metadata["ocean"],
             ),
-            atmosphere_writer=self.atmosphere.build_paired(
+            atmosphere_writer=self.atmosphere.build(
                 experiment_dir=atmos_dir,
                 initial_condition_times=initial_condition_times,
                 n_timesteps=n_timesteps_atmosphere,
@@ -76,11 +76,11 @@ class CoupledDataWriterConfig:
         )
 
 
-class CoupledPairedDataWriter(WriterABC[CoupledPrognosticState, CoupledPairedData]):
+class CoupledDataWriter(WriterABC[CoupledPrognosticState, CoupledPairedData]):
     def __init__(
         self,
-        ocean_writer: PairedDataWriter,
-        atmosphere_writer: PairedDataWriter,
+        ocean_writer: DataWriter,
+        atmosphere_writer: DataWriter,
     ):
         self._ocean_writer = ocean_writer
         self._atmosphere_writer = atmosphere_writer
