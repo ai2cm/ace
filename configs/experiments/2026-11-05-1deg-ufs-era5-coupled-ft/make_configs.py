@@ -313,6 +313,16 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
                 f"Launch: OCEAN={oc} ARM={arm} STAGE=fto ./launch-1deg-ufs-era5-coupled-ft.sh",
             ],
         ),
+        "fto-mse-then-alt": (
+            alt,
+            [
+                f"ufs1deg-{oc}-{arm}-fto-mse-then-alt: the same alternating coupled fine-tune as ufs1deg-{oc}-{arm}-fto-then-alt (2-member",
+                f"CRPS, Elynn's 1deg template) but warm-started from the MSE-loss FTO ocean (lifted from ufs1deg-{oc}-{arm}-fto-mse,",
+                "/ocean_ckpt.tar): the MSE FTO holds the observed warming corrector-free where the CRPS FTO cools (2026-11-11); this",
+                "tells whether the CRPS alternating stage brings the cooling back.",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=fto-mse-then-alt OCEAN_DS=<lifted fto-mse ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
         "fto-then-alt": (
             alt,
             [

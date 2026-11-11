@@ -11,7 +11,7 @@
 set -euo pipefail
 OCEAN="${OCEAN:-noohc}"             # noohc = corrector-free UFS ocean (paper-2 line); ohc = scaled-temperature OHC corrector kept (2026-11-09 cooling test)
 ARM="${ARM:?ace2s6h or ace2s512}"
-STAGE="${STAGE:?fto, fto-then-alt, fto-mse, jfto or jfto-then-alt}"
+STAGE="${STAGE:?fto, fto-then-alt, fto-mse, fto-mse-then-alt, jfto or jfto-then-alt}"
 case "$ARM" in
   ace2s6h)  ATMOS_DS_DEFAULT=01M49ERVM1DVWV12G5DRDXM0PC; ATMOS_CKPT_DEFAULT=training_checkpoints/ema_ckpt_0002.tar ;;        # 1deg-6h-ace2s-ft12-detached-rs0 (wandb cerls68n), the ACE2S paper's sixhourly checkpoint
   ace2s512) ATMOS_DS_DEFAULT=01KSVC6YS7C18SGYV4VPZYZ232; ATMOS_CKPT_DEFAULT=training_checkpoints/best_inference_ckpt.tar ;;  # ace2s-era5-multi-step-fine-tuning-no-var-weighting-rs0 (wandb u9ek57d9), the summer-2026 coupled runs' atmosphere
@@ -44,6 +44,7 @@ case "$STAGE" in
   fto) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto" ;;
   fto-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-then-ftalt" ;;
   fto-mse) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse" ;;
+  fto-mse-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse-then-ftalt" ;;   # CRPS alternating stage from the MSE-loss FTO ocean
   jfto) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-jfto" ;;                        # CM4 1deg two-stage template (James's recipe), stage 1
   jfto-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-jfto-then-ftalt"; : "${CKPT_DS:?stage-2 needs CKPT_DS=<jfto results dataset>}" ;;
   *) echo "unknown STAGE $STAGE"; exit 1 ;;
