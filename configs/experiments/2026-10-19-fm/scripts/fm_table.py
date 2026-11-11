@@ -14,7 +14,15 @@ preemptions do not inflate it. Epoch and train-time
 columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
 excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
 row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced,
-fm-spencer-balanced).
+fm-spencer-balanced). Only the -maskoff v2 runs are tracked; the -maskon
+runs are paused and left out. The 2026-11-11 follow-ups of the v2 runs
+(create_fm_v2_followup_jobs.tracked_runs) are counted in their parent's row,
+not rows of their own: the swin LR sweep (30 epochs) in the swin-v2.2-v2
+fm-balanced row, the ext80 forks of both architectures and the swin e120 runs
+(120 epochs; only for the LRs in E120_RUNS, so unchosen ones never count as
+not submitted) in their arm's row. The ext80 forks restart the epoch count
+at the fork, so their epochs are shown parent-equivalent (child epoch + 40,
+finished = 120).
 The v1 sfno and older swin runs are not tracked (ARCHS); their logs are not read. All
 values are measured; there are no estimates.
 
@@ -45,6 +53,7 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
+from create_fm_v2_followup_jobs import tracked_runs  # noqa: E402
 from submit_fm_jobs import (  # noqa: E402
     ARCH_CHOICES,
     V2_ARCH_CHOICES,
@@ -182,8 +191,19 @@ def is_v2(arch: str) -> bool:
     return any(arch.startswith(base) for _, base in V2_TAGS)
 
 
-def max_epochs_of(arch: str) -> int:
+# Follow-up runs by job name: their own max_epochs and, for forks, the
+# parent epochs before their first.
+FOLLOWUPS = {run.job_name: run for run in tracked_runs()}
+
+
+def max_epochs_of(arch: str, name: str | None = None) -> int:
+    if name in FOLLOWUPS:
+        return FOLLOWUPS[name].max_epochs
     return V2_MAX_EPOCHS if is_v2(arch) else MAX_EPOCHS
+
+
+def epoch_offset_of(name: str) -> int:
+    return FOLLOWUPS[name].epoch_offset if name in FOLLOWUPS else 0
 
 
 def _log_time(t: str) -> datetime:
@@ -287,13 +307,15 @@ def _run_log(job_id: str) -> str:
     ).stdout
 
 
-def progress(named, arch: str) -> tuple[int, Seconds, float]:
+def progress(named, arch: str, name: str | None = None) -> tuple[int, Seconds, float]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference), useful train seconds) over the logs of every run (preemption
-    retry) of the experiment, finished or not.
+    retry) of the experiment, finished or not. Epochs done are
+    parent-equivalent for forks (epoch_offset_of).
     """
     none: Seconds = (None, None, None, None)
-    max_epochs = max_epochs_of(arch)
+    offset = epoch_offset_of(name) if name is not None else 0
+    max_epochs = max_epochs_of(arch, name) + offset
     if named is None:
         return 0, none, 0.0
     jobs = named.experiment.get("jobs") or []
@@ -311,6 +333,7 @@ def progress(named, arch: str) -> tuple[int, Seconds, float]:
             intervals, epoch_intervals(log, heavy_inference_residue(arch))
         ):
             acc.extend(values)
+    done += offset
     if named.status == OK:
         done = max_epochs
     full, train, light, heavy = intervals
@@ -326,23 +349,32 @@ def main() -> None:
     ]
     names += [config_to_job_name(c) for c in select_configs(None, V2_ARCH_CHOICES)]
     names += [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
-    names = [n for n in dict.fromkeys(names) if arch_of(n) in ARCHS]
+    names += list(FOLLOWUPS)
+    # The -maskon v2 runs are paused (stopped on Beaker) and not tracked.
+    names = [
+        n
+        for n in dict.fromkeys(names)
+        if arch_of(n) in ARCHS and not n.endswith("-maskon")
+    ]
     # List per architecture by the names' longest common prefix: the broad
     # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
     # while each narrow one takes ~1 s.
+    # One listing per row and job-name tag (the part before "-fm-"), so a
+    # row's follow-up runs are listed apart from its v2 runs.
     by_name = {}
     for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
-        # An empty row's common prefix is "", which would list the whole
-        # workspace.
-        if arch_names:
-            by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
+        for tag in dict.fromkeys(n.partition("-fm-")[0] for n in arch_names):
+            # Never empty, so never the common prefix "", which would list
+            # the whole workspace.
+            tag_names = [n for n in arch_names if n.startswith(f"{tag}-fm-")]
+            by_name.update(newest_by_name(os.path.commonprefix(tag_names)))
     with ThreadPoolExecutor(20) as ex:
         prog = dict(
             zip(
                 names,
                 ex.map(
-                    lambda n: progress(by_name.get(n), arch_of(n)),
+                    lambda n: progress(by_name.get(n), arch_of(n), n),
                     names,
                 ),
             )

@@ -3,7 +3,9 @@
 Runs: the training runs of one architecture (--arch, default sfno: nc-sfno
 and swin-v2.2: nc-swin-v2.2, their four-source runs, no e3sm; sfno-v2:
 nc-sfno-v2 and swin-v2.2-v2: nc-swin-v2.2-v2, the 2026-11-09 runs of all
-four data arms;
+four data arms; sfno-v2-ext80, swin-v2.2-v2-ext80 and, once X is chosen,
+swin-v2.2-v2-lr{X}-e120: the 2026-11-11 follow-ups of the v2 runs,
+create_fm_v2_followup_jobs.py;
 _inference_common.ARCHS and inference_run_names; no diagnostics) whose Beaker
 experiment succeeded. The cm4xshield and cm4-1pct families skip runs not
 trained on CM4 and X-SHiELD (the v2 fm-era5 arms), and use the arch's
@@ -30,14 +32,17 @@ Checkpoint (--ckpt, default bestinf; _inference_common.CHECKPOINTS):
   bestinf     training_checkpoints/best_inference_ckpt.tar  (EMA weights)
   lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch;
               ema_ckpt_0050.tar for sfno-v2 and swin-v2.2-v2,
-              LAST_EMA_EPOCHS)
+              ema_ckpt_0080.tar for the ext80 forks, ema_ckpt_0120.tar
+              for the e120 runs; LAST_EMA_EPOCHS)
 
 --ckpt lastema: eval-suite job names swap "-bestinf" for "-lastema"; sst and
 paper job names (which carry no checkpoint suffix) get "-lastema" appended.
 Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS). The
 wandb groups of an arch with its own training date (GROUP_DATES; sfno-v2,
 swin-v2.2-v2: 2026-11-09) carry that date instead of 2026-10-19
-(wandb_groups); the two v2 archs share their groups, as sfno and swin-v2.2
+(wandb_groups), and the follow-up archs their phase tag and date (e.g.
+ace2-fm-eval-ext80-2026-11-11, ace2-fm-eval-lastema-ext80-2026-11-11);
+the two v2 archs share their groups, as sfno and swin-v2.2
 do (their job names differ by arch token). Where
 the lastema name would pass Beaker's 128-character limit (the balanced runs'
 ERA5 paper kinds), only the Beaker experiment name is shortened
@@ -55,7 +60,8 @@ Every config a submission uses is validated against this checkout's fme
 first (--dry-run validates too, so a dry run proves the configs load).
 
 Usage:
-    python submit_inference_jobs.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2}]
+    python submit_inference_jobs.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
+                                            sfno-v2-ext80,swin-v2.2-v2-ext80}]
                                     [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]

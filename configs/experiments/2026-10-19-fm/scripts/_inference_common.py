@@ -73,7 +73,8 @@ EXCLUDED_TOKENS_BY_ARCH = {
 }
 # Date of the training wandb group of each arch whose runs are not the
 # 2026-10-19 ones; it replaces "2026-10-19" in the inference wandb group names
-# (submit_inference_jobs.wandb_groups).
+# (submit_inference_jobs.wandb_groups). For the follow-up archs below it also
+# carries the phase tag, e.g. ace2-fm-eval-ext80-2026-11-11.
 GROUP_DATES = {"sfno-v2": "2026-11-09", "swin-v2.2-v2": "2026-11-09"}
 DEFAULT_GROUP_DATE = "2026-10-19"
 # Config variant of the CM4/X-SHiELD suites (cm4xshield, cm4-1pct) per arch
@@ -82,6 +83,37 @@ DEFAULT_GROUP_DATE = "2026-10-19"
 # their suites read those datasets the same way. The swin-v2.2-v2 runs share
 # the sfno-v2 runs' data config (check_shared_sources), so they share the suite.
 CM4_XSHIELD_VARIANT = {"sfno-v2": "v2", "swin-v2.2-v2": "v2"}
+
+
+def _add_followup_archs() -> None:
+    """The 2026-11-11 follow-ups of the v2 runs (create_fm_v2_followup_jobs.py)
+    as archs of their own, with the v2 archs' 174 jobs per checkpoint:
+    sfno-v2-ext80 and swin-v2.2-v2-ext80 (phase B, forks trained 80 more
+    epochs, last EMA checkpoint ema_ckpt_0080.tar, groups tagged
+    ext80-2026-11-11) and, for each chosen X in E120_RUNS,
+    swin-v2.2-v2-lr{X}-e120 (phase C, 120 epochs, ema_ckpt_0120.tar, groups
+    tagged lr{X}-e120-<date>). Their tokens are followed by "-fm-" too, so
+    nc-swin-v2.2-v2-fm- never selects them and theirs never select a v2 run.
+    Phase A (the LR sweep) gets no inference jobs.
+    """
+    from create_fm_v2_followup_jobs import E120_RUNS, e120_runs, ext80_runs
+
+    runs = ext80_runs() + [run for lr in E120_RUNS for run in e120_runs(lr)]
+    for run in runs:
+        base = "sfno-v2" if run.arch == "nc-sfno-v2" else "swin-v2.2-v2"
+        arch = f"{base}-{run.variant}"
+        if arch in ARCHS:
+            continue
+        ARCHS[arch] = run.tag
+        EXCLUDED_TOKENS_BY_ARCH[arch] = EXCLUDED_TOKENS_BY_ARCH[base]
+        LAST_EMA_EPOCHS[arch] = run.max_epochs
+        # The group's tag and date: ace2-fm-swin-ext80-2026-11-11 ->
+        # ext80-2026-11-11.
+        GROUP_DATES[arch] = run.group.split("-", 3)[3]
+        CM4_XSHIELD_VARIANT[arch] = CM4_XSHIELD_VARIANT[base]
+
+
+_add_followup_archs()
 # Training labels a run needs for the CM4/X-SHiELD suites to be in-sample; runs
 # without them (the v2 fm-era5 arms) get no cm4xshield / cm4-1pct jobs.
 CM4_XSHIELD_LABELS = ("cm4", "xshield")

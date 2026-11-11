@@ -15,7 +15,8 @@ counts experiments that exist and failed, were canceled, or have no job.
 Each of those is listed below the table with its experiment id.
 
 Usage:
-    python eval_table.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2}]
+    python eval_table.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
+                                  sfno-v2-ext80,swin-v2.2-v2-ext80}]
                          [--ckpt {bestinf,lastema} ...]
 """
 

@@ -82,13 +82,26 @@ def select_configs(version: str | None, archs: Sequence[str]) -> list[str]:
 
 
 def arch_tag(config_filename: str) -> str | None:
-    """The longest architecture tag directly after CONFIG_PREFIX, if any."""
+    """The longest architecture tag directly after CONFIG_PREFIX, if any.
+
+    A v2 tag not directly followed by "-fm-" is extended by everything up to
+    "-fm-": the follow-ups of the v2 runs (create_fm_v2_followup_jobs.py, e.g.
+    nc-swin-v2.2-v2-ext80-fm-...) get their own tag (nc-swin-v2.2-v2-ext80),
+    so the v2 selection (V2_ARCH_CHOICES) never picks them up.
+    """
     matches = [
         tag
         for tag in ALL_ARCH_TAGS
         if config_filename.startswith(f"{CONFIG_PREFIX}{tag}-")
     ]
-    return max(matches, key=len) if matches else None
+    if not matches:
+        return None
+    tag = max(matches, key=len)
+    rest = config_filename.removeprefix(f"{CONFIG_PREFIX}{tag}-")
+    if tag in V2_ARCH_CHOICES and not rest.startswith("fm-"):
+        variant, sep, _ = rest.partition("-fm-")
+        return f"{tag}-{variant}" if sep else None
+    return tag
 
 
 def config_to_job_name(config_filename: str) -> str:
