@@ -5,8 +5,12 @@ Epochs done and per-phase timings come from the logs of every run
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
 inference are all done. Finished jobs count as max_epochs; never-started jobs
-count as 0. Train time is the running wall time summed over an experiment's
-jobs (preemption retries included, queueing excluded). Epoch and train-time
+count as 0. Train time is the wall time that produced kept progress, summed
+over an experiment's jobs (preemption retries): each job counts from its first
+training step to its exit (or now, if running), except that a preempted or
+failed job counts only up to its last checkpoint save, since the work after it
+is redone by the next retry. Queueing, startup and lost work are excluded, so
+preemptions do not inflate it. Epoch and train-time
 columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
 excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
 row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced,
@@ -64,6 +68,11 @@ PHASE_RE = re.compile(
     re.M,
 )
 RESUME_MARK = "Resuming training from"
+# Checkpoint saves: at each epoch end and every checkpoint_every_n_batches. A
+# preempted run resumes from the last one, so its later work is redone.
+CHECKPOINT_RE = re.compile(
+    r"^(\S+)Z .*Saving (?:checkpoints for epoch|latest checkpoint)", re.M
+)
 # Two tables with the same rows, so each fits a terminal: job counts and
 # epochs, then timings.
 COUNT_COLUMNS = (
@@ -177,20 +186,29 @@ def max_epochs_of(arch: str) -> int:
     return V2_MAX_EPOCHS if is_v2(arch) else MAX_EPOCHS
 
 
-def train_seconds(named) -> float:
-    """Wall seconds the experiment's jobs have spent running, summed over all
-    attempts (preemption retries); time spent queued is excluded.
+def _log_time(t: str) -> datetime:
+    return datetime.fromisoformat(t).replace(tzinfo=UTC)
+
+
+def useful_seconds(job: dict, log: str) -> float:
+    """Wall seconds of one job (run) whose progress was kept: from its first
+    training step to its exit (or now, if still running); a preempted or
+    failed job ends at its last checkpoint save, as later work is redone.
     """
-    now = datetime.now(UTC)
-    total = 0.0
-    for job in named.experiment.get("jobs") or []:
-        status = job.get("status", {})
-        if "started" not in status:
-            continue
-        end = status.get("exited") or status.get("canceled")
-        t_end = datetime.fromisoformat(end) if end else now
-        total += (t_end - datetime.fromisoformat(status["started"])).total_seconds()
-    return total
+    starts = [_log_time(t) for t, _, _ in PHASE_RE.findall(log)]
+    if not starts:
+        return 0.0
+    start = starts[0]
+    status = job.get("status", {})
+    if status.get("exited") and status.get("exitCode") == 0:
+        end = datetime.fromisoformat(status["exited"])
+    elif not status.get("exited") and not status.get("canceled"):
+        end = datetime.now(UTC)
+    else:
+        saves = [_log_time(t) for t in CHECKPOINT_RE.findall(log)]
+        saves = [t for t in saves if t >= start]
+        end = saves[-1] if saves else start
+    return max((end - start).total_seconds(), 0.0)
 
 
 def format_duration(seconds: float) -> str:
@@ -257,7 +275,10 @@ def epoch_intervals(log: str, heavy_residue: int) -> Intervals:
 
 
 def _run_log(job_id: str) -> str:
-    grep = "grep -E 'Starting (training|validation|inference) step|Resuming training'"
+    grep = (
+        "grep -E 'Starting (training|validation|inference) step|Resuming training"
+        "|Saving (checkpoints for epoch|latest checkpoint)'"
+    )
     return subprocess.run(
         f"beaker job logs {job_id} 2>/dev/null | {grep}",
         shell=True,
@@ -266,23 +287,25 @@ def _run_log(job_id: str) -> str:
     ).stdout
 
 
-def progress(named, arch: str) -> tuple[int, Seconds]:
+def progress(named, arch: str) -> tuple[int, Seconds, float]:
     """(epochs done, median seconds per (epoch, training, light and heavy
-    inference)) over the logs of every run (preemption retry) of the
-    experiment, finished or not.
+    inference), useful train seconds) over the logs of every run (preemption
+    retry) of the experiment, finished or not.
     """
     none: Seconds = (None, None, None, None)
     max_epochs = max_epochs_of(arch)
     if named is None:
-        return 0, none
+        return 0, none, 0.0
     jobs = named.experiment.get("jobs") or []
     started = [j for j in jobs if "started" in j.get("status", {})]
     if not started:
-        return (max_epochs if named.status == OK else 0), none
+        return (max_epochs if named.status == OK else 0), none, 0.0
     intervals: Intervals = ([], [], [], [])
     done = 0
+    useful = 0.0
     for job in started:
         log = _run_log(job["id"])
+        useful += useful_seconds(job, log)
         done = max(done, *(int(m.group(1)) for m in EPOCH_RE.finditer(log)), 0)
         for acc, values in zip(
             intervals, epoch_intervals(log, heavy_inference_residue(arch))
@@ -291,7 +314,8 @@ def progress(named, arch: str) -> tuple[int, Seconds]:
     if named.status == OK:
         done = max_epochs
     full, train, light, heavy = intervals
-    return done, (_median(full), _median(train), _median(light), _median(heavy))
+    medians = (_median(full), _median(train), _median(light), _median(heavy))
+    return done, medians, useful
 
 
 def main() -> None:
@@ -337,7 +361,7 @@ def main() -> None:
         ]
         live = [n for n, _ in live_pairs]
         eps = [prog[n][0] for n in live] or [0]
-        times = [train_seconds(by_name[n]) for n in live]
+        times = [prog[n][2] for n in live]
 
         def median_column(i: int) -> str:
             values = [s for n in live if (s := prog[n][1][i]) is not None]
