@@ -4,8 +4,9 @@ Each config is submitted via run-ace-train.sh with N_GPUS=4 into the wandb
 group ace2-fm-2026-11-09. Job names follow submit_fm_jobs.config_to_job_name:
 ace-train-config-4deg-<stem>.yaml -> ace2-fm-<stem>.
 
-Beaker priority defaults to `high` for seed 0 of the SFNO architecture and
-`normal` for everything else; --beaker-priority overrides it for all jobs.
+Both masking arms (`-maskoff`, `-maskon`) are submitted. Beaker priority
+defaults to `high` for seed 0 of the SFNO architecture and `normal` for
+everything else; --beaker-priority overrides it for all jobs.
 
 Usage:
     python submit_fm_v2_jobs.py [--arch {nc-sfno-v2,nc-swin-v2.2-v2} ...]
@@ -41,7 +42,7 @@ N_GPUS = "4"
 HIGH_PRIORITY_ARCH = "nc-sfno-v2"
 HIGH_PRIORITY = "high"
 DEFAULT_PRIORITY = "normal"
-NAME_RE = re.compile(r"-(?P<arm>fm-[a-z0-9-]+)-s(?P<seed>\d+)-maskoff\.yaml$")
+NAME_RE = re.compile(r"-(?P<arm>fm-[a-z0-9-]+)-s(?P<seed>\d+)-mask(?:on|off)\.yaml$")
 
 
 def parse(config_filename: str) -> tuple[str, str, int]:

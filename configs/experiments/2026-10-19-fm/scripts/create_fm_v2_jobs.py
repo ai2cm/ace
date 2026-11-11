@@ -1,6 +1,6 @@
 """Generate the 2026-11-09 FM v2 run configs (wandb group ace2-fm-2026-11-09).
 
-24 runs: 2 architectures x 4 data arms x 3 seeds, all with input masking off.
+48 runs: 2 architectures x 4 data arms x 3 seeds x input masking off/on.
 Each run config is derived from a base config in base_configs/ (the "parent"),
 so everything not listed below is copied from the parent verbatim: loss,
 corrector, normalization groups and pinned variables (stats are replaced, see
@@ -59,8 +59,11 @@ Changes from the parents, identical for every arm:
   the e3sm group is groups/e3sm-filled (fill_e3sm_group_stats.py).
   fm-spencer-balanced keeps its parent's v2 stats, which already match its
   data.
-- Input masking off with presence channels: `include_channel_mask_inputs:
-  true` and no `input_dropout` (the maskoff arm of create_fm_jobs.py).
+- Presence channels on (`include_channel_mask_inputs: true`) in both masking
+  arms, which differ only in `input_dropout`, as in create_fm_jobs.py:
+  `-maskoff` has no `input_dropout`; `-maskon` masks a uniform 0..10
+  (MAX_MASKED_VARS) channels per sample from the default pool (all packed
+  input channels).
 - max_epochs 50; EMA decay 0.9999 with validate_using_ema; EMA checkpoints
   every epoch (`ema_checkpoint_save_epochs: {start: 1, step: 1}`, 1..50).
 - Step curriculum: 1 forward step for epochs 1-40, 3 for epochs 41-50, with
@@ -106,6 +109,8 @@ RUN_CONFIGS_DIR = EXP_DIR / "run_configs"
 CONFIG_PREFIX = "ace-train-config-4deg-"
 
 SEEDS = (0, 1, 2)
+MASKS = (False, True)
+MAX_MASKED_VARS = 10
 MAX_EPOCHS = 50
 SINGLE_STEP_EPOCHS = 40
 MULTI_STEP_N_FORWARD_STEPS = 3
@@ -197,8 +202,8 @@ def parent_path(arch: str, arm: str) -> pathlib.Path:
     return BASE_CONFIGS_DIR / f"{CONFIG_PREFIX}{parent_arch}-{ARMS[arm]}.yaml"
 
 
-def run_config_name(arch: str, arm: str, seed: int) -> str:
-    return f"{CONFIG_PREFIX}{arch}-{arm}-s{seed}-maskoff.yaml"
+def run_config_name(arch: str, arm: str, seed: int, mask: bool) -> str:
+    return f"{CONFIG_PREFIX}{arch}-{arm}-s{seed}-mask{'on' if mask else 'off'}.yaml"
 
 
 def _zarr_entry(data_path, file_pattern, start, stop, label="c96") -> dict:
@@ -336,7 +341,7 @@ def replace_stats_root(normalization: dict, arm: str) -> dict:
     return normalization
 
 
-def make_config(arch: str, arm: str, seed: int) -> dict:
+def make_config(arch: str, arm: str, seed: int, mask: bool) -> dict:
     parent = yaml.safe_load(parent_path(arch, arm).read_text())
     cfg = copy.deepcopy(parent)
     _, parent_embed_dim, embed_dim = ARCHS[arch]
@@ -385,6 +390,8 @@ def make_config(arch: str, arm: str, seed: int) -> dict:
     assert "include_channel_mask_inputs" not in step_config
     assert "input_dropout" not in step_config
     step_config["include_channel_mask_inputs"] = True
+    if mask:
+        step_config["input_dropout"] = {"default": {"max_masked_vars": MAX_MASKED_VARS}}
     normalization = replace_stats_root(step_config["normalization"], arm)
     step_config["normalization"] = normalization
     assert ("grouped" in normalization) == (arm != ERA5_ONLY_ARM)
@@ -412,9 +419,11 @@ def main() -> None:
     for arch in ARCHS:
         for arm in ARMS:
             for seed in SEEDS:
-                path = RUN_CONFIGS_DIR / run_config_name(arch, arm, seed)
-                path.write_text(header(arch, arm) + dump(make_config(arch, arm, seed)))
-                print(f"Wrote {path.relative_to(EXP_DIR)}")
+                for mask in MASKS:
+                    path = RUN_CONFIGS_DIR / run_config_name(arch, arm, seed, mask)
+                    cfg = make_config(arch, arm, seed, mask)
+                    path.write_text(header(arch, arm) + dump(cfg))
+                    print(f"Wrote {path.relative_to(EXP_DIR)}")
 
 
 if __name__ == "__main__":
