@@ -21,8 +21,8 @@ YEARS = (301, 306, 311)
 
 TEMPLATE = """\
 # job_runner/inference.sh configs/experiments/cm4-like-am4-1deg-randco2v2-eval/coupled .
-# Coupled 1deg abrupt-4xCO2 {description}: {duration} inference from piControl
-# at {time}, with CO2 held at 4x ({co2} ppm). Initial conditions come from the
+# Coupled 1deg {scenario} {description}: {duration} inference from piControl
+# at {time}, {co2_clause}. Initial conditions come from the
 # daily piControl ocean store and the 6-hourly atmosphere store, since most
 # first-of-month start dates are not on the 5-daily training data's time axis.
 # The ocean's exogenous forcings (land_fraction, sea_surface_fraction, deptho,
@@ -64,10 +64,7 @@ forcing_loader:
           engine: zarr{atmos_repeats}
         - data_path: /climate-default
           file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
-          engine: zarr{atmos_repeats}
-          overwrite:
-            constant:
-              carbon_dioxide: {co2}
+          engine: zarr{atmos_repeats}{co2_overwrite}
 data_writer:
   ocean:
     save_prediction_files: false
@@ -132,9 +129,39 @@ EXTENSION_COMMENT = """
 # except that both forcing datasets are repeated in time to cover 0301-0401:
 # - the piControl atmosphere stores end in 0350, so they are repeated once; the
 #   remaining atmosphere forcings are periodic in the noleap calendar and CO2 is
-#   overwritten with a constant, so the repeat introduces no discontinuity.
+#   {co2_repeat}, so the repeat introduces no discontinuity.
 # - the ocean's time-constant forcings file only spans the 150-day window on a
 #   5-day axis, so it is tiled well past the 7301 times needed."""
+
+
+ABRUPT = dict(
+    scenario="abrupt-4xCO2",
+    co2_clause=f"with CO2 held at 4x ({CO2_4X} ppm)",
+    co2_overwrite=(
+        "\n          overwrite:"
+        "\n            constant:"
+        f"\n              carbon_dioxide: {CO2_4X}"
+    ),
+)
+PICONTROL = dict(
+    scenario="piControl",
+    co2_clause="with CO2 from the piControl forcing",
+    co2_overwrite="",
+)
+
+PICONTROL_COMMENT = """
+# Control for the abrupt-4xCO2 100-year runs: the same initial condition and
+# forcing, except that CO2 is not overwritten. experiment_dir is set per run with
+# an override in experiments.txt."""
+
+
+def _extension_comment(scenario: dict) -> str:
+    abrupt = scenario is ABRUPT
+    return EXTENSION_COMMENT.format(
+        co2_repeat=(
+            "overwritten with a constant" if abrupt else "constant in piControl"
+        ),
+    )
 
 
 def start_times() -> list[cftime.datetime]:
@@ -154,9 +181,9 @@ def main():
     times = start_times()
     for member, time in enumerate(times, start=1):
         text = TEMPLATE.format(
+            **ABRUPT,
             description=f"ensemble member {member} of {len(times)}",
             time=format_time(time),
-            co2=CO2_4X,
             extra_comment="",
             n_coupled_steps=18,
             duration="90-day",
@@ -171,12 +198,26 @@ def main():
             atmos_files="",
         )
         (HERE / f"inference-config-cm4-abrupt4xCO2-ic{member}.yaml").write_text(text)
-    for suffix, monthly in [("", False), ("-monthly", True)]:
+    runs = [
+        ("cm4-abrupt4xCO2-ic1-100yr", ABRUPT, False, "/results"),
+        ("cm4-abrupt4xCO2-ic1-100yr-monthly", ABRUPT, True, MONTHLY_EXPERIMENT_DIR),
+        ("cm4-piControl-ic1-100yr-monthly", PICONTROL, True, "/results"),
+    ]
+    for tag, scenario, monthly, experiment_dir in runs:
+        extra_comment = _extension_comment(scenario)
+        if scenario is PICONTROL:
+            extra_comment += PICONTROL_COMMENT
+        if monthly:
+            extra_comment += MONTHLY_COMMENT
         text = TEMPLATE.format(
-            description=f"extension of ensemble member 1 of {len(times)}",
+            **scenario,
+            description=(
+                f"extension of ensemble member 1 of {len(times)}"
+                if scenario is ABRUPT
+                else "control for abrupt-4xCO2 member 1"
+            ),
             time=format_time(times[0]),
-            co2=CO2_4X,
-            extra_comment=EXTENSION_COMMENT + (MONTHLY_COMMENT if monthly else ""),
+            extra_comment=extra_comment,
             n_coupled_steps=7300,
             duration="100-year",
             steps_comment="100 years of 5-day ocean steps",
@@ -185,12 +226,11 @@ def main():
             member=1,
             ocean_repeats="\n      n_repeats: 500",
             atmos_repeats="\n          n_repeats: 2",
-            experiment_dir=MONTHLY_EXPERIMENT_DIR if monthly else "/results",
+            experiment_dir=experiment_dir,
             ocean_files=_monthly_files_yaml(MONTHLY_OCEAN_NAMES) if monthly else "",
             atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES) if monthly else "",
         )
-        name = f"inference-config-cm4-abrupt4xCO2-ic1-100yr{suffix}.yaml"
-        (HERE / name).write_text(text)
+        (HERE / f"inference-config-{tag}.yaml").write_text(text)
 
 
 if __name__ == "__main__":

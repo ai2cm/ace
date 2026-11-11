@@ -211,4 +211,10 @@ hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|inf_submitted_cm4-a
 
 # 100-year extension of member 1 for the ACE2.5 hybrid-residual + replay arm with monthly means of the same selected outputs as
 # hybrid1deg-cft-rs1-replay's monthly run; experiment_dir is overridden so the two runs write to separate GCS directories.
-hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-abrupt4xCO2-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-11-hybrid1deg-ace2p5-cft-rs1-replay-abrupt4xCO2-ic1-100yr-monthly|01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|h100
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|inf_submitted_cm4-abrupt4xCO2-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-11-hybrid1deg-ace2p5-cft-rs1-replay-abrupt4xCO2-ic1-100yr-monthly|01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|h100
+
+# 100-year piControl controls for the abrupt-4xCO2 100-year monthly runs of the two hybrid-residual + replay arms: same
+# initial condition (0301-01-01) and forcing, but CO2 from the piControl forcing; same monthly outputs, each in its own
+# GCS experiment_dir.
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_inf_cm4-piControl-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-11-hybrid1deg-cft-rs1-replay-piControl-ic1-100yr-monthly|01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|h100
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-piControl-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-11-hybrid1deg-ace2p5-cft-rs1-replay-piControl-ic1-100yr-monthly|01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|h100
