@@ -2,7 +2,7 @@
 
 The inference families (generate_inference_configs.py, submit_inference_jobs.py)
 evaluate a checkpoint of each finished 2026-10-19 training run, and of each
-finished 2026-11-09 sfno-v2 run (--arch sfno-v2). A run is one config in
+finished 2026-11-09 v2 run (--arch sfno-v2, swin-v2.2-v2). A run is one config in
 run_configs/; its job name (and wandb name) comes from
 submit_fm_jobs.config_to_job_name. Which runs have finished, and which
 Beaker result dataset holds their checkpoints, is read from Beaker
@@ -45,39 +45,45 @@ CHECKPOINTS = {
     "lastema": ("training_checkpoints/ema_ckpt_0150.tar", "-lastema"),
 }
 # Last EMA checkpoint epoch of archs whose runs do not train for 150 epochs:
-# the sfno-v2 runs (create_fm_v2_jobs.py) train 50 epochs with an EMA
-# checkpoint every epoch, so their last one is ema_ckpt_0050.tar.
-LAST_EMA_EPOCHS = {"sfno-v2": 50}
+# the v2 runs (sfno-v2, swin-v2.2-v2; create_fm_v2_jobs.py) train 50 epochs
+# with an EMA checkpoint every epoch, so their last one is ema_ckpt_0050.tar.
+LAST_EMA_EPOCHS = {"sfno-v2": 50, "swin-v2.2-v2": 50}
 
 # The architectures of the inference families (submit_inference_jobs.py
 # --arch): arch -> run-config token. The token must be followed by "-fm-" in
 # the config name, so nc-sfno never selects an nc-sfno-v2 config. The runs of
 # sfno and swin-v2.2 are their four-source training cells, balanced and
 # unbalanced; the e3sm cells, the res variants (variants/, not globbed) and
-# one-off diagnostics are left out. The runs of sfno-v2 (wandb group
-# ace2-fm-2026-11-09, create_fm_v2_jobs.py) are all four of its data arms
-# (fm-era5, fm-balanced, fm-e3sm-balanced, fm-spencer-balanced) x 3 seeds.
+# one-off diagnostics are left out. The runs of sfno-v2 and swin-v2.2-v2
+# (wandb group ace2-fm-2026-11-09, create_fm_v2_jobs.py) are all four of their
+# data arms (fm-era5, fm-balanced, fm-e3sm-balanced, fm-spencer-balanced) x 3
+# seeds; "-fm-" also keeps nc-swin-v2.2 from selecting nc-swin-v2.2-v2.
 ARCHS = {
     "sfno": "nc-sfno",
     "swin-v2.2": "nc-swin-v2.2",
     "sfno-v2": "nc-sfno-v2",
+    "swin-v2.2-v2": "nc-swin-v2.2-v2",
 }
 DEFAULT_ARCH = "sfno"
 EXCLUDED_TOKENS = ("-e3sm", "-diag", "-smoke")
 # Archs whose excluded tokens differ from EXCLUDED_TOKENS.
-EXCLUDED_TOKENS_BY_ARCH = {"sfno-v2": ("-diag", "-smoke")}
+EXCLUDED_TOKENS_BY_ARCH = {
+    "sfno-v2": ("-diag", "-smoke"),
+    "swin-v2.2-v2": ("-diag", "-smoke"),
+}
 # Date of the training wandb group of each arch whose runs are not the
 # 2026-10-19 ones; it replaces "2026-10-19" in the inference wandb group names
 # (submit_inference_jobs.wandb_groups).
-GROUP_DATES = {"sfno-v2": "2026-11-09"}
+GROUP_DATES = {"sfno-v2": "2026-11-09", "swin-v2.2-v2": "2026-11-09"}
 DEFAULT_GROUP_DATE = "2026-10-19"
 # Config variant of the CM4/X-SHiELD suites (cm4xshield, cm4-1pct) per arch
 # (generate_inference_configs.CM4_XSHIELD_VARIANTS). The v2 runs train with
 # HGTsfc spherical-harmonic roundtripped on every cm4/xshield dataset, so
-# their suites read those datasets the same way.
-CM4_XSHIELD_VARIANT = {"sfno-v2": "v2"}
+# their suites read those datasets the same way. The swin-v2.2-v2 runs share
+# the sfno-v2 runs' data config (check_shared_sources), so they share the suite.
+CM4_XSHIELD_VARIANT = {"sfno-v2": "v2", "swin-v2.2-v2": "v2"}
 # Training labels a run needs for the CM4/X-SHiELD suites to be in-sample; runs
-# without them (the sfno-v2 fm-era5 arm) get no cm4xshield / cm4-1pct jobs.
+# without them (the v2 fm-era5 arms) get no cm4xshield / cm4-1pct jobs.
 CM4_XSHIELD_LABELS = ("cm4", "xshield")
 
 # The 2026-06-26 single/two-dataset baselines (wandb group

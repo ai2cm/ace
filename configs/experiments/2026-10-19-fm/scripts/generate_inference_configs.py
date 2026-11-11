@@ -22,9 +22,10 @@ cm4xshield / cm4-1pct
     (renamed_variables, the 1e-6 CO2 rescale, derived ocean_fraction, label)
     without its time subset; the aggregator is the training config's
     ``10year_oosample_varying_co2_c96`` entry's. The 140-year 1pctCO2 run is
-    its own suite so it does not hold up the others. The sfno-v2 runs
-    (2026-11-09) get their own variant, ``...-cm4-xshield-v2.yaml`` and
-    ``...-cm4-1pct-v2.yaml`` (CM4_XSHIELD_VARIANTS): its dataset entries are
+    its own suite so it does not hold up the others. The sfno-v2 and
+    swin-v2.2-v2 runs (2026-11-09) get their own variant,
+    ``...-cm4-xshield-v2.yaml`` and ``...-cm4-1pct-v2.yaml``
+    (CM4_XSHIELD_VARIANTS): its dataset entries are
     copied from a v2 run config, so they carry the v2 runs'
     ``sht_roundtrip_variables: [HGTsfc]``, and its aggregator is the v2
     ``10year_oosample_varying_co2_era5`` entry's (the v2 runs have no c96
