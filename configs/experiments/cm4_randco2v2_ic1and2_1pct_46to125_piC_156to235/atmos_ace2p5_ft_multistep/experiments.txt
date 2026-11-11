@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5_ft_multistep|rs0|01M75DKMFE8T9XZFKSQTNTE6RT|training|best_inference_ckpt|normal|--min-runtime 8h
