@@ -1,0 +1,46 @@
+# make cm4_abrupt_4xCO2_ensemble_ocean_stats
+# Stats of the per-member 5-daily ocean and sea-ice stores produced by the
+# scripts/gfdl_om4 xrbeam Dataflow pipeline
+# (gfdl_om4/configs/cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily.yaml).
+runs:
+  ic_0001: ""
+  ic_0002: ""
+  ic_0003: ""
+  ic_0004: ""
+  ic_0005: ""
+  ic_0006: ""
+  ic_0007: ""
+  ic_0008: ""
+  ic_0009: ""
+  ic_0010: ""
+  ic_0011: ""
+  ic_0012: ""
+  ic_0013: ""
+  ic_0014: ""
+  ic_0015: ""
+  ic_0016: ""
+  ic_0017: ""
+  ic_0018: ""
+  ic_0019: ""
+  ic_0020: ""
+  ic_0021: ""
+  ic_0022: ""
+  ic_0023: ""
+  ic_0024: ""
+  ic_0025: ""
+  ic_0026: ""
+  ic_0027: ""
+  ic_0028: ""
+  ic_0029: ""
+  ic_0030: ""
+  ic_0031: ""
+  ic_0032: ""
+  ic_0033: ""
+  ic_0034: ""
+  ic_0035: ""
+  ic_0036: ""
+data_output_directory: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily
+stats:
+  output_directory: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily-stats
+  data_type: CM4
+  beaker_dataset: 2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily-stats
