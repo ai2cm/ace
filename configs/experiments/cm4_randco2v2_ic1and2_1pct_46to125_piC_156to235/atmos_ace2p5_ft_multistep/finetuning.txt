@@ -1,0 +1,5 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5_ft_multistep|rs0|ace2-cm4-atmos-noLSM||best_ckpt|train|low|titan|4|400GiB|3|ai2/ace|seed=0|01M67AQ8AAQHBE6Z2KFKV9MDXN|0
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5_ft_multistep|rs1|ace2-cm4-atmos-noLSM||best_ckpt|train|low|titan|4|400GiB|3|ai2/ace|seed=1|01M69F1G7Y0RYR8M7CBA979C51|0
+cm4_randco2v2_ic1and2_1pct_46to125_piC_156to235-atmos_ace2p5_ft_multistep|rs2|ace2-cm4-atmos-noLSM||best_ckpt|train|low|titan|4|400GiB|3|ai2/ace|seed=2|01M67AQZ37NYV53NDJT34K1YZR|0
