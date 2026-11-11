@@ -1,6 +1,7 @@
 import dataclasses
 import os
 import pathlib
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -14,6 +15,7 @@ from fme.ace.inference.inference import ForcingDataLoaderConfig
 from fme.ace.stepper import StepperOverrideConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
@@ -34,8 +36,13 @@ from fme.coupled.inference.test_evaluator import (
     _create_dataset_info_for_stepper,
     save_coupled_stepper,
     save_coupled_stepper_with_ema,
+    seed_negative_values,
 )
-from fme.coupled.test_stepper import AddOneWithNoise, CoupledDatasetInfoBuilder
+from fme.coupled.test_stepper import (
+    AddOneWithNoise,
+    CoupledDatasetInfoBuilder,
+    TimesTwo,
+)
 
 
 def _setup(
@@ -50,6 +57,12 @@ def _setup(
     empty_ocean_forcing: bool = False,
     atmosphere_times_offset: int = 0,
     atmosphere_builder: ModuleSelector | None = None,
+    ocean_corrector: CorrectorSelector | None = None,
+    seed_negative_ocean_variable: str | None = None,
+    atmosphere_corrector: CorrectorSelector | None = None,
+    seed_negative_atmosphere_variable: str | None = None,
+    ocean_save_step_diagnostics: bool = False,
+    atmosphere_save_step_diagnostics: bool = False,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmos_in_names + atmos_out_names)
@@ -76,6 +89,16 @@ def _setup(
         n_levels_atmosphere=1,
         atmosphere_start_time_offset_from_ocean=atmosphere_times_offset,
     )
+    if seed_negative_ocean_variable is not None:
+        seed_negative_values(
+            os.path.join(mock_data.ocean.data_dir, "data.nc"),
+            seed_negative_ocean_variable,
+        )
+    if seed_negative_atmosphere_variable is not None:
+        seed_negative_values(
+            os.path.join(mock_data.atmosphere.data_dir, "data.nc"),
+            seed_negative_atmosphere_variable,
+        )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=mock_data.vcoord,
         hcoord=mock_data.hcoord,
@@ -95,6 +118,8 @@ def _setup(
         ocean_timedelta=mock_data.ocean.timedelta,
         atmosphere_timedelta=mock_data.atmosphere.timedelta,
         atmosphere_builder=atmosphere_builder,
+        ocean_corrector=ocean_corrector,
+        atmosphere_corrector=atmosphere_corrector,
     )
     if empty_ocean_forcing:
         atmos_forcing_config = mock_data.dataset_config.atmosphere
@@ -135,10 +160,12 @@ def _setup(
             ocean=DataWriterConfig(
                 save_prediction_files=True,
                 save_monthly_files=True,
+                save_step_diagnostics=ocean_save_step_diagnostics,
             ),
             atmosphere=DataWriterConfig(
                 save_prediction_files=True,
                 save_monthly_files=True,
+                save_step_diagnostics=atmosphere_save_step_diagnostics,
             ),
         ),
         coupled_steps_in_memory=coupled_steps_in_memory,
@@ -393,6 +420,126 @@ def test_inference_seed_reproducible(tmp_path: pathlib.Path):
 
     np.testing.assert_array_equal(seed0, seed0_again)
     assert not np.allclose(seed0, seed1)
+
+
+def _setup_with_correctors(
+    tmp_path: pathlib.Path,
+    n_coupled_steps: int,
+    ocean_save_step_diagnostics: bool,
+    atmosphere_save_step_diagnostics: bool,
+    with_atmosphere_corrector: bool = False,
+):
+    """Ocean corrector force-positive on ``o_prog``; optionally an atmosphere
+    corrector force-positive on ``a_prog``. Both variables are seeded negative,
+    and both modules are sign-preserving, so each clamp fires.
+    """
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+    return _setup(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        tmp_path=tmp_path,
+        n_coupled_steps=n_coupled_steps,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=1,
+        atmosphere_builder=(
+            ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
+            if with_atmosphere_corrector
+            else None
+        ),
+        ocean_corrector=CorrectorSelector(
+            "ocean_corrector", {"force_positive_names": ["o_prog"]}
+        ),
+        seed_negative_ocean_variable="o_prog",
+        atmosphere_corrector=(
+            CorrectorSelector(
+                "atmosphere_corrector", {"force_positive_names": ["a_prog"]}
+            )
+            if with_atmosphere_corrector
+            else None
+        ),
+        seed_negative_atmosphere_variable=(
+            "a_prog" if with_atmosphere_corrector else None
+        ),
+        ocean_save_step_diagnostics=ocean_save_step_diagnostics,
+        atmosphere_save_step_diagnostics=atmosphere_save_step_diagnostics,
+    )
+
+
+def _run_inference(
+    tmp_path: pathlib.Path, config: InferenceConfig
+) -> list[dict[str, Any]]:
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True, metrics_log_dir=str(tmp_path / "metrics"))
+        main(yaml_config=str(config_filename))
+        return wandb.get_logs()
+
+
+@pytest.mark.parametrize("with_atmosphere_corrector", [False, True])
+@pytest.mark.medium_duration
+def test_inference_writes_step_diagnostics_per_realm(
+    tmp_path: pathlib.Path, with_atmosphere_corrector: bool
+):
+    n_coupled_steps = 2
+    config, _, atmos_steps_per_ocean_step = _setup_with_correctors(
+        tmp_path,
+        n_coupled_steps=n_coupled_steps,
+        ocean_save_step_diagnostics=True,
+        atmosphere_save_step_diagnostics=True,
+        with_atmosphere_corrector=with_atmosphere_corrector,
+    )
+    wandb_logs = _run_inference(tmp_path, config)
+    deltas_path = tmp_path / "ocean" / "step_diagnostics" / "correction_deltas.nc"
+    assert deltas_path.exists()
+    ds = xr.open_dataset(deltas_path, decode_timedelta=False)
+    # the force_positive corrector declares only the force-positive variable,
+    # on the ocean's own time axis
+    assert set(ds.data_vars) == {"o_prog"}
+    assert ds["o_prog"].sizes["time"] == n_coupled_steps
+    # the negative-seeded data makes the clamp fire, so a nonzero delta
+    # reaches the writer
+    assert np.nansum(np.abs(ds["o_prog"].values)) > 0
+    atmos_deltas_path = (
+        tmp_path / "atmosphere" / "step_diagnostics" / "correction_deltas.nc"
+    )
+    corrected_names = ["o_prog"]
+    if with_atmosphere_corrector:
+        corrected_names.append("a_prog")
+        ds_atmos = xr.open_dataset(atmos_deltas_path, decode_timedelta=False)
+        assert set(ds_atmos.data_vars) == {"a_prog"}
+        assert (
+            ds_atmos["a_prog"].sizes["time"]
+            == n_coupled_steps * atmos_steps_per_ocean_step
+        )
+        assert np.nansum(np.abs(ds_atmos["a_prog"].values)) > 0
+    else:
+        assert not atmos_deltas_path.exists()
+    # each corrected realm logs correction metrics, normalized by its stepper
+    for name in corrected_names:
+        magnitude_key = f"inference/time_mean_norm/correction_magnitude/{name}"
+        assert any(log.get(magnitude_key, 0.0) > 0.0 for log in wandb_logs)
+    correction_keys = {key for log in wandb_logs for key in log if "correction" in key}
+    assert all(any(name in key for name in corrected_names) for key in correction_keys)
+
+
+@pytest.mark.medium_duration
+def test_inference_no_step_diagnostics_by_default(tmp_path: pathlib.Path):
+    config, _, _ = _setup_with_correctors(
+        tmp_path,
+        n_coupled_steps=2,
+        ocean_save_step_diagnostics=False,
+        atmosphere_save_step_diagnostics=False,
+    )
+    _run_inference(tmp_path, config)
+    assert not (tmp_path / "ocean" / "step_diagnostics").exists()
+    assert not (tmp_path / "atmosphere" / "step_diagnostics").exists()
 
 
 @pytest.mark.parametrize("standalone", [False, True])
