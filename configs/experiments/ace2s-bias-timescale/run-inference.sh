@@ -7,6 +7,8 @@
 #   ./run-inference.sh ep40       # only jobs whose name contains "ep40"
 #
 # Inference has no mid-run checkpointing, so jobs are not preemptible.
+# Titan only: 32 samples at forward_steps_in_memory 20 run out of memory on an
+# 80 GB H100 (jupiter) but fit on a B200.
 
 set -euo pipefail
 
@@ -52,7 +54,6 @@ run_inference() {
     --workspace ai2/ace \
     --priority high \
     --not-preemptible \
-    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
