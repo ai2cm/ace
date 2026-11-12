@@ -75,6 +75,7 @@ class ZonalMeanAggregator:
         n_timesteps: int,
         zonal_mean_max_size: int,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        per_sample_dataset: bool = False,
     ):
         """
         Args:
@@ -85,7 +86,11 @@ class ZonalMeanAggregator:
             zonal_mean_max_size: Maximum number of timesteps to log zonal mean images.
                 If zonal_mean_max_size > _max_matplotlib_size, it will be set to
                 _max_matplotlib_size.
+            per_sample_dataset: If True, the dataset returned by get_dataset
+                additionally holds per-sample (not sample-averaged) generated and
+                target zonal means. Does not affect the logged images.
         """
+        self._per_sample_dataset = per_sample_dataset
         if zonal_mean_max_size > self._max_matplotlib_size:
             logging.warning(
                 "Zonal mean images support images with a maximum of "
@@ -320,8 +325,33 @@ class ZonalMeanAggregator:
             for k, v in self._get_data().items()
         }
 
+        if self._per_sample_dataset:
+            data.update(self._get_per_sample_data())
         ret = xr.Dataset(data)
         return ret
+
+    def _get_per_sample_data(self) -> dict[str, xr.DataArray]:
+        if self._gen_data is None or self._target_data is None:
+            raise RuntimeError("No data recorded")
+        if self._dist.world_size > 1:
+            raise NotImplementedError(
+                "per_sample_dataset is only supported with a single process"
+            )
+        data: dict[str, xr.DataArray] = {}
+        for prefix, accumulated in (
+            ("gen_per_sample", self._gen_data),
+            ("target_per_sample", self._target_data),
+        ):
+            for name in sorted(accumulated):
+                metadata = self._variable_metadata.get(
+                    name, VariableMetadata("unknown_units", name)
+                )
+                data[f"{prefix}-{name}"] = xr.DataArray(
+                    (accumulated[name] / self._n_batches).cpu().numpy(),
+                    dims=("sample", "forecast_step", "lat"),
+                    attrs=metadata.as_attrs(),
+                )
+        return data
 
     def _get_caption(self, key: str, varname: str) -> str:
         if varname in self._variable_metadata:
@@ -359,6 +389,7 @@ class ZonalMeanMetricConfig:
     variables: list[str] | None = None
     name: str = "zonal_mean"
     zonal_mean_max_size: int = 4096
+    per_sample_dataset: bool = False
     enabled: bool = True
     strict: bool = False
 
@@ -375,5 +406,6 @@ class ZonalMeanMetricConfig:
             n_timesteps=ctx.n_timesteps,
             variable_metadata=ctx.variable_metadata,
             zonal_mean_max_size=self.zonal_mean_max_size,
+            per_sample_dataset=self.per_sample_dataset,
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

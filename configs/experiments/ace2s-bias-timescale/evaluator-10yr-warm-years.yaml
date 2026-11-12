@@ -1,0 +1,47 @@
+# ACE2S (pvt11nqc detached fine-tune) bias-development timescale: 10-year
+# rollouts from 00Z Jan 1 of 1954-1957 and 1976-1979, 4 stochastic members per
+# start (32 samples). 3653 daily steps covers ten full calendar years for every
+# start. The checkpoint (EMA epoch 10 or 40) is mounted at /ckpt.tar by
+# run-inference.sh. Zonal means are saved per sample in
+# zonal_mean_diagnostics.nc; per-sample annual global means are in
+# annual_diagnostics.nc.
+experiment_dir: /results
+n_forward_steps: 3653
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 4
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - "1954-01-01T00:00:00"
+      - "1955-01-01T00:00:00"
+      - "1956-01-01T00:00:00"
+      - "1957-01-01T00:00:00"
+      - "1976-01-01T00:00:00"
+      - "1977-01-01T00:00:00"
+      - "1978-01-01T00:00:00"
+      - "1979-01-01T00:00:00"
+  dataset:
+    merge:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  zonal_mean:
+    enabled: true
+    per_sample_dataset: true
+  annual:
+    enabled: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

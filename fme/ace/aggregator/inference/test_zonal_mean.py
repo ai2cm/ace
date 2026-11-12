@@ -242,3 +242,38 @@ def test_zonal_mean_time_coarsening_override(zonal_mean_max_size):
         zonal_mean_max_size=zonal_mean_max_size,
     )
     assert agg._max_size <= agg._max_matplotlib_size
+
+
+@pytest.mark.parametrize("per_sample_dataset", [False, True])
+def test_zonal_mean_per_sample_dataset(per_sample_dataset: bool):
+    agg = ZonalMeanAggregator(
+        zonal_mean,
+        n_timesteps=n_time,
+        zonal_mean_max_size=zonal_mean_max_size,
+        per_sample_dataset=per_sample_dataset,
+    )
+    target = torch.randn(n_sample, n_time, ny, nx, device=get_device())
+    gen = torch.randn(n_sample, n_time, ny, nx, device=get_device())
+    half = n_time // 2
+    agg.record_batch(
+        _make_batch_data({"a": target[:, :half]}, {"a": gen[:, :half]}, 0)
+    )
+    agg.record_batch(
+        _make_batch_data({"a": target[:, half:]}, {"a": gen[:, half:]}, half)
+    )
+    ds = agg.get_dataset()
+    if not per_sample_dataset:
+        assert "gen_per_sample-a" not in ds
+        assert "target_per_sample-a" not in ds
+        return
+    expected_gen = zonal_mean(gen).cpu().numpy()
+    expected_target = zonal_mean(target).cpu().numpy()
+    assert ds["gen_per_sample-a"].dims == ("sample", "forecast_step", "lat")
+    np.testing.assert_allclose(ds["gen_per_sample-a"].values, expected_gen, rtol=1e-5)
+    np.testing.assert_allclose(
+        ds["target_per_sample-a"].values, expected_target, rtol=1e-5
+    )
+    # the sample-averaged outputs are unchanged by the flag
+    np.testing.assert_allclose(
+        ds["gen-a"].values, expected_gen.mean(axis=0), rtol=1e-5, atol=1e-6
+    )
