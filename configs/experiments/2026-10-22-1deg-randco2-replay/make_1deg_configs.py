@@ -241,6 +241,36 @@ arms["hybridsstdiag-jfto-alt-replay"] = (
         "Launch with CKPT_DS=<the -hybridsstdiag-jfto results dataset>.",
     ],
 )
+
+
+# 2026-11-12 (Troy): the stage-2 ep3 checkpoint of the recipe above breaks down after ~60 yr in both centennials (a
+# regional surface instability off Newfoundland) although its FTO start is stable for 200 yr. Both stages train the
+# ocean with the OHC corrector off for their first epoch (corrector_disabled_epochs: 1, copied from James), and the
+# corrector matters for OHC in the hybrid-residual ocean. Twins of both stages with the corrector on throughout.
+def _corrector_always_on(c):
+    c = copy.deepcopy(c)
+    c["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"][
+        "corrector_disabled_epochs"
+    ] = 0
+    return c
+
+
+arms["hybridsstdiag-jfto-con"] = (
+    _corrector_always_on(arms["hybridsstdiag-jfto"][0]),
+    arms["hybridsstdiag-jfto"][1][:2]
+    + [
+        "Twin with the OHC corrector ON in every epoch (corrector_disabled_epochs: 0), Troy 2026-11-12.",
+        "Launch with OCEAN_DS=01M626JPB247BQWSE0GN35SAXR.",
+    ],
+)
+arms["hybridsstdiag-jfto-alt-replay-con"] = (
+    _corrector_always_on(arms["hybridsstdiag-jfto-alt-replay"][0]),
+    arms["hybridsstdiag-jfto-alt-replay"][1][:2]
+    + [
+        "Twin with the OHC corrector ON in every epoch (corrector_disabled_epochs: 0), Troy 2026-11-12.",
+        "Launch with CKPT_DS=<the -hybridsstdiag-jfto-con results dataset>.",
+    ],
+)
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(
