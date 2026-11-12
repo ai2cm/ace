@@ -275,6 +275,11 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
     jalt["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"][
         "corrector_disabled_epochs"
     ] = 1
+    alt_mseocean = copy.deepcopy(alt)
+    alt_mseocean["stepper_training"]["ocean"]["loss"] = {"type": "MSE"}
+    alt_mse4 = copy.deepcopy(alt_mseocean)
+    alt_mse4["stepper_training"]["ocean"]["n_steps"] = 4
+    alt_mse4["stepper_training"]["ocean"]["optimize_last_step_only"] = False
     stages = {
         "jfto": (
             jfto,
@@ -321,6 +326,25 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
                 "/ocean_ckpt.tar): the MSE FTO holds the observed warming corrector-free where the CRPS FTO cools (2026-11-11); this",
                 "tells whether the CRPS alternating stage brings the cooling back.",
                 f"Launch: OCEAN={oc} ARM={arm} STAGE=fto-mse-then-alt OCEAN_DS=<lifted fto-mse ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
+        "fto-mse-then-alt-mseocean": (
+            alt_mseocean,
+            [
+                f"ufs1deg-{oc}-{arm}-fto-mse-then-alt-mseocean: Elynn's alternating stage from the MSE-loss FTO ocean (lifted from",
+                f"ufs1deg-{oc}-{arm}-fto-mse, /ocean_ckpt.tar) with the OCEAN loss switched to MSE (both members, Elynn's 1-8-step",
+                "last-step-only ocean windows kept); atmosphere stays on the 2-member CRPS loss. The CRPS alternating stage on the",
+                "MSE ocean brought the cooling back (2026-11-12), so this keeps the ocean on MSE through both stages.",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=fto-mse-then-alt-mseocean OCEAN_DS=<lifted fto-mse ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
+        "fto-mse-then-alt-mse4": (
+            alt_mse4,
+            [
+                f"ufs1deg-{oc}-{arm}-fto-mse-then-alt-mse4: as ufs1deg-{oc}-{arm}-fto-mse-then-alt-mseocean but with the MSE FTO's own",
+                "ocean window recipe inside the alternating stage (MSE on every step of fixed 4-step ocean windows); together the two",
+                "arms separate the loss type from the window schedule.",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=fto-mse-then-alt-mse4 OCEAN_DS=<lifted fto-mse ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh",
             ],
         ),
         "fto-then-alt": (
