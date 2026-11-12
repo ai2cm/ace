@@ -10,8 +10,9 @@ over an experiment's jobs (preemption retries): each job counts from its first
 training step to its exit (or now, if running), except that a preempted or
 failed job counts only up to its last checkpoint save, since the work after it
 is redone by the next retry. Queueing, startup and lost work are excluded, so
-preemptions do not inflate it. Epoch and train-time
-columns cover finished and running jobs only. The 2026-10-19 -e3sm configs are
+preemptions do not inflate it. Epoch columns cover unfinished (running or
+queued) jobs only, "-" when none; train-time and timing columns cover
+finished and running jobs. The 2026-10-19 -e3sm configs are
 excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
 row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced,
 fm-spencer-balanced). Only the -maskoff v2 runs are tracked; the -maskon
@@ -392,7 +393,8 @@ def main() -> None:
             (n, s) for n, s in zip(arch_names, statuses) if s in (OK, "running")
         ]
         live = [n for n, _ in live_pairs]
-        eps = [prog[n][0] for n in live] or [0]
+        # Epoch columns cover unfinished (running or queued) jobs only.
+        eps = [prog[n][0] for n, s in live_pairs if s == "running"]
         times = [prog[n][2] for n in live]
 
         def median_column(i: int) -> str:
@@ -408,9 +410,9 @@ def main() -> None:
                 sum(s not in (OK, "running", "missing") for s in statuses),
                 sum(s == "missing" for s in statuses),
                 sum(_preemptions(by_name[n]) for n in arch_names if n in by_name),
-                min(eps),
-                max(eps),
-                f"{statistics.median(eps):g}",
+                min(eps) if eps else "-",
+                max(eps) if eps else "-",
+                f"{statistics.median(eps):g}" if eps else "-",
             )
         )
         timing_rows.append(
