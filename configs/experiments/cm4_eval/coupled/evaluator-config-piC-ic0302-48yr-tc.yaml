@@ -1,0 +1,67 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+# Out-of-sample piControl (all training/validation dates < 0241-01-01), 6-h TC tracker
+# inputs and 5-day sst over |lat| <= 60 for TC wake statistics. Length and IC:
+# analysis/2026-11-11-1356-samudrace2-paper-figures/tc_eval_storage.py option (c)
+# (workspace repo): years_boot rounded up to a multiple of coupled_steps_in_memory,
+# latest YYYY-01-06 IC that fits before the stores' end.
+experiment_dir: /results
+n_coupled_steps: 3510  # --min-runtime 4h
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0302-01-06T00:00:00'
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+    - label: tc_band_5daily
+      names:
+      - sst
+      lat_extent: [-60.0, 60.0]  # tracker STITCH_THRESHOLD |lat| <= 50, plus 10 deg box padding
+      lon_extent: [0.0, 360.0]
+      save_reference: false  # CM4 target: read from the GCS stores
+      format:
+        name: zarr
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+    - label: tc_band_6h
+      names:  # TempestExtremes tracker inputs; static HGTsfc read from the CM4 store
+      - PRMSL
+      - UGRD10m
+      - VGRD10m
+      - air_temperature_3
+      lat_extent: [-60.0, 60.0]
+      lon_extent: [0.0, 360.0]
+      save_reference: false
+      format:
+        name: zarr
