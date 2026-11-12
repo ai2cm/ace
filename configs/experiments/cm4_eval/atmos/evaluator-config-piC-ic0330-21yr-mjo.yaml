@@ -1,0 +1,57 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/atmos
+# Out-of-sample piControl (all training/validation dates < 0311-01-01), daily
+# tropical-band output for MJO lag regression. Same span as the coupled
+# piC-ic0330-21yr-mjo config: 30600 = 1530 coupled steps * 20.
+experiment_dir: /results
+n_forward_steps: 30600  # --min-runtime 2h
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0330-01-06T00:00:00'
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+  num_data_workers: 4
+aggregator:
+  zonal_mean:
+    enabled: false
+  power_spectrum:
+     enabled: false
+  enso_coefficient:
+    enabled: false
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: true
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: tropics_daily
+    names:
+    - PRATEsfc
+    - ULWRFtoa
+    - surface_temperature
+    - eastward_wind_6  # layer nearest 850 hPa
+    - eastward_wind_2  # layer nearest 200 hPa
+    lat_extent: [-20.0, 20.0]
+    lon_extent: [0.0, 360.0]
+    time_coarsen:
+      coarsen_factor: 4  # 4 x 6 h = daily block mean
+    save_reference: false  # CM4 target: read from the GCS stores
+    format:
+      name: zarr
