@@ -59,6 +59,7 @@ _LABEL_1DEG = {
     "rco2rs1-1deg-hybridsstdiag-alt-replay": "rco2 rs1, hybrid-residual diagnosed-SST ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
     "ace2p5rs1-1deg-alt-replay": "ACE2.5 rco2 rs1, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
     "rco2rs1-1deg-hybridsstdiag-jfto-alt-replay": "rco2 rs1, hybrid-residual diagnosed-SST ocean, FTO then alternating coupled FT (James's recipe) + random-CO2 replay ep{ep} (lifted, EMA)",
+    "rco2rs1-1deg-hybridsstdiag-jfto-alt-replay-con": "rco2 rs1, hybrid-residual diagnosed-SST ocean, FTO then alternating coupled FT (James's recipe, OHC corrector on in every epoch) + random-CO2 replay ep{ep} (lifted, EMA)",
     "ace2p5rs1-1deg-hybridsstdiag-alt-replay": "ACE2.5 rco2 rs1, hybrid-residual diagnosed-SST ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
 }
 _LABEL = {
