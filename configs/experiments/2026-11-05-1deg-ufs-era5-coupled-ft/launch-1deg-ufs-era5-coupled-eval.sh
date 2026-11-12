@@ -2,6 +2,7 @@
 # Coupled evaluator of a 1deg UFS + ERA5 coupled fine-tune checkpoint (single-checkpoint form; configs in ./eval).
 #   CKPT_DS=<results ds> NAME=<label> CFG=coupled-evaluator-config-ufs1deg-era5-fullrecord-1994-singleckpt.yaml ./launch-1deg-ufs-era5-coupled-eval.sh
 #   CKPT_DS=<results ds> NAME=<label> HINDCAST_YEARS="2002 ... 2011" ./launch-1deg-ufs-era5-coupled-eval.sh   # one job per start year
+#   ... CFG_SUFFIX=-nocorr ...   # hindcasts with the ocean heat-content correction removed at inference (corrector-kept ckpts)
 set -euo pipefail
 CKPT_DS="${CKPT_DS:?coupled fine-tune results dataset}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
@@ -10,6 +11,7 @@ FRAC_DS="${FRAC_DS:?surface-fraction store dataset}"
 FRAC_ZARR=2026-11-05-era5-1deg-6h-ufs-coupled-fractions-1994-2023.zarr
 CFG="${CFG:-coupled-evaluator-config-ufs1deg-era5-fullrecord-1994-singleckpt.yaml}"
 HINDCAST_YEARS="${HINDCAST_YEARS:-}"
+CFG_SUFFIX="${CFG_SUFFIX:-}"   # e.g. -nocorr: hindcast configs coupled-evaluator-config-...-hindcast-<Y>-singleckpt${CFG_SUFFIX}.yaml
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"
 PRIORITY="${PRIORITY:-high}"
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"
@@ -38,7 +40,7 @@ launch() {  # job name, config file
   echo "$out" | grep -qm1 "beaker.org/ex/" && echo "launched $JOB: $(echo "$out" | grep -om1 'https://beaker.org/ex/[A-Z0-9]*')" || { echo "FAILED $JOB: $(echo "$out" | tail -3)"; return 1; }
 }
 if [ -n "$HINDCAST_YEARS" ]; then
-  for Y in $HINDCAST_YEARS; do launch "samudra-ufs1deg-era5-${NAME}-hindcast-${Y}" "coupled-evaluator-config-ufs1deg-era5-hindcast-${Y}-singleckpt.yaml"; done
+  for Y in $HINDCAST_YEARS; do launch "samudra-ufs1deg-era5-${NAME}-hindcast-${Y}" "coupled-evaluator-config-ufs1deg-era5-hindcast-${Y}-singleckpt${CFG_SUFFIX}.yaml"; done
 else
   launch "samudra-ufs1deg-era5-${NAME}-fullrecord-1994" "$CFG"
 fi
