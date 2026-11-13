@@ -50,3 +50,9 @@ def test_multiple_names_and_prefixes():
     assert matcher.match("thetao_0")
     assert not matcher.match("so")
     assert not matcher.match("thetao_1")
+
+
+def test_literal_character_matching():
+    matcher = NameAndPrefixMatcher(["a.c"])
+    assert matcher.match("a.c")
+    assert not matcher.match("abc")

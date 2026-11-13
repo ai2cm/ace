@@ -21,13 +21,14 @@ class NameAndPrefixMatcher:
         if names_and_prefixes:
             regex = []
             for name in names_and_prefixes:
+                escaped_name = re.escape(name)
                 if name.endswith("_"):
-                    regex.append(rf"^{name}\d+$")
+                    regex.append(rf"^{escaped_name}\d+$")
                 elif not re.match(r".+_\d+$", name):
-                    regex.append(f"^{name}$")
-                    regex.append(rf"^{name}_\d+$")
+                    regex.append(f"^{escaped_name}$")
+                    regex.append(rf"^{escaped_name}_\d+$")
                 else:
-                    regex.append(rf"^{name}$")
+                    regex.append(f"^{escaped_name}$")
             return r"|".join(regex)
         return None
 
