@@ -2,10 +2,12 @@
 # Atmosphere-only SSP2-4.5 run (fme.ace.inference, prescribed SST from the SSP forcing store); configs in ./ssp.
 #   ARM=ace2s6h-original CKPT_DS=01M49ERVM1DVWV12G5DRDXM0PC CKPT_FILE=training_checkpoints/ema_ckpt_0002.tar ./launch-1deg-era5-ssp245-atmos-only.sh
 #   ARM=ohc-uhm1p7-fto-then-ftalt-atmosphere CKPT_DS=<lifted atmosphere ds> CKPT_FILE=atmos_ckpt.tar ./launch-1deg-era5-ssp245-atmos-only.sh
+#   ARM=ace2p5-original CKPT_DS=01M6DWYW0RWBN0X33ABS98T0AH CKPT_FILE=training_checkpoints/best_inference_ckpt.tar EXTRA_DS=<extra forcing ds> ./launch-1deg-era5-ssp245-atmos-only.sh
 set -euo pipefail
 ARM="${ARM:?arm tag (ssp/ace-ssp245-<ARM>.yaml)}"
 CKPT_DS="${CKPT_DS:?atmosphere checkpoint dataset}"
 CKPT_FILE="${CKPT_FILE:?checkpoint file inside the dataset}"
+EXTRA_DS="${EXTRA_DS:-}"   # ace2p5-original: the extra forcing store (carbon_dioxide ppmv + lake_fraction) mounted at /ace2p5forcing
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"
 PRIORITY="${PRIORITY:-high}"
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"
@@ -27,6 +29,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --env WANDB_JOB_TYPE=inference --env WANDB_RUN_GROUP=samudra-ufs1deg-era5-ssp245 \
   --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
   --dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar" \
+  ${EXTRA_DS:+--dataset "${EXTRA_DS}:/ace2p5forcing/ace2p5_ssp245_forcing.zarr"} \
   --gpus 1 --shared-memory 200GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
   -- python -I -m fme.ace.inference "${SCRIPT_PATH}/ssp/${C}" 2>&1) || true
