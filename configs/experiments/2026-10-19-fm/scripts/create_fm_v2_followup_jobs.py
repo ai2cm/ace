@@ -33,7 +33,7 @@ epochs, EMA checkpoints every epoch):
   parent's 2-epoch warmup, peak X, then the 1-sqrt cooldown to 0 over epochs
   115-120. wandb group ace2-fm-swin-lr{X}-e120-<date>. Written only on request
   (`e120 --lr X`); E120_RUNS lists the X values that are configured (and
-  tracked by fm_table.py and the inference scripts).
+  tracked by the inference scripts).
 
 The LR schedule is "constant + cooldown" (Hagele et al. 2024; Subramanian et
 al. 2026, arXiv 2603.25687): warmup, constant peak, then
@@ -117,8 +117,8 @@ EXT80_GROUPS = {
 E120_MAX_EPOCHS = 120
 E120_COOLDOWN_EPOCHS = 6
 # Chosen peak LRs X (as in the job name) -> wandb group date. Empty until X is
-# chosen from phase A; fm_table.py and the inference scripts track the e120
-# runs of these X only.
+# chosen from phase A; the inference scripts track the e120 runs of these X
+# only.
 E120_RUNS: dict[str, str] = {}
 E120_DEFAULT_DATE = "2026-11-11"
 

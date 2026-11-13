@@ -1,31 +1,27 @@
-"""Per-architecture progress table for the 2026-10-19 FM training jobs.
+"""Per-architecture progress table for the 2026-11-12 FM fine-tuning sweep.
+
+Tracks only the 96 ft runs of create_fm_v2_finetune_jobs.py (the ext80
+fm-spencer-balanced runs fine-tuned for 8 epochs; 4 ERA5 mixes x 4 LRs x 3
+seeds per architecture), one row per architecture: sfno-v2-ft and
+swin-v2.2-v2-ft, 48 runs each. The runs they descend from (the 2026-10-19
+runs, the 2026-11-09 v2 runs and their 2026-11-11 follow-ups) are no longer
+tracked; their logs are not read.
 
 Epochs done and per-phase timings come from the logs of every run
 (preemption retry) of each finished or running experiment. Epochs done is the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
-inference are all done. Finished jobs count as max_epochs; never-started jobs
-count as 0. Train time is the wall time that produced kept progress, summed
-over an experiment's jobs (preemption retries): each job counts from its first
-training step to its exit (or now, if running), except that a preempted or
-failed job counts only up to its last checkpoint save, since the work after it
-is redone by the next retry. Queueing, startup and lost work are excluded, so
-preemptions do not inflate it. Epoch columns cover unfinished (running or
-queued) jobs only, "-" when none; train-time and timing columns cover
-finished and running jobs. The 2026-10-19 -e3sm configs are
-excluded; the 2026-11-09 v2 runs (create_fm_v2_jobs.py, 50 epochs) get one
-row per architecture and data arm (fm-era5, fm-balanced, fm-e3sm-balanced,
-fm-spencer-balanced). Only the -maskoff v2 runs are tracked; the -maskon
-runs are paused and left out. The 2026-11-11 follow-ups of the v2 runs
-(create_fm_v2_followup_jobs.tracked_runs) are counted in their parent's row,
-not rows of their own: the swin LR sweep (30 epochs) in the swin-v2.2-v2
-fm-balanced row, the ext80 forks of both architectures and the swin e120 runs
-(120 epochs; only for the LRs in E120_RUNS, so unchosen ones never count as
-not submitted) in their arm's row. The ext80 forks restart the epoch count
-at the fork, so their epochs are shown parent-equivalent (child epoch + 40,
-finished = 120).
-The v1 sfno and older swin runs are not tracked (ARCHS); their logs are not read. All
-values are measured; there are no estimates.
+inference are all done. Finished jobs count as max_epochs (8); never-started
+jobs count as 0. Train time is the wall time that produced kept progress,
+summed over an experiment's jobs (preemption retries): each job counts from
+its first training step to its exit (or now, if running), except that a
+preempted or failed job counts only up to its last checkpoint save, since the
+work after it is redone by the next retry. Queueing, startup and lost work are
+excluded, so preemptions do not inflate it. Epoch columns cover unfinished
+(running or queued) jobs only, "-" when none; train-time and timing columns
+cover finished and running jobs. The "inference, every 10" column stays "-":
+an 8-epoch run never reaches the every-10th-epoch inline inference entries.
+All values are measured; there are no estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed / Other" counts only experiments that exist and failed or were canceled.
@@ -54,16 +50,9 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
-from create_fm_v2_followup_jobs import tracked_runs  # noqa: E402
-from submit_fm_jobs import (  # noqa: E402
-    ARCH_CHOICES,
-    V2_ARCH_CHOICES,
-    config_to_job_name,
-    select_configs,
-)
+from create_fm_v2_finetune_jobs import ft_runs  # noqa: E402
+from create_fm_v2_followup_jobs import SFNO  # noqa: E402
 
-MAX_EPOCHS = 150
-V2_MAX_EPOCHS = 50
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
 EPOCH_RE = re.compile(r"Starting training step for model trained for (\d+) complete")
@@ -150,61 +139,17 @@ def _preemptions(named: NamedExperiment) -> int:
     )
 
 
-# Rows to track: per architecture, the four v2 data arms
-# (row suffix "-era5" for fm-era5, none for fm-balanced, "-e3sm" for
-# fm-e3sm-balanced, "-spencer" for fm-spencer-balanced). The older swin rows
-# ("swin-v2.2", "swin-v2.2-res") are left out.
-ARCHS = (
-    "sfno-v2-era5",
-    "sfno-v2",
-    "sfno-v2-e3sm",
-    "sfno-v2-spencer",
-    "swin-v2.2-v2-era5",
-    "swin-v2.2-v2",
-    "swin-v2.2-v2-e3sm",
-    "swin-v2.2-v2-spencer",
-)
-# Job-name tags of the v2 runs, longest first: they extend the old tags.
-V2_TAGS = (("-nc-swin-v2.2-v2-", "swin-v2.2-v2"), ("-nc-sfno-v2-", "sfno-v2"))
-V2_ARM_SUFFIXES = (
-    ("-fm-era5-", "-era5"),
-    ("-fm-e3sm-balanced-", "-e3sm"),
-    ("-fm-spencer-balanced-", "-spencer"),
-)
-# One-off variant configs, kept out of run_configs/ so batch submits skip them.
-VARIANTS_DIR = pathlib.Path(__file__).parent.parent / "variants"
+# Tracked runs by job name, and their rows: one per architecture.
+FT_RUNS = {run.job_name: run for run in ft_runs()}
+ARCHS = ("sfno-v2-ft", "swin-v2.2-v2-ft")
 
 
 def arch_of(name: str) -> str:
-    for tag, arch in V2_TAGS:
-        if tag in name:
-            for arm_tag, suffix in V2_ARM_SUFFIXES:
-                if arm_tag in name:
-                    return f"{arch}{suffix}"
-            return arch
-    for arch in ("swin-v2.2-res", "swin-v2.2"):
-        if f"-{arch}-" in name:
-            return arch
-    return "sfno"
+    return ARCHS[0] if FT_RUNS[name].arch == SFNO else ARCHS[1]
 
 
-def is_v2(arch: str) -> bool:
-    return any(arch.startswith(base) for _, base in V2_TAGS)
-
-
-# Follow-up runs by job name: their own max_epochs and, for forks, the
-# parent epochs before their first.
-FOLLOWUPS = {run.job_name: run for run in tracked_runs()}
-
-
-def max_epochs_of(arch: str, name: str | None = None) -> int:
-    if name in FOLLOWUPS:
-        return FOLLOWUPS[name].max_epochs
-    return V2_MAX_EPOCHS if is_v2(arch) else MAX_EPOCHS
-
-
-def epoch_offset_of(name: str) -> int:
-    return FOLLOWUPS[name].epoch_offset if name in FOLLOWUPS else 0
+def max_epochs_of(name: str) -> int:
+    return FT_RUNS[name].max_epochs
 
 
 def _log_time(t: str) -> datetime:
@@ -241,16 +186,12 @@ def _median(values: list[float]) -> float | None:
     return statistics.median(values) if values else None
 
 
-# Inline inference runs the aimip evaluator(s) every epoch and all others every
-# 10 epochs: for the v1 runs with `epochs: {start: 0, step: 10}`, i.e. after
-# epochs 1, 11, 21, ...; for the v2 runs (the 10yr and 46yr ERA5 runs and the
-# 5-day weather ensembles) with `epochs: {start: 9, step: 10}`, i.e. after
-# epochs 10, 20, ..., 50.
+# Inline inference runs the aimip evaluator every epoch and all others (the
+# 10yr and 46yr ERA5 runs and the 5-day weather ensembles) with
+# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ..., which the
+# 8-epoch ft runs never reach.
 HEAVY_INFERENCE_EVERY = 10
-
-
-def heavy_inference_residue(arch: str) -> int:
-    return 0 if is_v2(arch) else 1
+HEAVY_INFERENCE_RESIDUE = 0
 
 
 def _is_heavy_inference(epoch: int, residue: int) -> bool:
@@ -308,15 +249,14 @@ def _run_log(job_id: str) -> str:
     ).stdout
 
 
-def progress(named, arch: str, name: str | None = None) -> tuple[int, Seconds, float]:
+def progress(named, name: str) -> tuple[int, Seconds, float]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference), useful train seconds) over the logs of every run (preemption
-    retry) of the experiment, finished or not. Epochs done are
-    parent-equivalent for forks (epoch_offset_of).
+    retry) of the experiment, finished or not. The ft runs restart the epoch
+    count, so epochs done are their own (0..8).
     """
     none: Seconds = (None, None, None, None)
-    offset = epoch_offset_of(name) if name is not None else 0
-    max_epochs = max_epochs_of(arch, name) + offset
+    max_epochs = max_epochs_of(name)
     if named is None:
         return 0, none, 0.0
     jobs = named.experiment.get("jobs") or []
@@ -331,10 +271,9 @@ def progress(named, arch: str, name: str | None = None) -> tuple[int, Seconds, f
         useful += useful_seconds(job, log)
         done = max(done, *(int(m.group(1)) for m in EPOCH_RE.finditer(log)), 0)
         for acc, values in zip(
-            intervals, epoch_intervals(log, heavy_inference_residue(arch))
+            intervals, epoch_intervals(log, HEAVY_INFERENCE_RESIDUE)
         ):
             acc.extend(values)
-    done += offset
     if named.status == OK:
         done = max_epochs
     full, train, light, heavy = intervals
@@ -343,41 +282,19 @@ def progress(named, arch: str, name: str | None = None) -> tuple[int, Seconds, f
 
 
 def main() -> None:
-    names = [
-        config_to_job_name(c)
-        for c in select_configs(None, ARCH_CHOICES)
-        if "e3sm" not in c
-    ]
-    names += [config_to_job_name(c) for c in select_configs(None, V2_ARCH_CHOICES)]
-    names += [config_to_job_name(p.name) for p in sorted(VARIANTS_DIR.glob("*.yaml"))]
-    names += list(FOLLOWUPS)
-    # The -maskon v2 runs are paused (stopped on Beaker) and not tracked.
-    names = [
-        n
-        for n in dict.fromkeys(names)
-        if arch_of(n) in ARCHS and not n.endswith("-maskon")
-    ]
-    # List per architecture by the names' longest common prefix: the broad
-    # "ace2-fm-nc-" listing matches ~9k old experiments and takes ~5 min,
-    # while each narrow one takes ~1 s.
-    # One listing per row and job-name tag (the part before "-fm-"), so a
-    # row's follow-up runs are listed apart from its v2 runs.
+    names = list(FT_RUNS)
+    # One listing per row, by the common prefix of its job names (the ext80
+    # parent's name up to the seed): the broad "ace2-fm-nc-" listing matches
+    # ~9k old experiments and takes ~5 min, while a narrow one takes ~1 s.
     by_name = {}
     for arch in ARCHS:
         arch_names = [n for n in names if arch_of(n) == arch]
-        for tag in dict.fromkeys(n.partition("-fm-")[0] for n in arch_names):
-            # Never empty, so never the common prefix "", which would list
-            # the whole workspace.
-            tag_names = [n for n in arch_names if n.startswith(f"{tag}-fm-")]
-            by_name.update(newest_by_name(os.path.commonprefix(tag_names)))
+        by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
     with ThreadPoolExecutor(20) as ex:
         prog = dict(
             zip(
                 names,
-                ex.map(
-                    lambda n: progress(by_name.get(n), arch_of(n), n),
-                    names,
-                ),
+                ex.map(lambda n: progress(by_name.get(n), n), names),
             )
         )
     count_rows = []
