@@ -54,6 +54,8 @@ if [[ "$CO2_STATS_DATASET" == __* ]]; then
   echo "ERROR: CO2_STATS_DATASET is unset." >&2
   exit 1
 fi
+# Intercept-only ablation: the same file with every *_slope zeroed.
+CO2_INTERCEPT_DATASET=01M7BCQ51S9D3596H76D6RXK2J  # jeremym/2026-11-13-era5-1deg-co2-intercept-only-1990-2019
 
 run_inference() {
   local job_name="$1" config="$2" ckpt_file="$3"
@@ -77,6 +79,7 @@ run_inference() {
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset "$CKPT_DATASET:$ckpt_file:/ckpt.tar" \
     --dataset "$CO2_STATS_DATASET:/co2stats" \
+    --dataset "$CO2_INTERCEPT_DATASET:/co2stats-intercept" \
     --gpus 1 \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
@@ -100,3 +103,12 @@ run_inference exoomsxr-ema20-81yr-relax-tau5d evaluator-81yr-relax-tau5d.yaml "$
 run_inference exoomsxr-ema20-81yr-relax-tau30d evaluator-81yr-relax-tau30d.yaml "$EMA20_CKPT"
 run_inference exoomsxr-ema20-81yr-relax-tau365d evaluator-81yr-relax-tau365d.yaml "$EMA20_CKPT"
 run_inference exoomsxr-ema20-81yr-relax-tau730d evaluator-81yr-relax-tau730d.yaml "$EMA20_CKPT"
+# intercept-only ablation (slopes zeroed), both checkpoints
+run_inference exoomsxr-81yr-intercept-tau5d evaluator-81yr-intercept-tau5d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-intercept-tau30d evaluator-81yr-intercept-tau30d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-intercept-tau365d evaluator-81yr-intercept-tau365d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-intercept-tau730d evaluator-81yr-intercept-tau730d.yaml "$BEST_CKPT"
+run_inference exoomsxr-ema20-81yr-intercept-tau5d evaluator-81yr-intercept-tau5d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-intercept-tau30d evaluator-81yr-intercept-tau30d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-intercept-tau365d evaluator-81yr-intercept-tau365d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-intercept-tau730d evaluator-81yr-intercept-tau730d.yaml "$EMA20_CKPT"

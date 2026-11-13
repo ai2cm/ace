@@ -1,0 +1,172 @@
+# 81-year AMIP-style rollout (the long_81year inline setup of exoomsxr):
+# 8 ICs 1940-01-03..10 at 00Z, 1 member each, 29565 daily steps, observed
+# forcing. Checkpoint mounted at /ckpt.tar by run-inference.sh.
+# INTERCEPT-ONLY ablation: relaxes air_temperature_0 and specific_total_water_0
+# toward the 1990-2019 climatology (fit slopes zeroed), tau = 5 days (eval only).
+# The override restates the checkpoint's corrector options, which it replaces.
+# Reference netCDF mounted at /co2stats-intercept by run-inference.sh.
+experiment_dir: /results
+n_forward_steps: 29565
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  dataset:
+    merge:
+    - data_path: /climate-default/
+      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+    - data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '1940-01-03T00:00:00'
+    - '1940-01-04T00:00:00'
+    - '1940-01-05T00:00:00'
+    - '1940-01-06T00:00:00'
+    - '1940-01-07T00:00:00'
+    - '1940-01-08T00:00:00'
+    - '1940-01-09T00:00:00'
+    - '1940-01-10T00:00:00'
+  num_data_workers: 4
+aggregator:
+  trend:
+    name: trend
+    strict: false
+    enabled: false
+    variables: null
+  video:
+    name: video
+    strict: true
+    enabled: false
+    variables: null
+    enable_extended_videos: false
+  annual:
+    name: annual
+    strict: false
+    enabled: true
+    variables: null
+    report_crps: true
+    report_rmse: true
+    reference_data: null
+  seasonal:
+    name: seasonal
+    strict: true
+    enabled: false
+    variables: null
+  ensembles: []
+  histogram:
+    name: histogram
+    strict: true
+    enabled: true
+    variables: null
+    percentile_variables: null
+  ipo_index:
+    name: ipo_index
+    strict: false
+    enabled: true
+  mean_norm:
+    name: mean_norm
+    strict: false
+    target: norm
+    enabled: true
+    variables: null
+  enso_index:
+    name: enso_index
+    strict: false
+    enabled: true
+  step_means: []
+  zonal_mean:
+    name: zonal_mean
+    strict: false
+    enabled: true
+    variables: null
+    zonal_mean_max_size: 4096
+  mean_denorm:
+    name: mean
+    strict: false
+    target: denorm
+    enabled: true
+    variables: null
+  power_spectrum:
+    name: power_spectrum
+    strict: false
+    enabled: true
+    variables: null
+    plot_variables: null
+    report_directional_bias: true
+  time_mean_norm:
+    name: time_mean_norm
+    strict: false
+    target: norm
+    enabled: true
+    variables: null
+    reference_data: null
+    channel_mean_names: null
+  enso_coefficient:
+    name: enso_coefficient
+    strict: false
+    enabled: true
+  step_diagnostics:
+    correction_maps: false
+    correction_scalars: true
+  time_mean_denorm:
+    name: time_mean
+    strict: false
+    target: denorm
+    enabled: true
+    variables: null
+    reference_data: null
+    channel_mean_names: null
+  near_zero_fraction:
+    eps: 0
+    name: near_zero_fraction
+    strict: true
+    enabled: false
+    variables: []
+    include_maps: false
+    per_variable_eps: {}
+  monthly_reference_data: null
+  time_mean_reference_data: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/time-mean.nc
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+stepper_override:
+  corrector:
+    type: atmosphere_corrector
+    config:
+      clip_frozen_precipitation: true
+      conserve_dry_air: true
+      force_positive_names:
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - Q2m
+      - PRATEsfc
+      - total_frozen_precipitation_rate
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
+      moisture_budget_correction: advection_and_precipitation
+      co2_regression_relaxation:
+        timescale_days:
+          air_temperature_0: 5.0
+          specific_total_water_0: 5.0
+        co2_name: global_mean_co2
+        path: /co2stats-intercept/2026-11-13-era5-1deg-co2-intercept-only-1990-2019.nc
