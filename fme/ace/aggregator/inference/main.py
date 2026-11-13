@@ -649,6 +649,10 @@ class InferenceEvaluatorAggregator(
             raise ValueError(
                 f"Expected {self.n_ic_steps} initial condition steps, but got {n_times}"
             )
+        if len(gen_data) == 0:
+            # Diagnostic-only stepper: no prognostic state to record.
+            self._n_timesteps_seen = n_times
+            return {}
         batch = InferenceBatchData(
             prediction=gen_data,
             prediction_norm=self._normalize(gen_data),

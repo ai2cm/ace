@@ -1092,8 +1092,14 @@ class BatchData:
         self._raise_if_step_diagnostics("prepend")
         initial_batch_data = initial_condition.as_batch_data()
         filled_data = {**initial_batch_data.data}
-        example_tensor = list(initial_batch_data.data.values())[0]
         state_data_device = list(self.data.values())[0].device
+        if len(initial_batch_data.data) > 0:
+            example_tensor = list(initial_batch_data.data.values())[0]
+        else:
+            # Diagnostic-only stepper: the initial condition holds no
+            # prognostic variables, only its time coordinate.
+            n_ic = initial_batch_data.time.sizes["time"]
+            example_tensor = list(self.data.values())[0][:, :n_ic]
         for k in self.data:
             if k not in filled_data:
                 filled_data[k] = torch.full_like(example_tensor, fill_value=np.nan)
