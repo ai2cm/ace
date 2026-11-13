@@ -50,6 +50,12 @@ class CorrectorSelector(CorrectorConfigABC):
         """
         return self._corrector_config_instance.corrector_disabled_epochs == 0
 
+    def load(self):
+        self._corrector_config_instance.load()
+        # the selector is serialized via ``config``, so the loaded
+        # configuration must be written back to it
+        self.config = dataclasses.asdict(self._corrector_config_instance)
+
     @classmethod
     def register(cls, type_name):
         return cls.registry.register(type_name)

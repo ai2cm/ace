@@ -65,6 +65,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
+from fme.core.corrector.co2_relaxation import CO2RegressionRelaxationConfig
 from fme.core.corrector.loss_config import (
     CorrectorLossConfig,
     CorrectorRegularizationConfig,
@@ -4151,3 +4152,70 @@ def test_load_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
     stepper = load_stepper(path)
 
     assert_parameters_equal(stepper.modules, stepper_weights)
+
+
+def _write_co2_regression_reference(path: pathlib.Path, name: str) -> None:
+    rng = np.random.default_rng(0)
+    xr.Dataset(
+        {
+            f"{name}_intercept": (["y", "x"], rng.random((5, 5))),
+            f"{name}_slope": (["y", "x"], rng.random((5, 5))),
+        },
+        attrs={"co2_name": "co2", "co2_ref": 400.0},
+    ).to_netcdf(path)
+
+
+def _predict_with_co2(stepper: Stepper) -> torch.Tensor:
+    torch.manual_seed(0)
+    input_data, forcing_data = get_data_for_predict(n_steps=3, forcing_names=["co2"])
+    forcing_data.data = {"co2": 300.0 + 100.0 * forcing_data.data["co2"]}
+    output, _ = stepper.predict(input_data, forcing_data)
+    return output.data["a"]
+
+
+@pytest.mark.parametrize("use_selector", [False, True])
+@pytest.mark.parametrize("replace_corrector", [False, True])
+def test_co2_regression_relaxation_survives_checkpoint_without_file(
+    tmp_path: pathlib.Path, use_selector: bool, replace_corrector: bool
+):
+    path = tmp_path / "reference.nc"
+    _write_co2_regression_reference(path, "a")
+    relaxation = {
+        "timescale_days": {"a": 0.5},
+        "co2_name": "co2",
+        "path": str(path),
+    }
+    corrector: AtmosphereCorrectorConfig | CorrectorSelector
+    if use_selector or replace_corrector:
+        corrector = CorrectorSelector(
+            "atmosphere_corrector", {"co2_regression_relaxation": relaxation}
+        )
+    else:
+        corrector = AtmosphereCorrectorConfig(
+            co2_regression_relaxation=dacite.from_dict(
+                CO2RegressionRelaxationConfig, relaxation
+            )
+        )
+    if replace_corrector:
+        # the inference override path
+        stepper = _get_stepper(["a", "co2"], ["a"])
+        assert isinstance(corrector, CorrectorSelector)
+        stepper.replace_corrector(corrector)
+    else:
+        stepper = _get_stepper(["a", "co2"], ["a"], corrector=corrector)
+    unrelaxed = _get_stepper(["a", "co2"], ["a"])
+    stepper.set_eval()
+    unrelaxed.set_eval()
+    relaxed_output = _predict_with_co2(stepper)
+    assert not torch.allclose(relaxed_output, _predict_with_co2(unrelaxed))
+
+    state = stepper.get_state()
+    path.unlink()
+    reloaded = Stepper.from_state(state)
+    reloaded.set_eval()
+    torch.testing.assert_close(_predict_with_co2(reloaded), relaxed_output)
+    # train mode skips the relaxation
+    reloaded.set_train()
+    torch.testing.assert_close(
+        _predict_with_co2(reloaded), _predict_with_co2(unrelaxed)
+    )

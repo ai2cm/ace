@@ -12,6 +12,10 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
+from fme.core.corrector.co2_relaxation import (
+    CO2RegressionRelaxation,
+    CO2RegressionRelaxationConfig,
+)
 from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
@@ -318,6 +322,12 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             since frozen precipitation contributes to the surface energy flux via
             the latent heat of freezing. Defaults to False so that previously
             trained checkpoints, which did not apply this clip, are unaffected.
+        co2_regression_relaxation: If not None, relax the named generated
+            fields toward a per-gridpoint linear function of ln(CO2) (see
+            ``CO2RegressionRelaxationConfig``). Applied only in evaluation mode
+            (validation, inline and standalone inference), never to train-mode
+            steps. It runs before all other corrections, so the positivity,
+            dry-air, moisture and energy corrections act on the relaxed state.
     """
 
     @classmethod
@@ -339,6 +349,11 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
     clip_frozen_precipitation: bool = False
+    co2_regression_relaxation: CO2RegressionRelaxationConfig | None = None
+
+    def load(self):
+        if self.co2_regression_relaxation is not None:
+            self.co2_regression_relaxation.load()
 
     def _get_corrector(
         self,
@@ -359,6 +374,12 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
         corrections: list[Correction] = []
+        relaxation: CO2RegressionRelaxation | None = None
+        if self.co2_regression_relaxation is not None:
+            # do this step first so the budget corrections below close the
+            # budgets of the relaxed state.
+            relaxation = self.co2_regression_relaxation.build(timestep)
+            corrections.append(relaxation)
         if len(self.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
@@ -398,11 +419,29 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     self.total_energy_budget_correction.constant_unaccounted_heating,
                 )
             )
-        return AtmosphereCorrector(corrections)
+        return AtmosphereCorrector(corrections, relaxation=relaxation)
 
 
 class AtmosphereCorrector(CorrectionSequence):
-    pass
+    def __init__(
+        self,
+        corrections: list[Correction],
+        relaxation: CO2RegressionRelaxation | None = None,
+    ):
+        """
+        Args:
+            corrections: The corrections to apply, in order.
+            relaxation: The CO2 regression relaxation, if it is among
+                ``corrections``, so that the train/eval mode can be forwarded
+                to it.
+        """
+        super().__init__(corrections)
+        self._relaxation = relaxation
+
+    def train(self, mode: bool = True) -> "AtmosphereCorrector":
+        if self._relaxation is not None:
+            self._relaxation.train(mode)
+        return self
 
 
 def _seed_global_dry_air_mass(

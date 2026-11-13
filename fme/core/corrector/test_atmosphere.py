@@ -22,6 +22,7 @@ from .atmosphere import (
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
 )
+from .co2_relaxation import CO2RegressionRelaxationConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -711,10 +712,18 @@ def _build_full_atmosphere_corrector(tensor_shape):
         force_positive_names=["PRATEsfc"],
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
         clip_frozen_precipitation=True,
+        co2_regression_relaxation=CO2RegressionRelaxationConfig(
+            timescale_days={"air_temperature_0": 1.0},
+            co2_name="co2",
+            intercept={"air_temperature_0": torch.full(tensor_shape[-2:], 250.0)},
+            slope={"air_temperature_0": torch.ones(tensor_shape[-2:])},
+            co2_ref=1.0,
+        ),
     )
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
     )
+    forcing_data = {**forcing_data, "co2": torch.full(tensor_shape, 2.0)}
     # frozen precip exceeds total precip so the moisture budget correction's
     # frozen-precipitation clip has an effect.
     gen_data = _with_frozen_precip_exceeding_total(gen_data)
@@ -723,6 +732,8 @@ def _build_full_atmosphere_corrector(tensor_shape):
     )
     timestep = datetime.timedelta(seconds=3600)
     corrector = config._build(ops, vertical_coord, timestep)
+    # the CO2 regression relaxation only applies in eval mode
+    corrector.eval()
     return corrector, input_data, gen_data, forcing_data
 
 
@@ -739,6 +750,7 @@ def test_atmosphere_corrector_config_fields_are_exercised():
         "total_energy_budget_correction",
         "keep_gradient_through_clamps",
         "clip_frozen_precipitation",
+        "co2_regression_relaxation",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
