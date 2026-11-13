@@ -14,6 +14,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -92,22 +93,33 @@ _MUON_KWARGS = frozenset(
 def _split_muon_parameters(
     named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
     adamw_names: Sequence[str],
-) -> tuple[list[torch.nn.Parameter], list[torch.nn.Parameter]]:
-    """Split parameters into (Muon, AdamW) lists.
+) -> tuple[
+    list[torch.nn.Parameter],
+    list[SpectralFilterParameter],
+    list[torch.nn.Parameter],
+]:
+    """Split parameters into (Muon, spectral Muon, AdamW) lists.
 
-    Parameters with ``ndim >= 2`` go to Muon unless their name contains one of
-    ``adamw_names``; all others go to AdamW.
+    Parameters whose name contains one of ``adamw_names`` go to AdamW.
+    Of the rest, :class:`SpectralFilterParameter` instances go to spectral
+    Muon, other parameters with ``ndim >= 2`` to Muon, and all others to
+    AdamW.
 
     Raises:
         ValueError: If an entry of ``adamw_names`` matches no parameter name.
     """
     muon_params: list[torch.nn.Parameter] = []
+    spectral_params: list[SpectralFilterParameter] = []
     adamw_params: list[torch.nn.Parameter] = []
     unmatched = set(adamw_names)
     for name, param in named_parameters:
         matches = {pattern for pattern in adamw_names if pattern in name}
         unmatched -= matches
-        if param.ndim >= 2 and not matches:
+        if matches:
+            adamw_params.append(param)
+        elif isinstance(param, SpectralFilterParameter):
+            spectral_params.append(param)
+        elif param.ndim >= 2:
             muon_params.append(param)
         else:
             adamw_params.append(param)
@@ -116,7 +128,24 @@ def _split_muon_parameters(
             "OptimizationConfig.adamw_names entries matched no parameter "
             f"name: {sorted(unmatched)}"
         )
-    return muon_params, adamw_params
+    return muon_params, spectral_params, adamw_params
+
+
+def _default_foreach(
+    parameters: Sequence[torch.nn.Parameter], kwargs: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Keep torch's multi-tensor ("foreach") Adam default for models with
+    SpectralFilterParameter weights.
+
+    torch only defaults to the faster foreach implementation when every
+    parameter's type is exactly ``Tensor`` or ``Parameter``, so a single
+    ``SpectralFilterParameter`` would silently select the per-tensor loop.
+    """
+    if "foreach" in kwargs or "fused" in kwargs:
+        return kwargs
+    if not any(isinstance(p, SpectralFilterParameter) for p in parameters):
+        return kwargs
+    return {**kwargs, "foreach": all(p.is_cuda for p in parameters)}
 
 
 def _build_optimizer(
@@ -127,11 +156,19 @@ def _build_optimizer(
     adamw_names: Sequence[str] = (),
 ) -> torch.optim.Optimizer:
     if optimizer_type == "Muon":
-        muon_params, adamw_params = _split_muon_parameters(
+        muon_params, spectral_params, adamw_params = _split_muon_parameters(
             named_parameters, adamw_names
         )
-        return Muon(muon_params, adamw_params, lr=lr, **kwargs)
+        return Muon(
+            muon_params,
+            adamw_params,
+            lr=lr,
+            spectral_params=spectral_params,
+            **kwargs,
+        )
     parameters = [param for _, param in named_parameters]
+    if optimizer_type in ("Adam", "AdamW"):
+        kwargs = _default_foreach(parameters, kwargs)
     if optimizer_type == "FusedAdam":
         return torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
     elif optimizer_type == "Adam":
@@ -367,7 +404,13 @@ class OptimizationConfig:
             parameter with ``ndim >= 2`` (conv kernels are flattened to
             ``(out_channels, -1)``) with Muon's orthogonalized momentum, and
             all other parameters (biases, norm affines) plus those selected
-            by ``adamw_names`` with AdamW, in a second parameter group.
+            by ``adamw_names`` with AdamW, in a separate parameter group.
+            Spectral filter weights
+            (:class:`fme.core.spectral_filter_parameter.SpectralFilterParameter`,
+            used by the SFNO implementations) not selected by ``adamw_names``
+            get a third group, which orthogonalizes each spectral mode's
+            complex channel matrix separately instead of flattening the
+            weight.
             Grouping is by ``ndim`` alone, so a norm affine over several
             dimensions (e.g. ``LayerNorm([C, H, W])``) goes to Muon unless
             listed in ``adamw_names``.
