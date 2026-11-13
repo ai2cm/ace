@@ -1,12 +1,18 @@
+import os
+from typing import Literal
+
 import pytest
 import torch
 
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
+from fme.core.testing.regression import validate_tensor_dict
 
-from .swin_layers import ColumnMixer, WindowAttention2D
-from .swin_transformer import SwinTransformerNet
+from .boundary_padding import TensorPaddingConfig
+from .swin_layers import ColumnMixer, SwinTransformerBlock, WindowAttention2D
+from .swin_transformer import SwinTransformerNet, _padding_index
 
+DIR = os.path.abspath(os.path.dirname(__file__))
 _EMBED_DIM_NOISE = 8
 
 
@@ -16,6 +22,9 @@ def _build_net(
     img_shape: tuple[int, int],
     context_config: ContextConfig | None = None,
     use_skip: bool = True,
+    window_size: tuple[int, int] = (4, 4),
+    lat_coords: torch.Tensor | None = None,
+    padding_conf: dict | None = None,
 ) -> SwinTransformerNet:
     return SwinTransformerNet(
         in_chans=in_chans,
@@ -24,11 +33,13 @@ def _build_net(
         embed_dim=32,
         depth_multiplier=1,
         num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
+        window_size=window_size,
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
         context_config=context_config,
+        lat_coords=lat_coords,
+        padding_conf=padding_conf,
     )
 
 
@@ -255,20 +266,11 @@ def test_cpb_lat_coords_changes_output():
     lat_high = torch.full((img_shape[0],), 60.0, device=device)
     net_low = _build_net(in_chans, out_chans, img_shape).to(device)
     net_low_state = net_low.state_dict()
-    net_high = SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_high,
-    ).to(device)
+    net_high = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_high).to(
+        device
+    )
     net_high.load_state_dict(net_low_state)
-    # Push cpb_mlp off zero so lat_mean actually changes the bias.
+    # Push cpb_mlp off zero so the latitude actually changes the bias.
     optimizer = torch.optim.SGD(net_low.parameters(), lr=1.0)
     x = torch.randn(n, in_chans, *img_shape, device=device)
     net_low.train()
@@ -276,18 +278,9 @@ def test_cpb_lat_coords_changes_output():
     optimizer.step()
     # Give net_high the same updated weights.
     net_high.load_state_dict(net_low.state_dict())
-    net_low_lat = SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_low,
-    ).to(device)
+    net_low_lat = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_low).to(
+        device
+    )
     net_low_lat.load_state_dict(net_low.state_dict())
     with torch.no_grad():
         out_low = net_low_lat(x)
@@ -302,18 +295,7 @@ def test_cpb_backward_with_lat_coords():
     n = 2
     device = get_device()
     lat_coords = torch.linspace(-90.0, 90.0, img_shape[0], device=device)
-    net = SwinTransformerNet(
-        in_chans=in_chans,
-        out_chans=out_chans,
-        img_shape=img_shape,
-        embed_dim=32,
-        depth_multiplier=1,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_coords,
-    ).to(device)
+    net = _build_net(in_chans, out_chans, img_shape, lat_coords=lat_coords).to(device)
     x = torch.randn(n, in_chans, *img_shape, device=device)
     net(x).sum().backward()
     for name, param in net.named_parameters():
@@ -378,17 +360,7 @@ def test_earth_padding_forward():
         "pad_lat": [2, 1],
         "pad_lon": [2, 2],
     }
-    net = SwinTransformerNet(
-        3,
-        3,
-        img_shape,
-        embed_dim=32,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        padding_conf=padding_conf,
-    ).to(get_device())
+    net = _build_net(3, 3, img_shape, padding_conf=padding_conf).to(get_device())
     x = torch.randn(2, 3, *img_shape, device=get_device())
     assert net(x).shape == (2, 3, *img_shape)
 
@@ -406,30 +378,18 @@ def test_earth_padding_lat_coords_allow_one_sided_or_zero_padding(
         "pad_lon": [0, 0],
     }
 
-    net = SwinTransformerNet(
-        3,
-        3,
-        img_shape,
-        embed_dim=32,
-        num_heads=(2, 4, 4, 2),
-        window_size=(4, 4),
-        mlp_ratio=2.0,
-        drop_path_rate=0.0,
-        lat_coords=lat_coords,
-        padding_conf=padding_conf,
-    )
+    net = _build_net(3, 3, img_shape, lat_coords=lat_coords, padding_conf=padding_conf)
 
+    # The south padding is extended to reach the window multiple.
+    pad_s = net.padded_shape[0] - img_shape[0] - pad_lat[0]
     expected_pieces = []
     if pad_lat[0] > 0:
         expected_pieces.append(torch.flip(lat_coords[: pad_lat[0]], dims=[0]))
     expected_pieces.append(lat_coords)
-    if pad_lat[1] > 0:
-        expected_pieces.append(torch.flip(lat_coords[-pad_lat[1] :], dims=[0]))
+    if pad_s > 0:
+        expected_pieces.append(torch.flip(lat_coords[-pad_s:], dims=[0]))
     expected = torch.cat(expected_pieces)
-    pad_h = net.padded_shape[0] - expected.shape[0]
-    if pad_h > 0:
-        expected = torch.cat([expected, expected[-1:].expand(pad_h)])
-    torch.testing.assert_close(net.layer1.blocks[0].lat_coords, expected)
+    _assert_window_cos_lat(net.layer1.blocks[0], expected)
 
 
 def test_earth_padding_cln_forward():
@@ -448,3 +408,242 @@ def test_earth_padding_cln_forward():
         3,
         *img_shape,
     )
+
+
+_REGRESSION_IMG_SHAPE = (9, 18)  # not a multiple of 2 * window_size
+
+
+def _build_padded_net(
+    padding_mode: Literal["earth", "mirror"] | None,
+    conditioning: Literal["adaln", "cln"],
+) -> SwinTransformerNet:
+    """Small randomly-initialized net exercising padding and cos-lat CPB.
+
+    All parameters (including the zero-initialized CPB output layer) are
+    drawn from a seeded normal on CPU so outputs depend on the latitudes and
+    are reproducible across devices.
+    """
+    torch.manual_seed(0)
+    if padding_mode is None:
+        padding_conf = None
+    else:
+        padding_conf = {
+            "activate": True,
+            "mode": padding_mode,
+            "pad_lat": [2, 1],
+            "pad_lon": [2, 2],
+        }
+    context_config = ContextConfig(
+        embed_dim_scalar=0,
+        embed_dim_labels=0,
+        embed_dim_noise=_EMBED_DIM_NOISE if conditioning == "cln" else 0,
+        embed_dim_pos=0,
+    )
+    net = SwinTransformerNet(
+        in_chans=3,
+        out_chans=2,
+        img_shape=_REGRESSION_IMG_SHAPE,
+        embed_dim=16,
+        depth_multiplier=1,
+        num_heads=(2, 2, 2, 2),
+        window_size=(4, 4),
+        mlp_ratio=2.0,
+        drop_path_rate=0.0,
+        context_config=context_config,
+        conditioning=conditioning,
+        lat_coords=torch.linspace(-80.0, 80.0, _REGRESSION_IMG_SHAPE[0]),
+        padding_conf=padding_conf,
+    )
+    # At 0.2 the cln net amplifies float32 rounding to ~1e-3, so its outputs
+    # differ across platforms; 0.05 keeps it well conditioned.
+    scale = 0.2 if conditioning == "adaln" else 0.05
+    with torch.no_grad():
+        for param in net.parameters():
+            param.copy_(scale * torch.randn_like(param))
+    return net
+
+
+def _regression_inputs(conditioning: str) -> tuple[torch.Tensor, Context]:
+    torch.manual_seed(1)
+    x = torch.randn(2, 3, *_REGRESSION_IMG_SHAPE)
+    noise = (
+        torch.randn(2, _EMBED_DIM_NOISE, *_REGRESSION_IMG_SHAPE)
+        if conditioning == "cln"
+        else None
+    )
+    context = Context(
+        embedding_scalar=None, embedding_pos=None, labels=None, noise=noise
+    )
+    return x, context
+
+
+@pytest.mark.parametrize(
+    "padding_mode, conditioning",
+    [
+        pytest.param(None, "adaln", id="no_padding"),
+        pytest.param("earth", "adaln", id="earth_adaln"),
+        pytest.param("earth", "cln", id="earth_cln"),
+        pytest.param("mirror", "cln", id="mirror_cln"),
+    ],
+)
+def test_padded_output_regression(
+    padding_mode: Literal["earth", "mirror"] | None,
+    conditioning: Literal["adaln", "cln"],
+):
+    """Regression test for the padded forward pass, covering window-multiple
+    padding and cos-lat CPB scaling."""
+    device = get_device()
+    net = _build_padded_net(padding_mode, conditioning).to(device)
+    x, context = _regression_inputs(conditioning)
+    if context.noise is not None:
+        context.noise = context.noise.to(device)
+    with torch.no_grad():
+        out = net(x.to(device), context)
+    validate_tensor_dict(
+        {"output": out},
+        os.path.join(
+            DIR,
+            "testdata",
+            f"test_padded_output_regression-{padding_mode}-{conditioning}.pt",
+        ),
+        atol=1e-5,
+        rtol=1e-4,
+    )
+
+
+def _assert_window_cos_lat(block: SwinTransformerBlock, padded_lat: torch.Tensor):
+    """``block`` scales its CPB by the mean ``cos`` of each (shifted) window."""
+    ws_h, ws_w = block.window_size
+    n_w = block.input_resolution[1] // ws_w
+    rows = torch.roll(padded_lat, -block.shift_size[0]).reshape(-1, ws_h)
+    expected = torch.cos(torch.deg2rad(rows)).mean(1).repeat_interleave(n_w)
+    torch.testing.assert_close(block.window_cos_lat, expected)
+
+
+def test_shifted_window_cos_lat_is_polar_at_poles():
+    """Shifted windows that wrap across both poles must see a polar latitude.
+
+    On a 4-degree grid (-88..88) with earth padding [2, 1] the padded grid has
+    48 rows; with window height 4 the last shifted window row holds rows
+    from both poles (lats [88, 88, -84, -88]). Its CPB cos-lat scaling must
+    reflect a polar latitude, not the near-equatorial signed mean.
+    """
+    lat_coords = torch.arange(-88.0, 88.0 + 1, 4.0)
+    img_shape = (lat_coords.shape[0], 16)
+    net = _build_net(
+        3,
+        3,
+        img_shape,
+        window_size=(4, 8),
+        lat_coords=lat_coords,
+        padding_conf={
+            "activate": True,
+            "mode": "earth",
+            "pad_lat": [2, 1],
+            "pad_lon": [0, 0],
+        },
+    )
+    padded_lat = torch.cat([lat_coords[:2].flip(0), lat_coords, lat_coords[-1:]])
+    for block in (*net.layer1.blocks, *net.layer4.blocks):
+        _assert_window_cos_lat(block, padded_lat)
+        if block.shift_size[0] > 0:
+            assert block.window_cos_lat[-1] < 0.15
+
+
+def _reference_row(
+    mode: Literal["earth", "mirror"], H: int, row: int
+) -> tuple[int, bool]:
+    """Data row at ``row`` of an ``H``-row grid, walking one pole at a time.
+
+    Returns the row and whether longitude is rotated by 180 degrees.
+    """
+    rotated = False
+    while not 0 <= row < H:
+        if mode == "earth":
+            row = -1 - row if row < 0 else 2 * H - 1 - row
+            rotated = not rotated
+        else:
+            row = -row if row < 0 else 2 * (H - 1) - row
+    return row, rotated
+
+
+@pytest.mark.parametrize("mode", ["earth", "mirror"])
+@pytest.mark.parametrize(
+    "img_shape, pad_north, pad_west, padded_shape",
+    [
+        pytest.param((3, 4), 1, 1, (5, 6), id="both_edges"),
+        pytest.param((3, 2), 0, 0, (9, 2), id="lat_past_whole_grid"),
+        pytest.param((8, 4), 0, 0, (8, 16), id="lon_past_whole_grid"),
+        pytest.param((9, 18), 2, 2, (24, 24), id="window_multiple"),
+    ],
+)
+def test_padding_index_continues_the_sphere(
+    mode: Literal["earth", "mirror"],
+    img_shape: tuple[int, int],
+    pad_north: int,
+    pad_west: int,
+    padded_shape: tuple[int, int],
+):
+    H, W = img_shape
+    rows, cols = _padding_index(mode, img_shape, pad_north, pad_west, padded_shape)
+    for i in range(padded_shape[0]):
+        row, rotated = _reference_row(mode, H, i - pad_north)
+        assert torch.all(rows[i] == row)
+        expected_cols = (torch.arange(padded_shape[1]) - pad_west) % W
+        if rotated:
+            expected_cols = (expected_cols + W // 2) % W
+        assert torch.equal(cols[i], expected_cols)
+
+
+@pytest.mark.parametrize("mode", ["earth", "mirror", None])
+def test_pads_window_multiple_with_data(mode: Literal["earth", "mirror"] | None):
+    """Padded rows hold data and its latitude; ``None`` uses earth padding."""
+    img_shape = (9, 18)
+    lat_coords = torch.linspace(-80.0, 80.0, img_shape[0])
+    padding_conf = (
+        None
+        if mode is None
+        else {"activate": True, "mode": mode, "pad_lat": [2, 1], "pad_lon": [2, 2]}
+    )
+    net = _build_net(3, 3, img_shape, lat_coords=lat_coords, padding_conf=padding_conf)
+    x = torch.randn(1, 3, *img_shape)
+    expected_rows, expected_cols = _padding_index(
+        mode or "earth", img_shape, *net.pad_offset, net.padded_shape
+    )
+    torch.testing.assert_close(net._pad(x), x[..., expected_rows, expected_cols])
+    _assert_window_cos_lat(net.layer1.blocks[0], lat_coords[expected_rows[:, 0]])
+    with torch.no_grad():
+        assert net(x).shape == x.shape
+
+
+def test_downsampled_cos_lat_is_polar_when_rows_wrap_both_poles():
+    """Padded rows that wrap the whole grid pair rows from opposite poles.
+
+    With 2 rows at -80 and 80 degrees, every row pair merged into the
+    half-resolution stages spans both poles; their CPB scaling must stay
+    polar instead of the equatorial ``cos`` of the pair's signed mean.
+    """
+    net = _build_net(
+        3, 3, (2, 8), window_size=(4, 8), lat_coords=torch.tensor([-80.0, 80.0])
+    )
+    cos_80 = torch.cos(torch.deg2rad(torch.tensor(80.0)))
+    for layer in (net.layer1, net.layer2, net.layer3, net.layer4):
+        for block in layer.blocks:
+            torch.testing.assert_close(
+                block.window_cos_lat, cos_80.expand_as(block.window_cos_lat)
+            )
+
+
+@pytest.mark.parametrize(
+    "pad_lat, pad_lon",
+    [([-1, 0], [0, 0]), ([0, 0], [0, -2]), ([3], [0, 0]), ([0, 0], [1, 2, 3])],
+)
+def test_padding_config_rejects_invalid_sizes(pad_lat: list[int], pad_lon: list[int]):
+    with pytest.raises(ValueError, match="pad_l"):
+        TensorPaddingConfig(pad_lat=pad_lat, pad_lon=pad_lon)
+
+
+def test_earth_padding_rejects_odd_longitudes_when_crossing_poles():
+    with pytest.raises(ValueError, match="even number of longitudes"):
+        _build_net(3, 3, (9, 17))
+    _build_net(3, 3, (8, 17), window_size=(4, 8))  # rows need no padding
