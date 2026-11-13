@@ -16,10 +16,11 @@ chunked like the source (1 step per chunk), to be merged with the ERA5 store in 
 """
 
 import argparse
+import concurrent.futures
 
-import dask
 import numpy as np
 import xarray as xr
+import zarr
 
 p = argparse.ArgumentParser()
 p.add_argument(
@@ -30,16 +31,21 @@ p.add_argument(
     default="/climate-default/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr",
 )
 p.add_argument("--out", default="/results/ace2p5_era5_extra.zarr")
+p.add_argument("--block", type=int, default=512)
+p.add_argument("--threads", type=int, default=8)
 a = p.parse_args()
 
-era = xr.open_zarr(a.era5, chunks={"time": 256}, consolidated=None)
+era = xr.open_zarr(
+    a.era5, chunks=None, consolidated=None
+)  # no dask in the Beaker image: lazy indexing + explicit blocks
 cm = xr.open_zarr(a.cm4, chunks=None, consolidated=None)
 co2 = era.global_mean_co2.load().values * 1e6
 fin = np.isfinite(co2)
 co2[~fin] = np.interp(np.flatnonzero(~fin), np.flatnonzero(fin), co2[fin])
 lake = cm.lake_fraction.load().values.astype("float32")
-assert lake.shape == (era.sizes["latitude"], era.sizes["longitude"])
-out = xr.Dataset(
+nt, ny, nx = era.sizes["time"], era.sizes["latitude"], era.sizes["longitude"]
+assert lake.shape == (ny, nx)
+small = xr.Dataset(
     {
         "carbon_dioxide": (
             ("time",),
@@ -57,18 +63,6 @@ out = xr.Dataset(
                 "long_name": "lake fraction (CM4 piControl 1deg atmosphere store static map)",
             },
         ),
-        "eastward_surface_wind_stress": (-era.eastward_surface_stress)
-        .astype("float32")
-        .assign_attrs(
-            units="Pa",
-            long_name="minus the ERA5 eastward_surface_stress (CM4 sign convention)",
-        ),
-        "northward_surface_wind_stress": (-era.northward_surface_stress)
-        .astype("float32")
-        .assign_attrs(
-            units="Pa",
-            long_name="minus the ERA5 northward_surface_stress (CM4 sign convention)",
-        ),
     },
     coords={
         "time": era.time.values,
@@ -79,17 +73,51 @@ out = xr.Dataset(
         "note": "extra inputs/targets for the CM4-line ACE2.5 atmosphere on the 2026-03-19 ERA5 1deg 8-layer store's time axis"
     },
 )
-out.time.encoding = {
+small.time.encoding = {
     "units": "hours since 1940-01-01 00:00:00",
     "calendar": "proleptic_gregorian",
     "dtype": "float64",
 }
-enc = {
-    v: {"chunks": (1, 180, 360)}
-    for v in ["eastward_surface_wind_stress", "northward_surface_wind_stress"]
+small.to_zarr(a.out, mode="w", consolidated=False, zarr_format=2)
+
+# The two big fields: minus the ERA5 stresses, one timestep per chunk like the source, written block by block in threads.
+g = zarr.open_group(a.out, mode="r+", zarr_format=2)
+NAMES = {
+    "eastward_surface_wind_stress": "eastward_surface_stress",
+    "northward_surface_wind_stress": "northward_surface_stress",
 }
-with dask.config.set(scheduler="threads", num_workers=16):
-    out.to_zarr(a.out, mode="w", consolidated=True, encoding=enc)
+for dst, srcname in NAMES.items():
+    arr = g.create_array(
+        dst,
+        shape=(nt, ny, nx),
+        chunks=(1, ny, nx),
+        dtype="float32",
+        fill_value=np.nan,
+        overwrite=True,
+    )
+    arr.attrs.update(
+        {
+            "_ARRAY_DIMENSIONS": ["time", "latitude", "longitude"],
+            "units": "Pa",
+            "long_name": f"minus the ERA5 {srcname} (CM4 sign convention)",
+        }
+    )
+
+
+def do_block(i0: int) -> int:
+    i1 = min(i0 + a.block, nt)
+    for dst, srcname in NAMES.items():
+        g[dst][i0:i1] = -era[srcname].isel(time=slice(i0, i1)).values.astype("float32")
+    return i1
+
+
+with concurrent.futures.ThreadPoolExecutor(a.threads) as ex:
+    done = 0
+    for i1 in ex.map(do_block, range(0, nt, a.block)):
+        done = max(done, i1)
+        if done % (a.block * 20) < a.block:
+            print(f"{done}/{nt} steps written", flush=True)
+zarr.consolidate_metadata(a.out)
 chk = xr.open_zarr(a.out)
 print("written", list(chk.data_vars), dict(chk.sizes))
 print(
@@ -100,6 +128,10 @@ print(
 )
 print(
     "stress check (should be minus the ERA5 value):",
-    float(chk.eastward_surface_wind_stress[1000, 90, 180]),
-    float(era.eastward_surface_stress[1000, 90, 180]),
+    float(chk.eastward_surface_wind_stress[min(1000, nt - 1), 90, 180]),
+    float(era.eastward_surface_stress[min(1000, nt - 1), 90, 180]),
+)
+print(
+    "nan check last block:",
+    int(np.isnan(chk.northward_surface_wind_stress[-3:].values).sum()),
 )
