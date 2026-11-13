@@ -5,16 +5,15 @@ should ``from fme.core.sht import ...`` rather than importing from
 ``torch_harmonics`` directly.
 """
 
-# Forked (standalone) transform classes
-# Unpatched torch_harmonics utilities that consumers need
-from torch_harmonics import DiscreteContinuousConvS2, ResampleS2, quadrature
+# Upstream torch_harmonics utilities that consumers need
+from torch_harmonics import ResampleS2, quadrature
 from torch_harmonics.quadrature import (
     clenshaw_curtiss_weights,
     legendre_gauss_weights,
     lobatto_weights,
 )
 
-# Distributed wrappers (thin re-exports from torch_harmonics.distributed)
+# Upstream distributed wrappers (re-exports from torch_harmonics.distributed)
 from fme.core.sht._distributed import (
     DistributedDiscreteContinuousConvS2,
     DistributedInverseRealSHT,
@@ -29,6 +28,8 @@ from fme.core.sht._distributed import (
 
 # FFT helpers (forked from torch_harmonics)
 from fme.core.sht._fft import irfft, rfft
+
+# Forked transform classes (patched RealSHT / InverseRealSHT from torch_harmonics)
 from fme.core.sht._transforms import (
     InverseRealSHT,
     InverseRealSHTBenchmark,
@@ -55,8 +56,7 @@ __all__ = [
     # FFT
     "rfft",
     "irfft",
-    # Upstream torch_harmonics convolution / resampling
-    "DiscreteContinuousConvS2",
+    # Upstream torch_harmonics resampling
     "ResampleS2",
     # Quadrature
     "quadrature",

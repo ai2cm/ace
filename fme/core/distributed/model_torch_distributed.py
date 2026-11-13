@@ -27,7 +27,7 @@ import torch.nn as nn
 from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
-import fme.core.sht._distributed as thd
+import fme.core.sht as thd
 from fme.core import metrics
 from fme.core.device import in_dataloader_worker, using_gpu, using_srun
 
@@ -211,10 +211,8 @@ class ModelTorchDistributed(DistributedBackend):
         Returns:
             tuple[slice, slice]: Slices for the local height and width.
         """
-        from fme.core.sht import compute_split_shapes
-
-        h_shapes = compute_split_shapes(h, self._h_size)
-        w_shapes = compute_split_shapes(w, self._w_size)
+        h_shapes = thd.compute_split_shapes(h, self._h_size)
+        w_shapes = thd.compute_split_shapes(w, self._w_size)
         h_start = sum(h_shapes[: self._h_rank])
         w_start = sum(w_shapes[: self._w_rank])
         return (
