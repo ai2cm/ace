@@ -1,6 +1,7 @@
 # As pretrain-fieldsfno-pos64-mlpfilter-h512-4deg-rs1.yaml but with num_layers 16
 # instead of 8. "v1" = pos64 + mlpfilter (block_inner_skip, context_pos_embed_dim
-# 64, block_mlp_input filter).
+# 64, block_mlp_input filter). Trains 240 epochs (the 240-epoch target also
+# applied to the resumed baseline and h512 arms).
 # As pretrain-fieldsfno-pos64-mlpfilter-4deg-rs1.yaml (4deg daily, one GPU,
 # Muon, seed 1; inner skip, context_pos_embed_dim 64, block_mlp_input filter)
 # plus hidden_embed_dim 512: 512 latent channels ride the residual stream next
@@ -12,12 +13,12 @@ seed: 1
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_save_epochs:
-  start: 116
+  start: 236
 ema_checkpoint_save_epochs:
   start: 10
   step: 10
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 240
 ema:
   decay: 0.999
 inference:

@@ -170,3 +170,7 @@ run_training "pretrain-fieldsfno-pos64-mlpfilter-l32-4deg-rs1.yaml" "fieldsfno-p
 # v1 (= pos64 + mlpfilter) hidden_embed_dim 512 depth arms, 4deg at 1 GPU, PRIORITY=high.
 run_training "pretrain-fieldsfno-v1-l12-h512-4deg-rs1.yaml" "fieldsfno-v1-l12-h512-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-v1-l16-h512-4deg-rs1.yaml" "fieldsfno-v1-l16-h512-4deg-pretrain-rs1" 1
+# 240-epoch continuations of finished 4deg runs (resume_results; job name = the original
+# wandb run name so the resumed run keeps its display name). PRIORITY=high.
+run_training "pretrain-muon-4deg-rs1-resume240.yaml" "muon-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-pos64-mlpfilter-h512-4deg-rs1-resume240.yaml" "fieldsfno-pos64-mlpfilter-h512-4deg-pretrain-rs1" 1
