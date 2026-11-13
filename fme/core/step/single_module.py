@@ -141,9 +141,27 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
+    # Experiment hack (not for ace main): input names whose values are replaced
+    # by their network-normalization mean wherever the ocean fraction is below
+    # 0.5 (the same hard threshold as OceanConfig with interpolate=False, so
+    # coastal cells are never a land/ocean blend). Lets e.g. surface_temperature
+    # enter the network as prescribed SST only.
+    land_masked_input_names: list[str] = dataclasses.field(default_factory=list)
+    land_mask_ocean_fraction_name: str = "ocean_fraction"
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        for name in self.land_masked_input_names:
+            if name not in self.in_names:
+                raise ValueError(
+                    f"land_masked_input_name '{name}' not in in_names: "
+                    f"{self.in_names}"
+                )
+            if name in self.out_names:
+                raise ValueError(
+                    f"land_masked_input_name '{name}' must be input-only, but it "
+                    "is in out_names"
+                )
         residual_prediction = self.residual_prediction
         if isinstance(residual_prediction, bool):
             # bool spelling: True = every prognostic, False = disabled
@@ -257,10 +275,12 @@ class SingleModuleStepConfig(StepConfigABC):
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
-        if self.ocean is None:
-            return frozenset(self.in_names)
-        else:
-            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
+        names = set(self.in_names)
+        if self.ocean is not None:
+            names = names.union(self.ocean.forcing_names)
+        if len(self.land_masked_input_names) > 0:
+            names.add(self.land_mask_ocean_fraction_name)
+        return frozenset(names)
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
@@ -553,7 +573,7 @@ class SingleModuleStep(StepABC):
             return output_dict
 
         return step_with_adjustments(
-            input=args.input,
+            input=self._mask_land_inputs(args.input),
             next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
             normalizer=self.normalizer,
@@ -566,6 +586,20 @@ class SingleModuleStep(StepABC):
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
         )
+
+    def _mask_land_inputs(self, input: TensorMapping) -> TensorMapping:
+        """Replace land_masked_input_names with their normalization mean
+        wherever the ocean fraction is below 0.5 (no coastal blending).
+        """
+        names = self._config.land_masked_input_names
+        if len(names) == 0:
+            return input
+        is_ocean = input[self._config.land_mask_ocean_fraction_name] >= 0.5
+        result = dict(input)
+        for name in names:
+            mean = self.normalizer.means[name].to(input[name].dtype)
+            result[name] = torch.where(is_ocean, input[name], mean)
+        return result
 
     def _draw_input_dropout_mask(self) -> TensorMapping | None:
         """Draw a fresh input-dropout mask for this forward step.
