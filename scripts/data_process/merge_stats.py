@@ -5,10 +5,9 @@ import os
 import tempfile
 
 import dacite
-import fsspec
 import xarray as xr
 import yaml
-from fs_utils import makedirs
+from fs_utils import load_netcdf, makedirs
 from get_stats import copy
 
 STATS_NC_FILE_NAMES = [
@@ -50,12 +49,9 @@ class MergeStatsConfig:
     exclude_names: list[str] = dataclasses.field(default_factory=list)
 
     def open_input_datasets(self, fname: str):
-        datasets = []
-        for path in self.input_directories:
-            with fsspec.open(os.path.join(path, fname)) as file:
-                ds = xr.open_dataset(file, decode_timedelta=False).load()
-            datasets.append(ds)
-        return datasets
+        return [
+            load_netcdf(os.path.join(path, fname)) for path in self.input_directories
+        ]
 
 
 def merge_stats(config: MergeStatsConfig):
