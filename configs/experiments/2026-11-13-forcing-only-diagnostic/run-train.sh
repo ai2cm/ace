@@ -150,3 +150,4 @@ run_training "forcing-only-all-4deg-rs1.yaml" "forcing-only-all-4deg-rs1" 1
 run_training "forcing-only-co2-4deg-rs1.yaml" "forcing-only-co2-4deg-rs1" 1
 run_training "forcing-only-sst-4deg-rs1.yaml" "forcing-only-sst-4deg-rs1" 1
 run_training "forcing-only-sst-oceanonly-4deg-rs1.yaml" "forcing-only-sst-oceanonly-4deg-rs1" 1
+run_training "forcing-only-all-sst-oceanonly-4deg-rs1.yaml" "forcing-only-all-sst-oceanonly-4deg-rs1" 1
