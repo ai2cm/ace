@@ -29,6 +29,12 @@ Training:
 Inference and evaluation:
 
 - `generate_inference_configs.py`, `submit_inference_jobs.py`, `run-ace-inference-job.sh`, `run_eval_suite.py`.
+- `eval_table.py`: status table of the inference jobs of one `--arch`, a row per family and checkpoint (`--family`, `--ckpt` to narrow).
+- ft sweep evals (`--arch sfno-v2-ft`, `swin-v2.2-v2-ft`: the 96 runs of `run_configs/ft/`, 48 each). Run per arch, as often as wanted, while the runs finish: the `eval` family at bestinf, lastema (`ema_ckpt_0008`) and the per-epoch `ema1`..`ema7` (`ema_ckpt_0001`..`0007`) of every run whose training succeeded, skipping jobs already in Beaker (9 jobs per run, 432 per arch):
+  `python scripts/submit_inference_jobs.py --arch sfno-v2-ft --family eval --ckpt all --skip-if-in-beaker`
+  Later, the other families at bestinf and lastema (28 jobs per run, 1344 per arch):
+  `python scripts/submit_inference_jobs.py --arch sfno-v2-ft --family cm4xshield cm4-1pct sst paper-som paper-era5 --ckpt bestinf lastema --skip-if-in-beaker`
+  Status: `python scripts/eval_table.py --arch sfno-v2-ft [--family eval]`.
 - `run_anneal_postprocess.sh`: runs `update_beaker_map.py`, `make_soup_checkpoints.py`, `submit_anneal_eval_jobs.py`.
 - `anneal_eval_status.py`: anneal eval progress table.
 

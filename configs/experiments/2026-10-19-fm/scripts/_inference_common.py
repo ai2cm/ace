@@ -3,10 +3,10 @@
 The inference families (generate_inference_configs.py, submit_inference_jobs.py)
 evaluate a checkpoint of each finished 2026-10-19 training run, and of each
 finished 2026-11-09 v2 run (--arch sfno-v2, swin-v2.2-v2). A run is one config in
-run_configs/; its job name (and wandb name) comes from
-submit_fm_jobs.config_to_job_name. Which runs have finished, and which
-Beaker result dataset holds their checkpoints, is read from Beaker
-(_beaker_listing), not from wandb.
+run_configs/ (run_configs/ft/ for the ft archs, RUN_CONFIG_SUBDIRS); its job
+name (and wandb name) comes from submit_fm_jobs.config_to_job_name. Which runs
+have finished, and which Beaker result dataset holds their checkpoints, is
+read from Beaker (_beaker_listing), not from wandb.
 """
 
 import pathlib
@@ -48,6 +48,14 @@ CHECKPOINTS = {
 # the v2 runs (sfno-v2, swin-v2.2-v2; create_fm_v2_jobs.py) train 50 epochs
 # with an EMA checkpoint every epoch, so their last one is ema_ckpt_0050.tar.
 LAST_EMA_EPOCHS = {"sfno-v2": 50, "swin-v2.2-v2": 50}
+# Per-epoch EMA checkpoints, further --ckpt choices of the archs in
+# EPOCH_CHECKPOINT_ARCHS (the ft archs, _add_ft_archs) for the families in
+# EPOCH_CHECKPOINT_FAMILIES only: name -> (file, job-name suffix), e.g.
+# "ema3": ("training_checkpoints/ema_ckpt_0003.tar", "-ema3"). The arch's last
+# epoch is not among them: it is lastema.
+EPOCH_CHECKPOINTS: dict[str, tuple[str, str]] = {}
+EPOCH_CHECKPOINT_ARCHS: dict[str, tuple[str, ...]] = {}
+EPOCH_CHECKPOINT_FAMILIES = ("eval",)
 
 # The architectures of the inference families (submit_inference_jobs.py
 # --arch): arch -> run-config token. The token must be followed by "-fm-" in
@@ -65,6 +73,9 @@ ARCHS = {
     "swin-v2.2-v2": "nc-swin-v2.2-v2",
 }
 DEFAULT_ARCH = "sfno"
+# Subdirectory of run_configs/ holding the run configs of an arch whose
+# configs are not in run_configs/ itself (the ft archs, _add_ft_archs).
+RUN_CONFIG_SUBDIRS: dict[str, str] = {}
 EXCLUDED_TOKENS = ("-e3sm", "-diag", "-smoke")
 # Archs whose excluded tokens differ from EXCLUDED_TOKENS.
 EXCLUDED_TOKENS_BY_ARCH = {
@@ -113,7 +124,44 @@ def _add_followup_archs() -> None:
         CM4_XSHIELD_VARIANT[arch] = CM4_XSHIELD_VARIANT[base]
 
 
+def _add_ft_archs() -> None:
+    """The 2026-11-12 fine-tuning sweep of the ext80 fm-spencer-balanced runs
+    (create_fm_v2_finetune_jobs.py) as archs of its own: sfno-v2-ft and
+    swin-v2.2-v2-ft, 48 runs each (3 parents x 4 ERA5 mixes x 4 LRs). Their
+    configs are in run_configs/ft/ and share the ext80 archs' token
+    (nc-sfno-v2-ext80, nc-swin-v2.2-v2-ext80), so the two are told apart by
+    directory (RUN_CONFIG_SUBDIRS): the ext80 archs read run_configs/ only.
+    8 epochs with an EMA checkpoint every epoch: lastema is ema_ckpt_0008.tar,
+    and the eval family alone also runs on ema_ckpt_0001.tar ..
+    ema_ckpt_0007.tar (--ckpt ema1 .. ema7, EPOCH_CHECKPOINTS). Groups are
+    tagged ft-2026-11-12. The models are their ext80 parents' (same data
+    config, labels and normalization), so they use the v2 CM4/X-SHiELD suites.
+    """
+    from create_fm_v2_finetune_jobs import FT_DIR, ft_runs
+
+    for run in ft_runs():
+        base = "sfno-v2" if run.arch == "nc-sfno-v2" else "swin-v2.2-v2"
+        arch = f"{base}-ft"
+        if arch in ARCHS:
+            continue
+        ARCHS[arch] = run.parent.tag
+        RUN_CONFIG_SUBDIRS[arch] = FT_DIR.name
+        EXCLUDED_TOKENS_BY_ARCH[arch] = EXCLUDED_TOKENS_BY_ARCH[base]
+        LAST_EMA_EPOCHS[arch] = run.max_epochs
+        epochs = range(1, run.max_epochs)
+        for epoch in epochs:
+            EPOCH_CHECKPOINTS[f"ema{epoch}"] = (
+                f"training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+                f"-ema{epoch}",
+            )
+        EPOCH_CHECKPOINT_ARCHS[arch] = tuple(f"ema{epoch}" for epoch in epochs)
+        # ace2-fm-sfno-ft-2026-11-12 -> ft-2026-11-12.
+        GROUP_DATES[arch] = run.group.split("-", 3)[3]
+        CM4_XSHIELD_VARIANT[arch] = CM4_XSHIELD_VARIANT[base]
+
+
 _add_followup_archs()
+_add_ft_archs()
 # Training labels a run needs for the CM4/X-SHiELD suites to be in-sample; runs
 # without them (the v2 fm-era5 arms) get no cm4xshield / cm4-1pct jobs.
 CM4_XSHIELD_LABELS = ("cm4", "xshield")
@@ -156,11 +204,13 @@ OLD_RUNS = {
 }
 
 
-def training_config_names() -> list[str]:
-    """Every training config filename in run_configs/ (all architectures)."""
+def training_config_names(subdir: str = "") -> list[str]:
+    """Every training config filename in run_configs/ (all architectures), or
+    in its subdirectory `subdir`.
+    """
     return sorted(
         path.name
-        for path in RUN_CONFIGS_DIR.glob(f"{CONFIG_PREFIX}*.yaml")
+        for path in (RUN_CONFIGS_DIR / subdir).glob(f"{CONFIG_PREFIX}*.yaml")
         if not path.name.endswith(("-finetune.yaml", "-cooldown.yaml"))
     )
 
@@ -173,14 +223,20 @@ def inference_run_names(arch: str = DEFAULT_ARCH) -> list[str]:
     excluded = EXCLUDED_TOKENS_BY_ARCH.get(arch, EXCLUDED_TOKENS)
     return [
         config_to_job_name(name)
-        for name in training_config_names()
+        for name in training_config_names(RUN_CONFIG_SUBDIRS.get(arch, ""))
         if name.startswith(prefix) and not any(token in name for token in excluded)
     ]
 
 
 def run_config_path(run: str) -> pathlib.Path:
-    """run_configs/ training config of the run named `run`."""
-    return RUN_CONFIGS_DIR / f"{CONFIG_PREFIX}{run.removeprefix(WANDB_PREFIX)}.yaml"
+    """Training config of the run named `run`: in run_configs/ or, if not
+    there, in one of its RUN_CONFIG_SUBDIRS.
+    """
+    name = f"{CONFIG_PREFIX}{run.removeprefix(WANDB_PREFIX)}.yaml"
+    for subdir in sorted(set(RUN_CONFIG_SUBDIRS.values())):
+        if (RUN_CONFIGS_DIR / subdir / name).exists():
+            return RUN_CONFIGS_DIR / subdir / name
+    return RUN_CONFIGS_DIR / name
 
 
 def run_train_labels(run: str) -> set[str]:
@@ -195,12 +251,31 @@ def run_train_labels(run: str) -> set[str]:
 
 def checkpoint_path(ckpt: str, arch: str = DEFAULT_ARCH) -> str:
     """File in a training result dataset that --ckpt `ckpt` mounts for `arch`
-    (CHECKPOINTS, with the last EMA epoch from LAST_EMA_EPOCHS).
+    (CHECKPOINTS, with the last EMA epoch from LAST_EMA_EPOCHS, or
+    EPOCH_CHECKPOINTS).
     """
+    if ckpt in EPOCH_CHECKPOINTS:
+        return EPOCH_CHECKPOINTS[ckpt][0]
     path = CHECKPOINTS[ckpt][0]
     if ckpt == "lastema" and arch in LAST_EMA_EPOCHS:
         path = f"training_checkpoints/ema_ckpt_{LAST_EMA_EPOCHS[arch]:04d}.tar"
     return path
+
+
+def checkpoint_suffix(ckpt: str) -> str:
+    """Job-name suffix of --ckpt `ckpt` (CHECKPOINTS or EPOCH_CHECKPOINTS)."""
+    return (CHECKPOINTS | EPOCH_CHECKPOINTS)[ckpt][1]
+
+
+def arch_checkpoints(arch: str, family: str | None = None) -> list[str]:
+    """The --ckpt choices `arch` has jobs at, in `family` (default: in any
+    family): CHECKPOINTS, then the arch's EPOCH_CHECKPOINT_ARCHS for the
+    EPOCH_CHECKPOINT_FAMILIES.
+    """
+    ckpts = list(CHECKPOINTS)
+    if family is None or family in EPOCH_CHECKPOINT_FAMILIES:
+        ckpts += EPOCH_CHECKPOINT_ARCHS.get(arch, ())
+    return ckpts
 
 
 def anneal_run_names() -> list[str]:

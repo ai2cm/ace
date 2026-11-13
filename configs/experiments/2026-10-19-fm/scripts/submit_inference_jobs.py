@@ -5,7 +5,9 @@ and swin-v2.2: nc-swin-v2.2, their four-source runs, no e3sm; sfno-v2:
 nc-sfno-v2 and swin-v2.2-v2: nc-swin-v2.2-v2, the 2026-11-09 runs of all
 four data arms; sfno-v2-ext80, swin-v2.2-v2-ext80 and, once X is chosen,
 swin-v2.2-v2-lr{X}-e120: the 2026-11-11 follow-ups of the v2 runs,
-create_fm_v2_followup_jobs.py;
+create_fm_v2_followup_jobs.py; sfno-v2-ft and swin-v2.2-v2-ft: the 2026-11-12
+fine-tuning sweep of the ext80 fm-spencer-balanced runs, 48 runs each, read
+from run_configs/ft/, create_fm_v2_finetune_jobs.py;
 _inference_common.ARCHS and inference_run_names; no diagnostics) whose Beaker
 experiment succeeded. The cm4xshield and cm4-1pct families skip runs not
 trained on CM4 and X-SHiELD (the v2 fm-era5 arms), and use the arch's
@@ -27,17 +29,44 @@ Families (--family, default all):
   paper-som   {run}-{kind}                      evaluator, 2 SOM slab kinds
   paper-era5  {run}-{kind}                      evaluator, 4 ERA5 kinds
 
-Checkpoint (--ckpt, default bestinf; _inference_common.CHECKPOINTS):
+Checkpoint (--ckpt, one or more, default bestinf;
+_inference_common.CHECKPOINTS and EPOCH_CHECKPOINTS):
 
   bestinf     training_checkpoints/best_inference_ckpt.tar  (EMA weights)
   lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch;
               ema_ckpt_0050.tar for sfno-v2 and swin-v2.2-v2,
               ema_ckpt_0080.tar for the ext80 forks, ema_ckpt_0120.tar
-              for the e120 runs; LAST_EMA_EPOCHS)
+              for the e120 runs, ema_ckpt_0008.tar for the ft runs;
+              LAST_EMA_EPOCHS)
+  ema1..ema7  training_checkpoints/ema_ckpt_000N.tar        (EMA, epoch N;
+              the ft archs only, and the eval family only: {run}-emaN.
+              Their epoch 8 is lastema, so there is no ema8)
+  all         every checkpoint the arch has for each selected family
+              (_inference_common.arch_checkpoints): bestinf and lastema,
+              and for the ft archs' eval family also ema1..ema7
+
+The ft runs are evaluated as they finish, with one idempotent command per
+arch: the eval family at all 9 checkpoints of every ft run whose training
+experiment has succeeded, skipping runs still training and jobs already in
+Beaker (succeeded or running; failed and canceled ones are resubmitted):
+
+    python submit_inference_jobs.py --arch sfno-v2-ft --family eval \
+        --ckpt all --skip-if-in-beaker
+    python submit_inference_jobs.py --arch swin-v2.2-v2-ft --family eval \
+        --ckpt all --skip-if-in-beaker
+
+and later the other families at bestinf and lastema (the same for
+swin-v2.2-v2-ft):
+
+    python submit_inference_jobs.py --arch sfno-v2-ft \
+        --family cm4xshield cm4-1pct sst paper-som paper-era5 \
+        --ckpt bestinf lastema --skip-if-in-beaker
 
 --ckpt lastema: eval-suite job names swap "-bestinf" for "-lastema"; sst and
 paper job names (which carry no checkpoint suffix) get "-lastema" appended.
-Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS). The
+Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS), and the
+--ckpt emaN jobs to one "-emaN" group per epoch (e.g.
+ace2-fm-eval-ema3-ft-2026-11-12). The
 wandb groups of an arch with its own training date (GROUP_DATES; sfno-v2,
 swin-v2.2-v2: 2026-11-09) carry that date instead of 2026-10-19
 (wandb_groups), and the follow-up archs their phase tag and date (e.g.
@@ -46,8 +75,9 @@ the two v2 archs share their groups, as sfno and swin-v2.2
 do (their job names differ by arch token). Where
 the lastema name would pass Beaker's 128-character limit (the balanced runs'
 ERA5 paper kinds), only the Beaker experiment name is shortened
-(beaker_job_name: "-era5-c96-piC-1pct-cm4-xshield-" becomes "-4src-"); the
-wandb run name stays the full one.
+(beaker_job_name: "-era5-c96-piC-1pct-cm4-xshield-" becomes "-4src-" and,
+for the swin-v2.2-v2-ft runs' longest lastema ERA5 paper names,
+"-spencer-balanced-" becomes "-spb-"); the wandb run name stays the full one.
 --old-runs (lastema, eval family only) adds the arch's 2026-06-26 baselines
 (_inference_common.OLD_RUNS[arch]: era5-a1, fm-a2-cond, c96-a1; nc-sfno for
 sfno, nc-swin-v2.1 for swin-v2.2), each on the eval suite of its old -bestinf
@@ -61,11 +91,13 @@ first (--dry-run validates too, so a dry run proves the configs load).
 
 Usage:
     python submit_inference_jobs.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
-                                            sfno-v2-ext80,swin-v2.2-v2-ext80}]
+                                            sfno-v2-ext80,swin-v2.2-v2-ext80,
+                                            sfno-v2-ft,swin-v2.2-v2-ft}]
                                     [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
-                                    [--ckpt {bestinf,lastema}] [--old-runs]
+                                    [--ckpt {bestinf,lastema,ema1..ema7,all} ...]
+                                    [--old-runs]
                                     [--use-map] [--dry-run]
                                     [--skip-if-in-beaker] [--exclude-job NAME ...]
                                     [--beaker-workspace WORKSPACE]
@@ -88,11 +120,15 @@ from _inference_common import (
     CHECKPOINTS,
     DEFAULT_ARCH,
     DEFAULT_GROUP_DATE,
+    EPOCH_CHECKPOINT_FAMILIES,
+    EPOCH_CHECKPOINTS,
     GROUP_DATES,
     INFERENCE_CONFIGS_DIR,
     OLD_RUNS,
     WANDB_PROJECT,
+    arch_checkpoints,
     checkpoint_path,
+    checkpoint_suffix,
     finished_runs,
     inference_run_names,
 )
@@ -137,12 +173,15 @@ LASTEMA_WANDB_GROUPS = {
 
 def wandb_groups(ckpt: str, arch: str) -> dict[str, str]:
     """Family -> wandb group of `arch`'s jobs at `ckpt`: WANDB_GROUPS or
-    LASTEMA_WANDB_GROUPS, with the arch's GROUP_DATES date.
+    LASTEMA_WANDB_GROUPS, with the arch's GROUP_DATES date; a per-epoch
+    checkpoint (EPOCH_CHECKPOINTS) has the lastema groups with its own name
+    for "lastema".
     """
     groups = WANDB_GROUPS if ckpt == "bestinf" else LASTEMA_WANDB_GROUPS
     date = GROUP_DATES.get(arch, DEFAULT_GROUP_DATE)
+    tag = ckpt if ckpt in EPOCH_CHECKPOINTS else "lastema"
     return {
-        family: group.replace(DEFAULT_GROUP_DATE, date)
+        family: group.replace(DEFAULT_GROUP_DATE, date).replace("lastema", tag)
         for family, group in groups.items()
     }
 
@@ -172,6 +211,14 @@ MODES = {
 BEAKER_NAME_LIMIT = 128
 LONG_SOURCES_TOKEN = "-era5-c96-piC-1pct-cm4-xshield-"
 SHORT_SOURCES_TOKEN = "-4src-"
+# Tokens beaker_job_name shortens, in order, until the name fits. The second
+# is for the ft runs (their names have no LONG_SOURCES_TOKEN).
+BEAKER_NAME_SHORTENINGS = (
+    (LONG_SOURCES_TOKEN, SHORT_SOURCES_TOKEN),
+    ("-spencer-balanced-", "-spb-"),
+)
+# --ckpt value standing for every checkpoint of the arch (arch_checkpoints).
+ALL_CHECKPOINTS = "all"
 EVAL_SUITE_NAME_SUFFIXES = {
     "eval": "-bestinf",
     "cm4xshield": "-cm4xshield-bestinf",
@@ -186,15 +233,19 @@ class Job(NamedTuple):
     dataset_id: str
     wandb_group: str
     wandb_name: str
+    checkpoint: str  # file in the training result dataset
 
 
 def beaker_job_name(name: str) -> str:
-    """`name`, or, if over BEAKER_NAME_LIMIT, `name` with LONG_SOURCES_TOKEN
-    replaced by SHORT_SOURCES_TOKEN (the wandb run name stays `name`).
+    """`name`, or, if over BEAKER_NAME_LIMIT, `name` with the tokens of
+    BEAKER_NAME_SHORTENINGS replaced one after the other until it fits (the
+    wandb run name stays `name`).
     """
-    if len(name) <= BEAKER_NAME_LIMIT:
-        return name
-    short = name.replace(LONG_SOURCES_TOKEN, SHORT_SOURCES_TOKEN, 1)
+    short = name
+    for long_token, short_token in BEAKER_NAME_SHORTENINGS:
+        if len(short) <= BEAKER_NAME_LIMIT:
+            break
+        short = short.replace(long_token, short_token, 1)
     if len(short) > BEAKER_NAME_LIMIT:
         raise ValueError(f"job name over {BEAKER_NAME_LIMIT} characters: {short}")
     return short
@@ -212,15 +263,15 @@ def family_jobs(
     """(job name, config filename) of one run's jobs in one family, narrowed
     by `kinds` (paper families) and `sst_grids`/`sst_levels` (sst). `ckpt`
     sets the eval-suite job-name suffix and, unless bestinf, the suffix
-    appended to sst and paper job names (CHECKPOINTS). `arch` picks the
+    appended to sst and paper job names (checkpoint_suffix). `arch` picks the
     CM4/X-SHiELD suite variant (arch_eval_suite_config).
     """
     if family in EVAL_SUITE_CONFIGS:
         suffix = EVAL_SUITE_NAME_SUFFIXES[family].replace(
-            "-bestinf", CHECKPOINTS[ckpt][1]
+            "-bestinf", checkpoint_suffix(ckpt)
         )
         return [(f"{run}{suffix}", arch_eval_suite_config(family, arch))]
-    suffix = "" if ckpt == "bestinf" else CHECKPOINTS[ckpt][1]
+    suffix = "" if ckpt == "bestinf" else checkpoint_suffix(ckpt)
     if family == "sst":
         return [
             (f"{run}-sst-{grid}-{level}{suffix}", sst_config_filename(grid, level))
@@ -262,6 +313,32 @@ def select_jobs(
             family, run, kinds, sst_grids, sst_levels, ckpt, arch
         )
     ]
+
+
+def checkpoint_families(
+    arch: str, ckpts: Iterable[str], families: Iterable[str]
+) -> dict[str, list[str]]:
+    """Checkpoint -> the families of `families` that `arch` has jobs in at it
+    (arch_checkpoints), for each of `ckpts` in order; ALL_CHECKPOINTS stands
+    for every checkpoint of the arch. A checkpoint named outright that has
+    none of `families` (a per-epoch one on another arch, or without the eval
+    family) is an error; under ALL_CHECKPOINTS it is left out.
+    """
+    families = list(families)
+    selected: dict[str, list[str]] = {}
+    for ckpt in ckpts:
+        expanded = arch_checkpoints(arch) if ckpt == ALL_CHECKPOINTS else [ckpt]
+        for name in expanded:
+            at = [f for f in families if name in arch_checkpoints(arch, f)]
+            if at:
+                selected[name] = at
+            elif ckpt != ALL_CHECKPOINTS:
+                raise SystemExit(
+                    f"--ckpt {name}: {arch} has no {'/'.join(families)} jobs at it "
+                    f"(per-epoch checkpoints: {arch_checkpoints(arch)[2:] or 'none'}"
+                    f", families {'/'.join(EPOCH_CHECKPOINT_FAMILIES)} only)"
+                )
+    return selected
 
 
 def resolve_runs(
@@ -373,9 +450,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--ckpt",
-        choices=list(CHECKPOINTS),
-        default="bestinf",
-        help="Checkpoint to evaluate (default: bestinf).",
+        nargs="+",
+        choices=[*CHECKPOINTS, *EPOCH_CHECKPOINTS, ALL_CHECKPOINTS],
+        default=["bestinf"],
+        help=(
+            "Checkpoint(s) to evaluate (default: bestinf). The per-epoch ones "
+            f"({', '.join(EPOCH_CHECKPOINTS)}) are for the ft archs' eval family "
+            f"only; {ALL_CHECKPOINTS}: every checkpoint the arch has for each "
+            "selected family."
+        ),
     )
     parser.add_argument(
         "--old-runs",
@@ -388,10 +471,9 @@ def main() -> None:
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
-    if args.old_runs and (args.ckpt != "lastema" or args.family != ["eval"]):
+    if args.old_runs and (args.ckpt != ["lastema"] or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
-    ckpt_file = checkpoint_path(args.ckpt, args.arch)
-    groups = wandb_groups(args.ckpt, args.arch)
+    ckpt_families = checkpoint_families(args.arch, args.ckpt, args.family)
     cm4_xshield_ok = set(cm4_xshield_runs(args.arch))
 
     ready, skipped = resolve_runs(args)
@@ -411,11 +493,20 @@ def main() -> None:
     print()
 
     jobs = [
-        Job(beaker_job_name(name), family, config, ready[run], groups[family], name)
+        Job(
+            beaker_job_name(name),
+            family,
+            config,
+            ready[run],
+            wandb_groups(ckpt, args.arch)[family],
+            name,
+            checkpoint_path(ckpt, args.arch),
+        )
+        for ckpt, families in ckpt_families.items()
         for family, run, name, config in select_jobs(
-            args.family,
+            families,
             ready,
-            args.ckpt,
+            ckpt,
             args.arch,
             args.kind,
             args.sst_grid,
@@ -423,15 +514,17 @@ def main() -> None:
         )
     ]
     if args.old_runs:
-        suffix = CHECKPOINTS[args.ckpt][1]
+        (ckpt,) = ckpt_families
+        suffix = checkpoint_suffix(ckpt)
         jobs += [
             Job(
                 f"{run}{suffix}",
                 "eval",
                 config,
                 dataset,
-                groups["eval"],
+                wandb_groups(ckpt, args.arch)["eval"],
                 f"{run}{suffix}",
+                checkpoint_path(ckpt, args.arch),
             )
             for run, (dataset, config) in sorted(OLD_RUNS[args.arch].items())
         ]
@@ -468,7 +561,7 @@ def main() -> None:
                 job.name,
                 job.wandb_group,
                 job.dataset_id,
-                ckpt_file,
+                job.checkpoint,
                 job.wandb_name,
             ],
             wandb_project=WANDB_PROJECT,
@@ -483,9 +576,10 @@ def main() -> None:
     verb = "would be submitted" if args.dry_run else "submitted"
     summary = ", ".join(f"{family}: {n}" for family, n in counts.items())
     print(f"\n{len(jobs)} job(s) {verb} ({summary})")
-    print(f"Checkpoint: {ckpt_file}")
-    for family in counts:
-        print(f"wandb group ({family}): {groups[family]}")
+    for checkpoint in dict.fromkeys(job.checkpoint for job in jobs):
+        print(f"Checkpoint: {checkpoint}")
+    for family, group in dict.fromkeys((job.family, job.wandb_group) for job in jobs):
+        print(f"wandb group ({family}): {group}")
     longest = max(jobs, key=lambda job: len(job.name))
     print(f"Longest job name ({len(longest.name)} chars): {longest.name}")
 
