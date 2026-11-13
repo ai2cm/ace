@@ -39,10 +39,13 @@ should_run() {
 }
 # === END GUARDRAILS =========================================================
 
-# exoomsxr (beaker 01M5ZMXYAVE6GGE44X5F29J7XP) result dataset; best_ckpt.tar is
-# the best validation loss checkpoint (EMA weights, validate_using_ema: true).
+# exoomsxr (beaker 01M5ZMXYAVE6GGE44X5F29J7XP) result dataset. best_ckpt.tar is
+# the best validation loss checkpoint (epoch 120, EMA weights since
+# validate_using_ema: true); ema_ckpt_0020.tar is EMA epoch 20, before the
+# 81-year rollouts drift into the cold regime (epoch >= 40).
 CKPT_DATASET=01M60N0WEE02V8AKF9438YF3GT
-CKPT_FILE=training_checkpoints/best_ckpt.tar
+BEST_CKPT=training_checkpoints/best_ckpt.tar
+EMA20_CKPT=training_checkpoints/ema_ckpt_0020.tar
 # compute_co2_regression.py output for air_temperature_0 and
 # specific_total_water_0 vs global_mean_co2, 1990-2019 annual means of the
 # 2026-08-13 1-degree daily store.
@@ -53,10 +56,10 @@ if [[ "$CO2_STATS_DATASET" == __* ]]; then
 fi
 
 run_inference() {
-  local job_name="$1" config="$2"
+  local job_name="$1" config="$2" ckpt_file="$3"
   should_run "$job_name" || return 0
   [[ -f "$config" ]] || { echo "ERROR: $config not found in $(pwd)" >&2; exit 1; }
-  echo "launching: $job_name ($config)"
+  echo "launching: $job_name ($config, $ckpt_file)"
   (cd "$REPO_ROOT" && gantry run \
     --name "$job_name" \
     --description "exoomsxr 81-year AMIP inference, CO2-regression relaxation study: $job_name" \
@@ -72,7 +75,7 @@ run_inference() {
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset "$CKPT_DATASET:$CKPT_FILE:/ckpt.tar" \
+    --dataset "$CKPT_DATASET:$ckpt_file:/ckpt.tar" \
     --dataset "$CO2_STATS_DATASET:/co2stats" \
     --gpus 1 \
     --shared-memory 50GiB \
@@ -83,9 +86,17 @@ run_inference() {
     -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}${config}" </dev/null)
 }
 
-run_inference exoomsxr-81yr-baseline evaluator-81yr.yaml
-run_inference exoomsxr-81yr-relax-tau1d evaluator-81yr-relax-tau1d.yaml
-run_inference exoomsxr-81yr-relax-tau5d evaluator-81yr-relax-tau5d.yaml
-run_inference exoomsxr-81yr-relax-tau30d evaluator-81yr-relax-tau30d.yaml
-run_inference exoomsxr-81yr-relax-tau365d evaluator-81yr-relax-tau365d.yaml
-run_inference exoomsxr-81yr-relax-tau730d evaluator-81yr-relax-tau730d.yaml
+# best-validation checkpoint (epoch 120)
+run_inference exoomsxr-81yr-baseline evaluator-81yr.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-relax-tau1d evaluator-81yr-relax-tau1d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-relax-tau5d evaluator-81yr-relax-tau5d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-relax-tau30d evaluator-81yr-relax-tau30d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-relax-tau365d evaluator-81yr-relax-tau365d.yaml "$BEST_CKPT"
+run_inference exoomsxr-81yr-relax-tau730d evaluator-81yr-relax-tau730d.yaml "$BEST_CKPT"
+# EMA epoch 20
+run_inference exoomsxr-ema20-81yr-baseline evaluator-81yr.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-relax-tau1d evaluator-81yr-relax-tau1d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-relax-tau5d evaluator-81yr-relax-tau5d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-relax-tau30d evaluator-81yr-relax-tau30d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-relax-tau365d evaluator-81yr-relax-tau365d.yaml "$EMA20_CKPT"
+run_inference exoomsxr-ema20-81yr-relax-tau730d evaluator-81yr-relax-tau730d.yaml "$EMA20_CKPT"
