@@ -1,0 +1,129 @@
+# 5-daily 4-degree ocean and sea-ice (Samudra) store for one member of the
+# CM4 abrupt-4xCO2 ensemble. `{member}` is filled from --member (see
+# pipeline/config_io.py), e.g. ic_0001.
+#
+# Unlike the 1pctCO2 and piControl 5-daily configs, whose sources were
+# pre-subset / pre-coarsened to 5-daily, these sources are the raw daily and
+# 6-hourly stores: snapshots are subsampled to every 5th day and the daily-mean
+# fluxes are averaged over 5-day blocks in the pipeline.
+target_grid: F22.5
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F22.5
+expected_level_count: 19
+shift_timestamps_to_avg_interval_midpoint: false
+output:
+  path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-4deg-5daily/{member}.zarr
+  time_chunk_size: 1
+  time_shard_size: 365
+wetmask:
+  store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ocean_1daily_snap.zarr
+  variable: thetao
+statics:
+  store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ocean_static.zarr
+  variables:
+    - deptho
+    - hfgeou
+streams:
+  # Daily ocean snapshots, subsampled to the 5-daily instants (every 5th
+  # step). Every member's daily stores span a multiple of 5 days (90 or 365),
+  # so the block ends coincide with those of the 5-day flux means and the
+  # 20-step ice subsamples.
+  - name: snapshot_ocean
+    store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ocean_1daily_snap.zarr
+    variables:
+      - thetao
+      - so
+      - uo
+      - vo
+      - tos
+      - zos
+      - SSH
+      - mlotst
+      - rhoinsitu
+    time_subsample_stride: 5
+    rotated_pairs:
+      - [uo, vo]
+    # These sources carry coastal staggered velocity faces that are valid
+    # with value exactly 0.0 where the vertical remap unmasked land columns;
+    # the artifact flags them so they are not averaged into coastal centers.
+    # One artifact for the ensemble (make generate_face_masks_abrupt_4xco2).
+    face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/cm4-abrupt-4xCO2-2026-10-16
+    postprocess:
+      - name: kelvin_sst
+        sources:
+          celsius_sst: tos
+  # Daily-mean surface fluxes/forcings averaged over 5-day blocks, labeled by
+  # the end of each block so they coincide with the snapshot instants
+  # (enforced by the time-alignment assertion).
+  - name: flux
+    store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ocean_1daily.zarr
+    variables:
+      - hfds
+      - hflso
+      - hfsso
+      - rlntds
+      - rsntds
+      - hfsifrazil
+      - hfevapds
+      - hfrainds
+      - hfrunoffds
+      - wfo
+      - prlq
+      - prsn
+      - evs
+      - sfdsi
+      - tauuo
+      - tauvo
+      - ustar
+    time_block_mean_factor: 5
+    rotated_pairs:
+      - [tauuo, tauvo]
+    postprocess:
+      - hfds_total_area
+  # Ice-model true snapshots, subsampled from 6-hourly to the 5-daily
+  # snapshot instants (every 20th step). The ice SSH is the sea surface as
+  # seen by the ice model, distinct from the ocean-store SSH and zos.
+  - name: ice_snapshot
+    store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ice_6hourly_snap.zarr
+    variables:
+      - sea_ice_fraction
+      - EXT
+      - HI
+      - HS
+      - UI
+      - VI
+      - TS
+      - TSN
+      - SST
+      - SSS
+      - simass
+      - sisnmass
+      - SSH
+    dim_renaming:
+      xT: xh
+      yT: yh
+      xB: xq
+      yB: yq
+    time_subsample_stride: 20
+    rotated_pairs:
+      - [UI, VI]
+    renaming:
+      SSH: SSH_ice
+      sea_ice_fraction: ocean_sea_ice_fraction
+    full_cell_variables:
+      - sea_ice_fraction
+    postprocess:
+      - sea_ice
+  # Ice-model 6-hourly means at the snapshot instants (each mean covers the
+  # 6 hours ending at the instant), treated as snapshot estimates.
+  - name: ice_mean_as_snapshot
+    store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ice_6hourly.zarr
+    variables:
+      - T1
+      - T2
+      - T3
+      - T4
+      - T_bulkice
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_subsample_stride: 20

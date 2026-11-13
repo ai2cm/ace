@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 
 def check_output(
     config_path: str,
+    member: str | None = None,
     output_path: str | None = None,
     expected_timesteps: int | None = None,
 ) -> None:
-    config = load_config(config_path)
+    config = load_config(config_path, member)
     path = output_path if output_path is not None else config.output.path
     stream_datasets = {
         stream.name: open_stream(stream, config) for stream in config.streams
@@ -64,6 +65,9 @@ def main() -> None:
         "--config", required=True, help="Path to the pipeline YAML config"
     )
     parser.add_argument(
+        "--member", help="Ensemble-member name substituted into the config's URLs"
+    )
+    parser.add_argument(
         "--output-path",
         help="Store to check (defaults to the config's output path)",
     )
@@ -77,7 +81,7 @@ def main() -> None:
     # apache_beam may have already configured the root logger on import,
     # making basicConfig a no-op; raise the level explicitly.
     logging.getLogger().setLevel(logging.INFO)
-    check_output(args.config, args.output_path, args.expected_timesteps)
+    check_output(args.config, args.member, args.output_path, args.expected_timesteps)
 
 
 if __name__ == "__main__":
