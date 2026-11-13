@@ -100,7 +100,8 @@ def main():
             "loader": {
                 "dataset": DATASET,
                 "start_indices": {"times": [fmt(t) for t in IC_DATES]},
-                "num_data_workers": 4,
+                # 73-step windows from worker processes overflow /dev/shm
+                "num_data_workers": 0,
             },
             "data_writer": {
                 "save_prediction_files": False,

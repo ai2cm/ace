@@ -32,7 +32,7 @@ loader:
     - '1940-01-08T00:00:00'
     - '1940-01-09T00:00:00'
     - '1940-01-10T00:00:00'
-  num_data_workers: 4
+  num_data_workers: 0
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
