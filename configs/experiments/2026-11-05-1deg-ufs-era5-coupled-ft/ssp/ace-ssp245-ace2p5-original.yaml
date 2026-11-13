@@ -53,3 +53,5 @@ data_writer:
 aggregator:
   log_global_mean_time_series: true
 allow_incompatible_dataset: true
+stepper_override:
+  derived_forcings: {}
