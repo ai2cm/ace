@@ -30,6 +30,7 @@ N_STEPS = n_max // IN_MEMORY * IN_MEMORY
 ARMS = {
     "ace2s6h-original": "the original ACE2S 6-hourly checkpoint (the MSE FTO arm's atmosphere, frozen in FTO)",
     "ohc-uhm1p7-fto-then-ftalt-atmosphere": "the atmosphere lifted from the corrector-kept -1.7 W/m2 CRPS FTO then Elynn alternating coupled checkpoint",
+    "ace2s512-original": "the summer-2026 ERA5 ACE2S (embed 512, wandb u9ek57d9, best_inference_ckpt; the second coupling arm's atmosphere, never coupled fine-tuned)",
 }
 cfg: dict[str, Any] = {
     "experiment_dir": "/results",

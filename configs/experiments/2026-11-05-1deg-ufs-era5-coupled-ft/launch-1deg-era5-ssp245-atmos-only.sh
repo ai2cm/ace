@@ -2,6 +2,7 @@
 # Atmosphere-only SSP2-4.5 run (fme.ace.inference, prescribed SST from the SSP forcing store); configs in ./ssp.
 #   ARM=ace2s6h-original CKPT_DS=01M49ERVM1DVWV12G5DRDXM0PC CKPT_FILE=training_checkpoints/ema_ckpt_0002.tar ./launch-1deg-era5-ssp245-atmos-only.sh
 #   ARM=ohc-uhm1p7-fto-then-ftalt-atmosphere CKPT_DS=<lifted atmosphere ds> CKPT_FILE=atmos_ckpt.tar ./launch-1deg-era5-ssp245-atmos-only.sh
+#   ARM=ace2s512-original CKPT_DS=01KSVC6YS7C18SGYV4VPZYZ232 CKPT_FILE=training_checkpoints/best_inference_ckpt.tar ./launch-1deg-era5-ssp245-atmos-only.sh
 #   ARM=ace2p5-original CKPT_DS=01M6DWYW0RWBN0X33ABS98T0AH CKPT_FILE=training_checkpoints/best_inference_ckpt.tar EXTRA_DS=<extra forcing ds> ./launch-1deg-era5-ssp245-atmos-only.sh
 set -euo pipefail
 ARM="${ARM:?arm tag (ssp/ace-ssp245-<ARM>.yaml)}"
@@ -16,7 +17,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
-JOB="ace-1deg-era5-${ARM}-ssp245-atmos-only-2015-2099"
+JOB="ace-1deg-era5-${ARM}-ssp245-atmos-only-2015-2099${JOB_SUFFIX:-}"
 C="ace-ssp245-${ARM}.yaml"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "1deg ACE2S atmosphere-only SSP2-4.5 run with prescribed SST 2015-2099 (${C}) of ${CKPT_DS}:${CKPT_FILE}" \
