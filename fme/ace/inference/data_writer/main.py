@@ -3,13 +3,14 @@ import datetime
 import os
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import cftime
 import numpy as np
 import numpy.typing as npt
 import torch
 import xarray as xr
+import yaml
 
 from fme.ace.data_loading.batch_data import (
     _RESERVED_PREFIX,
@@ -45,11 +46,22 @@ class DataWriterConfig:
     """
     Configuration for inference data writers.
 
+    .. note::
+        ``save_prediction_files`` and ``save_monthly_files`` are deprecated and
+        will be removed in a future release. Configure output files through
+        ``files`` instead; see :ref:`advanced_inference` for an example.
+
     Parameters:
-        save_prediction_files: Whether to enable writing of netCDF files
-            containing the predictions and target values.
-        save_monthly_files: Whether to enable writing of netCDF files
-            containing the monthly predictions and target values.
+        save_prediction_files: Deprecated, use ``files`` instead. Whether to
+            enable writing of netCDF files containing the predictions and target
+            values. Equivalent to a ``files`` entry with
+            ``label: autoregressive`` and the top-level ``names`` and
+            ``time_coarsen``.
+        save_monthly_files: Deprecated, use ``files`` instead. Whether to
+            enable writing of netCDF files containing the monthly predictions
+            and target values. Equivalent to a ``files`` entry with
+            ``label: monthly_mean``, the top-level ``names`` and
+            ``time_coarsen: {method: monthly_mean}``.
         save_step_diagnostics: Whether to enable writing of netCDF files
             containing per-step diagnostics of the prediction, one file per
             named diagnostics dataset under a ``step_diagnostics/`` directory
@@ -86,12 +98,61 @@ class DataWriterConfig:
                 "names provided but all options to "
                 "save subsettable output files are False."
             )
+        if self.save_prediction_files or self.save_monthly_files:
+            warnings.warn(self._legacy_files_deprecation_message(), FutureWarning)
         all_filenames = self._get_all_filenames()
         if len(set(all_filenames)) != len(all_filenames):
             raise ValueError(
                 "Duplicate filenames found in file writer configurations. "
                 f"Filenames: {all_filenames}"
             )
+
+    def _legacy_file_entries(self) -> list[dict[str, Any]]:
+        """``files`` entries equivalent to the enabled legacy file flags."""
+        entries: list[dict[str, Any]] = []
+        if self.save_prediction_files:
+            entry: dict[str, Any] = {"label": "autoregressive"}
+            if self.names is not None:
+                entry["names"] = list(self.names)
+            if self.time_coarsen is not None:
+                entry["time_coarsen"] = dataclasses.asdict(self.time_coarsen)
+            entries.append(entry)
+        if self.save_monthly_files:
+            entry = {"label": "monthly_mean"}
+            if self.names is not None:
+                entry["names"] = list(self.names)
+            entry["time_coarsen"] = {"method": "monthly_mean"}
+            entries.append(entry)
+        return entries
+
+    def _legacy_files_deprecation_message(self) -> str:
+        enabled = [
+            flag
+            for flag, value in (
+                ("save_prediction_files", self.save_prediction_files),
+                ("save_monthly_files", self.save_monthly_files),
+            )
+            if value
+        ]
+        flags = " and ".join(f"`{flag}`" for flag in enabled)
+        verb = "is" if len(enabled) == 1 else "are"
+        snippet = yaml.safe_dump(
+            {"files": self._legacy_file_entries()},
+            sort_keys=False,
+            default_flow_style=False,
+        )
+        return (
+            f"{flags} {verb} enabled in DataWriterConfig (both default to "
+            "true) but deprecated, and will be removed in a future release. "
+            "After that, output files are only written when configured "
+            "through `files`. To keep writing the same files, add "
+            f"these entries to `files` and set {flags} to false:\n\n"
+            f"{snippet}\n"
+            "Each entry writes <label>_predictions.nc and <label>_target.nc. "
+            "Add `format: {name: zarr}` to an entry to write zarr instead, "
+            "which also supports a remote experiment_dir. To stop writing "
+            f"these files, set {flags} to false."
+        )
 
     @property
     def _needs_gather(self) -> bool:

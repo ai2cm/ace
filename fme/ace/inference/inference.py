@@ -230,8 +230,9 @@ class InferenceConfig:
                   used. See the ``files`` parameter of the
                   :class:`fme.ace.DataWriterConfig` for more details on how this
                   can be configured. Monthly coarsened data configured through
-                  ``files`` can be written to zarr. The legacy
-                  ``save_monthly_files`` option remains netCDF-only.
+                  ``files`` can be written to zarr. The deprecated
+                  ``save_prediction_files`` and ``save_monthly_files`` options
+                  are netCDF-only.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the
