@@ -84,6 +84,8 @@ run_inference() {
 }
 
 run_inference exoomsxr-81yr-baseline evaluator-81yr.yaml
+run_inference exoomsxr-81yr-relax-tau1d evaluator-81yr-relax-tau1d.yaml
+run_inference exoomsxr-81yr-relax-tau5d evaluator-81yr-relax-tau5d.yaml
 run_inference exoomsxr-81yr-relax-tau30d evaluator-81yr-relax-tau30d.yaml
 run_inference exoomsxr-81yr-relax-tau365d evaluator-81yr-relax-tau365d.yaml
 run_inference exoomsxr-81yr-relax-tau730d evaluator-81yr-relax-tau730d.yaml
