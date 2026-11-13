@@ -167,3 +167,6 @@ run_training "pretrain-fieldsfno-pos64-mlpfilter-h512-4deg-rs1.yaml" "fieldsfno-
 # Depth-only arms (num_layers 16 and 32 at embed_dim 512), 4deg at 1 GPU, PRIORITY=high.
 run_training "pretrain-fieldsfno-pos64-mlpfilter-l16-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-l16-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-l32-4deg-rs1.yaml" "fieldsfno-pos64-mlpfilter-l32-4deg-pretrain-rs1" 1
+# v1 (= pos64 + mlpfilter) hidden_embed_dim 512 depth arms, 4deg at 1 GPU, PRIORITY=high.
+run_training "pretrain-fieldsfno-v1-l12-h512-4deg-rs1.yaml" "fieldsfno-v1-l12-h512-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-v1-l16-h512-4deg-rs1.yaml" "fieldsfno-v1-l16-h512-4deg-pretrain-rs1" 1
