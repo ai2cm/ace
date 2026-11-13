@@ -224,6 +224,9 @@ class _DeprecatedKeyCorrectorConfig(CorrectorConfigABC):
         state.pop("old_key", None)
         return state
 
+    def load(self):
+        pass
+
     def _get_corrector(self, dataset_info: DatasetInfo) -> CorrectorABC:
         return CorrectionSequence([])
 
