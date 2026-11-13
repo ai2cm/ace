@@ -52,8 +52,9 @@ CKPT_DATASET=01M60N0WEE02V8AKF9438YF3GT
 BEST_CKPT=training_checkpoints/best_ckpt.tar
 EMA20_CKPT=training_checkpoints/ema_ckpt_0020.tar
 # Stage A states restacked to one leading sample dimension: ep120-states.nc and
-# ep20-states.nc, 200 states each (IC-major, snapshot-minor).
-IC_DATASET=__FILL_AFTER_STAGE_A__
+# ep20-states.nc, 200 states each (IC-major, snapshot-minor), at leads of
+# 1 + 73 k days (k = 0..24): the step slice keeps the first step of each window.
+IC_DATASET=01M7BHZR3BVH3NP9ZYTV4JY53E  # jeremym/2026-11-13-exoomsxr-restoring-force-states
 
 # run_inference <job_name> <module> <config> <ckpt_file> [needs_ic]
 run_inference() {
