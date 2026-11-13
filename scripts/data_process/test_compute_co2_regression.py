@@ -5,7 +5,10 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-from compute_co2_regression import compute_co2_regression
+from click.testing import CliRunner
+from compute_co2_regression import compute_co2_regression, main
+
+from fme.core.corrector.co2_relaxation import CO2RegressionRelaxationConfig
 
 CO2_NAME = "global_mean_co2"
 
@@ -85,8 +88,6 @@ def test_compute_co2_regression_default_co2_ref_is_window_mean():
 
 
 def test_compute_co2_regression_output_loads_into_corrector(tmp_path):
-    from fme.core.corrector.co2_relaxation import CO2RegressionRelaxationConfig
-
     rng = np.random.default_rng(0)
     intercept = 280 + rng.random((3, 4))
     slope = rng.random((3, 4))
@@ -118,9 +119,6 @@ def test_compute_co2_regression_output_loads_into_corrector(tmp_path):
 
 
 def test_compute_co2_regression_cli(tmp_path):
-    from click.testing import CliRunner
-    from compute_co2_regression import main
-
     rng = np.random.default_rng(0)
     intercept = 280 + rng.random((3, 4))
     slope = rng.random((3, 4))

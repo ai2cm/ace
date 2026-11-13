@@ -67,6 +67,12 @@ def _read_reference(
                 f"Intercept and slope for '{name}' in {path} have different "
                 f"shapes: {intercept[name].shape} and {slope[name].shape}."
             )
+        for label, values in (("intercept", intercept), ("slope", slope)):
+            if not torch.all(torch.isfinite(values[name])):
+                raise ValueError(
+                    f"The {label} for '{name}' in {path} has non-finite values, "
+                    "which the relaxation would propagate into the field."
+                )
     co2_ref = float(ds.attrs[CO2_REF_ATTR])
     ds.close()
     return _Reference(intercept=intercept, slope=slope, co2_ref=co2_ref)

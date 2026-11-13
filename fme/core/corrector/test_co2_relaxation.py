@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 import math
 import pathlib
+from unittest import mock
 
 import dacite
 import numpy as np
@@ -12,6 +13,7 @@ import xarray as xr
 from fme.core import AtmosphereData
 from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed import Distributed
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.registry.corrector import CorrectorSelector
 
@@ -144,6 +146,31 @@ def test_relaxation_missing_co2_raises():
         relaxation({"a": x}, {"a": x}, {"other": x}, None)
 
 
+def test_relaxation_uses_local_slice_of_reference():
+    """Under spatial parallelism the relaxation must use this rank's chunk of
+    the global reference."""
+    global_shape = (4, 6)
+    intercept = torch.arange(24, dtype=torch.float32).reshape(global_shape)
+    local_slices = (slice(2, 4), slice(3, 6))
+    with mock.patch.object(
+        Distributed.get_instance(),
+        "get_local_slices",
+        return_value=local_slices,
+    ):
+        relaxation = _loaded_config(
+            {"a": 0.01},  # tau << dt, so the field relaxes onto the target
+            {"a": intercept},
+            {"a": torch.zeros(global_shape)},
+        ).build(TIMESTEP)
+    relaxation.train(False)
+    shape = (2, 2, 3)
+    x = torch.zeros(shape)
+    relaxed, _ = relaxation({"a": x}, {"a": x}, _co2(shape, CO2_REF), None)
+    torch.testing.assert_close(
+        relaxed["a"], intercept[local_slices].expand(shape).contiguous()
+    )
+
+
 def test_relaxation_shape_mismatch_raises():
     shape = (2, 3, 4)
     config = _loaded_config(
@@ -237,6 +264,21 @@ def test_relaxation_config_missing_variable_in_file_raises(tmp_path: pathlib.Pat
         timescale_days={"b": 1.0}, co2_name=CO2_NAME, path=str(path)
     )
     with pytest.raises(ValueError, match="b_intercept"):
+        config.load()
+
+
+@pytest.mark.parametrize("label", ["intercept", "slope"])
+def test_relaxation_config_non_finite_reference_raises(
+    tmp_path: pathlib.Path, label: str
+):
+    values = {"intercept": np.zeros((3, 4)), "slope": np.zeros((3, 4))}
+    values[label][1, 2] = np.nan
+    path = tmp_path / "ref.nc"
+    _write_reference(path, {"a": values["intercept"]}, {"a": values["slope"]})
+    config = CO2RegressionRelaxationConfig(
+        timescale_days={"a": 1.0}, co2_name=CO2_NAME, path=str(path)
+    )
+    with pytest.raises(ValueError, match=f"{label} for 'a'.*non-finite"):
         config.load()
 
 
