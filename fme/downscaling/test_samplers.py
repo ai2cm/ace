@@ -124,3 +124,30 @@ def test_stochastic_sampler_raises_on_batch_mismatch() -> None:
             sigma_max=1.0,
             rho=3.0,
         )
+
+
+def test_stochastic_sampler_record_latent_steps_false() -> None:
+    device = get_device()
+    net = TinyDeterministicNet(c_out=1, c_lr=1).to(device).eval()
+    latents = torch.randn(2, 1, 4, 4, device=device)
+    img_lr = torch.randn(2, 1, 4, 4, device=device)
+
+    def _run(record_latent_steps: bool) -> tuple[Tensor, list[Tensor]]:
+        torch.manual_seed(0)
+        return stochastic_sampler(
+            net=net,
+            latents=latents,
+            img_lr=img_lr,
+            num_steps=3,
+            sigma_min=0.01,
+            sigma_max=1.0,
+            rho=3.0,
+            S_churn=0.5,
+            record_latent_steps=record_latent_steps,
+        )
+
+    expected, recorded_steps = _run(record_latent_steps=True)
+    out, latent_steps = _run(record_latent_steps=False)
+    assert len(recorded_steps) == 3 + 1
+    assert latent_steps == []
+    torch.testing.assert_close(out, expected)
