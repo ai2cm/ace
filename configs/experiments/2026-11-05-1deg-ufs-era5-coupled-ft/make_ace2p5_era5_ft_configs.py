@@ -36,7 +36,14 @@ def ds(subsets: list[dict[str, str]] | None = None) -> dict[str, Any]:
     """The ERA5 store merged with the ACE2.5 extra store; several time subsets = merge of two concats (the only nesting fme
     allows: merge: [concat | xarray, ...]).
     """
-    era5 = {"data_path": "/climate-default", "file_pattern": ERA5, "engine": "zarr"}
+    # ACE2.5 was trained with CM4 PRMSL in hPa (CM4 stats mean 1009.9, std 15); ERA5 stores it in Pa.
+    # Without this the PRMSL channel alone contributes ~6700 normalized units to the loss.
+    era5 = {
+        "data_path": "/climate-default",
+        "file_pattern": ERA5,
+        "engine": "zarr",
+        "overwrite": {"multiply_scalar": {"PRMSL": 0.01}},
+    }
     extra = {"data_path": "/extra", "file_pattern": EXTRA, "engine": "zarr"}
     if not subsets:
         return {"merge": [era5, extra]}
