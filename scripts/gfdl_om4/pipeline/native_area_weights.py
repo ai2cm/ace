@@ -10,6 +10,10 @@ writes a new artifact prefix holding
 - ``areacello.nc`` — ``areacello`` = ``A_J`` (m², float64, 0 on unmapped rows);
 - ``source_grid.nc`` — the source artifact's grid.
 
+``weights.nc`` also carries ``regrid_path = "direct"`` and
+``regrid_path_description`` (read by the pipelines, :mod:`pipeline.weights`),
+``ace_commit`` and a CF ``history`` line holding the build command.
+
 Published artifacts are immutable: an existing prefix raises
 ``FileExistsError``, and a superseding artifact takes a new version prefix
 (``NATIVE_AREA_WEIGHTS_VERSION`` in the Makefile).
@@ -18,12 +22,16 @@ Published artifacts are immutable: an existing prefix raises
         --source-weights-url <WEIGHTS_URL_ROOT>/om4-tripolar-0.25deg-to-F90 \\
         --target-grid F90 \\
         --a-source-url <statics store with areacello> \\
+        --ace-commit <ace commit> \\
         --output-url <WEIGHTS_URL_ROOT>/<version>/om4-tripolar-0.25deg-to-F90
 """
 
 import argparse
+import datetime
 import logging
 import os
+import shlex
+import sys
 import tempfile
 
 import fsspec
@@ -40,6 +48,9 @@ from .native_area import (
 )
 from .weights import (
     AREACELLO_FILENAME,
+    REGRID_PATH_ATTR,
+    REGRID_PATH_DESCRIPTION_ATTR,
+    REGRID_PATH_DIRECT,
     SOURCE_GRID_FILENAME,
     WEIGHTS_FILENAME,
     _upload,
@@ -51,6 +62,10 @@ from .zarr_io import make_zarr_store
 logger = logging.getLogger(__name__)
 
 ARTIFACT_FILENAMES = (SOURCE_GRID_FILENAME, AREACELLO_FILENAME, WEIGHTS_FILENAME)
+
+
+def regrid_path_description(target_grid_name: str) -> str:
+    return f"OM4 0.25° tripolar -> {target_grid_name} (direct)"
 
 
 def _assert_prefix_absent(output_url: str) -> None:
@@ -124,15 +139,19 @@ def write_native_area_artifact(
 
 def build_native_area_artifact(
     source_weights_url: str,
-    target_grid: xr.Dataset,
+    target_grid_name: str,
     a_source_url: str,
+    ace_commit: str,
     output_url: str,
+    argv: list[str],
 ) -> None:
     """Rebuild the artifact at ``source_weights_url`` in the native areas of
     ``a_source_url`` and write it under ``output_url``.
 
-    Every artifact-build assert raises before any write."""
+    ``argv`` is the command's arguments, recorded in ``history``. Every
+    artifact-build assert raises before any write."""
     _assert_prefix_absent(output_url)
+    target_grid = make_target_grid(target_grid_name)
     source_grid = open_source_grid(source_weights_url)
     w = read_weights(source_weights_url)
     statics = xr.open_zarr(
@@ -150,14 +169,23 @@ def build_native_area_artifact(
         a,
         radius=MEAN_EARTH_RADIUS_M,
     )
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(
+        timespec="seconds"
+    )
     attrs = {
         "source_weights_url": source_weights_url,
         "a_source_url": a_source_url,
         "esmpy_area_rtol": ESMPY_AREA_RTOL,
         "esmpy_max_rel_residual": result.max_rel_residual,
         "a_over_a_tilde_spread": result.a_over_a_tilde_spread,
-        "history": "Built by scripts/gfdl_om4/pipeline/native_area_weights.py.",
+        "ace_commit": ace_commit,
+        "history": (
+            f"{timestamp}: python -m pipeline.native_area_weights {shlex.join(argv)}"
+        ),
     }
+    # Last: only an artifact that passed every assert selects the path.
+    attrs[REGRID_PATH_ATTR] = REGRID_PATH_DIRECT
+    attrs[REGRID_PATH_DESCRIPTION_ATTR] = regrid_path_description(target_grid_name)
     logger.info(
         f"esmpy_max_rel_residual={result.max_rel_residual}, "
         f"a_over_a_tilde_spread={result.a_over_a_tilde_spread}"
@@ -166,7 +194,8 @@ def build_native_area_artifact(
     logger.info("Native-area weight artifact complete")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(
         description="Rebuild an ESMF weight artifact in native cell areas."
     )
@@ -183,16 +212,19 @@ def main() -> None:
         required=True,
         help="statics zarr store whose areacello is the native cell area",
     )
+    parser.add_argument("--ace-commit", required=True)
     parser.add_argument(
         "--output-url", required=True, help="GCS prefix for the new artifact"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     build_native_area_artifact(
         args.source_weights_url,
-        make_target_grid(args.target_grid),
+        args.target_grid,
         args.a_source_url,
+        args.ace_commit,
         args.output_url,
+        argv,
     )
 
 

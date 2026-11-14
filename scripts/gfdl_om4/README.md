@@ -118,6 +118,99 @@ from the config's `statics.store`. Every run asserts the area identities
 of `pipeline/native_area.py` on the statics and on every chunk, before the
 float32 cast, and fails on a violation.
 
+#### C96 path
+
+The C96 path regrids every field OM4 0.25° tripolar -> C96 -> target grid,
+the path the coupled model's atmosphere sees the ocean through, using the
+coupled model's own operators and no ESMF:
+
+- OM4 -> C96: CM4's exchange grid (`CM4_XGRID_TAR_URL`; `grid_spec.nc`
+  names its `aXo_file`, `aXl_file`), read by `pipeline/cm4_xgrid.py`
+  `read_cm4_xgrid`.
+- C96 -> target: `fregrid` `conserve_order1` remap files
+  (`FREGRID_REMAP_URL_F90`, `FREGRID_REMAP_URL_F22P5`), read by
+  `read_fregrid_remap`.
+
+`pipeline/c96_weights.py` composes them into one artifact of the format
+above, so `get_regridder` and both pipelines read it unchanged:
+
+```
+make c96_path_weights_one_degree c96_path_weights_four_degree
+# -> $(WEIGHTS_URL_ROOT)/$(C96_PATH_WEIGHTS_VERSION)/om4-tripolar-0.25deg-via-cm4-c96-to-<target_grid>
+```
+
+i: OM4 cell; c: C96 cell; J: target cell.
+
+```
+native_area_i           native areacello (m²)
+xgrid_ocean_area_ci     CM4 exchange-grid area of C96 cell c ∩ OM4 cell i (m²)
+xgrid_om4_area_i        = Σ_c xgrid_ocean_area_ci (m²)
+fregrid_overlap_Jc      fregrid exchange-grid area of target cell J ∩ C96 cell c (m²)
+share_Jc                = fregrid_overlap_Jc / Σ_J fregrid_overlap_Jc
+overlap_Ji              = Σ_c share_Jc xgrid_ocean_area_ci native_area_i / xgrid_om4_area_i
+                          so Σ_J overlap_Ji = native_area_i on wet i
+xgrid_land_area_c       CM4 exchange-grid land area in C96 cell c (m²)
+ocean_fraction_c        = Σ_i xgrid_ocean_area_ci / (Σ_i xgrid_ocean_area_ci + xgrid_land_area_c)
+ocean_fraction_J        = Σ_c fregrid_overlap_Jc ocean_fraction_c / Σ_c fregrid_overlap_Jc
+```
+
+The exchange grid has no columns on dry OM4 cells, so the artifact carries
+`wet_columns_only = 1`; each run then gates the artifact's columns against
+its own surface wetmask (both source URLs in the error) and skips the
+`sftof = 100` check on all-ocean cells.
+
+The ratio `native_area_i / xgrid_om4_area_i` (the two grids use different
+Earth radii and cell-area rules) is carried by `areacello`, not by
+`sea_surface_fraction`:
+
+```
+sea_surface_fraction_J = ocean_fraction_J           (≈ 1 − AM4 land_fraction_J)
+areacello_J            = Σ_i overlap_Ji / ocean_fraction_J   where ocean_fraction_J > 0
+                       = Σ_c fregrid_overlap_Jc              where ocean_fraction_J = 0
+areacello_J · sea_surface_fraction_J = Σ_i overlap_Ji = ocean area of J in native cell areas
+```
+
+So `0 ≤ sea_surface_fraction ≤ 1`, and it matches the atmosphere's
+`1 − land_fraction`. `areacello` alone is not a geometric cell area: it
+steps at coastlines and `Σ_J areacello_J` is not the area of the sphere.
+Readers that need ocean area or area weights use `areacello ·
+sea_surface_fraction`. The C96-path `areacello` and `sftof` attrs point
+here.
+
+**Selecting the path.** A config selects the path through `weights_url`
+alone. Each builder writes the artifact attr `regrid_path` (`"c96"` from
+`pipeline.c96_weights`, `"direct"` from `pipeline.native_area_weights`) and
+an informational `regrid_path_description`. A run copies both into the
+store's root attrs and branches on `regrid_path` only. An artifact without
+`regrid_path` raises, so direct configs name `native-area-v2` artifacts,
+not `native-area-v1`.
+
+**Inputs.** These config points are the whole adaptation surface: another
+ocean/atmosphere model pairing or CM4 version changes only them. No code
+path hard-codes a file name, grid size or mask.
+
+| source | config point | defines | gates that use it |
+|---|---|---|---|
+| CM4 exchange-grid tar | `CM4_XGRID_TAR_URL` → `--cm4-xgrid-tar-url`; attr `source_weights_url` | `xgrid_ocean_area_ci`, C96 land areas, C96 cell areas and centers | index maps, `{i : xgrid_om4_area_i > 0} = {i : wet_i = 1}`, every build assert, land-fraction gate |
+| native `ocean_static` (`wet`, `areacello`) | `NATIVE_AREA_A_SOURCE_URL` → `--a-source-url`; attr `a_source_url`; runs: config `statics.store` | `native_area_i`, `wet_i` | wet-support gate, `Σ_J overlap_Ji = native_area_i`, `check_static_identities` |
+| the run's wetmask store | config `wetmask.store`, `wetmask.variable` | the run's `wet_i0` | artifact columns = run wetmask; per-chunk identities |
+| `fregrid` remap files | `FREGRID_REMAP_URL_F90`, `FREGRID_REMAP_URL_F22P5` → `--fregrid-remap-url`; attr `fregrid_remap_url` | `fregrid_overlap_Jc` | index maps, band areas, `Σ_J share_Jc = 1`, ocean-fraction asserts |
+| AM4 land static (optional) | `AM4_LAND_STATIC_URL_F90`, `AM4_LAND_STATIC_URL_F22P5` → `--am4-land-static-url`; attr `am4_land_static_url` | AM4 `land_fraction_J` | land-fraction gate |
+| C96-path artifact | config `weights_url`; attrs `regrid_path`, `regrid_path_description`, `ace_commit`, `history`, `source_grid_url` | the C96-path weights and `areacello` | store root `regrid_path`; run identities |
+| direct native-area artifact | config `weights_url` of direct configs; `--source-grid-weights-url`; attrs `regrid_path`, `ace_commit`, `history` | OM4 centers, corners, `angle` (copied `source_grid.nc`); direct weights | index maps; copied source grid |
+
+The land-fraction gate, `|ocean_fraction_J − (1 − land_fraction_J)| ≤
+c96_weights.LF_A_TOL`, runs only when a land static URL is given (the make
+targets give one); without it the artifact records
+`am4_land_static_url = "none provided"`.
+
+**Checks.** `python -m pipeline.c96_checks` writes JSON: `operators` (the
+two readers), `statics` (a built artifact's static identities), `stores`
+(a C96-path store against its direct-path twin: ocean area and field
+totals equal to `AREA_RTOL`). `configs/c96-path-test/` holds C96-path copies
+of the 1pctCO2 om4 and randco2 configs with `-direct` twins, writing to
+scratch, for those smoke runs.
+
 ### Provenance
 
 Every run takes `--ace-commit` (the make targets pass `git rev-parse

@@ -10,6 +10,7 @@ written as an artifact and loaded with ``get_regridder``, ``open_areacello``
 and ``read_weights``.
 """
 
+import importlib
 import os
 from fractions import Fraction as F
 
@@ -50,7 +51,12 @@ from .native_area_weights import write_native_area_artifact
 from .ocean_emulators_port import regrid_normalized
 from .om4.postprocess import sea_ice
 from .postprocess import ChunkContext
-from .weights import REGRIDDER_KWARGS, WEIGHTS_FILENAME
+from .weights import (
+    REGRID_PATH_ATTR,
+    REGRID_PATH_DIRECT,
+    REGRIDDER_KWARGS,
+    WEIGHTS_FILENAME,
+)
 
 A_NATIVE = np.array([1.0, 1.0, 2.0])
 A_TILDE_ESMF = np.array([1.0, 1.1, 2.0])
@@ -92,6 +98,7 @@ TOY_ATTRS = {
     "a_source_url": "toy",
     "esmpy_area_rtol": ESMPY_AREA_RTOL,
     "esmpy_max_rel_residual": 0.0,
+    REGRID_PATH_ATTR: REGRID_PATH_DIRECT,
 }
 
 
@@ -108,6 +115,70 @@ def _toy_artifact(tmp_path, monkeypatch, z_row: bool = False):
     monkeypatch.setattr(weights, "_REGRIDDER_CACHE", {})
     monkeypatch.setattr(weights, "_AREACELLO_CACHE", {})
     return weights.get_regridder(url, "toy"), url
+
+
+# The module; the name native_area_weights is the function imported above.
+builder = importlib.import_module(".native_area_weights", __package__)
+TOY_ACE_COMMIT = "0123abcd"
+
+
+def toy_builder_argv(a_source_url: str, output_url: str) -> list[str]:
+    return [
+        "--source-weights-url",
+        "toy-esmf-artifact",
+        "--target-grid",
+        "toy",
+        "--a-source-url",
+        a_source_url,
+        "--ace-commit",
+        TOY_ACE_COMMIT,
+        "--output-url",
+        output_url,
+    ]
+
+
+def toy_artifact_built(tmp_path, monkeypatch, source_grid: xr.Dataset) -> str:
+    """The table-3 toy (``z_row``) written by ``python -m
+    pipeline.native_area_weights``, its ESMF readers and areas patched to the
+    toy's, on ``source_grid``; loadable through ``weights``. Returns its URL."""
+    w, A_e = _toy_weights(z_row=True)
+    target = _toy_grid([0.0, 1.5, 3.0, 4.0])
+    dims, shape = source_grid["lon"].dims, source_grid["lon"].shape
+    a_source_url = str(tmp_path / "toy_static.zarr")
+    xr.Dataset({"areacello": (dims, A_NATIVE.reshape(shape))}).to_zarr(a_source_url)
+    monkeypatch.setattr(builder, "make_target_grid", lambda name: target)
+    monkeypatch.setattr(builder, "open_source_grid", lambda url: source_grid)
+    monkeypatch.setattr(builder, "read_weights", lambda url: w)
+    monkeypatch.setattr(
+        builder,
+        "esmf_cell_areas",
+        lambda grid: A_e if grid is target else A_TILDE_ESMF,
+    )
+    monkeypatch.setattr(builder, "MEAN_EARTH_RADIUS_M", 1.0)
+    url = str(tmp_path / "native-area-v2" / "toy")
+    builder.main(toy_builder_argv(a_source_url, url))
+    monkeypatch.setattr(weights, "make_target_grid", lambda name: target)
+    monkeypatch.setattr(weights, "_REGRIDDER_CACHE", {})
+    monkeypatch.setattr(weights, "_AREACELLO_CACHE", {})
+    return url
+
+
+def test_toy_artifact_built_matches_toy(tmp_path, monkeypatch):
+    """The builder reproduces the hand-written toy artifact: same ŵ, A_J."""
+    url = toy_artifact_built(tmp_path, monkeypatch, _toy_grid([0, 1, 2, 3]))
+    _, result = _toy(z_row=True)
+    S, row, col = weights.read_weights(url)
+    w_hat = result.w_hat.tocoo()
+    np.testing.assert_array_equal(row, w_hat.row)
+    np.testing.assert_array_equal(col, w_hat.col)
+    assert_close(S, w_hat.data, rtol=F64_RTOL, scale=1.0, context="ŵ")
+    assert_close(
+        weights.open_areacello(url, "toy").values.ravel(),
+        result.area,
+        rtol=F64_RTOL,
+        scale=result.area.max(),
+        context="A_J",
+    )
 
 
 def _regrid(regridder, native) -> np.ndarray:
