@@ -52,7 +52,10 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0302-48yr-tc|best_inference_ckpt|high|--min-runtime 4h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-12-tc-wake-eval/coupled/8xx0pife/piC-ic0302-48yr-tc
 
 # AMOC at 26.5N, 1pctCO2 0001-0130 (rollout as 1pct-ic0001-130yr-maps), 5-day vo_0..vo_18 on the 26.5N Atlantic row
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_1pct-ic0001-130yr-amoc|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-13-amoc-eval/coupled/8xx0pife/1pct-ic0001-130yr-amoc
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|running_1pct-ic0001-130yr-amoc|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-13-amoc-eval/coupled/8xx0pife/1pct-ic0001-130yr-amoc
+
+# AMOC at 26.5N, piControl 0151-0350 (rollout as piC-ic0151-200yr-maps), 5-day vo_0..vo_18 on the 26.5N Atlantic row
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_piC-ic0151-200yr-amoc|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-13-amoc-eval/coupled/8xx0pife/piC-ic0151-200yr-amoc
 
 # --config-dir configs/experiments/cm4_eval/coupled
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
