@@ -1,5 +1,9 @@
 """Submit the 2026-11-12 fine-tuning sweep of the ext80 runs
-(create_fm_v2_finetune_jobs.py configs in run_configs/ft/), with N_GPUS=4.
+(create_fm_v2_finetune_jobs.py), with N_GPUS=4: by default the 96 8-epoch runs
+(configs in run_configs/ft/), and with --epochs 32 and/or 128 the 36 long
+fine-tunes (run_configs/ft-e32/, run_configs/ft-e128/: mixes 25, 70, 100 at LR
+1e-4 only, named <8-epoch job>-e32 / -e128). --mix, --lr, --seed and --arch
+narrow whichever lengths --epochs selects.
 
 Each job's name, wandb group, parent job and description come from its config
 header. Jobs go through run-ace-anneal.sh, as the ext80 forks do
@@ -10,7 +14,7 @@ records/wandb_to_beaker_map.json: the parent's Beaker experiment(s) are found
 by canonical job name and the result datasets of their jobs searched for the
 checkpoint (submit_fm_v2_followup_jobs.find_checkpoint; a preempted parent
 resumes in a new job with a new result dataset, and only the job that
-finished holds ema_ckpt_0080.tar). One lookup per parent, shared by its 16
+finished holds ema_ckpt_0080.tar). One lookup per parent, shared by its
 children. A child whose parent has no such checkpoint in a finished job's
 dataset is skipped with a message (a running job's dataset is uncommitted and
 cannot be mounted).
@@ -24,9 +28,12 @@ and configs without touching Beaker.
 Usage:
     python submit_fm_v2_finetune_jobs.py [--arch nc-sfno-v2 nc-swin-v2.2-v2]
         [--seed N ...] [--mix {25,50,70,100} ...] [--lr {1e-4,3e-5,1e-5,3e-6} ...]
-        [--only JOB_NAME ...] [--list] [--dry-run] [--skip-if-in-beaker]
-        [--exclude-job NAME ...] [--beaker-workspace ...] [--beaker-cluster ...]
-        [--beaker-priority ...]
+        [--epochs {8,32,128} ...] [--only JOB_NAME ...] [--list] [--dry-run]
+        [--skip-if-in-beaker] [--exclude-job NAME ...] [--beaker-workspace ...]
+        [--beaker-cluster ...] [--beaker-priority ...]
+
+The long fine-tunes, as submitted:
+    python submit_fm_v2_finetune_jobs.py --epochs 32 128 --skip-if-in-beaker
 """
 
 import argparse
@@ -35,12 +42,15 @@ from _beaker_listing import list_experiments
 from _submit_common import check_configs_at_head, drop_jobs_in_beaker, submit_job
 from create_anneal_jobs import read_header
 from create_fm_v2_finetune_jobs import (
+    LONG_MAX_EPOCHS,
     LRS,
+    MAX_EPOCHS,
     MIXES,
     N_GPUS,
     PARENT_ARM,
     PARENT_CHECKPOINT,
     FtRun,
+    ft_long_runs,
     ft_runs,
 )
 from create_fm_v2_followup_jobs import EXT80_ARCHS
@@ -87,6 +97,17 @@ def main() -> None:
     parser.add_argument("--mix", nargs="+", choices=list(MIXES), default=list(MIXES))
     parser.add_argument("--lr", nargs="+", choices=LRS, default=list(LRS))
     parser.add_argument(
+        "--epochs",
+        nargs="+",
+        type=int,
+        choices=(MAX_EPOCHS, *LONG_MAX_EPOCHS),
+        default=[MAX_EPOCHS],
+        help=(
+            f"Run lengths (max_epochs) to submit (default: {MAX_EPOCHS}); "
+            f"{', '.join(map(str, LONG_MAX_EPOCHS))} are the long fine-tunes."
+        ),
+    )
+    parser.add_argument(
         "--only",
         nargs="+",
         default=None,
@@ -103,8 +124,11 @@ def main() -> None:
 
     runs = [
         run
-        for run in ft_runs(tuple(args.arch))
-        if run.seed in args.seed and run.mix in args.mix and run.lr in args.lr
+        for run in ft_runs(tuple(args.arch)) + ft_long_runs(tuple(args.arch))
+        if run.max_epochs in args.epochs
+        and run.seed in args.seed
+        and run.mix in args.mix
+        and run.lr in args.lr
     ]
     if args.only is not None:
         unknown = set(args.only) - {run.job_name for run in runs}

@@ -21,6 +21,7 @@ Training:
 
 - `create_fm_v2_jobs.py`, `submit_fm_v2_jobs.py`: v2 grid (wandb group ace2-fm-2026-11-09): sfno-v2, swin-v2.2-v2 x fm-era5, fm-balanced, fm-e3sm-balanced x 3 seeds.
 - `create_fm_v2_followup_jobs.py`, `submit_fm_v2_followup_jobs.py`: 2026-11-11 follow-ups of the v2 maskoff runs, constant LR + 1-sqrt cooldown: `lrsweep` (swin fm-balanced s0, LR 1e-4/3e-4/5e-4, 30 epochs), `ext80` (sfno-v2 and swin-v2.2-v2 forked from each parent's ema_ckpt_0040, 80 more epochs), `e120 --lr X` (swin, 120 epochs from scratch at the chosen LR).
+- `create_fm_v2_finetune_jobs.py`, `submit_fm_v2_finetune_jobs.py`: 2026-11-12 fine-tuning sweep of the ext80 fm-spencer-balanced runs (wandb groups ace2-fm-{sfno,swin}-ft-2026-11-12): 8 epochs, 4 ERA5 mixes x 4 LRs x 3 seeds per arch (96 runs, `run_configs/ft/`), and its long fine-tunes of 32 and 128 epochs at ERA5 mixes 25/70/100, LR 1e-4 (36 runs, `run_configs/ft-e32/`, `run_configs/ft-e128/`): `python scripts/submit_fm_v2_finetune_jobs.py --epochs 32 128 --skip-if-in-beaker`.
 - `create_fm_1deg_jobs.py`, `submit_fm_1deg_jobs.py`: 1deg 6-hourly runs (wandb group ace2-fm-1deg-2026-11-13, 8 GPUs, 400GiB shared memory): sfno-v2 x fm-e3sm-balanced, fm-era5 x 3 seeds, 120 epochs. `--smoke` submits a 2-epoch smoke test per arm (group ace2-fm-1deg-2026-11-13-smoke).
 - `create_fm_jobs.py`, `submit_fm_jobs.py`: v1 seed x masking grid.
 - `create_anneal_jobs.py`, `submit_anneal_jobs.py`: anneal fine-tuning sweep.
@@ -36,6 +37,9 @@ Inference and evaluation:
   Later, the other families at bestinf and lastema (28 jobs per run, 1344 per arch):
   `python scripts/submit_inference_jobs.py --arch sfno-v2-ft --family cm4xshield cm4-1pct sst paper-som paper-era5 --ckpt bestinf lastema --skip-if-in-beaker`
   Status: `python scripts/eval_table.py --arch sfno-v2-ft [--family eval]`.
+- long fine-tune evals (`--arch sfno-v2-ft-e32`, `sfno-v2-ft-e128`, `swin-v2.2-v2-ft-e32`, `swin-v2.2-v2-ft-e128`: 9 runs each, `run_configs/ft-e32/` and `run_configs/ft-e128/`). The same commands with these archs: the `eval` family at bestinf, lastema (`ema_ckpt_0032` / `ema_ckpt_0128`) and `ema2`, `ema4`, `ema8`, `ema16` (e32) or `ema8`, `ema16`, `ema32`, `ema64` (e128), 6 jobs per run, 54 per arch:
+  `python scripts/submit_inference_jobs.py --arch sfno-v2-ft-e32 --family eval --ckpt all --skip-if-in-beaker`
+  Status: `python scripts/eval_table.py --arch sfno-v2-ft-e32 --family eval`.
 - `run_anneal_postprocess.sh`: runs `update_beaker_map.py`, `make_soup_checkpoints.py`, `submit_anneal_eval_jobs.py`.
 - `anneal_eval_status.py`: anneal eval progress table.
 

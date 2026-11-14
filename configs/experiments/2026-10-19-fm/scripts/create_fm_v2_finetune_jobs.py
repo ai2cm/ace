@@ -67,6 +67,40 @@ The inline inference entries are the parent's, so only `aimip_checkpoint_era5`
 (every epoch) runs: the others have `epochs: {start: 9, step: 10}` and an
 8-epoch run never reaches them.
 
+Long fine-tunes (`ft_long_runs`, 36 runs): the same recipe run for 32 and for
+128 epochs, to find where performance turns from improving to degrading. Each
+parent gets ERA5 mixes 25, 70 and 100 at LR 1e-4 only, at both lengths, named
+
+    <parent job>-ft-era5{25,70,100}-lr1e-4-e{32,128}
+
+i.e. the 8-epoch run's name plus `-e{max_epochs}`, in the same wandb groups.
+Their configs are in run_configs/ft-e32/ and run_configs/ft-e128/ (the
+8-epoch config's file name plus the same suffix), one directory per length
+because the inference tooling tells archs sharing a name token apart by
+directory and has one last EMA epoch per arch (_inference_common
+._add_ft_archs). Each is identical to its 8-epoch sibling except:
+
+- `max_epochs`: 32 or 128.
+- The LinearLR `total_iters`: max_epochs * 774 = 24768 or 99072, so the LR
+  still reaches 0 exactly at the end.
+- `ema_checkpoint_save_epochs`: {start: 2, step: 2} for 32 epochs and
+  {start: 8, step: 8} for 128, i.e. 16 EMA checkpoints per run instead of one
+  per epoch. The trainer saves ema_ckpt_{N:04d}.tar after the N-th epoch
+  (N = epochs trained, 1-based) when N is in
+  range(max_epochs + 1)[start::step] (trainer.epoch_checkpoint_enabled):
+  ema_ckpt_0002, 0004, .. 0032, and ema_ckpt_0008, 0016, .. 0128, the last
+  epoch included.
+
+The parent's other inline inference entries (`epochs: {start: 9, step: 10}`:
+the 10- and 46-year ERA5 runs and the 5-day weather ensembles) are unchanged
+and do fire in these runs, after epochs 10, 20, 30, .. (3 times in 32 epochs,
+12 in 128).
+
+`-e128` is four hex digits, which _beaker_listing.canonical_name would take
+for gantry's collision suffix and strip, making the run the namesake of its
+8-epoch sibling; canonical_name keeps it (NOT_HASH_SUFFIXES), and the
+generator asserts every job name is its own canonical name.
+
 Each file starts with a `# KEY: value` header (create_anneal_jobs.read_header)
 naming the job, its wandb group, its parent job and the parent checkpoint;
 submit_fm_v2_finetune_jobs.py reads it.
@@ -81,6 +115,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from _beaker_listing import canonical_name
 from create_anneal_jobs import MOUNTED_PARENT_CHECKPOINT
 from create_fm_v2_followup_jobs import (
     BATCH_SIZE,
@@ -129,16 +164,50 @@ CONTROL_MIX = "25"
 LRS = ("1e-4", "3e-5", "1e-5", "3e-6")
 WEIGHT_DECIMALS = 6
 
+# The long fine-tunes: the MAX_EPOCHS recipe at these lengths, mixes and LRs.
+LONG_MAX_EPOCHS = (32, 128)
+LONG_MIXES = ("25", "70", "100")
+LONG_LRS = ("1e-4",)
+LONG_EMA_CHECKPOINTS = 16  # per run, evenly spaced, the last epoch included
+
+
+def ft_dir(max_epochs: int) -> Path:
+    """Directory of the configs of the runs of `max_epochs` epochs."""
+    if max_epochs == MAX_EPOCHS:
+        return FT_DIR
+    return RUN_CONFIGS_DIR / f"{FT_DIR.name}-e{max_epochs}"
+
+
+def ema_checkpoint_save_epochs(max_epochs: int) -> dict[str, int]:
+    """Every epoch for MAX_EPOCHS, else LONG_EMA_CHECKPOINTS evenly spaced
+    epochs ending at the last one.
+    """
+    if max_epochs == MAX_EPOCHS:
+        return EMA_CHECKPOINT_SAVE_EPOCHS
+    assert max_epochs % LONG_EMA_CHECKPOINTS == 0
+    step = max_epochs // LONG_EMA_CHECKPOINTS
+    return {"start": step, "step": step}
+
+
+def ema_checkpoint_epochs(max_epochs: int) -> list[int]:
+    """Epochs N whose ema_ckpt_{N:04d}.tar a run of `max_epochs` saves, as
+    fme's trainer.epoch_checkpoint_enabled selects them.
+    """
+    save = ema_checkpoint_save_epochs(max_epochs)
+    return list(range(max_epochs + 1)[save["start"] :: save["step"]])
+
 
 @dataclass(frozen=True)
 class FtRun:
     parent: Run  # the ext80 run fine-tuned
     mix: str  # key of MIXES
     lr: str  # one of LRS
+    max_epochs: int = MAX_EPOCHS  # or one of LONG_MAX_EPOCHS
 
     @property
     def suffix(self) -> str:
-        return f"-ft-era5{self.mix}-lr{self.lr}"
+        epochs = "" if self.max_epochs == MAX_EPOCHS else f"-e{self.max_epochs}"
+        return f"-ft-era5{self.mix}-lr{self.lr}{epochs}"
 
     @property
     def arch(self) -> str:
@@ -158,22 +227,45 @@ class FtRun:
 
     @property
     def path(self) -> Path:
-        return FT_DIR / self.config_name
+        return ft_dir(self.max_epochs) / self.config_name
 
     @property
     def group(self) -> str:
         return FT_GROUPS[self.arch]
 
     @property
-    def max_epochs(self) -> int:
-        return MAX_EPOCHS
+    def total_iterations(self) -> int:
+        return self.max_epochs * FT_ITERATIONS_PER_EPOCH
+
+
+def _parents(archs) -> list[Run]:
+    parents = [run for run in ext80_runs(archs) if run.arm == PARENT_ARM]
+    assert len(parents) == len(archs) * len(SEEDS)
+    return parents
 
 
 def ft_runs(archs=EXT80_ARCHS) -> list[FtRun]:
-    """The 96 runs (48 per arch), ordered by arch, seed, mix, LR."""
-    parents = [run for run in ext80_runs(archs) if run.arm == PARENT_ARM]
-    assert len(parents) == len(archs) * len(SEEDS)
-    return [FtRun(parent, mix, lr) for parent in parents for mix in MIXES for lr in LRS]
+    """The 96 8-epoch runs (48 per arch), ordered by arch, seed, mix, LR."""
+    return [
+        FtRun(parent, mix, lr)
+        for parent in _parents(archs)
+        for mix in MIXES
+        for lr in LRS
+    ]
+
+
+def ft_long_runs(archs=EXT80_ARCHS) -> list[FtRun]:
+    """The 36 long runs (18 per arch, 9 per arch and length), ordered by
+    arch, max_epochs, seed, mix, LR.
+    """
+    return [
+        FtRun(parent, mix, lr, max_epochs)
+        for arch in archs
+        for max_epochs in LONG_MAX_EPOCHS
+        for parent in _parents((arch,))
+        for mix in LONG_MIXES
+        for lr in LONG_LRS
+    ]
 
 
 def iterations_per_epoch(samples_per_epoch: int) -> int:
@@ -201,13 +293,13 @@ def mix_weights(parent_weights: dict[str, float], era5: float) -> dict[str, floa
     return weights
 
 
-def lr_scheduler() -> dict:
+def lr_scheduler(total_iterations: int) -> dict:
     return {
         "type": "LinearLR",
         "kwargs": {
             "start_factor": 1.0,
             "end_factor": 0.0,
-            "total_iters": TOTAL_ITERATIONS,
+            "total_iters": total_iterations,
         },
         "step_each_iteration": True,
     }
@@ -219,12 +311,16 @@ def make_config(run: FtRun) -> dict:
     assert "resume_results" not in parent
     assert parent["seed"] == run.seed
     assert parent["max_epochs"] == EXT80_MAX_EPOCHS
-    cfg["max_epochs"] = MAX_EPOCHS
+    cfg["max_epochs"] = run.max_epochs
 
     assert parent["ema"] == {"decay": PARENT_EMA_DECAY}
     cfg["ema"]["decay"] = EMA_DECAY
     assert parent["validate_using_ema"] is True
     assert parent["ema_checkpoint_save_epochs"] == EMA_CHECKPOINT_SAVE_EPOCHS
+    cfg["ema_checkpoint_save_epochs"] = ema_checkpoint_save_epochs(run.max_epochs)
+    # The last epoch's EMA checkpoint is the one the inference tooling calls
+    # lastema.
+    assert ema_checkpoint_epochs(run.max_epochs)[-1] == run.max_epochs
 
     # The parent's iteration count is the measured one, under the same formula.
     check_iterations_per_epoch(parent)
@@ -261,13 +357,13 @@ def make_config(run: FtRun) -> dict:
         for piece in optimization["scheduler"]["schedulers"]
     )
     optimization["lr"] = lr_value(run.lr)
-    optimization["scheduler"] = lr_scheduler()
+    optimization["scheduler"] = lr_scheduler(run.total_iterations)
     return cfg
 
 
 def describe(run: FtRun) -> str:
     return (
-        f"ACE FM {run.parent.tag} ft: {MAX_EPOCHS} epochs of "
+        f"ACE FM {run.parent.tag} ft: {run.max_epochs} epochs of "
         f"{FT_ITERATIONS_PER_EPOCH} iterations from {run.parent.job_name} "
         f"ema_ckpt_{EXT80_MAX_EPOCHS:04d}, era5 label weight {MIXES[run.mix]:g}, "
         f"LR {run.lr} linear to 0, {MULTI_STEP_N_FORWARD_STEPS}-step, EMA decay "
@@ -298,12 +394,17 @@ def write_config(run: FtRun) -> None:
 
 
 def main() -> None:
-    FT_DIR.mkdir(exist_ok=True)
-    runs = ft_runs()
+    runs = ft_runs() + ft_long_runs()
     assert len({run.job_name for run in runs}) == len(runs)
+    # No name ends in what Beaker listings would strip as a collision suffix.
+    assert all(canonical_name(run.job_name) == run.job_name for run in runs)
+    assert TOTAL_ITERATIONS == ft_runs()[0].total_iterations
     for run in runs:
+        run.path.parent.mkdir(exist_ok=True)
         write_config(run)
-    print(f"{len(runs)} configs in {FT_DIR.relative_to(EXP_DIR)}")
+    for directory in dict.fromkeys(run.path.parent for run in runs):
+        count = sum(run.path.parent == directory for run in runs)
+        print(f"{count} configs in {directory.relative_to(EXP_DIR)}")
 
 
 if __name__ == "__main__":

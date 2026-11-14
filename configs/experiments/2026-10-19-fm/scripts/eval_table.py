@@ -6,8 +6,10 @@ finished or not, with every family (--family, default all; select_jobs;
 Beaker names from beaker_job_name), at each checkpoint the architecture has
 for the family (--ckpt, default all of them:
 _inference_common.arch_checkpoints, i.e. bestinf and lastema and, for the eval
-family of the ft archs sfno-v2-ft and swin-v2.2-v2-ft, the per-epoch ema1 ..
-ema7), one row per family and checkpoint. Their Beaker
+family of the ft archs, their per-epoch ones: ema1 .. ema7 for sfno-v2-ft and
+swin-v2.2-v2-ft, ema2, ema4, ema8, ema16 for their -e32 long fine-tunes and
+ema8, ema16, ema32, ema64 for the -e128 ones), one row per family and
+checkpoint. Their Beaker
 state comes from one workspace listing (submit_inference_jobs.listing_text);
 no logs are read. As in fm_table.py, the newest experiment of each job name
 counts, and preemption retries resolve to that experiment's latest status
@@ -21,9 +23,11 @@ Each of those is listed below the table with its experiment id.
 Usage:
     python eval_table.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
                                   sfno-v2-ext80,swin-v2.2-v2-ext80,
-                                  sfno-v2-ft,swin-v2.2-v2-ft}]
+                                  sfno-v2-ft,swin-v2.2-v2-ft,
+                                  sfno-v2-ft-e32,sfno-v2-ft-e128,
+                                  swin-v2.2-v2-ft-e32,swin-v2.2-v2-ft-e128}]
                          [--family FAMILY ...]
-                         [--ckpt {bestinf,lastema,ema1..ema7} ...]
+                         [--ckpt {bestinf,lastema,emaN} ...]
 """
 
 import argparse

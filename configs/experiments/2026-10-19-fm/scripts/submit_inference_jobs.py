@@ -7,7 +7,10 @@ four data arms; sfno-v2-ext80, swin-v2.2-v2-ext80 and, once X is chosen,
 swin-v2.2-v2-lr{X}-e120: the 2026-11-11 follow-ups of the v2 runs,
 create_fm_v2_followup_jobs.py; sfno-v2-ft and swin-v2.2-v2-ft: the 2026-11-12
 fine-tuning sweep of the ext80 fm-spencer-balanced runs, 48 runs each, read
-from run_configs/ft/, create_fm_v2_finetune_jobs.py;
+from run_configs/ft/, create_fm_v2_finetune_jobs.py; sfno-v2-ft-e32,
+sfno-v2-ft-e128, swin-v2.2-v2-ft-e32 and swin-v2.2-v2-ft-e128: its 32- and
+128-epoch long fine-tunes, 9 runs each, read from run_configs/ft-e32/ and
+run_configs/ft-e128/;
 _inference_common.ARCHS and inference_run_names; no diagnostics) whose Beaker
 experiment succeeded. The cm4xshield and cm4-1pct families skip runs not
 trained on CM4 and X-SHiELD (the v2 fm-era5 arms), and use the arch's
@@ -36,14 +39,19 @@ _inference_common.CHECKPOINTS and EPOCH_CHECKPOINTS):
   lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch;
               ema_ckpt_0050.tar for sfno-v2 and swin-v2.2-v2,
               ema_ckpt_0080.tar for the ext80 forks, ema_ckpt_0120.tar
-              for the e120 runs, ema_ckpt_0008.tar for the ft runs;
-              LAST_EMA_EPOCHS)
-  ema1..ema7  training_checkpoints/ema_ckpt_000N.tar        (EMA, epoch N;
+              for the e120 runs, ema_ckpt_0008.tar for the ft runs,
+              ema_ckpt_0032.tar and ema_ckpt_0128.tar for the ft-e32 and
+              ft-e128 runs; LAST_EMA_EPOCHS)
+  emaN        training_checkpoints/ema_ckpt_{N:04d}.tar     (EMA, epoch N;
               the ft archs only, and the eval family only: {run}-emaN.
-              Their epoch 8 is lastema, so there is no ema8)
+              ft: ema1..ema7; ft-e32: ema2, ema4, ema8, ema16; ft-e128:
+              ema8, ema16, ema32, ema64
+              (_inference_common.EPOCH_CHECKPOINT_ARCHS). An arch's last
+              epoch is lastema, so ft has no ema8; an emaN the arch does
+              not have is an error)
   all         every checkpoint the arch has for each selected family
               (_inference_common.arch_checkpoints): bestinf and lastema,
-              and for the ft archs' eval family also ema1..ema7
+              and for the ft archs' eval family also their emaN
 
 The ft runs are evaluated as they finish, with one idempotent command per
 arch: the eval family at all 9 checkpoints of every ft run whose training
@@ -55,8 +63,14 @@ Beaker (succeeded or running; failed and canceled ones are resubmitted):
     python submit_inference_jobs.py --arch swin-v2.2-v2-ft --family eval \
         --ckpt all --skip-if-in-beaker
 
-and later the other families at bestinf and lastema (the same for
-swin-v2.2-v2-ft):
+The long fine-tunes likewise, at their 6 eval checkpoints (54 jobs per arch):
+
+    python submit_inference_jobs.py --arch sfno-v2-ft-e32 --family eval \
+        --ckpt all --skip-if-in-beaker
+
+and the same for sfno-v2-ft-e128, swin-v2.2-v2-ft-e32 and
+swin-v2.2-v2-ft-e128. Later the other families at bestinf and lastema (the
+same for the other ft archs):
 
     python submit_inference_jobs.py --arch sfno-v2-ft \
         --family cm4xshield cm4-1pct sst paper-som paper-era5 \
@@ -66,7 +80,7 @@ swin-v2.2-v2-ft):
 paper job names (which carry no checkpoint suffix) get "-lastema" appended.
 Every family logs to a "-lastema" wandb group (LASTEMA_WANDB_GROUPS), and the
 --ckpt emaN jobs to one "-emaN" group per epoch (e.g.
-ace2-fm-eval-ema3-ft-2026-11-12). The
+ace2-fm-eval-ema3-ft-2026-11-12, ace2-fm-eval-ema16-ft-e32-2026-11-12). The
 wandb groups of an arch with its own training date (GROUP_DATES; sfno-v2,
 swin-v2.2-v2: 2026-11-09) carry that date instead of 2026-10-19
 (wandb_groups), and the follow-up archs their phase tag and date (e.g.
@@ -76,8 +90,9 @@ do (their job names differ by arch token). Where
 the lastema name would pass Beaker's 128-character limit (the balanced runs'
 ERA5 paper kinds), only the Beaker experiment name is shortened
 (beaker_job_name: "-era5-c96-piC-1pct-cm4-xshield-" becomes "-4src-" and,
-for the swin-v2.2-v2-ft runs' longest lastema ERA5 paper names,
-"-spencer-balanced-" becomes "-spb-"); the wandb run name stays the full one.
+for the ft runs' longest ERA5 paper names (swin-v2.2-v2-ft at lastema, the
+long fine-tunes at lastema and, for swin, bestinf), "-spencer-balanced-"
+becomes "-spb-"); the wandb run name stays the full one.
 --old-runs (lastema, eval family only) adds the arch's 2026-06-26 baselines
 (_inference_common.OLD_RUNS[arch]: era5-a1, fm-a2-cond, c96-a1; nc-sfno for
 sfno, nc-swin-v2.1 for swin-v2.2), each on the eval suite of its old -bestinf
@@ -92,11 +107,14 @@ first (--dry-run validates too, so a dry run proves the configs load).
 Usage:
     python submit_inference_jobs.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
                                             sfno-v2-ext80,swin-v2.2-v2-ext80,
-                                            sfno-v2-ft,swin-v2.2-v2-ft}]
+                                            sfno-v2-ft,swin-v2.2-v2-ft,
+                                            sfno-v2-ft-e32,sfno-v2-ft-e128,
+                                            swin-v2.2-v2-ft-e32,
+                                            swin-v2.2-v2-ft-e128}]
                                     [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
-                                    [--ckpt {bestinf,lastema,ema1..ema7,all} ...]
+                                    [--ckpt {bestinf,lastema,emaN,all} ...]
                                     [--old-runs]
                                     [--use-map] [--dry-run]
                                     [--skip-if-in-beaker] [--exclude-job NAME ...]

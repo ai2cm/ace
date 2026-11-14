@@ -3,7 +3,8 @@
 The inference families (generate_inference_configs.py, submit_inference_jobs.py)
 evaluate a checkpoint of each finished 2026-10-19 training run, and of each
 finished 2026-11-09 v2 run (--arch sfno-v2, swin-v2.2-v2). A run is one config in
-run_configs/ (run_configs/ft/ for the ft archs, RUN_CONFIG_SUBDIRS); its job
+run_configs/ (run_configs/ft/, ft-e32/ and ft-e128/ for the ft archs,
+RUN_CONFIG_SUBDIRS); its job
 name (and wandb name) comes from submit_fm_jobs.config_to_job_name. Which runs
 have finished, and which Beaker result dataset holds their checkpoints, is
 read from Beaker (_beaker_listing), not from wandb.
@@ -51,8 +52,11 @@ LAST_EMA_EPOCHS = {"sfno-v2": 50, "swin-v2.2-v2": 50}
 # Per-epoch EMA checkpoints, further --ckpt choices of the archs in
 # EPOCH_CHECKPOINT_ARCHS (the ft archs, _add_ft_archs) for the families in
 # EPOCH_CHECKPOINT_FAMILIES only: name -> (file, job-name suffix), e.g.
-# "ema3": ("training_checkpoints/ema_ckpt_0003.tar", "-ema3"). The arch's last
-# epoch is not among them: it is lastema.
+# "ema3": ("training_checkpoints/ema_ckpt_0003.tar", "-ema3"). A name stands
+# for the same file on every arch; EPOCH_CHECKPOINT_ARCHS holds the names each
+# arch has jobs at (sfno-v2-ft: ema1..ema7, sfno-v2-ft-e32: ema2, ema4, ema8,
+# ema16, sfno-v2-ft-e128: ema8, ema16, ema32, ema64). The arch's last epoch is
+# not among them: it is lastema.
 EPOCH_CHECKPOINTS: dict[str, tuple[str, str]] = {}
 EPOCH_CHECKPOINT_ARCHS: dict[str, tuple[str, ...]] = {}
 EPOCH_CHECKPOINT_FAMILIES = ("eval",)
@@ -124,6 +128,11 @@ def _add_followup_archs() -> None:
         CM4_XSHIELD_VARIANT[arch] = CM4_XSHIELD_VARIANT[base]
 
 
+# max_epochs of the long fine-tunes -> the epochs, besides the last, whose EMA
+# checkpoint the eval family runs on (_add_ft_archs).
+LONG_EPOCH_CHECKPOINTS = {32: (2, 4, 8, 16), 128: (8, 16, 32, 64)}
+
+
 def _add_ft_archs() -> None:
     """The 2026-11-12 fine-tuning sweep of the ext80 fm-spencer-balanced runs
     (create_fm_v2_finetune_jobs.py) as archs of its own: sfno-v2-ft and
@@ -136,27 +145,48 @@ def _add_ft_archs() -> None:
     ema_ckpt_0007.tar (--ckpt ema1 .. ema7, EPOCH_CHECKPOINTS). Groups are
     tagged ft-2026-11-12. The models are their ext80 parents' (same data
     config, labels and normalization), so they use the v2 CM4/X-SHiELD suites.
-    """
-    from create_fm_v2_finetune_jobs import FT_DIR, ft_runs
 
-    for run in ft_runs():
+    Its long fine-tunes (ft_long_runs) are four more archs, 9 runs each (3
+    parents x ERA5 mixes 25, 70, 100, LR 1e-4): sfno-v2-ft-e32 and
+    swin-v2.2-v2-ft-e32 (32 epochs, configs in run_configs/ft-e32/, lastema
+    ema_ckpt_0032.tar, eval family also at ema2, ema4, ema8, ema16) and
+    sfno-v2-ft-e128 and swin-v2.2-v2-ft-e128 (128 epochs, run_configs/ft-e128/,
+    lastema ema_ckpt_0128.tar, eval family also at ema8, ema16, ema32, ema64):
+    LONG_EPOCH_CHECKPOINTS of the 16 EMA checkpoints each run saves. Their
+    inference groups are tagged ft-e32-2026-11-12 and ft-e128-2026-11-12
+    (the training runs are in the ft training groups).
+    """
+    from create_fm_v2_finetune_jobs import (
+        MAX_EPOCHS,
+        ema_checkpoint_epochs,
+        ft_long_runs,
+        ft_runs,
+    )
+
+    for run in ft_runs() + ft_long_runs():
         base = "sfno-v2" if run.arch == "nc-sfno-v2" else "swin-v2.2-v2"
-        arch = f"{base}-ft"
+        long_tag = "" if run.max_epochs == MAX_EPOCHS else f"-e{run.max_epochs}"
+        arch = f"{base}-ft{long_tag}"
         if arch in ARCHS:
             continue
         ARCHS[arch] = run.parent.tag
-        RUN_CONFIG_SUBDIRS[arch] = FT_DIR.name
+        RUN_CONFIG_SUBDIRS[arch] = run.path.parent.name
         EXCLUDED_TOKENS_BY_ARCH[arch] = EXCLUDED_TOKENS_BY_ARCH[base]
         LAST_EMA_EPOCHS[arch] = run.max_epochs
-        epochs = range(1, run.max_epochs)
+        epochs = LONG_EPOCH_CHECKPOINTS.get(
+            run.max_epochs, tuple(range(1, run.max_epochs))
+        )
+        assert set(epochs) < set(ema_checkpoint_epochs(run.max_epochs))
+        assert run.max_epochs not in epochs  # that one is lastema
         for epoch in epochs:
             EPOCH_CHECKPOINTS[f"ema{epoch}"] = (
                 f"training_checkpoints/ema_ckpt_{epoch:04d}.tar",
                 f"-ema{epoch}",
             )
         EPOCH_CHECKPOINT_ARCHS[arch] = tuple(f"ema{epoch}" for epoch in epochs)
-        # ace2-fm-sfno-ft-2026-11-12 -> ft-2026-11-12.
-        GROUP_DATES[arch] = run.group.split("-", 3)[3]
+        # ace2-fm-sfno-ft-2026-11-12 -> ft-2026-11-12, ft-e32-2026-11-12.
+        tag, date = run.group.split("-", 3)[3].split("-", 1)
+        GROUP_DATES[arch] = f"{tag}{long_tag}-{date}"
         CM4_XSHIELD_VARIANT[arch] = CM4_XSHIELD_VARIANT[base]
 
 

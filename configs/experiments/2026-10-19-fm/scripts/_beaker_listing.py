@@ -28,6 +28,12 @@ DEFAULT_TEXT = "ace2-fm-"
 # `-ens` or an epoch segment `-e07` never match, and no FM job-name segment is
 # itself four or seven hex digits.
 _HASH_SUFFIX = re.compile(r"-(?:[0-9a-f]{4}|[0-9a-f]{7})$")
+# The exception to "no FM job-name segment is itself four or seven hex
+# digits": the 128-epoch long fine-tunes (create_fm_v2_finetune_jobs
+# .ft_long_runs) are named <8-epoch ft job>-e128. Their tail is kept, or each
+# would be taken for a resubmission of its 8-epoch sibling. (A collision
+# suffix on that sibling is "e128" one time in 16**4.)
+NOT_HASH_SUFFIXES = re.compile(r"-ft-era5\d+-lr\d+e-\d+-e128$")
 
 # How a job ended. Beaker sets `canceled`/`canceledCode` both on a job a user
 # stopped and on one the scheduler preempted; a preempted job also carries a
@@ -46,6 +52,8 @@ _PREEMPTED_MARKER = "preempted"
 
 
 def canonical_name(name: str) -> str:
+    if NOT_HASH_SUFFIXES.search(name):
+        return name
     return _HASH_SUFFIX.sub("", name)
 
 
