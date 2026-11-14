@@ -12,7 +12,7 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.core.loss import LossOutput, StandardLoss, StepLoss
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
-from .loss import ComponentLossSchedule
+from .loss import ComponentLossSchedule, JointPair
 from .stepper import (
     ComponentEnsembleStepPrediction,
     ComponentTrainingConfig,
@@ -105,6 +105,7 @@ def _build_coupled_loss(
     ocean_n_steps_limit=10,
     atmos_n_steps_limit=10,
     objective_per_batch: ObjectivePerBatchConfig | None = None,
+    joint_pairs: tuple[JointPair, ...] = (),
 ) -> CoupledStepperTrainLoss:
     ocean_schedule = ComponentLossSchedule(
         n_steps=ocean_n_steps,
@@ -124,6 +125,7 @@ def _build_coupled_loss(
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
         objective_weights=objective_per_batch,
+        joint_pairs=joint_pairs,
     )
 
 
@@ -746,21 +748,60 @@ def test_objective_deterministic_for_fixed_seed():
     assert len(set(seq_a)) == 2
 
 
+# n_inner_steps = 2, as in step_and_target_gen
+_OCEAN_LATER_PAIR = JointPair(ocean_step=1, atmosphere_step=2, n_inner_steps=2)
+_ATMOS_LATER_PAIR = JointPair(ocean_step=0, atmosphere_step=3, n_inner_steps=2)
+
+
+def _drawn_objective(loss_obj) -> str:
+    """The objective of the current draw: a realm, "joint", or "none"."""
+    realms = _optimized_realms(loss_obj, n_steps_each=10)
+    if loss_obj.joint_pair is not None:
+        pair = loss_obj.joint_pair
+        if realms == {"ocean", "atmosphere"} and not any(
+            loss_obj.step_is_optimized(realm, step)
+            for realm in ("ocean", "atmosphere")
+            for step in range(10)
+            if pair.role(realm, step) is None
+        ):
+            return "joint"
+    if len(realms) == 1:
+        (realm,) = realms
+        return realm
+    return "none"
+
+
 @pytest.mark.parametrize(
-    "atmosphere, ocean",
-    [(1.0, 1.0), (3.0, 1.0), (1.0, 0.0), (0.0, 2.0)],
+    "atmosphere, ocean, joint",
+    [
+        (1.0, 1.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (0.0, 2.0, 0.0),
+        (1.0, 1.0, 2.0),
+        (0.0, 1.0, 3.0),
+    ],
 )
-def test_objective_draw_follows_weights(atmosphere, ocean):
+def test_objective_draw_follows_weights(atmosphere, ocean, joint):
     loss_obj = _objective_loss(
-        ObjectivePerBatchConfig(atmosphere=atmosphere, ocean=ocean)
+        ObjectivePerBatchConfig(atmosphere=atmosphere, ocean=ocean, joint=joint),
+        joint_pairs=(_ATMOS_LATER_PAIR,),
     )
     n_draws = 4000
-    draws = _draw_objectives(loss_obj, n_draws)
-    assert all(len(draw) == 1 for draw in draws)
-    atmosphere_fraction = draws.count(frozenset({"atmosphere"})) / n_draws
-    expected = atmosphere / (atmosphere + ocean)
-    # binomial std <= 0.008 at n_draws=4000; 0.03 is ~4 sigma
-    assert atmosphere_fraction == pytest.approx(expected, abs=0.03)
+    draws = []
+    for _ in range(n_draws):
+        loss_obj.sample_from_rng()
+        draws.append(_drawn_objective(loss_obj))
+    total = atmosphere + ocean + joint
+    for objective, weight in (
+        ("atmosphere", atmosphere),
+        ("ocean", ocean),
+        ("joint", joint),
+    ):
+        # binomial std <= 0.008 at n_draws=4000; 0.03 is ~4 sigma
+        assert draws.count(objective) / n_draws == pytest.approx(
+            weight / total, abs=0.03
+        )
 
 
 def test_objective_null_realm_drops_out():
@@ -842,17 +883,127 @@ def test_objective_active_in_eval():
 
 
 def test_objective_eval_reproducible_after_seed_eval():
-    loss_obj = _objective_loss()
+    loss_obj = _objective_loss(
+        ObjectivePerBatchConfig(atmosphere=1.0, ocean=1.0, joint=1.0),
+        joint_pairs=(_OCEAN_LATER_PAIR, _ATMOS_LATER_PAIR),
+    )
+
+    def _draws(n_draws):
+        draws = []
+        for _ in range(n_draws):
+            loss_obj.sample_from_rng()
+            draws.append((_drawn_objective(loss_obj), loss_obj.joint_pair))
+        return draws
 
     def _eval_sequence():
         loss_obj.set_eval()
         loss_obj.seed_rng(0)
-        return _draw_objectives(loss_obj, 30)
+        return _draws(60)
 
     first = _eval_sequence()
     # Advance the (free-running) train RNG to prove eval is independent of it.
     loss_obj.set_train()
-    _draw_objectives(loss_obj, 7)
+    _draws(7)
     second = _eval_sequence()
     assert first == second
-    assert len(set(first)) == 2
+    assert {objective for objective, _ in first} == {"atmosphere", "ocean", "joint"}
+    assert {pair for _, pair in first} == {
+        None,
+        _OCEAN_LATER_PAIR,
+        _ATMOS_LATER_PAIR,
+    }
+
+
+def _pair_steps(pair: JointPair) -> set[tuple[str, int]]:
+    return {("ocean", pair.ocean_step), ("atmosphere", pair.atmosphere_step)}
+
+
+def _optimized_steps(loss_obj, n_steps=10) -> set[tuple[str, int]]:
+    return {
+        (realm, step)
+        for realm in ("ocean", "atmosphere")
+        for step in range(n_steps)
+        if loss_obj.step_is_optimized(realm, step)
+    }
+
+
+@pytest.mark.parametrize("pair", [_OCEAN_LATER_PAIR, _ATMOS_LATER_PAIR])
+def test_joint_objective_optimizes_only_pair_steps(pair):
+    loss_obj = _objective_loss(ObjectivePerBatchConfig(joint=1.0), joint_pairs=(pair,))
+    loss_obj.sample_from_rng()
+    assert loss_obj.joint_pair == pair
+    assert _optimized_steps(loss_obj) == _pair_steps(pair)
+
+
+@pytest.mark.parametrize("pair", [_OCEAN_LATER_PAIR, _ATMOS_LATER_PAIR])
+def test_no_objective_weights_schedules_plus_pair(pair):
+    loss_obj = _objective_loss(
+        objective_per_batch=None,
+        joint_pairs=(pair,),
+        ocean_n_steps=1,
+        atmos_n_steps=1,
+    )
+    loss_obj.sample_from_rng()
+    assert loss_obj.joint_pair == pair
+    schedule_steps = {("ocean", 0), ("atmosphere", 0)}
+    assert _optimized_steps(loss_obj) == schedule_steps | _pair_steps(pair)
+
+
+def test_joint_pair_draw_uniform_with_repeats():
+    loss_obj = _objective_loss(
+        ObjectivePerBatchConfig(joint=1.0),
+        joint_pairs=(_OCEAN_LATER_PAIR, _ATMOS_LATER_PAIR, _ATMOS_LATER_PAIR),
+    )
+    n_draws = 3000
+    draws = []
+    for _ in range(n_draws):
+        loss_obj.sample_from_rng()
+        draws.append(loss_obj.joint_pair)
+    # binomial std ~0.009 at n_draws=3000; 0.04 is ~4 sigma
+    assert draws.count(_ATMOS_LATER_PAIR) / n_draws == pytest.approx(2 / 3, abs=0.04)
+    assert draws.count(_OCEAN_LATER_PAIR) / n_draws == pytest.approx(1 / 3, abs=0.04)
+
+
+@pytest.mark.parametrize(
+    "pair, ocean_n_steps, atmos_n_steps, expected",
+    [
+        # ocean later, i_O = 3: pair needs 3 outer steps
+        (JointPair(ocean_step=2, atmosphere_step=5, n_inner_steps=2), 1, 1, 3),
+        # atmosphere later, i_O = 1, i_A = 4: pair needs 2 outer steps
+        (JointPair(ocean_step=0, atmosphere_step=3, n_inner_steps=2), 1, 1, 2),
+        # schedules reach further than the pair
+        (JointPair(ocean_step=0, atmosphere_step=3, n_inner_steps=2), 4, 1, 4),
+    ],
+)
+def test_n_required_outer_steps_covers_pair(
+    pair, ocean_n_steps, atmos_n_steps, expected
+):
+    loss_obj = _objective_loss(
+        ObjectivePerBatchConfig(joint=1.0),
+        joint_pairs=(pair,),
+        ocean_n_steps=ocean_n_steps,
+        atmos_n_steps=atmos_n_steps,
+    )
+    loss_obj.sample_from_rng()
+    assert loss_obj.n_required_outer_steps(n_inner_steps=2) == expected
+
+
+@pytest.mark.parametrize("realm", ["ocean", "atmosphere"])
+def test_compute_loss_pair_step_outside_schedule(realm):
+    loss_obj = _objective_loss(
+        ObjectivePerBatchConfig(joint=1.0),
+        joint_pairs=(_ATMOS_LATER_PAIR,),
+        ocean_n_steps=0,
+        atmos_n_steps=1,
+    )
+    loss_obj.sample_from_rng()
+    step = _ATMOS_LATER_PAIR.ocean_step if realm == "ocean" else 3
+    prediction = ComponentEnsembleStepPrediction(
+        realm=realm,
+        data=EnsembleTensorDict({"x": torch.zeros(1, 1, 1, 1)}),
+        step=step,
+    )
+    expected = torch.tensor(2.0 if realm == "ocean" else 1.0)
+    target = {"x": torch.zeros(1, 1, 1, 1)}
+    torch.testing.assert_close(loss_obj.compute_loss(prediction, target), expected)
+    torch.testing.assert_close(loss_obj(prediction, target), expected)

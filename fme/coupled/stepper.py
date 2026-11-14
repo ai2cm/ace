@@ -4,7 +4,7 @@ import datetime
 import logging
 import pathlib
 import warnings
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Sequence
 from typing import Any, Literal
 
 import dacite
@@ -60,7 +60,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPrognosticState,
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.loss import ComponentLossSchedule
+from fme.coupled.loss import ComponentLossSchedule, JointPair
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -896,6 +896,62 @@ def _realm_step_outputs(
     ]
 
 
+class _StepOffsetOptimization(OptimizationABC):
+    """Delegates to ``optimization``, adding ``step_offset`` to the step passed
+    to ``checkpoint``, so a split atmosphere window sees the same step numbers
+    as an unsplit one.
+    """
+
+    def __init__(self, optimization: OptimizationABC, step_offset: int):
+        self._optimization = optimization
+        self._step_offset = step_offset
+
+    def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
+        return self._optimization.checkpoint(module, step=step + self._step_offset)
+
+    @contextlib.contextmanager
+    def autocast(self):
+        with self._optimization.autocast():
+            yield
+
+    @property
+    def learning_rate(self) -> float:
+        return self._optimization.learning_rate
+
+    @property
+    def learning_rates(self) -> dict[str, float]:
+        return self._optimization.learning_rates
+
+    def set_learning_rate(self, lr: float):
+        self._optimization.set_learning_rate(lr)
+
+    def set_mode(self, modules: nn.ModuleList):
+        self._optimization.set_mode(modules)
+
+    def step_scheduler(
+        self, valid_loss: float | None = None, is_iteration: bool = False
+    ):
+        self._optimization.step_scheduler(valid_loss, is_iteration)
+
+    def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
+        return self._optimization.detach_if_using_gradient_accumulation(state)
+
+    def accumulate_loss(self, loss: torch.Tensor):
+        self._optimization.accumulate_loss(loss)
+
+    def get_accumulated_loss(self) -> torch.Tensor:
+        return self._optimization.get_accumulated_loss()
+
+    def step_weights(self):
+        self._optimization.step_weights()
+
+    def get_state(self):
+        return self._optimization.get_state()
+
+    def load_state(self, state):
+        self._optimization.load_state(state)
+
+
 class CoupledStepper:
     TIME_DIM = 1
 
@@ -1099,8 +1155,9 @@ class CoupledStepper:
             ocean_ic: Ocean initial condition state, including SST.
         """
         time_dim = self.atmosphere.TIME_DIM
-        sizes = [-1] * len(next(iter(atmos_data.values())).shape)
-        sizes[time_dim] = self.n_inner_steps + 1
+        window_shape = next(iter(atmos_data.values())).shape
+        sizes = [-1] * len(window_shape)
+        sizes[time_dim] = window_shape[time_dim]
         # Exogenous and next-step forcing fields (e.g. prescribed prognostics)
         forcing_data = {k: atmos_data[k] for k in self._atmosphere_forcing_window_names}
         # forcings from ocean are constant during the fast atmosphere steps
@@ -1174,12 +1231,93 @@ class CoupledStepper:
         forcing_data.update(forcings_from_atmosphere)
         return forcing_data
 
+    def _atmosphere_window_generator(
+        self,
+        atmos_ic_state: PrognosticState,
+        atmos_window: BatchData,
+        ocean_ic: TensorMapping,
+        optimizer: OptimizationABC,
+        attached_ocean_step: TensorMapping | None,
+        attached_inner_step: int | None,
+    ) -> Generator[StepOutput, None, None]:
+        """Predict one window of atmosphere steps.
+
+        Without an attached ocean step, one atmosphere generator runs the
+        window with forcings from ``ocean_ic``. With one, the window is split
+        into segments around ``attached_inner_step``, whose forcings (and IC
+        SST, if it is the window's first step) come from
+        ``attached_ocean_step``. Each segment's forcings are built while
+        resuming its first step, so the attached forcing is built in the pair
+        step's own grad context.
+        """
+        n_ic = self.atmosphere.n_ic_timesteps
+        if attached_ocean_step is None or attached_inner_step is None:
+            boundaries = [0, self.n_inner_steps]
+        else:
+            boundaries = sorted(
+                {0, attached_inner_step, attached_inner_step + 1, self.n_inner_steps}
+            )
+        ic_state = atmos_ic_state
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            segment_window = atmos_window.select_time_slice(slice(start, end + n_ic))
+            segment_ocean_ic: TensorMapping
+            if attached_ocean_step is not None and start == attached_inner_step:
+                segment_ocean_ic = {
+                    k: v.unsqueeze(self.ocean.TIME_DIM)
+                    for k, v in attached_ocean_step.items()
+                }
+            else:
+                segment_ocean_ic = ocean_ic
+            segment_forcings = BatchData(
+                data=self._get_atmosphere_forcings(
+                    segment_window.data, segment_ocean_ic
+                ),
+                time=segment_window.time,
+                labels=segment_window.labels,
+            )
+            if start == 0:
+                ic_state = self._prescribe_ic_sst(
+                    ic_state, segment_forcings.select_time_slice(slice(None, n_ic))
+                )
+            segment_generator = self.atmosphere.get_prediction_generator(
+                ic_state,
+                segment_forcings,
+                end - start,
+                optimizer if start == 0 else _StepOffsetOptimization(optimizer, start),
+            )
+            for _ in range(end - start):
+                result = next(segment_generator)
+                yield result
+            # The unsplit generator detaches its state on resume; a segment that
+            # is not resumed hands its last state on attached, so detach here.
+            ic_state = PrognosticState(
+                BatchData(
+                    data={
+                        k: v.unsqueeze(self.atmosphere.TIME_DIM)
+                        for k, v in optimizer.detach_if_using_gradient_accumulation(
+                            result.output
+                        ).items()
+                    },
+                    time=segment_window.time.isel(time=slice(-n_ic, None)),
+                    labels=segment_window.labels,
+                    stepper_state=result.stepper_state,
+                )
+            )
+
     def get_prediction_generator(
         self,
         initial_condition: CoupledPrognosticState,
         forcing_data: CoupledBatchData,
         optimizer: OptimizationABC,
+        joint_pair: JointPair | None = None,
     ) -> Generator[ComponentStepPrediction, None, None]:
+        """Yield atmosphere and ocean steps in causal order.
+
+        ``joint_pair`` keeps the pair's direct edge attached through the
+        gradient-accumulation detaches: the pair's atmosphere step in the ocean
+        forcing mean (ocean later), or the pair's ocean output in the pair
+        atmosphere step's forcings (atmosphere later). Inference passes None.
+        """
         if (
             initial_condition.atmosphere_data.as_batch_data().n_timesteps
             != self.atmosphere.n_ic_timesteps
@@ -1203,6 +1341,9 @@ class CoupledStepper:
         ocean_ic_state = initial_condition.ocean_data
 
         n_outer_steps = forcing_data.ocean_data.n_timesteps - self.n_ic_timesteps
+        # x_O(i_O) kept attached for the atmosphere-later pair step; derived
+        # tensors are built in the pair step's grad context, not here
+        attached_ocean_step: TensorMapping | None = None
 
         for i_outer in range(n_outer_steps):
             # get the atmosphere window for the initial coupled step
@@ -1212,27 +1353,21 @@ class CoupledStepper:
                     (i_outer + 1) * self.n_inner_steps + self.atmosphere.n_ic_timesteps,
                 )
             )
-            atmos_forcings = BatchData(
-                data=self._get_atmosphere_forcings(
-                    atmos_window.data,
-                    ocean_ic_state.as_batch_data().data,
-                ),
-                time=atmos_window.time,
-                labels=atmos_window.labels,
-            )
-            # prescribe the initial condition SST state
-            atmos_ic_state = self._prescribe_ic_sst(
+            pair_inner_step: int | None = None
+            if (
+                joint_pair is not None
+                and joint_pair.atmosphere_step // self.n_inner_steps == i_outer
+            ):
+                pair_inner_step = joint_pair.atmosphere_step % self.n_inner_steps
+            atmos_generator = self._atmosphere_window_generator(
                 atmos_ic_state,
-                atmos_forcings.select_time_slice(
-                    slice(None, self.atmosphere.n_ic_timesteps)
-                ),
-            )
-            atmos_generator = self.atmosphere.get_prediction_generator(
-                atmos_ic_state,
-                atmos_forcings,
-                self.n_inner_steps,
+                atmos_window,
+                ocean_ic_state.as_batch_data().data,
                 optimizer,
+                attached_ocean_step=attached_ocean_step,
+                attached_inner_step=pair_inner_step,
             )
+            attached_ocean_step = None
             atmos_steps = []
             atmos_stepper_state: StepperState | None = None
 
@@ -1249,7 +1384,15 @@ class CoupledStepper:
                     stepper_state=atmos_stepper_state,
                     corrector_diagnostics=atmos_result.corrector_diagnostics,
                 )
-                atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
+                ocean_later_pair_step = (
+                    joint_pair is not None
+                    and joint_pair.ocean_is_later
+                    and atmos_step_num == joint_pair.atmosphere_step
+                )
+                if not ocean_later_pair_step:
+                    atmos_step = optimizer.detach_if_using_gradient_accumulation(
+                        atmos_step
+                    )
                 atmos_steps.append(atmos_step)
 
             atmos_gen = stack_list_of_tensor_dicts(
@@ -1311,6 +1454,12 @@ class CoupledStepper:
             ocean_ic_data = {
                 k: v.unsqueeze(self.ocean.TIME_DIM) for k, v in ocean_step.items()
             }
+            if (
+                joint_pair is not None
+                and not joint_pair.ocean_is_later
+                and i_outer == joint_pair.ocean_step
+            ):
+                attached_ocean_step = ocean_step
             ocean_ic_state = PrognosticState(
                 BatchData(
                     data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
@@ -1540,6 +1689,7 @@ _OBJECTIVE_RNG_OFFSET = 685
 
 Realm = Literal["ocean", "atmosphere"]
 _REALMS: tuple[Realm, ...] = ("ocean", "atmosphere")
+Objective = Literal["ocean", "atmosphere", "joint"]
 
 
 @dataclasses.dataclass
@@ -1553,10 +1703,13 @@ class ObjectivePerBatchConfig:
     Parameters:
         atmosphere: Weight of the atmosphere objective (its schedule's losses).
         ocean: Weight of the ocean objective (its schedule's losses).
+        joint: Weight of the joint objective (the loss of one pair drawn from
+            ``joint_pairs``); > 0 requires ``joint_pairs``.
     """
 
     atmosphere: float = 0.0
     ocean: float = 0.0
+    joint: float = 0.0
 
     def __post_init__(self):
         weights = self.as_dict()
@@ -1568,8 +1721,8 @@ class ObjectivePerBatchConfig:
         if sum(weights.values()) <= 0:
             raise ValueError("objective_per_batch needs at least one weight > 0.")
 
-    def as_dict(self) -> dict[Realm, float]:
-        return {"ocean": self.ocean, "atmosphere": self.atmosphere}
+    def as_dict(self) -> dict[Objective, float]:
+        return {"ocean": self.ocean, "atmosphere": self.atmosphere, "joint": self.joint}
 
 
 class CoupledStepperTrainLoss:
@@ -1584,6 +1737,7 @@ class CoupledStepperTrainLoss:
         ocean_schedule: ComponentLossSchedule,
         atmosphere_schedule: ComponentLossSchedule,
         objective_weights: ObjectivePerBatchConfig | None = None,
+        joint_pairs: Sequence[JointPair] = (),
     ):
         self._loss_objs: dict[str, StepLoss] = {
             "ocean": ocean_loss,
@@ -1604,17 +1758,22 @@ class CoupledStepperTrainLoss:
         )
         self._objective_rng: np.random.RandomState | None = None
         self._eval_objective_rng: np.random.RandomState | None = None
+        self._joint_pairs = list(joint_pairs)
         self._schedule_realms: frozenset[Realm] = frozenset(_REALMS)
+        self._joint_drawn: bool = False
+        self._joint_pair: JointPair | None = None
         self._is_training: bool = True
 
     def sample_from_rng(self) -> None:
-        """Draw this batch's per-component rollout window, then its objective.
+        """Draw this batch's per-component rollout window, then its objective,
+        then its joint pair.
 
         The single public entry point for per-batch RNG draws: the objective's
         per-batch null check must see the freshly sampled window.
         """
         self._sample_n_steps()
         self._draw_objective()
+        self._draw_joint_pair()
 
     def _sample_n_steps(self) -> None:
         for schedule in self._schedules.values():
@@ -1650,28 +1809,53 @@ class CoupledStepperTrainLoss:
         return self._eval_objective_rng
 
     def _draw_objective(self) -> None:
-        """Draw which realms' schedule losses count this batch.
+        """Draw which objective this batch optimizes.
 
-        Weights absent: every realm. Present: one objective among those with
+        Weights absent: every realm's schedule, plus a joint pair if
+        ``joint_pairs`` is set. Present: one objective among those with
         weight > 0 and a loss this batch, drawn by normalized weight; none
         eligible means no loss this batch. Applies in train and eval.
         """
         if self._objective_weights is None:
             self._schedule_realms = frozenset(_REALMS)
+            self._joint_drawn = len(self._joint_pairs) > 0
             return
         eligible = [
-            realm
-            for realm in _REALMS
-            if self._objective_weights[realm] > 0
-            and self._schedules[realm].n_required_forward_steps() > 0
+            objective
+            for objective, weight in self._objective_weights.items()
+            if weight > 0 and self._objective_has_loss(objective)
         ]
         if len(eligible) <= 1:
-            self._schedule_realms = frozenset(eligible)
+            drawn = eligible
+        else:
+            weights = np.array([self._objective_weights[o] for o in eligible])
+            rng = self._get_objective_rng()
+            index = int(rng.choice(len(eligible), p=weights / weights.sum()))
+            drawn = [eligible[index]]
+        self._schedule_realms = frozenset(r for r in _REALMS if r in drawn)
+        self._joint_drawn = "joint" in drawn
+
+    def _objective_has_loss(self, objective: Objective) -> bool:
+        if objective == "joint":
+            return len(self._joint_pairs) > 0
+        return self._schedules[objective].n_required_forward_steps() > 0
+
+    def _draw_joint_pair(self) -> None:
+        if not self._joint_drawn:
+            self._joint_pair = None
             return
-        weights = np.array([self._objective_weights[realm] for realm in eligible])
         rng = self._get_objective_rng()
-        index = int(rng.choice(len(eligible), p=weights / weights.sum()))
-        self._schedule_realms = frozenset([eligible[index]])
+        self._joint_pair = self._joint_pairs[rng.randint(len(self._joint_pairs))]
+
+    @property
+    def joint_pair(self) -> JointPair | None:
+        """This batch's pair; None when ``L_joint`` is not in the batch."""
+        return self._joint_pair
+
+    def joint_role(self, realm: Realm, step: int) -> Literal["earlier", "later"] | None:
+        if self._joint_pair is None:
+            return None
+        return self._joint_pair.role(realm, step)
 
     def set_train(self) -> None:
         self._is_training = True
@@ -1693,18 +1877,21 @@ class CoupledStepperTrainLoss:
         ocean_required = self._schedules["ocean"].n_required_forward_steps()
         atmos_required = self._schedules["atmosphere"].n_required_forward_steps()
         atmos_outer = -(-atmos_required // n_inner_steps)  # ceil division
-        return max(ocean_required, atmos_outer)
+        pair_outer = 0 if self._joint_pair is None else self._joint_pair.n_outer_steps
+        return max(ocean_required, atmos_outer, pair_outer)
 
     def step_is_optimized(
         self,
         realm: Literal["ocean", "atmosphere"],
         step: int,
     ) -> bool:
+        if self.joint_role(realm, step) is not None:
+            return True
         if realm not in self._schedule_realms:
             return False
         return self._schedules[realm].step_is_optimized(step)
 
-    def compute_loss(
+    def _weighted_step_loss(
         self,
         prediction: ComponentEnsembleStepPrediction,
         target_data: TensorMapping,
@@ -1713,27 +1900,33 @@ class CoupledStepperTrainLoss:
         weight = self._weights[realm]
         if weight == 0.0:
             return torch.tensor(0.0, device=fme.get_device())
-        if not self._schedules[realm].step_is_optimized(prediction.step):
-            return torch.tensor(0.0, device=fme.get_device())
         loss_output = self._loss_objs[realm](
             prediction.data, target_data, prediction.step
         )
         return weight * loss_output.total()
+
+    def compute_loss(
+        self,
+        prediction: ComponentEnsembleStepPrediction,
+        target_data: TensorMapping,
+    ) -> torch.Tensor:
+        realm = prediction.realm
+        # The objective does not gate this, so per-step diagnostic metrics
+        # cover both realms whatever the objective; a pair step always counts.
+        if self.joint_role(realm, prediction.step) is None and not self._schedules[
+            realm
+        ].step_is_optimized(prediction.step):
+            return torch.tensor(0.0, device=fme.get_device())
+        return self._weighted_step_loss(prediction, target_data)
 
     def __call__(
         self,
         prediction: ComponentEnsembleStepPrediction,
         target_data: TensorMapping,
     ) -> torch.Tensor | None:
-        realm = prediction.realm
-        # compute_loss stays on the schedule alone, so per-step diagnostic
-        # metrics cover both realms whatever the objective.
-        if not self.step_is_optimized(realm, prediction.step):
+        if not self.step_is_optimized(prediction.realm, prediction.step):
             return None
-        loss_output = self._loss_objs[realm](
-            prediction.data, target_data, prediction.step
-        )
-        return self._weights[realm] * loss_output.total()
+        return self._weighted_step_loss(prediction, target_data)
 
 
 @dataclasses.dataclass
@@ -1799,6 +1992,14 @@ class CoupledTrainStepperConfig:
             batch member. Default is 2 if ocean or atmosphere loss type is
             EnsembleLoss, otherwise the default is 1. Must be 2 for EnsembleLoss
             to be valid.
+        joint_pairs: 1-indexed ``[i_O, i_A]`` ocean/atmosphere step pairs. A
+            batch optimizing the joint objective draws one pair uniformly from
+            this list (a repeated pair is drawn more often) and optimizes the
+            sum of the pair's two step losses with the gradient flowing across
+            the pair's direct edge: the atmosphere step must lie in the ocean
+            step's forcing window or the next one. Without
+            ``objective_per_batch``, every batch adds one pair's loss to the
+            schedules' losses.
         objective_per_batch: If set, each ``train_on_batch`` call optimizes
             one objective, drawn by these weights among the objectives with a
             loss that batch. The draw applies in validation too, from a
@@ -1816,6 +2017,7 @@ class CoupledTrainStepperConfig:
     ocean: ComponentTrainingConfig
     atmosphere: ComponentTrainingConfig
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
+    joint_pairs: list[list[int]] | None = None
     objective_per_batch: ObjectivePerBatchConfig | None = None
     optimize_single_component_per_batch: bool = False
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
@@ -1859,12 +2061,28 @@ class CoupledTrainStepperConfig:
             )
             # Reset so dataclasses.replace on this config does not raise.
             self.optimize_single_component_per_batch = False
+        if self.joint_pairs is not None:
+            malformed = [
+                pair
+                for pair in self.joint_pairs
+                if len(pair) != 2 or any(index < 1 for index in pair)
+            ]
+            if not self.joint_pairs or malformed:
+                raise ValueError(
+                    "joint_pairs must be a non-empty list of [i_O, i_A] pairs of "
+                    f"1-indexed steps, got {self.joint_pairs}."
+                )
         if self.objective_per_batch is not None:
-            component_configs = {"ocean": self.ocean, "atmosphere": self.atmosphere}
+            if self.objective_per_batch.joint > 0 and self.joint_pairs is None:
+                raise ValueError("objective_per_batch.joint > 0 requires joint_pairs.")
+            component_configs: dict[Realm, ComponentTrainingConfig] = {
+                "ocean": self.ocean,
+                "atmosphere": self.atmosphere,
+            }
             null_realms = [
                 realm
-                for realm, weight in self.objective_per_batch.as_dict().items()
-                if weight > 0 and component_configs[realm].loss_is_null
+                for realm, config in component_configs.items()
+                if self.objective_per_batch.as_dict()[realm] > 0 and config.loss_is_null
             ]
             if null_realms:
                 raise ValueError(
@@ -1908,7 +2126,8 @@ class CoupledTrainStepperConfig:
 
         When the atmosphere loss has unbounded ``n_steps`` (``None``), the
         target horizon collapses to the full rollout length, recovering the
-        previous behavior.
+        previous behavior. Otherwise it also covers the largest atmosphere
+        step in ``joint_pairs``.
 
         Args:
             stepper_config: The coupled stepper config, used for variable
@@ -1920,8 +2139,11 @@ class CoupledTrainStepperConfig:
         if atmos_n_steps_max is None:
             short_atmos_n = long_atmos_n
         else:
+            max_pair_atmos_step = max(
+                (pair[1] for pair in self.joint_pairs or ()), default=0
+            )
             # +1 for n_ic_timesteps (asserted to be 1 in CoupledStepper.__init__)
-            short_atmos_n = atmos_n_steps_max + 1
+            short_atmos_n = max(atmos_n_steps_max, max_pair_atmos_step) + 1
         forcing_names = list(stepper_config.atmosphere_forcing_exogenous_names)
         target_names = list(
             set(stepper_config.all_names.atmosphere) - set(forcing_names)
@@ -1966,6 +2188,10 @@ class CoupledTrainStepperConfig:
             ocean_schedule=ocean_schedule,
             atmosphere_schedule=atmos_schedule,
             objective_weights=self.objective_per_batch,
+            joint_pairs=[
+                JointPair.from_config(pair, stepper.n_inner_steps)
+                for pair in self.joint_pairs or ()
+            ],
         )
 
     def get_train_stepper(
@@ -2120,8 +2346,16 @@ class CoupledTrainStepper(
         optimization: OptimizationABC,
         metrics: ComponentStepMetrics,
         output_list: list[ComponentEnsembleStepPrediction],
+        held_earlier_loss: list[torch.Tensor],
         evaluate_all_steps: bool = False,
     ) -> None:
+        """Compute one step's loss and accumulate it.
+
+        A joint pair's earlier-step loss is appended to ``held_earlier_loss``
+        instead, and accumulated together with the later-step loss, so one
+        backward of ``L_joint`` reaches both components under gradient
+        accumulation.
+        """
         target_step = {
             k: v.select(time_dim, gen_step.step) for k, v in forward_data.items()
         }
@@ -2131,18 +2365,25 @@ class CoupledTrainStepper(
             step=gen_step.step,
         )
         target_step_ensemble = add_ensemble_dim(target_step)
+        label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+        optimized_loss: torch.Tensor | None
         if evaluate_all_steps:
             step_loss = self._loss.compute_loss(ensemble_step, target_step_ensemble)
-            label = f"loss/{gen_step.realm}_step_{gen_step.step}"
             metrics.add_metric(label, step_loss.detach(), gen_step.realm)
-            if self._loss.step_is_optimized(gen_step.realm, gen_step.step):
-                optimization.accumulate_loss(step_loss)
+            optimized = self._loss.step_is_optimized(gen_step.realm, gen_step.step)
+            optimized_loss = step_loss if optimized else None
         else:
-            step_loss = self._loss(ensemble_step, target_step_ensemble)
-            if step_loss is not None:
-                label = f"loss/{gen_step.realm}_step_{gen_step.step}"
-                metrics.add_metric(label, step_loss.detach(), gen_step.realm)
-                optimization.accumulate_loss(step_loss)
+            optimized_loss = self._loss(ensemble_step, target_step_ensemble)
+            if optimized_loss is not None:
+                metrics.add_metric(label, optimized_loss.detach(), gen_step.realm)
+        if optimized_loss is not None:
+            role = self._loss.joint_role(gen_step.realm, gen_step.step)
+            if role == "earlier":
+                held_earlier_loss.append(optimized_loss)
+            elif role == "later" and held_earlier_loss:
+                optimization.accumulate_loss(held_earlier_loss.pop() + optimized_loss)
+            else:
+                optimization.accumulate_loss(optimized_loss)
         output_list.append(
             ensemble_step.detach_if_using_gradient_accumulation(
                 optimization
@@ -2176,9 +2417,11 @@ class CoupledTrainStepper(
             input_data,
             data_ensemble,
             optimization,
+            joint_pair=self._loss.joint_pair,
         )
         output_iterator = iter(output_generator)
         output_list: list[ComponentEnsembleStepPrediction] = []
+        held_earlier_loss: list[torch.Tensor] = []
         n_outer_steps_data = data.ocean_data.n_timesteps - self.n_ic_timesteps
         if evaluate_all_steps:
             n_outer_steps = n_outer_steps_data
@@ -2212,6 +2455,7 @@ class CoupledTrainStepper(
                         optimization=optimization,
                         metrics=metrics,
                         output_list=output_list,
+                        held_earlier_loss=held_earlier_loss,
                         evaluate_all_steps=evaluate_all_steps,
                     )
             optimize = self._loss.step_is_optimized("ocean", i_outer)
@@ -2227,8 +2471,13 @@ class CoupledTrainStepper(
                     optimization=optimization,
                     metrics=metrics,
                     output_list=output_list,
+                    held_earlier_loss=held_earlier_loss,
                     evaluate_all_steps=evaluate_all_steps,
                 )
+        # A pair whose later step lies past the data window contributes
+        # L_earlier alone.
+        for loss in held_earlier_loss:
+            optimization.accumulate_loss(loss)
 
         return output_list
 
