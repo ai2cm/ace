@@ -21,6 +21,7 @@ Training:
 
 - `create_fm_v2_jobs.py`, `submit_fm_v2_jobs.py`: v2 grid (wandb group ace2-fm-2026-11-09): sfno-v2, swin-v2.2-v2 x fm-era5, fm-balanced, fm-e3sm-balanced x 3 seeds.
 - `create_fm_v2_followup_jobs.py`, `submit_fm_v2_followup_jobs.py`: 2026-11-11 follow-ups of the v2 maskoff runs, constant LR + 1-sqrt cooldown: `lrsweep` (swin fm-balanced s0, LR 1e-4/3e-4/5e-4, 30 epochs), `ext80` (sfno-v2 and swin-v2.2-v2 forked from each parent's ema_ckpt_0040, 80 more epochs), `e120 --lr X` (swin, 120 epochs from scratch at the chosen LR).
+- `create_fm_1deg_jobs.py`, `submit_fm_1deg_jobs.py`: 1deg 6-hourly runs (wandb group ace2-fm-1deg-2026-11-13, 8 GPUs, 400GiB shared memory): sfno-v2 x fm-e3sm-balanced, fm-era5 x 3 seeds, 120 epochs. `--smoke` submits a 2-epoch smoke test per arm (group ace2-fm-1deg-2026-11-13-smoke).
 - `create_fm_jobs.py`, `submit_fm_jobs.py`: v1 seed x masking grid.
 - `create_anneal_jobs.py`, `submit_anneal_jobs.py`: anneal fine-tuning sweep.
 - `fill_e3sm_group_stats.py`: fills the E3SM normalization group (`groups/e3sm-filled`).

@@ -12,6 +12,7 @@ BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter ai2/titan ai2/saturn"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=${N_GPUS:-2}  # submit_fm_v2_jobs.py sets 4
+SHARED_MEMORY=${SHARED_MEMORY:-200GiB}  # submit_fm_1deg_jobs.py sets 400GiB
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -52,7 +53,7 @@ run_training() {
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus $N_GPUS \
-    --shared-memory 200GiB \
+    --shared-memory "$SHARED_MEMORY" \
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
     --system-python \

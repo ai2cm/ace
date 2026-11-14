@@ -35,7 +35,12 @@ WANDB_ENTITY = "ai2cm"
 WANDB_PROJECT = "FM"
 WANDB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-2026-10-19"
-CONFIG_PREFIX = "ace-train-config-4deg-"
+# Training config names are TRAIN_CONFIG_PREFIX + "<resolution>-" + the run's
+# stem. Job names drop the resolution of the 4deg runs (DEFAULT_RESOLUTION) and
+# keep any other (config_to_job_name).
+TRAIN_CONFIG_PREFIX = "ace-train-config-"
+DEFAULT_RESOLUTION = "4deg"
+CONFIG_PREFIX = f"{TRAIN_CONFIG_PREFIX}{DEFAULT_RESOLUTION}-"
 # Architecture tags appearing in config filenames, directly after
 # CONFIG_PREFIX. Matching is exact-tag, so `nc-swin-v2` never selects a
 # `nc-swin-v2.2` config (or vice versa).
@@ -107,8 +112,11 @@ def arch_tag(config_filename: str) -> str | None:
 def config_to_job_name(config_filename: str) -> str:
     # ace-train-config-4deg-nc-sfno-fm-a2-cond-era5-c96-s0-maskon.yaml
     # → ace2-fm-nc-sfno-fm-a2-cond-era5-c96-s0-maskon
+    # ace-train-config-1deg-nc-sfno-v2-fm-era5-s0.yaml
+    # → ace2-fm-1deg-nc-sfno-v2-fm-era5-s0
     stem = pathlib.Path(config_filename).stem  # strip .yaml
-    return f"{WANDB_PREFIX}{stem.removeprefix(CONFIG_PREFIX)}"
+    run = stem.removeprefix(TRAIN_CONFIG_PREFIX)
+    return f"{WANDB_PREFIX}{run.removeprefix(f'{DEFAULT_RESOLUTION}-')}"
 
 
 def wandb_run_names() -> set[str]:
