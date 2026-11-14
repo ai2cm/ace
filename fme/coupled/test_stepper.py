@@ -57,6 +57,7 @@ from .stepper import (
     CoupledStepperConfig,
     CoupledTrainStepper,
     CoupledTrainStepperConfig,
+    ObjectivePerBatchConfig,
 )
 
 NZ = 3  # number of vertical interface levels in mock data from get_data
@@ -2334,42 +2335,110 @@ def test_train_on_batch_stochastic_n_steps():
 
 
 # ---------------------------------------------------------------------------
-# Single-component-per-batch optimization (optimize_single_component_per_batch)
+# Per-batch objective draw (objective_per_batch)
 # ---------------------------------------------------------------------------
+
+_BOTH_REALMS = ObjectivePerBatchConfig(atmosphere=1.0, ocean=1.0)
+
+
+def _mse_component(**kwargs) -> ComponentTrainingConfig:
+    return ComponentTrainingConfig(loss=StepLossConfig(type="MSE"), **kwargs)
 
 
 @pytest.mark.parametrize(
-    "null_kwargs",
+    "kwargs, match",
     [
-        {"loss_weight": 0.0},
-        {"n_steps": 0},
+        pytest.param(
+            {
+                "objective_per_batch": _BOTH_REALMS,
+                "optimize_single_component_per_batch": True,
+            },
+            "not both",
+            id="flag_and_mapping",
+        ),
+        pytest.param(
+            {"objective_per_batch": {}},
+            "at least one weight",
+            id="all_weights_zero",
+        ),
+        pytest.param(
+            {"objective_per_batch": {"atmosphere": 1.0, "ocean": -1.0}},
+            "must be >= 0",
+            id="negative_weight",
+        ),
+        pytest.param(
+            {
+                "ocean": {"loss_weight": 0.0},
+                "objective_per_batch": {"atmosphere": 1.0, "ocean": 1.0},
+            },
+            "statically null",
+            id="null_realm_zero_loss_weight",
+        ),
+        pytest.param(
+            {
+                "ocean": {"n_steps": 0},
+                "objective_per_batch": {"atmosphere": 1.0, "ocean": 1.0},
+            },
+            "statically null",
+            id="null_realm_zero_n_steps",
+        ),
+        pytest.param(
+            {"ocean": {"n_steps": 0}, "optimize_single_component_per_batch": True},
+            "statically null",
+            id="deprecated_flag_null_realm",
+        ),
     ],
 )
-def test_optimize_single_component_rejects_static_null_realm(null_kwargs):
-    # With a statically-null realm the per-batch choice has no observable
-    # effect, so __post_init__ must reject the flag.
-    with pytest.raises(ValueError, match="optimize_single_component_per_batch"):
+def test_objective_per_batch_config_validation(kwargs, match):
+    kwargs = dict(kwargs)
+    ocean_kwargs = kwargs.pop("ocean", {})
+    objective = kwargs.pop("objective_per_batch", None)
+    with pytest.raises(ValueError, match=match):
         CoupledTrainStepperConfig(
             n_coupled_steps=1,
-            ocean=ComponentTrainingConfig(
-                loss=StepLossConfig(type="MSE"), **null_kwargs
+            ocean=_mse_component(**ocean_kwargs),
+            atmosphere=_mse_component(),
+            objective_per_batch=(
+                ObjectivePerBatchConfig(**objective)
+                if isinstance(objective, dict)
+                else objective
             ),
-            atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-            optimize_single_component_per_batch=True,
+            **kwargs,
         )
 
 
-def _single_component_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
-    """Build a flag-on CoupledTrainStepper + batch with both realms non-null."""
+def test_objective_per_batch_weight_zero_on_null_realm_accepted():
+    config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=_mse_component(n_steps=0),
+        atmosphere=_mse_component(),
+        objective_per_batch=ObjectivePerBatchConfig(atmosphere=1.0),
+    )
+    assert config.objective_per_batch == ObjectivePerBatchConfig(atmosphere=1.0)
+
+
+def test_deprecated_single_component_flag():
+    with pytest.warns(DeprecationWarning, match="objective_per_batch"):
+        config = CoupledTrainStepperConfig(
+            n_coupled_steps=1,
+            ocean=_mse_component(),
+            atmosphere=_mse_component(),
+            optimize_single_component_per_batch=True,
+        )
+    assert config.objective_per_batch == _BOTH_REALMS
+    assert not config.optimize_single_component_per_batch
+    replaced = dataclasses.replace(config, n_coupled_steps=2)
+    assert replaced.objective_per_batch == _BOTH_REALMS
+
+
+def _objective_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
+    """Build a CoupledTrainStepper + batch with both realms non-null and
+    objective_per_batch {atmosphere: 1, ocean: 1}."""
     train_stepper_config = CoupledTrainStepperConfig(
         n_coupled_steps=1,
-        ocean=ComponentTrainingConfig(
-            loss=StepLossConfig(type="MSE"), n_steps=ocean_n_steps
-        ),
-        atmosphere=ComponentTrainingConfig(
-            loss=StepLossConfig(type="MSE"), n_steps=atmos_n_steps
-        ),
-        optimize_single_component_per_batch=True,
+        ocean=_mse_component(n_steps=ocean_n_steps),
+        atmosphere=_mse_component(n_steps=atmos_n_steps),
+        objective_per_batch=_BOTH_REALMS,
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         train_stepper_config=train_stepper_config,
@@ -2384,33 +2453,42 @@ def _single_component_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
     return train_stepper, coupled_data
 
 
-def test_single_component_choice_remade_per_train_on_batch():
+def _batch_objective(train_stepper) -> str:
+    """The one realm whose first step is optimized in the current batch."""
+    (realm,) = [
+        realm
+        for realm in ("ocean", "atmosphere")
+        if train_stepper._loss.step_is_optimized(realm, 0)
+    ]
+    return realm
+
+
+def test_objective_redrawn_per_train_on_batch():
     torch.manual_seed(0)
-    train_stepper, coupled_data = _single_component_stepper_and_batch()
+    train_stepper, coupled_data = _objective_stepper_and_batch()
     selected = []
-    for _ in range(20):  # fixed seed; both realms appear under fair 50/50
+    for _ in range(20):  # fixed seed; both realms appear under equal weights
         stepped = train_stepper.train_on_batch(
             data=coupled_data.data, optimization=NullOptimization()
         )
-        sel = train_stepper._loss._selected_realm
+        sel = _batch_objective(train_stepper)
         selected.append(sel)
-        # (b) within a batch only the selected realm carries per-step loss
-        # metrics (training path), so the other realm contributes zero loss.
+        # within a batch only the drawn realm carries per-step loss metrics
+        # (training path), so the other realm contributes zero loss.
         ocean_step_keys = [k for k in stepped.ocean.metrics if "_step_" in k]
         atmos_step_keys = [k for k in stepped.atmosphere.metrics if "_step_" in k]
         if sel == "ocean":
             assert ocean_step_keys and not atmos_step_keys
         else:
             assert atmos_step_keys and not ocean_step_keys
-    # (a) the optimized realm varies across batches
     assert set(selected) == {"ocean", "atmosphere"}
 
 
-def test_single_component_validation_loss_is_single_component_and_reproducible():
+def test_objective_validation_loss_follows_draw_and_reproducible():
     torch.manual_seed(0)
     # One optimized step per realm so the accumulate_loss count maps cleanly to
-    # "single component" (1) vs "both components" (2).
-    train_stepper, coupled_data = _single_component_stepper_and_batch(
+    # "one objective" (1) vs "both realms" (2).
+    train_stepper, coupled_data = _objective_stepper_and_batch(
         ocean_n_steps=1, atmos_n_steps=1
     )
     train_stepper.set_eval()
@@ -2421,15 +2499,11 @@ def test_single_component_validation_loss_is_single_component_and_reproducible()
         optimization=optimization,
         evaluate_all_steps=True,
     )
-    # (a) accumulated loss is single-component: only the selected realm's one
-    # optimized step accumulates (flag-off would accumulate both -> 2 calls).
     assert len(optimization.accumulate_loss.call_args_list) == 1
-    assert train_stepper._loss._selected_realm in ("ocean", "atmosphere")
     # ...yet per-step diagnostic metrics are produced for BOTH realms.
     assert any("_step_" in k for k in stepped.ocean.metrics)
     assert any("_step_" in k for k in stepped.atmosphere.metrics)
 
-    # (b) after seed_eval(0) the per-batch selection sequence is reproducible.
     def _eval_sequence():
         train_stepper.set_eval()
         train_stepper.seed_eval(0)
@@ -2440,7 +2514,7 @@ def test_single_component_validation_loss_is_single_component_and_reproducible()
                 optimization=NullOptimization(),
                 evaluate_all_steps=True,
             )
-            seq.append(train_stepper._loss._selected_realm)
+            seq.append(_batch_objective(train_stepper))
         return seq
 
     first = _eval_sequence()

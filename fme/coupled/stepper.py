@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+import warnings
 from collections.abc import Generator, Iterable
 from typing import Any, Literal
 
@@ -1531,11 +1532,44 @@ def _process_ensemble_output_list(
     return ocean_gen_data, atmos_gen_data
 
 
-# Offset added to the distributed/eval seed for the per-batch component-choice
-# RNG. Chosen as 685 -- one past TimeLengthProbabilities' reserved 684, and
-# distinct from the small per-schedule offsets (0, 1) used by seed_rng, so the
-# choice RNG never shares a seed with an n_steps sampler.
-_COMPONENT_CHOICE_RNG_OFFSET = 685
+# Offset added to the distributed/eval seed for the per-batch objective RNG.
+# Chosen as 685 -- one past TimeLengthProbabilities' reserved 684, and distinct
+# from the small per-schedule offsets (0, 1) used by seed_rng, so the objective
+# RNG never shares a seed with an n_steps sampler.
+_OBJECTIVE_RNG_OFFSET = 685
+
+Realm = Literal["ocean", "atmosphere"]
+_REALMS: tuple[Realm, ...] = ("ocean", "atmosphere")
+
+
+@dataclasses.dataclass
+class ObjectivePerBatchConfig:
+    """Per-batch objective draw weights for coupled training.
+
+    Each batch optimizes one objective, drawn with probability proportional to
+    its weight among the objectives with a loss that batch. An absent key has
+    weight 0, so that objective is never optimized.
+
+    Parameters:
+        atmosphere: Weight of the atmosphere objective (its schedule's losses).
+        ocean: Weight of the ocean objective (its schedule's losses).
+    """
+
+    atmosphere: float = 0.0
+    ocean: float = 0.0
+
+    def __post_init__(self):
+        weights = self.as_dict()
+        negative = [name for name, w in weights.items() if w < 0]
+        if negative:
+            raise ValueError(
+                f"objective_per_batch weights must be >= 0, got negative {negative}."
+            )
+        if sum(weights.values()) <= 0:
+            raise ValueError("objective_per_batch needs at least one weight > 0.")
+
+    def as_dict(self) -> dict[Realm, float]:
+        return {"ocean": self.ocean, "atmosphere": self.atmosphere}
 
 
 class CoupledStepperTrainLoss:
@@ -1549,7 +1583,7 @@ class CoupledStepperTrainLoss:
         atmosphere_loss: StepLoss,
         ocean_schedule: ComponentLossSchedule,
         atmosphere_schedule: ComponentLossSchedule,
-        optimize_single_component_per_batch: bool = False,
+        objective_weights: ObjectivePerBatchConfig | None = None,
     ):
         self._loss_objs: dict[str, StepLoss] = {
             "ocean": ocean_loss,
@@ -1563,28 +1597,24 @@ class CoupledStepperTrainLoss:
             "ocean": ocean_schedule.loss_weight,
             "atmosphere": atmosphere_schedule.loss_weight,
         }
-        # Per-batch single-component selection state. Two RNGs mirror
-        # ComponentLossSchedule's _n_steps_sampler / _eval_n_steps_sampler split
-        # so the validation loss stays single-component (comparable in scale to
-        # the training batch loss) yet reproducible. ``_selected_realm is None``
-        # means both realms are eligible (the disabled / no-selection case).
-        self._optimize_single_component_per_batch = optimize_single_component_per_batch
-        self._component_choice_rng: np.random.RandomState | None = None
-        self._eval_component_choice_rng: np.random.RandomState | None = None
-        self._selected_realm: Literal["ocean", "atmosphere"] | None = None
+        # Two RNGs mirror ComponentLossSchedule's train / eval sampler split, so
+        # the validation loss follows the training objective mix yet replays.
+        self._objective_weights = (
+            None if objective_weights is None else objective_weights.as_dict()
+        )
+        self._objective_rng: np.random.RandomState | None = None
+        self._eval_objective_rng: np.random.RandomState | None = None
+        self._schedule_realms: frozenset[Realm] = frozenset(_REALMS)
         self._is_training: bool = True
 
     def sample_from_rng(self) -> None:
-        """Draw this batch's per-component rollout window and the
-        single-component selection, in the required order.
+        """Draw this batch's per-component rollout window, then its objective.
 
-        The single public entry point for per-batch RNG draws so callers can't
-        transpose them: the selection's per-batch null check must see the
-        freshly sampled window, so ``_component_optimization_choice`` has to run
-        after ``_sample_n_steps``.
+        The single public entry point for per-batch RNG draws: the objective's
+        per-batch null check must see the freshly sampled window.
         """
         self._sample_n_steps()
-        self._component_optimization_choice()
+        self._draw_objective()
 
     def _sample_n_steps(self) -> None:
         for schedule in self._schedules.values():
@@ -1593,72 +1623,55 @@ class CoupledStepperTrainLoss:
     def seed_rng(self, seed: int) -> None:
         """Reseed the eval-only RNGs deterministically.
 
-        Reseeds both the per-schedule eval n_steps samplers and the eval
-        component-choice RNG, so each validation pass replays the same
-        single-component selections regardless of the training RNG position.
-        Training RNGs are distributed-seeded lazily and are left untouched.
+        Reseeds the per-schedule eval n_steps samplers and the eval objective
+        RNG, so each validation pass replays the same draws regardless of the
+        training RNG position. Training RNGs are distributed-seeded lazily and
+        are left untouched.
         """
         for i, schedule in enumerate(self._schedules.values()):
             schedule.seed_rng(seed + i)
-        self._eval_component_choice_rng = np.random.RandomState(
-            seed + _COMPONENT_CHOICE_RNG_OFFSET
-        )
+        self._eval_objective_rng = np.random.RandomState(seed + _OBJECTIVE_RNG_OFFSET)
 
-    def _init_component_choice_rng(self) -> None:
-        """Lazily seed the training component-choice RNG from the distributed
-        seed, mirroring ``TimeLengthProbabilities.initialize_rng``. Seeded
-        identically across ranks so every rank makes the same per-batch
-        selection. This does not make the per-batch training sequence
-        reproducible across preemption/resume -- the RNG advances batch-by-batch
-        and its position is not checkpointed, same as the random n_steps
-        sampler.
+    def _get_objective_rng(self) -> np.random.RandomState:
+        """The training RNG is seeded lazily from the distributed seed, the same
+        on every rank, mirroring ``TimeLengthProbabilities.initialize_rng``. Its
+        position is not checkpointed, so the training sequence does not survive
+        preemption/resume, same as the random n_steps sampler.
         """
-        if self._component_choice_rng is None:
-            self._component_choice_rng = np.random.RandomState(
-                Distributed.get_instance().get_seed() + _COMPONENT_CHOICE_RNG_OFFSET
-            )
-
-    def _component_optimization_choice(self) -> None:
-        """Re-draw which single realm is optimized this batch (no-op when the
-        flag is disabled).
-
-        Invoked by ``sample_from_rng`` after ``_sample_n_steps`` so the
-        per-batch null check reflects the current batch's sampled window. The
-        train vs eval RNG is chosen by training/eval state (mirroring
-        ``ComponentLossSchedule.sample_n_steps``); the selection itself applies
-        in both modes via ``step_is_optimized``.
-        """
-        if not self._optimize_single_component_per_batch:
-            self._selected_realm = None
-            return
         if self._is_training:
-            self._init_component_choice_rng()
-            rng = self._component_choice_rng
-        else:
-            if self._eval_component_choice_rng is None:
-                # Defensive: the validation loop drives seed_eval(0) before each
-                # pass, but fall back to a deterministic seed if it has not.
-                self._eval_component_choice_rng = np.random.RandomState(
-                    _COMPONENT_CHOICE_RNG_OFFSET
+            if self._objective_rng is None:
+                self._objective_rng = np.random.RandomState(
+                    Distributed.get_instance().get_seed() + _OBJECTIVE_RNG_OFFSET
                 )
-            rng = self._eval_component_choice_rng
-        assert rng is not None
-        realms: list[Literal["ocean", "atmosphere"]] = ["ocean", "atmosphere"]
-        non_null = [
+            return self._objective_rng
+        if self._eval_objective_rng is None:
+            # The validation loop calls seed_eval before each pass.
+            self._eval_objective_rng = np.random.RandomState(_OBJECTIVE_RNG_OFFSET)
+        return self._eval_objective_rng
+
+    def _draw_objective(self) -> None:
+        """Draw which realms' schedule losses count this batch.
+
+        Weights absent: every realm. Present: one objective among those with
+        weight > 0 and a loss this batch, drawn by normalized weight; none
+        eligible means no loss this batch. Applies in train and eval.
+        """
+        if self._objective_weights is None:
+            self._schedule_realms = frozenset(_REALMS)
+            return
+        eligible = [
             realm
-            for realm in realms
-            if self._schedules[realm].n_required_forward_steps() > 0
+            for realm in _REALMS
+            if self._objective_weights[realm] > 0
+            and self._schedules[realm].n_required_forward_steps() > 0
         ]
-        if len(non_null) == 1:
-            self._selected_realm = non_null[0]
-        elif len(non_null) >= 2:
-            # Fair 50/50 among non-null realms; deterministic order keeps the
-            # draw reproducible across ranks for a fixed seed.
-            self._selected_realm = non_null[int(rng.randint(len(non_null)))]
-        else:
-            # Both realms null this batch (e.g. stochastic n_steps==0 for both);
-            # no realm contributes loss regardless, so leave both eligible.
-            self._selected_realm = None
+        if len(eligible) <= 1:
+            self._schedule_realms = frozenset(eligible)
+            return
+        weights = np.array([self._objective_weights[realm] for realm in eligible])
+        rng = self._get_objective_rng()
+        index = int(rng.choice(len(eligible), p=weights / weights.sum()))
+        self._schedule_realms = frozenset([eligible[index]])
 
     def set_train(self) -> None:
         self._is_training = True
@@ -1687,15 +1700,7 @@ class CoupledStepperTrainLoss:
         realm: Literal["ocean", "atmosphere"],
         step: int,
     ) -> bool:
-        # Single-component selection gate. Applies in both train and eval (no
-        # _is_training gate here; the train/eval distinction lives in
-        # component_optimization_choice, which only picks the RNG), so the
-        # accumulated/validation loss stays single-component-per-batch.
-        if (
-            self._optimize_single_component_per_batch
-            and self._selected_realm is not None
-            and realm != self._selected_realm
-        ):
+        if realm not in self._schedule_realms:
             return False
         return self._schedules[realm].step_is_optimized(step)
 
@@ -1721,10 +1726,8 @@ class CoupledStepperTrainLoss:
         target_data: TensorMapping,
     ) -> torch.Tensor | None:
         realm = prediction.realm
-        # Route through the (realm, step) wrapper so the single-component
-        # selection gates the normal training loss path too (the wrapper was
-        # previously bypassed here). compute_loss deliberately stays on the
-        # schedule directly to keep per-step diagnostic metrics for both realms.
+        # compute_loss stays on the schedule alone, so per-step diagnostic
+        # metrics cover both realms whatever the objective.
         if not self.step_is_optimized(realm, prediction.step):
             return None
         loss_output = self._loss_objs[realm](
@@ -1796,14 +1799,15 @@ class CoupledTrainStepperConfig:
             batch member. Default is 2 if ocean or atmosphere loss type is
             EnsembleLoss, otherwise the default is 1. Must be 2 for EnsembleLoss
             to be valid.
-        optimize_single_component_per_batch: If True, each ``train_on_batch``
-            call optimizes exactly one of {ocean, atmosphere}, chosen per batch
-            (fair 50/50 among realms whose loss is non-null for that batch). The
-            selection stays active in validation too, drawn from a separate,
-            deterministically-seeded RNG, so the validation loss is
-            single-component-per-batch and comparable in scale to the training
-            batch loss. Default False reproduces the existing behavior exactly.
-            Requires both realms to be non-null (validated in __post_init__).
+        objective_per_batch: If set, each ``train_on_batch`` call optimizes
+            one objective, drawn by these weights among the objectives with a
+            loss that batch. The draw applies in validation too, from a
+            separate, deterministically seeded RNG, so the validation loss
+            follows the training objective mix. A positive weight on a
+            statically null realm is rejected. Default None optimizes every
+            realm's schedule each batch.
+        optimize_single_component_per_batch: Deprecated; ``True`` is mapped to
+            ``objective_per_batch={atmosphere: 1, ocean: 1}``.
         parameter_init: The coupled parameter initialization configuration for
             fine-tuning a previously-trained coupled stepper.
     """
@@ -1812,6 +1816,7 @@ class CoupledTrainStepperConfig:
     ocean: ComponentTrainingConfig
     atmosphere: ComponentTrainingConfig
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
+    objective_per_batch: ObjectivePerBatchConfig | None = None
     optimize_single_component_per_batch: bool = False
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
@@ -1838,18 +1843,35 @@ class CoupledTrainStepperConfig:
                 "At least one of ocean or atmosphere loss must be "
                 "non-null (non-zero loss_weight and non-zero n_steps)."
             )
-        if self.optimize_single_component_per_batch and (
-            self.ocean.loss_is_null or self.atmosphere.loss_is_null
-        ):
-            # With a statically-null realm the per-batch choice degrades to
-            # always selecting the sole non-null realm, so the flag has no
-            # observable effect; reject it rather than accept it silently.
-            raise ValueError(
-                "optimize_single_component_per_batch requires both ocean and "
-                "atmosphere losses to be non-null (non-zero loss_weight and "
-                "non-zero n_steps); a statically-null realm makes the per-batch "
-                "component choice a no-op."
+        if self.optimize_single_component_per_batch:
+            if self.objective_per_batch is not None:
+                raise ValueError(
+                    "Set objective_per_batch or the deprecated "
+                    "optimize_single_component_per_batch, not both."
+                )
+            warnings.warn(
+                "optimize_single_component_per_batch is deprecated; use "
+                "objective_per_batch: {atmosphere: 1, ocean: 1}.",
+                DeprecationWarning,
             )
+            self.objective_per_batch = ObjectivePerBatchConfig(
+                atmosphere=1.0, ocean=1.0
+            )
+            # Reset so dataclasses.replace on this config does not raise.
+            self.optimize_single_component_per_batch = False
+        if self.objective_per_batch is not None:
+            component_configs = {"ocean": self.ocean, "atmosphere": self.atmosphere}
+            null_realms = [
+                realm
+                for realm, weight in self.objective_per_batch.as_dict().items()
+                if weight > 0 and component_configs[realm].loss_is_null
+            ]
+            if null_realms:
+                raise ValueError(
+                    f"objective_per_batch gives a positive weight to {null_realms}, "
+                    "whose loss is statically null (zero loss_weight or zero "
+                    "n_steps); that objective would never be drawn."
+                )
         if self.n_ensemble == -1:
             use_ensemble_loss = "EnsembleLoss" in (
                 self.ocean.loss.type,
@@ -1943,9 +1965,7 @@ class CoupledTrainStepperConfig:
             atmosphere_loss=atmos_step_loss,
             ocean_schedule=ocean_schedule,
             atmosphere_schedule=atmos_schedule,
-            optimize_single_component_per_batch=(
-                self.optimize_single_component_per_batch
-            ),
+            objective_weights=self.objective_per_batch,
         )
 
     def get_train_stepper(
@@ -2242,9 +2262,7 @@ class CoupledTrainStepper(
         )
 
         metrics = ComponentStepMetrics()
-        # Draws this batch's rollout window and (when
-        # optimize_single_component_per_batch) the single-component selection,
-        # in the required order.
+        # Draws this batch's rollout window, then its objective.
         self._loss.sample_from_rng()
         optimization.set_mode(self.modules)
         with optimization.autocast():
