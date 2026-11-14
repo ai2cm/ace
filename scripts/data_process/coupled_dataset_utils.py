@@ -239,7 +239,10 @@ class CoupledSeaSurfaceConfig:
 
     Parameters:
         surface_flux_window_avg: Configuration for computing windowed time-averaged
-            surface flux variables from the atmosphere dataset.
+            surface flux variables from the atmosphere dataset. If its
+            first_timestamp is None, the first window ends at the ocean
+            dataset's first timestamp, so that an ensemble whose runs start on
+            different dates can share this configuration.
         sst_threshold: Upper threshold for the SST time mean in degrees Kelvin.
             The resulting sea ice mask is 1 where the time mean SST < the
             threshold and 0 otherwise.
@@ -322,9 +325,13 @@ class CoupledSeaSurfaceConfig:
             return self.sea_ice_window_avg.get_window_avg(ds)
         return ds
 
-    def apply_surface_flux_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
+    def apply_surface_flux_window_avg(
+        self, ds: xr.Dataset, ocean_time: xr.DataArray
+    ) -> xr.Dataset:
         logging.info("Computing window-averaged surface fluxes")
-        return self.surface_flux_window_avg.get_window_avg(ds)
+        return self.surface_flux_window_avg.get_window_avg(
+            ds, first_window_end=ocean_time[0].item()
+        )
 
 
 @dataclasses.dataclass
@@ -801,7 +808,7 @@ def compute_coupled_ocean(
 
     ds = config.apply_sea_ice_window_avg(ds)
     ds = ds.sel({tdim: ocean[tdim]})
-    ds = xr.merge([ds, config.apply_surface_flux_window_avg(atmos)])
+    ds = xr.merge([ds, config.apply_surface_flux_window_avg(atmos, ocean[tdim])])
     ds[tdim] = _make_serializable_time_coord(
         ds=ocean, tdim=tdim, timedelta=config.timedelta
     )
