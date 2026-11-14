@@ -4,15 +4,20 @@ import copy
 import unittest.mock
 from typing import Any
 
+import pytest
 import torch
 
 from fme.core.device import get_device
 from fme.core.ema import EMATracker
 from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
-from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.optimization import (
+    Optimization,
+    OptimizationConfig,
+    build_optimization_dict,
+)
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import Slice, TensorDict
@@ -114,7 +119,7 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
         pass
 
 
-def _build_optimization(modules: torch.nn.ModuleList) -> Optimization:
+def _build_optimization(modules: OptimizationModules) -> Optimization:
     return OptimizationConfig(
         optimizer_type="Adam",
         lr=0.01,
@@ -561,3 +566,70 @@ def test_optimization_config_has_lr_schedule_with_sequential_scheduler():
         )
     )
     assert config.has_lr_schedule is True
+
+
+class _TwoComponentStepper(_Stepper):
+    def __init__(self):
+        self._modules = torch.nn.ModuleList(
+            [torch.nn.Linear(1, 1, bias=False), torch.nn.Linear(1, 1, bias=False)]
+        ).to(get_device())
+
+    def train_on_batch(
+        self,
+        data: "_BatchData",
+        optimization: OptimizationABC,
+        compute_derived_variables: bool = False,
+        evaluate_all_steps: bool = False,
+    ) -> _TrainOutput:
+        x = torch.ones(1, 1, device=get_device())
+        loss = self._modules[0](x).sum() + self._modules[1](x).sum()
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
+        return _TrainOutput()
+
+    @property
+    def optimization_modules(self) -> dict[str, torch.nn.ModuleList]:
+        return {
+            "a": torch.nn.ModuleList([self._modules[0]]),
+            "b": torch.nn.ModuleList([self._modules[1]]),
+        }
+
+
+def test_lr_tuning_trial_with_optimization_dict():
+    stepper = _TwoComponentStepper()
+    built: list[OptimizationABC] = []
+
+    def build_optimization(modules: OptimizationModules) -> OptimizationABC:
+        assert isinstance(modules, dict)
+        optimization = build_optimization_dict(
+            {"a": OptimizationConfig(lr=0.01), "b": OptimizationConfig(lr=0.1)},
+            modules,
+            max_epochs=10,
+        )
+        built.append(optimization)
+        return optimization
+
+    optimization = build_optimization(stepper.optimization_modules)
+    result = run_lr_tuning_trial(
+        train_data=_TrainData(n_batches=3),
+        optimization=optimization,
+        copy_stepper=_make_copy_stepper(stepper),
+        build_optimization=build_optimization,
+        copy_ema=_make_copy_ema(EMATracker(stepper.modules, decay=0.9999)),
+        config=LRTuningConfig(epochs=Slice(), lr_factor=0.5, num_batches=2),
+        current_lr=optimization.learning_rate,
+        epoch=1,
+        validate_stepper=_make_validate_stepper(0.8, 0.5),
+    )
+    _, baseline, candidate = built
+    assert baseline.learning_rates == {"a": 0.01, "b": 0.1}
+    assert candidate.learning_rates == {
+        "a": pytest.approx(0.005),
+        "b": pytest.approx(0.05),
+    }
+    assert result == pytest.approx(0.005)
+    optimization.set_learning_rate(result)
+    assert optimization.learning_rates == {
+        "a": pytest.approx(0.005),
+        "b": pytest.approx(0.05),
+    }

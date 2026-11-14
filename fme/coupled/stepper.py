@@ -2041,6 +2041,15 @@ class CoupledTrainStepper(
         return self._stepper.modules
 
     @property
+    def optimization_modules(self) -> dict[str, nn.ModuleList]:
+        # key order matches CoupledStepper.modules, so the single-form
+        # optimization flattens to the same parameter order as today
+        return {
+            "atmosphere": self.atmosphere.modules,
+            "ocean": self.ocean.modules,
+        }
+
+    @property
     def n_ic_timesteps(self) -> int:
         return self._stepper.n_ic_timesteps
 

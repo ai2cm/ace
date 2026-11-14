@@ -2,7 +2,7 @@ import contextlib
 import dataclasses
 import itertools
 import warnings
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeAlias
 
 import numpy as np
@@ -10,7 +10,7 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
-from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
@@ -142,6 +142,60 @@ def _build_optimizer(
         raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
 
+def flatten_optimization_modules(modules: OptimizationModules) -> nn.ModuleList:
+    """Concatenate per-component module lists in key order; a module list is
+    returned unchanged.
+    """
+    if isinstance(modules, Mapping):
+        return nn.ModuleList(
+            [module for component in modules.values() for module in component]
+        )
+    return modules
+
+
+def _step_scheduler(
+    scheduler: LRScheduler, valid_loss: float | None, is_iteration: bool
+) -> None:
+    if scheduler.should_step(is_iteration):
+        try:
+            if valid_loss is not None:
+                scheduler.step(metrics=valid_loss)
+            else:
+                scheduler.step()
+        except TypeError:
+            # Some schedulers don't accept metrics argument
+            scheduler.step()
+
+
+def _load_optimizer_state_for_finetuning(
+    optimizer: torch.optim.Optimizer, optimizer_state_dict: dict[str, Any]
+) -> None:
+    """Load per-parameter running state, keeping ``optimizer``'s per-group
+    hyperparameters. See ``Optimization.load_optimizer_state_for_finetuning``.
+    """
+    check_muon_state_dict_compatible(optimizer, optimizer_state_dict)
+    fresh_hparams = [
+        {k: v for k, v in g.items() if k != "params"} for g in optimizer.param_groups
+    ]
+    try:
+        optimizer.load_state_dict(optimizer_state_dict)
+    except ValueError as e:
+        raise ValueError(
+            "Failed to load optimizer state for fine-tuning: parameter "
+            "groups in the checkpoint are incompatible with the "
+            "freshly-built optimizer (e.g. group count or per-group "
+            "parameter count mismatch). This typically indicates the "
+            "model architecture or trainable-parameter set changed "
+            "between the source checkpoint and the current run. "
+            f"Underlying error: {e}"
+        ) from e
+    for group, hparams in zip(optimizer.param_groups, fresh_hparams):
+        for k in list(group.keys()):
+            if k != "params":
+                del group[k]
+        group.update(hparams)
+
+
 class Optimization(OptimizationABC):
     def __init__(
         self,
@@ -203,15 +257,7 @@ class Optimization(OptimizationABC):
             is_iteration: Whether the step is called from a training iteration or at
                 the end of an epoch. Default is epoch.
         """
-        if self.scheduler.should_step(is_iteration):
-            try:
-                if valid_loss is not None:
-                    self.scheduler.step(metrics=valid_loss)
-                else:
-                    self.scheduler.step()
-            except TypeError:
-                # Some schedulers don't accept metrics argument
-                self.scheduler.step()
+        _step_scheduler(self.scheduler, valid_loss, is_iteration)
 
     def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
         if self._use_gradient_accumulation:
@@ -299,28 +345,9 @@ class Optimization(OptimizationABC):
                 or if one but not both of the checkpoint and the current
                 optimizer is Muon.
         """
-        check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
-        fresh_hparams = [
-            {k: v for k, v in g.items() if k != "params"}
-            for g in self.optimizer.param_groups
-        ]
-        try:
-            self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        except ValueError as e:
-            raise ValueError(
-                "Failed to load optimizer state for fine-tuning: parameter "
-                "groups in the checkpoint are incompatible with the "
-                "freshly-built optimizer (e.g. group count or per-group "
-                "parameter count mismatch). This typically indicates the "
-                "model architecture or trainable-parameter set changed "
-                "between the source checkpoint and the current run. "
-                f"Underlying error: {e}"
-            ) from e
-        for group, hparams in zip(self.optimizer.param_groups, fresh_hparams):
-            for k in list(group.keys()):
-                if k != "params":
-                    del group[k]
-            group.update(hparams)
+        _load_optimizer_state_for_finetuning(
+            self.optimizer, state["optimizer_state_dict"]
+        )
         if self.gscaler is not None and state.get("gscaler_state_dict") is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
@@ -345,6 +372,12 @@ class Optimization(OptimizationABC):
             ValueError: If one but not both of the saved and the current
                 optimizer is Muon.
         """
+        if "components" in state:
+            raise ValueError(
+                "Optimization state holds one optimizer per component "
+                f"({sorted(state['components'])}); it cannot load into a single "
+                "optimizer. Use the per-component optimization config."
+            )
         check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
@@ -355,6 +388,217 @@ class Optimization(OptimizationABC):
         with torch.no_grad():
             if torch.isnan(loss):
                 raise ValueError("Loss is NaN-valued during training.")
+
+
+@dataclasses.dataclass
+class _OptimizerEntry:
+    optimizer: torch.optim.Optimizer
+    scheduler: LRScheduler
+    max_grad_norm: float | None
+
+
+def _has_grad(optimizer: torch.optim.Optimizer) -> bool:
+    return any(
+        param.grad is not None
+        for group in optimizer.param_groups
+        for param in group["params"]
+    )
+
+
+class OptimizationDict(OptimizationABC):
+    """One optimizer and LR scheduler per component over one shared backward
+    pass and one shared GradScaler.
+
+    ``learning_rate`` and ``set_learning_rate`` act on the first component;
+    ``set_learning_rate`` rescales every other group by the same factor.
+    """
+
+    def __init__(
+        self,
+        entries: Mapping[str, _OptimizerEntry],
+        enable_automatic_mixed_precision: bool,
+        use_gradient_accumulation: bool = False,
+        get_checkpoint: Callable[
+            [int], Checkpoint | NoCheckpoint
+        ] = lambda _: NoCheckpoint(),
+    ):
+        if len(entries) == 0:
+            raise ValueError("OptimizationDict requires at least one component.")
+        self._entries = dict(entries)
+        if enable_automatic_mixed_precision:
+            self.gscaler: torch.amp.GradScaler | None = torch.amp.GradScaler("cuda")
+        else:
+            self.gscaler = None
+        self._accumulated_loss = torch.tensor(0.0, device=get_device())
+        self._use_gradient_accumulation = use_gradient_accumulation
+        self._get_checkpoint = get_checkpoint
+
+    @property
+    def _first(self) -> _OptimizerEntry:
+        return next(iter(self._entries.values()))
+
+    def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
+        return self._get_checkpoint(step)(module)
+
+    @contextlib.contextmanager
+    def autocast(self):
+        enabled = self.gscaler is not None
+        dtype = torch.bfloat16 if enabled else None
+        with torch.amp.autocast("cuda", enabled=enabled, dtype=dtype):
+            yield
+
+    @property
+    def learning_rate(self) -> float:
+        return self._first.optimizer.param_groups[0]["lr"]
+
+    @property
+    def learning_rates(self) -> dict[str, float]:
+        return {
+            key: entry.optimizer.param_groups[0]["lr"]
+            for key, entry in self._entries.items()
+        }
+
+    def set_learning_rate(self, lr: float):
+        """Set the first component's first-group learning rate to ``lr``,
+        rescaling every other group of every component by the same factor.
+        If that learning rate is zero, every group is set to ``lr``.
+        """
+        current = self.learning_rate
+        for entry in self._entries.values():
+            for param_group in entry.optimizer.param_groups:
+                if current == 0:
+                    param_group["lr"] = lr
+                else:
+                    param_group["lr"] = param_group["lr"] * (lr / current)
+
+    def set_mode(self, modules: nn.ModuleList):
+        for m in modules:
+            m.train()
+
+    def step_scheduler(
+        self, valid_loss: float | None = None, is_iteration: bool = False
+    ):
+        for entry in self._entries.values():
+            _step_scheduler(entry.scheduler, valid_loss, is_iteration)
+
+    def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
+        if self._use_gradient_accumulation:
+            return {k: v.detach() for k, v in state.items()}
+        return dict(state)
+
+    def accumulate_loss(self, loss: torch.Tensor):
+        with torch.no_grad():
+            if torch.isnan(loss):
+                raise ValueError("Loss is NaN-valued during training.")
+        self._accumulated_loss += loss
+        if self._use_gradient_accumulation:
+            self._backward(loss)
+
+    def get_accumulated_loss(self) -> torch.Tensor:
+        return self._accumulated_loss
+
+    def _backward(self, loss: torch.Tensor):
+        if self.gscaler is not None:
+            self.gscaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+    def _clip_gradients(self, entry: _OptimizerEntry):
+        if entry.max_grad_norm is None:
+            return
+        if self.gscaler is not None:
+            self.gscaler.unscale_(entry.optimizer)
+        params = itertools.chain.from_iterable(
+            group["params"] for group in entry.optimizer.param_groups
+        )
+        torch.nn.utils.clip_grad_norm_(params, entry.max_grad_norm)
+
+    def step_weights(self):
+        if not self._use_gradient_accumulation:
+            self._backward(self._accumulated_loss)
+        stepped = False
+        for entry in self._entries.values():
+            # GradScaler.step raises "No inf checks were recorded for this
+            # optimizer" when no param has a grad: a frozen component, or a
+            # single-component batch whose loss does not reach it.
+            if not _has_grad(entry.optimizer):
+                continue
+            self._clip_gradients(entry)
+            if self.gscaler is not None:
+                self.gscaler.step(entry.optimizer)
+            else:
+                entry.optimizer.step()
+            stepped = True
+        for entry in self._entries.values():
+            entry.optimizer.zero_grad()
+        # GradScaler.update raises "No inf checks were recorded prior to
+        # update" when no optimizer stepped.
+        if self.gscaler is not None and stepped:
+            self.gscaler.update()
+        self._accumulated_loss = torch.tensor(0.0, device=get_device())
+
+    def load_optimizer_state_for_finetuning(self, key: str, state: Mapping[str, Any]):
+        """Load one component's per-parameter running state from a saved
+        optimization state, keeping this config's hyperparameters and schedule.
+
+        ``state`` is either a single-optimizer state (e.g. an uncoupled
+        ``ckpt.tar``) or a per-component state holding ``key``. The shared
+        GradScaler starts fresh.
+        """
+        if "components" in state:
+            if key not in state["components"]:
+                raise ValueError(
+                    f"Saved per-component optimization state has no {key!r} "
+                    f"entry; it has {sorted(state['components'])}."
+                )
+            state = state["components"][key]
+        _load_optimizer_state_for_finetuning(
+            self._entries[key].optimizer, state["optimizer_state_dict"]
+        )
+
+    def get_state(self):
+        return {
+            "components": {
+                key: {
+                    "optimizer_state_dict": entry.optimizer.state_dict(),
+                    "scheduler_state_dict": entry.scheduler.state_dict(),
+                }
+                for key, entry in self._entries.items()
+            },
+            "gscaler_state_dict": (
+                self.gscaler.state_dict() if self.gscaler is not None else None
+            ),
+        }
+
+    def load_state(self, state):
+        """
+        Raises:
+            ValueError: If ``state`` is a single-optimizer state, or its
+                components differ from this optimization's, or one but not
+                both of a saved and a current optimizer is Muon.
+        """
+        if "components" not in state:
+            raise ValueError(
+                "Optimization state holds a single optimizer over all "
+                "components; it cannot load into per-component optimizers. "
+                "Start the optimizers fresh, or set each component's "
+                "resume_optimizer_ckpt_path."
+            )
+        saved = set(state["components"])
+        if saved != set(self._entries):
+            raise ValueError(
+                f"Saved optimization components {sorted(saved)} differ from "
+                f"configured components {sorted(self._entries)}."
+            )
+        for key, entry in self._entries.items():
+            component_state = state["components"][key]
+            check_muon_state_dict_compatible(
+                entry.optimizer, component_state["optimizer_state_dict"]
+            )
+            entry.optimizer.load_state_dict(component_state["optimizer_state_dict"])
+            entry.scheduler.load_state_dict(component_state["scheduler_state_dict"])
+        if self.gscaler is not None:
+            self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
 
 @dataclasses.dataclass
@@ -475,10 +719,12 @@ class OptimizationConfig:
             return True
         return self.scheduler.type is not None
 
-    def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
+    def build_optimizer_and_scheduler(
+        self, modules: OptimizationModules, max_epochs: int
+    ) -> tuple[torch.optim.Optimizer, LRScheduler]:
         named_parameters = [
             (f"{i}.{name}", param)
-            for i, module in enumerate(modules)
+            for i, module in enumerate(flatten_optimization_modules(modules))
             for name, param in module.named_parameters()
         ]
         optimizer = _build_optimizer(
@@ -488,7 +734,11 @@ class OptimizationConfig:
             self.kwargs,
             adamw_names=self.adamw_names,
         )
-        scheduler = self.scheduler.build(optimizer, max_epochs)
+        return optimizer, self.scheduler.build(optimizer, max_epochs)
+
+    def build(self, modules: OptimizationModules, max_epochs: int) -> Optimization:
+        """A per-component mapping is flattened in key order into one optimizer."""
+        optimizer, scheduler = self.build_optimizer_and_scheduler(modules, max_epochs)
         optimization = Optimization(
             optimizer=optimizer,
             scheduler=scheduler,
@@ -498,8 +748,8 @@ class OptimizationConfig:
             max_grad_norm=self.max_grad_norm,
         )
         if self.resume_optimizer_ckpt_path is not None:
-            _load_finetune_optimization_state(
-                optimization, self.resume_optimizer_ckpt_path
+            optimization.load_optimizer_state_for_finetuning(
+                _read_optimization_state(self.resume_optimizer_ckpt_path)
             )
         return optimization
 
@@ -509,6 +759,86 @@ class OptimizationConfig:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OptimizationConfig":
         return cls(**state)
+
+
+OptimizationConfigDict: TypeAlias = dict[str, OptimizationConfig]
+"""One OptimizationConfig per independently optimized component."""
+
+_SHARED_OPTIMIZATION_FIELDS = (
+    "enable_automatic_mixed_precision",
+    "use_gradient_accumulation",
+    "checkpoint",
+)
+
+
+def validate_optimization_config_dict(
+    configs: OptimizationConfigDict, keys: Collection[str]
+) -> None:
+    """
+    Raises:
+        ValueError: If the keys of ``configs`` differ from ``keys``, or a
+            field that acts on the shared backward pass differs across entries.
+    """
+    missing = set(keys) - set(configs)
+    unknown = set(configs) - set(keys)
+    if missing or unknown:
+        raise ValueError(
+            f"Per-component optimization needs exactly the keys {sorted(keys)}; "
+            f"missing {sorted(missing)}, unknown {sorted(unknown)}."
+        )
+    for name in _SHARED_OPTIMIZATION_FIELDS:
+        values = {key: getattr(config, name) for key, config in configs.items()}
+        first, *rest = values.values()
+        if any(value != first for value in rest):
+            raise ValueError(
+                f"optimization.<component>.{name} must agree across components, "
+                f"got {values}."
+            )
+
+
+def has_lr_schedule(config: OptimizationConfig | OptimizationConfigDict) -> bool:
+    """Whether any component configures a learning rate scheduler."""
+    if isinstance(config, OptimizationConfig):
+        return config.has_lr_schedule
+    return any(entry.has_lr_schedule for entry in config.values())
+
+
+def build_optimization_dict(
+    configs: OptimizationConfigDict,
+    modules: Mapping[str, nn.ModuleList],
+    max_epochs: int,
+) -> OptimizationDict:
+    """Build one optimizer and scheduler per key of ``modules``, in its order.
+
+    Parameter names restart at ``0.<name>`` within each component, as for an
+    uncoupled stepper, so ``adamw_names`` and ``resume_optimizer_ckpt_path``
+    carry over from uncoupled configs.
+    """
+    validate_optimization_config_dict(configs, keys=modules.keys())
+    entries: dict[str, _OptimizerEntry] = {}
+    for key, component_modules in modules.items():
+        optimizer, scheduler = configs[key].build_optimizer_and_scheduler(
+            component_modules, max_epochs
+        )
+        entries[key] = _OptimizerEntry(
+            optimizer=optimizer,
+            scheduler=scheduler,
+            max_grad_norm=configs[key].max_grad_norm,
+        )
+    shared = next(iter(configs.values()))
+    optimization = OptimizationDict(
+        entries,
+        enable_automatic_mixed_precision=shared.enable_automatic_mixed_precision,
+        use_gradient_accumulation=shared.use_gradient_accumulation,
+        get_checkpoint=shared.checkpoint.build,
+    )
+    for key in modules:
+        path = configs[key].resume_optimizer_ckpt_path
+        if path is not None:
+            optimization.load_optimizer_state_for_finetuning(
+                key, _read_optimization_state(path)
+            )
+    return optimization
 
 
 NestedTensor: TypeAlias = (
@@ -527,14 +857,8 @@ def _tensors_to_device(obj: NestedTensor, device: torch.device):
     return obj
 
 
-def _load_finetune_optimization_state(optimization: Optimization, checkpoint_path: str):
-    """Load optimizer (and optionally grad scaler) state for fine-tuning.
-
-    Only loads the optimizer state dict and grad scaler state from the
-    checkpoint. Scheduler state and training counters are not restored, so
-    the current config's schedule starts from scratch. All freshly-built
-    optimizer per-group hyperparameters (lr, weight_decay, betas, eps, ...)
-    are preserved from the current job's TrainConfig.
+def _read_optimization_state(checkpoint_path: str) -> dict[str, Any]:
+    """Read a ckpt.tar's optimization state onto the training device.
 
     The checkpoint is loaded on CPU so that only the optimization state
     (not model weights, EMA, etc.) is transferred to the training device.
@@ -548,8 +872,7 @@ def _load_finetune_optimization_state(optimization: Optimization, checkpoint_pat
         )
     optim_state = checkpoint["optimization"]
     del checkpoint
-    optim_state = _tensors_to_device(optim_state, get_device())
-    optimization.load_optimizer_state_for_finetuning(optim_state)
+    return _tensors_to_device(optim_state, get_device())
 
 
 class NullOptimization(OptimizationABC):

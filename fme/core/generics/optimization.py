@@ -1,10 +1,16 @@
 import abc
 import contextlib
+from collections.abc import Mapping
+from typing import TypeAlias
 
 import torch
 from torch import nn
 
 from fme.core.typing_ import TensorDict, TensorMapping
+
+OptimizationModules: TypeAlias = nn.ModuleList | Mapping[str, nn.ModuleList]
+"""What ``build_optimization`` receives: one module list, or one per
+independently optimized component."""
 
 
 class OptimizationABC(abc.ABC):
@@ -15,6 +21,13 @@ class OptimizationABC(abc.ABC):
     @property
     @abc.abstractmethod
     def learning_rate(self) -> float: ...
+
+    @property
+    def learning_rates(self) -> dict[str, float]:
+        """Learning rate per component, for optimizations holding one
+        optimizer per component; empty otherwise.
+        """
+        return {}
 
     @abc.abstractmethod
     def set_learning_rate(self, lr: float):

@@ -3,7 +3,7 @@ from typing import Any, Generic, TypeVar
 
 from torch import nn
 
-from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import TensorDict
 
@@ -48,6 +48,14 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     @abc.abstractmethod
     def modules(self) -> nn.ModuleList:
         pass
+
+    @property
+    def optimization_modules(self) -> OptimizationModules:
+        """Modules handed to ``build_optimization``. Must hold the same
+        parameters as ``modules``; a mapping gives each key its own optimizer
+        when the optimization config is per-component.
+        """
+        return self.modules
 
     @abc.abstractmethod
     def get_state(self) -> dict[str, Any]:
