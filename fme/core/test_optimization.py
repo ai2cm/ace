@@ -16,6 +16,9 @@ from fme.core.optimization import (
     NullOptimization,
     Optimization,
     OptimizationConfig,
+    OptimizationDict,
+    build_optimization_dict,
+    validate_optimization_config_dict,
 )
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
 
@@ -878,3 +881,461 @@ def test_optimization_config_passes_max_grad_norm():
         nn.ModuleList([model]), max_epochs=1
     )
     assert opt._max_grad_norm == 1.5
+
+
+def _two_component_modules(seed: int = 0) -> dict[str, nn.ModuleList]:
+    torch.manual_seed(seed)
+    return {
+        "a": nn.ModuleList([nn.Linear(3, 1).to(fme.get_device())]),
+        "b": nn.ModuleList([nn.Linear(3, 1).to(fme.get_device())]),
+    }
+
+
+def _summed_loss(modules: dict[str, nn.ModuleList], x: torch.Tensor) -> torch.Tensor:
+    return sum((component[0](x) ** 2).sum() for component in modules.values())  # type: ignore[return-value]
+
+
+def test_optimization_dict_distinct_lr_and_schedules():
+    max_epochs = 6
+    modules = _two_component_modules()
+    configs = {
+        "a": OptimizationConfig(
+            optimizer_type="AdamW",
+            lr=0.01,
+            scheduler=SchedulerConfig(type="CosineAnnealingLR"),
+        ),
+        "b": OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.1,
+            scheduler=SchedulerConfig(
+                type="StepLR", kwargs={"step_size": 2, "gamma": 0.5}
+            ),
+        ),
+    }
+    optimization = build_optimization_dict(configs, modules, max_epochs=max_epochs)
+    reference_a = torch.optim.AdamW(modules["a"].parameters(), lr=0.01)
+    reference_b = torch.optim.Adam(modules["b"].parameters(), lr=0.1)
+    schedule_a = torch.optim.lr_scheduler.CosineAnnealingLR(
+        reference_a, T_max=max_epochs
+    )
+    schedule_b = torch.optim.lr_scheduler.StepLR(reference_b, step_size=2, gamma=0.5)
+    for _ in range(max_epochs):
+        assert optimization.learning_rates == {
+            "a": pytest.approx(reference_a.param_groups[0]["lr"]),
+            "b": pytest.approx(reference_b.param_groups[0]["lr"]),
+        }
+        assert optimization.learning_rate == pytest.approx(
+            reference_a.param_groups[0]["lr"]
+        )
+        optimization.step_scheduler(valid_loss=1.0)
+        reference_a.step()
+        reference_b.step()
+        schedule_a.step()
+        schedule_b.step()
+
+
+_OCEAN_LR = 1e-3
+_ATMOSPHERE_LR = 1e-5
+_GROWTH_ITERS = 16
+
+
+def _decaying_lr(n_steps: int) -> float:
+    return _OCEAN_LR * 0.5**n_steps
+
+
+def _constant_lr(n_steps: int) -> float:
+    return _ATMOSPHERE_LR
+
+
+def _growing_lr(n_steps: int) -> float:
+    return _ATMOSPHERE_LR * (0.25 + 0.75 * min(n_steps, _GROWTH_ITERS) / _GROWTH_ITERS)
+
+
+def _schedule(kind: str, step_each_iteration: bool) -> SchedulerConfig:
+    if kind == "decaying":
+        return SchedulerConfig(
+            type="ExponentialLR",
+            kwargs={"gamma": 0.5},
+            step_each_iteration=step_each_iteration,
+        )
+    if kind == "growing":
+        return SchedulerConfig(
+            type="LinearLR",
+            kwargs={
+                "start_factor": 0.25,
+                "end_factor": 1.0,
+                "total_iters": _GROWTH_ITERS,
+            },
+            step_each_iteration=step_each_iteration,
+        )
+    return SchedulerConfig(step_each_iteration=step_each_iteration)
+
+
+_EXPECTED_LR = {
+    "decaying": _decaying_lr,
+    "constant": _constant_lr,
+    "growing": _growing_lr,
+}
+
+_SCHEDULE_SCENARIOS = [
+    ("constant", False, False),
+    ("constant", False, True),
+    ("growing", False, False),
+    ("growing", True, True),
+    ("growing", True, False),
+    ("growing", False, True),
+]
+_SCHEDULE_SCENARIO_IDS = [
+    "atmos_constant-ocean_epoch",
+    "atmos_constant-ocean_iteration",
+    "atmos_growing_epoch-ocean_epoch",
+    "atmos_growing_iteration-ocean_iteration",
+    "atmos_growing_iteration-ocean_epoch",
+    "atmos_growing_epoch-ocean_iteration",
+]
+
+
+@pytest.mark.parametrize(
+    "atmosphere, atmosphere_each_iteration, ocean_each_iteration",
+    _SCHEDULE_SCENARIOS,
+    ids=_SCHEDULE_SCENARIO_IDS,
+)
+def test_optimization_dict_per_component_lr_trajectories(
+    atmosphere: str, atmosphere_each_iteration: bool, ocean_each_iteration: bool
+):
+    n_epochs, n_batches = 3, 4
+    x = torch.randn(5, 3).to(fme.get_device())
+    modules = dict(zip(("atmosphere", "ocean"), _two_component_modules().values()))
+    optimization = build_optimization_dict(
+        {
+            "atmosphere": OptimizationConfig(
+                lr=_ATMOSPHERE_LR,
+                scheduler=_schedule(atmosphere, atmosphere_each_iteration),
+            ),
+            "ocean": OptimizationConfig(
+                lr=_OCEAN_LR, scheduler=_schedule("decaying", ocean_each_iteration)
+            ),
+        },
+        modules,
+        max_epochs=n_epochs,
+    )
+    timing = {"atmosphere": atmosphere_each_iteration, "ocean": ocean_each_iteration}
+    expected_lr = {"atmosphere": _EXPECTED_LR[atmosphere], "ocean": _decaying_lr}
+    # Trainer order: step weights and the per-iteration scheduler each batch,
+    # then the per-epoch scheduler with the validation loss.
+    for epoch in range(n_epochs):
+        for batch in range(n_batches):
+            iteration = epoch * n_batches + batch
+            assert optimization.learning_rates == {
+                key: pytest.approx(
+                    expected_lr[key](iteration if timing[key] else epoch)
+                )
+                for key in modules
+            }
+            assert (
+                optimization.learning_rate == optimization.learning_rates["atmosphere"]
+            )
+            optimization.accumulate_loss(_summed_loss(modules, x))
+            optimization.step_weights()
+            optimization.step_scheduler(is_iteration=True)
+        optimization.step_scheduler(valid_loss=1.0, is_iteration=False)
+
+
+def test_optimization_dict_matches_separate_optimizations():
+    x = torch.randn(5, 3).to(fme.get_device())
+    configs = {
+        "a": OptimizationConfig(optimizer_type="AdamW", lr=0.01),
+        "b": OptimizationConfig(optimizer_type="Adam", lr=0.1),
+    }
+    joint_modules = _two_component_modules()
+    joint = build_optimization_dict(configs, joint_modules, max_epochs=1)
+    separate_modules = _two_component_modules()
+    for _ in range(3):
+        joint.accumulate_loss(_summed_loss(joint_modules, x))
+        joint.step_weights()
+    separate = {
+        key: configs[key].build(separate_modules[key], max_epochs=1)
+        for key in separate_modules
+    }
+    for _ in range(3):
+        for key, optimization in separate.items():
+            optimization.accumulate_loss((separate_modules[key][0](x) ** 2).sum())
+            optimization.step_weights()
+    for key in joint_modules:
+        for joint_param, separate_param in zip(
+            joint_modules[key].parameters(), separate_modules[key].parameters()
+        ):
+            torch.testing.assert_close(joint_param, separate_param)
+
+
+def _dict_configs() -> dict[str, OptimizationConfig]:
+    return {
+        "a": OptimizationConfig(
+            optimizer_type="AdamW",
+            lr=0.01,
+            scheduler=SchedulerConfig(type="CosineAnnealingLR"),
+        ),
+        "b": OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.1,
+            scheduler=SchedulerConfig(
+                type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}
+            ),
+        ),
+    }
+
+
+def test_optimization_dict_state_round_trip():
+    x = torch.randn(5, 3).to(fme.get_device())
+    modules = _two_component_modules()
+    optimization = build_optimization_dict(_dict_configs(), modules, max_epochs=4)
+    for _ in range(2):
+        optimization.accumulate_loss(_summed_loss(modules, x))
+        optimization.step_weights()
+        optimization.step_scheduler(valid_loss=1.0)
+    state = optimization.get_state()
+    assert set(state) == {"components", "gscaler_state_dict"}
+    assert set(state["components"]) == {"a", "b"}
+    resumed_modules = _two_component_modules()
+    for key in modules:
+        resumed_modules[key].load_state_dict(modules[key].state_dict())
+    resumed = build_optimization_dict(_dict_configs(), resumed_modules, max_epochs=4)
+    resumed.load_state(copy.deepcopy(state))
+    assert resumed.learning_rates == optimization.learning_rates
+    for opt, mods in ((optimization, modules), (resumed, resumed_modules)):
+        opt.accumulate_loss(_summed_loss(mods, x))
+        opt.step_weights()
+        opt.step_scheduler(valid_loss=1.0)
+    assert resumed.learning_rates == optimization.learning_rates
+    for key in modules:
+        for param, resumed_param in zip(
+            modules[key].parameters(), resumed_modules[key].parameters()
+        ):
+            torch.testing.assert_close(param, resumed_param)
+
+
+def test_optimization_dict_load_state_rejects_single_form():
+    modules = _two_component_modules()
+    single = OptimizationConfig().build(
+        nn.ModuleList([*modules["a"], *modules["b"]]), max_epochs=1
+    )
+    dict_form = build_optimization_dict(_dict_configs(), modules, max_epochs=1)
+    with pytest.raises(ValueError, match="single optimizer"):
+        dict_form.load_state(single.get_state())
+
+
+def test_optimization_load_state_rejects_dict_form():
+    modules = _two_component_modules()
+    single = OptimizationConfig().build(
+        nn.ModuleList([*modules["a"], *modules["b"]]), max_epochs=1
+    )
+    dict_form = build_optimization_dict(_dict_configs(), modules, max_epochs=1)
+    with pytest.raises(ValueError, match="one optimizer per component"):
+        single.load_state(dict_form.get_state())
+
+
+def test_optimization_dict_load_state_rejects_other_components():
+    modules = _two_component_modules()
+    dict_form = build_optimization_dict(_dict_configs(), modules, max_epochs=1)
+    state = dict_form.get_state()
+    state["components"]["c"] = state["components"].pop("b")
+    with pytest.raises(ValueError, match="differ from configured components"):
+        dict_form.load_state(state)
+
+
+def _cpu_grad_scaler() -> torch.amp.GradScaler:
+    # GradScaler("cuda") disables itself without CUDA; a CPU scaler runs the
+    # same per-optimizer inf-check bookkeeping that the skip guards against.
+    return torch.amp.GradScaler("cpu", init_scale=2.0**4)
+
+
+@pytest.mark.parametrize(
+    "amp",
+    [
+        "off",
+        "cpu_scaler",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="AMP requires CUDA"
+            ),
+        ),
+    ],
+)
+def test_optimization_dict_skips_component_without_grad(amp: str):
+    x = torch.randn(5, 3).to(fme.get_device())
+    modules = _two_component_modules()
+    for param in modules["b"].parameters():
+        param.requires_grad_(False)
+    configs = {
+        key: OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.1,
+            enable_automatic_mixed_precision=amp == "cuda",
+        )
+        for key in ("a", "b")
+    }
+    optimization = build_optimization_dict(configs, modules, max_epochs=1)
+    if amp == "cpu_scaler":
+        optimization.gscaler = _cpu_grad_scaler()
+    b_before = copy.deepcopy(modules["b"].state_dict())
+    a_before = copy.deepcopy(modules["a"].state_dict())
+    with optimization.autocast():
+        loss = (modules["a"][0](x) ** 2).sum() + (modules["b"][0](x) ** 2).sum()
+    optimization.accumulate_loss(loss)
+    optimization.step_weights()
+    for name, value in modules["b"].state_dict().items():
+        torch.testing.assert_close(value, b_before[name])
+    assert any(
+        not torch.equal(value, a_before[name])
+        for name, value in modules["a"].state_dict().items()
+    )
+
+
+@pytest.mark.parametrize(
+    "amp",
+    [
+        "cpu_scaler",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="AMP requires CUDA"
+            ),
+        ),
+    ],
+)
+def test_optimization_dict_no_component_with_grad_does_not_raise(amp: str):
+    x = torch.randn(5, 3).to(fme.get_device())
+    modules = _two_component_modules()
+    configs = {
+        key: OptimizationConfig(
+            optimizer_type="Adam", enable_automatic_mixed_precision=amp == "cuda"
+        )
+        for key in ("a", "b")
+    }
+    optimization = build_optimization_dict(configs, modules, max_epochs=1)
+    if amp == "cpu_scaler":
+        optimization.gscaler = _cpu_grad_scaler()
+    assert optimization.gscaler is not None
+    scale_before = optimization.gscaler.get_scale()
+    with optimization.autocast():
+        loss = (modules["a"][0](x) ** 2).sum().detach().requires_grad_()
+    optimization.accumulate_loss(loss)
+    optimization.step_weights()
+    assert optimization.gscaler.get_scale() == scale_before
+
+
+def test_optimization_dict_clips_per_component():
+    # Adam's normalized step hides clipping in the weights; the first moment
+    # holds (1 - beta1) * clipped grad, so it shows whether a's grad was shrunk.
+    x = torch.ones(1, 3).to(fme.get_device())
+    configs = {
+        key: OptimizationConfig(optimizer_type="Adam", lr=0.1, max_grad_norm=1.0)
+        for key in ("a", "b")
+    }
+    modules = _two_component_modules()
+    optimization = build_optimization_dict(configs, modules, max_epochs=1)
+    optimization.accumulate_loss(
+        0.01 * modules["a"][0](x).sum() + 1e6 * modules["b"][0](x).sum()
+    )
+    optimization.step_weights()
+    a_optimizer = optimization._entries["a"].optimizer
+    weight = modules["a"][0].weight
+    torch.testing.assert_close(
+        a_optimizer.state[weight]["exp_avg"], 0.1 * 0.01 * torch.ones_like(weight)
+    )
+
+
+def test_optimization_dict_set_learning_rate_not_supported():
+    optimization = build_optimization_dict(
+        {"a": OptimizationConfig(lr=0.01), "b": OptimizationConfig(lr=0.1)},
+        _two_component_modules(),
+        max_epochs=1,
+    )
+    with pytest.raises(NotImplementedError, match="LR tuning"):
+        optimization.set_learning_rate(0.02)
+    assert optimization.learning_rates == {"a": 0.01, "b": 0.1}
+
+
+@pytest.mark.parametrize(
+    "configs, match",
+    [
+        ({"a": OptimizationConfig()}, "missing"),
+        (
+            {
+                "a": OptimizationConfig(),
+                "b": OptimizationConfig(),
+                "c": OptimizationConfig(),
+            },
+            "unknown",
+        ),
+        (
+            {
+                "a": OptimizationConfig(enable_automatic_mixed_precision=True),
+                "b": OptimizationConfig(),
+            },
+            "enable_automatic_mixed_precision",
+        ),
+        (
+            {
+                "a": OptimizationConfig(use_gradient_accumulation=True),
+                "b": OptimizationConfig(),
+            },
+            "use_gradient_accumulation",
+        ),
+        (
+            {
+                "a": OptimizationConfig(
+                    checkpoint=CheckpointConfig(after_n_forward_steps=1)
+                ),
+                "b": OptimizationConfig(),
+            },
+            "checkpoint",
+        ),
+    ],
+    ids=[
+        "missing",
+        "unknown",
+        "amp_differs",
+        "accumulation_differs",
+        "checkpoint_differs",
+    ],
+)
+def test_validate_optimization_config_dict_rejects(configs, match):
+    with pytest.raises(ValueError, match=match):
+        validate_optimization_config_dict(configs, keys=("a", "b"))
+
+
+def test_build_optimization_dict_resume_from_uncoupled_ckpt(tmp_path: str):
+    x = torch.randn(5, 3).to(fme.get_device())
+    source_modules = _two_component_modules()
+    source = OptimizationConfig(optimizer_type="Adam", lr=0.001).build(
+        source_modules["b"], max_epochs=1
+    )
+    for _ in range(3):
+        source.accumulate_loss((source_modules["b"][0](x) ** 2).sum())
+        source.step_weights()
+    ckpt_path = os.path.join(tmp_path, "ckpt.tar")
+    torch.save({"optimization": source.get_state()}, ckpt_path)
+
+    modules = _two_component_modules()
+    optimization = build_optimization_dict(
+        {
+            "a": OptimizationConfig(optimizer_type="AdamW", lr=0.01),
+            "b": OptimizationConfig(
+                optimizer_type="Adam", lr=0.05, resume_optimizer_ckpt_path=ckpt_path
+            ),
+        },
+        modules,
+        max_epochs=1,
+    )
+    assert isinstance(optimization, OptimizationDict)
+    assert optimization._entries["a"].optimizer.state_dict()["state"] == {}
+    source_state = source.optimizer.state_dict()["state"]
+    target_state = optimization._entries["b"].optimizer.state_dict()["state"]
+    for param_id in source_state:
+        for key in ("exp_avg", "exp_avg_sq"):
+            torch.testing.assert_close(
+                target_state[param_id][key], source_state[param_id][key]
+            )
+    assert optimization.learning_rates["b"] == 0.05

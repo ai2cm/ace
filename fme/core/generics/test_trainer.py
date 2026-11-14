@@ -26,7 +26,7 @@ from fme.core.generics.aggregator import (
 )
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
-from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
@@ -365,7 +365,9 @@ def get_trainer(
     inference_data = InferenceData()
     stepper = TrainStepper(state=stepper_state)
 
-    def build_optimization(modules: torch.nn.ModuleList) -> Optimization:
+    def build_optimization(modules: OptimizationModules) -> Optimization:
+        if not isinstance(modules, torch.nn.ModuleList):
+            raise TypeError("Expected a ModuleList")
         if len(modules) != 1:
             raise ValueError("Expected 1 linear module with 1 weight")
         if not isinstance(modules[0], torch.nn.Linear):
@@ -1644,7 +1646,9 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
         scheduler_config=stage1_scheduler,
         lr=configured_lr,
     )
-    assert stage1_trainer.optimization.optimizer.state_dict()["state"] == {}
+    stage1_optimization = stage1_trainer.optimization
+    assert isinstance(stage1_optimization, Optimization)
+    assert stage1_optimization.optimizer.state_dict()["state"] == {}
 
     stage1_trainer.train()
     assert stage1_trainer.optimization.learning_rate < configured_lr
@@ -1653,7 +1657,7 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
     stage1_ckpt_path = stage1_trainer.paths.latest_checkpoint_path
 
     # verify training updated the optimizer state dict
-    stage1_opt_state = stage1_trainer.optimization.optimizer.state_dict()["state"]
+    stage1_opt_state = stage1_optimization.optimizer.state_dict()["state"]
     assert stage1_opt_state != {}, "optimizer state should change during training"
 
     stage2_dir = os.path.join(tmp_path, "stage2")
@@ -1671,7 +1675,9 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
     assert stage2_trainer.num_batches_seen == 0
 
     # optimizer state loaded from stage1 ckpt
-    stage2_opt_state = stage2_trainer.optimization.optimizer.state_dict()["state"]
+    stage2_optimization = stage2_trainer.optimization
+    assert isinstance(stage2_optimization, Optimization)
+    stage2_opt_state = stage2_optimization.optimizer.state_dict()["state"]
     for param_id in stage1_opt_state:
         assert param_id in stage2_opt_state
         for key in ("step", "exp_avg", "exp_avg_sq"):
@@ -1684,12 +1690,9 @@ def test_finetune_optimization_checkpoint_loads_optimizer_state(tmp_path: str):
     # lr and scheduler are overwritten by OptimizationConfig
     assert stage2_trainer.optimization.learning_rate == configured_lr
     fresh_scheduler = SchedulerConfig().build(
-        stage2_trainer.optimization.optimizer, max_epochs=1
+        stage2_optimization.optimizer, max_epochs=1
     )
-    assert (
-        stage2_trainer.optimization.scheduler.state_dict()
-        == fresh_scheduler.state_dict()
-    )
+    assert stage2_optimization.scheduler.state_dict() == fresh_scheduler.state_dict()
 
 
 @pytest.mark.parametrize("include_optimization", [True, False])

@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import torch
 
@@ -11,6 +11,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
@@ -26,7 +27,12 @@ from fme.core.generics.trainer import (
 )
 from fme.core.generics.validation import run_validation_loop
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.optimization import (
+    OptimizationConfig,
+    OptimizationConfigDict,
+    build_optimization_dict,
+    validate_optimization_config_dict,
+)
 from fme.core.rand import set_seed
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
@@ -339,6 +345,9 @@ def _get_inference_callback(
     )
 
 
+_OPTIMIZATION_COMPONENTS = ("atmosphere", "ocean")
+
+
 @dataclasses.dataclass
 class TrainConfig:
     """
@@ -351,7 +360,17 @@ class TrainConfig:
             run's loss is used for checkpoint selection. Each entry can specify
             a name (used as wandb log prefix) and weight.
         stepper: Configuration for the coupled stepper.
-        optimization: Configuration for the optimization.
+        optimization: Configuration for the optimization. Either one
+            OptimizationConfig with one optimizer over both components, or a
+            mapping with keys ``atmosphere`` and ``ocean``, each building its
+            own optimizer and LR scheduler over that component's parameters.
+            In the mapping, ``enable_automatic_mixed_precision``,
+            ``use_gradient_accumulation`` and ``checkpoint`` must agree across
+            entries, ``max_grad_norm`` clips each component's gradient norm
+            alone, the logged ``lr`` is the atmosphere's (each component's
+            is logged as ``lr/<component>``), and ``lr_tuning`` is not
+            supported. A ``ReduceLROnPlateau`` scheduler in either entry
+            steps on the total validation loss of both components.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
         save_checkpoint: Whether to save checkpoints. If false, no checkpoints
@@ -407,7 +426,10 @@ class TrainConfig:
     validation: InlineValidationConfig | list[InlineValidationConfig]
     stepper: CoupledStepperConfig
     stepper_training: CoupledTrainStepperConfig
-    optimization: OptimizationConfig
+    # OptimizationConfig first: dacite (strict=True) tries union members in
+    # order, so {} stays the single form and the mapping fails it on
+    # unexpected keys.
+    optimization: OptimizationConfig | OptimizationConfigDict
     logging: LoggingConfig
     max_epochs: int
     save_checkpoint: bool
@@ -450,7 +472,16 @@ class TrainConfig:
                 f"Inference names {sorted(reserved_overlap)} collide with "
                 f"reserved names {sorted(self._RESERVED_NAMES)}"
             )
-        if self.lr_tuning is not None and self.optimization.has_lr_schedule:
+        if isinstance(self.optimization, dict):
+            validate_optimization_config_dict(
+                self.optimization, keys=_OPTIMIZATION_COMPONENTS
+            )
+            if self.lr_tuning is not None:
+                raise ValueError(
+                    "lr_tuning is not supported with per-component "
+                    "optimization (optimization.atmosphere/ocean)."
+                )
+        elif self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"
@@ -589,8 +620,15 @@ class TrainConfig:
             entries.append((entry, data, name))
         return entries
 
-    def _get_optimization(self, parameters) -> Optimization:
-        return self.optimization.build(parameters, self.max_epochs)
+    def _get_optimization(self, modules: OptimizationModules) -> OptimizationABC:
+        if isinstance(self.optimization, OptimizationConfig):
+            return self.optimization.build(modules, self.max_epochs)
+        if not isinstance(modules, Mapping):
+            raise TypeError(
+                "Per-component optimization needs per-component modules, "
+                f"got {type(modules).__name__}."
+            )
+        return build_optimization_dict(self.optimization, modules, self.max_epochs)
 
     def _get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
         return self.stepper_training.get_train_stepper(

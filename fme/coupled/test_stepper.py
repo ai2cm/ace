@@ -26,7 +26,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
-from fme.core.optimization import NullOptimization
+from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.rand import randn_like
 from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
@@ -2714,3 +2714,69 @@ def test_prediction_generator_yields_corrector_diagnostics():
             name, offset = "a_prog", atmosphere_offset
         delta = prediction.corrector_diagnostics.delta[name]
         torch.testing.assert_close(delta, torch.full_like(delta, offset))
+
+
+def _trainable_train_stepper_and_batch(seed: int = 0):
+    torch.manual_seed(seed)
+    return get_train_stepper_and_batch(
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=2,
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": torch.nn.Conv2d(1, 1, 1)}
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": torch.nn.Conv2d(2, 1, 1)}
+        ),
+    )
+
+
+def test_optimization_modules_cover_modules():
+    train_stepper, _, _, _ = _trainable_train_stepper_and_batch()
+    optimization_modules = train_stepper.optimization_modules
+    assert list(optimization_modules) == ["atmosphere", "ocean"]
+    flat_ids = [
+        id(p)
+        for component in optimization_modules.values()
+        for p in component.parameters()
+    ]
+    assert len(flat_ids) > 0
+    assert flat_ids == [id(p) for p in train_stepper.modules.parameters()]
+
+
+def test_single_form_optimization_unchanged():
+    results = []
+    for use_optimization_modules in (True, False):
+        train_stepper, coupled_data, _, _ = _trainable_train_stepper_and_batch()
+        modules = (
+            train_stepper.optimization_modules
+            if use_optimization_modules
+            else train_stepper.modules
+        )
+        optimization = OptimizationConfig(optimizer_type="AdamW", lr=0.01).build(
+            modules, max_epochs=1
+        )
+        for _ in range(2):
+            train_stepper.train_on_batch(
+                data=coupled_data.data, optimization=optimization
+            )
+        results.append(
+            (
+                optimization.optimizer.state_dict(),
+                [p.detach().clone() for p in train_stepper.modules.parameters()],
+            )
+        )
+    (state_a, params_a), (state_b, params_b) = results
+    assert len(state_a["state"]) > 0
+    assert state_a["param_groups"] == state_b["param_groups"]
+    assert state_a["state"].keys() == state_b["state"].keys()
+    for param_id in state_a["state"]:
+        for key, value in state_a["state"][param_id].items():
+            torch.testing.assert_close(value, state_b["state"][param_id][key])
+    assert len(params_a) > 0
+    for param_a, param_b in zip(params_a, params_b):
+        torch.testing.assert_close(param_a, param_b)

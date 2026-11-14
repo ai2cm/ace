@@ -1,11 +1,13 @@
 import os
 import tempfile
+import unittest.mock
 
 import numpy as np
 import pytest
 import torch
 import xarray as xr
 
+from fme.core.generics.trainer import _restore_checkpoint
 from fme.core.rand import set_seed, use_cpu_randn
 from fme.core.testing.wandb import mock_wandb
 
@@ -598,3 +600,245 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
             inference_logs[1][f"inference/mean/weighted_mean_gen/{name}"],
             atol=1e-4,
         )
+
+
+_PER_COMPONENT_OPTIMIZATION_YAML = """optimization:
+  atmosphere:
+    optimizer_type: AdamW
+    lr: 0.0001
+    scheduler: {type: StepLR, kwargs: {step_size: 1, gamma: 0.5}}
+  ocean:
+    optimizer_type: Adam
+    lr: 0.001
+    max_grad_norm: 1.0
+    scheduler: {type: StepLR, kwargs: {step_size: 1, gamma: 0.1}}
+"""
+
+
+def _per_component_train_config(
+    tmp_path,
+    experiment_name: str,
+    max_epochs: int,
+    segment_epochs: int | None = None,
+    optimization_yaml: str = _PER_COMPONENT_OPTIMIZATION_YAML,
+):
+    data_dir = tmp_path / f"coupled_data_{experiment_name}"
+    data_dir.mkdir()
+    ocean_names = [
+        "thetao_0",
+        "thetao_1",
+        "sst",
+        "mask_2d",
+        "mask_0",
+        "mask_1",
+        "ocean_sea_ice_fraction",
+        "land_fraction",
+    ]
+    atmos_names = [
+        "DLWRFsfc",
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "surface_temperature",
+        "ocean_fraction",
+        "land_fraction",
+        "sea_ice_fraction",
+    ]
+    mock_coupled_data = create_coupled_data_on_disk(
+        data_dir,
+        n_forward_times_ocean=8,
+        n_forward_times_atmosphere=16,
+        ocean_names=ocean_names,
+        atmosphere_names=atmos_names,
+        atmosphere_start_time_offset_from_ocean=1,
+        n_levels_ocean=2,
+        n_levels_atmosphere=2,
+    )
+    experiment_path = tmp_path / experiment_name
+    experiment_path.mkdir(exist_ok=True)
+    train_config_fname, _ = _write_test_yaml_files(
+        experiment_path,
+        mock_coupled_data,
+        ocean_in_names=ocean_names,
+        ocean_out_names=["thetao_0", "thetao_1", "sst", "ocean_sea_ice_fraction"],
+        atmos_in_names=atmos_names,
+        atmos_out_names=[
+            "DLWRFsfc",
+            "PRESsfc",
+            "specific_total_water_0",
+            "specific_total_water_1",
+            "surface_temperature",
+        ],
+        ocean_sfc_temp_name="sst",
+        sea_ice_frac_name="ocean_sea_ice_fraction",
+        atmos_sea_ice_frac_name="sea_ice_fraction",
+        land_frac_name="land_fraction",
+        atmos_sfc_temp_name="surface_temperature",
+        ocean_frac_name="ocean_fraction",
+        n_coupled_steps=1,
+        max_epochs=max_epochs,
+        loss_atmos_n_steps=2,
+    )
+    with open(train_config_fname) as f:
+        text = f.read()
+    single_form = (
+        "optimization:\n  enable_automatic_mixed_precision: false\n"
+        "  lr: 0.00001\n  optimizer_type: Adam\n"
+    )
+    assert single_form in text
+    with open(train_config_fname, "w") as f:
+        f.write(
+            text.replace(single_form, optimization_yaml)
+            + "log_train_every_n_batches: 1\n"
+            + (f"segment_epochs: {segment_epochs}\n" if segment_epochs else "")
+        )
+    return train_config_fname
+
+
+def _epoch_component_lrs(logs) -> list[tuple[float, float]]:
+    return [
+        (log["lr/atmosphere"], log["lr/ocean"])
+        for log in logs
+        if "epoch" in log and "lr/atmosphere" in log
+    ]
+
+
+@pytest.mark.medium_duration
+def test_train_per_component_optimization(tmp_path):
+    set_seed(0)
+    uninterrupted = _per_component_train_config(tmp_path, "uninterrupted", 2)
+    with use_cpu_randn(), mock_wandb() as wandb:
+        train_main(yaml_config=uninterrupted)
+        uninterrupted_logs = wandb.get_logs()
+    expected = [(1e-4, 1e-3), (0.5e-4, 1e-4)]
+    assert _epoch_component_lrs(uninterrupted_logs) == pytest.approx(expected)
+    batch_logs = [
+        log
+        for log in uninterrupted_logs
+        if "training_samples_per_second_on_rank_0" in log
+    ]
+    assert len(batch_logs) > 0
+    assert all("lr/atmosphere" in log and "lr/ocean" in log for log in batch_logs)
+
+    resumed_config = _per_component_train_config(
+        tmp_path, "resumed", 2, segment_epochs=1
+    )
+    with use_cpu_randn(), mock_wandb() as wandb:
+        train_main(yaml_config=resumed_config)
+        first_logs = wandb.get_logs()
+        wandb_id = wandb.get_id()
+        last_step = len(first_logs) - 1
+    checkpoint = torch.load(
+        tmp_path / "resumed" / "results" / "training_checkpoints" / "ckpt.tar",
+        weights_only=False,
+    )
+    assert set(checkpoint["optimization"]) == {"components", "gscaler_state_dict"}
+    assert set(checkpoint["optimization"]["components"]) == {"atmosphere", "ocean"}
+    with (
+        unittest.mock.patch(
+            "fme.core.generics.trainer._restore_checkpoint",
+            new=unittest.mock.MagicMock(side_effect=_restore_checkpoint),
+        ) as restore,
+        use_cpu_randn(),
+        mock_wandb() as wandb,
+    ):
+        wandb.set_id(wandb_id)
+        wandb.set_last_received_step(last_step)
+        train_main(yaml_config=resumed_config)
+        second_logs = wandb.get_logs()
+    restore.assert_called()
+    assert [
+        log["epoch"] for log in first_logs if "lr/atmosphere" in log and "epoch" in log
+    ] == [1]
+    assert [
+        log["epoch"] for log in second_logs if "lr/atmosphere" in log and "epoch" in log
+    ] == [2]
+    resumed = _epoch_component_lrs(first_logs) + _epoch_component_lrs(second_logs)
+    assert resumed == pytest.approx(expected)
+
+
+_OCEAN_LR = 1e-3
+_ATMOSPHERE_LR = 1e-5
+_GROWTH_ITERS = 16
+
+
+def _scheduler_yaml(kind: str, step_each_iteration: bool) -> str:
+    if kind == "decaying":
+        scheduler = "{type: ExponentialLR, kwargs: {gamma: 0.5}"
+    elif kind == "growing":
+        scheduler = (
+            "{type: LinearLR, kwargs: {start_factor: 0.25, end_factor: 1.0, "
+            f"total_iters: {_GROWTH_ITERS}}}"
+        )
+    else:
+        return "{}"
+    return f"{scheduler}, step_each_iteration: {str(step_each_iteration).lower()}}}"
+
+
+def _expected_lr(kind: str, n_steps: int) -> float:
+    if kind == "decaying":
+        return _OCEAN_LR * 0.5**n_steps
+    if kind == "growing":
+        growth = min(n_steps, _GROWTH_ITERS) / _GROWTH_ITERS
+        return _ATMOSPHERE_LR * (0.25 + 0.75 * growth)
+    return _ATMOSPHERE_LR
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "atmosphere, atmosphere_each_iteration, ocean_each_iteration",
+    [
+        ("constant", False, False),
+        ("growing", True, False),
+        ("growing", False, True),
+    ],
+    ids=[
+        "atmos_constant-ocean_epoch",
+        "atmos_growing_iteration-ocean_epoch",
+        "atmos_growing_epoch-ocean_iteration",
+    ],
+)
+def test_train_per_component_lr_schedules(
+    tmp_path,
+    atmosphere: str,
+    atmosphere_each_iteration: bool,
+    ocean_each_iteration: bool,
+):
+    optimization_yaml = (
+        "optimization:\n"
+        "  atmosphere:\n"
+        f"    lr: {_ATMOSPHERE_LR:.6f}\n"
+        f"    scheduler: {_scheduler_yaml(atmosphere, atmosphere_each_iteration)}\n"
+        "  ocean:\n"
+        f"    lr: {_OCEAN_LR:.6f}\n"
+        f"    scheduler: {_scheduler_yaml('decaying', ocean_each_iteration)}\n"
+    )
+    max_epochs = 2
+    set_seed(0)
+    config = _per_component_train_config(
+        tmp_path, "schedules", max_epochs, optimization_yaml=optimization_yaml
+    )
+    with use_cpu_randn(), mock_wandb() as wandb:
+        train_main(yaml_config=config)
+        logs = wandb.get_logs()
+    epoch_end_steps = [
+        step for step, log in enumerate(logs) if "epoch" in log and "lr/ocean" in log
+    ]
+    n_batches = epoch_end_steps[0]
+    assert n_batches > 1
+    assert epoch_end_steps == [n_batches * (e + 1) for e in range(max_epochs)]
+    kinds = {"atmosphere": atmosphere, "ocean": "decaying"}
+    each_iteration = {
+        "atmosphere": atmosphere_each_iteration,
+        "ocean": ocean_each_iteration,
+    }
+    # Batch logs come after that batch's per-iteration scheduler step; the
+    # per-epoch scheduler steps after the epoch's last log.
+    for step in range(1, n_batches * max_epochs + 1):
+        epoch = (step - 1) // n_batches
+        for key, kind in kinds.items():
+            n_steps = step if each_iteration[key] else epoch
+            assert logs[step][f"lr/{key}"] == pytest.approx(
+                _expected_lr(kind, n_steps)
+            ), (key, step)
+        assert logs[step]["lr"] == logs[step]["lr/atmosphere"]

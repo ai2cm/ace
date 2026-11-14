@@ -39,6 +39,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
+from fme.core.generics.optimization import OptimizationModules
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
     AggregatorBuilderABC,
@@ -665,7 +666,7 @@ class TrainConfig:
             entries.append((entry, data, dataset_info, name))
         return entries
 
-    def _get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
+    def _get_optimization(self, modules: OptimizationModules) -> Optimization:
         return self.optimization.build(modules, self.max_epochs)
 
     def _get_stepper(
