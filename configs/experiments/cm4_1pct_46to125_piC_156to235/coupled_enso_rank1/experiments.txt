@@ -82,3 +82,10 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0-r1-ic0
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0-r1-ic0037|01M62AB3K9JNPF3N6C6CZ5QHAT|deferred_D8a_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 4h|n_coupled_steps=6800 loader.start_indices.times=['0037-01-06T00:00:00'] experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-14-coupled-ft-enso-rank1-evals/9bj993pv/ema_ckpt_0003/1pct-ic0037-93yr/|01M62AB3KER1BSQ6CAFNKHDR99
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0-r1-lag1|01M62AB3K9JNPF3N6C6CZ5QHAT|deferred_D8b_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 4h|n_coupled_steps=6800 loader.start_indices.times=['0001-01-11T00:00:00'] experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-14-coupled-ft-enso-rank1-evals/9bj993pv/ema_ckpt_0003/1pct-ic0001-lag1-93yr/|01M62AB3KER1BSQ6CAFNKHDR99
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0-r1-lag2|01M62AB3K9JNPF3N6C6CZ5QHAT|deferred_D8b_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 4h|n_coupled_steps=6800 loader.start_indices.times=['0001-01-16T00:00:00'] experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-14-coupled-ft-enso-rank1-evals/9bj993pv/ema_ckpt_0003/1pct-ic0001-lag2-93yr/|01M62AB3KER1BSQ6CAFNKHDR99
+
+# 08b
+# Issue 08b rank-1 evals, lineage no228urh -> k2658h3a (1deg-randco2rs1-fmean, hybrid-residual);
+# rows written by analysis/2026-11-13-2237-coupled-ft-enso-dynamics/scripts/08b_rank1_rows.py.
+
+# smoke (compare: 08b_smoke_compare.py)
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-smoke|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 1h|n_coupled_steps=64 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
