@@ -3055,7 +3055,9 @@ def test_joint_pair_atmos_later_only_pair_step_reads_attached_ocean(
     ocean_params = list(train_stepper.ocean.modules.parameters())
     coupler = train_stepper._stepper
     original = coupler.get_prediction_generator
+    original_prescribe = coupler._prescribe_ic_sst
     paths: dict[int, bool] = {}
+    ic_sst_paths: list[bool] = []
 
     def _record(*args, **kwargs):
         for step in original(*args, **kwargs):
@@ -3065,15 +3067,28 @@ def test_joint_pair_atmos_later_only_pair_step_reads_attached_ocean(
                 )
             yield step
 
+    def _record_ic_sst(atmos_ic_state, forcing_ic_batch):
+        prescribed = original_prescribe(atmos_ic_state, forcing_ic_batch)
+        ic_sst = prescribed.as_batch_data().data["surface_temperature"]
+        ic_sst_paths.append(_has_path(ic_sst, ocean_params))
+        return prescribed
+
     optimization = _build_optimization(train_stepper, use_gradient_accumulation=True)
-    with patch.object(coupler, "get_prediction_generator", side_effect=_record):
+    with (
+        patch.object(coupler, "get_prediction_generator", side_effect=_record),
+        patch.object(coupler, "_prescribe_ic_sst", side_effect=_record_ic_sst),
+    ):
         train_stepper.train_on_batch(data=coupled_data.data, optimization=optimization)
     pair_step = pair[1] - 1
     assert paths == {step: step == pair_step for step in range(4)}
+    # one IC SST per window; only a pair step first in window 1 reads x_O(1)
+    pair_first_in_window = pair_step % 2 == 0
+    assert ic_sst_paths == [False, pair_first_in_window]
 
 
-def test_joint_pair_single_backward():
-    train_stepper, coupled_data = _joint_stepper_and_batch([_ATMOS_LATER])
+@pytest.mark.parametrize("pair", [_OCEAN_LATER, _ATMOS_LATER])
+def test_joint_pair_single_backward(pair):
+    train_stepper, coupled_data = _joint_stepper_and_batch([pair])
     optimization = Mock(
         wraps=_build_optimization(train_stepper, use_gradient_accumulation=True)
     )
@@ -3081,9 +3096,9 @@ def test_joint_pair_single_backward():
         data=coupled_data.data, optimization=optimization
     )
     (call,) = optimization.accumulate_loss.call_args_list
-    l_earlier = stepped.ocean.metrics["loss/ocean_step_0"]
-    l_later = stepped.atmosphere.metrics["loss/atmosphere_step_3"]
-    torch.testing.assert_close(call.args[0].detach(), l_earlier + l_later)
+    l_ocean = stepped.ocean.metrics[f"loss/ocean_step_{pair[0] - 1}"]
+    l_atmosphere = stepped.atmosphere.metrics[f"loss/atmosphere_step_{pair[1] - 1}"]
+    torch.testing.assert_close(call.args[0].detach(), l_ocean + l_atmosphere)
 
 
 def test_joint_pair_beyond_atmosphere_n_steps():
@@ -3094,10 +3109,27 @@ def test_joint_pair_beyond_atmosphere_n_steps():
     requirements = train_stepper._config.get_train_window_data_requirements(
         stepper_config
     )
-    # i_A = 4 plus the IC
-    assert requirements.atmosphere_target_requirements.n_timesteps == 5
+    target_n = requirements.atmosphere_target_requirements.n_timesteps
+    assert target_n == 5  # i_A = 4 plus the IC
+    # NaN-pad target variables past the horizon, as the training loader does
+    atmosphere_data = coupled_data.data.atmosphere_data
+    forcing_names = set(stepper_config.atmosphere_forcing_exogenous_names)
+    padded = {}
+    for name, tensor in atmosphere_data.data.items():
+        padded[name] = tensor.clone()
+        if name not in forcing_names:
+            padded[name][:, target_n:] = float("nan")
+    padded_data = CoupledBatchData(
+        ocean_data=coupled_data.data.ocean_data,
+        atmosphere_data=BatchData.new_on_device(
+            data=padded,
+            time=atmosphere_data.time,
+            labels=atmosphere_data.labels,
+            horizontal_dims=list(atmosphere_data.horizontal_dims),
+        ),
+    )
     stepped = train_stepper.train_on_batch(
-        data=coupled_data.data, optimization=NullOptimization()
+        data=padded_data, optimization=NullOptimization()
     )
     assert "loss/atmosphere_step_3" in stepped.atmosphere.metrics
     assert torch.isfinite(stepped.total_metrics["loss"])
