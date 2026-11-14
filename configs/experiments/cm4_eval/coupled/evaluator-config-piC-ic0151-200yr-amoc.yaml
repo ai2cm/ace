@@ -1,0 +1,54 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+# piControl rollout of evaluator-config-piC-ic0151-200yr-maps.yaml (same IC, length,
+# stores) saving 5-day predicted vo_0..vo_18 on the 1-degree row at 26.5N across the
+# Atlantic, for AMOC at 26.5N; companion of evaluator-config-1pct-ic0001-130yr-amoc.yaml.
+# The CM4 target AMOC is computed from its GCS store instead.
+experiment_dir: /results
+n_coupled_steps: 14598  # --min-runtime 8h
+coupled_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+    - label: amoc_26n_5daily
+      names: [vo_0, vo_1, vo_2, vo_3, vo_4, vo_5, vo_6, vo_7, vo_8, vo_9,
+              vo_10, vo_11, vo_12, vo_13, vo_14, vo_15, vo_16, vo_17, vo_18]
+      lat_extent: [26.0, 27.0]  # one 1-degree row, centre nearest RAPID 26.5N
+      lon_extent: [255.0, 355.0]  # Gulf of Mexico to Africa; land at both ends, no lon-0 wrap
+      save_reference: false  # target AMOC computed from the GCS store
+      format:
+        name: zarr
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
