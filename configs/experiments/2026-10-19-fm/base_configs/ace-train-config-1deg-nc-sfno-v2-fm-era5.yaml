@@ -16,6 +16,9 @@
 #   loss weight h500: 5.0 (both as in configs/baselines/era5);
 # - inline inference n_forward_steps and the day-5 step_means step x4
 #   (6-hourly steps).
+# - to fit an 80 GiB GPU at 1deg: validation batch_size 32 -> 16 (2 per GPU
+#   on 8 GPUs) and weather inference n_ensemble_per_ic 4 -> 2 (8 initial
+#   conditions x 2 members = 16 fields on the one inference GPU);
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -338,7 +341,7 @@ inference:
     step: 10
   n_forward_steps: 20
   forward_steps_in_memory: 5
-  n_ensemble_per_ic: 4
+  n_ensemble_per_ic: 2
   loader:
     start_indices:
       times:
@@ -452,7 +455,7 @@ inference:
     step: 10
   n_forward_steps: 20
   forward_steps_in_memory: 5
-  n_ensemble_per_ic: 4
+  n_ensemble_per_ic: 2
   loader:
     start_indices:
       times:
@@ -599,7 +602,7 @@ validation:
   weight: 1.0
   evaluate_all_steps: false
   loader:
-    batch_size: 32
+    batch_size: 16
     num_data_workers: 8
     prefetch_factor: 2
     time_buffer: 16
