@@ -49,7 +49,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0330-21yr-mjo|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-11-mjo-lag-regression-eval/coupled/8xx0pife/piC-ic0330-21yr-mjo
 
 # TC wake statistics, out-of-sample piControl 0302-0350, 6-h tracker inputs + 5-day sst, |lat| <= 60
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|run_piC-ic0302-48yr-tc|best_inference_ckpt|high|--min-runtime 4h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-12-tc-wake-eval/coupled/8xx0pife/piC-ic0302-48yr-tc
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0302-48yr-tc|best_inference_ckpt|high|--min-runtime 4h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-12-tc-wake-eval/coupled/8xx0pife/piC-ic0302-48yr-tc
 
 # --config-dir configs/experiments/cm4_eval/coupled
 cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
@@ -81,8 +81,8 @@ fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|ran_1pct-ic0001-130yr|ema_c
 fmean1deg-cft-rs1-replay||01M61RBH49PFKN105CG631SHAJ|ran_piC-ic0151-200yr|ema_ckpt_0007|high|--min-runtime 8h
 
 # troy's training runs with the hybrid SST Samudra + random CO2 replay
-hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_1pct-ic0001-130yr|ema_ckpt_0007|high|--min-runtime 8h
-hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_piC-ic0151-200yr|ema_ckpt_0007|high|--min-runtime 8h
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|ran_1pct-ic0001-130yr|ema_ckpt_0007|high|--min-runtime 8h
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|ran_piC-ic0151-200yr|ema_ckpt_0007|high|--min-runtime 8h
 
 # --config-dir configs/experiments/cm4_eval/coupled (job_runner/inference.sh)
 # Coupled abrupt-4xCO2: 36 90-day members branched from piControl, plus a 100-year extension of member 1 (W&B 8xx0pife).
@@ -123,3 +123,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic35|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic36|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+
+# troy's training runs with the hybrid SST Samudra + random CO2 replay, FTO -> FTalt with corrector_disabled_epochs: 0
+hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
+hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
