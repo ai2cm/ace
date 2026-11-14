@@ -125,3 +125,31 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0-r1-ic0
 
 # smoke (compare: 08b_smoke_compare.py)
 1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-smoke|01M73SGN1R0VNPVFCGP0HF2DE2|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 1h|n_coupled_steps=64 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+
+# 08b no228urh best_inference_ckpt (launch now)
+1deg-randco2rs1-fmean-hybridsstdiag-jfto|r1-ic0001|01M6WHHVQJDD47A41HHPWQXNXT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0001-01-06T00:00:00']|01M711Y5KWBW0RH2B1EK38YTEY|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto|r1-ic0019|01M6WHHVQJDD47A41HHPWQXNXT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0019-01-06T00:00:00']|01M711Y5KWBW0RH2B1EK38YTEY|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto|r1-ic0037|01M6WHHVQJDD47A41HHPWQXNXT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0037-01-06T00:00:00']|01M711Y5KWBW0RH2B1EK38YTEY|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto|r1-ic0151|01M6WHHVQJDD47A41HHPWQXNXT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0151-01-06T00:00:00']|01M711Y5KWBW0RH2B1EK38YTEY|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto|r1-ic0229|01M6WHHVQJDD47A41HHPWQXNXT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0229-01-06T00:00:00']|01M711Y5KWBW0RH2B1EK38YTEY|ai2/ace
+
+# 08b k2658h3a ema_ckpt_0001 (launch now)
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0001|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0019|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0019-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0037|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0037-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0151|01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0151-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0229|01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0229-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+
+# 08b k2658h3a ema_ckpt_0002 (launch now)
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0001|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0019|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0019-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0037|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0037-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0151|01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0151-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0229|01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0229-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+
+# 08b k2658h3a ema_ckpt_0003 (launch now)
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0001|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0019|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0019-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0037|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h|n_coupled_steps=6800 loader.start_indices.times=['0037-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0151|01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0151-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-ic0229|01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h|n_coupled_steps=8838 loader.start_indices.times=['0229-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
