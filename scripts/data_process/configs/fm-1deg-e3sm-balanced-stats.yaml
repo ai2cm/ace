@@ -2,118 +2,121 @@
 # fm-e3sm-balanced base config
 #   configs/experiments/2026-10-19-fm/base_configs/ace-train-config-1deg-nc-sfno-v2-fm-e3sm-balanced.yaml
 # Derived from fm-v2-e3sm-balanced-stats.yaml: the same entries, time slices, groups, renames, derived
-# variables and scalings, with each 4deg daily store replaced by the GCS copy of
-# its 1deg 6-hourly store.
+# variables and scalings, with each 4deg daily store replaced by its 1deg
+# 6-hourly store.
+# Every store is read from its weka copy (the same paths training reads; each
+# is /climate-default/X for gs://vcm-ml-intermediate/X): the train concat is
+# about 20 TB compressed, too much to pull from GCS.
 # The E3SM store has no TMP850 or h500 (training reads the e3sm group from
-# groups/e3sm-filled, built by fill_e3sm_group_stats.py). It is read from weka:
-# a copy of gs://vcm-ml-intermediate/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+# groups/e3sm-filled, built by fill_e3sm_group_stats.py). Its weka copy is
+# gs://vcm-ml-intermediate/2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
 # with a constant global_mean_co2 appended.
 dataset_pairs:
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
   start_time: '1979-01-01'
   end_time: '1993-12-31'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
   start_time: '1995-01-01'
   end_time: '2008-12-31'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-1xCO2-random-perturbation.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-1xCO2-random-perturbation.zarr
   start_time: '2020-01-01'
   end_time: '2025-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
   start_time: '2020-01-01'
   end_time: '2025-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-2xCO2-random-perturbation.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-2xCO2-random-perturbation.zarr
   start_time: '2020-01-01'
   end_time: '2025-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
   start_time: '2020-01-01'
   end_time: '2025-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-4xCO2-random-perturbation.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-4xCO2-random-perturbation.zarr
   start_time: '2020-01-01'
   end_time: '2025-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset/ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
   start_time: '2020-01-01'
   end_time: '2025-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0001.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0001.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0001.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0001.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0001.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0001.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
   start_time: '1979-01-01'
   end_time: '1993-12-31'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
   start_time: '1995-01-01'
   end_time: '2008-12-31'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0002.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0003.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0003.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0004.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0004.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0002.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0003.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0003.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0004.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0004.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0005.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0005.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0002.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0002.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0003.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0003.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0004.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0004.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0005.zarr
+- dataset: /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0005.zarr
   start_time: '2031-01-02'
   end_time: '2041-01-01'
   group: c96
-- dataset: gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+- dataset: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   start_time: '1940-01-03'
   end_time: '1993-12-31'
   group: era5
-- dataset: gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+- dataset: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   start_time: '1995-01-01'
   end_time: '2008-12-31'
   group: era5
-- dataset: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+- dataset: /climate-default/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -121,7 +124,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+- dataset: /climate-default/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -129,7 +132,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0001.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0001.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -137,7 +140,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0002.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0002.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -145,7 +148,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0003.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0003.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -153,7 +156,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0001.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0001.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -161,7 +164,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0002.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0002.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -169,7 +172,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0003.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0003.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -177,7 +180,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0001.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0001.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -185,7 +188,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0002.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0002.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -193,7 +196,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0003.zarr
+- dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0003.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
@@ -201,7 +204,7 @@ dataset_pairs:
     global_mean_co2: 1.0e-06
   derived_variables:
   - ocean_fraction
-- dataset: gs://vcm-ml-intermediate/2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+- dataset: /climate-default/2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
   group: xshield
 - dataset: /climate-default/2026-11-13-E3SMv3-piControl-atmosphere-105yr-6H-co2.zarr
   group: e3sm

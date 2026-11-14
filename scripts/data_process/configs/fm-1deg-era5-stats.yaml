@@ -2,14 +2,15 @@
 # fm-era5 base config
 #   configs/experiments/2026-10-19-fm/base_configs/ace-train-config-1deg-nc-sfno-v2-fm-era5.yaml
 # Derived from fm-v2-era5-stats.yaml: the same entries, time slices, groups, renames, derived
-# variables and scalings, with each 4deg daily store replaced by the GCS copy of
-# its 1deg 6-hourly store.
+# variables and scalings, with each 4deg daily store replaced by its 1deg
+# 6-hourly store, read from its weka copy (the same path training reads;
+# /climate-default/X for gs://vcm-ml-intermediate/X).
 dataset_pairs:
-- dataset: gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+- dataset: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   start_time: '1940-01-03'
   end_time: '1993-12-31'
   group: era5
-- dataset: gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+- dataset: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   start_time: '1995-01-01'
   end_time: '2008-12-31'
   group: era5
