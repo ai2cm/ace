@@ -10,9 +10,13 @@ becomes `objective_per_batch`, a weighted draw over `{atmosphere, ocean, joint}`
 n          = dt_ocean / dt_atmos                # CoupledStepperConfig.n_inner_steps
 i_O, i_A   : 1-indexed ocean / atmosphere steps (config); code steps are 0-indexed
 W(i_O)     = {(i_O-1)*n + 1, ..., i_O*n}        # atmosphere steps averaged into ocean step i_O's forcing
+x_O(i), x_A(i) : predicted ocean / atmosphere state at step i
+θ_O, θ_A   : ocean / atmosphere module weights
+L_O(i), L_A(i) : the realm's per-step loss at step i, loss_weight * StepLoss(...).total() as today
 ocean later  ⇔ i_A ∈ W(i_O)       edge: L_O(i_O) → x_A(i_A) → θ_A   (x_A(i_A) in the ocean forcing mean)
 atmos later  ⇔ i_A ∈ W(i_O + 1)   edge: L_A(i_A) → x_O(i_O) → θ_O   (x_O(i_O) in atmosphere step i_A's forcing)
-L_joint    = L_earlier(i_earlier) + L_later(i_later)   # each the realm's weighted per-step loss
+earlier, later : the pair's two steps in causal order; L_earlier, L_later their per-step losses
+L_joint    = L_earlier(i_earlier) + L_later(i_later)
 ```
 
 ```yaml
@@ -28,11 +32,16 @@ Per batch:
 
 ```
 objective_per_batch absent  -> every schedule's losses + L_joint(pair ~ U(joint_pairs))   (L_joint only if joint_pairs)
-objective_per_batch present -> objective ~ normalized weights over objectives with a loss this batch
+objective_per_batch present -> objective ~ normalized weights over objectives with weight > 0 and a loss this batch
                                atmosphere | ocean -> that schedule's losses (today's single-component batch)
                                joint              -> L_joint only
-rollout outer steps = max(today's schedule rollout, ceil(i_A / n))
+                               no such objective  -> no loss this batch (a weight-0 realm is never optimized)
+rollout outer steps = max(today's schedule rollout, ceil(i_A / n))   # every batch, joint batches included
+joint_pairs with objective_per_batch.joint absent or 0 -> accepted; the pairs go unused
 ```
+
+The weighted draw replaces today's `randint` over non-null realms: the
+deprecated flag keeps today's distribution, not today's per-batch sequence.
 
 Gradient cuts are the existing `use_gradient_accumulation` detaches; joint mode
 adds none. It keeps the pair's edge attached, runs both pair steps with grad
@@ -88,7 +97,7 @@ class CoupledTrainStepperConfig:
 
     def __post_init__(self): ...  # CHANGED
     # flag and objective_per_batch both set -> ValueError
-    # flag true -> DeprecationWarning; objective_per_batch = {atmosphere: 1, ocean: 1}
+    # flag true -> DeprecationWarning; objective_per_batch = {atmosphere: 1, ocean: 1}; flag reset to False
     # objective_per_batch.<realm> > 0 for a statically null realm -> ValueError (today's flag check, per key)
     # objective_per_batch.joint > 0 without joint_pairs -> ValueError
     # joint_pairs: non-empty, pairs of two indices >= 1
@@ -148,6 +157,13 @@ class CoupledTrainStepper:
   forcing is therefore built while resuming the pair step itself, for example
   by splitting the window's atmosphere generator at that step. Never
   `torch.enable_grad()`: validation runs under `no_grad`.
+- **Segment boundaries.** `single_module.py` `predict_generator` detaches its
+  state only when resumed after a yield, so a segment that is not resumed
+  hands its last state on attached. Each segment boundary therefore calls
+  `optimizer.detach_if_using_gradient_accumulation` on the carried state: this
+  reproduces today's detach, not a new cut. Each segment continues the
+  atmosphere step count, so `optimizer.checkpoint(..., step=...)` sees the same
+  step numbers as an unsplit window.
 - **One backward.** Under accumulation `accumulate_loss` calls `backward` at
   once and frees the graph. Holding `L_earlier` keeps the earlier step's graph
   alive until the later step. No other backward reaches it, because every
@@ -173,7 +189,8 @@ def _validate_joint_pairs(
 
 ```python
 # Build on _build_coupled_loss, _single_component_loss, _optimized_realms.
-# Port the test_single_component_* tests to objective_per_batch {atmosphere: 1, ocean: 1}.
+# Port the test_single_component_* tests and the _build_coupled_loss
+# optimize_single_component_per_batch kwarg to objective_per_batch {atmosphere: 1, ocean: 1}.
 
 def test_objective_draw_follows_weights():
     # GOAL: draw frequencies follow normalized weights.
@@ -182,6 +199,11 @@ def test_objective_draw_follows_weights():
 
 def test_objective_null_realm_drops_out():
     # GOAL: a realm with no loss this batch (sampled n_steps 0) is never drawn; the rest renormalize.
+    ...
+
+def test_objective_no_eligible_objective_optimizes_nothing():
+    # GOAL: {atmosphere: 1} with a non-null ocean schedule, atmosphere n_steps 0 this batch
+    # -> step_is_optimized false for every step of both realms.
     ...
 
 def test_joint_objective_optimizes_only_pair_steps():
@@ -213,7 +235,8 @@ def test_objective_eval_reproducible_after_seed_eval():
 
 ```python
 # Build on get_train_stepper_and_batch, _single_component_stepper_and_batch,
-# _trainable_train_stepper_and_batch.
+# _trainable_train_stepper_and_batch. Port test_optimize_single_component_rejects_static_null_realm
+# (it matches the error text "optimize_single_component_per_batch").
 
 def test_objective_per_batch_config_validation():
     # GOAL: __post_init__ rejects invalid configs.
@@ -222,13 +245,26 @@ def test_objective_per_batch_config_validation():
     ...
 
 def test_deprecated_single_component_flag():
-    # GOAL: DeprecationWarning; behaves as {atmosphere: 1, ocean: 1}.
+    # GOAL: DeprecationWarning; behaves as {atmosphere: 1, ocean: 1}; the flag reads False after
+    # __post_init__, so dataclasses.replace on the config does not raise.
     ...
 
 def test_joint_pair_cross_component_gradient():
     # GOAL: in a joint batch the earlier component's gradient differs from that of
     # L_earlier alone, and the later component gets a gradient.
     # PARAMETERIZE: ocean later / atmosphere later x use_gradient_accumulation true / false.
+    ...
+
+def test_joint_pair_with_schedules_accumulation():
+    # GOAL: objective_per_batch absent, use_gradient_accumulation true, schedules optimizing
+    # the steps next to the pair, pair atmosphere step not first in its window -> train step
+    # runs (no backward through a freed graph) and both components get a gradient.
+    # PARAMETERIZE: ocean later / atmosphere later.
+    ...
+
+def test_joint_pair_per_component_optimizers():
+    # GOAL: per-component optimizers (OptimizationDict) with a joint batch -> one backward
+    # reaches both components and each optimizer steps its own component.
     ...
 
 def test_joint_pair_ocean_later_only_pair_step_attached():
@@ -250,8 +286,8 @@ def test_joint_pair_beyond_atmosphere_n_steps():
     ...
 
 def test_joint_pair_validation_loss_reproducible():
-    # GOAL: eval, NullOptimization, evaluate_all_steps=True -> per-step metrics for both realms;
-    # draws replay after seed_eval.
+    # GOAL: eval, NullOptimization -> per-step metrics for both realms; draws replay after seed_eval.
+    # PARAMETERIZE: evaluate_all_steps True / False.
     ...
 ```
 
@@ -259,8 +295,8 @@ def test_joint_pair_validation_loss_reproducible():
 
 ```python
 def test_validate_joint_pairs():
-    # GOAL: accept (1, 1), (1, n), (1, n + 1), (1, 2n); reject (1, 2n + 1) (no direct edge),
-    # i_O > n_coupled_steps, ceil(i_A / n) > n_coupled_steps.
+    # GOAL: accept (1, 1), (1, n), (1, n + 1), (1, 2n); reject (1, 2n + 1) and (2, n), (2, 1)
+    # (no direct edge), i_O > n_coupled_steps, ceil(i_A / n) > n_coupled_steps.
     # PARAMETERIZE: n.
     ...
 ```
@@ -269,9 +305,7 @@ def test_validate_joint_pairs():
 
 ## Open Questions
 
-- Rollout length of a `joint` batch: the full schedule rollout (as a
-  single-component batch rolls out both schedules today), or only the pair's?
-- `joint_pairs` set with `objective_per_batch.joint` 0 or absent: accepted
-  (the pairs go unused, so `joint: 0` can switch them off), or rejected?
-- Per-step losses inside `L_joint` carry each realm's `loss_weight`; a realm at
-  `loss_weight: 0` contributes only its gradient path through the other's loss.
+None. Settled above: a `joint` batch rolls out `max(schedules, pair)`;
+`joint_pairs` with `joint` weight 0 or absent is accepted and unused; `L_joint`
+sums each realm's weighted per-step loss, so a realm at `loss_weight: 0`
+contributes only its gradient path through the other realm's loss.
