@@ -47,10 +47,6 @@ streams:
     # the artifact flags them so they are not averaged into coastal centers.
     # One artifact for the ensemble (make generate_face_masks_abrupt_4xco2).
     face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/cm4-abrupt-4xCO2-2026-10-16
-    postprocess:
-      - name: kelvin_sst
-        sources:
-          celsius_sst: tos
   # Daily-mean surface fluxes/forcings averaged over 5-day blocks, labeled by
   # the end of each block so they coincide with the snapshot instants
   # (enforced by the time-alignment assertion).
@@ -113,6 +109,9 @@ streams:
       - sea_ice_fraction
     postprocess:
       - sea_ice
+      - name: kelvin_sst
+        sources:
+          celsius_sst: SST
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot

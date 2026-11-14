@@ -40,10 +40,6 @@ streams:
     # with value exactly 0.0 where the vertical remap unmasked land columns;
     # the artifact flags them so they are not averaged into coastal centers.
     face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/om4-picontrol-2026-06-19
-    postprocess:
-      - name: kelvin_sst
-        sources:
-          celsius_sst: tos
   # 1-day-mean surface fluxes/forcings, whose end-of-interval time labels
   # coincide with the snapshot instants (enforced by the time-alignment
   # assertion).
@@ -105,6 +101,9 @@ streams:
       - sea_ice_fraction
     postprocess:
       - sea_ice
+      - name: kelvin_sst
+        sources:
+          celsius_sst: SST
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot

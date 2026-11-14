@@ -229,6 +229,9 @@ def test_chunk_values_on_toy(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "OUTPUT_DTYPE", np.float64)
     out = _toy_chunk(_toy_run(tmp_path, monkeypatch))
     _assert_tabled(out["SST"], [F(1, 3), -1, NAN], "X^a_J of ζ")
+    np.testing.assert_array_equal(out["SST_degK"], out["SST"] + 273.15)
+    assert out["SST_degK"].attrs["units"] == "K"
+    assert "sst" not in out.data_vars
     _assert_tabled(
         out["sea_ice_fraction"], [F(5, 6), F(1, 10), NAN], "sea_ice_fraction_J"
     )
