@@ -1,158 +1,167 @@
-# Per-component learning rates and LR schedules for coupled training
+# Joint atmosphere-ocean pair optimization for coupled training
 
-`TrainConfig.optimization` in `fme/coupled` takes either today's single
-`OptimizationConfig` or a mapping with one `OptimizationConfig` per component
-(`atmosphere`, `ocean`), each building its own optimizer and LR scheduler.
-`CoupledStepper.modules` stays a `ModuleList`, so model weights, EMA names and
-single-form optimizer state in existing coupled checkpoints load unchanged.
+Coupled training gains a third per-batch objective, `joint`: for one drawn
+pair of steps `(i_O, i_A)`, gradients flow between the ocean and the
+atmosphere across the pair's one direct edge, optimizing `P(O, A)` beside the
+conditional objectives `P(A|O)` and `P(O|A)`. `optimize_single_component_per_batch`
+becomes `objective_per_batch`, a weighted draw over `{atmosphere, ocean, joint}`.
 
-Config, dict form:
+```
+n          = dt_ocean / dt_atmos                # CoupledStepperConfig.n_inner_steps
+i_O, i_A   : 1-indexed ocean / atmosphere steps (config); code steps are 0-indexed
+W(i_O)     = {(i_O-1)*n + 1, ..., i_O*n}        # atmosphere steps averaged into ocean step i_O's forcing
+ocean later  ⇔ i_A ∈ W(i_O)       edge: L_O(i_O) → x_A(i_A) → θ_A   (x_A(i_A) in the ocean forcing mean)
+atmos later  ⇔ i_A ∈ W(i_O + 1)   edge: L_A(i_A) → x_O(i_O) → θ_O   (x_O(i_O) in atmosphere step i_A's forcing)
+L_joint    = L_earlier(i_earlier) + L_later(i_later)   # each the realm's weighted per-step loss
+```
 
 ```yaml
-optimization:
-  atmosphere:
-    optimizer_type: AdamW
-    lr: <lr_atmosphere>
-    enable_automatic_mixed_precision: true
-    max_grad_norm: <clip_atmosphere>
-    scheduler: {type: CosineAnnealingLR}
-  ocean:
-    optimizer_type: Muon
-    lr: <lr_ocean>
-    kwargs: {adamw_lr: <adamw_lr_ocean>}
-    enable_automatic_mixed_precision: true
-    resume_optimizer_ckpt_path: <uncoupled ocean ckpt.tar>   # param names 0.<name> match uncoupled ACE
-    scheduler: {type: ReduceLROnPlateau, kwargs: {factor: <f>, patience: <p>}}
+stepper_training:
+  joint_pairs: [[1, 1], [1, 21], [1, 21]]   # [i_O, i_A]; repeats raise a pair's draw weight
+  objective_per_batch:                       # optional
+    atmosphere: 1.0                          # absent key = 0; weights normalized
+    ocean: 1.0
+    joint: 1.0                               # > 0 requires joint_pairs
 ```
 
-Saved `ckpt.tar["optimization"]`:
+Per batch:
 
 ```
-single form:  {optimizer_state_dict, scheduler_state_dict, gscaler_state_dict}   # unchanged
-dict form:    {components: {atmosphere: {optimizer_state_dict, scheduler_state_dict},
-                            ocean:      {optimizer_state_dict, scheduler_state_dict}},
-               gscaler_state_dict}
+objective_per_batch absent  -> every schedule's losses + L_joint(pair ~ U(joint_pairs))   (L_joint only if joint_pairs)
+objective_per_batch present -> objective ~ normalized weights over objectives with a loss this batch
+                               atmosphere | ocean -> that schedule's losses (today's single-component batch)
+                               joint              -> L_joint only
+rollout outer steps = max(today's schedule rollout, ceil(i_A / n))
 ```
+
+Gradient cuts are the existing `use_gradient_accumulation` detaches; joint mode
+adds none. It keeps the pair's edge attached, runs both pair steps with grad
+whatever the schedule, and holds `L_earlier` until the later step, so one
+backward of `L_joint` runs through both components. With accumulation on (the
+intended setting), no backward visits a component twice. With it off, the
+cross-component backprop through every grad-enabled step is the same as today.
 
 ---
 
-## `fme/core/generics/optimization.py` (modified)
+## `fme/coupled/loss.py` (modified)
 
 ```python
-OptimizationModules: TypeAlias = nn.ModuleList | Mapping[str, nn.ModuleList]  # NEW
+@dataclasses.dataclass(frozen=True)
+class JointPair:  # NEW: one validated pair, 0-indexed
+    ocean_step: int
+    atmosphere_step: int
+    n_inner_steps: int
 
-class OptimizationABC(abc.ABC):
+    @classmethod
+    def from_config(cls, pair: Sequence[int], n_inner_steps: int) -> "JointPair":  # [i_O, i_A] -> 0-indexed; raises off a direct edge
+        ...
+
     @property
-    def learning_rates(self) -> dict[str, float]:  # NEW — per-component lr; {} by default
+    def ocean_is_later(self) -> bool:  # atmosphere_step // n_inner_steps == ocean_step
         ...
-```
 
-## `fme/core/generics/train_stepper.py` (modified)
-
-```python
-class TrainStepperABC:
     @property
-    def optimization_modules(self) -> OptimizationModules:  # NEW — default self.modules; same params as modules
+    def n_outer_steps(self) -> int:  # atmosphere_step // n_inner_steps + 1
+        ...
+
+    def role(self, realm: Literal["ocean", "atmosphere"], step: int) -> Literal["earlier", "later"] | None:
         ...
 ```
-
-## `fme/core/optimization.py` (modified)
-
-```python
-def flatten_optimization_modules(modules: OptimizationModules) -> nn.ModuleList:  # NEW — concat mapping values in key order
-    ...
-
-def _step_scheduler(scheduler, valid_loss, is_iteration) -> None:  # NEW — lifted from Optimization.step_scheduler
-    ...
-
-def _load_optimizer_state_for_finetuning(optimizer, optimizer_state_dict) -> None:  # NEW — lifted from Optimization
-    ...
-
-def _read_optimization_state(checkpoint_path: str) -> dict[str, Any]:  # NEW — replaces _load_finetune_optimization_state
-    ...
-
-class Optimization:
-    def load_state(self, state):  # CHANGED — raises ValueError on a per-component ("components") state
-        ...
-
-class OptimizationDict(OptimizationABC):  # NEW — one optimizer + scheduler per key, one backward, one shared GradScaler
-    learning_rate: float                    # first component's lr
-    learning_rates: dict[str, float]
-    def set_learning_rate(self, lr): ...    # raises NotImplementedError (no lr_tuning, D5)
-    def step_scheduler(self, valid_loss=None, is_iteration=False): ...  # steps each component's scheduler on its own step_each_iteration
-    def step_weights(self): ...             # skips a component with no grads; clips each component's norm alone
-    def load_optimizer_state_for_finetuning(self, key, state): ...  # single-form or per-component state into one key
-    def get_state(self): ...                # {components: {...}, gscaler_state_dict}
-    def load_state(self, state): ...        # raises on single-form state or on different component keys
-
-class OptimizationConfig:
-    def build_optimizer_and_scheduler(self, modules, max_epochs) -> tuple[Optimizer, LRScheduler]:  # NEW
-        ...
-    def build(self, modules: OptimizationModules, max_epochs) -> Optimization:  # CHANGED — a mapping flattens in key order
-        ...
-
-OptimizationConfigDict: TypeAlias = dict[str, OptimizationConfig]  # NEW
-
-def validate_optimization_config_dict(configs, keys) -> None:  # NEW — exact keys; amp/accumulation/checkpoint agree
-    ...
-
-def has_lr_schedule(config: OptimizationConfig | OptimizationConfigDict) -> bool:  # NEW — any entry
-    ...
-
-def build_optimization_dict(configs, modules: Mapping[str, nn.ModuleList], max_epochs) -> OptimizationDict:  # NEW
-    ...
-```
-
-### Critical detail — mixed precision with several optimizers
-
-- One `GradScaler`: `unscale_(opt_c)` and `step(opt_c)` per component `c`, one
-  `update()`. An inf in one component skips only that component's step.
-- `GradScaler.step(opt_c)` raises when no parameter of `c` has a grad (frozen
-  component, or a single-component batch that does not reach `c`), so such a
-  component is skipped; `update()` is skipped when no component stepped.
 
 ## `fme/coupled/stepper.py` (modified)
 
 ```python
-class CoupledTrainStepper:
+@dataclasses.dataclass
+class ObjectivePerBatchConfig:  # NEW
+    atmosphere: float = 0.0
+    ocean: float = 0.0
+    joint: float = 0.0
+
+    def __post_init__(self): ...  # every weight >= 0, sum > 0
+
+
+@dataclasses.dataclass
+class CoupledTrainStepperConfig:
+    joint_pairs: list[list[int]] | None = None                  # NEW
+    objective_per_batch: ObjectivePerBatchConfig | None = None  # NEW
+    optimize_single_component_per_batch: bool = False           # CHANGED: deprecated
+
+    def __post_init__(self): ...  # CHANGED
+    # flag and objective_per_batch both set -> ValueError
+    # flag true -> DeprecationWarning; objective_per_batch = {atmosphere: 1, ocean: 1}
+    # objective_per_batch.<realm> > 0 for a statically null realm -> ValueError (today's flag check, per key)
+    # objective_per_batch.joint > 0 without joint_pairs -> ValueError
+    # joint_pairs: non-empty, pairs of two indices >= 1
+
+    def get_train_window_data_requirements(self, stepper_config): ...  # CHANGED: atmosphere target horizon covers max i_A
+    def _build_loss(self, stepper, n_coupled_steps): ...  # CHANGED: objective weights, JointPair list
+
+
+class CoupledStepperTrainLoss:
+    def __init__(
+        self, ocean_loss, atmosphere_loss, ocean_schedule, atmosphere_schedule,
+        objective_weights: ObjectivePerBatchConfig | None = None,  # CHANGED: replaces optimize_single_component_per_batch
+        joint_pairs: Sequence[JointPair] = (),                     # NEW
+    ): ...
+
+    def sample_from_rng(self) -> None: ...  # CHANGED: n_steps, then objective, then pair; train/eval RNGs as today
+
     @property
-    def optimization_modules(self) -> dict[str, nn.ModuleList]:  # NEW — {"atmosphere": ..., "ocean": ...}
-        ...  # key order matches CoupledStepper.modules: the single form flattens to today's param order
+    def joint_pair(self) -> JointPair | None: ...  # NEW: this batch's pair; None when L_joint is not in the batch
+
+    def joint_role(self, realm, step) -> Literal["earlier", "later"] | None: ...  # NEW
+
+    def n_required_outer_steps(self, n_inner_steps: int) -> int: ...  # CHANGED: covers joint_pair
+    def step_is_optimized(self, realm, step) -> bool: ...  # CHANGED: pair steps always; objective gates the rest
+    def compute_loss(self, prediction, target_data) -> torch.Tensor: ...  # CHANGED: pair steps regardless of schedule
+    def __call__(self, prediction, target_data) -> torch.Tensor | None: ...  # CHANGED
+
+
+class CoupledStepper:
+    def get_prediction_generator(
+        self, initial_condition, forcing_data, optimizer,
+        joint_pair: JointPair | None = None,  # NEW: inference passes None
+    ): ...  # CHANGED
+
+
+class CoupledTrainStepper:
+    def _accumulate_loss(self, ...): ...  # CHANGED: passes self._loss.joint_pair to the generator
+    def _accumulate_step_loss(self, ...): ...  # CHANGED: holds L_earlier; accumulate_loss(L_earlier + L_later) once
 ```
+
+### Critical detail: the pair's attached edge
+
+- **Ocean later.** The pair's atmosphere step skips
+  `detach_if_using_gradient_accumulation` before it joins the window stack, so
+  it stays attached in the ocean forcing mean. Every other step of the window
+  is unchanged.
+- **Atmosphere later.** The ocean output at the pair's ocean step is kept
+  attached beside the detached copy that becomes the next ocean IC. In the next
+  window, only the pair's atmosphere step reads the attached copy: its
+  ocean-derived forcings and, when it is the window's first step, the SST
+  prescribed into its initial condition. Every other step reads the detached
+  copy.
+- **Grad context.** `_accumulate_loss` sets the grad context per `next()`, and
+  generator code between yields runs in the context of the `next()` that
+  resumes it. The window's forcings are built while resuming its first
+  atmosphere step, which may run under `no_grad`. The pair step's attached
+  forcing is therefore built while resuming the pair step itself, for example
+  by splitting the window's atmosphere generator at that step. Never
+  `torch.enable_grad()`: validation runs under `no_grad`.
+- **One backward.** Under accumulation `accumulate_loss` calls `backward` at
+  once and frees the graph. Holding `L_earlier` keeps the earlier step's graph
+  alive until the later step. No other backward reaches it, because every
+  other path out of the earlier step is cut by an accumulation detach.
 
 ## `fme/coupled/train/train_config.py` (modified)
 
 ```python
-class TrainConfig:
-    optimization: OptimizationConfig | OptimizationConfigDict  # CHANGED — single form first in the union
-
-    def __post_init__(self): ...  # CHANGED — validate dict keys and shared fields; reject lr_tuning with the dict form
-    def _get_optimization(self, modules: OptimizationModules) -> OptimizationABC: ...  # CHANGED — dispatch on form
-```
-
-## `fme/core/generics/trainer.py` (modified)
-
-```python
-class Trainer:
-    def __init__(self, ..., build_optimization: Callable[[OptimizationModules], OptimizationABC], ...):  # CHANGED
-        ...  # builds from stepper.optimization_modules; EMA and wandb.watch keep stepper.modules
-    # train / train_one_epoch: CHANGED — also log lr/<component>
-
-def _component_lr_logs(optimization: OptimizationABC) -> dict[str, float]:  # NEW
-    ...
-```
-
-## `fme/core/generics/lr_tuning.py` (modified)
-
-```python
-def run_lr_tuning_trial(..., build_optimization: Callable[[OptimizationModules], OptimizationABC], ...):  # CHANGED
-    ...  # baseline and candidate built from <stepper>.optimization_modules
-```
-
-## `fme/ace/train/train_config.py` (modified)
-
-```python
-def _get_optimization(self, modules: OptimizationModules) -> Optimization:  # CHANGED — annotation only
+def _validate_joint_pairs(
+    joint_pairs: list[list[int]] | None, n_inner_steps: int, n_coupled_steps: int
+) -> None:  # NEW; called in TrainConfig.__post_init__ beside _validate_n_steps
+    # each pair: i_A ∈ W(i_O) ∪ W(i_O + 1)  (a direct edge)
+    # each pair: i_O <= n_coupled_steps and ceil(i_A / n) <= n_coupled_steps
+    # one ValueError naming every offending pair
     ...
 ```
 
@@ -160,79 +169,109 @@ def _get_optimization(self, modules: OptimizationModules) -> Optimization:  # CH
 
 ## Tests
 
-## `fme/core/test_optimization.py` (modified)
+## `fme/coupled/test_loss.py` (modified)
 
 ```python
-def test_optimization_dict_distinct_lr_and_schedules():
-    # GOAL: AdamW + CosineAnnealingLR and Adam + StepLR each match a lone torch optimizer + scheduler every epoch.
-def test_optimization_dict_matches_separate_optimizations():
-    # GOAL: one step on a summed loss == one OptimizationConfig.build per component stepped alone.
-def test_optimization_dict_state_round_trip():
-    # GOAL: get_state -> fresh build -> load_state continues identically (weights and lr).
-def test_optimization_dict_load_state_rejects_single_form(): ...
-def test_optimization_load_state_rejects_dict_form(): ...
-def test_optimization_dict_load_state_rejects_other_components(): ...
-def test_optimization_dict_skips_component_without_grad():
-    # PARAMETERIZE: scaler in {off, cpu GradScaler, cuda}; frozen component unchanged, other updated, no raise.
-def test_optimization_dict_no_component_with_grad_does_not_raise():
-    # PARAMETERIZE: {cpu GradScaler, cuda}; scale unchanged.
-def test_optimization_dict_clips_per_component():
-    # GOAL: a large-grad component does not shrink the other's clipped grad (read from Adam exp_avg).
-def test_optimization_dict_set_learning_rate_not_supported(): ...
-def test_optimization_dict_per_component_lr_trajectories():
-    # PARAMETERIZE: atmosphere {constant, growing} x ocean decaying x {iteration, epoch} stepping per component;
-    # each component's lr per batch matches its closed-form schedule.
-def test_validate_optimization_config_dict_rejects():
-    # PARAMETERIZE: missing key, unknown key, amp / accumulation / checkpoint differ.
-def test_build_optimization_dict_resume_from_uncoupled_ckpt():
-    # GOAL: per-entry resume_optimizer_ckpt_path restores that component's moments, keeps its lr, other fresh.
-```
+# Build on _build_coupled_loss, _single_component_loss, _optimized_realms.
+# Port the test_single_component_* tests to objective_per_batch {atmosphere: 1, ocean: 1}.
 
-## `fme/coupled/train/test_train_config.py` (modified)
+def test_objective_draw_follows_weights():
+    # GOAL: draw frequencies follow normalized weights.
+    # PARAMETERIZE: weights, including a zero key.
+    ...
 
-```python
-def test_train_config_optimization_union_parse():
-    # PARAMETERIZE: {} and {lr} -> OptimizationConfig; {atmosphere, ocean} -> dict of OptimizationConfig.
-def test_train_config_optimization_union_hides_entry_error():
-    # GOAL: documents that dacite's union reports an invalid entry as UnionMatchError.
-def test_train_config_rejects_lr_tuning_with_per_component_form(): ...
-def test_train_config_rejects_wrong_optimization_components(): ...
+def test_objective_null_realm_drops_out():
+    # GOAL: a realm with no loss this batch (sampled n_steps 0) is never drawn; the rest renormalize.
+    ...
+
+def test_joint_objective_optimizes_only_pair_steps():
+    # GOAL: objective joint -> step_is_optimized true only at the pair's two steps.
+    ...
+
+def test_no_objective_weights_schedules_plus_pair():
+    # GOAL: objective_per_batch absent with joint_pairs -> schedule steps plus the pair's steps.
+    ...
+
+def test_joint_pair_draw_uniform_with_repeats():
+    # GOAL: uniform over the list, so a repeated pair is drawn more often.
+    ...
+
+def test_n_required_outer_steps_covers_pair():
+    # GOAL: rollout = max(schedules, pair). PARAMETERIZE: ocean later, atmosphere later.
+    ...
+
+def test_compute_loss_pair_step_outside_schedule():
+    # GOAL: compute_loss at a pair step outside its schedule is non-zero.
+    ...
+
+def test_objective_eval_reproducible_after_seed_eval():
+    # GOAL: eval objective and pair draws replay after seed_rng.
+    ...
 ```
 
 ## `fme/coupled/test_stepper.py` (modified)
 
 ```python
-def test_optimization_modules_cover_modules():
-    # GOAL: keys atmosphere, ocean in order; flattened params == modules params in order.
-def test_single_form_optimization_unchanged():
-    # GOAL: OptimizationConfig.build from optimization_modules == from modules after two train_on_batch.
+# Build on get_train_stepper_and_batch, _single_component_stepper_and_batch,
+# _trainable_train_stepper_and_batch.
+
+def test_objective_per_batch_config_validation():
+    # GOAL: __post_init__ rejects invalid configs.
+    # PARAMETERIZE: flag and mapping both set; all weights 0; a negative weight;
+    # positive weight on a statically null realm; joint > 0 without pairs; malformed pair.
+    ...
+
+def test_deprecated_single_component_flag():
+    # GOAL: DeprecationWarning; behaves as {atmosphere: 1, ocean: 1}.
+    ...
+
+def test_joint_pair_cross_component_gradient():
+    # GOAL: in a joint batch the earlier component's gradient differs from that of
+    # L_earlier alone, and the later component gets a gradient.
+    # PARAMETERIZE: ocean later / atmosphere later x use_gradient_accumulation true / false.
+    ...
+
+def test_joint_pair_ocean_later_only_pair_step_attached():
+    # GOAL: accumulation on -> in the ocean forcing mean only the pair's atmosphere step carries grad.
+    ...
+
+def test_joint_pair_atmos_later_only_pair_step_reads_attached_ocean():
+    # GOAL: accumulation on -> only the pair's atmosphere step has a path to the ocean output.
+    # PARAMETERIZE: pair step first in its window / not first, with the window's first step under no_grad.
+    ...
+
+def test_joint_pair_single_backward():
+    # GOAL: Mock(wraps=Optimization(...)): one accumulate_loss call carries L_earlier + L_later;
+    # L_earlier is never passed alone.
+    ...
+
+def test_joint_pair_beyond_atmosphere_n_steps():
+    # GOAL: i_A past the atmosphere n_steps -> target data covers it and the loss is finite.
+    ...
+
+def test_joint_pair_validation_loss_reproducible():
+    # GOAL: eval, NullOptimization, evaluate_all_steps=True -> per-step metrics for both realms;
+    # draws replay after seed_eval.
+    ...
 ```
 
-## `fme/coupled/test_train.py` (modified)
+## `fme/coupled/train/test_train_config.py` (modified)
 
 ```python
-def test_train_per_component_optimization():
-    # GOAL: dict-form coupled training logs lr/atmosphere and lr/ocean following distinct StepLR schedules;
-    # saves the per-component state, resumes, and continues the same schedules.
-def test_train_per_component_lr_schedules():
-    # PARAMETERIZE: atmosphere constant / growing, ocean decaying, mixed iteration / epoch stepping;
-    # logged lr/atmosphere and lr/ocean per batch match each closed-form schedule.
-```
-
-## `fme/core/generics/test_trainer.py` (modified)
-
-```python
-# build_optimization helper and test_finetune_optimization_checkpoint_loads_optimizer_state
-# narrow OptimizationModules / OptimizationABC with isinstance (Trainer.optimization is now OptimizationABC).
+def test_validate_joint_pairs():
+    # GOAL: accept (1, 1), (1, n), (1, n + 1), (1, 2n); reject (1, 2n + 1) (no direct edge),
+    # i_O > n_coupled_steps, ceil(i_A / n) > n_coupled_steps.
+    # PARAMETERIZE: n.
+    ...
 ```
 
 ---
 
 ## Open Questions
 
-- Old coupled checkpoint resumed under the dict form: refuse (implemented), convert by param-index split, or start fresh with a warning?
-- `CoupledTrainStepper.optimization_modules` under the single form: always the mapping, flattened in key order (implemented), or `self.modules`?
-- Per-entry fields: full `OptimizationConfig` with amp/accumulation/checkpoint required to agree (implemented), or a narrower per-entry class?
-- Gradient clipping: per component (implemented) or one global norm?
-- Logged `lr` and `lr_tuning`: decided — atmosphere's lr plus `lr/<component>`; `lr_tuning` rejected with the dict form; distinct per-component schedules required.
-- Missing component key: raise (implemented), freeze it, or fall back to a default?
+- Rollout length of a `joint` batch: the full schedule rollout (as a
+  single-component batch rolls out both schedules today), or only the pair's?
+- `joint_pairs` set with `objective_per_batch.joint` 0 or absent: accepted
+  (the pairs go unused, so `joint: 0` can switch them off), or rejected?
+- Per-step losses inside `L_joint` carry each realm's `loss_weight`; a realm at
+  `loss_weight: 0` contributes only its gradient path through the other's loss.
