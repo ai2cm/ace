@@ -103,7 +103,7 @@ cfg: dict[str, Any] = {
             "evaluate_all_steps": False,
             "weight": 1.0,
             "loader": {
-                "batch_size": 64,
+                "batch_size": 16,  # 64 OOMs on 4 H100s in the pre-training validation pass (2 members, up to 20 steps)
                 "num_data_workers": 8,
                 "prefetch_factor": 2,
                 "dataset": ds(

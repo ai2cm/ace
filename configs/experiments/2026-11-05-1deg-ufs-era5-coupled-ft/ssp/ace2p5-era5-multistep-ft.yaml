@@ -59,7 +59,7 @@ validation:
   evaluate_all_steps: false
   weight: 1.0
   loader:
-    batch_size: 64
+    batch_size: 16
     num_data_workers: 8
     prefetch_factor: 2
     dataset:
