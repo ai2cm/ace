@@ -8,8 +8,11 @@ ace-train-config-1deg-<stem>.yaml -> ace2-fm-1deg-<stem>.
 --smoke submits the smoke-test configs (...-s0-smoke.yaml, one per arm)
 instead, into the wandb group ace2-fm-1deg-2026-11-13-smoke.
 
-The default clusters (ai2/jupiter, ai2/titan, ai2/saturn) all have 8-GPU
-nodes. Beaker priority defaults to `normal`.
+The default clusters are ai2/jupiter and ai2/titan. ai2/saturn is left out:
+on its A100s the compiled 1deg model fails in the first backward pass, as one
+generated kernel needs more shared memory than an A100 has ("No valid triton
+configs ... Required: 180384 Hardware limit:166912"). Beaker priority defaults
+to `normal`.
 
 Real submissions need the configs committed and pushed (gantry clones HEAD);
 --dry-run skips that check and prints the commands without submitting.
@@ -24,15 +27,21 @@ Usage:
 
 import argparse
 
-from _submit_common import check_configs_at_head, drop_jobs_in_beaker, submit_job
+from _submit_common import (
+    add_beaker_args,
+    check_configs_at_head,
+    drop_jobs_in_beaker,
+    submit_job,
+)
 from create_fm_1deg_jobs import ARMS, SEEDS, SMOKE_SEED, run_config_name
 from submit_fm_jobs import (
+    BEAKER_PRIORITY,
+    BEAKER_WORKSPACE,
     EXP_DIR,
     RUN_CONFIGS_DIR,
     RUN_SCRIPT,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    add_default_beaker_args,
     config_to_job_name,
 )
 
@@ -40,6 +49,7 @@ WANDB_GROUP = "ace2-fm-1deg-2026-11-13"
 SMOKE_WANDB_GROUP = f"{WANDB_GROUP}-smoke"
 N_GPUS = "8"
 SHARED_MEMORY = "400GiB"  # as configs/baselines/era5/run-ace-train.sh
+BEAKER_CLUSTERS = ["ai2/jupiter", "ai2/titan"]  # not saturn, see module docstring
 # Narrow Beaker --text filter matching every 1deg job name.
 LIST_TEXT = f"{WANDB_PREFIX}1deg-"
 
@@ -65,7 +75,12 @@ def main() -> None:
         action="store_true",
         help=f"Submit the smoke-test configs into {SMOKE_WANDB_GROUP} instead.",
     )
-    add_default_beaker_args(parser)
+    add_beaker_args(
+        parser,
+        default_workspace=BEAKER_WORKSPACE,
+        default_cluster=list(BEAKER_CLUSTERS),
+        default_priority=BEAKER_PRIORITY,
+    )
     args = parser.parse_args()
     if args.smoke and args.seed is not None:
         parser.error("--seed is not allowed with --smoke")
