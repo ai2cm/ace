@@ -210,6 +210,7 @@ def _get_diffusion_model(
     predict_residual=True,
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
+    in_names: list[str] | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -220,7 +221,7 @@ def _get_diffusion_model(
             "unet_diffusion_song", {"model_channels": 4}
         ),
         loss=LossConfig(type="MSE"),
-        in_names=["x"],
+        in_names=["x"] if in_names is None else in_names,
         out_names=["x"],
         normalization=normalizer,
         p_mean=-1.0,
@@ -280,6 +281,61 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
     assert torch.all(
         generated_outputs[0].prediction["x"] != generated_outputs[1].prediction["x"]
     )
+
+
+def test_diffusion_model_train_and_generate_with_only_static_inputs():
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size=2)
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        predict_residual=False,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+        in_names=[],
+    )
+
+    optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
+    train_outputs = model.train_on_batch(batch, optimization)
+    assert torch.isfinite(train_outputs.loss)
+
+    n_samples = 3
+    generated = model.generate_on_batch(batch, n_samples=n_samples)
+    assert generated.prediction["x"].shape == (2, n_samples, *fine_shape)
+
+
+@pytest.mark.parametrize(
+    "use_fine_topography, predict_residual, match",
+    [
+        (False, False, "use_fine_topography"),
+        (True, True, "predict_residual"),
+    ],
+)
+def test_empty_in_names_config_validation(use_fine_topography, predict_residual, match):
+    with pytest.raises(ValueError, match=match):
+        DiffusionModelConfig(
+            module=DiffusionModuleRegistrySelector(
+                "unet_diffusion_song", {"model_channels": 4}
+            ),
+            loss=LossConfig(type="MSE"),
+            in_names=[],
+            out_names=["x"],
+            normalization=PairedNormalizationConfig(
+                NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+                NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+            ),
+            p_mean=-1.0,
+            p_std=1.0,
+            sigma_min=0.1,
+            sigma_max=1.0,
+            churn=0.5,
+            num_diffusion_generation_steps=3,
+            predict_residual=predict_residual,
+            use_fine_topography=use_fine_topography,
+        )
 
 
 def test_interleaved_samples_round_trip():

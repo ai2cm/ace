@@ -151,7 +151,11 @@ class DiffusionModelConfig:
     Parameters:
         module: The module registry selector for the diffusion model.
         loss:  The loss configuration for the diffusion model.
-        in_names: The input variable names for the diffusion model.
+        in_names: The coarse input variable names for the diffusion model. May be
+            empty if ``use_fine_topography`` is True, in which case the model is
+            conditioned only on the fine static inputs (e.g. topography) and learns
+            a prior over fine-resolution states that can be combined with coarse
+            information at generation time (see ``project_block_mean``).
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
         sigma_min: Min noise level for generation.
@@ -200,6 +204,16 @@ class DiffusionModelConfig:
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
             )
+        if len(self.in_names) == 0:
+            if not self.use_fine_topography:
+                raise ValueError(
+                    "in_names may only be empty when use_fine_topography is True, "
+                    "so that the model is conditioned on fine static inputs."
+                )
+            if self.predict_residual:
+                raise ValueError(
+                    "predict_residual must be False when in_names is empty."
+                )
         if self.p_mean is not None and self.p_std is not None:
             if self.training_noise_distribution is None:
                 warnings.warn(
@@ -465,31 +479,38 @@ class DiffusionModel:
     def _get_input_from_coarse(
         self, coarse: TensorMapping, static_inputs: StaticInputs | None
     ) -> torch.Tensor:
-        inputs = filter_tensor_mapping(coarse, self.in_packer.names)
-        normalized = self.in_packer.pack(
-            self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
-        )
-        interpolated = interpolate(normalized, self.downscale_factor)
+        reference = next(iter(coarse.values()))
+        n_batches = reference.shape[0]
+        fine_shape = self._get_fine_shape((reference.shape[-2], reference.shape[-1]))
+
+        fields: list[torch.Tensor] = []
+        if len(self.in_packer.names) > 0:
+            inputs = filter_tensor_mapping(coarse, self.in_packer.names)
+            normalized = self.in_packer.pack(
+                self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
+            )
+            if not self.config._interpolate_input:
+                return normalized
+            fields.append(interpolate(normalized, self.downscale_factor))
 
         if self.config.use_fine_topography and static_inputs is not None:
-            expected_shape = interpolated.shape[-2:]
-            if static_inputs.shape != expected_shape:
+            if static_inputs.shape != fine_shape:
                 raise ValueError(
                     f"Subsetted static input shape {static_inputs.shape} does not "
-                    f"match expected fine spatial shape {expected_shape}."
+                    f"match expected fine spatial shape {fine_shape}."
                 )
-            n_batches = normalized.shape[0]
             # Join normalized static inputs to input (see dataset for details)
-            fields: list[torch.Tensor] = [interpolated]
             for field in static_inputs.fields:
                 static_field = field.data.unsqueeze(0).repeat(n_batches, 1, 1)
                 static_field = static_field.unsqueeze(self._channel_axis)
                 fields.append(static_field)
-            interpolated = torch.concat(fields, dim=self._channel_axis)
 
-        if self.config._interpolate_input:
-            return interpolated
-        return normalized
+        if len(fields) == 0:
+            raise ValueError(
+                "Model has no coarse input variables and no static inputs were "
+                "provided, so there is nothing to condition on."
+            )
+        return torch.concat(fields, dim=self._channel_axis)
 
     def train_on_batch(
         self,

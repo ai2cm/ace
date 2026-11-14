@@ -201,6 +201,19 @@ def test_train_main_only(
 
 
 @pytest.mark.medium_duration
+def test_train_main_only_static_inputs(default_trainer_config, tmp_path):
+    """Check that a model conditioned only on static inputs trains."""
+    config = _update_in_out_names(default_trainer_config, [], ["var0", "var1"])
+    config["model"]["use_fine_topography"] = True
+    config["model"]["predict_residual"] = False
+    config["max_epochs"] = 1
+    config_path = _store_config(tmp_path, config)
+
+    with mock_wandb():
+        main(config_path=config_path)
+
+
+@pytest.mark.medium_duration
 def test_train_main_logs(default_trainer_config, tmp_path):
     """Check that training loop records the appropriate logs."""
 
