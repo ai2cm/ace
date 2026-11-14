@@ -1,7 +1,7 @@
 # 5-daily 4-degree ocean (Samudra) store from the 140-year CM4 1pctCO2
 # simulation.
 target_grid: F22.5
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F22.5
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v1/om4-tripolar-0.25deg-to-F22.5
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 output:

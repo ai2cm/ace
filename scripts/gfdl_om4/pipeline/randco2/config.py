@@ -15,7 +15,13 @@ import dataclasses
 
 import dacite
 
-from ..config_io import MEMBER_PLACEHOLDER, OutputConfig, WetmaskConfig, load_yaml
+from ..config_io import (
+    MEMBER_PLACEHOLDER,
+    OutputConfig,
+    StaticsConfig,
+    WetmaskConfig,
+    load_yaml,
+)
 from ..postprocess import (
     Postprocess,
     PostprocessConfig,
@@ -28,6 +34,7 @@ __all__ = [
     "MEMBER_PLACEHOLDER",
     "OutputConfig",
     "PipelineConfig",
+    "StaticsConfig",
     "StreamConfig",
     "WetmaskConfig",
     "load_config",
@@ -102,6 +109,8 @@ class PipelineConfig:
 
     Attributes:
         stream: the time-varying variable stream.
+        statics: static source store; its native cell area and wet fraction
+            are read by fixed name, so ``variables`` may be empty.
         wetmask: source of the 2D ocean wetmask.
         target_grid: Gaussian target grid name (e.g. "F90").
         weights_url: URL prefix of the precomputed regridding weight artifact
@@ -112,6 +121,7 @@ class PipelineConfig:
     """
 
     stream: StreamConfig
+    statics: StaticsConfig
     wetmask: WetmaskConfig
     target_grid: str
     weights_url: str

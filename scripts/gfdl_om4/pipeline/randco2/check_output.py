@@ -2,9 +2,10 @@
 
 Opens the store a pipeline invocation wrote and asserts its variable set
 equals the set implied by the config (renamed stream outputs, full-cell
-twins, postprocess additions, and the static ocean fraction), and optionally
-the timestep count. Used by the randco2.mk smoke-test targets after each
-DirectRunner subset run, and by hand after a production launch.
+twins, postprocess additions, and the static ocean fraction), that it
+carries the root attr ``ace_commit``, and optionally the timestep count.
+Used by the randco2.mk smoke-test targets after each DirectRunner subset
+run, and by hand after a production launch.
 """
 
 import argparse
@@ -12,6 +13,7 @@ import logging
 
 import xarray as xr
 
+from ..postprocess import ACE_COMMIT_ATTR
 from ..zarr_io import TIME_DIM, make_zarr_store
 from .config import load_config
 from .run import _expected_output_names, land_nan_exempt_names, open_stream
@@ -38,6 +40,10 @@ def check_output(
             f"output store {path} variables disagree with the set implied by "
             f"{config_path}; missing={sorted(expected - actual)} "
             f"unexpected={sorted(actual - expected)}"
+        )
+    if ACE_COMMIT_ATTR not in ds.attrs:
+        raise AssertionError(
+            f"output store {path} lacks the root attr {ACE_COMMIT_ATTR}"
         )
     if expected_timesteps is not None and ds.sizes[TIME_DIM] != expected_timesteps:
         raise AssertionError(

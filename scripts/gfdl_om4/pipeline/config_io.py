@@ -60,6 +60,19 @@ class WetmaskConfig:
 
 
 @dataclasses.dataclass
+class StaticsConfig:
+    """Static (time-invariant) fields for the output store.
+
+    Attributes:
+        store: URL of the static source zarr store.
+        variables: tracer-point fields to regrid onto the target grid.
+    """
+
+    store: str
+    variables: list[str] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
 class OutputConfig:
     """Output store layout.
 
