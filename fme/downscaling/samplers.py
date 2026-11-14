@@ -42,6 +42,7 @@ def stochastic_sampler(
     S_min: float = 0.0,
     S_max: float = float("inf"),
     S_noise: float = 1.0,
+    denoised_transform: Callable[[Tensor], Tensor] | None = None,
 ) -> Tensor:
     """
     Proposed EDM sampler (Algorithm 2) with minor changes to enable
@@ -87,6 +88,12 @@ def stochastic_sampler(
         Maximum time step for applying churn. By default float("inf").
     S_noise : float
         Noise scaling factor applied during the churn step. By default 1.
+    denoised_transform : Callable[[Tensor], Tensor] | None
+        Optional function applied to every denoiser output (the estimate of
+        the clean sample) before it is used in the update, e.g. to project it
+        onto a constraint set. Since the final step goes to sigma=0, the
+        returned sample equals the transformed final denoiser output.
+        Not part of the original physicsnemo implementation. By default None.
 
     Returns
     -------
@@ -144,6 +151,8 @@ def stochastic_sampler(
             x_lr,
             t_hat,
         ).to(compute_dtype)
+        if denoised_transform is not None:
+            denoised = denoised_transform(denoised)
 
         d_cur = (x_hat - denoised) / t_hat
         x_next = x_hat + (t_next - t_hat) * d_cur
@@ -158,6 +167,8 @@ def stochastic_sampler(
                 x_lr,
                 t_next,
             ).to(compute_dtype)
+            if denoised_transform is not None:
+                denoised = denoised_transform(denoised)
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
         latent_steps.append(x_next.to(latents.dtype))

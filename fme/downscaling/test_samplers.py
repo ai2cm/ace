@@ -124,3 +124,21 @@ def test_stochastic_sampler_raises_on_batch_mismatch() -> None:
             sigma_max=1.0,
             rho=3.0,
         )
+
+
+def test_stochastic_sampler_output_equals_transformed_final_denoised() -> None:
+    torch.manual_seed(0)
+    net = TinyDeterministicNet(c_out=2, c_lr=1).to(get_device())
+    latents = torch.randn(2, 2, 4, 4, device=get_device())
+    img_lr = torch.randn(2, 1, 4, 4, device=get_device())
+    constant = 3.0
+
+    output, _ = stochastic_sampler(
+        net,
+        latents,
+        img_lr,
+        num_steps=4,
+        denoised_transform=lambda denoised: torch.full_like(denoised, constant),
+    )
+
+    torch.testing.assert_close(output, torch.full_like(output, constant))

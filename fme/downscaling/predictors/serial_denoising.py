@@ -253,6 +253,10 @@ class DenoisingMoEPredictor:
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        if self._primary.config.project_block_mean:
+            raise NotImplementedError(
+                "project_block_mean is not supported by DenoisingMoEPredictor."
+            )
         inputs, latents = self._primary.prepare_generation_inputs(
             coarse_data, static_inputs, n_samples
         )

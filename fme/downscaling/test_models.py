@@ -28,6 +28,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.noise import LogNormalNoiseDistribution
+from fme.downscaling.projection import block_mean
 from fme.downscaling.test_utils import cell_centered_coordinate
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -211,6 +212,7 @@ def _get_diffusion_model(
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
     in_names: list[str] | None = None,
+    project_block_mean: bool = False,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -232,6 +234,7 @@ def _get_diffusion_model(
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
+        project_block_mean=project_block_mean,
     ).build(
         coarse_shape,
         downscale_factor,
@@ -335,6 +338,44 @@ def test_empty_in_names_config_validation(use_fine_topography, predict_residual,
             num_diffusion_generation_steps=3,
             predict_residual=predict_residual,
             use_fine_topography=use_fine_topography,
+        )
+
+
+@pytest.mark.parametrize(
+    "in_names, predict_residual",
+    [([], False), (["x"], False), (["x"], True)],
+)
+def test_generate_with_project_block_mean_matches_coarse(in_names, predict_residual):
+    torch.manual_seed(0)
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    downscale_factor = 2
+    static_inputs = make_static_inputs(fine_shape)
+    batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size=2)
+    batch.coarse.data = {"x": torch.randn_like(batch.coarse.data["x"])}
+    model = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=static_inputs.coords,
+        predict_residual=predict_residual,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+        in_names=in_names,
+        project_block_mean=True,
+    )
+    n_samples = 3
+
+    with_target = model.generate_on_batch(batch, n_samples=n_samples).prediction
+    no_target = model.generate_on_batch_no_target(batch.coarse, n_samples=n_samples)
+
+    lat_weights = torch.cos(torch.deg2rad(static_inputs.coords.lat))
+    expected = batch.coarse.data["x"].unsqueeze(1).expand(-1, n_samples, -1, -1)
+    for generated in (with_target, no_target):
+        torch.testing.assert_close(
+            block_mean(generated["x"], lat_weights, downscale_factor),
+            expected,
+            atol=1e-5,
+            rtol=1e-5,
         )
 
 

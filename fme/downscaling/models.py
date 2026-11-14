@@ -1,6 +1,7 @@
 import dataclasses
+import functools
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import cached_property
 from typing import Any
 
@@ -33,6 +34,7 @@ from fme.downscaling.noise import (
     LogUniformNoiseDistribution,
     condition_with_noise_for_training,
 )
+from fme.downscaling.projection import block_mean, project_to_block_mean
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -165,6 +167,13 @@ class DiffusionModelConfig:
         use_fine_topography: Whether to use fine topography in the model.
         use_amp_bf16: Whether to use automatic mixed precision (bfloat16) in the
             UNetDiffusionModule.
+        project_block_mean: Whether to constrain generated samples so that their
+            area-weighted means over each coarse grid cell exactly equal the coarse
+            input values of the output variables. At every sampling step, the
+            denoiser's estimate of the clean sample is projected onto this
+            constraint, so the final sample satisfies it exactly. Applies only to
+            generation, so it can be enabled for an existing checkpoint via
+            ``model_updates``.
         loss_weights: Weighting configuration for the training loss, including
             per-variable channel weights and the noise-level weight exponent.
         training_noise_distribution: Noise distribution to use during training.
@@ -188,6 +197,7 @@ class DiffusionModelConfig:
     predict_residual: bool
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
+    project_block_mean: bool = False
     loss_weights: LossWeightsConfig = dataclasses.field(
         default_factory=LossWeightsConfig
     )
@@ -512,6 +522,53 @@ class DiffusionModel:
             )
         return torch.concat(fields, dim=self._channel_axis)
 
+    def _get_base_prediction(self, coarse: TensorMapping) -> torch.Tensor:
+        """Interpolated, normalized coarse output variables used as the base
+        to which a predicted residual is added.
+        """
+        return interpolate(
+            self.out_packer.pack(
+                self.normalizer.coarse.normalize(
+                    {k: coarse[k] for k in self.out_packer.names}
+                ),
+                axis=self._channel_axis,
+            ),
+            self.downscale_factor,
+        )
+
+    def _get_block_mean_projection(
+        self,
+        coarse_data: TensorMapping,
+        fine_coords: LatLonCoordinates,
+        n_samples: int,
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        """
+        Build a function projecting the sampler's (normalized, possibly
+        residual) estimate onto fine fields whose area-weighted block means
+        equal the coarse values of the output variables.
+        """
+        # The fine normalization is affine per channel, so it commutes with
+        # block means: normalize the coarse target with the fine normalizer.
+        target = self.out_packer.pack(
+            self.normalizer.fine.normalize(
+                {k: coarse_data[k] for k in self.out_packer.names}
+            ),
+            axis=self._channel_axis,
+        )
+        lat_weights = torch.cos(torch.deg2rad(fine_coords.lat))
+        if self.config.predict_residual:
+            target = target - block_mean(
+                self._get_base_prediction(coarse_data),
+                lat_weights,
+                self.downscale_factor,
+            )
+        return functools.partial(
+            project_to_block_mean,
+            target=_repeat_batch_by_samples(target, n_samples),
+            lat_weights=lat_weights,
+            factor=self.downscale_factor,
+        )
+
     def train_on_batch(
         self,
         batch: PairedBatchData,
@@ -532,15 +589,7 @@ class DiffusionModel:
         )
 
         if self.config.predict_residual:
-            base_prediction = interpolate(
-                self.out_packer.pack(
-                    self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in self.out_packer.names}
-                    ),
-                    axis=self._channel_axis,
-                ),
-                self.downscale_factor,
-            )
+            base_prediction = self._get_base_prediction(coarse)
             targets_norm = targets_norm - base_prediction
 
         conditioned_target = condition_with_noise_for_training(
@@ -621,15 +670,7 @@ class DiffusionModel:
     ) -> tuple[TensorDict, torch.Tensor]:
         """Add residual, separate samples, and denormalize sampler output."""
         if self.config.predict_residual:
-            base_prediction = interpolate(
-                self.out_packer.pack(
-                    self.normalizer.coarse.normalize(
-                        {k: coarse_data[k] for k in self.out_packer.names}
-                    ),
-                    axis=self._channel_axis,
-                ),
-                self.downscale_factor,
-            )
+            base_prediction = self._get_base_prediction(coarse_data)
             generated_norm = generated_norm + _repeat_batch_by_samples(
                 base_prediction, n_samples
             )
@@ -647,7 +688,23 @@ class DiffusionModel:
         coarse_data: TensorMapping,
         static_inputs: StaticInputs | None,
         n_samples: int = 1,
+        fine_coords: LatLonCoordinates | None = None,
     ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        """
+        Args:
+            coarse_data: Coarse input data.
+            static_inputs: Static inputs subset to the fine domain of the batch.
+            n_samples: Number of samples to generate per batch member.
+            fine_coords: Fine coordinates of the batch domain. Required when
+                ``project_block_mean`` is enabled.
+        """
+        denoised_transform = None
+        if self.config.project_block_mean:
+            if fine_coords is None:
+                raise ValueError("fine_coords are required for project_block_mean.")
+            denoised_transform = self._get_block_mean_projection(
+                coarse_data, fine_coords, n_samples
+            )
         inputs, latents = self.prepare_generation_inputs(
             coarse_data, static_inputs, n_samples
         )
@@ -659,6 +716,7 @@ class DiffusionModel:
             sigma_min=self.config.sigma_min,
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
+            denoised_transform=denoised_transform,
         )
         generated, generated_norm = self.postprocess_generated(
             generated_norm, coarse_data, n_samples
@@ -672,7 +730,12 @@ class DiffusionModel:
         n_samples: int = 1,
     ) -> TensorDict:
         _static_inputs = self._subset_static_if_available(batch)
-        generated, _, _ = self.generate(batch.data, _static_inputs, n_samples)
+        generated, _, _ = self.generate(
+            batch.data,
+            _static_inputs,
+            n_samples,
+            fine_coords=self.get_fine_coords_for_batch(batch),
+        )
         return generated
 
     @torch.no_grad()
@@ -684,7 +747,10 @@ class DiffusionModel:
         _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         generated, generated_norm, latent_steps = self.generate(
-            coarse, _static_inputs, n_samples
+            coarse,
+            _static_inputs,
+            n_samples,
+            fine_coords=self.get_fine_coords_for_batch(batch.coarse),
         )
 
         targets_norm = self.out_packer.pack(
