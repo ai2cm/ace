@@ -26,6 +26,12 @@
 # The dependencies of this script are installed in the "fv3net" conda
 # environment (same as get_stats.py / combine_stats.py).
 #
+# The per-store stats files double as a checkpoint: a store whose three files
+# are already in the output directory is loaded instead of recomputed, so a
+# preempted job resumes where it stopped. `--shard I/N` computes only every
+# N-th store (and skips the pooling), so N jobs can fill one output directory in
+# parallel before a final run without `--shard` pools them.
+#
 # Usage:
 #   # launch a CPU beaker job that reads the data and writes the stats:
 #   python get_pooled_stats.py submit configs/stats_config.yaml gs://bucket/out-dir
@@ -47,7 +53,7 @@ import numpy as np
 import torch
 import xarray as xr
 import yaml
-from fs_utils import is_local, makedirs
+from fs_utils import is_local, makedirs, path_exists
 
 from fme.core.dataset.xarray import DERIVED_VARIABLES, _rename_variables
 
@@ -423,10 +429,57 @@ def write_stats(stats: dict, out_dir: str, config_yaml: str, n_samples: int):
             logging.info(f"Wrote {out_dir}/{filename}")
 
 
-def compute(config_yaml: str, output_directory: str):
+def load_store_stats(store: str, out_dir: str) -> dict | None:
+    """Load the per-store stats `write_stats` wrote to `out_dir`, in the layout
+    `compute_store_stats` returns, or None if any of the three files is missing.
+
+    The directory name identifies the store and time slice (see
+    `DatasetPair.output_subdir`) but not the transforms, so an output directory
+    must not be reused after changing an entry's renames / derived / scalings.
+    """
+    out_dir = out_dir.rstrip("/")
+    keys = {
+        "centering.nc": "centering",
+        "scaling-full-field.nc": "scaling_full_field",
+        "scaling-residual.nc": "scaling_residual",
+    }
+    if not all(path_exists(out_dir + "/" + filename) for filename in keys):
+        return None
+    stats: dict = {"store": store}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for filename, key in keys.items():
+            local_path = os.path.join(tmpdir, filename)
+            copy(out_dir + "/" + filename, local_path)
+            with xr.open_dataset(local_path) as ds:
+                stats[key] = ds.load()
+    n_samples = {int(stats[key].attrs["n_samples"]) for key in keys.values()}
+    if len(n_samples) != 1:
+        raise ValueError(f"Inconsistent n_samples {n_samples} in {out_dir}.")
+    stats["n_samples"] = n_samples.pop()
+    return stats
+
+
+def parse_shard(shard: str) -> tuple[int, int]:
+    """Parse an `I/N` shard spec into (I, N), with 0 <= I < N."""
+    try:
+        index, count = (int(part) for part in shard.split("/"))
+    except ValueError:
+        raise ValueError(f"shard must be I/N, got {shard!r}.") from None
+    if not 0 <= index < count:
+        raise ValueError(f"shard must have 0 <= I < N, got {shard!r}.")
+    return index, count
+
+
+def compute(config_yaml: str, output_directory: str, shard: str | None = None):
     """Compute the pooled stats, log them, and write them. Runs in the beaker
-    container, or locally if you have the data access and dependencies."""
+    container, or locally if you have the data access and dependencies.
+
+    Stores whose stats are already in `output_directory` are loaded rather than
+    recomputed. With `shard` set to `I/N`, only the stores whose index is I
+    modulo N are computed and nothing is pooled.
+    """
     logging.basicConfig(level=logging.INFO)
+    shard_index, shard_count = parse_shard(shard) if shard is not None else (0, 1)
 
     config = Config.from_file(config_yaml)
     output_directory = output_directory.rstrip("/")
@@ -447,17 +500,30 @@ def compute(config_yaml: str, output_directory: str):
             if stores != [pair.dataset.rstrip("/")]:
                 logging.info(f"Resolved {pair.dataset} -> {stores}")
             for store in stores:
-                stats = compute_store_stats(store, pair.time_slice, transforms=pair)
+                store_index = index
+                index += 1
+                if store_index % shard_count != shard_index:
+                    continue
+                store_directory = (
+                    output_directory + "/" + pair.output_subdir(store_index, store)
+                )
+                stats = load_store_stats(store, store_directory)
+                if stats is not None:
+                    logging.info(f"Reusing existing stats in {store_directory}")
+                else:
+                    stats = compute_store_stats(store, pair.time_slice, transforms=pair)
+                    write_stats(
+                        _stats_files(stats),
+                        store_directory,
+                        config_yaml,
+                        n_samples=stats["n_samples"],
+                    )
                 stats["groups"] = pair.group_names
                 per_pair.append(stats)
-                subdir = pair.output_subdir(index, store)
-                write_stats(
-                    _stats_files(stats),
-                    output_directory + "/" + subdir,
-                    config_yaml,
-                    n_samples=stats["n_samples"],
-                )
-                index += 1
+
+        if shard is not None:
+            logging.info(f"Shard {shard}: wrote {len(per_pair)} stores, not pooling.")
+            return
 
         total_samples = sum(p["n_samples"] for p in per_pair)
         pooled = pool_stats(per_pair)
@@ -542,6 +608,8 @@ def submit(args):
         str(config_rel),
         args.output_directory,
     ]
+    if args.shard is not None:
+        cmd += ["--shard", args.shard]
 
     print("Submitting:", " ".join(cmd))
     if not args.dry_run:
@@ -564,6 +632,12 @@ def main():
         "output_directory", help="Where to write the stats (local path or gs://)."
     )
 
+    shard_help = (
+        "I/N: compute only the stores whose index is I modulo N and skip the "
+        "pooling; run again without --shard to pool."
+    )
+    p_compute.add_argument("--shard", default=None, help=shard_help)
+
     p_submit = sub.add_parser("submit", help="Launch a CPU beaker job via gantry.")
     p_submit.add_argument("config_yaml", help="Path to the dataset_pairs config.")
     p_submit.add_argument(
@@ -577,14 +651,17 @@ def main():
     p_submit.add_argument("--beaker-priority", default=DEFAULT_PRIORITY)
     p_submit.add_argument("--budget", default=DEFAULT_BUDGET)
     p_submit.add_argument("--weka", default=DEFAULT_WEKA)
+    p_submit.add_argument("--shard", default=None, help=shard_help)
     p_submit.add_argument(
         "--dry-run", action="store_true", help="Print the gantry command only."
     )
 
     args = parser.parse_args()
     if args.mode == "compute":
-        compute(args.config_yaml, args.output_directory)
+        compute(args.config_yaml, args.output_directory, shard=args.shard)
     else:
+        if args.shard is not None:
+            parse_shard(args.shard)
         submit(args)
 
 

@@ -3,13 +3,19 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+import yaml
 from get_pooled_stats import (
     Config,
     DatasetPair,
     _resolve_zarr_stores,
+    _stats_files,
     apply_transforms,
+    compute,
     compute_store_stats,
+    load_store_stats,
+    parse_shard,
     pool_stats,
+    write_stats,
 )
 
 
@@ -323,3 +329,62 @@ def test_apply_transforms_rejects_existing_derived_variable(tmp_path):
             xr.open_zarr(store),
             DatasetPair(dataset=store, derived_variables=["ocean_fraction"]),
         )
+
+
+def test_load_store_stats_round_trips_written_stats(tmp_path):
+    store = tmp_path / "a.zarr"
+    _write_store(store)
+    stats = compute_store_stats(str(store), slice(None, None))
+    out_dir = str(tmp_path / "out")
+    assert load_store_stats(str(store), out_dir) is None
+    write_stats(_stats_files(stats), out_dir, "config.yaml", stats["n_samples"])
+    loaded = load_store_stats(str(store), out_dir)
+    assert loaded is not None
+    assert loaded["n_samples"] == stats["n_samples"]
+    for key in ("centering", "scaling_full_field", "scaling_residual"):
+        xr.testing.assert_allclose(loaded[key], stats[key])
+
+
+def test_parse_shard():
+    assert parse_shard("1/4") == (1, 4)
+    for bad in ("4/4", "-1/4", "1", "a/b"):
+        with pytest.raises(ValueError, match="shard"):
+            parse_shard(bad)
+
+
+def _pooled(root) -> dict[str, xr.Dataset]:
+    names = ("centering.nc", "scaling-full-field.nc", "scaling-residual.nc")
+    return {name: xr.open_dataset(root / name).load() for name in names}
+
+
+def test_compute_pools_shards_like_a_single_run(tmp_path):
+    """Stats computed in shards and then pooled, reusing the per-store files,
+    equal those of one uninterrupted run."""
+    pairs = []
+    for i, name in enumerate(["a", "b", "c"]):
+        _write_store(tmp_path / f"{name}.zarr", n_time=10 + i)
+        pairs.append({"dataset": str(tmp_path / f"{name}.zarr"), "group": "g"})
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.safe_dump({"dataset_pairs": pairs, "groups": ["g"]}))
+
+    single = tmp_path / "single"
+    compute(str(config_yaml), str(single))
+
+    sharded = tmp_path / "sharded"
+    compute(str(config_yaml), str(sharded), shard="0/2")
+    assert not (sharded / "centering.nc").exists()
+    assert sorted(p.name for p in sharded.iterdir()) == ["00_a_min_max", "02_c_min_max"]
+    compute(str(config_yaml), str(sharded), shard="1/2")
+    # Poison the sources: the pooling run must reuse the per-store files.
+    for name in ["a", "b", "c"]:
+        (tmp_path / f"{name}.zarr").rename(tmp_path / f"{name}-moved.zarr")
+        (tmp_path / f"{name}.zarr").mkdir()
+        (tmp_path / f"{name}.zarr" / ".zmetadata").write_text("{}")
+    compute(str(config_yaml), str(sharded))
+
+    for root in (single, single / "groups" / "g"):
+        expected = _pooled(root)
+        actual = _pooled(sharded / root.relative_to(single))
+        for name in expected:
+            xr.testing.assert_allclose(actual[name], expected[name])
+            assert actual[name].attrs["n_samples"] == expected[name].attrs["n_samples"]

@@ -94,4 +94,5 @@ cd "$REPO_ROOT" && gantry run \
     --budget ai2/atec-climate \
     --no-python \
     --install "echo 'skipping installation step'" \
+    --allow-dirty \
     -- bash -c "$COPY_CMD"
