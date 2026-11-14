@@ -382,7 +382,8 @@ def _moments(x: np.ndarray, axes: tuple[int, ...]) -> _Moments:
         n = np.full(total.shape, count)
         mean = np.divide(total, n, out=np.zeros_like(total), where=n > 0)
         deviation = x - mean
-    m2 = np.square(deviation, out=deviation).sum(axis=axes)
+    # No `out=deviation`: for a 0-d variable it is a numpy scalar, not an array.
+    m2 = np.square(deviation).sum(axis=axes)
     return n.squeeze(axis=axes), mean.squeeze(axis=axes), m2
 
 

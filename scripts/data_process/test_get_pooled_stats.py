@@ -396,7 +396,8 @@ def test_compute_pools_shards_like_a_single_run(tmp_path):
 def test_compute_store_stats_matches_xarray_over_blocks(tmp_path, shards):
     """Blockwise stats equal xarray's over the whole slice, for a slice that
     spans several blocks and starts inside one, with NaNs, an all-NaN column of
-    values, a static variable and a variable with only a time dimension."""
+    values, a static variable, a variable with only a time dimension and one
+    with no dimensions."""
     rng = np.random.default_rng(0)
     n_time = 23
     time = pd.date_range("2000-01-01", periods=n_time, freq="D")
@@ -412,6 +413,7 @@ def test_compute_store_stats_matches_xarray_over_blocks(tmp_path, shards):
             "static": (("lat", "lon"), rng.normal(size=(3, 5))),
             "scalar_series": (("time",), rng.normal(size=n_time).astype(np.float32)),
             "constant": (("time",), np.full(n_time, 284.317e-6, dtype=np.float32)),
+            "zero_dimensional": ((), 100000.0),
         },
         coords={"time": time},
     )
