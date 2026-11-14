@@ -10,9 +10,10 @@ MIN_RUNTIME="${MIN_RUNTIME:-6h}"   # gantry --min-runtime; 1deg template default
 PRIORITY="${PRIORITY:-high}"
 # 2026-11-10: a results dataset is committed ~30 min after its job exits; gantry refuses a mount of an uncommitted
 # dataset ("uncommitted dataset"), which silently lost a chained launch. Wait for the commit before submitting.
+# 2026-11-14: an uncommitted dataset reports committed = 0001-01-01T00:00:00Z (zero time), not empty; treat that as uncommitted.
 wait_committed() {
   local ds="$1" t=0
-  until [ "$(beaker dataset get "$ds" --format json 2>/dev/null | jq -r '.[0].committed // empty')" != "" ]; do
+  until [ "$(beaker dataset get "$ds" --format json 2>/dev/null | jq -r '.[0].committed // empty' | grep -v "^0001-")" != "" ]; do
     [ $t -ge 7200 ] && { echo "dataset $ds still uncommitted after 2 h" >&2; return 1; }
     sleep 60; t=$((t+60))
   done
