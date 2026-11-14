@@ -88,4 +88,4 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0-r1-lag
 # rows written by analysis/2026-11-13-2237-coupled-ft-enso-dynamics/scripts/08b_rank1_rows.py.
 
 # smoke (compare: 08b_smoke_compare.py)
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-smoke|01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 1h|n_coupled_steps=64 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay|r1-smoke|01M73SGN1R0VNPVFCGP0HF2DE2|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 1h|n_coupled_steps=64 loader.start_indices.times=['0001-01-06T00:00:00']|01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
