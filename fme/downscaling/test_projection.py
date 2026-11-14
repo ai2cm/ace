@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from fme.downscaling.projection import block_mean, project_to_block_mean
+from fme.downscaling.projection import (
+    block_mean,
+    project_to_block_mean,
+    project_to_block_mean_nonnegative,
+)
 
 
 def _lat_weights(n_lat: int) -> torch.Tensor:
@@ -50,3 +54,28 @@ def test_project_to_block_mean_hits_target_and_keeps_anomalies():
 def test_block_mean_raises_for_indivisible_shape():
     with pytest.raises(ValueError, match="divisible"):
         block_mean(torch.zeros(1, 5, 4), torch.ones(5), 2)
+
+
+def test_project_to_block_mean_nonnegative():
+    torch.manual_seed(0)
+    factor = 2
+    lat_weights = _lat_weights(4)
+    x = torch.randn(2, 4, 6, dtype=torch.float64)
+    x[0, :2, :2] = -1.0  # block that clips to all zeros
+    target = torch.rand(2, 2, 3, dtype=torch.float64)
+
+    projected = project_to_block_mean_nonnegative(x, target, lat_weights, factor)
+
+    assert torch.all(projected >= 0)
+    torch.testing.assert_close(block_mean(projected, lat_weights, factor), target)
+    # all-zero block is filled uniformly with the target value
+    torch.testing.assert_close(
+        projected[0, :2, :2], torch.full((2, 2), target[0, 0, 0].item()).double()
+    )
+    # elsewhere, the clipped field is rescaled within each block
+    clipped = x.clamp(min=0)
+    block = (1, slice(2, 4), slice(2, 4))
+    nonzero = clipped[block] > 0
+    ratios = projected[block][nonzero] / clipped[block][nonzero]
+    assert ratios.numel() > 1
+    torch.testing.assert_close(ratios, torch.full_like(ratios, ratios[0].item()))

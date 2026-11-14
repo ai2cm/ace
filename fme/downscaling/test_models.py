@@ -213,10 +213,12 @@ def _get_diffusion_model(
     static_inputs: StaticInputs | None = None,
     in_names: list[str] | None = None,
     project_block_mean: bool = False,
+    nonnegative_names: list[str] | None = None,
+    x_mean: float = 0.0,
 ):
     normalizer = PairedNormalizationConfig(
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": x_mean}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": x_mean}, stds={"x": 1.0}),
     )
     return DiffusionModelConfig(
         module=DiffusionModuleRegistrySelector(
@@ -235,6 +237,7 @@ def _get_diffusion_model(
         predict_residual=predict_residual,
         use_fine_topography=use_fine_topography,
         project_block_mean=project_block_mean,
+        nonnegative_names=nonnegative_names or [],
     ).build(
         coarse_shape,
         downscale_factor,
@@ -341,18 +344,24 @@ def test_empty_in_names_config_validation(use_fine_topography, predict_residual,
         )
 
 
+@pytest.mark.parametrize("nonnegative", [False, True])
 @pytest.mark.parametrize(
     "in_names, predict_residual",
     [([], False), (["x"], False), (["x"], True)],
 )
-def test_generate_with_project_block_mean_matches_coarse(in_names, predict_residual):
+def test_generate_with_project_block_mean_matches_coarse(
+    in_names, predict_residual, nonnegative
+):
     torch.manual_seed(0)
     coarse_shape = (8, 16)
     fine_shape = (16, 32)
     downscale_factor = 2
     static_inputs = make_static_inputs(fine_shape)
     batch = make_paired_batch_data(coarse_shape, fine_shape, batch_size=2)
-    batch.coarse.data = {"x": torch.randn_like(batch.coarse.data["x"])}
+    coarse_x = torch.randn_like(batch.coarse.data["x"])
+    if nonnegative:
+        coarse_x = coarse_x.abs()
+    batch.coarse.data = {"x": coarse_x}
     model = _get_diffusion_model(
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
@@ -362,6 +371,10 @@ def test_generate_with_project_block_mean_matches_coarse(in_names, predict_resid
         static_inputs=static_inputs,
         in_names=in_names,
         project_block_mean=True,
+        nonnegative_names=["x"] if nonnegative else None,
+        # nonzero mean so non-negativity in physical units differs from
+        # non-negativity in normalized units
+        x_mean=0.5,
     )
     n_samples = 3
 
@@ -376,6 +389,35 @@ def test_generate_with_project_block_mean_matches_coarse(in_names, predict_resid
             expected,
             atol=1e-5,
             rtol=1e-5,
+        )
+        if nonnegative:
+            assert torch.all(generated["x"] >= 0)
+
+
+def test_nonnegative_names_clips_generated_without_projection():
+    fine_shape = (16, 32)
+    static_inputs = make_static_inputs(fine_shape)
+    batch = make_paired_batch_data((8, 16), fine_shape, batch_size=2)
+    model = _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+        nonnegative_names=["x"],
+        x_mean=5.0,  # pushes many unconstrained samples below zero
+    )
+    generated = model.generate_on_batch(batch, n_samples=2).prediction
+    assert torch.all(generated["x"] >= 0)
+
+
+def test_nonnegative_names_must_be_outputs():
+    with pytest.raises(ValueError, match="nonnegative_names"):
+        _get_diffusion_model(
+            coarse_shape=(8, 16),
+            downscale_factor=2,
+            full_fine_coords=make_fine_coords((16, 32)),
+            use_fine_topography=False,
+            nonnegative_names=["y"],
         )
 
 

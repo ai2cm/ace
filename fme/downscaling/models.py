@@ -1,5 +1,4 @@
 import dataclasses
-import functools
 import warnings
 from collections.abc import Callable, Mapping
 from functools import cached_property
@@ -34,7 +33,10 @@ from fme.downscaling.noise import (
     LogUniformNoiseDistribution,
     condition_with_noise_for_training,
 )
-from fme.downscaling.projection import block_mean, project_to_block_mean
+from fme.downscaling.projection import (
+    project_to_block_mean,
+    project_to_block_mean_nonnegative,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -174,6 +176,12 @@ class DiffusionModelConfig:
             constraint, so the final sample satisfies it exactly. Applies only to
             generation, so it can be enabled for an existing checkpoint via
             ``model_updates``.
+        nonnegative_names: Output variables that must be non-negative (e.g.
+            precipitation). Generated values of these variables are clipped at
+            zero. When ``project_block_mean`` is enabled, these variables are
+            instead clipped and rescaled within each coarse cell, in physical
+            units, so that they are both non-negative and match the coarse
+            block means. Applies only to generation.
         loss_weights: Weighting configuration for the training loss, including
             per-variable channel weights and the noise-level weight exponent.
         training_noise_distribution: Noise distribution to use during training.
@@ -198,6 +206,7 @@ class DiffusionModelConfig:
     use_fine_topography: bool = False
     use_amp_bf16: bool = False
     project_block_mean: bool = False
+    nonnegative_names: list[str] = dataclasses.field(default_factory=list)
     loss_weights: LossWeightsConfig = dataclasses.field(
         default_factory=LossWeightsConfig
     )
@@ -213,6 +222,11 @@ class DiffusionModelConfig:
             raise ValueError(
                 "Fine topography can only be used when predicting on interpolated"
                 " coarse input"
+            )
+        missing = set(self.nonnegative_names).difference(self.out_names)
+        if missing:
+            raise ValueError(
+                f"nonnegative_names {sorted(missing)} are not in out_names."
             )
         if len(self.in_names) == 0:
             if not self.use_fine_topography:
@@ -431,6 +445,13 @@ class DiffusionModel:
         self._loss_weight_tensor = _build_variable_loss_weight_tensor(
             config.loss_weights.output_channels, self.out_names
         )
+        # Index via config.out_names so the (training-time) names in
+        # config.nonnegative_names map correctly onto renamed runtime names.
+        self._nonnegative_indices = [
+            i
+            for i, name in enumerate(config.out_names)
+            if name in config.nonnegative_names
+        ]
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -545,29 +566,55 @@ class DiffusionModel:
         """
         Build a function projecting the sampler's (normalized, possibly
         residual) estimate onto fine fields whose area-weighted block means
-        equal the coarse values of the output variables.
+        equal the coarse values of the output variables, and which are
+        non-negative for the variables in ``nonnegative_names``.
         """
+        lat_weights = torch.cos(torch.deg2rad(fine_coords.lat))
+        factor = self.downscale_factor
+        coarse_outputs = {k: coarse_data[k] for k in self.out_packer.names}
         # The fine normalization is affine per channel, so it commutes with
         # block means: normalize the coarse target with the fine normalizer.
-        target = self.out_packer.pack(
-            self.normalizer.fine.normalize(
-                {k: coarse_data[k] for k in self.out_packer.names}
+        target_norm = _repeat_batch_by_samples(
+            self.out_packer.pack(
+                self.normalizer.fine.normalize(coarse_outputs),
+                axis=self._channel_axis,
             ),
-            axis=self._channel_axis,
+            n_samples,
         )
-        lat_weights = torch.cos(torch.deg2rad(fine_coords.lat))
+        base: torch.Tensor | float = 0.0
         if self.config.predict_residual:
-            target = target - block_mean(
-                self._get_base_prediction(coarse_data),
-                lat_weights,
-                self.downscale_factor,
+            base = _repeat_batch_by_samples(
+                self._get_base_prediction(coarse_data), n_samples
             )
-        return functools.partial(
-            project_to_block_mean,
-            target=_repeat_batch_by_samples(target, n_samples),
-            lat_weights=lat_weights,
-            factor=self.downscale_factor,
-        )
+
+        nonneg = self._nonnegative_indices
+        if nonneg:
+            # Non-negativity is not preserved by the normalization's mean
+            # shift, so these channels are projected in physical units.
+            nonneg_names = [self.out_packer.names[i] for i in nonneg]
+            target_phys = _repeat_batch_by_samples(
+                torch.stack([coarse_outputs[k] for k in nonneg_names], dim=-3),
+                n_samples,
+            )
+            means = torch.stack(
+                [self.normalizer.fine.means[k] for k in nonneg_names]
+            ).reshape(-1, 1, 1)
+            stds = torch.stack(
+                [self.normalizer.fine.stds[k] for k in nonneg_names]
+            ).reshape(-1, 1, 1)
+
+        def project(denoised: torch.Tensor) -> torch.Tensor:
+            full = denoised + base
+            projected = project_to_block_mean(full, target_norm, lat_weights, factor)
+            if nonneg:
+                phys = full[:, nonneg] * stds + means
+                phys = project_to_block_mean_nonnegative(
+                    phys, target_phys, lat_weights, factor
+                )
+                projected[:, nonneg] = ((phys - means) / stds).to(projected.dtype)
+            return projected - base
+
+        return project
 
     def train_on_batch(
         self,
@@ -680,6 +727,9 @@ class DiffusionModel:
         generated = self.normalizer.fine.denormalize(
             self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
         )
+        for i in self._nonnegative_indices:
+            name = self.out_packer.names[i]
+            generated[name] = generated[name].clamp(min=0)
         return generated, generated_norm
 
     @torch.no_grad()
