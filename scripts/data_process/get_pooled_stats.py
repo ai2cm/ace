@@ -23,8 +23,10 @@
 # time (`renamed_variables`, `derived_variables`, `overwrite.multiply_scalar`),
 # so that every store contributes to the stats of the variables training sees.
 #
-# The dependencies of this script are installed in the "fv3net" conda
-# environment (same as get_stats.py / combine_stats.py).
+# Each store is read once, in blocks of time steps reduced by a pool of worker
+# processes (`--workers`), without dask.
+#
+# The dependencies of this script are those of fme (it runs in the fme image).
 #
 # The per-store stats files double as a checkpoint: a store whose three files
 # are already in the output directory is loaded instead of recomputed, so a
@@ -39,13 +41,17 @@
 #   python get_pooled_stats.py compute configs/stats_config.yaml gs://bucket/out-dir
 
 import argparse
+import concurrent.futures
 import dataclasses
+import itertools
 import logging
+import multiprocessing
 import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 
 import dacite
 import fsspec
@@ -68,6 +74,9 @@ DEFAULT_PRIORITY = "high"
 DEFAULT_BUDGET = "ai2/atec-climate"
 DEFAULT_WEKA = "climate-default:/climate-default"
 GCP_CREDS = "/tmp/google_application_credentials.json"
+# Worker processes reading the stores; each uses about one core and, for 1deg
+# data, a few GiB of memory.
+DEFAULT_WORKERS = 64
 
 # Auxiliary variables that exist for masking / vertical integrals but are not ML
 # inputs/outputs, so they need no normalization constants. Mirrors get_stats.py.
@@ -319,50 +328,221 @@ def apply_transforms(ds: xr.Dataset, pair: DatasetPair) -> xr.Dataset:
     return ds.assign(scaled)
 
 
+# Target number of timesteps read by one worker task, when the store does not
+# say (through its shard size) how many are cheapest to read together.
+TARGET_TIME_BLOCK = 256
+
+# The store a worker process has open, kept between its tasks so that the
+# store's metadata is parsed once per process rather than once per task.
+_OPEN_STORE: dict[str, xr.Dataset] = {}
+
+_Moments = tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
+def _init_worker():
+    """Keep each worker process to about one core: the parallelism is across
+    processes, so thread pools inside them only oversubscribe the node."""
+    import zarr
+
+    zarr.config.set({"threading.max_workers": 2})
+    torch.set_num_threads(1)
+
+
+def _open_store(store: str) -> xr.Dataset:
+    if store not in _OPEN_STORE:
+        _OPEN_STORE.clear()
+        # chunks=None gives lazily indexed numpy arrays: a variable is read
+        # only when its values are asked for, and no dask graph is involved.
+        # cache=False so the values are dropped again once they are reduced.
+        _OPEN_STORE[store] = xr.open_dataset(
+            store, engine="zarr", chunks=None, cache=False
+        )
+    return _OPEN_STORE[store]
+
+
+def _moments(x: np.ndarray, axes: tuple[int, ...]) -> _Moments:
+    """Count, mean and sum of squared deviations from that mean of the non-NaN
+    values of `x` over `axes`, in float64. The mean is 0 where the count is 0."""
+    total = x.sum(axis=axes, keepdims=True)
+    if np.isnan(total).any():
+        valid = ~np.isnan(x)
+        n = valid.sum(axis=axes, keepdims=True).astype(np.float64)
+        total = np.where(valid, x, 0.0).sum(axis=axes, keepdims=True)
+        mean = np.divide(total, n, out=np.zeros_like(total), where=n > 0)
+        deviation = np.where(valid, x - mean, 0.0)
+    else:
+        count = float(np.prod([x.shape[axis] for axis in axes]))
+        n = np.full(total.shape, count)
+        mean = np.divide(total, n, out=np.zeros_like(total), where=n > 0)
+        deviation = x - mean
+    m2 = np.square(deviation, out=deviation).sum(axis=axes)
+    return n.squeeze(axis=axes), mean.squeeze(axis=axes), m2
+
+
+def _combine_moments(a: _Moments, b: _Moments) -> _Moments:
+    """Moments of the union of two disjoint samples (Chan et al. pairwise
+    update), which unlike sums of squares does not lose precision when the
+    spread is small relative to the mean."""
+    n_a, mean_a, m2_a = a
+    n_b, mean_b, m2_b = b
+    n = n_a + n_b
+    delta = mean_b - mean_a
+    weight_b = np.divide(n_b, n, out=np.zeros_like(n), where=n > 0)
+    mean = mean_a + delta * weight_b
+    m2 = m2_a + m2_b + delta**2 * n_a * weight_b
+    return n, mean, m2
+
+
+def _block_moments(
+    store: str, start: int, stop: int, first: int, transforms: DatasetPair | None
+) -> dict[str, dict]:
+    """Moments of every variable over the time steps [start, stop) of a store,
+    and of its time differences ending in those steps. `first` is the first
+    step of the whole time slice, which has no time difference ending in it.
+
+    Variables are read one at a time, so memory use is that of one variable
+    over the block rather than of the whole block.
+    """
+    ds = _open_store(store)
+    lead = 0 if start == first else 1
+    block = ds.isel(time=slice(start - lead, stop))
+    if transforms is not None:
+        block = apply_transforms(block, transforms)
+    block = block.drop_vars(DROP_VARIABLES, errors="ignore")
+    reduction_dims = _reduction_dims(block)
+
+    result = {}
+    for name, da in block.data_vars.items():
+        has_time = "time" in da.dims
+        if not has_time and start != first:
+            continue  # a static variable is the same in every block
+        if not np.issubdtype(da.dtype, np.number):
+            raise ValueError(f"{store}: variable {name!r} has dtype {da.dtype}.")
+        axes = tuple(i for i, dim in enumerate(da.dims) if dim in reduction_dims)
+        values = np.asarray(da.values, dtype=np.float64)
+        if has_time:
+            time_axis = da.dims.index("time")
+            without_lead = (slice(None),) * time_axis + (slice(lead, None),)
+            full = _moments(values[without_lead], axes)
+            difference = _moments(np.diff(values, axis=time_axis), axes)
+        else:
+            # As xarray's Dataset.diff, which leaves variables without the
+            # dimension unchanged.
+            full = difference = _moments(values, axes)
+        dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
+        result[name] = {
+            "dims": tuple(d for d in da.dims if d not in reduction_dims),
+            "dtype": np.dtype(dtype).str,
+            "full": full,
+            "difference": difference,
+        }
+    return result
+
+
+def _time_block_size(ds: xr.Dataset) -> int:
+    """Number of time steps per task: the time extent of a shard if the store
+    is sharded, so each task reads whole files, else a multiple of the chunk."""
+    for da in ds.data_vars.values():
+        if "time" in da.dims and da.ndim > 1:
+            time_axis = da.dims.index("time")
+            shards = da.encoding.get("shards")
+            if shards is not None:
+                return int(shards[time_axis])
+            chunks = da.encoding.get("chunks")
+            if chunks is not None:
+                chunk = int(chunks[time_axis])
+                return chunk * max(1, round(TARGET_TIME_BLOCK / chunk))
+    return TARGET_TIME_BLOCK
+
+
+def _time_blocks(start: int, stop: int, size: int) -> list[tuple[int, int]]:
+    """Split [start, stop) at the multiples of `size`."""
+    edges = [start, *range((start // size + 1) * size, stop, size), stop]
+    return list(zip(edges[:-1], edges[1:]))
+
+
 def compute_store_stats(
-    store: str, time_slice: slice, transforms: DatasetPair | None = None
+    store: str,
+    time_slice: slice,
+    transforms: DatasetPair | None = None,
+    pool: concurrent.futures.Executor | None = None,
 ) -> dict:
     """Open one zarr store, slice it in time, and return its centering /
     full-field / residual stats plus the timestep count used as the pooling
     weight. If `transforms` is given, its renamed / derived / scaled variables
     are applied first, so all three stats (including the time-difference
-    residual) are of the transformed variables."""
-    # Imported here, not at module level, so the Config can be loaded (e.g. by
-    # scripts/data_process/test_config.py) without dask installed.
-    import dask
+    residual) are of the transformed variables.
 
-    with dask.config.set({"array.chunk-size": "128MiB"}):
-        ds = xr.open_zarr(store, chunks={"time": "auto"})
-
-    if transforms is not None:
-        ds = apply_transforms(ds, transforms)
-    ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
-    ds = ds.sel(time=time_slice)
+    The stats are those xarray gives for `ds.mean(dims)`, `ds.std(dims)` and
+    `ds.diff("time").std(dims)` over time and the horizontal dims, skipping
+    NaNs. They are accumulated in float64 over blocks of time steps, each
+    reading every variable once; the blocks are computed by `pool` if given
+    (see `_init_worker`), else in this process.
+    """
+    ds = xr.open_zarr(store, chunks=None)
+    positions = xr.DataArray(
+        np.arange(ds.sizes["time"]), coords={"time": ds["time"]}, dims=["time"]
+    )
+    selected = positions.sel(time=time_slice).values
 
     bounds = f"[{time_slice.start}, {time_slice.stop}]"
-    n_samples = len(ds.time)
+    n_samples = len(selected)
     if n_samples < 2:
         raise ValueError(
             f"{store} sliced to {bounds} has {n_samples} timesteps; check the "
             "time bounds in the config."
         )
+    start, stop = int(selected[0]), int(selected[-1]) + 1
+    if stop - start != n_samples:
+        raise ValueError(f"{store} sliced to {bounds} is not contiguous in time.")
 
-    dims = _reduction_dims(ds)
-    logging.info(f"{store} {bounds}: {n_samples} steps, reducing over {dims}")
-
-    # Build all three reductions lazily, then compute them together so the zarr is
-    # read from storage only once: the shared dask graph dedups the source reads.
-    centering, scaling_full_field, scaling_residual = dask.compute(
-        ds.mean(dim=dims),
-        ds.std(dim=dims),
-        ds.diff("time").std(dim=dims),
+    blocks = _time_blocks(start, stop, _time_block_size(ds))
+    logging.info(
+        f"{store} {bounds}: {n_samples} steps in {len(blocks)} blocks, reducing "
+        f"over {_reduction_dims(ds)}"
     )
+    arguments = (
+        itertools.repeat(store),
+        [block_start for block_start, _ in blocks],
+        [block_stop for _, block_stop in blocks],
+        itertools.repeat(start),
+        itertools.repeat(transforms),
+    )
+    if pool is None:
+        results: Iterable[dict[str, dict]] = map(_block_moments, *arguments)
+    else:
+        results = pool.map(_block_moments, *arguments)
+
+    total: dict[str, dict] = {}
+    for i, result in enumerate(results):
+        for name, moments in result.items():
+            if name not in total:
+                total[name] = moments
+            else:
+                for key in ("full", "difference"):
+                    total[name][key] = _combine_moments(total[name][key], moments[key])
+        if (i + 1) % 50 == 0:
+            logging.info(f"{store} {bounds}: {i + 1}/{len(blocks)} blocks done")
+
+    def _mean(moments: dict, key: str) -> np.ndarray:
+        n, mean, _ = moments[key]
+        return np.where(n > 0, mean, np.nan).astype(moments["dtype"])
+
+    def _std(moments: dict, key: str) -> np.ndarray:
+        n, _, m2 = moments[key]
+        variance = np.divide(m2, n, out=np.full_like(m2, np.nan), where=n > 0)
+        return np.sqrt(variance).astype(moments["dtype"])
+
+    def _dataset(function, key: str) -> xr.Dataset:
+        return xr.Dataset(
+            {name: (m["dims"], function(m, key)) for name, m in total.items()}
+        )
 
     return {
         "store": store,
-        "centering": centering,
-        "scaling_full_field": scaling_full_field,
-        "scaling_residual": scaling_residual,
+        "centering": _dataset(_mean, "full"),
+        "scaling_full_field": _dataset(_std, "full"),
+        "scaling_residual": _dataset(_std, "difference"),
         "n_samples": n_samples,
     }
 
@@ -470,13 +650,19 @@ def parse_shard(shard: str) -> tuple[int, int]:
     return index, count
 
 
-def compute(config_yaml: str, output_directory: str, shard: str | None = None):
+def compute(
+    config_yaml: str,
+    output_directory: str,
+    shard: str | None = None,
+    n_workers: int = DEFAULT_WORKERS,
+):
     """Compute the pooled stats, log them, and write them. Runs in the beaker
     container, or locally if you have the data access and dependencies.
 
     Stores whose stats are already in `output_directory` are loaded rather than
     recomputed. With `shard` set to `I/N`, only the stores whose index is I
-    modulo N are computed and nothing is pooled.
+    modulo N are computed and nothing is pooled. The stores are read by
+    `n_workers` processes.
     """
     logging.basicConfig(level=logging.INFO)
     shard_index, shard_count = parse_shard(shard) if shard is not None else (0, 1)
@@ -484,13 +670,14 @@ def compute(config_yaml: str, output_directory: str, shard: str | None = None):
     config = Config.from_file(config_yaml)
     output_directory = output_directory.rstrip("/")
 
-    # Start a dask distributed client so the per-store reads/reductions run across
-    # many workers, mirroring get_stats.py. Imported here for the same reason as
-    # dask in compute_store_stats.
-    import distributed
-
-    client = distributed.Client(n_workers=16)
-    logging.info(f"Started dask distributed client: {client}")
+    # Worker processes are spawned, not forked: the parent has already started
+    # threads (torch, zarr's event loop) that a fork would leave in a bad state.
+    pool = concurrent.futures.ProcessPoolExecutor(
+        max_workers=n_workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_init_worker,
+    )
+    logging.info(f"Started a pool of {n_workers} worker processes")
 
     try:
         per_pair = []
@@ -511,7 +698,9 @@ def compute(config_yaml: str, output_directory: str, shard: str | None = None):
                 if stats is not None:
                     logging.info(f"Reusing existing stats in {store_directory}")
                 else:
-                    stats = compute_store_stats(store, pair.time_slice, transforms=pair)
+                    stats = compute_store_stats(
+                        store, pair.time_slice, transforms=pair, pool=pool
+                    )
                     write_stats(
                         _stats_files(stats),
                         store_directory,
@@ -556,7 +745,7 @@ def compute(config_yaml: str, output_directory: str, shard: str | None = None):
         copy(config_yaml, output_directory + "/" + os.path.basename(config_yaml))
         logging.info(f"Wrote {output_directory}/{os.path.basename(config_yaml)}")
     finally:
-        client.close()
+        pool.shutdown(cancel_futures=True)
 
 
 def submit(args):
@@ -595,7 +784,7 @@ def submit(args):
         f"google-credentials:{GCP_CREDS}",
         "--system-python",
         "--install",
-        "pip install 'dask[array]' distributed && pip install --no-deps .",
+        "pip install --no-deps .",
         "--allow-dirty",
     ]
     for cluster in args.beaker_cluster:
@@ -610,6 +799,7 @@ def submit(args):
     ]
     if args.shard is not None:
         cmd += ["--shard", args.shard]
+    cmd += ["--workers", str(args.workers)]
 
     print("Submitting:", " ".join(cmd))
     if not args.dry_run:
@@ -637,6 +827,10 @@ def main():
         "pooling; run again without --shard to pool."
     )
     p_compute.add_argument("--shard", default=None, help=shard_help)
+    workers_help = "Number of worker processes reading the stores."
+    p_compute.add_argument(
+        "--workers", type=int, default=DEFAULT_WORKERS, help=workers_help
+    )
 
     p_submit = sub.add_parser("submit", help="Launch a CPU beaker job via gantry.")
     p_submit.add_argument("config_yaml", help="Path to the dataset_pairs config.")
@@ -653,12 +847,20 @@ def main():
     p_submit.add_argument("--weka", default=DEFAULT_WEKA)
     p_submit.add_argument("--shard", default=None, help=shard_help)
     p_submit.add_argument(
+        "--workers", type=int, default=DEFAULT_WORKERS, help=workers_help
+    )
+    p_submit.add_argument(
         "--dry-run", action="store_true", help="Print the gantry command only."
     )
 
     args = parser.parse_args()
     if args.mode == "compute":
-        compute(args.config_yaml, args.output_directory, shard=args.shard)
+        compute(
+            args.config_yaml,
+            args.output_directory,
+            shard=args.shard,
+            n_workers=args.workers,
+        )
     else:
         if args.shard is not None:
             parse_shard(args.shard)

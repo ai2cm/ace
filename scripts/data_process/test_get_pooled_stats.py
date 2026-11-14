@@ -388,3 +388,53 @@ def test_compute_pools_shards_like_a_single_run(tmp_path):
         for name in expected:
             xr.testing.assert_allclose(actual[name], expected[name])
             assert actual[name].attrs["n_samples"] == expected[name].attrs["n_samples"]
+
+
+@pytest.mark.parametrize("shards", [None, (4, 3, 5)])
+def test_compute_store_stats_matches_xarray_over_blocks(tmp_path, shards):
+    """Blockwise stats equal xarray's over the whole slice, for a slice that
+    spans several blocks and starts inside one, with NaNs, an all-NaN column of
+    values, a static variable and a variable with only a time dimension."""
+    rng = np.random.default_rng(0)
+    n_time = 23
+    time = pd.date_range("2000-01-01", periods=n_time, freq="D")
+    field = (1e5 + rng.normal(size=(n_time, 3, 5))).astype(np.float32)
+    masked = rng.normal(size=(n_time, 3, 5)).astype(np.float32)
+    masked[:, 0, 0] = np.nan
+    masked[rng.random(masked.shape) < 0.2] = np.nan
+    ds = xr.Dataset(
+        {
+            "field": (("time", "lat", "lon"), field),
+            "masked": (("time", "lat", "lon"), masked),
+            "all_nan": (("time", "lat", "lon"), np.full_like(field, np.nan)),
+            "static": (("lat", "lon"), rng.normal(size=(3, 5))),
+            "scalar_series": (("time",), rng.normal(size=n_time).astype(np.float32)),
+            "constant": (("time",), np.full(n_time, 284.317e-6, dtype=np.float32)),
+        },
+        coords={"time": time},
+    )
+    store = str(tmp_path / "store.zarr")
+    chunked = ["field", "masked", "all_nan"]
+    encoding = {name: {"chunks": (2, 3, 5), "shards": shards} for name in chunked}
+    ds.to_zarr(store, mode="w", encoding=encoding)
+
+    time_slice = slice("2000-01-04", "2000-01-21")
+    stats = compute_store_stats(store, time_slice)
+
+    expected = ds.sel(time=time_slice)
+    dims = ["time", "lat", "lon"]
+    assert stats["n_samples"] == expected.sizes["time"]
+    references = {
+        "centering": expected.mean(dim=dims),
+        "scaling_full_field": expected.std(dim=dims),
+        "scaling_residual": expected.diff("time").std(dim=dims),
+    }
+    for key, reference in references.items():
+        assert set(stats[key].data_vars) == set(reference.data_vars)
+        for name in reference.data_vars:
+            assert stats[key][name].dtype == reference[name].dtype, (key, name)
+            np.testing.assert_allclose(
+                stats[key][name], reference[name], rtol=1e-5, err_msg=f"{key} {name}"
+            )
+    assert stats["scaling_full_field"]["constant"] == 0.0
+    assert np.isnan(stats["centering"]["all_nan"])
