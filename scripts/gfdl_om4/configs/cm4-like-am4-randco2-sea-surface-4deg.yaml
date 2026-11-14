@@ -2,9 +2,9 @@
 # random-CO2 ensemble. `{member}` is filled from --member (see
 # pipeline/config_io.py); the nine members are listed in randco2.mk.
 target_grid: F22.5
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v2/om4-tripolar-0.25deg-to-F22.5
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/c96-path-v1/om4-tripolar-0.25deg-via-cm4-c96-to-F22.5
 output:
-  path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-4deg/{member}.zarr
+  path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-4deg/{member}.zarr
   time_chunk_size: 1
   time_shard_size: 365
 # Native cell area and wet fraction, read by fixed name: same tripolar grid

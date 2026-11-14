@@ -7,11 +7,11 @@
 # 6-hourly stores: snapshots are subsampled to every 5th day and the daily-mean
 # fluxes are averaged over 5-day blocks in the pipeline.
 target_grid: F90
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v2/om4-tripolar-0.25deg-to-F90
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/c96-path-v1/om4-tripolar-0.25deg-via-cm4-c96-to-F90
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 output:
-  path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily/{member}.zarr
+  path: gs://vcm-ml-intermediate/2026-11-13-cm4-abrupt-4xCO2-ensemble-ocean-1deg-5daily/{member}.zarr
   time_chunk_size: 1
   time_shard_size: 365
 wetmask:
