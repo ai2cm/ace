@@ -4,7 +4,7 @@ import datetime
 from collections import namedtuple
 from collections.abc import Iterable
 from typing import Literal
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -26,7 +26,11 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
-from fme.core.optimization import NullOptimization, OptimizationConfig
+from fme.core.optimization import (
+    NullOptimization,
+    OptimizationConfig,
+    build_optimization_dict,
+)
 from fme.core.rand import randn_like
 from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
@@ -57,6 +61,7 @@ from .stepper import (
     CoupledStepperConfig,
     CoupledTrainStepper,
     CoupledTrainStepperConfig,
+    ObjectivePerBatchConfig,
 )
 
 NZ = 3  # number of vertical interface levels in mock data from get_data
@@ -2334,42 +2339,118 @@ def test_train_on_batch_stochastic_n_steps():
 
 
 # ---------------------------------------------------------------------------
-# Single-component-per-batch optimization (optimize_single_component_per_batch)
+# Per-batch objective draw (objective_per_batch)
 # ---------------------------------------------------------------------------
+
+_BOTH_REALMS = ObjectivePerBatchConfig(atmosphere=1.0, ocean=1.0)
+
+
+def _mse_component(**kwargs) -> ComponentTrainingConfig:
+    return ComponentTrainingConfig(loss=StepLossConfig(type="MSE"), **kwargs)
 
 
 @pytest.mark.parametrize(
-    "null_kwargs",
+    "kwargs, match",
     [
-        {"loss_weight": 0.0},
-        {"n_steps": 0},
+        pytest.param(
+            {
+                "objective_per_batch": _BOTH_REALMS,
+                "optimize_single_component_per_batch": True,
+            },
+            "not both",
+            id="flag_and_mapping",
+        ),
+        pytest.param(
+            {"objective_per_batch": {}},
+            "at least one weight",
+            id="all_weights_zero",
+        ),
+        pytest.param(
+            {"objective_per_batch": {"atmosphere": 1.0, "ocean": -1.0}},
+            "must be >= 0",
+            id="negative_weight",
+        ),
+        pytest.param(
+            {
+                "ocean": {"loss_weight": 0.0},
+                "objective_per_batch": {"atmosphere": 1.0, "ocean": 1.0},
+            },
+            "statically null",
+            id="null_realm_zero_loss_weight",
+        ),
+        pytest.param(
+            {
+                "ocean": {"n_steps": 0},
+                "objective_per_batch": {"atmosphere": 1.0, "ocean": 1.0},
+            },
+            "statically null",
+            id="null_realm_zero_n_steps",
+        ),
+        pytest.param(
+            {"ocean": {"n_steps": 0}, "optimize_single_component_per_batch": True},
+            "statically null",
+            id="deprecated_flag_null_realm",
+        ),
+        pytest.param(
+            {"objective_per_batch": {"atmosphere": 1.0, "joint": 1.0}},
+            "requires joint_pairs",
+            id="joint_without_pairs",
+        ),
+        pytest.param({"joint_pairs": []}, "non-empty", id="empty_pairs"),
+        pytest.param({"joint_pairs": [[1]]}, "non-empty", id="short_pair"),
+        pytest.param({"joint_pairs": [[0, 1]]}, "non-empty", id="zero_index"),
     ],
 )
-def test_optimize_single_component_rejects_static_null_realm(null_kwargs):
-    # With a statically-null realm the per-batch choice has no observable
-    # effect, so __post_init__ must reject the flag.
-    with pytest.raises(ValueError, match="optimize_single_component_per_batch"):
+def test_objective_per_batch_config_validation(kwargs, match):
+    kwargs = dict(kwargs)
+    ocean_kwargs = kwargs.pop("ocean", {})
+    objective = kwargs.pop("objective_per_batch", None)
+    with pytest.raises(ValueError, match=match):
         CoupledTrainStepperConfig(
             n_coupled_steps=1,
-            ocean=ComponentTrainingConfig(
-                loss=StepLossConfig(type="MSE"), **null_kwargs
+            ocean=_mse_component(**ocean_kwargs),
+            atmosphere=_mse_component(),
+            objective_per_batch=(
+                ObjectivePerBatchConfig(**objective)
+                if isinstance(objective, dict)
+                else objective
             ),
-            atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-            optimize_single_component_per_batch=True,
+            **kwargs,
         )
 
 
-def _single_component_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
-    """Build a flag-on CoupledTrainStepper + batch with both realms non-null."""
+def test_objective_per_batch_weight_zero_on_null_realm_accepted():
+    config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=_mse_component(n_steps=0),
+        atmosphere=_mse_component(),
+        objective_per_batch=ObjectivePerBatchConfig(atmosphere=1.0),
+    )
+    assert config.objective_per_batch == ObjectivePerBatchConfig(atmosphere=1.0)
+
+
+def test_deprecated_single_component_flag():
+    with pytest.warns(DeprecationWarning, match="objective_per_batch"):
+        config = CoupledTrainStepperConfig(
+            n_coupled_steps=1,
+            ocean=_mse_component(),
+            atmosphere=_mse_component(),
+            optimize_single_component_per_batch=True,
+        )
+    assert config.objective_per_batch == _BOTH_REALMS
+    assert not config.optimize_single_component_per_batch
+    replaced = dataclasses.replace(config, n_coupled_steps=2)
+    assert replaced.objective_per_batch == _BOTH_REALMS
+
+
+def _objective_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
+    """Build a CoupledTrainStepper + batch with both realms non-null and
+    objective_per_batch {atmosphere: 1, ocean: 1}."""
     train_stepper_config = CoupledTrainStepperConfig(
         n_coupled_steps=1,
-        ocean=ComponentTrainingConfig(
-            loss=StepLossConfig(type="MSE"), n_steps=ocean_n_steps
-        ),
-        atmosphere=ComponentTrainingConfig(
-            loss=StepLossConfig(type="MSE"), n_steps=atmos_n_steps
-        ),
-        optimize_single_component_per_batch=True,
+        ocean=_mse_component(n_steps=ocean_n_steps),
+        atmosphere=_mse_component(n_steps=atmos_n_steps),
+        objective_per_batch=_BOTH_REALMS,
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         train_stepper_config=train_stepper_config,
@@ -2384,33 +2465,42 @@ def _single_component_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
     return train_stepper, coupled_data
 
 
-def test_single_component_choice_remade_per_train_on_batch():
+def _batch_objective(train_stepper) -> str:
+    """The one realm whose first step is optimized in the current batch."""
+    (realm,) = [
+        realm
+        for realm in ("ocean", "atmosphere")
+        if train_stepper._loss.step_is_optimized(realm, 0)
+    ]
+    return realm
+
+
+def test_objective_redrawn_per_train_on_batch():
     torch.manual_seed(0)
-    train_stepper, coupled_data = _single_component_stepper_and_batch()
+    train_stepper, coupled_data = _objective_stepper_and_batch()
     selected = []
-    for _ in range(20):  # fixed seed; both realms appear under fair 50/50
+    for _ in range(20):  # fixed seed; both realms appear under equal weights
         stepped = train_stepper.train_on_batch(
             data=coupled_data.data, optimization=NullOptimization()
         )
-        sel = train_stepper._loss._selected_realm
+        sel = _batch_objective(train_stepper)
         selected.append(sel)
-        # (b) within a batch only the selected realm carries per-step loss
-        # metrics (training path), so the other realm contributes zero loss.
+        # within a batch only the drawn realm carries per-step loss metrics
+        # (training path), so the other realm contributes zero loss.
         ocean_step_keys = [k for k in stepped.ocean.metrics if "_step_" in k]
         atmos_step_keys = [k for k in stepped.atmosphere.metrics if "_step_" in k]
         if sel == "ocean":
             assert ocean_step_keys and not atmos_step_keys
         else:
             assert atmos_step_keys and not ocean_step_keys
-    # (a) the optimized realm varies across batches
     assert set(selected) == {"ocean", "atmosphere"}
 
 
-def test_single_component_validation_loss_is_single_component_and_reproducible():
+def test_objective_validation_loss_follows_draw_and_reproducible():
     torch.manual_seed(0)
     # One optimized step per realm so the accumulate_loss count maps cleanly to
-    # "single component" (1) vs "both components" (2).
-    train_stepper, coupled_data = _single_component_stepper_and_batch(
+    # "one objective" (1) vs "both realms" (2).
+    train_stepper, coupled_data = _objective_stepper_and_batch(
         ocean_n_steps=1, atmos_n_steps=1
     )
     train_stepper.set_eval()
@@ -2421,15 +2511,11 @@ def test_single_component_validation_loss_is_single_component_and_reproducible()
         optimization=optimization,
         evaluate_all_steps=True,
     )
-    # (a) accumulated loss is single-component: only the selected realm's one
-    # optimized step accumulates (flag-off would accumulate both -> 2 calls).
     assert len(optimization.accumulate_loss.call_args_list) == 1
-    assert train_stepper._loss._selected_realm in ("ocean", "atmosphere")
     # ...yet per-step diagnostic metrics are produced for BOTH realms.
     assert any("_step_" in k for k in stepped.ocean.metrics)
     assert any("_step_" in k for k in stepped.atmosphere.metrics)
 
-    # (b) after seed_eval(0) the per-batch selection sequence is reproducible.
     def _eval_sequence():
         train_stepper.set_eval()
         train_stepper.seed_eval(0)
@@ -2440,7 +2526,7 @@ def test_single_component_validation_loss_is_single_component_and_reproducible()
                 optimization=NullOptimization(),
                 evaluate_all_steps=True,
             )
-            seq.append(train_stepper._loss._selected_realm)
+            seq.append(_batch_objective(train_stepper))
         return seq
 
     first = _eval_sequence()
@@ -2780,3 +2866,332 @@ def test_single_form_optimization_unchanged():
     assert len(params_a) > 0
     for param_a, param_b in zip(params_a, params_b):
         torch.testing.assert_close(param_a, param_b)
+
+
+# Joint pairs
+# ---------------------------------------------------------------------------
+# n_inner_steps = 2 (OCEAN_TIMEDELTA / ATMOS_TIMEDELTA), n_coupled_steps = 2.
+# [i_O, i_A] = [1, 2]: ocean later; [1, 3], [1, 4]: atmosphere later.
+_OCEAN_LATER = [1, 2]
+_ATMOS_LATER_FIRST_IN_WINDOW = [1, 3]
+_ATMOS_LATER = [1, 4]
+
+
+def _joint_stepper_and_batch(
+    joint_pairs,
+    objective_per_batch: ObjectivePerBatchConfig | None = ObjectivePerBatchConfig(
+        joint=1.0
+    ),
+    ocean_loss_weight: float = 1.0,
+    atmosphere_loss_weight: float = 1.0,
+    atmosphere_n_steps: int | None = None,
+    seed: int = 0,
+):
+    """Trainable stepper with an atmosphere output (a_flux) forcing the ocean,
+    so both pair edges exist."""
+    torch.manual_seed(seed)
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=_mse_component(loss_weight=ocean_loss_weight),
+        atmosphere=_mse_component(
+            loss_weight=atmosphere_loss_weight, n_steps=atmosphere_n_steps
+        ),
+        joint_pairs=joint_pairs,
+        objective_per_batch=objective_per_batch,
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "a_flux"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature", "a_flux"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=2,
+        ocean_builder=ModuleSelector(
+            type="prebuilt", config={"module": torch.nn.Conv2d(2, 1, 1)}
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": torch.nn.Conv2d(2, 2, 1)}
+        ),
+    )
+    return train_stepper, coupled_data
+
+
+def _build_optimization(train_stepper, use_gradient_accumulation: bool):
+    return OptimizationConfig(
+        lr=0.0, use_gradient_accumulation=use_gradient_accumulation
+    ).build(train_stepper.modules, max_epochs=1)
+
+
+def _component_grads(train_stepper, coupled_data, optimization):
+    """Per-component parameter gradients after one train_on_batch."""
+    with patch.object(optimization.optimizer, "zero_grad"):
+        train_stepper.train_on_batch(data=coupled_data.data, optimization=optimization)
+    return {
+        realm: torch.cat(
+            [
+                torch.zeros_like(p).flatten() if p.grad is None else p.grad.flatten()
+                for p in modules.parameters()
+            ]
+        )
+        for realm, modules in train_stepper.optimization_modules.items()
+    }
+
+
+def _has_path(output: torch.Tensor, params: list[torch.Tensor]) -> bool:
+    """Whether ``output`` has a nonzero gradient path to any of ``params``."""
+    if not output.requires_grad:
+        return False
+    grads = torch.autograd.grad(
+        output.sum(), params, retain_graph=True, allow_unused=True
+    )
+    return any(g is not None and g.abs().sum() > 0 for g in grads)
+
+
+@pytest.mark.parametrize("use_gradient_accumulation", [True, False])
+@pytest.mark.parametrize(
+    "pair, earlier, later",
+    [
+        (_OCEAN_LATER, "atmosphere", "ocean"),
+        (_ATMOS_LATER, "ocean", "atmosphere"),
+    ],
+)
+def test_joint_pair_cross_component_gradient(
+    pair, earlier, later, use_gradient_accumulation
+):
+    def _grads(later_loss_weight: float):
+        train_stepper, coupled_data = _joint_stepper_and_batch(
+            [pair],
+            ocean_loss_weight=later_loss_weight if later == "ocean" else 1.0,
+            atmosphere_loss_weight=later_loss_weight if later == "atmosphere" else 1.0,
+        )
+        optimization = _build_optimization(train_stepper, use_gradient_accumulation)
+        return _component_grads(train_stepper, coupled_data, optimization)
+
+    joint = _grads(later_loss_weight=1.0)
+    earlier_alone = _grads(later_loss_weight=0.0)  # L_joint = L_earlier
+    assert joint[later].abs().sum() > 0
+    assert earlier_alone[earlier].abs().sum() > 0
+    assert not torch.allclose(joint[earlier], earlier_alone[earlier])
+
+
+@pytest.mark.parametrize("pair", [_OCEAN_LATER, _ATMOS_LATER])
+def test_joint_pair_with_schedules_accumulation(pair):
+    # objective_per_batch absent: every schedule step (including the steps next
+    # to the pair) is optimized beside L_joint.
+    train_stepper, coupled_data = _joint_stepper_and_batch(
+        [pair], objective_per_batch=None
+    )
+    optimization = _build_optimization(train_stepper, use_gradient_accumulation=True)
+    grads = _component_grads(train_stepper, coupled_data, optimization)
+    assert all(g.abs().sum() > 0 for g in grads.values())
+
+
+def test_joint_pair_per_component_optimizers():
+    train_stepper, coupled_data = _joint_stepper_and_batch([_ATMOS_LATER])
+    configs = {
+        key: OptimizationConfig(lr=0.01, use_gradient_accumulation=True)
+        for key in train_stepper.optimization_modules
+    }
+    optimization = Mock(
+        wraps=build_optimization_dict(
+            configs, train_stepper.optimization_modules, max_epochs=1
+        )
+    )
+    before = {
+        realm: [p.detach().clone() for p in modules.parameters()]
+        for realm, modules in train_stepper.optimization_modules.items()
+    }
+    train_stepper.train_on_batch(data=coupled_data.data, optimization=optimization)
+    assert optimization.accumulate_loss.call_count == 1
+    for realm, modules in train_stepper.optimization_modules.items():
+        assert any(
+            not torch.equal(p_before, p_after)
+            for p_before, p_after in zip(before[realm], modules.parameters())
+        ), realm
+
+
+def test_joint_pair_ocean_later_only_pair_step_attached():
+    # Schedules optimize every step, so every atmosphere step runs with grad;
+    # only the pair step stays attached in the ocean forcing mean.
+    train_stepper, coupled_data = _joint_stepper_and_batch(
+        [_OCEAN_LATER], objective_per_batch=None
+    )
+    atmosphere_params = list(train_stepper.atmosphere.modules.parameters())
+    coupler = train_stepper._stepper
+    attached = []
+    original = coupler._get_ocean_forcings
+
+    def _record(ocean_data, atmos_gen, atmos_forcings):
+        a_flux = atmos_gen["a_flux"]
+        attached.append(
+            [_has_path(a_flux[:, i], atmosphere_params) for i in range(a_flux.shape[1])]
+        )
+        return original(ocean_data, atmos_gen, atmos_forcings)
+
+    optimization = _build_optimization(train_stepper, use_gradient_accumulation=True)
+    with patch.object(coupler, "_get_ocean_forcings", side_effect=_record):
+        train_stepper.train_on_batch(data=coupled_data.data, optimization=optimization)
+    # window 0 holds atmosphere steps 0, 1; the pair step is 1 (i_A = 2)
+    assert attached == [[False, True], [False, False]]
+
+
+@pytest.mark.parametrize(
+    "pair, objective_per_batch",
+    [
+        (_ATMOS_LATER_FIRST_IN_WINDOW, None),
+        (_ATMOS_LATER, None),
+        # joint only: the window's first step (atmosphere step 2) runs no_grad
+        (_ATMOS_LATER, ObjectivePerBatchConfig(joint=1.0)),
+    ],
+)
+def test_joint_pair_atmos_later_only_pair_step_reads_attached_ocean(
+    pair, objective_per_batch
+):
+    train_stepper, coupled_data = _joint_stepper_and_batch(
+        [pair], objective_per_batch=objective_per_batch
+    )
+    ocean_params = list(train_stepper.ocean.modules.parameters())
+    coupler = train_stepper._stepper
+    original = coupler.get_prediction_generator
+    original_prescribe = coupler._prescribe_ic_sst
+    paths: dict[int, bool] = {}
+    ic_sst_paths: list[bool] = []
+
+    def _record(*args, **kwargs):
+        for step in original(*args, **kwargs):
+            if step.realm == "atmosphere":
+                paths[step.step] = _has_path(
+                    step.data["surface_temperature"], ocean_params
+                )
+            yield step
+
+    def _record_ic_sst(atmos_ic_state, forcing_ic_batch):
+        prescribed = original_prescribe(atmos_ic_state, forcing_ic_batch)
+        ic_sst = prescribed.as_batch_data().data["surface_temperature"]
+        ic_sst_paths.append(_has_path(ic_sst, ocean_params))
+        return prescribed
+
+    optimization = _build_optimization(train_stepper, use_gradient_accumulation=True)
+    with (
+        patch.object(coupler, "get_prediction_generator", side_effect=_record),
+        patch.object(coupler, "_prescribe_ic_sst", side_effect=_record_ic_sst),
+    ):
+        train_stepper.train_on_batch(data=coupled_data.data, optimization=optimization)
+    pair_step = pair[1] - 1
+    assert paths == {step: step == pair_step for step in range(4)}
+    # one IC SST per window; only a pair step first in window 1 reads x_O(1)
+    pair_first_in_window = pair_step % 2 == 0
+    assert ic_sst_paths == [False, pair_first_in_window]
+
+
+@pytest.mark.parametrize("pair", [_OCEAN_LATER, _ATMOS_LATER])
+def test_joint_pair_single_backward(pair):
+    train_stepper, coupled_data = _joint_stepper_and_batch([pair])
+    optimization = Mock(
+        wraps=_build_optimization(train_stepper, use_gradient_accumulation=True)
+    )
+    stepped = train_stepper.train_on_batch(
+        data=coupled_data.data, optimization=optimization
+    )
+    (call,) = optimization.accumulate_loss.call_args_list
+    l_ocean = stepped.ocean.metrics[f"loss/ocean_step_{pair[0] - 1}"]
+    l_atmosphere = stepped.atmosphere.metrics[f"loss/atmosphere_step_{pair[1] - 1}"]
+    torch.testing.assert_close(call.args[0].detach(), l_ocean + l_atmosphere)
+
+
+def test_joint_pair_beyond_atmosphere_n_steps():
+    train_stepper, coupled_data = _joint_stepper_and_batch(
+        [_ATMOS_LATER], objective_per_batch=None, atmosphere_n_steps=1
+    )
+    stepper_config = train_stepper._stepper.config
+    requirements = train_stepper._config.get_train_window_data_requirements(
+        stepper_config
+    )
+    target_n = requirements.atmosphere_target_requirements.n_timesteps
+    assert target_n == 5  # i_A = 4 plus the IC
+    # NaN-pad target variables past the horizon, as the training loader does
+    atmosphere_data = coupled_data.data.atmosphere_data
+    forcing_names = set(stepper_config.atmosphere_forcing_exogenous_names)
+    padded = {}
+    for name, tensor in atmosphere_data.data.items():
+        padded[name] = tensor.clone()
+        if name not in forcing_names:
+            padded[name][:, target_n:] = float("nan")
+    padded_data = CoupledBatchData(
+        ocean_data=coupled_data.data.ocean_data,
+        atmosphere_data=BatchData.new_on_device(
+            data=padded,
+            time=atmosphere_data.time,
+            labels=atmosphere_data.labels,
+            horizontal_dims=list(atmosphere_data.horizontal_dims),
+        ),
+    )
+    stepped = train_stepper.train_on_batch(
+        data=padded_data, optimization=NullOptimization()
+    )
+    assert "loss/atmosphere_step_3" in stepped.atmosphere.metrics
+    assert torch.isfinite(stepped.total_metrics["loss"])
+
+
+@pytest.mark.parametrize("evaluate_all_steps", [True, False])
+def test_joint_pair_validation_loss_reproducible(evaluate_all_steps):
+    train_stepper, coupled_data = _joint_stepper_and_batch(
+        [_OCEAN_LATER, _ATMOS_LATER],
+        objective_per_batch=ObjectivePerBatchConfig(joint=1.0),
+    )
+
+    def _eval_sequence():
+        train_stepper.set_eval()
+        train_stepper.seed_eval(0)
+        sequence = []
+        for _ in range(8):
+            with torch.no_grad():
+                stepped = train_stepper.train_on_batch(
+                    data=coupled_data.data,
+                    optimization=NullOptimization(),
+                    evaluate_all_steps=evaluate_all_steps,
+                )
+            pair = train_stepper._loss.joint_pair
+            assert pair is not None
+            assert f"loss/ocean_step_{pair.ocean_step}" in stepped.ocean.metrics
+            assert (
+                f"loss/atmosphere_step_{pair.atmosphere_step}"
+                in stepped.atmosphere.metrics
+            )
+            sequence.append((pair, stepped.total_metrics["loss"].item()))
+        return sequence
+
+    first = _eval_sequence()
+    second = _eval_sequence()
+    assert first == second
+    assert len({pair for pair, _ in first}) == 2
+
+
+@pytest.mark.parametrize(
+    "pair", [_OCEAN_LATER, _ATMOS_LATER_FIRST_IN_WINDOW, _ATMOS_LATER]
+)
+def test_joint_pair_split_window_matches_unsplit(pair):
+    # The pair changes only the graph: predictions and checkpoint step numbers
+    # match a run without joint_pairs.
+    def _run(joint_pairs):
+        train_stepper, coupled_data = _joint_stepper_and_batch(
+            joint_pairs, objective_per_batch=None
+        )
+        optimization = Mock(wraps=NullOptimization())
+        stepped = train_stepper.train_on_batch(
+            data=coupled_data.data, optimization=optimization
+        )
+        steps = [call.kwargs["step"] for call in optimization.checkpoint.call_args_list]
+        return stepped, steps
+
+    with_pair, with_pair_steps = _run([pair])
+    without_pair, without_pair_steps = _run(None)
+    assert with_pair_steps == without_pair_steps
+    for realm in ("ocean", "atmosphere"):
+        expected = getattr(without_pair, realm).gen_data
+        actual = getattr(with_pair, realm).gen_data
+        assert actual.keys() == expected.keys()
+        for name in expected:
+            torch.testing.assert_close(actual[name], expected[name])
