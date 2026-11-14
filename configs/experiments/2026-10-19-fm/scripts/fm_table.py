@@ -1,27 +1,30 @@
-"""Per-architecture progress table for the 2026-11-12 FM fine-tuning sweep.
+"""Progress table for the long fine-tunes of the 2026-11-12 FM ft sweep.
 
-Tracks only the 96 ft runs of create_fm_v2_finetune_jobs.py (the ext80
-fm-spencer-balanced runs fine-tuned for 8 epochs; 4 ERA5 mixes x 4 LRs x 3
-seeds per architecture), one row per architecture: sfno-v2-ft and
-swin-v2.2-v2-ft, 48 runs each. The runs they descend from (the 2026-10-19
-runs, the 2026-11-09 v2 runs and their 2026-11-11 follow-ups) are no longer
-tracked; their logs are not read.
+Tracks only the 36 long runs of create_fm_v2_finetune_jobs.ft_long_runs (the
+ext80 fm-spencer-balanced runs fine-tuned for 32 and for 128 epochs; ERA5
+mixes 25, 70, 100 x 3 seeds at LR 1e-4), one row per architecture and length,
+9 runs each, the SFNO rows first: sfno-v2-ft-e32, sfno-v2-ft-e128,
+swin-v2.2-v2-ft-e32, swin-v2.2-v2-ft-e128. The finished 8-epoch ft runs and
+the runs they descend from (the 2026-10-19 runs, the 2026-11-09 v2 runs and
+their 2026-11-11 follow-ups) are no longer tracked; their logs are not read.
 
 Epochs done and per-phase timings come from the logs of every run
 (preemption retry) of each finished or running experiment. Epochs done is the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
-inference are all done. Finished jobs count as max_epochs (8); never-started
-jobs count as 0. Train time is the wall time that produced kept progress,
+inference are all done. Finished jobs count as their run's max_epochs (32 or
+128, from the run object); never-started jobs count as 0.
+Train time is the wall time that produced kept progress,
 summed over an experiment's jobs (preemption retries): each job counts from
 its first training step to its exit (or now, if running), except that a
 preempted or failed job counts only up to its last checkpoint save, since the
 work after it is redone by the next retry. Queueing, startup and lost work are
 excluded, so preemptions do not inflate it. Epoch columns cover unfinished
 (running or queued) jobs only, "-" when none; train-time and timing columns
-cover finished and running jobs. The "inference, every 10" column stays "-":
-an 8-epoch run never reaches the every-10th-epoch inline inference entries.
-All values are measured; there are no estimates.
+cover finished and running jobs. The "inference, every 10" column is the
+inline inference after epochs 10, 20, ..., when the every-10th-epoch entries
+run too; "-" until a run of the row has finished one. All values are measured;
+there are no estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed / Other" counts only experiments that exist and failed or were canceled.
@@ -50,7 +53,7 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
-from create_fm_v2_finetune_jobs import ft_runs  # noqa: E402
+from create_fm_v2_finetune_jobs import ft_long_runs  # noqa: E402
 from create_fm_v2_followup_jobs import SFNO  # noqa: E402
 
 # "Starting training step for model trained for N complete epochs" marks that
@@ -139,13 +142,21 @@ def _preemptions(named: NamedExperiment) -> int:
     )
 
 
-# Tracked runs by job name, and their rows: one per architecture.
-FT_RUNS = {run.job_name: run for run in ft_runs()}
-ARCHS = ("sfno-v2-ft", "swin-v2.2-v2-ft")
+# Tracked runs by job name, and their rows: one per architecture and length,
+# in ft_long_runs order (the SFNO rows first, each arch's shorter runs first).
+FT_RUNS = {run.job_name: run for run in ft_long_runs()}
 
 
 def arch_of(name: str) -> str:
-    return ARCHS[0] if FT_RUNS[name].arch == SFNO else ARCHS[1]
+    """Row of the run named `name`, e.g. sfno-v2-ft-e32 (its inference arch,
+    _inference_common._add_ft_archs).
+    """
+    run = FT_RUNS[name]
+    base = "sfno-v2" if run.arch == SFNO else "swin-v2.2-v2"
+    return f"{base}-ft-e{run.max_epochs}"
+
+
+ARCHS = tuple(dict.fromkeys(arch_of(name) for name in FT_RUNS))
 
 
 def max_epochs_of(name: str) -> int:
@@ -188,8 +199,8 @@ def _median(values: list[float]) -> float | None:
 
 # Inline inference runs the aimip evaluator every epoch and all others (the
 # 10yr and 46yr ERA5 runs and the 5-day weather ensembles) with
-# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ..., which the
-# 8-epoch ft runs never reach.
+# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ...: 3 times in a
+# 32-epoch run, 12 in a 128-epoch one.
 HEAVY_INFERENCE_EVERY = 10
 HEAVY_INFERENCE_RESIDUE = 0
 
@@ -253,7 +264,7 @@ def progress(named, name: str) -> tuple[int, Seconds, float]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference), useful train seconds) over the logs of every run (preemption
     retry) of the experiment, finished or not. The ft runs restart the epoch
-    count, so epochs done are their own (0..8).
+    count, so epochs done are their own (0..max_epochs).
     """
     none: Seconds = (None, None, None, None)
     max_epochs = max_epochs_of(name)
@@ -283,13 +294,16 @@ def progress(named, name: str) -> tuple[int, Seconds, float]:
 
 def main() -> None:
     names = list(FT_RUNS)
-    # One listing per row, by the common prefix of its job names (the ext80
-    # parent's name up to the seed): the broad "ace2-fm-nc-" listing matches
-    # ~9k old experiments and takes ~5 min, while a narrow one takes ~1 s.
+    # One listing per distinct common prefix of a row's job names (the ext80
+    # parent's name up to the seed, shared by an architecture's two rows): the
+    # broad "ace2-fm-nc-" listing matches ~9k old experiments and takes
+    # ~5 min, while a narrow one takes a few seconds.
+    prefixes = dict.fromkeys(
+        os.path.commonprefix([n for n in names if arch_of(n) == arch]) for arch in ARCHS
+    )
     by_name = {}
-    for arch in ARCHS:
-        arch_names = [n for n in names if arch_of(n) == arch]
-        by_name.update(newest_by_name(os.path.commonprefix(arch_names)))
+    for prefix in prefixes:
+        by_name.update(newest_by_name(prefix))
     with ThreadPoolExecutor(20) as ex:
         prog = dict(
             zip(
