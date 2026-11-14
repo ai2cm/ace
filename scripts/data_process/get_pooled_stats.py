@@ -331,6 +331,13 @@ def apply_transforms(ds: xr.Dataset, pair: DatasetPair) -> xr.Dataset:
 # Target number of timesteps read by one worker task, when the store does not
 # say (through its shard size) how many are cheapest to read together.
 TARGET_TIME_BLOCK = 256
+# Smallest number of timesteps a task is split down to when a store would
+# otherwise give the pool too few tasks to keep its workers busy.
+MIN_TIME_BLOCK = 16
+# Timesteps reduced at once within a task: small enough that the float64
+# temporaries of a 1deg field stay a few MiB, which is much faster than
+# reducing a whole block of them at once.
+REDUCTION_STEPS = 8
 
 # The store a worker process has open, kept between its tasks so that the
 # store's metadata is parsed once per process rather than once per task.
@@ -393,6 +400,37 @@ def _combine_moments(a: _Moments, b: _Moments) -> _Moments:
     return n, mean, m2
 
 
+def _time_moments(
+    values: np.ndarray, axes: tuple[int, ...], lead: int
+) -> tuple[_Moments, _Moments]:
+    """Moments over `axes` of `values[lead:]` and of the differences between
+    consecutive steps of `values`, whose first axis is time (and is in `axes`).
+
+    The steps are reduced a few at a time and the results combined, so that the
+    float64 copies made on the way stay small.
+    """
+    full: _Moments | None = None
+    difference: _Moments | None = None
+    for start in range(lead, values.shape[0], REDUCTION_STEPS):
+        # One step before the slab is included, for the difference ending in
+        # the slab's first step.
+        before = min(start, 1)
+        slab = np.asarray(
+            values[start - before : start + REDUCTION_STEPS], dtype=np.float64
+        )
+        slab_full = _moments(slab[before:], axes)
+        slab_difference = _moments(np.diff(slab, axis=0), axes)
+        full = slab_full if full is None else _combine_moments(full, slab_full)
+        difference = (
+            slab_difference
+            if difference is None
+            else _combine_moments(difference, slab_difference)
+        )
+    if full is None or difference is None:
+        raise ValueError("No time steps to reduce.")
+    return full, difference
+
+
 def _block_moments(
     store: str, start: int, stop: int, first: int, transforms: DatasetPair | None
 ) -> dict[str, dict]:
@@ -418,17 +456,16 @@ def _block_moments(
             continue  # a static variable is the same in every block
         if not np.issubdtype(da.dtype, np.number):
             raise ValueError(f"{store}: variable {name!r} has dtype {da.dtype}.")
-        axes = tuple(i for i, dim in enumerate(da.dims) if dim in reduction_dims)
-        values = np.asarray(da.values, dtype=np.float64)
         if has_time:
-            time_axis = da.dims.index("time")
-            without_lead = (slice(None),) * time_axis + (slice(lead, None),)
-            full = _moments(values[without_lead], axes)
-            difference = _moments(np.diff(values, axis=time_axis), axes)
+            da = da.transpose("time", ...)
+        axes = tuple(i for i, dim in enumerate(da.dims) if dim in reduction_dims)
+        values = da.values
+        if has_time:
+            full, difference = _time_moments(values, axes, lead)
         else:
             # As xarray's Dataset.diff, which leaves variables without the
             # dimension unchanged.
-            full = difference = _moments(values, axes)
+            full = difference = _moments(np.asarray(values, dtype=np.float64), axes)
         dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
         result[name] = {
             "dims": tuple(d for d in da.dims if d not in reduction_dims),
@@ -439,20 +476,26 @@ def _block_moments(
     return result
 
 
-def _time_block_size(ds: xr.Dataset) -> int:
+def _time_block_size(ds: xr.Dataset, n_steps: int, min_blocks: int) -> int:
     """Number of time steps per task: the time extent of a shard if the store
-    is sharded, so each task reads whole files, else a multiple of the chunk."""
+    is sharded, so each task reads whole files, else a multiple of the chunk.
+    It is halved (down to MIN_TIME_BLOCK) until `n_steps` gives `min_blocks`
+    tasks."""
+    size = TARGET_TIME_BLOCK
     for da in ds.data_vars.values():
         if "time" in da.dims and da.ndim > 1:
             time_axis = da.dims.index("time")
             shards = da.encoding.get("shards")
-            if shards is not None:
-                return int(shards[time_axis])
             chunks = da.encoding.get("chunks")
-            if chunks is not None:
+            if shards is not None:
+                size = int(shards[time_axis])
+            elif chunks is not None:
                 chunk = int(chunks[time_axis])
-                return chunk * max(1, round(TARGET_TIME_BLOCK / chunk))
-    return TARGET_TIME_BLOCK
+                size = chunk * max(1, round(TARGET_TIME_BLOCK / chunk))
+            break
+    while n_steps < min_blocks * size and size // 2 >= MIN_TIME_BLOCK:
+        size //= 2
+    return size
 
 
 def _time_blocks(start: int, stop: int, size: int) -> list[tuple[int, int]]:
@@ -466,6 +509,7 @@ def compute_store_stats(
     time_slice: slice,
     transforms: DatasetPair | None = None,
     pool: concurrent.futures.Executor | None = None,
+    min_blocks: int = 1,
 ) -> dict:
     """Open one zarr store, slice it in time, and return its centering /
     full-field / residual stats plus the timestep count used as the pooling
@@ -477,7 +521,8 @@ def compute_store_stats(
     `ds.diff("time").std(dims)` over time and the horizontal dims, skipping
     NaNs. They are accumulated in float64 over blocks of time steps, each
     reading every variable once; the blocks are computed by `pool` if given
-    (see `_init_worker`), else in this process.
+    (see `_init_worker`), else in this process. `min_blocks` is the number of
+    blocks to aim for at least, so that a pool has enough tasks for its workers.
     """
     ds = xr.open_zarr(store, chunks=None)
     positions = xr.DataArray(
@@ -496,7 +541,7 @@ def compute_store_stats(
     if stop - start != n_samples:
         raise ValueError(f"{store} sliced to {bounds} is not contiguous in time.")
 
-    blocks = _time_blocks(start, stop, _time_block_size(ds))
+    blocks = _time_blocks(start, stop, _time_block_size(ds, n_samples, min_blocks))
     logging.info(
         f"{store} {bounds}: {n_samples} steps in {len(blocks)} blocks, reducing "
         f"over {_reduction_dims(ds)}"
@@ -521,7 +566,7 @@ def compute_store_stats(
             else:
                 for key in ("full", "difference"):
                     total[name][key] = _combine_moments(total[name][key], moments[key])
-        if (i + 1) % 50 == 0:
+        if (i + 1) % max(50, len(blocks) // 10) == 0:
             logging.info(f"{store} {bounds}: {i + 1}/{len(blocks)} blocks done")
 
     def _mean(moments: dict, key: str) -> np.ndarray:
@@ -699,7 +744,11 @@ def compute(
                     logging.info(f"Reusing existing stats in {store_directory}")
                 else:
                     stats = compute_store_stats(
-                        store, pair.time_slice, transforms=pair, pool=pool
+                        store,
+                        pair.time_slice,
+                        transforms=pair,
+                        pool=pool,
+                        min_blocks=4 * n_workers,
                     )
                     write_stats(
                         _stats_files(stats),

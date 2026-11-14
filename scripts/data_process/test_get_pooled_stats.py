@@ -9,6 +9,8 @@ from get_pooled_stats import (
     DatasetPair,
     _resolve_zarr_stores,
     _stats_files,
+    _time_block_size,
+    _time_blocks,
     apply_transforms,
     compute,
     compute_store_stats,
@@ -438,3 +440,22 @@ def test_compute_store_stats_matches_xarray_over_blocks(tmp_path, shards):
             )
     assert stats["scaling_full_field"]["constant"] == 0.0
     assert np.isnan(stats["centering"]["all_nan"])
+
+
+def test_time_blocks_split_at_multiples_of_the_block_size():
+    assert _time_blocks(5, 17, 4) == [(5, 8), (8, 12), (12, 16), (16, 17)]
+    assert _time_blocks(8, 12, 4) == [(8, 12)]
+    assert _time_blocks(5, 7, 4) == [(5, 7)]
+
+
+def test_time_block_size_is_halved_to_give_enough_blocks(tmp_path):
+    store = str(tmp_path / "store.zarr")
+    values = np.zeros((128, 2, 3), dtype=np.float32)
+    ds = xr.Dataset({"a": (("time", "lat", "lon"), values)})
+    encoding = {"a": {"chunks": (1, 2, 3), "shards": (64, 2, 3)}}
+    ds.to_zarr(store, mode="w", encoding=encoding)
+    opened = xr.open_zarr(store, chunks=None)
+    assert _time_block_size(opened, n_steps=128, min_blocks=1) == 64
+    assert _time_block_size(opened, n_steps=128, min_blocks=4) == 32
+    # Never below MIN_TIME_BLOCK (16), however many blocks are asked for.
+    assert _time_block_size(opened, n_steps=128, min_blocks=1000) == 16
