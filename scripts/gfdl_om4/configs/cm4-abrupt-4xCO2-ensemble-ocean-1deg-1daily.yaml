@@ -2,11 +2,11 @@
 # CM4 abrupt-4xCO2 ensemble. `{member}` is filled from --member (see
 # pipeline/config_io.py), e.g. ic_0001.
 target_grid: F90
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v2/om4-tripolar-0.25deg-to-F90
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/c96-path-v1/om4-tripolar-0.25deg-via-cm4-c96-to-F90
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 output:
-  path: gs://vcm-ml-intermediate/2026-10-19-cm4-abrupt-4xCO2-ensemble-ocean-1deg-1daily/{member}.zarr
+  path: gs://vcm-ml-intermediate/2026-11-13-cm4-abrupt-4xCO2-ensemble-ocean-1deg-1daily/{member}.zarr
   time_chunk_size: 1
   time_shard_size: 365
 wetmask:
@@ -38,10 +38,6 @@ streams:
     # the artifact flags them so they are not averaged into coastal centers.
     # One artifact for the ensemble (make generate_face_masks_abrupt_4xco2).
     face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/cm4-abrupt-4xCO2-2026-10-16
-    postprocess:
-      - name: kelvin_sst
-        sources:
-          celsius_sst: tos
   # 1-day-mean surface fluxes/forcings, whose end-of-interval time labels
   # coincide with the snapshot instants (enforced by the time-alignment
   # assertion).
@@ -103,6 +99,9 @@ streams:
       - sea_ice_fraction
     postprocess:
       - sea_ice
+      - name: kelvin_sst
+        sources:
+          celsius_sst: SST
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot

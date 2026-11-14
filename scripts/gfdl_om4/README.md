@@ -68,8 +68,10 @@ depend on the read width.
 
 Each entry of a stream's `postprocess` list is a transform name, or
 `{name: <transform>, sources: {<argument>: <variable>}}` naming the output
-variables it reads. `kelvin_sst` needs `sources: {celsius_sst: <name>}`
-(`tos` in the OM4 configs, `SST` in randco2's). `sea_ice` and
+variables it reads, all of which the same stream must produce.
+`kelvin_sst` adds `<name>_degK` (`<name>` + 273.15, in K) and needs `sources: {celsius_sst: <name>}`:
+`SST`, the SIS2 field, in every config, so in the OM4 configs it sits on the
+`ice_snapshot` stream. `sea_ice` and
 `sea_ice_fraction_consistency` take `sea_ice_fraction` and
 `ocean_sea_ice_fraction`, defaulting to those names. A name the stream does
 not produce fails at config load.
@@ -252,7 +254,7 @@ Contents, under `pipeline/om4/`:
   instants or block-mean time coarsening onto them, full-cell (per-total-cell-area) regridding for selected
   variables, and named postprocess transforms.
 - `pipeline/om4/postprocess.py`: named post-regrid transforms selectable per
-  stream — Kelvin `sst`, `hfds_total_area`, and the sea-ice conventions
+  stream — Kelvin `SST_degK`, `hfds_total_area`, and the sea-ice conventions
   (ice-velocity masking, thickness zeroing, `sea_ice_volume`).
 - `pipeline/om4/face_masks.py`: one-time setup step for sources whose staggered
   velocities carry remap-born zeros over land (MOM6's online z\*-remap
@@ -399,7 +401,7 @@ Each output store carries exactly seven variables on the target grid:
 | Variable | Meaning |
 | --- | --- |
 | `SST` | sea surface temperature, °C, wetmask-normalized regrid of the source `SST` |
-| `sst` | the same field in K (`SST + 273.15`) |
+| `SST_degK` | the same field in K (`SST + 273.15`) |
 | `sea_ice_fraction` | ice area per total cell area |
 | `ocean_sea_ice_fraction` | ice area per ocean area |
 | `sea_surface_fraction` | time-invariant ocean fraction of each target cell (`sftof / 100`) |
@@ -428,7 +430,7 @@ grid, weights loader, regridding, config loading and zarr I/O):
 - `pipeline/randco2/config.py`: YAML→dataclass configuration (dacite); the
   `{member}` substitution is `pipeline.config_io.load_yaml`'s.
 - `pipeline/randco2/postprocess.py`: named post-regrid transforms — Kelvin
-  `sst` and the sea-ice-fraction consistency assertion.
+  `SST_degK` and the sea-ice-fraction consistency assertion.
 - `pipeline/randco2/check_output.py`: post-run assertion that a store opens
   with the variable set the config implies.
 - `pipeline/randco2/check_wetmask_equivalence.py`: assertion that all nine

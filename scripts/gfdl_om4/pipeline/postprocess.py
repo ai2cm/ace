@@ -142,7 +142,7 @@ class PostprocessConfig:
     Attributes:
         name: key of the pipeline's POSTPROCESS registry.
         sources: keyword arguments of the registered factory, each naming an
-            output variable the transform reads (e.g. ``celsius_sst: tos``).
+            output variable the transform reads (e.g. ``celsius_sst: SST``).
             Arguments left out take the factory's default.
     """
 
@@ -208,27 +208,32 @@ def assert_postprocess_inputs(
         available.update(spec.adds)
 
 
+def kelvin_name(celsius_name: str) -> str:
+    return f"{celsius_name}_degK"
+
+
 def kelvin_sst(
     ds: xr.Dataset, context: ChunkContext, *, celsius_sst: str
 ) -> xr.Dataset:
-    """Add ``sst``: sea surface temperature in Kelvin, from ``celsius_sst``."""
-    sst = ds[celsius_sst] + 273.15
-    sst.attrs = {
-        "long_name": "Sea surface temperature",
+    """Add ``<celsius_sst>_degK``: ``celsius_sst`` converted to Kelvin."""
+    sst_kelvin = ds[celsius_sst] + 273.15
+    sst_kelvin.attrs = {
+        "long_name": "Sea surface temperature in Kelvin",
         "units": "K",
         **provenance_attrs(context.store, celsius_sst, f"{celsius_sst} + 273.15"),
     }
-    ds["sst"] = sst
+    ds[kelvin_name(celsius_sst)] = sst_kelvin
     return ds
 
 
 def kelvin_sst_postprocess(*, celsius_sst: str) -> Postprocess:
     """``kelvin_sst`` reading the Celsius SST from output variable
-    ``celsius_sst``. No default: the name differs between pipelines."""
+    ``celsius_sst`` (``SST``, the SIS2 ``ice_snapshot`` field, in every
+    config). No default: the source must be named in the config."""
     return Postprocess(
         functools.partial(kelvin_sst, celsius_sst=celsius_sst),
         requires=(celsius_sst,),
-        adds=("sst",),
+        adds=(kelvin_name(celsius_sst),),
     )
 
 

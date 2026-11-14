@@ -1,11 +1,11 @@
 # 5-daily 4-degree ocean (Samudra) store from the 140-year CM4 1pctCO2
 # simulation.
 target_grid: F22.5
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v2/om4-tripolar-0.25deg-to-F22.5
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/c96-path-v1/om4-tripolar-0.25deg-via-cm4-c96-to-F22.5
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 output:
-  path: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-4deg-ocean-5daily.zarr
+  path: gs://vcm-ml-intermediate/2026-11-13-om4-1pctco2-4deg-ocean-5daily.zarr
   time_chunk_size: 1
   time_shard_size: 365
 wetmask:
@@ -35,10 +35,6 @@ streams:
     # with value exactly 0.0 where the vertical remap unmasked land columns;
     # the artifact flags them so they are not averaged into coastal centers.
     face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/om4-1pctco2-2026-06-19
-    postprocess:
-      - name: kelvin_sst
-        sources:
-          celsius_sst: tos
   # 5-day-mean surface fluxes/forcings, whose end-of-interval time labels
   # coincide with the snapshot instants (enforced by the time-alignment
   # assertion).
@@ -100,6 +96,9 @@ streams:
       - sea_ice_fraction
     postprocess:
       - sea_ice
+      - name: kelvin_sst
+        sources:
+          celsius_sst: SST
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot
@@ -114,3 +113,29 @@ streams:
       xT: xh
       yT: yh
     time_subsample_stride: 20
+  # SIS2 6-hourly means averaged over 20-step blocks (#1584) into 5-day
+  # means, labeled by each block's final step; the labels equal the flux
+  # stream's 5-day-mean labels. XPRTi, XPRTs live in a second store, and a
+  # stream reads one store.
+  - name: ice_flux_mean
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_6hourly.zarr
+    variables:
+      - SW
+      - LW
+      - LH
+      - SH
+      - SNOWFL
+      - EVAP
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_block_mean_factor: 20
+  - name: ice_transport_mean
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_tendencies_and_TSN_6hourly.zarr
+    variables:
+      - XPRTi
+      - XPRTs
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_block_mean_factor: 20

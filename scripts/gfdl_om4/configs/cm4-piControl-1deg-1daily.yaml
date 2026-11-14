@@ -1,7 +1,7 @@
 # 1-daily 1-degree ocean (Samudra) store from the 200-year CM4 piControl
 # simulation.
 target_grid: F90
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v2/om4-tripolar-0.25deg-to-F90
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/c96-path-v1/om4-tripolar-0.25deg-via-cm4-c96-to-F90
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 # The daily snapshot store carries one initial-condition instant before the
@@ -9,7 +9,7 @@ shift_timestamps_to_avg_interval_midpoint: false
 # one time coordinate.
 start_time: '0151-01-02'
 output:
-  path: gs://vcm-ml-intermediate/2026-09-02-cm4-piControl-1deg-ocean-1daily.zarr
+  path: gs://vcm-ml-intermediate/2026-11-13-cm4-piControl-1deg-ocean-1daily.zarr
   time_chunk_size: 1
   time_shard_size: 365
 # wetmask from the 5-daily processing
@@ -40,10 +40,6 @@ streams:
     # with value exactly 0.0 where the vertical remap unmasked land columns;
     # the artifact flags them so they are not averaged into coastal centers.
     face_mask_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/face-masks/om4-picontrol-2026-06-19
-    postprocess:
-      - name: kelvin_sst
-        sources:
-          celsius_sst: tos
   # 1-day-mean surface fluxes/forcings, whose end-of-interval time labels
   # coincide with the snapshot instants (enforced by the time-alignment
   # assertion).
@@ -105,6 +101,9 @@ streams:
       - sea_ice_fraction
     postprocess:
       - sea_ice
+      - name: kelvin_sst
+        sources:
+          celsius_sst: SST
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot
@@ -119,3 +118,21 @@ streams:
       xT: xh
       yT: yh
     time_subsample_stride: 4
+  # SIS2 6-hourly surface fluxes and ice transports, averaged over the 4
+  # steps ending at each snapshot instant (end-labeled 1-day means). piControl
+  # has no ice_tendencies_and_TSN_6hourly store; XPRTi, XPRTs are here.
+  - name: ice_flux_mean
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ice_6hourly.zarr
+    variables:
+      - SW
+      - LW
+      - LH
+      - SH
+      - SNOWFL
+      - EVAP
+      - XPRTi
+      - XPRTs
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_block_mean_factor: 4
