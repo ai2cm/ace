@@ -2,8 +2,8 @@ from typing import TypeVar
 
 import torch
 import torch.nn as nn
-import torch_harmonics as th
 
+import fme.core.sht as th
 from fme.core import metrics
 from fme.core.disco import DiscreteContinuousConvS2
 
