@@ -31,7 +31,6 @@ from fme.core.optimization import (
     OptimizationConfig,
     OptimizationConfigDict,
     build_optimization_dict,
-    has_lr_schedule,
     validate_optimization_config_dict,
 )
 from fme.core.rand import set_seed
@@ -368,8 +367,10 @@ class TrainConfig:
             In the mapping, ``enable_automatic_mixed_precision``,
             ``use_gradient_accumulation`` and ``checkpoint`` must agree across
             entries, ``max_grad_norm`` clips each component's gradient norm
-            alone, and the logged ``lr`` is the atmosphere's (each component's
-            is logged as ``lr/<component>``).
+            alone, the logged ``lr`` is the atmosphere's (each component's
+            is logged as ``lr/<component>``), and ``lr_tuning`` is not
+            supported. A ``ReduceLROnPlateau`` scheduler in either entry
+            steps on the total validation loss of both components.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
         save_checkpoint: Whether to save checkpoints. If false, no checkpoints
@@ -475,7 +476,12 @@ class TrainConfig:
             validate_optimization_config_dict(
                 self.optimization, keys=_OPTIMIZATION_COMPONENTS
             )
-        if self.lr_tuning is not None and has_lr_schedule(self.optimization):
+            if self.lr_tuning is not None:
+                raise ValueError(
+                    "lr_tuning is not supported with per-component "
+                    "optimization (optimization.atmosphere/ocean)."
+                )
+        elif self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
                 "lr_tuning and optimization.scheduler cannot both be specified; "
                 "lr_tuning is an alternative form of learning rate scheduling"

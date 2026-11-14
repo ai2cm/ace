@@ -20,7 +20,6 @@ from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
 from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.loss import StepLossConfig
 from fme.core.optimization import OptimizationConfig
-from fme.core.scheduler import SchedulerConfig
 from fme.core.typing_ import Slice
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import (
@@ -761,15 +760,16 @@ def _make_train_config_with_optimization(tmp_path, optimization, lr_tuning=None)
     )
 
 
-def test_train_config_rejects_lr_tuning_with_component_schedule(tmp_path):
+def test_train_config_rejects_lr_tuning_with_per_component_form(tmp_path):
     optimization = {
-        "atmosphere": OptimizationConfig(),
-        "ocean": OptimizationConfig(
-            scheduler=SchedulerConfig(type="StepLR", kwargs={"step_size": 1})
-        ),
+        "atmosphere": OptimizationConfig(lr=1e-5),
+        "ocean": OptimizationConfig(lr=1e-3),
     }
     _make_train_config_with_optimization(tmp_path, optimization)
-    with pytest.raises(ValueError, match="lr_tuning"):
+    _make_train_config_with_optimization(
+        tmp_path, OptimizationConfig(), lr_tuning=LRTuningConfig()
+    )
+    with pytest.raises(ValueError, match="lr_tuning is not supported"):
         _make_train_config_with_optimization(
             tmp_path, optimization, lr_tuning=LRTuningConfig()
         )

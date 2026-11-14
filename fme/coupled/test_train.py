@@ -616,7 +616,11 @@ _PER_COMPONENT_OPTIMIZATION_YAML = """optimization:
 
 
 def _per_component_train_config(
-    tmp_path, experiment_name: str, max_epochs: int, segment_epochs: int | None = None
+    tmp_path,
+    experiment_name: str,
+    max_epochs: int,
+    segment_epochs: int | None = None,
+    optimization_yaml: str = _PER_COMPONENT_OPTIMIZATION_YAML,
 ):
     data_dir = tmp_path / f"coupled_data_{experiment_name}"
     data_dir.mkdir()
@@ -684,7 +688,7 @@ def _per_component_train_config(
     assert single_form in text
     with open(train_config_fname, "w") as f:
         f.write(
-            text.replace(single_form, _PER_COMPONENT_OPTIMIZATION_YAML)
+            text.replace(single_form, optimization_yaml)
             + "log_train_every_n_batches: 1\n"
             + (f"segment_epochs: {segment_epochs}\n" if segment_epochs else "")
         )
@@ -751,3 +755,90 @@ def test_train_per_component_optimization(tmp_path):
     ] == [2]
     resumed = _epoch_component_lrs(first_logs) + _epoch_component_lrs(second_logs)
     assert resumed == pytest.approx(expected)
+
+
+_OCEAN_LR = 1e-3
+_ATMOSPHERE_LR = 1e-5
+_GROWTH_ITERS = 16
+
+
+def _scheduler_yaml(kind: str, step_each_iteration: bool) -> str:
+    if kind == "decaying":
+        scheduler = "{type: ExponentialLR, kwargs: {gamma: 0.5}"
+    elif kind == "growing":
+        scheduler = (
+            "{type: LinearLR, kwargs: {start_factor: 0.25, end_factor: 1.0, "
+            f"total_iters: {_GROWTH_ITERS}}}"
+        )
+    else:
+        return "{}"
+    return f"{scheduler}, step_each_iteration: {str(step_each_iteration).lower()}}}"
+
+
+def _expected_lr(kind: str, n_steps: int) -> float:
+    if kind == "decaying":
+        return _OCEAN_LR * 0.5**n_steps
+    if kind == "growing":
+        growth = min(n_steps, _GROWTH_ITERS) / _GROWTH_ITERS
+        return _ATMOSPHERE_LR * (0.25 + 0.75 * growth)
+    return _ATMOSPHERE_LR
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "atmosphere, atmosphere_each_iteration, ocean_each_iteration",
+    [
+        ("constant", False, False),
+        ("growing", True, False),
+        ("growing", False, True),
+    ],
+    ids=[
+        "atmos_constant-ocean_epoch",
+        "atmos_growing_iteration-ocean_epoch",
+        "atmos_growing_epoch-ocean_iteration",
+    ],
+)
+def test_train_per_component_lr_schedules(
+    tmp_path,
+    atmosphere: str,
+    atmosphere_each_iteration: bool,
+    ocean_each_iteration: bool,
+):
+    optimization_yaml = (
+        "optimization:\n"
+        "  atmosphere:\n"
+        f"    lr: {_ATMOSPHERE_LR:.6f}\n"
+        f"    scheduler: {_scheduler_yaml(atmosphere, atmosphere_each_iteration)}\n"
+        "  ocean:\n"
+        f"    lr: {_OCEAN_LR:.6f}\n"
+        f"    scheduler: {_scheduler_yaml('decaying', ocean_each_iteration)}\n"
+    )
+    max_epochs = 2
+    set_seed(0)
+    config = _per_component_train_config(
+        tmp_path, "schedules", max_epochs, optimization_yaml=optimization_yaml
+    )
+    with use_cpu_randn(), mock_wandb() as wandb:
+        train_main(yaml_config=config)
+        logs = wandb.get_logs()
+    epoch_end_steps = [
+        step for step, log in enumerate(logs) if "epoch" in log and "lr/ocean" in log
+    ]
+    n_batches = epoch_end_steps[0]
+    assert n_batches > 1
+    assert epoch_end_steps == [n_batches * (e + 1) for e in range(max_epochs)]
+    kinds = {"atmosphere": atmosphere, "ocean": "decaying"}
+    each_iteration = {
+        "atmosphere": atmosphere_each_iteration,
+        "ocean": ocean_each_iteration,
+    }
+    # Batch logs come after that batch's per-iteration scheduler step; the
+    # per-epoch scheduler steps after the epoch's last log.
+    for step in range(1, n_batches * max_epochs + 1):
+        epoch = (step - 1) // n_batches
+        for key, kind in kinds.items():
+            n_steps = step if each_iteration[key] else epoch
+            assert logs[step][f"lr/{key}"] == pytest.approx(
+                _expected_lr(kind, n_steps)
+            ), (key, step)
+        assert logs[step]["lr"] == logs[step]["lr/atmosphere"]

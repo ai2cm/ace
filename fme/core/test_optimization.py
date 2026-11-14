@@ -934,6 +934,113 @@ def test_optimization_dict_distinct_lr_and_schedules():
         schedule_b.step()
 
 
+_OCEAN_LR = 1e-3
+_ATMOSPHERE_LR = 1e-5
+_GROWTH_ITERS = 16
+
+
+def _decaying_lr(n_steps: int) -> float:
+    return _OCEAN_LR * 0.5**n_steps
+
+
+def _constant_lr(n_steps: int) -> float:
+    return _ATMOSPHERE_LR
+
+
+def _growing_lr(n_steps: int) -> float:
+    return _ATMOSPHERE_LR * (0.25 + 0.75 * min(n_steps, _GROWTH_ITERS) / _GROWTH_ITERS)
+
+
+def _schedule(kind: str, step_each_iteration: bool) -> SchedulerConfig:
+    if kind == "decaying":
+        return SchedulerConfig(
+            type="ExponentialLR",
+            kwargs={"gamma": 0.5},
+            step_each_iteration=step_each_iteration,
+        )
+    if kind == "growing":
+        return SchedulerConfig(
+            type="LinearLR",
+            kwargs={
+                "start_factor": 0.25,
+                "end_factor": 1.0,
+                "total_iters": _GROWTH_ITERS,
+            },
+            step_each_iteration=step_each_iteration,
+        )
+    return SchedulerConfig(step_each_iteration=step_each_iteration)
+
+
+_EXPECTED_LR = {
+    "decaying": _decaying_lr,
+    "constant": _constant_lr,
+    "growing": _growing_lr,
+}
+
+_SCHEDULE_SCENARIOS = [
+    ("constant", False, False),
+    ("constant", False, True),
+    ("growing", False, False),
+    ("growing", True, True),
+    ("growing", True, False),
+    ("growing", False, True),
+]
+_SCHEDULE_SCENARIO_IDS = [
+    "atmos_constant-ocean_epoch",
+    "atmos_constant-ocean_iteration",
+    "atmos_growing_epoch-ocean_epoch",
+    "atmos_growing_iteration-ocean_iteration",
+    "atmos_growing_iteration-ocean_epoch",
+    "atmos_growing_epoch-ocean_iteration",
+]
+
+
+@pytest.mark.parametrize(
+    "atmosphere, atmosphere_each_iteration, ocean_each_iteration",
+    _SCHEDULE_SCENARIOS,
+    ids=_SCHEDULE_SCENARIO_IDS,
+)
+def test_optimization_dict_per_component_lr_trajectories(
+    atmosphere: str, atmosphere_each_iteration: bool, ocean_each_iteration: bool
+):
+    n_epochs, n_batches = 3, 4
+    x = torch.randn(5, 3).to(fme.get_device())
+    modules = dict(zip(("atmosphere", "ocean"), _two_component_modules().values()))
+    optimization = build_optimization_dict(
+        {
+            "atmosphere": OptimizationConfig(
+                lr=_ATMOSPHERE_LR,
+                scheduler=_schedule(atmosphere, atmosphere_each_iteration),
+            ),
+            "ocean": OptimizationConfig(
+                lr=_OCEAN_LR, scheduler=_schedule("decaying", ocean_each_iteration)
+            ),
+        },
+        modules,
+        max_epochs=n_epochs,
+    )
+    timing = {"atmosphere": atmosphere_each_iteration, "ocean": ocean_each_iteration}
+    expected_lr = {"atmosphere": _EXPECTED_LR[atmosphere], "ocean": _decaying_lr}
+    # Trainer order: step weights and the per-iteration scheduler each batch,
+    # then the per-epoch scheduler with the validation loss.
+    for epoch in range(n_epochs):
+        for batch in range(n_batches):
+            iteration = epoch * n_batches + batch
+            assert optimization.learning_rates == {
+                key: pytest.approx(
+                    expected_lr[key](iteration if timing[key] else epoch)
+                )
+                for key in modules
+            }
+            assert (
+                optimization.learning_rate == optimization.learning_rates["atmosphere"]
+            )
+            optimization.accumulate_loss(_summed_loss(modules, x))
+            optimization.step_weights()
+            optimization.step_scheduler(is_iteration=True)
+        optimization.step_scheduler(valid_loss=1.0, is_iteration=False)
+
+
 def test_optimization_dict_matches_separate_optimizations():
     x = torch.randn(5, 3).to(fme.get_device())
     configs = {
@@ -1139,22 +1246,15 @@ def test_optimization_dict_clips_per_component():
     )
 
 
-def test_optimization_dict_set_learning_rate_keeps_ratio():
-    modules = _two_component_modules()
+def test_optimization_dict_set_learning_rate_not_supported():
     optimization = build_optimization_dict(
-        {
-            "a": OptimizationConfig(lr=0.01),
-            "b": OptimizationConfig(lr=0.1),
-        },
-        modules,
+        {"a": OptimizationConfig(lr=0.01), "b": OptimizationConfig(lr=0.1)},
+        _two_component_modules(),
         max_epochs=1,
     )
-    optimization.set_learning_rate(0.02)
-    assert optimization.learning_rate == pytest.approx(0.02)
-    assert optimization.learning_rates == {
-        "a": pytest.approx(0.02),
-        "b": pytest.approx(0.2),
-    }
+    with pytest.raises(NotImplementedError, match="LR tuning"):
+        optimization.set_learning_rate(0.02)
+    assert optimization.learning_rates == {"a": 0.01, "b": 0.1}
 
 
 @pytest.mark.parametrize(

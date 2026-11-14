@@ -78,8 +78,8 @@ class Optimization:
 class OptimizationDict(OptimizationABC):  # NEW — one optimizer + scheduler per key, one backward, one shared GradScaler
     learning_rate: float                    # first component's lr
     learning_rates: dict[str, float]
-    def set_learning_rate(self, lr): ...    # sets first component's lr, rescales every group by the same factor
-    def step_scheduler(self, valid_loss=None, is_iteration=False): ...  # steps every component's scheduler
+    def set_learning_rate(self, lr): ...    # raises NotImplementedError (no lr_tuning, D5)
+    def step_scheduler(self, valid_loss=None, is_iteration=False): ...  # steps each component's scheduler on its own step_each_iteration
     def step_weights(self): ...             # skips a component with no grads; clips each component's norm alone
     def load_optimizer_state_for_finetuning(self, key, state): ...  # single-form or per-component state into one key
     def get_state(self): ...                # {components: {...}, gscaler_state_dict}
@@ -126,7 +126,7 @@ class CoupledTrainStepper:
 class TrainConfig:
     optimization: OptimizationConfig | OptimizationConfigDict  # CHANGED — single form first in the union
 
-    def __post_init__(self): ...  # CHANGED — validate dict keys and shared fields; lr_tuning vs any entry's schedule
+    def __post_init__(self): ...  # CHANGED — validate dict keys and shared fields; reject lr_tuning with the dict form
     def _get_optimization(self, modules: OptimizationModules) -> OptimizationABC: ...  # CHANGED — dispatch on form
 ```
 
@@ -178,7 +178,10 @@ def test_optimization_dict_no_component_with_grad_does_not_raise():
     # PARAMETERIZE: {cpu GradScaler, cuda}; scale unchanged.
 def test_optimization_dict_clips_per_component():
     # GOAL: a large-grad component does not shrink the other's clipped grad (read from Adam exp_avg).
-def test_optimization_dict_set_learning_rate_keeps_ratio(): ...
+def test_optimization_dict_set_learning_rate_not_supported(): ...
+def test_optimization_dict_per_component_lr_trajectories():
+    # PARAMETERIZE: atmosphere {constant, growing} x ocean decaying x {iteration, epoch} stepping per component;
+    # each component's lr per batch matches its closed-form schedule.
 def test_validate_optimization_config_dict_rejects():
     # PARAMETERIZE: missing key, unknown key, amp / accumulation / checkpoint differ.
 def test_build_optimization_dict_resume_from_uncoupled_ckpt():
@@ -192,7 +195,7 @@ def test_train_config_optimization_union_parse():
     # PARAMETERIZE: {} and {lr} -> OptimizationConfig; {atmosphere, ocean} -> dict of OptimizationConfig.
 def test_train_config_optimization_union_hides_entry_error():
     # GOAL: documents that dacite's union reports an invalid entry as UnionMatchError.
-def test_train_config_rejects_lr_tuning_with_component_schedule(): ...
+def test_train_config_rejects_lr_tuning_with_per_component_form(): ...
 def test_train_config_rejects_wrong_optimization_components(): ...
 ```
 
@@ -211,13 +214,9 @@ def test_single_form_optimization_unchanged():
 def test_train_per_component_optimization():
     # GOAL: dict-form coupled training logs lr/atmosphere and lr/ocean following distinct StepLR schedules;
     # saves the per-component state, resumes, and continues the same schedules.
-```
-
-## `fme/core/generics/test_lr_tuning.py` (modified)
-
-```python
-def test_lr_tuning_trial_with_optimization_dict():
-    # GOAL: candidate scales both components' lr by lr_factor; adopting it scales both.
+def test_train_per_component_lr_schedules():
+    # PARAMETERIZE: atmosphere constant / growing, ocean decaying, mixed iteration / epoch stepping;
+    # logged lr/atmosphere and lr/ocean per batch match each closed-form schedule.
 ```
 
 ## `fme/core/generics/test_trainer.py` (modified)
@@ -235,5 +234,5 @@ def test_lr_tuning_trial_with_optimization_dict():
 - `CoupledTrainStepper.optimization_modules` under the single form: always the mapping, flattened in key order (implemented), or `self.modules`?
 - Per-entry fields: full `OptimizationConfig` with amp/accumulation/checkpoint required to agree (implemented), or a narrower per-entry class?
 - Gradient clipping: per component (implemented) or one global norm?
-- Logged `lr` and `lr_tuning`: first component's lr plus `lr/<component>`, `set_learning_rate` keeps the ratio (implemented), or reject `lr_tuning` with the dict form?
+- Logged `lr` and `lr_tuning`: decided — atmosphere's lr plus `lr/<component>`; `lr_tuning` rejected with the dict form; distinct per-component schedules required.
 - Missing component key: raise (implemented), freeze it, or fall back to a default?

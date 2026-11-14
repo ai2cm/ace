@@ -409,8 +409,9 @@ class OptimizationDict(OptimizationABC):
     """One optimizer and LR scheduler per component over one shared backward
     pass and one shared GradScaler.
 
-    ``learning_rate`` and ``set_learning_rate`` act on the first component;
-    ``set_learning_rate`` rescales every other group by the same factor.
+    ``learning_rate`` is the first component's first-group learning rate.
+    Each component's scheduler steps that component's learning rate alone.
+    Setting one learning rate for all components (LR tuning) is not supported.
     """
 
     def __init__(
@@ -459,17 +460,10 @@ class OptimizationDict(OptimizationABC):
         }
 
     def set_learning_rate(self, lr: float):
-        """Set the first component's first-group learning rate to ``lr``,
-        rescaling every other group of every component by the same factor.
-        If that learning rate is zero, every group is set to ``lr``.
-        """
-        current = self.learning_rate
-        for entry in self._entries.values():
-            for param_group in entry.optimizer.param_groups:
-                if current == 0:
-                    param_group["lr"] = lr
-                else:
-                    param_group["lr"] = param_group["lr"] * (lr / current)
+        raise NotImplementedError(
+            "Per-component optimization has one learning rate per component; "
+            "setting a single learning rate (LR tuning) is not supported."
+        )
 
     def set_mode(self, modules: nn.ModuleList):
         for m in modules:
@@ -794,13 +788,6 @@ def validate_optimization_config_dict(
                 f"optimization.<component>.{name} must agree across components, "
                 f"got {values}."
             )
-
-
-def has_lr_schedule(config: OptimizationConfig | OptimizationConfigDict) -> bool:
-    """Whether any component configures a learning rate scheduler."""
-    if isinstance(config, OptimizationConfig):
-        return config.has_lr_schedule
-    return any(entry.has_lr_schedule for entry in config.values())
 
 
 def build_optimization_dict(
