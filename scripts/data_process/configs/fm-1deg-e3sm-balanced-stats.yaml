@@ -1,9 +1,9 @@
 # Pooled normalization stats over exactly the train concat of the 1deg 6-hourly
 # fm-e3sm-balanced base config
 #   configs/experiments/2026-10-19-fm/base_configs/ace-train-config-1deg-nc-sfno-v2-fm-e3sm-balanced.yaml
-# Derived from fm-v2-e3sm-balanced-stats.yaml: the same entries, time slices, groups, renames, derived
-# variables and scalings, with each 4deg daily store replaced by its 1deg
-# 6-hourly store.
+# Derived from fm-v2-e3sm-balanced-stats.yaml: the same entries, time slices, groups, renames
+# and scalings, with each 4deg daily store replaced by its 1deg 6-hourly store.
+# ocean_fraction is not derived for CM4: the 1deg CM4 stores already hold it.
 # Every store is read from its weka copy (the same paths training reads; each
 # is /climate-default/X for gs://vcm-ml-intermediate/X): the train concat is
 # about 20 TB compressed, too much to pull from GCS.
@@ -122,88 +122,66 @@ dataset_pairs:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0001.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0002.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-1xCO2-ic_0003.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0001.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0002.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-2xCO2-ic_0003.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0001.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0002.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2026-10-11-CM4-like-AM4-random-CO2/random-CO2-4xCO2-ic_0003.zarr
   group: cm4
   renamed_variables:
     carbon_dioxide: global_mean_co2
   multiply_scalar:
     global_mean_co2: 1.0e-06
-  derived_variables:
-  - ocean_fraction
 - dataset: /climate-default/2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
   group: xshield
 - dataset: /climate-default/2026-11-13-E3SMv3-piControl-atmosphere-105yr-6H-co2.zarr

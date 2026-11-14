@@ -2,7 +2,9 @@
 # Derived from run_configs/ace-train-config-4deg-nc-sfno-v2-fm-e3sm-balanced-s0-maskoff.yaml
 # with these changes:
 # - every dataset replaced by its 1deg 6-hourly store (same members, labels,
-#   year splits, renames, derived variables and scalings);
+#   year splits, renames and scalings; the 1deg CM4 stores already hold
+#   ocean_fraction, equal to the derived one to float32 rounding, so it is no
+#   longer derived, which fme refuses for a variable a store has);
 # - normalization stats roots replaced by the 1deg ones (to be computed, see
 #   scripts/data_process/configs/fm-1deg-e3sm-balanced-stats.yaml);
 # - label_sampling samples_per_epoch 11037 = one ERA5-only epoch of 6-hourly
@@ -807,8 +809,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default
@@ -824,8 +824,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -841,8 +839,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -858,8 +854,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -875,8 +869,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -892,8 +884,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -909,8 +899,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -926,8 +914,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -943,8 +929,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -960,8 +944,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
@@ -977,8 +959,6 @@ train_loader:
       variable_metadata:
         global_mean_co2:
           units: volume mixing ratio
-      derived_variables:
-      - ocean_fraction
       sht_roundtrip_variables:
       - HGTsfc
     - data_path: /climate-default
