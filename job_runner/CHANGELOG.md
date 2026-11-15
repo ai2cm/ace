@@ -25,6 +25,10 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] `experiments.txt` column `n_gpus` (last; blank = 1) runs
   `{evaluate,inference}.sh` jobs on that many GPUs, with `torchrun` when > 1;
   `inference.sh` rejects > 1 for `fme.coupled.inference`
+- [FEAT] `evaluate.sh --lift-coupled-atmosphere`: score a coupled checkpoint's
+  atmosphere with `fme.ace.evaluator`; the job first runs
+  `bin/extract_atmosphere_from_coupled_ckpt.py` (copy of troya's tool from
+  `troya/2026-10-29-1deg-hybrid-sstdiag-coupled-ft`)
 
 ### Changed
 
