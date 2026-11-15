@@ -711,7 +711,9 @@ def test_train_per_component_optimization(tmp_path):
         train_main(yaml_config=uninterrupted)
         uninterrupted_logs = wandb.get_logs()
     expected = [(1e-4, 1e-3), (0.5e-4, 1e-4)]
-    assert _epoch_component_lrs(uninterrupted_logs) == pytest.approx(expected)
+    assert _epoch_component_lrs(uninterrupted_logs) == [
+        pytest.approx(lrs) for lrs in expected
+    ]
     batch_logs = [
         log
         for log in uninterrupted_logs
@@ -754,7 +756,7 @@ def test_train_per_component_optimization(tmp_path):
         log["epoch"] for log in second_logs if "lr/atmosphere" in log and "epoch" in log
     ] == [2]
     resumed = _epoch_component_lrs(first_logs) + _epoch_component_lrs(second_logs)
-    assert resumed == pytest.approx(expected)
+    assert resumed == [pytest.approx(lrs) for lrs in expected]
 
 
 _OCEAN_LR = 1e-3
