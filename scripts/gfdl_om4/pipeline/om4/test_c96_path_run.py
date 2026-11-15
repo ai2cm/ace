@@ -232,11 +232,15 @@ def _field(toy: Toy, scale: float, level: int | None = None) -> np.ndarray:
     return np.where(wet, values, np.nan).reshape(O_SHAPE)
 
 
-def _chunk(c96: C96Run, stream: StreamConfig, fields: dict, level=None):
-    """process_chunk on one timestep; ``fields`` maps names to (dims, values)."""
+def _chunk(c96: C96Run, stream: StreamConfig, fields: dict, level=None, attrs=None):
+    """process_chunk on one timestep; ``fields`` maps names to (dims, values),
+    ``attrs`` names to source attrs."""
+    attrs = attrs or {}
     ds = xr.Dataset(
         {
-            name: (dims, np.asarray(values, dtype=np.float32))
+            name: xr.Variable(
+                dims, np.asarray(values, dtype=np.float32), attrs.get(name, {})
+            )
             for name, (dims, values) in fields.items()
         }
     ).expand_dims(TIME_DIM)
@@ -323,6 +327,36 @@ def test_process_chunk_c96_path(tmp_path, monkeypatch):
     )
     assert "sea_ice_volume" in out.data_vars
     _assert_finite_where_ocean(out, ocean_0, e.gained_band)
+
+
+def test_rotated_pair_labels(tmp_path, monkeypatch):
+    """process_chunk relabels a rotated pair as geographic components."""
+    c96 = _c96_run(tmp_path, monkeypatch)
+    face = 1.0 + 0.1 * np.arange(c96.toy.wet.size).reshape(O_SHAPE)
+    ice = StreamConfig(
+        name="ice", store="toy", variables=["UI", "VI"], rotated_pairs=[["UI", "VI"]]
+    )
+    attrs = {
+        "UI": {
+            "long_name": "Sea Water X Velocity",
+            "standard_name": "sea_water_x_velocity",
+            "units": "m/s",
+        },
+        "VI": {"long_name": "ice velocity - y component", "units": "m/s"},
+    }
+    out = _chunk(
+        c96,
+        ice,
+        {"UI": (("yh", "xq"), face), "VI": (("yq", "xh"), -0.5 * face)},
+        attrs=attrs,
+    )
+    assert out["UI"].attrs["long_name"] == "Sea Water Eastward Velocity"
+    assert out["UI"].attrs["standard_name"] == "eastward_sea_water_velocity"
+    assert out["VI"].attrs["long_name"] == "ice velocity - northward component"
+    assert "standard_name" not in out["VI"].attrs
+    for name in ("UI", "VI"):
+        assert out[name].attrs["units"] == "m/s"
+        assert "rotated" in out[name].attrs[DERIVATION_ATTR]
 
 
 def _write_streams(tmp_path, c96: C96Run) -> str:

@@ -151,6 +151,7 @@ def _toy_run(tmp_path, monkeypatch, a=TOY_A, sftof=TOY_SFTOF, c=TOY_C):
             "sea_ice_fraction": (
                 (TIME_DIM, "yh", "xh"),
                 np.array([c, c])[:, None, :].astype(np.float32),
+                {"long_name": "ice concentration"},
             ),
         },
         coords={TIME_DIM: time},
@@ -236,6 +237,14 @@ def test_chunk_values_on_toy(tmp_path, monkeypatch):
         out["sea_ice_fraction"], [F(5, 6), F(1, 10), NAN], "sea_ice_fraction_J"
     )
     _assert_tabled(out["ocean_sea_ice_fraction"], [F(5, 6), F(1, 2), NAN], "X^a_J of c")
+    assert (
+        out["sea_ice_fraction"].attrs["long_name"]
+        == "ice concentration, fraction of cell area"
+    )
+    assert (
+        out["ocean_sea_ice_fraction"].attrs["long_name"]
+        == "ice concentration, fraction of ocean area"
+    )
 
 
 def test_drop_outputs_removes_sst(tmp_path, monkeypatch):

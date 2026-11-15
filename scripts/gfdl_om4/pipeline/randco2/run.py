@@ -59,6 +59,7 @@ from ..native_area import (
     regrid_full_cell,
 )
 from ..ocean_emulators_port import OCEAN_FRACTION_THRESHOLD, regrid_normalized
+from ..output_attrs import CELL_AREA_BASIS, OCEAN_AREA_BASIS, area_basis_long_name
 from ..postprocess import (
     DERIVATION_ATTR,
     ChunkContext,
@@ -240,19 +241,25 @@ def _process_chunk(
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
         out_name = stream.renaming.get(name, name)
+        if name in stream.full_cell_variables:
+            da = da.assign_attrs(
+                long_name=area_basis_long_name(da.attrs, name, OCEAN_AREA_BASIS)
+            )
         output[out_name] = da.assign_attrs(
             provenance_attrs(stream.store, name, da.attrs.get(DERIVATION_ATTR))
         )
 
     for name, full in full_cell.data_vars.items():
+        long_name = area_basis_long_name(full.attrs, name, CELL_AREA_BASIS)
         output[name] = full.assign_attrs(
-            provenance_attrs(
+            long_name=long_name,
+            **provenance_attrs(
                 stream.store,
                 name,
                 "zeroed over land (wetmask) and conservatively regridded "
                 "without ocean-fraction normalization, giving the "
                 "per-total-cell-area quantity; NaN over land applied after",
-            )
+            ),
         )
 
     if stream.postprocess:

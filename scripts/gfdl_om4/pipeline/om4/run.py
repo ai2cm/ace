@@ -81,6 +81,14 @@ from ..ocean_emulators_port import (
     regrid_normalized,
     rotate_vectors,
 )
+from ..output_attrs import (
+    CELL_AREA_BASIS,
+    EASTWARD,
+    NORTHWARD,
+    OCEAN_AREA_BASIS,
+    area_basis_long_name,
+    geographic_component_attrs,
+)
 from ..postprocess import (
     DERIVATION_ATTR,
     SEA_ICE_FRACTION,
@@ -344,7 +352,9 @@ def _rotate_pairs(
     face_masks: xr.Dataset | None,
 ) -> xr.Dataset:
     """Interpolate each configured C-grid vector pair to tracer centers and
-    rotate it to geographic components, preserving names and attrs.
+    rotate it to geographic components, preserving names and attrs except
+    the relabeled ``long_name``/``standard_name``
+    (pipeline.output_attrs.geographic_component_attrs).
 
     Faces the source masks as land drop out of the face->center average. An
     ocean center whose faces on an axis are *all* land is a wall for that
@@ -391,8 +401,12 @@ def _rotate_pairs(
                 "valid zeros by the source) treated as invalid; " + rotation_note
             )
         ds = ds.drop_vars([u_name, v_name])
-        ds[u_name] = append_derivation(u.assign_attrs(u_attrs), rotation_note)
-        ds[v_name] = append_derivation(v.assign_attrs(v_attrs), rotation_note)
+        u_attrs = geographic_component_attrs(u_attrs, u_name, EASTWARD)
+        v_attrs = geographic_component_attrs(v_attrs, v_name, NORTHWARD)
+        # Replace, not update: the rotation arithmetic carries u's attrs onto v.
+        u.attrs, v.attrs = u_attrs, v_attrs
+        ds[u_name] = append_derivation(u, rotation_note)
+        ds[v_name] = append_derivation(v, rotation_note)
     return ds
 
 
@@ -507,19 +521,25 @@ def _process_chunk(
             derivation = f"{level_note}; {derivation}" if derivation else level_note
             da = da.squeeze(LEVEL_DIM, drop=True)
             out_name = f"{out_name}_{level_index}"
+        if name in stream.full_cell_variables:
+            da = da.assign_attrs(
+                long_name=area_basis_long_name(da.attrs, name, OCEAN_AREA_BASIS)
+            )
         output[out_name] = da.assign_attrs(
             provenance_attrs(stream.store, name, derivation)
         )
 
     for name, full in full_cell.data_vars.items():
+        long_name = area_basis_long_name(full.attrs, name, CELL_AREA_BASIS)
         output[name] = full.assign_attrs(
-            provenance_attrs(
+            long_name=long_name,
+            **provenance_attrs(
                 stream.store,
                 name,
                 "zeroed over land (wetmask) and conservatively regridded "
                 "without ocean-fraction normalization, giving the "
                 "per-total-cell-area quantity; NaN over land applied after",
-            )
+            ),
         )
 
     for name, product in ice_area_products.data_vars.items():
