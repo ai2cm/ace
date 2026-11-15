@@ -287,6 +287,49 @@ def test_ice_area_weight_only_not_written(tmp_path, monkeypatch):
         assert names == {"TS"}
 
 
+def test_interval_ice_fraction_twin(tmp_path, monkeypatch):
+    """A block-meaned full-cell ice fraction and its per-ocean-area twin pass
+    sea_ice_fraction_consistency."""
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+    name, twin = (
+        "interval_average_sea_ice_fraction",
+        "ocean_interval_average_sea_ice_fraction",
+    )
+    stream = StreamConfig(
+        name="ice_flux_mean",
+        store="toy",
+        variables=[name],
+        time_block_mean_factor=2,
+        full_cell_variables=[name],
+        renaming={name: twin},
+        postprocess=[
+            PostprocessConfig(
+                "sea_ice_fraction_consistency",
+                {"sea_ice_fraction": name, "ocean_sea_ice_fraction": twin},
+            )
+        ],
+    )
+    c = _native(TOY_C, name).astype(np.float32)
+    c.attrs = {"long_name": "ice concentration", "cell_methods": "time: mean"}
+    time = np.array(["2000-01-01T00", "2000-01-01T06"], dtype="datetime64[ns]")
+    ds = xr.Dataset({name: xr.concat([c, c], TIME_DIM)}).assign_coords({TIME_DIM: time})
+    _, out = process_chunk(
+        xbeam.Key({TIME_DIM: 0}),
+        ds,
+        stream,
+        _toy_wetmask(),
+        url,
+        "toy",
+        _native(A_NATIVE, "areacello"),
+        _native(TOY_DEPTHO, "deptho"),
+    )
+    assert set(out.data_vars) == {name, twin}
+    _assert_row(out[name], [F(5, 6), F(1, 10)], "full-cell c_J")
+    _assert_row(out[twin], [F(5, 6), F(1, 2)], "X^a_J of c")
+    assert out[name].attrs["long_name"] == "ice concentration, fraction of cell area"
+    assert out[twin].attrs["long_name"] == "ice concentration, fraction of ocean area"
+
+
 def _toy_time_store(path, name, time) -> str:
     ds = xr.Dataset(
         {name: ((TIME_DIM, "lat", "lon"), np.zeros((time.size, 1, 3)))},

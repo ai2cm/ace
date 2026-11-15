@@ -118,7 +118,6 @@ streams:
       - T2
       - T3
       - T4
-      - T_bulkice
     dim_renaming:
       xT: xh
       yT: yh
@@ -126,11 +125,25 @@ streams:
     # Per-ice-area, weighted by the ice fraction of the same 6 h mean (read
     # for weighting only).
     ice_area_weight: interval_average_sea_ice_fraction
-    ice_area_weighted: [T1, T2, T3, T4, T_bulkice]
+    ice_area_weighted: [T1, T2, T3, T4]
+  # T_bulkice true snapshots, subsampled like ice_snapshot. Its store has no
+  # ice fraction, so the weight is read from ice_snapshot's store at the same
+  # instants.
+  - name: ice_bulkice_snapshot
+    store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/T_bulkice_6hourly_snap.zarr
+    variables:
+      - T_bulkice
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_subsample_stride: 20
+    ice_area_weight: sea_ice_fraction
+    ice_area_weight_store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_6hourly_snap.zarr
+    ice_area_weighted: [T_bulkice]
   # SIS2 6-hourly means averaged over 20-step blocks (#1584) into 5-day
   # means, labeled by each block's final step; the labels equal the flux
-  # stream's 5-day-mean labels. XPRTi, XPRTs live in a second store, and a
-  # stream reads one store.
+  # stream's 5-day-mean labels. XPRTi, XPRTs and the LSRC/LSNK/BSNK terms
+  # live in a second store, and a stream reads one store.
   - name: ice_flux_mean
     store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_6hourly.zarr
     variables:
@@ -140,15 +153,35 @@ streams:
       - SH
       - SNOWFL
       - EVAP
+      - SALTF
+      - SN2IC
+      - interval_average_sea_ice_fraction
     dim_renaming:
       xT: xh
       yT: yh
     time_block_mean_factor: 20
+    full_cell_variables:
+      - interval_average_sea_ice_fraction
+    renaming:
+      interval_average_sea_ice_fraction: ocean_interval_average_sea_ice_fraction
+    # The full-cell and per-ocean-area ice fractions of the same 5-day mean
+    # must agree (as in ice_snapshot); no sea_ice transform on block means.
+    postprocess:
+      - name: sea_ice_fraction_consistency
+        sources:
+          sea_ice_fraction: interval_average_sea_ice_fraction
+          ocean_sea_ice_fraction: ocean_interval_average_sea_ice_fraction
   - name: ice_transport_mean
     store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_tendencies_and_TSN_6hourly.zarr
     variables:
       - XPRTi
       - XPRTs
+      - LSRCi
+      - LSRCs
+      - LSNKi
+      - LSNKs
+      - BSNKi
+      - BSNKs
     dim_renaming:
       xT: xh
       yT: yh

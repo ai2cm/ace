@@ -89,6 +89,7 @@ streams:
       - VI
       - TS
       - TSN
+      - T_bulkice
       - SST
       - SSS
       - simass
@@ -119,7 +120,7 @@ streams:
     # ice-free ocean); ocean_sea_ice_thickness_mean is the ice volume per
     # ocean area.
     ice_area_weight: sea_ice_fraction
-    ice_area_weighted: [HI, HS, TS, TSN, UI, VI]
+    ice_area_weighted: [HI, HS, TS, TSN, UI, VI, T_bulkice]
     ice_area_products:
       HI: ocean_sea_ice_thickness_mean
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
@@ -131,7 +132,6 @@ streams:
       - T2
       - T3
       - T4
-      - T_bulkice
     dim_renaming:
       xT: xh
       yT: yh
@@ -139,4 +139,41 @@ streams:
     # Per-ice-area, weighted by the ice fraction of the same 6 h mean (read
     # for weighting only).
     ice_area_weight: interval_average_sea_ice_fraction
-    ice_area_weighted: [T1, T2, T3, T4, T_bulkice]
+    ice_area_weighted: [T1, T2, T3, T4]
+  # SIS2 6-hourly surface fluxes and ice transports, averaged over the 20
+  # steps ending at each snapshot instant (end-labeled 5-day means).
+  - name: ice_flux_mean
+    store: gs://vcm-ml-raw-flexible-retention/2026-10-16-CM4-ocean-and-sea-ice-abrupt-4xCO2-ensemble/zarrs/abrupt-4xCO2-{member}/ice_6hourly.zarr
+    variables:
+      - SW
+      - LW
+      - LH
+      - SH
+      - SNOWFL
+      - EVAP
+      - XPRTi
+      - XPRTs
+      - SALTF
+      - LSRCi
+      - LSRCs
+      - LSNKi
+      - LSNKs
+      - BSNKi
+      - BSNKs
+      - SN2IC
+      - interval_average_sea_ice_fraction
+    dim_renaming:
+      xT: xh
+      yT: yh
+    time_block_mean_factor: 20
+    full_cell_variables:
+      - interval_average_sea_ice_fraction
+    renaming:
+      interval_average_sea_ice_fraction: ocean_interval_average_sea_ice_fraction
+    # The full-cell and per-ocean-area ice fractions of the same 5-day mean
+    # must agree (as in ice_snapshot); no sea_ice transform on block means.
+    postprocess:
+      - name: sea_ice_fraction_consistency
+        sources:
+          sea_ice_fraction: interval_average_sea_ice_fraction
+          ocean_sea_ice_fraction: ocean_interval_average_sea_ice_fraction

@@ -141,7 +141,27 @@ streams:
       - EVAP
       - XPRTi
       - XPRTs
+      - SALTF
+      - LSRCi
+      - LSRCs
+      - LSNKi
+      - LSNKs
+      - BSNKi
+      - BSNKs
+      - SN2IC
+      - interval_average_sea_ice_fraction
     dim_renaming:
       xT: xh
       yT: yh
     time_block_mean_factor: 20
+    full_cell_variables:
+      - interval_average_sea_ice_fraction
+    renaming:
+      interval_average_sea_ice_fraction: ocean_interval_average_sea_ice_fraction
+    # The full-cell and per-ocean-area ice fractions of the same 5-day mean
+    # must agree (as in ice_snapshot); no sea_ice transform on block means.
+    postprocess:
+      - name: sea_ice_fraction_consistency
+        sources:
+          sea_ice_fraction: interval_average_sea_ice_fraction
+          ocean_sea_ice_fraction: ocean_interval_average_sea_ice_fraction

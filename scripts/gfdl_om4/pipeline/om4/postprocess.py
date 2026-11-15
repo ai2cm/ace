@@ -21,6 +21,7 @@ from ..postprocess import (
     check_sea_ice_fraction_consistency,
     kelvin_sst_postprocess,
     provenance_attrs,
+    sea_ice_fraction_consistency_postprocess,
 )
 
 
@@ -125,4 +126,5 @@ POSTPROCESS: dict[str, PostprocessFactory] = {
     "kelvin_sst": kelvin_sst_postprocess,
     "hfds_total_area": hfds_total_area_postprocess,
     "sea_ice": sea_ice_postprocess,
+    "sea_ice_fraction_consistency": sea_ice_fraction_consistency_postprocess,
 }
