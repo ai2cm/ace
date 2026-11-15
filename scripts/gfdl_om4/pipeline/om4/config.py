@@ -73,6 +73,9 @@ class StreamConfig:
             :class:`~pipeline.postprocess.PostprocessConfig` naming the
             variables the transform reads (``kelvin_sst`` needs
             ``sources: {celsius_sst: <name>}``).
+        drop_outputs: output names (see :meth:`output_names`) removed from
+            each chunk after all postprocess transforms, e.g. a source a
+            transform replaces.
         face_mask_url: URL prefix of a precomputed face-mask artifact (see
             pipeline/om4/face_masks.py) for sources whose staggered velocities
             carry remap-born zeros over land. When set, the flagged faces
@@ -91,6 +94,7 @@ class StreamConfig:
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
     postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
     face_mask_url: str | None = None
+    drop_outputs: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         for pair in self.rotated_pairs:
@@ -140,11 +144,26 @@ class StreamConfig:
             context,
             allow_level_suffix=True,
         )
+        unknown = set(self.drop_outputs) - self.output_names()
+        if unknown:
+            raise ValueError(
+                f"drop_outputs {sorted(unknown)} not among stream {self.name!r} "
+                f"outputs {sorted(self.output_names())}"
+            )
         if self.face_mask_url is not None and not self.rotated_pairs:
             raise ValueError(
                 f"stream {self.name!r} sets face_mask_url but has no "
                 "rotated_pairs for it to apply to"
             )
+
+    def output_names(self) -> set[str]:
+        """Output base names (3D variables unsplit): renamed variables,
+        full-cell variables and postprocess additions."""
+        names = {self.renaming.get(name, name) for name in self.variables}
+        names.update(self.full_cell_variables)
+        for spec in self.postprocess_specs():
+            names.update(spec.adds)
+        return names
 
     def postprocess_specs(self) -> list[Postprocess]:
         """The configured transforms, with their source names bound."""

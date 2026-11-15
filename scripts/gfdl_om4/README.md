@@ -74,7 +74,9 @@ variables it reads, all of which the same stream must produce.
 `ice_snapshot` stream. `sea_ice` and
 `sea_ice_fraction_consistency` take `sea_ice_fraction` and
 `ocean_sea_ice_fraction`, defaulting to those names. A name the stream does
-not produce fails at config load.
+not produce fails at config load. A stream's `drop_outputs` lists output names
+removed after all transforms: every config directly under `configs/` drops
+`SST`, keeping `SST_degK` (the `configs/c96-path-test/` configs keep both).
 
 ### Environment, weights and worker image
 
@@ -396,11 +398,11 @@ so there is one config carrying a `{member}` placeholder rather than nine
 near-identical files, and `randco2.mk` holds the member list
 (`RANDCO2_MEMBERS`).
 
-Each output store carries exactly seven variables on the target grid:
+Each output store carries the variables below on the target grid:
 
 | Variable | Meaning |
 | --- | --- |
-| `SST` | sea surface temperature, °C, wetmask-normalized regrid of the source `SST` |
+| `SST` | sea surface temperature, °C, wetmask-normalized regrid of the source `SST`; dropped by the randco2 configs directly under `configs/` (`drop_outputs`) |
 | `SST_degK` | the same field in K (`SST + 273.15`) |
 | `sea_ice_fraction` | ice area per total cell area |
 | `ocean_sea_ice_fraction` | ice area per ocean area |

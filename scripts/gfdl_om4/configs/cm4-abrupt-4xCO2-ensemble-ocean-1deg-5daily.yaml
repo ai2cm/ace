@@ -112,6 +112,9 @@ streams:
       - name: kelvin_sst
         sources:
           celsius_sst: SST
+    # SST_degK replaces it.
+    drop_outputs:
+      - SST
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot

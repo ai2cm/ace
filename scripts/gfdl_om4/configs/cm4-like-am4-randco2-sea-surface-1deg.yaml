@@ -41,3 +41,6 @@ stream:
       sources:
         celsius_sst: SST
     - sea_ice_fraction_consistency
+  # SST_degK replaces it.
+  drop_outputs:
+    - SST

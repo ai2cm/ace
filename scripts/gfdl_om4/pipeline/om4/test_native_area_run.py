@@ -24,7 +24,7 @@ from ..native_area import (
     Z_STAR_DEFINITION,
     assert_close,
 )
-from ..postprocess import Postprocess
+from ..postprocess import Postprocess, PostprocessConfig
 from ..test_native_area import (
     A_NATIVE,
     TOY_C,
@@ -181,6 +181,25 @@ def test_process_chunk_toy_table3(tmp_path, monkeypatch):
     _assert_row(out["ocean_sea_ice_fraction"], [F(5, 6), F(1, 2)], "X^a_J of c")
     _assert_row(out["sea_ice_volume"], [F(9, 4), F(1, 4)], "sea_ice_volume_J")
     _assert_row(out["HI"], [F(5, 3), 1], "stored HI")
+
+
+def test_process_chunk_drops_outputs(tmp_path, monkeypatch):
+    config = _toy_config(tmp_path, monkeypatch)
+    ice = StreamConfig(
+        name="ice",
+        store="toy",
+        variables=["SST"],
+        postprocess=[PostprocessConfig("kelvin_sst", {"celsius_sst": "SST"})],
+        drop_outputs=["SST"],
+    )
+    out = _toy_chunk(ice, config.weights_url, {"SST": TOY_ZETA})
+    config = dataclasses.replace(config, streams=[ice])
+    expected = run._expected_output_names(
+        config, {"ice": xr.Dataset({"SST": _native(TOY_ZETA, "SST")})}
+    )
+    for names in (set(out.data_vars), expected):
+        assert "SST_degK" in names
+        assert "SST" not in names
 
 
 def test_process_chunk_raises_on_other_native_areas(tmp_path, monkeypatch):

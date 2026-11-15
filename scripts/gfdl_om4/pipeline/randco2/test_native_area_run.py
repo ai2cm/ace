@@ -238,6 +238,20 @@ def test_chunk_values_on_toy(tmp_path, monkeypatch):
     _assert_tabled(out["ocean_sea_ice_fraction"], [F(5, 6), F(1, 2), NAN], "X^a_J of c")
 
 
+def test_drop_outputs_removes_sst(tmp_path, monkeypatch):
+    config_path = _toy_run(tmp_path, monkeypatch)
+    with open(config_path, "a") as f:
+        f.write("  drop_outputs:\n    - SST\n")
+    config = load_config(config_path)
+    out = _toy_chunk(config_path)
+    expected = run._expected_output_names(
+        config, run.open_stream(config.stream, config)
+    )
+    for names in (set(out.data_vars), expected):
+        assert "SST_degK" in names
+        assert "SST" not in names
+
+
 def test_chunk_identity_raises_on_other_native_areas(tmp_path, monkeypatch):
     config_path = _toy_run(tmp_path, monkeypatch)
     config = load_config(config_path)

@@ -529,6 +529,7 @@ def _process_chunk(
             context,
         )
 
+    output = output.drop_vars(stream.drop_outputs)
     for name in output.data_vars:
         output[name] = output[name].astype(OUTPUT_DTYPE)
     return output
@@ -945,7 +946,7 @@ def _expected_output_names(
         assert_postprocess_inputs(specs, stream_names, f"stream {stream.name!r}")
         for spec in specs:
             stream_names.update(spec.adds)
-        names.update(stream_names)
+        names.update(stream_names - set(stream.drop_outputs))
     return names
 
 

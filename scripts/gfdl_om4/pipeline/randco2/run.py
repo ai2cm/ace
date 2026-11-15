@@ -263,6 +263,7 @@ def _process_chunk(
             if all(v in output.data_vars for v in spec.requires):
                 output = spec.fn(output, chunk_context)
 
+    output = output.drop_vars(stream.drop_outputs)
     for name in output.data_vars:
         output[name] = output[name].astype(OUTPUT_DTYPE)
     return output
@@ -429,7 +430,7 @@ def _expected_output_names(
     assert_postprocess_inputs(specs, names, f"stream {stream.name!r}")
     for spec in specs:
         names.update(spec.adds)
-    return names
+    return names - set(stream.drop_outputs)
 
 
 def _get_parser() -> argparse.ArgumentParser:
