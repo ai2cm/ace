@@ -16,6 +16,7 @@ import xarray_beam as xbeam
 import yaml
 import zarr
 
+from .. import postprocess as shared_postprocess
 from ..config_io import OutputConfig, StaticsConfig, WetmaskConfig
 from ..native_area import (
     AREA_RTOL,
@@ -42,8 +43,8 @@ from ..test_native_area import (
     _toy_wetmask,
 )
 from ..zarr_io import OUTPUT_DTYPE, TIME_DIM
+from . import ice_area, run
 from . import postprocess as om4_postprocess
-from . import run
 from .check_output import check_output
 from .config import PipelineConfig, StreamConfig
 from .run import (
@@ -195,6 +196,25 @@ def test_process_chunk_toy_table3(tmp_path, monkeypatch):
     _assert_row(out["HI"], [F(9, 5), 1], "stored HI (ice-area weighted)")
 
 
+@pytest.mark.parametrize(
+    "name, source, expected",
+    [
+        ("rhoinsitu", "cell_thickness", "sea_water_density"),
+        ("rhoinsitu", "sea_water_sigma_t", "sea_water_sigma_t"),
+        ("thkcello", "cell_thickness", "cell_thickness"),
+    ],
+)
+def test_process_chunk_corrects_source_standard_name(
+    tmp_path, monkeypatch, name, source, expected
+):
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+    ocean = StreamConfig(name="ocean", store="toy", variables=[name])
+    attrs = {name: {"long_name": "In situ density", "standard_name": source}}
+    out = _toy_chunk(ocean, url, {name: TOY_X}, level=1, attrs=attrs)
+    assert out[f"{name}_1"].attrs["standard_name"] == expected
+    assert out[f"{name}_1"].attrs["long_name"] == "In situ density"
+
+
 def test_process_chunk_calving_residue(tmp_path, monkeypatch):
     """calving_residue_J is the formula on the stored per-ocean-area inputs,
     and its ocean-area integral is the native one (no f_J factor)."""
@@ -273,6 +293,7 @@ def test_ice_area_output_attrs(tmp_path, monkeypatch):
         assert out[name].attrs["long_name"] == attrs[name]["long_name"]
         assert out[name].attrs["units"] == attrs[name]["units"]
         assert out[name].attrs["cell_methods"] == f"{method} area: mean where sea_ice"
+        assert ice_area.COMMENT_ATTR not in out[name].attrs
     v = out["ocean_sea_ice_thickness_mean"].attrs
     assert (
         v["long_name"] == "ice thickness times sea_ice_fraction, mean over ocean area"
@@ -337,14 +358,69 @@ def test_ice_area_weight_only_not_written(tmp_path, monkeypatch):
         assert names == {"TS"}
 
 
-def test_interval_ice_fraction_twin(tmp_path, monkeypatch):
+def test_ice_area_weight_output(tmp_path, monkeypatch):
+    """The weight-only ice fraction is written per full cell under
+    ice_area_weight_output, each weighted field's comment names it, and with
+    it the stored fields' ice-area sum equals the native one."""
+    config = _toy_config(tmp_path, monkeypatch)
+    weight, written = (
+        "interval_average_sea_ice_fraction",
+        "interval_average_sea_ice_fraction_6h",
+    )
+    stream = StreamConfig(
+        name="ice_mean_as_snapshot",
+        store="toy",
+        variables=["T1", "T2"],
+        ice_area_weight=weight,
+        ice_area_weighted=["T1", "T2"],
+        ice_area_weight_output=written,
+    )
+    attrs = {
+        weight: {"long_name": "ice concentration", "cell_methods": "time: mean"},
+        "T2": {"comment": "source note"},
+    }
+    fields = {weight: TOY_C, "T1": TOY_HI, "T2": TOY_HI}
+    out = _toy_chunk(stream, config.weights_url, fields, attrs=attrs)
+    expected = run._expected_output_names(
+        dataclasses.replace(config, streams=[stream]),
+        {stream.name: xr.Dataset({n: _native(v, n) for n, v in fields.items()})},
+    )
+    assert set(out.data_vars) == expected == {"T1", "T2", written}
+    _assert_row(out[written], [F(5, 6), F(1, 10)], "full-cell c_J")
+    assert out[written].attrs["long_name"] == (
+        "ice concentration, fraction of cell area, mean over the source time "
+        "step ending at the output time"
+    )
+    assert out[written].attrs["source_variable"] == weight
+    note = ice_area.weight_comment(written)
+    assert written in note
+    assert out["T1"].attrs["comment"] == note
+    assert out["T2"].attrs["comment"] == f"source note\n{note}"
+
+    area = run.open_areacello(config.weights_url, "toy")
+    stored = float((area * out[written] * out["T1"]).sum())
+    native = np.nansum(A_NATIVE * np.array(TOY_C) * np.array(TOY_HI))
+    np.testing.assert_allclose(stored, native, rtol=1e-6)
+
+
+@pytest.mark.parametrize("drop", [False, True])
+def test_interval_ice_fraction_twin(tmp_path, monkeypatch, drop):
     """A block-meaned full-cell ice fraction and its per-ocean-area twin pass
-    sea_ice_fraction_consistency."""
+    sea_ice_fraction_consistency, which still sees the twin when it is
+    dropped from the output."""
     _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
     name, twin = (
         "interval_average_sea_ice_fraction",
         "ocean_interval_average_sea_ice_fraction",
     )
+    checked = []
+    check = shared_postprocess.check_sea_ice_fraction_consistency
+
+    def spy(ds, context, **names):
+        checked.append(set(names.values()) <= set(ds.data_vars))
+        check(ds, context, **names)
+
+    monkeypatch.setattr(shared_postprocess, "check_sea_ice_fraction_consistency", spy)
     stream = StreamConfig(
         name="ice_flux_mean",
         store="toy",
@@ -358,6 +434,7 @@ def test_interval_ice_fraction_twin(tmp_path, monkeypatch):
                 {"sea_ice_fraction": name, "ocean_sea_ice_fraction": twin},
             )
         ],
+        drop_outputs=[twin] if drop else [],
     )
     c = _native(TOY_C, name).astype(np.float32)
     c.attrs = {"long_name": "ice concentration", "cell_methods": "time: mean"}
@@ -373,11 +450,15 @@ def test_interval_ice_fraction_twin(tmp_path, monkeypatch):
         _native(A_NATIVE, "areacello"),
         _native(TOY_DEPTHO, "deptho"),
     )
-    assert set(out.data_vars) == {name, twin}
+    assert checked == [True]
+    assert set(out.data_vars) == ({name} if drop else {name, twin})
     _assert_row(out[name], [F(5, 6), F(1, 10)], "full-cell c_J")
-    _assert_row(out[twin], [F(5, 6), F(1, 2)], "X^a_J of c")
     assert out[name].attrs["long_name"] == "ice concentration, fraction of cell area"
-    assert out[twin].attrs["long_name"] == "ice concentration, fraction of ocean area"
+    if not drop:
+        _assert_row(out[twin], [F(5, 6), F(1, 2)], "X^a_J of c")
+        assert (
+            out[twin].attrs["long_name"] == "ice concentration, fraction of ocean area"
+        )
 
 
 def _toy_time_store(path, name, time) -> str:

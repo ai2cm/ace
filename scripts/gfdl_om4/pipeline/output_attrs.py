@@ -49,3 +49,20 @@ def area_basis_long_name(attrs: dict, name: str, basis: str) -> str:
     (CELL_AREA_BASIS for the full-cell regrid, OCEAN_AREA_BASIS for the
     per-ocean-area one)."""
     return f"{attrs.get('long_name', name)}, {basis}"
+
+
+# Wrong CF standard_names in the source stores, per source variable:
+# {name: (source standard_name, corrected standard_name)}. CF
+# sea_water_density is the in situ density.
+SOURCE_STANDARD_NAME_FIXES = {
+    "rhoinsitu": ("cell_thickness", "sea_water_density"),
+}
+
+
+def corrected_source_attrs(attrs: dict, name: str) -> dict:
+    """``attrs`` of source variable ``name`` with a known-wrong
+    standard_name (SOURCE_STANDARD_NAME_FIXES) replaced."""
+    wrong, right = SOURCE_STANDARD_NAME_FIXES.get(name, (None, None))
+    if wrong is None or attrs.get("standard_name") != wrong:
+        return dict(attrs)
+    return {**attrs, "standard_name": right}

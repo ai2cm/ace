@@ -90,6 +90,13 @@ class StreamConfig:
         ice_area_products: mapping of an ``ice_area_weighted`` variable ``X``
             to an output name for the ocean-area mean of ``c X`` (e.g.
             ``HI`` -> ice volume per ocean area).
+        ice_area_weight_output: if set, the weight-only ``ice_area_weight``
+            is also written, regridded per full cell like
+            ``full_cell_variables``, under this name, and each
+            ``ice_area_weighted`` output gets a CF ``comment`` naming it as
+            the weight for ice-area means. For a weight that no other output
+            of the store holds (e.g. the 6 h mean ice fraction at a 5-daily
+            instant).
         face_mask_url: URL prefix of a precomputed face-mask artifact (see
             pipeline/om4/face_masks.py) for sources whose staggered velocities
             carry remap-born zeros over land. When set, the flagged faces
@@ -113,6 +120,7 @@ class StreamConfig:
     ice_area_weight: str | None = None
     ice_area_weight_store: str | None = None
     ice_area_products: dict[str, str] = dataclasses.field(default_factory=dict)
+    ice_area_weight_output: str | None = None
 
     def __post_init__(self):
         for pair in self.rotated_pairs:
@@ -222,6 +230,17 @@ class StreamConfig:
                     f"{context}: ice_area_weight {weight!r} is in variables, so it "
                     "is read from store, not ice_area_weight_store"
                 )
+        if self.ice_area_weight_output is not None:
+            if not self.ice_area_weighted:
+                raise ValueError(
+                    f"{context} sets ice_area_weight_output without "
+                    "ice_area_weighted"
+                )
+            if self.weight_only() is None:
+                raise ValueError(
+                    f"{context} sets ice_area_weight_output, but ice_area_weight "
+                    f"{weight!r} is in variables; use full_cell_variables"
+                )
         unweighted = set(self.ice_area_products) - set(self.ice_area_weighted)
         if unweighted:
             raise ValueError(
@@ -229,6 +248,8 @@ class StreamConfig:
                 "ice_area_weighted"
             )
         products = list(self.ice_area_products.values())
+        if self.ice_area_weight_output is not None:
+            products.append(self.ice_area_weight_output)
         others = self._base_output_names()
         weight_only = self.weight_only()
         if weight_only is not None:
@@ -238,8 +259,8 @@ class StreamConfig:
         }
         if collisions:
             raise ValueError(
-                f"{context}: ice_area_products names {sorted(collisions)} collide "
-                "with other names of the stream"
+                f"{context}: ice_area_products / ice_area_weight_output names "
+                f"{sorted(collisions)} collide with other names of the stream"
             )
 
     def _base_output_names(self) -> set[str]:
@@ -251,9 +272,13 @@ class StreamConfig:
 
     def output_names(self) -> set[str]:
         """Output base names (3D variables unsplit): renamed variables,
-        full-cell variables, postprocess additions and ice-area products.
-        A weight-only ``ice_area_weight`` is not written."""
-        return self._base_output_names() | set(self.ice_area_products.values())
+        full-cell variables, postprocess additions, ice-area products and
+        ``ice_area_weight_output``. A weight-only ``ice_area_weight`` is not
+        written under its source name."""
+        names = self._base_output_names() | set(self.ice_area_products.values())
+        if self.ice_area_weight_output is not None:
+            names.add(self.ice_area_weight_output)
+        return names
 
     def weight_only(self) -> str | None:
         """The ``ice_area_weight`` if it is read for weighting only."""

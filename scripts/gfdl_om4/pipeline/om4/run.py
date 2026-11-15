@@ -45,7 +45,9 @@ Masking conventions of the output store:
   ``sea_ice_fraction``) are regridded with full-cell semantics — the value
   is per total cell area, land counted as zero — with land-NaN applied
   after; their wetmask-normalized (per-ocean-area) twins are written under
-  renamed outputs (e.g. ``ocean_sea_ice_fraction``).
+  renamed outputs (e.g. ``ocean_sea_ice_fraction``). A weight-only
+  ``ice_area_weight`` gets the same full-cell regrid when the stream sets
+  ``ice_area_weight_output``, written under that name only.
 - Masks, ``idepth_*``, ``areacello``, ``sftof``, ``sea_surface_fraction``
   and ``h_prime_*`` are exempt from land-NaN by explicit list (see
   land_nan_exempt_names); they are 0 on land, ``idepth_*`` aside.
@@ -87,6 +89,7 @@ from ..output_attrs import (
     NORTHWARD,
     OCEAN_AREA_BASIS,
     area_basis_long_name,
+    corrected_source_attrs,
     geographic_component_attrs,
 )
 from ..postprocess import (
@@ -426,6 +429,22 @@ def _sea_ice_fraction_source(stream: StreamConfig) -> str | None:
     return None
 
 
+def _full_cell_outputs(stream: StreamConfig) -> dict[str, str]:
+    """Source name -> output name of each full-cell regridded variable."""
+    outputs = {name: name for name in stream.full_cell_variables}
+    weight = stream.weight_only()
+    if weight is not None and stream.ice_area_weight_output is not None:
+        outputs[weight] = stream.ice_area_weight_output
+    return outputs
+
+
+def _weight_time_phrase(attrs: dict) -> str:
+    """Long-name phrase giving the time a written ice-area weight is at."""
+    if "time: mean" in attrs.get("cell_methods", ""):
+        return "mean over the source time step ending at the output time"
+    return "at the output time"
+
+
 # Output name a postprocess transform reads, for each checked output.
 EXTENSIVE_SOURCES = {"hfds_total_area": "hfds"}
 
@@ -484,8 +503,9 @@ def _process_chunk(
         )
         per_volume, per_ocean_area = regridded, xr.Dataset()
 
+    full_cell_outputs = _full_cell_outputs(stream)
     full_cell = xr.Dataset()
-    for name in stream.full_cell_variables:
+    for name in full_cell_outputs:
         if name in ds.data_vars:
             full_cell[name] = regrid_full_cell(
                 regridder, ds[name], wetmask, ocean_fraction
@@ -525,21 +545,27 @@ def _process_chunk(
             da = da.assign_attrs(
                 long_name=area_basis_long_name(da.attrs, name, OCEAN_AREA_BASIS)
             )
+        da.attrs = corrected_source_attrs(da.attrs, name)
         output[out_name] = da.assign_attrs(
             provenance_attrs(stream.store, name, derivation)
         )
 
     for name, full in full_cell.data_vars.items():
         long_name = area_basis_long_name(full.attrs, name, CELL_AREA_BASIS)
-        output[name] = full.assign_attrs(
+        derivation = (
+            "zeroed over land (wetmask) and conservatively regridded "
+            "without ocean-fraction normalization, giving the "
+            "per-total-cell-area quantity; NaN over land applied after"
+        )
+        if name not in stream.full_cell_variables:
+            long_name = f"{long_name}, {_weight_time_phrase(full.attrs)}"
+            derivation = (
+                f"{derivation}; the ice_area_weight of this stream's ice-area "
+                "weighted fields"
+            )
+        output[full_cell_outputs[name]] = full.assign_attrs(
             long_name=long_name,
-            **provenance_attrs(
-                stream.store,
-                name,
-                "zeroed over land (wetmask) and conservatively regridded "
-                "without ocean-fraction normalization, giving the "
-                "per-total-cell-area quantity; NaN over land applied after",
-            ),
+            **provenance_attrs(stream.store, name, derivation),
         )
 
     for name, product in ice_area_products.data_vars.items():

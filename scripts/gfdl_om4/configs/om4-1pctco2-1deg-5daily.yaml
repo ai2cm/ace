@@ -123,9 +123,11 @@ streams:
       xT: xh
       yT: yh
     time_subsample_stride: 20
-    # Per-ice-area, weighted by the ice fraction of the same 6 h mean (read
-    # for weighting only).
+    # Per-ice-area, weighted by the ice fraction of the same 6 h mean, which
+    # is written per full cell as interval_average_sea_ice_fraction_6h (no
+    # other output holds it) and named in each weighted field's comment.
     ice_area_weight: interval_average_sea_ice_fraction
+    ice_area_weight_output: interval_average_sea_ice_fraction_6h
     ice_area_weighted: [T1, T2, T3, T4]
   # T_bulkice true snapshots, subsampled like ice_snapshot. Its store has no
   # ice fraction, so the weight is read from ice_snapshot's store at the same
@@ -172,6 +174,9 @@ streams:
         sources:
           sea_ice_fraction: interval_average_sea_ice_fraction
           ocean_sea_ice_fraction: ocean_interval_average_sea_ice_fraction
+    # The per-ocean-area twin is only read by the check above.
+    drop_outputs:
+      - ocean_interval_average_sea_ice_fraction
   - name: ice_transport_mean
     store: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/1pctCO2/ice_tendencies_and_TSN_6hourly.zarr
     variables:

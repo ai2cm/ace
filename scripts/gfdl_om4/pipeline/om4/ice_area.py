@@ -73,6 +73,30 @@ def _with_area_method(attrs: dict, method: str) -> dict:
     }
 
 
+# CF free-text attribute for "information about the data or methods used to
+# produce it"; the weight note is neither a method (cell_methods) nor a
+# variable link (ancillary_variables holds QC-type companions).
+COMMENT_ATTR = "comment"
+
+
+def weight_comment(weight_output: str) -> str:
+    """Caveat on an R1 field whose weight is stored as ``weight_output``."""
+    return (
+        f"Ice-area means and sums of this field need {weight_output} as the "
+        "ice-fraction weight: it is the ice fraction this field was weighted by "
+        "(same source time step). Other sea-ice fractions in this store cover "
+        "other times and do not recover them exactly."
+    )
+
+
+def _with_comment(attrs: dict, comment: str) -> dict:
+    existing = attrs.get(COMMENT_ATTR)
+    return {
+        **attrs,
+        COMMENT_ATTR: f"{existing}\n{comment}" if existing else comment,
+    }
+
+
 def ice_area_weighted_means(
     regridded: xr.Dataset, stream: StreamConfig, ocean_fraction: xr.DataArray
 ) -> tuple[xr.Dataset, xr.Dataset]:
@@ -98,6 +122,10 @@ def ice_area_weighted_means(
         num = regridded[product_name(name)]
         quotient = xr.where(ice, num / a.where(ice), 0.0).where(ocean)
         quotient.attrs = _with_area_method(regridded[name].attrs, ICE_AREA_METHOD)
+        if stream.ice_area_weight_output is not None:
+            quotient.attrs = _with_comment(
+                quotient.attrs, weight_comment(stream.ice_area_weight_output)
+            )
         out[name] = append_derivation(
             quotient,
             f"ice-area weighted: ocean-area mean of {name} x {weight_note} "

@@ -100,6 +100,48 @@ def test_launch_config_weights_per_ice_area_fields(name):
             assert stream.ice_area_weight == source, stream.name
 
 
+SIX_HOUR_ICE_FRACTION = "interval_average_sea_ice_fraction_6h"
+
+
+@pytest.mark.parametrize("name", LAUNCH_CONFIGS)
+def test_launch_config_ice_fraction_outputs(name):
+    written = _written(_load(name))
+    assert SIX_HOUR_ICE_FRACTION in written
+    assert "ocean_interval_average_sea_ice_fraction" not in written
+    assert "ocean_interval_average_sea_ice_fraction_6h" not in written
+
+
+@pytest.mark.parametrize("name, basename", LAUNCH_CONFIGS.items())
+def test_launch_config_six_hour_means_name_their_weight(name, basename):
+    """The 6 h means stored at the 5-daily instants (T1-T4, and T_bulkice where
+    it is read from the 6-hourly mean store) and nothing else note the 6 h
+    ice fraction as their weight."""
+    noting = [s for s in _load(name).streams if s.ice_area_weight_output is not None]
+    assert {s.ice_area_weight_output for s in noting} == {SIX_HOUR_ICE_FRACTION}
+    noted = {x for stream in noting for x in stream.ice_area_weighted}
+    bulkice = {"T_bulkice"} if basename == "ice_6hourly.zarr" else set()
+    assert noted == {"T1", "T2", "T3", "T4", *bulkice}
+
+
+@pytest.mark.parametrize("name", LAUNCH_CONFIGS)
+def test_launch_config_dropped_twin_is_checked(name):
+    """The dropped 5-day ocean_ twin is still read by
+    sea_ice_fraction_consistency in its stream."""
+    twin = "ocean_interval_average_sea_ice_fraction"
+    streams = [s for s in _load(name).streams if twin in s.drop_outputs]
+    assert streams
+    for stream in streams:
+        selections = [
+            PostprocessConfig(e) if isinstance(e, str) else e
+            for e in stream.postprocess
+        ]
+        assert any(
+            p.name == "sea_ice_fraction_consistency"
+            and p.sources.get("ocean_sea_ice_fraction") == twin
+            for p in selections
+        ), stream.name
+
+
 @pytest.mark.parametrize("name, basename", LAUNCH_CONFIGS.items())
 def test_launch_config_t_bulkice_store(name, basename):
     stores = [

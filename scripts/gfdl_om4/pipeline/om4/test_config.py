@@ -121,6 +121,44 @@ def test_ice_area_config_validation(options, match):
         _ice_area_stream(**options)
 
 
+_WEIGHT_ONLY = {
+    "variables": ["TS"],
+    "renaming": {},
+    "full_cell_variables": [],
+    "ice_area_weighted": ["TS"],
+    "ice_area_products": {},
+}
+
+
+def test_ice_area_weight_output_loads():
+    stream = _ice_area_stream(**_WEIGHT_ONLY, ice_area_weight_output="c_6h")
+    assert stream.output_names() == {"TS", "c_6h"}
+    assert stream.weight_only() == "sea_ice_fraction"
+
+
+@pytest.mark.parametrize(
+    "options, match",
+    [
+        ({"ice_area_weight_output": "c_6h"}, "is in variables"),
+        (
+            {**_WEIGHT_ONLY, "ice_area_weighted": [], "ice_area_weight_output": "c"},
+            "ice_area_weight_output without ice_area_weighted",
+        ),
+        (
+            {**_WEIGHT_ONLY, "ice_area_weight_output": "TS"},
+            "names \\['TS'\\] collide",
+        ),
+        (
+            {**_WEIGHT_ONLY, "ice_area_weight_output": "sea_ice_fraction"},
+            "names \\['sea_ice_fraction'\\] collide",
+        ),
+    ],
+)
+def test_ice_area_weight_output_validation(options, match):
+    with pytest.raises(ValueError, match=match):
+        _ice_area_stream(**options)
+
+
 def test_ice_area_weighted_on_block_mean_stream_raises():
     with pytest.raises(ValueError, match="ice_area_weighted on a block-meaned"):
         StreamConfig(

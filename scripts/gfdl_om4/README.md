@@ -318,6 +318,16 @@ Per-ice-area SIS2 fields (`HI`, `HS`, `TS`, `TSN`, `UI`, `VI`, `T1`–`T4`,
 `ocean_sea_ice_thickness_mean = mean_ocean_J(c HI)` is the ice volume per
 ocean area. Block-meaned streams reject `ice_area_weighted`.
 
+`T1`–`T4` (and piControl `T_bulkice`) are 6 h means at the 5-daily instants,
+weighted by the 6 h mean ice fraction ending at that instant. The 1° 5-daily
+configs write that weight per full cell as
+`interval_average_sea_ice_fraction_6h` (stream option
+`ice_area_weight_output`), and each weighted field's `comment` names it: its
+ice-area mean or sum needs that weight, not the 5-day
+`interval_average_sea_ice_fraction` or the snapshot `sea_ice_fraction`. The
+5-day per-ocean-area `ocean_interval_average_sea_ice_fraction` is read by
+`sea_ice_fraction_consistency` and then dropped (`drop_outputs`).
+
 ### Running
 
 #### Smoke tests
