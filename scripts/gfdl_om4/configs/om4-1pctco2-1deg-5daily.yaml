@@ -102,6 +102,13 @@ streams:
     # SST_degK replaces it.
     drop_outputs:
       - SST
+    # Per-ice-area fields, weighted by ice area at the same instant (0 on
+    # ice-free ocean); ocean_sea_ice_thickness_mean is the ice volume per
+    # ocean area.
+    ice_area_weight: sea_ice_fraction
+    ice_area_weighted: [HI, HS, TS, TSN, UI, VI]
+    ice_area_products:
+      HI: ocean_sea_ice_thickness_mean
   # Ice-model 6-hourly means at the snapshot instants (each mean covers the
   # 6 hours ending at the instant), treated as snapshot estimates.
   - name: ice_mean_as_snapshot
@@ -116,6 +123,10 @@ streams:
       xT: xh
       yT: yh
     time_subsample_stride: 20
+    # Per-ice-area, weighted by the ice fraction of the same 6 h mean (read
+    # for weighting only).
+    ice_area_weight: interval_average_sea_ice_fraction
+    ice_area_weighted: [T1, T2, T3, T4, T_bulkice]
   # SIS2 6-hourly means averaged over 20-step blocks (#1584) into 5-day
   # means, labeled by each block's final step; the labels equal the flux
   # stream's 5-day-mean labels. XPRTi, XPRTs live in a second store, and a

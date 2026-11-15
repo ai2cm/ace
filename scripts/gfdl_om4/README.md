@@ -306,6 +306,15 @@ snapshots (`time_subsample_stride`) and average the daily-mean fluxes over
 5-day blocks (`time_block_mean_factor`) in the pipeline; the 1-daily configs
 only subsample the 6-hourly ice streams.
 
+Per-ice-area SIS2 fields (`HI`, `HS`, `TS`, `TSN`, `UI`, `VI`, `T1`–`T4`,
+`T_bulkice`) are regridded weighted by ice area in the 5-daily configs
+(stream options `ice_area_weighted`, `ice_area_weight`,
+`ice_area_weight_store`, `ice_area_products`; rule R1 in
+`pipeline/om4/ice_area.py`): `X_J = mean_ocean_J(c X) / mean_ocean_J(c)`,
+0 on ice-free ocean, NaN on land. So `HI` is the ice-area mean thickness, and
+`ocean_sea_ice_thickness_mean = mean_ocean_J(c HI)` is the ice volume per
+ocean area. Block-meaned streams reject `ice_area_weighted`.
+
 ### Running
 
 #### Smoke tests

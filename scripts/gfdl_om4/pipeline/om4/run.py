@@ -116,6 +116,7 @@ from ..zarr_io import (
 )
 from .config import PipelineConfig, StreamConfig, load_config
 from .face_masks import count_masked_candidate_faces, get_face_masks
+from .ice_area import add_ice_area_products, ice_area_weighted_means
 from .time_coarsening import (
     coarsen,
     select_whole_blocks,
@@ -157,16 +158,16 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
     pipeline (see :func:`coarsen`) and its output time coordinate is
     :func:`stream_output_time`.
     """
-    ds = xr.open_zarr(
-        make_zarr_store(stream.store), chunks=None, decode_timedelta=False
-    )
-    missing = set(stream.variables) - set(ds.data_vars)
-    if missing:
-        raise AssertionError(
-            f"stream {stream.name!r}: variables missing from {stream.store}: "
-            f"{sorted(missing)}"
-        )
-    ds = ds[stream.variables]
+    ds = _open_variables(stream, stream.store, _store_variables(stream))
+    weight_name = stream.weight_only()
+    if stream.ice_area_weight_store is not None and weight_name is not None:
+        weight = _open_variables(stream, stream.ice_area_weight_store, [weight_name])
+        if not ds[TIME_DIM].equals(weight[TIME_DIM]):
+            raise AssertionError(
+                f"stream {stream.name!r}: time of {stream.ice_area_weight_store} "
+                f"differs from time of {stream.store}"
+            )
+        ds = xr.merge([ds, weight], join="exact")
     if stream.dim_renaming:
         ds = ds.rename(stream.dim_renaming)
         for staggered, tracer in STAGGERED_TO_TRACER_DIM.items():
@@ -210,6 +211,25 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
                 f"levels; expected {config.expected_level_count}"
             )
     return ds
+
+
+def _store_variables(stream: StreamConfig) -> list[str]:
+    """Variables a stream reads from its own ``store``."""
+    weight = stream.weight_only()
+    if weight is None or stream.ice_area_weight_store is not None:
+        return list(stream.variables)
+    return [*stream.variables, weight]
+
+
+def _open_variables(stream: StreamConfig, store: str, names: list[str]) -> xr.Dataset:
+    ds = xr.open_zarr(make_zarr_store(store), chunks=None, decode_timedelta=False)
+    missing = set(names) - set(ds.data_vars)
+    if missing:
+        raise AssertionError(
+            f"stream {stream.name!r}: variables missing from {store}: "
+            f"{sorted(missing)}"
+        )
+    return ds[names]
 
 
 def load_wetmask(config: PipelineConfig) -> xr.DataArray:
@@ -431,6 +451,9 @@ def _process_chunk(
     ds = ds.astype(np.float64)
     ds = _conform_to_wetmask(ds, wetmask, context)
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
+    if stream.ice_area_weighted:
+        # After rotation: UI, VI are tracer-centered, like the weight.
+        ds = add_ice_area_products(ds, stream)
     for name in ds.data_vars:
         assert_footprint(ds[name], wetmask, context)
 
@@ -467,6 +490,9 @@ def _process_chunk(
         full_cell=full_cell,
         dz=dz,
     )
+    regridded, ice_area_products = ice_area_weighted_means(
+        regridded, stream, ocean_fraction
+    )
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
@@ -494,6 +520,12 @@ def _process_chunk(
                 "without ocean-fraction normalization, giving the "
                 "per-total-cell-area quantity; NaN over land applied after",
             )
+        )
+
+    for name, product in ice_area_products.data_vars.items():
+        source = next(x for x, out in stream.ice_area_products.items() if out == name)
+        output[name] = product.assign_attrs(
+            provenance_attrs(stream.store, source, product.attrs.get(DERIVATION_ATTR))
         )
 
     if stream.postprocess:
@@ -529,7 +561,10 @@ def _process_chunk(
             context,
         )
 
-    output = output.drop_vars(stream.drop_outputs)
+    weight_only = stream.weight_only()
+    output = output.drop_vars(
+        [*stream.drop_outputs, *([weight_only] if weight_only in output else [])]
+    )
     for name in output.data_vars:
         output[name] = output[name].astype(OUTPUT_DTYPE)
     return output
@@ -932,20 +967,19 @@ def _expected_output_names(
     names: set[str] = set()
     for stream in config.streams:
         ds = stream_datasets[stream.name]
-        stream_names: set[str] = set()
-        for name in ds.data_vars:
-            out_name = stream.renaming.get(name, name)
+        stream_names = stream.output_names()
+        for name in stream.variables:
             if LEVEL_DIM in ds[name].dims:
+                out_name = stream.renaming.get(name, name)
+                stream_names.remove(out_name)
                 stream_names.update(
                     f"{out_name}_{k}" for k in range(ds.sizes[LEVEL_DIM])
                 )
-            else:
-                stream_names.add(out_name)
-        stream_names.update(stream.full_cell_variables)
         specs = stream.postprocess_specs()
-        assert_postprocess_inputs(specs, stream_names, f"stream {stream.name!r}")
-        for spec in specs:
-            stream_names.update(spec.adds)
+        added = {name for spec in specs for name in spec.adds}
+        assert_postprocess_inputs(
+            specs, stream_names - added, f"stream {stream.name!r}"
+        )
         names.update(stream_names - set(stream.drop_outputs))
     return names
 

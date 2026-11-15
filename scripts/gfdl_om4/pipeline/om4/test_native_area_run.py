@@ -118,12 +118,19 @@ def test_land_nan_exempt_includes_new_statics():
     assert "deptho" not in exempt
 
 
-def _toy_chunk(stream: StreamConfig, url: str, fields: dict, level=None, a=A_NATIVE):
-    """process_chunk on one timestep of the toy ``fields`` (native, float32)."""
+def _toy_chunk(
+    stream: StreamConfig, url: str, fields: dict, level=None, a=A_NATIVE, attrs=None
+):
+    """process_chunk on one timestep of the toy ``fields`` (native, float32),
+    with source ``attrs`` per field name."""
     wetmask = _toy_wetmask()
+    attrs = attrs or {}
     ds = xr.Dataset(
         {
-            name: _native(values, name).astype(np.float32).expand_dims(TIME_DIM)
+            name: _native(values, name)
+            .astype(np.float32)
+            .expand_dims(TIME_DIM)
+            .assign_attrs(attrs.get(name, {}))
             for name, values in fields.items()
         }
     )
@@ -172,6 +179,9 @@ def test_process_chunk_toy_table3(tmp_path, monkeypatch):
         renaming={"sea_ice_fraction": "ocean_sea_ice_fraction"},
         full_cell_variables=["sea_ice_fraction"],
         postprocess=["sea_ice"],
+        ice_area_weight="sea_ice_fraction",
+        ice_area_weighted=["HI", "UI", "VI"],
+        ice_area_products={"HI": "ocean_sea_ice_thickness_mean"},
     )
     zero = [0.0, 0.0, np.nan]
     out = _toy_chunk(
@@ -180,7 +190,133 @@ def test_process_chunk_toy_table3(tmp_path, monkeypatch):
     _assert_row(out["sea_ice_fraction"], [F(5, 6), F(1, 10)], "sea_ice_fraction_J")
     _assert_row(out["ocean_sea_ice_fraction"], [F(5, 6), F(1, 2)], "X^a_J of c")
     _assert_row(out["sea_ice_volume"], [F(9, 4), F(1, 4)], "sea_ice_volume_J")
-    _assert_row(out["HI"], [F(5, 3), 1], "stored HI")
+    _assert_row(out["ocean_sea_ice_thickness_mean"], [F(3, 2), F(1, 2)], "v_J")
+    _assert_row(out["HI"], [F(9, 5), 1], "stored HI (ice-area weighted)")
+
+
+def test_ice_area_output_attrs(tmp_path, monkeypatch):
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+    ice = StreamConfig(
+        name="ice",
+        store="toy",
+        variables=["sea_ice_fraction", "HI", "T1"],
+        ice_area_weight="sea_ice_fraction",
+        ice_area_weighted=["HI", "T1"],
+        ice_area_products={"HI": "ocean_sea_ice_thickness_mean"},
+    )
+    attrs = {
+        "HI": {
+            "long_name": "ice thickness",
+            "units": "m-ice",
+            "cell_methods": "time: point",
+        },
+        "T1": {
+            "long_name": "ice layer 1 temperature",
+            "units": "degC",
+            "cell_methods": "time: mean",
+        },
+    }
+    out = _toy_chunk(
+        ice, url, {"sea_ice_fraction": TOY_C, "HI": TOY_HI, "T1": TOY_ZETA}, attrs=attrs
+    )
+    for name, method in (("HI", "time: point"), ("T1", "time: mean")):
+        assert out[name].attrs["long_name"] == attrs[name]["long_name"]
+        assert out[name].attrs["units"] == attrs[name]["units"]
+        assert out[name].attrs["cell_methods"] == f"{method} area: mean where sea_ice"
+    v = out["ocean_sea_ice_thickness_mean"].attrs
+    assert (
+        v["long_name"] == "ice thickness times sea_ice_fraction, mean over ocean area"
+    )
+    assert v["units"] == "m-ice"
+    assert v["cell_methods"] == "time: point area: mean where sea"
+    assert v["source_variable"] == "HI"
+    assert "sea_ice_fraction" in v["derivation"]
+
+
+def _ice_area_chunk(url, weight, fields, weighted, variables=None):
+    """process_chunk on a toy ``ice`` stream weighting ``weighted`` by
+    ``sea_ice_fraction`` = ``weight``."""
+    names = list(fields)
+    ice = StreamConfig(
+        name="ice",
+        store="toy",
+        variables=variables if variables is not None else names,
+        ice_area_weight="sea_ice_fraction",
+        ice_area_weighted=weighted,
+    )
+    return _toy_chunk(ice, url, {"sea_ice_fraction": weight, **fields}), ice
+
+
+def test_ice_area_weight_drops_ice_free_values(tmp_path, monkeypatch):
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+    out, _ = _ice_area_chunk(
+        url, [0.0, 0.5, np.nan], {"TS": [-5.0, -2.0, np.nan]}, ["TS"]
+    )
+    _assert_row(out["TS"], [-2, -2], "TS_J")
+
+
+def test_ice_area_weighted_zero_on_ice_free_ocean(tmp_path, monkeypatch):
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+    out, _ = _ice_area_chunk(
+        url, [0.0, 0.0, np.nan], {"HS": [0.0, 0.0, np.nan]}, ["HS"]
+    )
+    assert np.isfinite(out["HS"].values.ravel()[:2]).all()
+    _assert_row(out["HS"], [0, 0], "HS_J")
+
+
+def test_ice_area_weighted_velocity(tmp_path, monkeypatch):
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+    out, _ = _ice_area_chunk(
+        url, TOY_C, {"UI": TOY_HI, "VI": [0.0, 0.0, np.nan]}, ["UI", "VI"]
+    )
+    _assert_row(out["UI"], [F(9, 5), 1], "UI_J")
+    _assert_row(out["VI"], [0, 0], "VI_J")
+
+
+def test_ice_area_weight_only_not_written(tmp_path, monkeypatch):
+    config = _toy_config(tmp_path, monkeypatch)
+    out, ice = _ice_area_chunk(
+        config.weights_url, TOY_C, {"TS": TOY_HI}, ["TS"], variables=["TS"]
+    )
+    config = dataclasses.replace(config, streams=[ice])
+    native = xr.Dataset(
+        {"TS": _native(TOY_HI, "TS"), "sea_ice_fraction": _native(TOY_C, "c")}
+    )
+    expected = run._expected_output_names(config, {"ice": native})
+    for names in (set(out.data_vars), expected):
+        assert names == {"TS"}
+
+
+def _toy_time_store(path, name, time) -> str:
+    ds = xr.Dataset(
+        {name: ((TIME_DIM, "lat", "lon"), np.zeros((time.size, 1, 3)))},
+        coords={TIME_DIM: time},
+    )
+    ds.to_zarr(str(path))
+    return str(path)
+
+
+@pytest.mark.parametrize("shift", [None, np.timedelta64(6, "h")])
+def test_open_stream_merges_ice_area_weight_store(tmp_path, monkeypatch, shift):
+    config = _toy_config(tmp_path, monkeypatch)
+    time = np.array(["2000-01-01", "2000-01-06"], dtype="datetime64[ns]")
+    weight_time = time if shift is None else time + shift
+    stream = StreamConfig(
+        name="ice",
+        store=_toy_time_store(tmp_path / "x.zarr", "T_bulkice", time),
+        variables=["T_bulkice"],
+        ice_area_weight="sea_ice_fraction",
+        ice_area_weight_store=_toy_time_store(
+            tmp_path / "c.zarr", "sea_ice_fraction", weight_time
+        ),
+        ice_area_weighted=["T_bulkice"],
+    )
+    if shift is None:
+        ds = run.open_stream(stream, config)
+        assert set(ds.data_vars) == {"T_bulkice", "sea_ice_fraction"}
+    else:
+        with pytest.raises(AssertionError, match="c.zarr differs from time of"):
+            run.open_stream(stream, config)
 
 
 def test_process_chunk_drops_outputs(tmp_path, monkeypatch):
