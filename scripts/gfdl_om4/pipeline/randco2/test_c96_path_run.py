@@ -16,7 +16,13 @@ for _name in ("xesmf", "esmpy", "apache_beam", "xarray_beam", "obstore"):
 
 from .. import c96_weights
 from ..native_area_weights import regrid_path_description as direct_description
-from ..om4.test_c96_path_run import COAST_LON, _assert_g, _expected, _on_g
+from ..om4.test_c96_path_run import (
+    COAST_LON,
+    _assert_g,
+    _expected,
+    _on_g,
+    perturb_worker_coords,
+)
 from ..om4.test_native_area_run import DIRECT_FLAGS
 from ..postprocess import DERIVATION_ATTR
 from ..test_c96_weights import O_DIMS, TARGET, Toy, _argv, _inputs, _on_source, _toy
@@ -204,3 +210,21 @@ def test_main_raises_without_regrid_path(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="pipeline.c96_weights"):
         _run_main(monkeypatch, config_path)
     assert not os.path.exists(config.output.path)
+
+
+def test_main_worker_coords_one_ulp_off_template(tmp_path, monkeypatch):
+    config_path = _direct_run(tmp_path, monkeypatch)
+    output = load_config(config_path).output.path
+    reference = str(tmp_path / "reference.zarr")
+    with open(config_path) as f:
+        text = f.read()
+    with open(config_path, "w") as f:
+        f.write(text.replace(output, reference))
+    _run_main(monkeypatch, config_path)
+    with open(config_path, "w") as f:
+        f.write(text)
+    perturb_worker_coords(monkeypatch, run)
+    _run_main(monkeypatch, config_path)
+    xr.testing.assert_identical(
+        xr.open_zarr(output).load(), xr.open_zarr(reference).load()
+    )

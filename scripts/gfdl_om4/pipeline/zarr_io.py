@@ -100,13 +100,56 @@ def shard_aligned_chunk_size(read_chunk_size: int, shard_size: int) -> int:
     return math.gcd(read_chunk_size, shard_size)
 
 
+# Worker-recomputed coords (e.g. Gaussian lat from np.arcsin, whose SIMD path
+# is CPU-dependent) differ from the client's by ~1 ulp, or by a subnormal at 0;
+# anything larger is a bug.
+COORD_TOL = 1e-12
+
+
+def take_template_coords(
+    key: xbeam.Key,
+    chunk: xr.Dataset,
+    # beam.MapTuple requires keyword-only side inputs to carry defaults.
+    template_coords: xr.Dataset | None = None,
+) -> tuple[xbeam.Key, xr.Dataset]:
+    """Replace the chunk's dimension coordinates with the template's slice at
+    the key's offsets, after checking they agree: float coords to
+    ``COORD_TOL`` (relative and absolute), all others exactly.
+
+    xarray_beam's ``ValidateChunks`` requires exact index equality, so a
+    coordinate the workers recompute must not depend on the worker's host.
+    """
+    assert template_coords is not None
+    region = xbeam.offsets_to_slices(key.offsets, chunk.sizes)
+    replaced = {}
+    for dim in chunk.indexes:
+        if dim not in template_coords.indexes:
+            continue
+        expected = template_coords[dim].values[region[dim]]
+        actual = chunk[dim].values
+        if np.issubdtype(expected.dtype, np.floating):
+            agree = expected.shape == actual.shape and np.allclose(
+                actual, expected, rtol=COORD_TOL, atol=COORD_TOL
+            )
+        else:
+            agree = np.array_equal(actual, expected)
+        if not agree:
+            raise ValueError(
+                f"chunk coordinate {dim!r} differs from the template beyond "
+                f"tolerance {COORD_TOL}: {key=}\ntemplate: {expected}\nchunk: {actual}"
+            )
+        replaced[dim] = expected
+    return key, chunk.assign_coords(replaced)
+
+
 class WriteShardedZarr(beam.PTransform):
     """Write processed (key, chunk) pairs into a templated zarr v3 store,
     chunked and sharded along time.
 
-    Chunks are optionally split along time to ``split_chunks`` (see
-    :func:`shard_aligned_chunk_size`), consolidated into shard-width chunks,
-    and written with ``ChunksToZarr``.
+    Each chunk first takes its dimension coordinates from the template (see
+    :func:`take_template_coords`). Chunks are then optionally split along
+    time to ``split_chunks`` (see :func:`shard_aligned_chunk_size`),
+    consolidated into shard-width chunks, and written with ``ChunksToZarr``.
     """
 
     def __init__(
@@ -125,6 +168,10 @@ class WriteShardedZarr(beam.PTransform):
         self.split_chunks = split_chunks
 
     def expand(self, pcoll):
+        pcoll = pcoll | "template_coords" >> beam.MapTuple(
+            take_template_coords,
+            template_coords=self.template.coords.to_dataset(),
+        )
         if self.split_chunks is not None:
             pcoll = pcoll | "split" >> xbeam.SplitChunks(self.split_chunks)
         return (

@@ -9,6 +9,7 @@ every wet cell is 100 m deep but one, 40 m.
 """
 
 import dataclasses
+import functools
 import os
 import sys
 
@@ -447,3 +448,46 @@ def test_main_raises_without_regrid_path(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="pipeline.native_area_weights"):
         _run_main(monkeypatch, config_path)
     assert not os.path.exists(config.output.path)
+
+
+def perturb_worker_coords(monkeypatch, run_module) -> None:
+    """Beam-side ``process_chunk`` returns ``lat``/``lon`` 1 ulp off, as on a
+    Dataflow worker whose ``np.arcsin`` rounds differently from the launch
+    client; ``build_template`` keeps the unperturbed coords."""
+    original = run_module.process_chunk
+    original_build_template = run_module.build_template
+
+    @functools.wraps(original)
+    def worker_process_chunk(key, ds, **kwargs):
+        key, out = original(key, ds, **kwargs)
+        return key, out.assign_coords(
+            lat=np.nextafter(out.lat.values, np.inf),
+            lon=np.nextafter(out.lon.values, -np.inf),
+        )
+
+    def client_build_template(*args, **kwargs):
+        run_module.process_chunk = original
+        try:
+            return original_build_template(*args, **kwargs)
+        finally:
+            run_module.process_chunk = worker_process_chunk
+
+    monkeypatch.setattr(run_module, "process_chunk", worker_process_chunk)
+    monkeypatch.setattr(run_module, "build_template", client_build_template)
+
+
+def test_main_worker_coords_one_ulp_off_template(tmp_path, monkeypatch):
+    config_path, config = _direct_run_config(tmp_path, monkeypatch)
+    reference = str(tmp_path / "reference.zarr")
+    with open(config_path) as f:
+        text = f.read()
+    with open(config_path, "w") as f:
+        f.write(text.replace(config.output.path, reference))
+    _run_main(monkeypatch, config_path)
+    with open(config_path, "w") as f:
+        f.write(text)
+    perturb_worker_coords(monkeypatch, run)
+    _run_main(monkeypatch, config_path)
+    xr.testing.assert_identical(
+        xr.open_zarr(config.output.path).load(), xr.open_zarr(reference).load()
+    )
