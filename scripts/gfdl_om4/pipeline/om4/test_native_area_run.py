@@ -19,6 +19,7 @@ import zarr
 from ..config_io import OutputConfig, StaticsConfig, WetmaskConfig
 from ..native_area import (
     AREA_RTOL,
+    F64_RTOL,
     LEVEL_DIM,
     NATIVE_AREA_CHECKS,
     Z_STAR_DEFINITION,
@@ -192,6 +193,55 @@ def test_process_chunk_toy_table3(tmp_path, monkeypatch):
     _assert_row(out["sea_ice_volume"], [F(9, 4), F(1, 4)], "sea_ice_volume_J")
     _assert_row(out["ocean_sea_ice_thickness_mean"], [F(3, 2), F(1, 2)], "v_J")
     _assert_row(out["HI"], [F(9, 5), 1], "stored HI (ice-area weighted)")
+
+
+def test_process_chunk_calving_residue(tmp_path, monkeypatch):
+    """calving_residue_J is the formula on the stored per-ocean-area inputs,
+    and its ocean-area integral is the native one (no f_J factor)."""
+    monkeypatch.setattr(run, "OUTPUT_DTYPE", np.float64)
+    config = _toy_config(tmp_path, monkeypatch)
+    statics = build_statics(config, _toy_wetmask())
+    flux = StreamConfig(
+        name="flux",
+        store="toy",
+        variables=["hflso", "evs", "prsn"],
+        postprocess=["calving_residue"],
+    )
+    fields = {
+        "hflso": TOY_ZETA,
+        "evs": [3e-6, -1e-6, np.nan],
+        "prsn": [2e-6, 5e-6, np.nan],
+    }
+    out = _toy_chunk(flux, config.weights_url, fields)
+    L_v, L_f = om4_postprocess.LATENT_HEAT_VAPOR, om4_postprocess.LATENT_HEAT_FUSION
+    residue_J = out["calving_residue"].values.ravel()[:2]
+    formula = -out["hflso"] + L_v * out["evs"] - L_f * out["prsn"]
+    formula_J = formula.values.ravel()[:2]
+    assert_close(
+        residue_J,
+        formula_J,
+        rtol=F64_RTOL,
+        scale=np.abs(formula_J).max(),
+        context="calving_residue_J",
+    )
+    assert np.isnan(out["calving_residue"].values.ravel()[2]), "NaN on Z"
+
+    native = {
+        n: np.asarray(v, np.float32).astype(np.float64) for n, v in fields.items()
+    }
+    residue_i = -native["hflso"] + L_v * native["evs"] - L_f * native["prsn"]
+    m_i = _toy_wetmask().isel({LEVEL_DIM: 0}).values.ravel()
+    W_J = (statics["areacello"] * statics["sea_surface_fraction"]).values.ravel()[:2]
+    lhs = np.sum(W_J * residue_J)
+    rhs = np.nansum(A_NATIVE * m_i * residue_i)
+    assert_close(
+        lhs,
+        rhs,
+        rtol=AREA_RTOL,
+        scale=np.abs(residue_i[:2]).max(),
+        context="Σ_J W_J X_J = Σ_i a_i m_i X_i",
+    )
+    assert out["calving_residue"].attrs["units"] == "W/m2"
 
 
 def test_ice_area_output_attrs(tmp_path, monkeypatch):

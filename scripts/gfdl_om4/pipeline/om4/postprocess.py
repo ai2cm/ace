@@ -51,6 +51,51 @@ def hfds_total_area_postprocess() -> Postprocess:
     return Postprocess(hfds_total_area, requires=("hfds",), adds=("hfds_total_area",))
 
 
+# J/kg, SIS2 LATENT_HEAT_VAPOR and LATENT_HEAT_FUSION
+# (docs/cm4-params/SIS_parameter_doc.all in the ai2cm workspace).
+LATENT_HEAT_VAPOR = 2.5e6
+LATENT_HEAT_FUSION = 3.34e5
+CALVING_RESIDUE = "calving_residue"
+
+
+def calving_residue(
+    ds: xr.Dataset, context: ChunkContext, *, hflso: str, evs: str, prsn: str
+) -> xr.Dataset:
+    """Add ``calving_residue`` = -hflso + L_v evs - L_f prsn, per ocean area.
+
+    MOM6's ``hflso`` is L_v evap - L_f fprec - L_f frunoff, with ``evs`` =
+    evap and ``prsn`` = fprec (mass into the ocean positive), so the residue
+    is the latent heat of calving melt, L_f frunoff.
+    """
+    out = -ds[hflso] + LATENT_HEAT_VAPOR * ds[evs] - LATENT_HEAT_FUSION * ds[prsn]
+    formula = f"-{hflso} + L_v {evs} - L_f {prsn}"
+    source = ds[hflso].attrs
+    out.attrs = {
+        "long_name": "Surface Downward Latent Heat Flux residue due to calving",
+        "units": source.get("units", "W/m2"),
+        **{k: source[k] for k in ("cell_methods", "cell_measures") if k in source},
+        **provenance_attrs(
+            context.store,
+            ", ".join((hflso, evs, prsn)),
+            f"{formula}, L_v = {LATENT_HEAT_VAPOR:g} J/kg, "
+            f"L_f = {LATENT_HEAT_FUSION:g} J/kg (SIS2), on the per-ocean-area "
+            "regridded inputs",
+        ),
+    }
+    ds[CALVING_RESIDUE] = out
+    return ds
+
+
+def calving_residue_postprocess(
+    *, hflso: str = "hflso", evs: str = "evs", prsn: str = "prsn"
+) -> Postprocess:
+    return Postprocess(
+        functools.partial(calving_residue, hflso=hflso, evs=evs, prsn=prsn),
+        requires=(hflso, evs, prsn),
+        adds=(CALVING_RESIDUE,),
+    )
+
+
 def sea_ice(
     ds: xr.Dataset,
     context: ChunkContext,
@@ -125,6 +170,7 @@ def sea_ice_postprocess(
 POSTPROCESS: dict[str, PostprocessFactory] = {
     "kelvin_sst": kelvin_sst_postprocess,
     "hfds_total_area": hfds_total_area_postprocess,
+    "calving_residue": calving_residue_postprocess,
     "sea_ice": sea_ice_postprocess,
     "sea_ice_fraction_consistency": sea_ice_fraction_consistency_postprocess,
 }

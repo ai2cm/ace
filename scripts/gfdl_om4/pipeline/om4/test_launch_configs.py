@@ -78,7 +78,12 @@ def _sea_ice_fraction_source(stream: StreamConfig) -> str | None:
 @pytest.mark.parametrize("name", LAUNCH_CONFIGS)
 def test_launch_config_writes_requested_fields(name):
     written = _written(_load(name))
-    expected = {*REQUESTED_FIELDS, "ocean_sea_ice_thickness_mean", "SST_degK"}
+    expected = {
+        *REQUESTED_FIELDS,
+        "ocean_sea_ice_thickness_mean",
+        "calving_residue",
+        "SST_degK",
+    }
     assert expected <= written, sorted(expected - written)
     assert "SST" not in written
 

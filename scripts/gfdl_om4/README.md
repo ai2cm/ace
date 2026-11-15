@@ -73,7 +73,10 @@ variables it reads, all of which the same stream must produce.
 `SST`, the SIS2 field, in every config, so in the OM4 configs it sits on the
 `ice_snapshot` stream. `sea_ice` and
 `sea_ice_fraction_consistency` take `sea_ice_fraction` and
-`ocean_sea_ice_fraction`, defaulting to those names. A name the stream does
+`ocean_sea_ice_fraction`, defaulting to those names. `calving_residue` adds
+`calving_residue` = `-hflso + L_v evs - L_f prsn` (W/m2, per ocean area like
+its inputs; L_v, L_f from SIS2), taking `hflso`, `evs`, `prsn` by default.
+A name the stream does
 not produce fails at config load. A stream's `drop_outputs` lists output names
 removed after all transforms: every config directly under `configs/` drops
 `SST`, keeping `SST_degK` (the `configs/c96-path-test/` configs keep both).
