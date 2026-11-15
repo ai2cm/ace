@@ -28,7 +28,7 @@ gantry run \
     --cluster ai2/jupiter \
     --cluster ai2/ceres \
     --beaker-image $DEPS_ONLY_IMAGE \
-    --env WANDB_USERNAME=$WANDB_USERNAME
+    --env WANDB_USERNAME=$WANDB_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
