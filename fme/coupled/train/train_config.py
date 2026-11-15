@@ -101,6 +101,37 @@ def _validate_n_steps(
         raise ValueError("Incompatible n_steps: " + " ".join(errors))
 
 
+def _validate_joint_pairs(
+    joint_pairs: list[list[int]] | None, n_inner_steps: int, n_coupled_steps: int
+) -> None:
+    """Ensure each 1-indexed ``[i_O, i_A]`` pair has a direct edge, i.e.
+    ``i_A`` lies in ocean step ``i_O``'s forcing window or the next one, and
+    that both steps fit within ``n_coupled_steps``.
+
+    Raises:
+        ValueError: Naming every offending pair.
+    """
+    errors: list[str] = []
+    for ocean_step, atmosphere_step in joint_pairs or ():
+        first_in_window = (ocean_step - 1) * n_inner_steps + 1
+        last_in_next_window = (ocean_step + 1) * n_inner_steps
+        if not first_in_window <= atmosphere_step <= last_in_next_window:
+            errors.append(
+                f"[{ocean_step}, {atmosphere_step}]: atmosphere step outside "
+                f"{first_in_window}..{last_in_next_window} (no direct edge)."
+            )
+        atmosphere_outer_step = -(-atmosphere_step // n_inner_steps)  # ceil
+        if max(ocean_step, atmosphere_outer_step) > n_coupled_steps:
+            errors.append(
+                f"[{ocean_step}, {atmosphere_step}]: beyond n_coupled_steps "
+                f"({n_coupled_steps})."
+            )
+    if errors:
+        raise ValueError(
+            f"Invalid joint_pairs (n_inner_steps={n_inner_steps}): " + " ".join(errors)
+        )
+
+
 @dataclasses.dataclass
 class InlineValidationConfig:
     """
@@ -490,6 +521,11 @@ class TrainConfig:
             n_coupled_steps=self.stepper_training.n_coupled_steps,
             n_inner_steps=self.stepper.n_inner_steps,
             component_n_steps_max=self.stepper_training.component_n_steps_max,
+        )
+        _validate_joint_pairs(
+            joint_pairs=self.stepper_training.joint_pairs,
+            n_inner_steps=self.stepper.n_inner_steps,
+            n_coupled_steps=self.stepper_training.n_coupled_steps,
         )
 
     @property

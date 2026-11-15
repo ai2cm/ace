@@ -1,4 +1,68 @@
+import dataclasses
+from collections.abc import Sequence
+from typing import Literal
+
 from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
+
+
+@dataclasses.dataclass(frozen=True)
+class JointPair:
+    """One ocean-atmosphere step pair joined by a direct edge, 0-indexed.
+
+    The ocean is later when the atmosphere step lies in the ocean step's
+    forcing window; the atmosphere is later when the atmosphere step lies in
+    the next window, whose forcing reads the ocean step's output.
+
+    Parameters:
+        ocean_step: 0-indexed ocean step.
+        atmosphere_step: 0-indexed atmosphere step.
+        n_inner_steps: Atmosphere steps per ocean step.
+    """
+
+    ocean_step: int
+    atmosphere_step: int
+    n_inner_steps: int
+
+    def __post_init__(self):
+        if self.atmosphere_step // self.n_inner_steps not in (
+            self.ocean_step,
+            self.ocean_step + 1,
+        ):
+            raise ValueError(
+                f"Joint pair [{self.ocean_step + 1}, {self.atmosphere_step + 1}] "
+                "has no direct edge: the atmosphere step must lie in the ocean "
+                "step's forcing window or the next one."
+            )
+
+    @classmethod
+    def from_config(cls, pair: Sequence[int], n_inner_steps: int) -> "JointPair":
+        """Build from a 1-indexed ``[i_O, i_A]`` config entry."""
+        ocean_step, atmosphere_step = pair
+        return cls(
+            ocean_step=ocean_step - 1,
+            atmosphere_step=atmosphere_step - 1,
+            n_inner_steps=n_inner_steps,
+        )
+
+    @property
+    def ocean_is_later(self) -> bool:
+        return self.atmosphere_step // self.n_inner_steps == self.ocean_step
+
+    @property
+    def n_outer_steps(self) -> int:
+        """Outer (ocean) steps needed to reach both pair steps."""
+        return self.atmosphere_step // self.n_inner_steps + 1
+
+    def role(
+        self, realm: Literal["ocean", "atmosphere"], step: int
+    ) -> Literal["earlier", "later"] | None:
+        if realm == "ocean":
+            if step != self.ocean_step:
+                return None
+            return "later" if self.ocean_is_later else "earlier"
+        if step != self.atmosphere_step:
+            return None
+        return "earlier" if self.ocean_is_later else "later"
 
 
 class ComponentLossSchedule:

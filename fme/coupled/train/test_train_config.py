@@ -38,6 +38,7 @@ from fme.coupled.typing_ import CoupledOptionalInt
 from .train_config import (
     _get_inference_callback,
     _get_validation_callback,
+    _validate_joint_pairs,
     _validate_n_steps,
 )
 
@@ -338,6 +339,26 @@ def test_validate_n_steps_passes_at_limit():
         n_inner_steps=2,
         component_n_steps_max=CoupledOptionalInt(ocean=4, atmosphere=8),
     )
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_validate_joint_pairs(n):
+    n_coupled_steps = 2
+    accepted = [[1, 1], [1, n], [1, n + 1], [1, 2 * n]]
+    _validate_joint_pairs(accepted, n_inner_steps=n, n_coupled_steps=n_coupled_steps)
+    _validate_joint_pairs(None, n_inner_steps=n, n_coupled_steps=n_coupled_steps)
+    rejected = {
+        # [2, n] equals [2, 1] at n = 1
+        "no direct edge": [[1, 2 * n + 1], [2, 1]] + ([[2, n]] if n > 1 else []),
+        "beyond n_coupled_steps": [[3, 2 * n + 1], [2, 2 * n + 1]],
+    }
+    for match, pairs in rejected.items():
+        with pytest.raises(ValueError, match=match) as exc_info:
+            _validate_joint_pairs(
+                accepted + pairs, n_inner_steps=n, n_coupled_steps=n_coupled_steps
+            )
+        for pair in pairs:
+            assert str(pair) in str(exc_info.value)
 
 
 def test_validate_n_steps_rejects_ocean_overshoot():
