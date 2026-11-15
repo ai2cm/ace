@@ -125,5 +125,7 @@ cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR
 
 # troy's training runs with the hybrid SST Samudra + random CO2 replay, FTO -> FTalt with corrector_disabled_epochs: 0
-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
+hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h
