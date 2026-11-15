@@ -1,8 +1,12 @@
 #!/bin/bash
 # Wrapper script for evaluation jobs
-# Usage: evaluate.sh <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>]
+# Usage: evaluate.sh <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>] [--lift-coupled-atmosphere]
 
 set -e
+
+# In-job coupled-to-atmosphere checkpoint lift (--lift-coupled-atmosphere)
+LIFT_TOOL="job_runner/bin/extract_atmosphere_from_coupled_ckpt.py"
+LIFTED_ATMOSPHERE_CKPT="/tmp/lifted_atmosphere_ckpt.tar"
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,13 +15,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 if [[ "$#" -lt 2 ]]; then
-  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>]"
+  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>] [--lift-coupled-atmosphere]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled or experiments/2025-08-08-jamesd/uncoupled)"
   echo "  - <config_subdirectory>: Subdirectory containing the evaluator config files (evaluator-config-*.yaml)"
   echo "  - --dry-run: Preview actions without launching jobs"
   echo "  - --config-dir <path>: Read the evaluator config files from this directory instead of"
   echo "      <experiment_dir>/<config_subdirectory>/. Absolute, or relative to the repo root,"
   echo "      and must resolve inside it. experiments.txt is read from <experiment_dir>/<config_subdirectory>/ either way."
+  echo "  - --lift-coupled-atmosphere: Each row's checkpoint is a coupled checkpoint; the job first lifts its"
+  echo "      atmosphere with $LIFT_TOOL, then runs fme.ace.evaluator on the lifted file."
+  echo "      Atmosphere-only (non-coupled <experiment_dir>) only."
   echo "Reads <experiment_dir>/<config_subdirectory>/experiments.txt, header:"
   echo "  $(input_header EXPERIMENTS_COLUMNS)"
   exit 1
@@ -34,6 +41,14 @@ parse_dry_run_flag "$@"
 # Parse --config-dir flag
 parse_config_dir_arg "$@"
 
+# Parse --lift-coupled-atmosphere flag
+LIFT_COUPLED_ATMOSPHERE=false
+for arg in "$@"; do
+    if [[ "$arg" == "--lift-coupled-atmosphere" ]]; then
+        LIFT_COUPLED_ATMOSPHERE=true
+    fi
+done
+
 # Initialize script environment
 init_script_environment
 
@@ -44,6 +59,15 @@ if [[ "$EXPERIMENT_DIR" =~ coupled ]]; then
 else
     FME_MODULE_VALIDATE="fme.ace.validate_config"
     FME_MODULE_EVALUATOR="fme.ace.evaluator"
+fi
+
+if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]] && [[ "$FME_MODULE_EVALUATOR" != "fme.ace.evaluator" ]]; then
+    echo "Error: --lift-coupled-atmosphere needs an atmosphere-only <experiment_dir> (got ${EXPERIMENT_DIR})" >&2
+    exit 1
+fi
+LIFT_OVERRIDE=()
+if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]]; then
+    LIFT_OVERRIDE=("checkpoint_path=$LIFTED_ATMOSPHERE_CKPT")
 fi
 
 # Construct full paths
@@ -65,6 +89,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  Git Branch: $GIT_BRANCH"
     echo "  Beaker Username: $BEAKER_USERNAME"
     echo "  Config Directory: $CONFIG_DIR"
+    echo "  Lift Coupled Atmosphere: $LIFT_COUPLED_ATMOSPHERE"
     echo
 fi
 
@@ -181,7 +206,8 @@ while read TRAIN_EXPER; do
         echo " - Shared memory: ${SHARED_MEM}"
         echo " - Priority: ${PRIORITY}"
         echo " - ${MIN_RUNTIME}"
-        echo " - --override args: ${OVERRIDE_ARGS}"
+        echo " - --override args: ${OVERRIDE_ARGS} ${LIFT_OVERRIDE[*]}"
+        echo " - Lift coupled atmosphere: ${LIFT_COUPLED_ATMOSPHERE}"
 
         echo
     fi
@@ -191,7 +217,12 @@ while read TRAIN_EXPER; do
     # list/dict values with spaces into single argv elements (literal quotes read
     # from the file are otherwise ignored by word-splitting).
     eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
-    validate_config_once "$FME_MODULE_VALIDATE" evaluator "$CONFIG_PATH_REL" "${OVERRIDE_ARGV[@]}"
+    validate_config_once "$FME_MODULE_VALIDATE" evaluator "$CONFIG_PATH_REL" "${OVERRIDE_ARGV[@]}" "${LIFT_OVERRIDE[@]}"
+
+    JOB_COMMAND=(python -I -m "$FME_MODULE_EVALUATOR" "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}" "${LIFT_OVERRIDE[@]}")
+    if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]]; then
+        JOB_COMMAND=(bash -c "python -I $LIFT_TOOL /ckpt.tar $LIFTED_ATMOSPHERE_CKPT && exec \"\$@\"" lift-coupled-atmosphere "${JOB_COMMAND[@]}")
+    fi
 
     # Run gantry command unless in dry-run mode
     if [[ "$DRY_RUN" != "true" ]]; then
@@ -218,7 +249,7 @@ while read TRAIN_EXPER; do
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
-            -- python -I -m $FME_MODULE_EVALUATOR "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
+            -- "${JOB_COMMAND[@]}"
         echo
     fi
 done <"$INPUT_PATH"

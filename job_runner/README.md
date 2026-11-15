@@ -136,6 +136,26 @@ can evaluate against one maintained set of `evaluator-config-*.yaml` /
   to the job. The script exits non-zero naming the offending path.
 - `--config-dir` is hyphenated, unlike the underscored `--atmos_stats` family.
 
+## Atmosphere of a Coupled Checkpoint (`--lift-coupled-atmosphere`)
+
+`evaluate.sh --lift-coupled-atmosphere` runs an atmosphere-only evaluator
+config on rows whose checkpoint is a coupled one. Each job first runs
+`bin/extract_atmosphere_from_coupled_ckpt.py /ckpt.tar /tmp/lifted_atmosphere_ckpt.tar`,
+then `fme.ace.evaluator` with `checkpoint_path=/tmp/lifted_atmosphere_ckpt.tar`
+appended to the overrides. No beaker dataset is created for the lifted file.
+
+```bash
+./job_runner/evaluate.sh configs/experiments/my-exper/atmos_from_coupled . \
+    --config-dir configs/experiments/cm4_eval/atmos --lift-coupled-atmosphere --dry-run
+```
+
+- Atmosphere-only `<experiment_dir>` only (no `coupled` in the path); the
+  script exits non-zero otherwise.
+- Applies to every row of the file, so keep coupled-checkpoint rows in their
+  own `experiments.txt`.
+- No `--ema`: `best_*_ckpt.tar` and `ema_ckpt_*.tar` already hold EMA weights.
+  A raw `ckpt.tar` would need the tool's `--ema`, which this flag does not pass.
+
 ## Dry-Run Mode
 
 All wrapper scripts support a `--dry-run` flag that allows you to preview actions without launching jobs or committing changes:
