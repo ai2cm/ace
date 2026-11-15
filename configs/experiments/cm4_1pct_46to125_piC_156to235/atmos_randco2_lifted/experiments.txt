@@ -9,10 +9,12 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # One run_* job per family; deferred_afterfirst_* rows wait until the family's run_* job reaches the inference loop.
 
 # 8xx0pife:best_inference_ckpt (first_row)
+# Evals launched 2026-11-15 UTC: 01M7EWM0SPF7ST298G9H4XB9QZ.
+# Evals launched 2026-11-15 UTC: 01M7EWKR3V83VCFQ11QWXPRG6C.
 # Evals launched 2026-11-15 UTC: 01M7EQYH1E3Q8K68CCNTG5JKR9.
 cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
 
 # 2q4vkyxv:best_inference_ckpt (first_row)
 # Evals launched 2026-11-15 UTC: 01M7ET7DDJ7C1N8SFGSWN6YZ1Z.
@@ -71,17 +73,25 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62A
 1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
 
 # p7czybxj:ema_ckpt_0001 (deferred)
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+# Evals launched 2026-11-15 UTC: 01M7EWMV4D39E58Z5XFX2FQRQD.
+# Evals launched 2026-11-15 UTC: 01M7EWMJANXPGT7HVNPC0CMSHQ.
+# Evals launched 2026-11-15 UTC: 01M7EWM9MCF0AT8S4M59BW42YS.
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
 
 # p7czybxj:ema_ckpt_0002 (deferred)
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+# Evals launched 2026-11-15 UTC: 01M7EWNP0X691CKAQCCTT46HCB.
+# Evals launched 2026-11-15 UTC: 01M7EWND2AY51HH6YYKRK3ETPG.
+# Evals launched 2026-11-15 UTC: 01M7EWN40TQTD9E6KDZMQCV1CK.
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
 
 # p7czybxj:ema_ckpt_0003 (first_row)
+# Evals launched 2026-11-15 UTC: 01M7EWP89NEC10P520G6QK2JDK.
+# Evals launched 2026-11-15 UTC: 01M7EWNZ054HKYAF1Y4226FYGY.
 # Evals launched 2026-11-15 UTC: 01M7EQZP6986TJJYWZSJ6JD8N8.
 1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
