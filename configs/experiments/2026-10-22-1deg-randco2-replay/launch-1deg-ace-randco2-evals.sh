@@ -10,6 +10,8 @@ CKPT_DS="${CKPT_DS:?Beaker dataset holding the atmosphere checkpoint}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 TAG="${TAG:?short label for the atmosphere, e.g. rco2rs2-before}"
 CO2S="${CO2S:-1 2 4}"
+STORE="${STORE:-legacy}"   # legacy = -sea_ice.zarr merge (all arms scored so far); sstblend = James's -atmosphere.zarr (ace PR #1623, newest)
+case "$STORE" in legacy) SUFFIX="";; sstblend) SUFFIX="-sstblend";; *) echo "STORE must be legacy or sstblend" >&2; exit 1;; esac
 PRIORITY="${PRIORITY:-high}"
 MIN_RUNTIME="${MIN_RUNTIME:-1h}"   # guaranteed time before Beaker may preempt (gantry --min-runtime; 0 = any time)
 CLUSTERS="${CLUSTERS:-ai2/ceres ai2/jupiter ai2/titan}"   # 1-GPU 4deg jobs: widen when the climate clusters are full
@@ -21,7 +23,7 @@ cd "$REPO_ROOT"
 ok=0; total=0
 for X in $CO2S; do
   total=$((total+1))
-  JOB="ace1deg-randco2-${X}xCO2-ic3-${TAG}"
+  JOB="ace1deg-randco2-${X}xCO2-ic3${SUFFIX}-${TAG}"
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "ACE-only random-CO2 ${X}xCO2 ic_0003 5.25-yr rollout of atmosphere ${TAG} (${CKPT_DS}:${CKPT_FILE})" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
@@ -35,7 +37,7 @@ for X in $CO2S; do
     --dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar" \
     --gpus 1 --shared-memory 100GiB --budget ai2/atec-climate \
     --allow-dirty --system-python --install "pip install --no-deps ." \
-    -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/eval-ace/evaluator-config-randco2-${X}xCO2-ic3.yaml" 2>&1) || true
+    -- python -I -m fme.ace.evaluator "${SCRIPT_PATH}/eval-ace/evaluator-config-randco2-${X}xCO2-ic3${SUFFIX}.yaml" 2>&1) || true
   echo "$out" | grep -qm1 "beaker.org/ex/" && { ok=$((ok+1)); echo "launched $JOB: $(echo "$out" | grep -om1 'https://beaker.org/ex/[A-Z0-9]*')"; } || echo "FAILED $JOB: $(echo "$out" | tail -2)"
 done
 echo "ACE random-CO2 evals launched: $ok/$total"
