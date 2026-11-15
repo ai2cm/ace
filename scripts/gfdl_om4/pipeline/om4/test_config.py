@@ -23,3 +23,28 @@ def test_drop_outputs_unknown_name_raises(stream_config):
             postprocess=[kelvin_sst],
             drop_outputs=["sst"],
         )
+
+
+def _sea_ice_stream(sea_ice="sea_ice", **time_options) -> StreamConfig:
+    return StreamConfig(
+        name="ice",
+        store="toy",
+        variables=["sea_ice_fraction", "HI", "UI", "VI"],
+        renaming={"sea_ice_fraction": "ocean_sea_ice_fraction"},
+        full_cell_variables=["sea_ice_fraction"],
+        postprocess=[sea_ice],
+        **time_options,
+    )
+
+
+@pytest.mark.parametrize(
+    "sea_ice",
+    ["sea_ice", PostprocessConfig("sea_ice", {"sea_ice_fraction": "sea_ice_fraction"})],
+)
+def test_sea_ice_on_block_mean_stream_raises(sea_ice):
+    with pytest.raises(ValueError, match="sea_ice postprocess to a block-meaned"):
+        _sea_ice_stream(sea_ice, time_block_mean_factor=20)
+
+
+def test_sea_ice_on_subsampled_stream_loads():
+    _sea_ice_stream(time_subsample_stride=20)

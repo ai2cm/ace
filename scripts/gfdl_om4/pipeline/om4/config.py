@@ -122,6 +122,14 @@ class StreamConfig:
                     f"stream {self.name!r} sets both time_subsample_stride and "
                     "time_block_mean_factor; choose one"
                 )
+            if "sea_ice" in self.postprocess_names():
+                # sea_ice_volume from block means is mean_t(HI) * mean_t(c),
+                # not mean_t(HI * c).
+                raise ValueError(
+                    f"stream {self.name!r} applies sea_ice postprocess to a "
+                    "block-meaned stream (time_block_mean_factor); use "
+                    "time_subsample_stride"
+                )
         for name in self.full_cell_variables:
             if name not in self.variables:
                 raise ValueError(
@@ -164,6 +172,13 @@ class StreamConfig:
         for spec in self.postprocess_specs():
             names.update(spec.adds)
         return names
+
+    def postprocess_names(self) -> list[str]:
+        """Registry names of the configured transforms, in order."""
+        return [
+            entry if isinstance(entry, str) else entry.name
+            for entry in self.postprocess
+        ]
 
     def postprocess_specs(self) -> list[Postprocess]:
         """The configured transforms, with their source names bound."""
