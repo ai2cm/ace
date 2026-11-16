@@ -139,6 +139,22 @@ def test_dynamic_histogram_odd_n_bins():
         DynamicHistogram(n_series=1, n_bins=201)
 
 
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), -float("inf")])
+def test_dynamic_histogram_ignores_non_finite_values(bad_value: float):
+    values = torch.as_tensor([0.0, 1.0, 2.0])
+    other = torch.as_tensor([0.5, 1.5])
+    expected = DynamicHistogram(n_series=2, n_bins=200)
+    expected.add([values, other])
+    histogram = DynamicHistogram(n_series=2, n_bins=200)
+    # non-finite values in one series don't affect it or the other series
+    histogram.add([values, torch.as_tensor([0.5, bad_value, 1.5])])
+    # a series with no finite values is skipped
+    histogram.add([torch.as_tensor([]), torch.as_tensor([bad_value])])
+    assert histogram.bin_edges is not None
+    np.testing.assert_array_equal(histogram.bin_edges, expected.bin_edges)
+    np.testing.assert_array_equal(histogram.counts, expected.counts)
+
+
 def test_dynamic_histogram_range_larger_than_float32_max():
     # values of both signs give bins with a range that can't be represented
     # in float32, as can happen when a prediction diverges
@@ -166,6 +182,14 @@ def test_histogram_dtypes(dtype: torch.dtype):
     counts = histogram(values, vmin=0.3, bin_size=0.1, n_bins=20000)
     assert counts.sum() == 1
     assert counts[9997] == 1
+
+
+def test_dynamic_histogram_no_finite_values():
+    histogram = DynamicHistogram(n_series=1, n_bins=200)
+    histogram.add([torch.as_tensor([float("nan")])])
+    assert histogram.bin_edges is None
+    assert np.all(np.isnan(histogram.get_bin_edges()))
+    assert np.all(histogram.counts == 0)
 
 
 @pytest.mark.parametrize("value", [1.0, 300.0, 1.0e5])

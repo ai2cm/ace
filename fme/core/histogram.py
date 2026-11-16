@@ -1,5 +1,5 @@
 import collections
-import logging
+import math
 from collections import namedtuple
 from collections.abc import Mapping, Sequence
 from typing import Literal
@@ -101,6 +101,34 @@ def histogram(
     return torch.bincount(i_bin, minlength=n_bins)
 
 
+def _finite_values(value: torch.Tensor) -> tuple[torch.Tensor, float, float] | None:
+    """
+    Get the finite values of a tensor and their range.
+
+    Args:
+        value: 1D tensor of values
+
+    Returns:
+        The finite values with their minimum and maximum, or None if there
+        are no finite values.
+    """
+    if value.numel() == 0:
+        return None
+    vmin, vmax = _min_max(value)
+    if not (math.isfinite(vmin) and math.isfinite(vmax)):
+        value = value[torch.isfinite(value)]
+        if value.numel() == 0:
+            return None
+        vmin, vmax = _min_max(value)
+    return value, vmin, vmax
+
+
+def _min_max(value: torch.Tensor) -> tuple[float, float]:
+    # the result is non-finite if any value is non-finite
+    vmin, vmax = torch.aminmax(value)
+    return float(vmin), float(vmax)
+
+
 class DynamicHistogram:
     """
     Histograms of one or more series of values, which dynamically bin values
@@ -136,7 +164,7 @@ class DynamicHistogram:
 
     def add(self, values: Sequence[torch.Tensor]):
         """
-        Add new values to the histograms.
+        Add new values to the histograms. Non-finite values are ignored.
 
         Args:
             values: 1D tensor of values to add for each series, which may
@@ -146,9 +174,13 @@ class DynamicHistogram:
             raise ValueError(
                 f"expected values for {self._n_series} series, got {len(values)}"
             )
+        finite_values = [_finite_values(value) for value in values]
+        ranges = [(vmin, vmax) for _, vmin, vmax in filter(None, finite_values)]
+        if len(ranges) == 0:
+            return
         # the bins must contain the values of all series
-        vmin = min(float(torch.min(value)) for value in values)
-        vmax = max(float(torch.max(value)) for value in values)
+        vmin = min(vmin for vmin, _ in ranges)
+        vmax = max(vmax for _, vmax in ranges)
         # pad the range to ensure all values stay within (and not just equal
         # to) the bin edges, and to avoid the case where vmin == vmax
         pad = self._epsilon * max(1.0, abs(vmin), abs(vmax))
@@ -162,11 +194,11 @@ class DynamicHistogram:
             while vmax > self.bin_edges[-1]:
                 self._double_size("right")
 
-        for i_series, value in enumerate(values):
-            try:
+        for i_series, finite in enumerate(finite_values):
+            if finite is not None:
                 self.counts[i_series] += (
                     histogram(
-                        value,
+                        finite[0],
                         self.bin_edges[0],
                         self.bin_edges[1] - self.bin_edges[0],
                         self._n_bins,
@@ -174,9 +206,6 @@ class DynamicHistogram:
                     .cpu()
                     .numpy()
                 )
-            except RuntimeError as err:
-                # ignore samples with NaNs
-                logging.error(f"caught exception while computing histogram: {err}")
 
     def _double_size(self, direction: Literal["left", "right"]):
         """
@@ -196,6 +225,14 @@ class DynamicHistogram:
             new_counts[:, : self._n_bins // 2] = combined_counts
         self.bin_edges = np.linspace(start, stop, self._n_bins + 1)
         self.counts = new_counts
+
+    def get_bin_edges(self) -> np.ndarray:
+        """
+        Get the bin edges, which are NaN if no finite values have been added.
+        """
+        if self.bin_edges is None:
+            return np.full(self._n_bins + 1, np.nan)
+        return self.bin_edges
 
 
 class DynamicHistogramAggregator:
@@ -253,7 +290,7 @@ class DynamicHistogramAggregator:
         return_dict: dict[str, _Histogram] = {}
         for k, histogram in self.histograms.items():
             counts, bin_edges = trim_zero_bins(
-                histogram.counts[0, :], histogram.bin_edges
+                histogram.counts[0, :], histogram.get_bin_edges()
             )
             return_dict[k] = _Histogram(counts, bin_edges)
         return return_dict
@@ -268,7 +305,7 @@ class DynamicHistogramAggregator:
                 dims=("bin",),
             )
             data[f"{var_name}_bin_edges"] = xr.DataArray(
-                histogram.bin_edges,
+                histogram.get_bin_edges(),
                 dims=("bin_edges",),
             )
         return xr.Dataset(data)
