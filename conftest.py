@@ -9,10 +9,9 @@ import torch
 import xdist
 
 from fme.core.distributed.distributed import Distributed
-from fme.core.testing import (  # noqa: F401  autouse for every test
-    dynamo_hygiene,
-    session_compile_backend,
-)
+
+# autouse fixtures that apply to every test
+pytest_plugins = ["fme.core.testing.compile"]
 
 
 def pytest_addoption(parser):
@@ -68,8 +67,9 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
-        "timeout(seconds): per-test timeout replacing the default 90 s, for "
-        "slow tests that cannot be made faster (e.g. inductor compilation)",
+        "timeout(seconds): per-test timeout replacing the default (90 s, or 30 s "
+        "with --fast; --very-fast always uses 3 s), for slow tests that cannot "
+        "be made faster (e.g. inductor compilation)",
     )
 
 
@@ -166,13 +166,15 @@ def enforce_timeout(request, pdb_enabled, no_timeout, _serialize_when_needed):
     if pdb_enabled or no_timeout:
         yield  # Do not enforce timeout if we are debugging
         return
+    timeout_marker = request.node.get_closest_marker("timeout")
     if request.config.getoption("--very-fast"):
         timeout_seconds = 3
+    elif timeout_marker is not None:
+        timeout_seconds = timeout_marker.args[0]
     elif request.config.getoption("--fast"):
         timeout_seconds = 30
     else:
-        timeout_marker = request.node.get_closest_marker("timeout")
-        timeout_seconds = 90 if timeout_marker is None else timeout_marker.args[0]
+        timeout_seconds = 90
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout_seconds)  # Set the timeout for the test
     try:

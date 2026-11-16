@@ -1,5 +1,7 @@
+import pytest
 import torch
 
+from fme.core.compile import compile_enabled
 from fme.core.dataset_info import DatasetInfo
 from fme.core.registry import ModuleSelector
 
@@ -105,6 +107,19 @@ class TestSecondaryDecoder:
             network=network,
             dataset_info=DatasetInfo(),
         )
-        # Just test that to() returns self and doesn't error
         result = decoder.to("cpu")
-        assert result is decoder
+        x = torch.randn(1, 4, 4, 4)
+        torch.testing.assert_close(result(x), decoder(x))
+
+    def test_to_after_compile_raises(self):
+        network = ModuleSelector(type="MLP", config={})
+        decoder = SecondaryDecoder(
+            in_dim=4,
+            out_names=["diag1"],
+            network=network,
+            dataset_info=DatasetInfo(),
+        )
+        with compile_enabled(True):
+            compiled = decoder.compile()
+        with pytest.raises(RuntimeError, match="before Module.compile"):
+            compiled.to("cpu")

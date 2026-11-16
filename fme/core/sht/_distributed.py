@@ -5,8 +5,10 @@
 torch-harmonics Authors), adding a ``.clone()`` after ``torch.view_as_complex``
 whenever a ``distributed_transpose`` follows it. Without it, ``torch.compile``
 (torch 2.7-2.9) raises "setStorage ... out of bounds" when that view is passed
-to a transpose. When no transpose follows, the clone is skipped and
-``forward`` matches upstream. Recheck against upstream when the
+to a transpose. When no transpose follows, the clone is skipped. The inverse
+also zeroes the imaginary DC and Nyquist parts through ``torch.view_as_real``
+instead of upstream's ``.imag`` setattr, which dynamo cannot trace; the values
+are unchanged. Recheck against upstream when the
 torch-harmonics pin is bumped. Other names are unmodified re-exports.
 """
 
@@ -126,10 +128,11 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         if self.comm_size_azimuth > 1:
             x = thd.distributed_transpose_azimuth.apply(x, (-3, -1), self.m_shapes)
 
-        # set DCT and nyquist frequencies to 0:
-        x[..., 0].imag = 0.0
+        # set DCT and nyquist frequencies to 0, written through view_as_real
+        # because dynamo cannot trace a Tensor.imag setattr
+        torch.view_as_real(x[..., 0])[..., 1] = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < x.shape[-1]):
-            x[..., self.nlon // 2].imag = 0.0
+            torch.view_as_real(x[..., self.nlon // 2])[..., 1] = 0.0
 
         # apply the inverse (real) FFT
         x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")

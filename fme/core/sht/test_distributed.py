@@ -138,3 +138,18 @@ def test_isht_matches_upstream(lmax, mmax):
         get_device()
     )
     _assert_matches_upstream(isht, upstream, _isht_input(isht))
+
+
+@MODES
+def test_isht_compiles_without_graph_break(lmax, mmax):
+    """The inverse SHT zeroes the imaginary DC and Nyquist parts in a form
+    dynamo can trace, so on a single rank it compiles to a single graph.
+    Upstream's ``.imag`` setattr breaks the graph there. Not run under spatial
+    parallelism, where the distributed transposes break the graph anyway."""
+    isht = DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax).to(get_device())
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(isht)(_isht_input(isht)())
+    finally:
+        torch._dynamo.reset()
+    assert explanation.graph_break_count == 0, explanation.break_reasons

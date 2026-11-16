@@ -117,9 +117,16 @@ class SecondaryDecoder:
         return compiled
 
     def to(self, device) -> "SecondaryDecoder":
-        """Move the module to the specified device."""
-        self._module = self._module.to(device)
-        return self
+        """Return a decoder whose module is on ``device``.
+
+        Like :meth:`wrap_module` and :meth:`compile`, the result is a new
+        decoder; as with :meth:`fme.core.registry.module.Module.to`, the
+        underlying parameters are moved in place, and this must be called
+        before :meth:`compile`.
+        """
+        moved = copy.copy(self)
+        moved._module = self._module.to(device)
+        return moved
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the decoder."""

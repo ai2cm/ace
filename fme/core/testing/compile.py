@@ -6,7 +6,7 @@ from collections.abc import Iterator
 import pytest
 import torch
 
-from fme.core.compile import compile_backend, compile_enabled
+from fme.core.compile import compile_backend
 from fme.core.device import get_device
 
 TEST_COMPILE_BACKEND = "aot_eager"
@@ -25,9 +25,9 @@ def session_compile_backend() -> Iterator[None]:
     """Compile with :data:`TEST_COMPILE_BACKEND` for the whole test session,
     unless ``FME_COMPILE_BACKEND`` is set (e.g. to ``inductor``).
 
-    Made autouse for every test by the root ``conftest.py``. The backend is
-    also exported as ``FME_COMPILE_BACKEND`` so that entrypoints run in a
-    subprocess (e.g. under ``torchrun``) compile with it too.
+    Applied to every test via ``pytest_plugins`` in the root ``conftest.py``.
+    The backend is also exported as ``FME_COMPILE_BACKEND`` so that entrypoints
+    run in a subprocess (e.g. under ``torchrun``) compile with it too.
     """
     if os.environ.get("FME_COMPILE_BACKEND"):
         yield
@@ -41,26 +41,14 @@ def session_compile_backend() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def compile_on() -> Iterator[None]:
-    """Enable compilation on any device for every test in a test module.
-
-    Import this name into a test module to make it autouse for that module::
-
-        from fme.core.testing import compile_on  # noqa: F401
-    """
-    with compile_enabled(True):
-        yield
-
-
-@pytest.fixture(autouse=True)
 def dynamo_hygiene() -> Iterator[None]:
     """Isolate each test's dynamo state from the rest of the suite.
 
-    Made autouse for every test by the root ``conftest.py``. Dynamo's cache is
-    process-global, and every compiled module is traced through the same
-    ``DummyWrapper.forward`` code object, so without a reset tests sharing an
-    xdist worker would share its recompile budget, and later tests would
-    silently run eagerly once it is used up.
+    Applied to every test via ``pytest_plugins`` in the root ``conftest.py``.
+    Dynamo's cache is process-global, and every compiled module is traced
+    through the same ``DummyWrapper.forward`` code object, so without a reset
+    tests sharing an xdist worker would share its recompile budget, and later
+    tests would silently run eagerly once it is used up.
 
     Within a test, hitting the recompile limit raises instead of falling back
     to eager, so tests cannot pass without running the compiled code they

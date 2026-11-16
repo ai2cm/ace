@@ -1,5 +1,4 @@
 import logging
-import os
 from unittest import mock
 
 import pytest
@@ -45,6 +44,14 @@ def test_parse_compile_backend_env(value: str | None, expected: str | None | typ
         assert _parse_compile_backend_env(value) == expected
 
 
+@pytest.mark.parametrize("value", [None, ""])
+def test_unset_compile_backend_env_skips_listing_backends(value: str | None):
+    # listing backends is slow, and importing fme must not pay for it
+    with mock.patch("torch._dynamo.list_backends") as mock_list_backends:
+        assert _parse_compile_backend_env(value) is None
+    mock_list_backends.assert_not_called()
+
+
 def _use_auto(monkeypatch: pytest.MonkeyPatch) -> None:
     # compile_enabled deliberately cannot express "unset", so reset the
     # override directly to exercise the default rule
@@ -73,32 +80,12 @@ def test_override_compiles_off_cuda():
         assert is_compile_enabled()
 
 
-@pytest.mark.parametrize("split_dim", ["azimuth", "polar"])
-def test_spatial_split_skips_compile_and_logs_once(
-    split_dim: str,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-):
-    """Splitting longitude (azimuth) or latitude (polar) disables compilation
-    even when it is forced on."""
-    monkeypatch.setattr(fme.core.compile.thd, f"{split_dim}_group_size", lambda: 2)
-    monkeypatch.setattr(fme.core.compile, "_LOGGED_SPATIAL_SPLIT_SKIP", False)
-    with compile_enabled(True), caplog.at_level(logging.INFO):
-        assert not is_compile_enabled()
-        assert not is_compile_enabled()
-    assert caplog.text.count("spatial parallelism splits longitude or latitude") == 1
-
-
 @pytest.mark.parallel
-def test_compile_skipped_only_when_spatially_split():
-    """Under the parallel test matrix, forced compilation stays on unless the
-    model backend splits longitude or latitude."""
-    splits_space = os.environ.get("FME_DISTRIBUTED_BACKEND") == "model" and (
-        int(os.environ.get("FME_DISTRIBUTED_W", "1")) > 1
-        or int(os.environ.get("FME_DISTRIBUTED_H", "1")) > 1
-    )
+def test_forced_compile_stays_on_under_parallelism():
+    """Under the parallel test matrix, including spatial splits of longitude
+    and latitude, forcing compilation on enables it."""
     with compile_enabled(True):
-        assert is_compile_enabled() == (not splits_space)
+        assert is_compile_enabled()
 
 
 def test_compile_module_raises_recompile_limit():

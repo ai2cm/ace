@@ -5,7 +5,6 @@ from collections.abc import Generator
 from typing import Any
 
 import torch
-import torch_harmonics.distributed as thd
 from torch import nn
 
 from fme.core.device import get_device
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _parse_compile_env(value: str | None) -> bool | None:
     # an empty value (FME_COMPILE=) is treated as unset
-    if value is None or value == "":
+    if not value:
         return None
     if value == "1":
         return True
@@ -43,8 +42,10 @@ def _validate_backend(backend: str, source: str) -> str:
 
 
 def _parse_compile_backend_env(value: str | None) -> str | None:
-    # an empty value (FME_COMPILE_BACKEND=) is treated as unset
-    if value is None or value == "":
+    # an empty value (FME_COMPILE_BACKEND=) is treated as unset; only a set
+    # value is validated, so importing fme does not pay for listing backends
+    # while a typo still fails at startup
+    if not value:
         return None
     return _validate_backend(value, "FME_COMPILE_BACKEND")
 
@@ -54,7 +55,6 @@ _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
 )
 _LOGGED_AUTO_SKIP = False
-_LOGGED_SPATIAL_SPLIT_SKIP = False
 RECOMPILE_LIMIT = 32
 
 
@@ -119,24 +119,8 @@ def is_compile_enabled() -> bool:
     disables compilation everywhere, and setting it to ``1`` forces it on any
     device, in which case any compiler failure on that device is the user's to
     resolve. :func:`compile_enabled` overrides both within a context.
-
-    Regardless of these settings, modules are never compiled when spatial
-    parallelism splits longitude or latitude. With longitude split, the
-    compiled distributed inverse SHT fails. With latitude split, uneven shards
-    (e.g. 45 latitudes over 2 ranks) make dynamo fail to trace the backward
-    gather of torch_harmonics' distributed SHT.
     """
-    global _LOGGED_AUTO_SKIP, _LOGGED_SPATIAL_SPLIT_SKIP
-    # TODO: remove this gate once the distributed SHT compiles with longitude
-    # (https://github.com/ai2cm/ace/pull/1602) and uneven latitude splits
-    if thd.azimuth_group_size() > 1 or thd.polar_group_size() > 1:
-        if not _LOGGED_SPATIAL_SPLIT_SKIP:
-            logger.info(
-                "torch.compile skipped: spatial parallelism splits longitude "
-                "or latitude, where the compiled distributed SHT fails"
-            )
-            _LOGGED_SPATIAL_SPLIT_SKIP = True
-        return False
+    global _LOGGED_AUTO_SKIP
     if _COMPILE_OVERRIDE is not None:
         return _COMPILE_OVERRIDE
     device = get_device()
@@ -168,7 +152,11 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     ``DummyWrapper``, so all compiled modules are traced through one
     ``DummyWrapper.forward`` code object and share its recompile budget, which
     defaults to 8 and is easily used up by the train, validation and inference
-    variants of several modules. This raises the process-global
+    variants of several modules. Instances with the same structure share one
+    cache entry, so only distinct module types and their variants count.
+    Compiling the unwrapped module would not help: on torch 2.10 dynamo traces
+    every compiled module through one shared entry function, whose budget is
+    shared the same way. This raises the process-global
     ``torch._dynamo.config.recompile_limit`` to :data:`RECOMPILE_LIMIT`,
     leaving any larger user-set value in place. When the limit is still hit,
     dynamo logs a warning on the ``torch._dynamo`` logger and runs the

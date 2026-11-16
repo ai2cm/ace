@@ -18,7 +18,6 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import LabelEncoding
 from fme.core.rand import set_seed
 from fme.core.registry.module import Module
-from fme.core.testing import compile_on  # noqa: F401  autouse in this module
 
 from .module import CONDITIONAL_BUILDERS, ModuleConfig, ModuleSelector
 
@@ -373,7 +372,8 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
     torch.manual_seed(0)
     net = _LinearNet().to(fme.get_device())
     module = Module(net, label_encoding=None)
-    compiled = module.compile()
+    with compile_enabled(True):
+        compiled = module.compile()
     assert not module.is_compiled
     assert compiled.is_compiled
     assert compiled.torch_module is module.torch_module
@@ -429,11 +429,27 @@ def test_compile_unsupported_builder_runs_eagerly_without_tracing(
     declared reason logged, and never reaches torch.compile, since tracing an
     untraceable module can take minutes before falling back."""
     module = _build_compile_unsupported_module()
-    with caplog.at_level(logging.INFO), mock.patch("torch.compile") as mock_compile:
+    with (
+        compile_enabled(True),
+        caplog.at_level(logging.INFO),
+        mock.patch("torch.compile") as mock_compile,
+    ):
         compiled = module.compile()
     mock_compile.assert_not_called()
     assert not compiled.is_compiled
     assert "not traceable" in caplog.text
+
+
+def test_compile_unsupported_builder_does_not_log_when_compile_disabled(
+    caplog: pytest.LogCaptureFixture,
+):
+    """With compilation off, nothing would have been compiled anyway, so the
+    compile-unsupported reason is not logged on every step build."""
+    module = _build_compile_unsupported_module()
+    with compile_enabled(False), caplog.at_level(logging.INFO):
+        compiled = module.compile()
+    assert not compiled.is_compiled
+    assert "torch.compile skipped" not in caplog.text
 
 
 def test_registered_builder_without_compile_reason_compiles():
@@ -444,7 +460,10 @@ def test_registered_builder_without_compile_reason_compiles():
     module = selector.build(
         n_in_channels=1, n_out_channels=1, dataset_info=DatasetInfo()
     )
-    with mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile:
+    with (
+        compile_enabled(True),
+        mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile,
+    ):
         compiled = module.compile()
     mock_compile.assert_called_once()
     assert compiled.is_compiled

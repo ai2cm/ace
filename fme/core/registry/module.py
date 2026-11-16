@@ -140,20 +140,26 @@ class Module:
         Args:
             kwargs: Forwarded to :func:`fme.core.compile.compile_module`.
         """
+        if not is_compile_enabled():
+            return self
         if self._compile_unsupported_reason is not None:
             logger.info(
                 "torch.compile skipped, module runs eagerly: "
                 f"{self._compile_unsupported_reason}"
             )
             return self
-        if not is_compile_enabled():
-            return self
-        return Module(
-            self._module,
-            self._label_encoding,
-            forward_module=compile_module(self._module, **kwargs),
-            compile_unsupported_reason=self._compile_unsupported_reason,
-        )
+        return self._replace(forward_module=compile_module(self._module, **kwargs))
+
+    def _replace(self, **changes: Any) -> "Module":
+        """A copy of this Module with the given constructor arguments replaced."""
+        kwargs: dict[str, Any] = {
+            "module": self._module,
+            "label_encoding": self._label_encoding,
+            "forward_module": self._forward_module,
+            "compile_unsupported_reason": self._compile_unsupported_reason,
+        }
+        kwargs.update(changes)
+        return Module(**kwargs)
 
     @property
     def is_compiled(self) -> bool:
@@ -197,17 +203,8 @@ class Module:
         applied before :meth:`compile`.
         """
         if self._forward_module is not None:
-            return Module(
-                self._module,
-                self._label_encoding,
-                forward_module=callable(self._forward_module),
-                compile_unsupported_reason=self._compile_unsupported_reason,
-            )
-        return Module(
-            callable(self._module),
-            self._label_encoding,
-            compile_unsupported_reason=self._compile_unsupported_reason,
-        )
+            return self._replace(forward_module=callable(self._forward_module))
+        return self._replace(module=callable(self._module))
 
     def to(self, device: torch.device) -> "Module":
         if self._forward_module is not None:
@@ -215,11 +212,7 @@ class Module:
                 "Module.to must be called before Module.compile; moving a "
                 "compiled module between devices is not supported."
             )
-        return Module(
-            self._module.to(device),
-            self._label_encoding,
-            compile_unsupported_reason=self._compile_unsupported_reason,
-        )
+        return self._replace(module=self._module.to(device))
 
 
 @dataclasses.dataclass
