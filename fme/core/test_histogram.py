@@ -149,7 +149,7 @@ def test_compared_dynamic_histograms(shape, percentiles):
                 )
 
     ds = histogram.get_dataset()
-    all(ds.coords["source"] == ["target", "prediction"])
+    assert list(ds.coords["source"].values) == ["target", "prediction"]
 
 
 def test_compared_dynamic_histograms_prediction_frac_is_prediction_over_target():
