@@ -626,6 +626,7 @@ class StepperConfig:
             input_masking = self.input_masking.build(
                 mask=dataset_info.spatial_mask_provider,
                 means=step.normalizer.means,
+                names=self.input_names,
             )
         try:
             output_masking: SpatialMasking = (

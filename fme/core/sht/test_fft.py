@@ -4,7 +4,7 @@ import pytest
 import torch
 import torch.fft
 
-from fme.fft import irfft
+from fme.core.sht import irfft
 
 
 def _irfft_reference(
