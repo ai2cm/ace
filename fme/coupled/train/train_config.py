@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 import torch
 
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.data_loading.config import DataLoaderConfig as AtmosphereDataLoaderConfig
+from fme.ace.data_loading.getters import get_gridded_data as get_atmosphere_gridded_data
 from fme.core.cli import ResumeResultsConfig
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
@@ -50,6 +52,7 @@ from fme.coupled.data_loading.getters import (
 )
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.data_loading.mixed import MixedGriddedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
@@ -99,6 +102,37 @@ def _validate_n_steps(
         )
     if errors:
         raise ValueError("Incompatible n_steps: " + " ".join(errors))
+
+
+def _validate_joint_pairs(
+    joint_pairs: list[list[int]] | None, n_inner_steps: int, n_coupled_steps: int
+) -> None:
+    """Ensure each 1-indexed ``[i_O, i_A]`` pair has a direct edge, i.e.
+    ``i_A`` lies in ocean step ``i_O``'s forcing window or the next one, and
+    that both steps fit within ``n_coupled_steps``.
+
+    Raises:
+        ValueError: Naming every offending pair.
+    """
+    errors: list[str] = []
+    for ocean_step, atmosphere_step in joint_pairs or ():
+        first_in_window = (ocean_step - 1) * n_inner_steps + 1
+        last_in_next_window = (ocean_step + 1) * n_inner_steps
+        if not first_in_window <= atmosphere_step <= last_in_next_window:
+            errors.append(
+                f"[{ocean_step}, {atmosphere_step}]: atmosphere step outside "
+                f"{first_in_window}..{last_in_next_window} (no direct edge)."
+            )
+        atmosphere_outer_step = -(-atmosphere_step // n_inner_steps)  # ceil
+        if max(ocean_step, atmosphere_outer_step) > n_coupled_steps:
+            errors.append(
+                f"[{ocean_step}, {atmosphere_step}]: beyond n_coupled_steps "
+                f"({n_coupled_steps})."
+            )
+    if errors:
+        raise ValueError(
+            f"Invalid joint_pairs (n_inner_steps={n_inner_steps}): " + " ".join(errors)
+        )
 
 
 @dataclasses.dataclass
@@ -420,6 +454,13 @@ class TrainConfig:
             subdirectory, then it is assumed that this is a new run to resume a
             previously completed run and resume_results.existing_dir is recursively
             copied to experiment_dir.
+        train_loader_uncoupled_atmosphere: Uncoupled atmosphere training data
+            loader, whose batches are interleaved with the coupled ones and
+            stepped by the atmosphere alone. Set exactly when
+            ``stepper_training.uncoupled_atmosphere`` is set;
+            ``stepper_training.objective_per_batch.uncoupled_atmosphere`` sets
+            their share of each epoch. Validation and the post-epoch training
+            evaluation use coupled batches only.
     """
 
     train_loader: CoupledDataLoaderConfig
@@ -454,6 +495,7 @@ class TrainConfig:
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
+    train_loader_uncoupled_atmosphere: AtmosphereDataLoaderConfig | None = None
 
     _RESERVED_NAMES = {"train", "val"}
 
@@ -491,6 +533,18 @@ class TrainConfig:
             n_inner_steps=self.stepper.n_inner_steps,
             component_n_steps_max=self.stepper_training.component_n_steps_max,
         )
+        _validate_joint_pairs(
+            joint_pairs=self.stepper_training.joint_pairs,
+            n_inner_steps=self.stepper.n_inner_steps,
+            n_coupled_steps=self.stepper_training.n_coupled_steps,
+        )
+        if (self.train_loader_uncoupled_atmosphere is None) != (
+            self.stepper_training.uncoupled_atmosphere is None
+        ):
+            raise ValueError(
+                "train_loader_uncoupled_atmosphere and "
+                "stepper_training.uncoupled_atmosphere must be set together."
+            )
 
     @property
     def n_coupled_steps(self) -> int:
@@ -579,11 +633,29 @@ class TrainConfig:
             self.n_coupled_steps
         )
 
-    def _get_train_data(self) -> GriddedData:
+    def _get_train_data(self) -> GriddedData | MixedGriddedData:
         data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_train_data(
+        coupled = get_gridded_train_data(
             self.train_loader,
             requirements=data_requirements,
+        )
+        objective_per_batch = self.stepper_training.objective_per_batch
+        if self.train_loader_uncoupled_atmosphere is None:
+            return coupled
+        assert objective_per_batch is not None  # validated with uncoupled_atmosphere
+        uncoupled_atmosphere = get_atmosphere_gridded_data(
+            self.train_loader_uncoupled_atmosphere,
+            train=True,
+            requirements=(
+                self.stepper_training.get_uncoupled_atmosphere_data_requirements(
+                    self.stepper
+                )
+            ),
+        )
+        return MixedGriddedData(
+            coupled,
+            uncoupled_atmosphere,
+            fraction=objective_per_batch.uncoupled_atmosphere_share(),
         )
 
     def _get_validation_data(
