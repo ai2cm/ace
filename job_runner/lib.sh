@@ -343,6 +343,30 @@ require_job_name_length() {
     fi
 }
 
+# Default a blank N_GPUS to 1 (experiments.txt rows without the n_gpus column);
+# stop the submission loop unless it is then a positive integer.
+# Args: JOB_NAME
+require_eval_n_gpus() {
+    N_GPUS="${N_GPUS:-1}"
+    if [[ ! "$N_GPUS" =~ ^[1-9][0-9]*$ ]]; then
+        echo >&2
+        echo "Error: n_gpus must be a positive integer, got '${N_GPUS}' for JOB_NAME: $1" >&2
+        echo "This job and any remaining jobs in the input file were not submitted." >&2
+        exit 1
+    fi
+}
+
+# Set FME_LAUNCH to the command prefix that runs an fme module on N_GPUS
+# processes: `python -I -m` for one, single-node torchrun for more.
+# Args: N_GPUS
+build_fme_launch() {
+    if (( $1 > 1 )); then
+        FME_LAUNCH=(torchrun --nproc_per_node "$1" -m)
+    else
+        FME_LAUNCH=(python -I -m)
+    fi
+}
+
 # Append experiment result to experiments.txt and commit
 # Args:
 #   $1 - EXPERIMENT_DIR (e.g., "experiments/2025-08-08-jamesd/coupled")
@@ -545,6 +569,7 @@ EXPERIMENTS_COLUMNS=(
     results_dataset:EXISTING_RESULTS_DATASET workspace:WORKSPACE cluster:CLUSTER
     ocean_results_dataset:EXISTING_RESULTS_OCEAN_DATASET
     atmos_results_dataset:EXISTING_RESULTS_ATMOS_DATASET shared_mem:SHARED_MEM
+    n_gpus:N_GPUS
 )
 
 # Print the header line for an input file

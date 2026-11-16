@@ -22,6 +22,9 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] `pretraining.txt` columns `results_dataset_ocean` and
   `results_dataset_atmos` override the wandb-resolved results datasets in
   `coupled_train.sh`
+- [FEAT] `experiments.txt` column `n_gpus` (last; blank = 1) runs
+  `{evaluate,inference}.sh` jobs on that many GPUs, with `torchrun` when > 1;
+  `inference.sh` rejects > 1 for `fme.coupled.inference`
 
 ### Changed
 
