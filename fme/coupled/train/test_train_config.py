@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import typing
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -29,6 +30,7 @@ from fme.coupled.data_loading.config import (
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.stepper import ComponentTrainingConfig
 from fme.coupled.train.train_config import (
+    AtmosphereInlineInferenceConfig,
     InlineInferenceConfig,
     InlineValidationConfig,
     TrainConfig,
@@ -121,6 +123,7 @@ def _make_train_config_for_inference(
     inference: InlineInferenceConfig | list[InlineInferenceConfig],
     max_epochs: int = 5,
     evaluate_before_training: bool | None = None,
+    atmosphere_inference: list[AtmosphereInlineInferenceConfig] | None = None,
 ) -> TrainConfig:
     # Only forward evaluate_before_training when explicitly requested, so that
     # tests which do not care about it keep seeing the class default.
@@ -138,6 +141,7 @@ def _make_train_config_for_inference(
         save_checkpoint=False,
         experiment_dir=str(tmp_path),
         inference=inference,
+        atmosphere_inference=atmosphere_inference or [],
         **extra_kwargs,
     )
 
@@ -828,3 +832,160 @@ def test_train_config_uncoupled_atmosphere_loader_and_stepper_set_together(
             experiment_dir=str(tmp_path),
             train_loader_uncoupled_atmosphere=MagicMock() if loader_set else None,
         )
+
+
+def _make_atmosphere_inference_config(
+    name: str | None = None, epochs: Slice | None = None
+) -> AtmosphereInlineInferenceConfig:
+    return dacite.from_dict(
+        AtmosphereInlineInferenceConfig,
+        {
+            "loader": {
+                "dataset": {"data_path": ""},
+                "start_indices": {"n_initial_conditions": 1},
+            },
+            "n_forward_steps": 1,
+            "forward_steps_in_memory": 1,
+            "epochs": dataclasses.asdict(epochs or Slice()),
+            "name": name,
+        },
+        config=dacite.Config(strict=True),
+    )
+
+
+def test_atmosphere_inference_default_weight_is_zero():
+    assert _make_atmosphere_inference_config().weight == 0.0
+
+
+def test_atmosphere_inference_names(tmp_path):
+    single = _make_train_config_for_inference(
+        tmp_path, [], atmosphere_inference=[_make_atmosphere_inference_config()]
+    )
+    assert single.atmosphere_inference_names == ["atmosphere_inference"]
+    multiple = _make_train_config_for_inference(
+        tmp_path,
+        [],
+        atmosphere_inference=[
+            _make_atmosphere_inference_config(),
+            _make_atmosphere_inference_config(name="b"),
+        ],
+    )
+    assert multiple.atmosphere_inference_names == ["atmosphere_inference_0", "b"]
+
+
+def test_duplicate_atmosphere_inference_names_raises(tmp_path):
+    with pytest.raises(ValueError, match="Duplicate atmosphere inference names"):
+        _make_train_config_for_inference(
+            tmp_path,
+            [],
+            atmosphere_inference=[
+                _make_atmosphere_inference_config(name="same"),
+                _make_atmosphere_inference_config(name="same"),
+            ],
+        )
+
+
+@pytest.mark.parametrize("name", ["inference", "val", "train"])
+def test_atmosphere_inference_name_collision_raises(tmp_path, name):
+    with pytest.raises(ValueError, match="Atmosphere inference names"):
+        _make_train_config_for_inference(
+            tmp_path,
+            [_make_inference_config()],
+            atmosphere_inference=[_make_atmosphere_inference_config(name=name)],
+        )
+
+
+def test_inference_epochs_include_atmosphere_inference(tmp_path):
+    config = _make_train_config_for_inference(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=4,
+        atmosphere_inference=[_make_atmosphere_inference_config(epochs=Slice(step=4))],
+    )
+    assert config.get_inference_epoch_sets() == [{0, 1, 3}]
+    assert config.get_atmosphere_inference_epoch_sets() == [{0, 1}]
+    assert config.get_inference_epochs() == [0, 1, 3]
+    config = _make_train_config_for_inference(
+        tmp_path,
+        [],
+        max_epochs=4,
+        atmosphere_inference=[_make_atmosphere_inference_config(epochs=Slice(step=2))],
+    )
+    assert config.get_inference_epochs() == [0, 1, 3]
+
+
+def test_atmosphere_inference_timestep_mismatch_raises(tmp_path):
+    config = _make_train_config_for_inference(
+        tmp_path, [], atmosphere_inference=[_make_atmosphere_inference_config()]
+    )
+    config.stepper = MagicMock(atmosphere_timestep=datetime.timedelta(hours=6))
+    data = MagicMock()
+    data.dataset_info.timestep = datetime.timedelta(hours=3)
+    with patch.object(
+        AtmosphereInlineInferenceConfig, "get_inference_data", return_value=data
+    ):
+        with pytest.raises(ValueError, match="does not match the atmosphere timestep"):
+            config._get_atmosphere_inference_data(variable_metadata={})
+
+
+class TestGetInferenceCallbackWithAtmosphere:
+    @staticmethod
+    def _call(inference_entries, atmosphere_weight, side_effect):
+        atmosphere_config = MagicMock()
+        atmosphere_config.weight = atmosphere_weight
+        atmosphere_entries = [(atmosphere_config, MagicMock(), MagicMock(), "atmos")]
+        stepper = MagicMock()
+        with patch(
+            "fme.core.generics.trainer.inference_one_epoch",
+            side_effect=side_effect,
+        ) as mock_inference_one_epoch:
+            callback = _get_inference_callback(
+                inference_entries=inference_entries,
+                inference_epochs=[1],
+                inference_epoch_sets=[{1} for _ in inference_entries],
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                output_dir="/tmp/out",
+                save_per_epoch_diagnostics=False,
+                atmosphere_inference_entries=atmosphere_entries,
+                atmosphere_inference_epoch_sets=[{1}],
+            )
+            logs, error = callback(epoch=1)
+        atmosphere_config.build_aggregator_factory.assert_called_once()
+        assert (
+            atmosphere_config.build_aggregator_factory.call_args.kwargs["stepper"]
+            is stepper.atmosphere
+        )
+        predict = mock_inference_one_epoch.call_args_list[-1].kwargs["predict"]
+        assert predict is stepper.atmosphere.predict_paired
+        return logs, error
+
+    def test_zero_weight_atmosphere_does_not_change_error(self):
+        coupled = TestGetInferenceCallback._make_entry("inference", weight=1.0)
+        logs, error = self._call(
+            [coupled],
+            atmosphere_weight=0.0,
+            side_effect=[
+                InferenceSummary(logs={"inference/x": 0.4}, loss=0.4),
+                InferenceSummary(logs={"atmos/x": 9.0}, loss=9.0),
+            ],
+        )
+        assert error == pytest.approx(0.4)
+        assert logs == {"inference/x": 0.4, "atmos/x": 9.0}
+
+    def test_only_zero_weight_atmosphere_returns_none_error(self):
+        logs, error = self._call(
+            [],
+            atmosphere_weight=0.0,
+            side_effect=[InferenceSummary(logs={"atmos/x": 9.0}, loss=9.0)],
+        )
+        assert error is None
+        assert logs == {"atmos/x": 9.0}
+
+    def test_weighted_atmosphere_contributes_error(self):
+        logs, error = self._call(
+            [],
+            atmosphere_weight=2.0,
+            side_effect=[InferenceSummary(logs={"atmos/x": 0.5}, loss=0.5)],
+        )
+        assert error == pytest.approx(1.0)

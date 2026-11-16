@@ -24,7 +24,7 @@ from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.ace.stepper import TrainOutput, TrainStepper
+from fme.ace.stepper import Stepper, TrainOutput, TrainStepper
 from fme.ace.stepper.single_module import (
     CheckpointStepperConfig,
     StepperConfig,
@@ -204,7 +204,7 @@ class InlineInferenceConfig:
         data: InferenceGriddedData,
         entry_dataset_info: DatasetInfo,
         name: str,
-        stepper: TrainStepper,
+        stepper: TrainStepper | Stepper,
         output_dir: str,
         save_per_epoch_diagnostics: bool,
     ) -> Callable[[], InferenceEvaluatorAggregator]:
