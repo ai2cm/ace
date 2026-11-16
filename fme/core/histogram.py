@@ -148,9 +148,9 @@ class DynamicHistogram:
             self.bin_edges = np.linspace(vmin, vmax, self._n_bins + 1)
         else:
             while vmin < self.bin_edges[0]:
-                self._double_size_left()
+                self._double_size("left")
             while vmax > self.bin_edges[-1]:
-                self._double_size_right()
+                self._double_size("right")
 
         for i_series, value in enumerate(values):
             try:
@@ -168,46 +168,23 @@ class DynamicHistogram:
                 # ignore samples with NaNs
                 logging.error(f"caught exception while computing histogram: {err}")
 
-    def _double_size_left(self):
+    def _double_size(self, direction: Literal["left", "right"]):
         """
-        Double the sizes of bins, extending the histogram
-        to the left (further negative).
-        """
-        if self.bin_edges is None:
-            raise RuntimeError("Cannot double size of bins without bin edges")
-        current_range = self.bin_edges[-1] - self.bin_edges[0]
-        new_range = 2 * current_range
-
-        new_bin_edges = np.linspace(
-            self.bin_edges[-1] - new_range,
-            self.bin_edges[-1],
-            self._n_bins + 1,
-        )
-        new_counts = np.zeros((self._n_series, self._n_bins), dtype=np.int64)
-        combined_counts = self.counts[:, ::2] + self.counts[:, 1::2]
-        new_counts[:, self._n_bins // 2 :] = combined_counts
-        self.bin_edges = new_bin_edges
-        self.counts = new_counts
-
-    def _double_size_right(self):
-        """
-        Double the sizes of bins, extending the histogram
-        to the right (further positive).
+        Double the sizes of bins, extending the histograms to the left
+        (further negative) or to the right (further positive).
         """
         if self.bin_edges is None:
             raise RuntimeError("Cannot double size of bins without bin edges")
-        current_range = self.bin_edges[-1] - self.bin_edges[0]
-        new_range = 2 * current_range
-
-        new_bin_edges = np.linspace(
-            self.bin_edges[0],
-            self.bin_edges[0] + new_range,
-            self._n_bins + 1,
-        )
-        new_counts = np.zeros((self._n_series, self._n_bins), dtype=np.int64)
+        new_range = 2 * (self.bin_edges[-1] - self.bin_edges[0])
+        new_counts = np.zeros_like(self.counts)
         combined_counts = self.counts[:, ::2] + self.counts[:, 1::2]
-        new_counts[:, : self._n_bins // 2] = combined_counts
-        self.bin_edges = new_bin_edges
+        if direction == "left":
+            start, stop = self.bin_edges[-1] - new_range, self.bin_edges[-1]
+            new_counts[:, self._n_bins // 2 :] = combined_counts
+        else:
+            start, stop = self.bin_edges[0], self.bin_edges[0] + new_range
+            new_counts[:, : self._n_bins // 2] = combined_counts
+        self.bin_edges = np.linspace(start, stop, self._n_bins + 1)
         self.counts = new_counts
 
 
