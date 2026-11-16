@@ -216,6 +216,96 @@ def test_trim_zero_bins_trims_series_together():
     np.testing.assert_array_equal(trimmed_edges, [1.0, 2.0, 3.0, 4.0])
 
 
+def test_compared_dynamic_histograms_share_bins():
+    torch.manual_seed(0)
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    shape = (2, 3, 8, 16)
+    targets, predictions = [], []
+    for scale in [1.0, 3.0]:  # bins must be extended for the second batch
+        # the prediction has a wider range of values than the target
+        # float64 so that values are binned identically to np.histogram
+        targets.append(scale * torch.rand(*shape, dtype=torch.float64))
+        predictions.append(10.0 * scale * torch.rand(*shape, dtype=torch.float64) - 5.0)
+        histogram.record_batch({"x": targets[-1]}, {"x": predictions[-1]})
+
+    histograms = histogram._get_histograms()["x"]
+    bin_edges = histograms["target"].bin_edges
+    np.testing.assert_array_equal(histograms["prediction"].bin_edges, bin_edges)
+    for source_histogram, values in (
+        (histograms["target"], targets),
+        (histograms["prediction"], predictions),
+    ):
+        np.testing.assert_array_equal(
+            source_histogram.counts,
+            np.histogram(torch.cat(values).numpy(), bins=bin_edges)[0],
+        )
+
+    wandb_result = histogram.get_wandb()
+    bin_width = bin_edges[1] - bin_edges[0]
+    for source, values in (("target", targets), ("prediction", predictions)):
+        assert wandb_result[f"{source}/99.0th-percentile/x"] == pytest.approx(
+            np.percentile(torch.cat(values).numpy(), 99.0), abs=bin_width
+        )
+
+
+def test_compared_dynamic_histograms_dataset():
+    torch.manual_seed(0)
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    shape = (2, 8, 16)
+    # float64 so that values are binned identically to np.histogram
+    target = {"x": torch.rand(*shape, dtype=torch.float64)}
+    prediction = {"x": 2.0 * torch.rand(*shape, dtype=torch.float64)}
+    histogram.record_batch(target, prediction)
+    ds = histogram.get_dataset()
+    assert list(ds.coords["source"].values) == ["target", "prediction"]
+    assert ds["x"].dims == ("source", "bin")
+    assert ds["x"].shape == (2, n_bins)
+    assert ds["x_bin_edges"].dims == ("source", "bin_edges")
+    assert ds["x_bin_edges"].shape == (2, n_bins + 1)
+    np.testing.assert_array_equal(
+        ds["x_bin_edges"].sel(source="target").values,
+        ds["x_bin_edges"].sel(source="prediction").values,
+    )
+    for source, data in (("target", target), ("prediction", prediction)):
+        np.testing.assert_array_equal(
+            ds["x"].sel(source=source).values,
+            np.histogram(
+                data["x"].numpy(),
+                bins=ds["x_bin_edges"].sel(source=source).values,
+            )[0],
+        )
+
+
+def test_compared_dynamic_histograms_non_finite_prediction():
+    torch.manual_seed(0)
+    n_bins = 300
+    shape = (2, 8, 16)
+    target = {"x": torch.rand(*shape)}
+    prediction = {"x": torch.rand(*shape)}
+    bad_prediction = {"x": prediction["x"].clone()}
+    bad_prediction["x"][0, 0, 0] = float("inf")
+    bad_prediction["x"][1, 2, 3] = float("nan")
+
+    expected = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    expected.record_batch(target, prediction)
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    histogram.record_batch(target, bad_prediction)
+
+    ds, expected_ds = histogram.get_dataset(), expected.get_dataset()
+    np.testing.assert_array_equal(ds["x_bin_edges"], expected_ds["x_bin_edges"])
+    np.testing.assert_array_equal(
+        ds["x"].sel(source="target"), expected_ds["x"].sel(source="target")
+    )
+    assert ds["x"].sel(source="prediction").sum() == prediction["x"].numel() - 2
+    wandb_result = histogram.get_wandb()
+    assert wandb_result["target/99.0th-percentile/x"] == pytest.approx(
+        expected.get_wandb()["target/99.0th-percentile/x"]
+    )
+    assert np.isfinite(wandb_result["prediction/99.0th-percentile/x"])
+
+
 @pytest.mark.parametrize(
     "shape",
     [
@@ -270,9 +360,10 @@ def test_compared_dynamic_histograms_prediction_frac_is_prediction_over_target()
     histogram.record_batch(target, prediction)
     wandb_result = histogram.get_wandb()
 
+    # percentiles are only accurate to within the width of a bin
     assert wandb_result[
         "prediction_frac_of_target/99.0th-percentile/x"
-    ] == pytest.approx(2.0)
+    ] == pytest.approx(2.0, rel=0.01)
 
 
 @pytest.mark.parametrize(
@@ -422,6 +513,21 @@ def test_compared_dynamic_tails_histograms():
         assert f"prediction_frac_of_target/0.0001th-percentile/{var}" in wandb_result
 
 
+def test_compared_dynamic_tails_histograms_share_bins():
+    histogram = ComparedDynamicTailsHistograms(n_bins=300, percentiles=[99.0])
+    shape = (2, 8, 16)
+    histogram.record_batch({"x": torch.rand(*shape)}, {"x": 5.0 * torch.rand(*shape)})
+    histograms = histogram._get_histograms()["x"]
+    np.testing.assert_array_equal(
+        histograms["target"].bin_edges, histograms["prediction"].bin_edges
+    )
+    ds = histogram.get_dataset()
+    np.testing.assert_array_equal(
+        ds["x_bin_edges"].sel(source="target"),
+        ds["x_bin_edges"].sel(source="prediction"),
+    )
+
+
 def test_compared_dynamic_tails_histograms_prediction_frac_is_prediction_over_target():
     n_bins = 300
     histogram = ComparedDynamicTailsHistograms(
@@ -441,9 +547,10 @@ def test_compared_dynamic_tails_histograms_prediction_frac_is_prediction_over_ta
     histogram.record_batch(target, prediction)
     wandb_result = histogram.get_wandb()
 
+    # percentiles are only accurate to within the width of a bin
     assert wandb_result[
         "prediction_frac_of_target/99.0th-percentile/upper"
-    ] == pytest.approx(2.0)
+    ] == pytest.approx(2.0, rel=0.01)
     assert wandb_result[
         "prediction_frac_of_target/1.0th-percentile/lower"
-    ] == pytest.approx(2.0)
+    ] == pytest.approx(2.0, rel=0.01)
