@@ -1,19 +1,17 @@
-"""Progress table for the long fine-tunes of the 2026-11-12 FM ft sweep.
+"""Progress table for the 1deg, 6-hourly FM training runs.
 
-Tracks only the 36 long runs of create_fm_v2_finetune_jobs.ft_long_runs (the
-ext80 fm-spencer-balanced runs fine-tuned for 32 and for 128 epochs; ERA5
-mixes 25, 70, 100 x 3 seeds at LR 1e-4), one row per architecture and length,
-9 runs each, the SFNO rows first: sfno-v2-ft-e32, sfno-v2-ft-e128,
-swin-v2.2-v2-ft-e32, swin-v2.2-v2-ft-e128. The finished 8-epoch ft runs and
-the runs they descend from (the 2026-10-19 runs, the 2026-11-09 v2 runs and
-their 2026-11-11 follow-ups) are no longer tracked; their logs are not read.
+Tracks only the 6 runs of create_fm_1deg_jobs (NoiseConditionedSFNO embed_dim
+1024, 120 epochs, 8 GPUs; 2 arms x 3 seeds), one row per arm, 3 runs each:
+sfno-v2-1deg-fm-e3sm-balanced, sfno-v2-1deg-fm-era5. Their smoke tests and
+every 4deg run (the 2026-10-19 runs, the 2026-11-09 v2 runs, their follow-ups
+and the 2026-11-12 fine-tunes) are not tracked; their logs are not read.
 
 Epochs done and per-phase timings come from the logs of every run
 (preemption retry) of each finished or running experiment. Epochs done is the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
-inference are all done. Finished jobs count as their run's max_epochs (32 or
-128, from the run object); never-started jobs count as 0.
+inference are all done. Finished jobs count as max_epochs (120); never-started
+jobs count as 0.
 Train time is the wall time that produced kept progress,
 summed over an experiment's jobs (preemption retries): each job counts from
 its first training step to its exit (or now, if running), except that a
@@ -53,8 +51,8 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
-from create_fm_v2_finetune_jobs import ft_long_runs  # noqa: E402
-from create_fm_v2_followup_jobs import SFNO  # noqa: E402
+from create_fm_1deg_jobs import ARMS, SEEDS, run_config_name  # noqa: E402
+from submit_fm_jobs import config_to_job_name  # noqa: E402
 
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
@@ -142,25 +140,26 @@ def _preemptions(named: NamedExperiment) -> int:
     )
 
 
-# Tracked runs by job name, and their rows: one per architecture and length,
-# in ft_long_runs order (the SFNO rows first, each arch's shorter runs first).
-FT_RUNS = {run.job_name: run for run in ft_long_runs()}
+MAX_EPOCHS = 120  # max_epochs of both 1deg base configs
+# Tracked runs: job name -> arm, in table row order (one row per arm, seeds in
+# order within it).
+RUN_ARMS = {
+    config_to_job_name(run_config_name(arm, seed, False)): arm
+    for arm in ARMS
+    for seed in SEEDS
+}
 
 
 def arch_of(name: str) -> str:
-    """Row of the run named `name`, e.g. sfno-v2-ft-e32 (its inference arch,
-    _inference_common._add_ft_archs).
-    """
-    run = FT_RUNS[name]
-    base = "sfno-v2" if run.arch == SFNO else "swin-v2.2-v2"
-    return f"{base}-ft-e{run.max_epochs}"
+    """Row of the run named `name`, e.g. sfno-v2-1deg-fm-era5."""
+    return f"sfno-v2-1deg-{RUN_ARMS[name]}"
 
 
-ARCHS = tuple(dict.fromkeys(arch_of(name) for name in FT_RUNS))
+ARCHS = tuple(dict.fromkeys(arch_of(name) for name in RUN_ARMS))
 
 
 def max_epochs_of(name: str) -> int:
-    return FT_RUNS[name].max_epochs
+    return MAX_EPOCHS
 
 
 def _log_time(t: str) -> datetime:
@@ -199,8 +198,8 @@ def _median(values: list[float]) -> float | None:
 
 # Inline inference runs the aimip evaluator every epoch and all others (the
 # 10yr and 46yr ERA5 runs and the 5-day weather ensembles) with
-# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ...: 3 times in a
-# 32-epoch run, 12 in a 128-epoch one.
+# `epochs: {start: 9, step: 10}`, i.e. after epochs 10, 20, ...: 12 times in a
+# 120-epoch run.
 HEAVY_INFERENCE_EVERY = 10
 HEAVY_INFERENCE_RESIDUE = 0
 
@@ -263,8 +262,7 @@ def _run_log(job_id: str) -> str:
 def progress(named, name: str) -> tuple[int, Seconds, float]:
     """(epochs done, median seconds per (epoch, training, light and heavy
     inference), useful train seconds) over the logs of every run (preemption
-    retry) of the experiment, finished or not. The ft runs restart the epoch
-    count, so epochs done are their own (0..max_epochs).
+    retry) of the experiment, finished or not.
     """
     none: Seconds = (None, None, None, None)
     max_epochs = max_epochs_of(name)
@@ -293,9 +291,10 @@ def progress(named, name: str) -> tuple[int, Seconds, float]:
 
 
 def main() -> None:
-    names = list(FT_RUNS)
-    # One listing per distinct common prefix of a row's job names (the ext80
-    # parent's name up to the seed, shared by an architecture's two rows): the
+    names = list(RUN_ARMS)
+    # One listing per distinct common prefix of a row's job names (the name up
+    # to the seed; it also matches the row's smoke tests, which are dropped
+    # below as their names are not tracked): the
     # broad "ace2-fm-nc-" listing matches ~9k old experiments and takes
     # ~5 min, while a narrow one takes a few seconds.
     prefixes = dict.fromkeys(
