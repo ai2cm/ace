@@ -118,8 +118,7 @@ Multi-GPU inference
 ===================
 
 Inference and evaluation can be run across multiple GPUs using ``torchrun``.
-Initial conditions are automatically sharded across data-parallel ranks, with
-each GPU processing a contiguous block of samples:
+Initial conditions are automatically sharded across data-parallel ranks:
 
 .. code-block:: bash
 
@@ -131,7 +130,7 @@ The same works for the evaluator:
 
     torchrun --nproc_per_node 4 -m fme.ace.evaluator config-evaluator.yaml
 
-No configuration changes are needed. The number of initial conditions must be
+No configuration changes are needed, but the number of initial conditions must be
 divisible by the number of GPUs.
 
 NetCDF output files (predictions, monthly means, step diagnostics, and custom
