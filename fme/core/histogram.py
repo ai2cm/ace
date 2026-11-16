@@ -1,6 +1,6 @@
 import math
 from collections import namedtuple
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Literal
 
 import matplotlib.figure
@@ -271,41 +271,28 @@ class DynamicHistogramAggregator:
         self,
         n_bins: int,
         percentiles: list[float] | None = None,
-        nan_masks: Mapping[str, torch.Tensor | None] | None = None,
     ) -> None:
         self.n_bins = n_bins
         self.percentiles = [99.9999] if percentiles is None else percentiles
-        self.histograms: Mapping[str, DynamicHistogram] | None = None
-        self.nan_masks = nan_masks
-
-    def set_nan_masks(self, data: TensorMapping):
-        if self.nan_masks is None:
-            self.nan_masks = _get_nan_masks(data)
-
-    def _remove_nans(self, key: str, value: torch.Tensor):
-        if self.nan_masks is None:
-            raise ValueError(
-                "record_batch must be called at least once before removing NaNs"
-            )
-        return _select_unmasked(value, self.nan_masks[key])
+        self._histograms: dict[str, DynamicHistogram] | None = None
+        self._nan_masks: dict[str, torch.Tensor | None] | None = None
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
-        self.set_nan_masks(data)
-        if self.histograms is None:
-            self.histograms = {
-                k: DynamicHistogram(n_series=1, n_bins=self.n_bins) for k in data.keys()
+        if self._histograms is None or self._nan_masks is None:
+            self._nan_masks = _get_nan_masks(data)
+            self._histograms = {
+                k: DynamicHistogram(n_series=1, n_bins=self.n_bins) for k in data
             }
         for k in data:
             # no matter what data shape is given, combine it all into one histogram
-            value = self._remove_nans(k, data[k])
-            self.histograms[k].add([value])
+            self._histograms[k].add([_select_unmasked(data[k], self._nan_masks[k])])
 
     def get_histograms(self) -> dict[str, _Histogram]:
-        if self.histograms is None:
+        if self._histograms is None:
             raise ValueError("No data has been added to the histogram")
         return_dict: dict[str, _Histogram] = {}
-        for k, histogram in self.histograms.items():
+        for k, histogram in self._histograms.items():
             counts, bin_edges = trim_zero_bins(
                 histogram.counts[0, :], histogram.get_bin_edges()
             )
@@ -313,10 +300,10 @@ class DynamicHistogramAggregator:
         return return_dict
 
     def get_dataset(self) -> xr.Dataset:
-        if self.histograms is None:
+        if self._histograms is None:
             raise ValueError("No data has been added to the histogram")
         data = {}
-        for var_name, histogram in self.histograms.items():
+        for var_name, histogram in self._histograms.items():
             data[var_name] = xr.DataArray(
                 histogram.counts[0, :],
                 dims=("bin",),
