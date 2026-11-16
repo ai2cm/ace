@@ -9,8 +9,10 @@ from fme.core.compile import (
     RECOMPILE_LIMIT,
     _parse_compile_backend_env,
     _parse_compile_env,
+    _parse_flag_env,
     compile_backend,
     compile_enabled,
+    compile_fullgraph,
     compile_module,
     is_compile_enabled,
 )
@@ -28,6 +30,11 @@ def test_parse_compile_env(value: str | None, expected: bool | None | type):
             _parse_compile_env(value)
     else:
         assert _parse_compile_env(value) is expected
+
+
+def test_parse_flag_env_names_the_variable_in_errors():
+    with pytest.raises(ValueError, match="FME_COMPILE_FULLGRAPH must be '0' or '1'"):
+        _parse_flag_env("FME_COMPILE_FULLGRAPH", "true")
 
 
 @pytest.mark.parametrize(
@@ -100,10 +107,11 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
     """Falling back to eager at the limit costs speed, so it must be visible.
     Dynamo warns on the ``torch._dynamo`` logger, which does not propagate to
     the root logger, so caplog's handler is attached to it directly. The
-    suite-wide ``dynamo_hygiene`` fixture makes hitting the limit raise, so
-    this test turns that off to exercise the production fallback."""
+    suite-wide ``dynamo_hygiene`` and ``session_compile_fullgraph`` fixtures
+    make hitting the limit raise, so this test turns both off to exercise the
+    production fallback."""
     net = torch.nn.Linear(2, 2)
-    module = compile_module(net, backend="eager")
+    module = compile_module(net, backend="eager", fullgraph=False)
     dynamo_logger = logging.getLogger("torch._dynamo")
     dynamo_logger.addHandler(caplog.handler)
     try:
@@ -123,21 +131,45 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
 
 
 @pytest.mark.parametrize(
-    "kwargs, expected",
+    "fullgraph, kwargs, expected",
     [
-        pytest.param({}, {"backend": "eager"}, id="configured_backend"),
         pytest.param(
+            False, {}, {"backend": "eager", "fullgraph": False}, id="configured"
+        ),
+        pytest.param(
+            True,
+            {},
+            {"backend": "eager", "fullgraph": True},
+            id="configured_fullgraph",
+        ),
+        pytest.param(
+            False,
             {"backend": "aot_eager", "fullgraph": True},
             {"backend": "aot_eager", "fullgraph": True},
-            id="explicit_backend_wins",
+            id="explicit_options_win",
         ),
     ],
 )
-def test_compile_module_backend(kwargs: dict, expected: dict):
+def test_compile_module_options(fullgraph: bool, kwargs: dict, expected: dict):
     net = torch.nn.Linear(2, 2)
     with (
         compile_backend("eager"),
+        compile_fullgraph(fullgraph),
         mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile,
     ):
         compile_module(net, **kwargs)
     mock_compile.assert_called_once_with(net, **expected)
+
+
+def test_test_session_compiles_with_fullgraph():
+    """The suite-wide fixture makes any graph break in a compiled module fail
+    the test that runs it, rather than silently splitting the graph."""
+
+    class _BreaksGraph(torch.nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            torch._dynamo.graph_break()
+            return x + 1
+
+    compiled = compile_module(_BreaksGraph(), backend="eager")
+    with pytest.raises(torch._dynamo.exc.Unsupported):
+        compiled(torch.zeros(2))

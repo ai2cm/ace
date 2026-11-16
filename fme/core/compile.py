@@ -12,17 +12,19 @@ from fme.core.device import get_device
 logger = logging.getLogger(__name__)
 
 
-def _parse_compile_env(value: str | None) -> bool | None:
-    # an empty value (FME_COMPILE=) is treated as unset
+def _parse_flag_env(name: str, value: str | None) -> bool | None:
+    # an empty value (e.g. FME_COMPILE=) is treated as unset
     if not value:
         return None
     if value == "1":
         return True
     if value == "0":
         return False
-    raise ValueError(
-        f"FME_COMPILE must be '0' or '1' (or unset or empty), got {value!r}."
-    )
+    raise ValueError(f"{name} must be '0' or '1' (or unset or empty), got {value!r}.")
+
+
+def _parse_compile_env(value: str | None) -> bool | None:
+    return _parse_flag_env("FME_COMPILE", value)
 
 
 DEFAULT_COMPILE_BACKEND = "inductor"
@@ -53,6 +55,9 @@ def _parse_compile_backend_env(value: str | None) -> str | None:
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
 _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
+)
+_FULLGRAPH_OVERRIDE: bool | None = _parse_flag_env(
+    "FME_COMPILE_FULLGRAPH", os.environ.get("FME_COMPILE_FULLGRAPH")
 )
 _LOGGED_AUTO_SKIP = False
 RECOMPILE_LIMIT = 32
@@ -94,6 +99,36 @@ def compile_backend(backend: str) -> Generator[None, None, None]:
         yield
     finally:
         _BACKEND_OVERRIDE = previous
+
+
+@contextlib.contextmanager
+def compile_fullgraph(fullgraph: bool = True) -> Generator[None, None, None]:
+    """Set whether :func:`compile_module` compiles with ``fullgraph`` within
+    the context, overriding ``FME_COMPILE_FULLGRAPH``.
+
+    Args:
+        fullgraph: If True, a graph break raises instead of splitting the
+            compiled forward pass into several graphs.
+    """
+    global _FULLGRAPH_OVERRIDE
+    previous = _FULLGRAPH_OVERRIDE
+    try:
+        _FULLGRAPH_OVERRIDE = fullgraph
+        yield
+    finally:
+        _FULLGRAPH_OVERRIDE = previous
+
+
+def get_compile_fullgraph() -> bool:
+    """Whether :func:`compile_module` compiles with ``fullgraph=True``.
+
+    False by default, so a graph break costs speed rather than failing a run.
+    Setting the ``FME_COMPILE_FULLGRAPH`` environment variable to ``1`` makes
+    any graph break raise; the test suite does this so that a break in any
+    compiled module fails the test that runs it. :func:`compile_fullgraph`
+    overrides the environment variable within a context.
+    """
+    return bool(_FULLGRAPH_OVERRIDE)
 
 
 def get_compile_backend() -> str:
@@ -162,10 +197,10 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     dynamo logs a warning on the ``torch._dynamo`` logger and runs the
     remaining variants eagerly.
 
-    The backend is :func:`get_compile_backend` unless ``kwargs`` names one
-    explicitly, in which case the explicit backend wins: a caller that asks for
-    a particular backend needs that backend, while the configured one is only a
-    default.
+    The backend is :func:`get_compile_backend` and ``fullgraph`` is
+    :func:`get_compile_fullgraph` unless ``kwargs`` names them explicitly, in
+    which case the explicit values win: a caller that asks for particular
+    options needs them, while the configured ones are only defaults.
 
     Args:
         module: The module to compile.
@@ -173,4 +208,5 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())
+    kwargs.setdefault("fullgraph", get_compile_fullgraph())
     return torch.compile(module, **kwargs)

@@ -45,6 +45,7 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
+    assert_step_modules_have_no_graph_breaks,
     get_dataset_info,
     skip_unless_cuda,
     trivial_network_and_loss_normalization,
@@ -2641,24 +2642,6 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
         assert module.forward_module._orig_mod is module.torch_module, attr
 
 
-def _capture_module_calls(
-    step: StepABC, args: StepArgs
-) -> dict[int, tuple[tuple[Any, ...], dict[str, Any]]]:
-    """Run ``step`` once and return the inputs of the first call to each
-    module it runs, keyed by the ``id`` of the callable that received them."""
-    calls: dict[int, tuple[tuple[Any, ...], dict[str, Any]]] = {}
-
-    def recording_wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
-        def record(*call_args: Any, **call_kwargs: Any) -> Any:
-            calls.setdefault(id(module), (call_args, call_kwargs))
-            return module(*call_args, **call_kwargs)
-
-        return record
-
-    step.step(args=args, wrapper=recording_wrapper)
-    return calls
-
-
 @pytest.mark.parametrize("training", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)
 def test_step_compiled_modules_have_no_graph_breaks(
@@ -2677,6 +2660,10 @@ def test_step_compiled_modules_have_no_graph_breaks(
     # the uncompiled module is exactly what Module.compile hands torch.compile
     with compile_enabled(False):
         step = get_step(selector_getter(), DEFAULT_IMG_SHAPE)
+    compiled_modules = {
+        id(operator.attrgetter(attr)(step).torch_module) for attr in module_attrs
+    }
+    assert compiled_modules == {id(module) for module in step.modules}
     args = StepArgs(
         input=get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2),
         next_step_input_data=get_tensor_dict(
@@ -2684,21 +2671,7 @@ def test_step_compiled_modules_have_no_graph_breaks(
         ),
         labels=None,
     )
-    for module in step.modules:
-        module.train(training)
-    with torch.set_grad_enabled(training):
-        calls = _capture_module_calls(step, args)
-        for attr in module_attrs:
-            module = operator.attrgetter(attr)(step).torch_module
-            assert id(module) in calls, f"{attr} was not called by the step"
-            call_args, call_kwargs = calls[id(module)]
-            torch._dynamo.reset()
-            explanation = torch._dynamo.explain(module)(*call_args, **call_kwargs)
-            assert explanation.graph_break_count == 0, (
-                attr,
-                explanation.break_reasons,
-            )
-            assert explanation.graph_count == 1, attr
+    assert_step_modules_have_no_graph_breaks(step, args, training)
 
 
 def _train_step_once(

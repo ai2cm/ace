@@ -237,14 +237,5 @@ def test_disco_conv_compiles_without_graph_break(in_shape, out_shape):
         explanation = torch._dynamo.explain(conv)(x)
     finally:
         torch._dynamo.reset()
-    if (
-        explanation.graph_break_count > 0
-        and thd.azimuth_group_size() > 1
-        and torch.distributed.get_backend() == "gloo"
-    ):
-        pytest.xfail(
-            "the azimuth transpose calls the gloo all_to_all fallback in "
-            "fme.core.distributed._gloo_patch, which dynamo cannot trace"
-        )
     assert explanation.graph_break_count == 0, explanation.break_reasons
     assert explanation.graph_count == 1

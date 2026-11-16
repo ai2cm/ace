@@ -20,12 +20,11 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
-from torch._dynamo.testing import CompileCounter
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.compile import compile_enabled, compile_module
+from fme.core.compile import compile_enabled
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
@@ -39,7 +38,10 @@ from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
-from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.testing import (
+    assert_step_modules_have_no_graph_breaks,
+    trivial_network_and_loss_normalization,
+)
 from fme.core.typing_ import TensorDict
 from fme.core.var_masking import (
     BernoulliMaskingConfig,
@@ -309,51 +311,30 @@ def test_step_applies_wrapper(config: StepSelector):
     assert owners == {id(m) for m in step.modules}
 
 
+@pytest.mark.parametrize("training", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
 @pytest.mark.parallel
-def test_step_modules_compile_under_distributed_wrapper(config: StepSelector):
-    """Each module of a step compiles on top of its distributed wrapper,
-    instead of silently running eagerly.
-
-    DistributedDataParallel runs the wrapped module in a frame dynamo starts
-    afresh, and dynamo skips that frame, so runs it eagerly, when its forward
-    is defined in torch itself (e.g. a bare ``nn.Sequential``).
-    """
+def test_step_modules_have_no_graph_breaks(config: StepSelector, training: bool):
+    """Under every spatial decomposition, each module a step compiles traces
+    into a single graph, including the distributed SHT and DISCO code paths
+    and the data parallel wrapper that a single rank never runs."""
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
+    # the uncompiled module is exactly what Module.compile hands torch.compile
     with compile_enabled(False):
         step = get_step(config, img_shape)
     dist = Distributed.get_instance()
-    input_data = dist.scatter_spatial(
-        get_tensor_dict(step.input_names, img_shape, 2), img_shape
-    )
-    next_step_input_data = dist.scatter_spatial(
-        get_tensor_dict(step.next_step_input_names, img_shape, 2), img_shape
-    )
-    calls: dict[int, tuple[tuple[Any, ...], dict[str, Any]]] = {}
-
-    def wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
-        def record(*args: Any, **kwargs: Any) -> Any:
-            calls.setdefault(id(module), (args, kwargs))
-            return module(*args, **kwargs)
-
-        return record
-
-    step.step(
-        args=StepArgs(
-            input=input_data, next_step_input_data=next_step_input_data, labels=None
+    args = StepArgs(
+        input=dist.scatter_spatial(
+            get_tensor_dict(step.input_names, img_shape, n_samples=2), img_shape
         ),
-        wrapper=wrapper,
+        next_step_input_data=dist.scatter_spatial(
+            get_tensor_dict(step.next_step_input_names, img_shape, n_samples=2),
+            img_shape,
+        ),
+        labels=None,
     )
-    for module in step.modules:
-        args, kwargs = calls[id(module)]
-        torch._dynamo.reset()
-        counter = CompileCounter()
-        compile_module(module, backend=counter)(*args, **kwargs)
-        assert counter.frame_count > 0, (
-            f"{type(module.module).__name__} ran eagerly under "
-            f"{type(module).__name__}"
-        )
+    assert_step_modules_have_no_graph_breaks(step, args, training)
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
