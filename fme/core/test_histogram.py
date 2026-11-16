@@ -133,6 +133,11 @@ def test_dynamic_histogram_wrong_number_of_series():
         histogram.add([torch.as_tensor([1.0])])
 
 
+def test_dynamic_histogram_odd_n_bins():
+    with pytest.raises(ValueError, match="even"):
+        DynamicHistogram(n_series=1, n_bins=201)
+
+
 def test_histogram_handles_uniform_field():
     histogram = DynamicHistogram(n_series=1, n_bins=200)
     histogram.add([torch.as_tensor([1.0, 1.0, 1.0])])  # has zero range

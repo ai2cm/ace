@@ -109,13 +109,17 @@ class DynamicHistogram:
         """
         Args:
             n_series: Number of series of values to keep histograms of.
-            n_bins: Number of bins to use for the histogram. The "effective"
-                number of bins may be as small as 1/4th this number of bins,
-                as there may be bins greater than the max or less than the
-                min value with no samples in them, due to the dynamic resizing
-                of bins. For any one series it may be smaller still, as the
-                bins span the range of the values of all series.
+            n_bins: Number of bins to use for the histogram, must be even.
+                The "effective" number of bins may be as small as 1/4th this
+                number of bins, as there may be bins greater than the max or
+                less than the min value with no samples in them, due to the
+                dynamic resizing of bins. For any one series it may be smaller
+                still, as the bins span the range of the values of all series.
         """
+        if n_bins % 2 != 0:
+            raise ValueError(
+                f"n_bins must be even so that bins can be doubled in size, got {n_bins}"
+            )
         self._n_series = n_series
         self._n_bins = n_bins
         self.bin_edges: np.ndarray | None = None
