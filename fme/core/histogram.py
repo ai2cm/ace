@@ -95,10 +95,13 @@ def histogram(
     # represented in the dtype of arr, scaling by a power of two avoids
     # overflow without changing the result
     scale = _OVERFLOW_SCALE
-    i_bin = (arr * scale - vmin * scale) / (bin_size * scale)
-    i_bin = i_bin.clamp(0, n_bins - 1).long()
+    # in-place operations on the new tensor avoid further allocations
+    i_bin = arr * scale
+    i_bin -= vmin * scale
+    i_bin /= bin_size * scale
+    i_bin.clamp_(0, n_bins - 1)
     # use bincount for speed
-    return torch.bincount(i_bin, minlength=n_bins)
+    return torch.bincount(i_bin.int(), minlength=n_bins)
 
 
 def _finite_values(value: torch.Tensor) -> tuple[torch.Tensor, float, float] | None:
