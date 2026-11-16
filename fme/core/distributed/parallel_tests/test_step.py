@@ -20,10 +20,12 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
+from torch._dynamo.testing import CompileCounter
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
+from fme.core.compile import compile_enabled, compile_module
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
@@ -305,6 +307,53 @@ def test_step_applies_wrapper(config: StepSelector):
     assert len(received) == len(step.modules)
     owners = {id(getattr(m, "_orig_mod", m)) for m in received}
     assert owners == {id(m) for m in step.modules}
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+@pytest.mark.parallel
+def test_step_modules_compile_under_distributed_wrapper(config: StepSelector):
+    """Each module of a step compiles on top of its distributed wrapper,
+    instead of silently running eagerly.
+
+    DistributedDataParallel runs the wrapped module in a frame dynamo starts
+    afresh, and dynamo skips that frame, so runs it eagerly, when its forward
+    is defined in torch itself (e.g. a bare ``nn.Sequential``).
+    """
+    torch.manual_seed(0)
+    img_shape = DEFAULT_IMG_SHAPE
+    with compile_enabled(False):
+        step = get_step(config, img_shape)
+    dist = Distributed.get_instance()
+    input_data = dist.scatter_spatial(
+        get_tensor_dict(step.input_names, img_shape, 2), img_shape
+    )
+    next_step_input_data = dist.scatter_spatial(
+        get_tensor_dict(step.next_step_input_names, img_shape, 2), img_shape
+    )
+    calls: dict[int, tuple[tuple[Any, ...], dict[str, Any]]] = {}
+
+    def wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
+        def record(*args: Any, **kwargs: Any) -> Any:
+            calls.setdefault(id(module), (args, kwargs))
+            return module(*args, **kwargs)
+
+        return record
+
+    step.step(
+        args=StepArgs(
+            input=input_data, next_step_input_data=next_step_input_data, labels=None
+        ),
+        wrapper=wrapper,
+    )
+    for module in step.modules:
+        args, kwargs = calls[id(module)]
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        compile_module(module, backend=counter)(*args, **kwargs)
+        assert counter.frame_count > 0, (
+            f"{type(module.module).__name__} ran eagerly under "
+            f"{type(module).__name__}"
+        )
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
