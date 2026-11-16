@@ -6,7 +6,11 @@ import torch_harmonics.distributed as thd
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
-from fme.core.sht import DistributedInverseRealSHT, DistributedRealSHT
+from fme.core.sht import (
+    DistributedDiscreteContinuousConvS2,
+    DistributedInverseRealSHT,
+    DistributedRealSHT,
+)
 
 NLAT, NLON = 8, 16
 BATCH_CHANNEL_SHAPE = (2, 3)
@@ -167,3 +171,80 @@ def test_transform_compiles_without_graph_break(lmax, mmax, inverse):
     finally:
         torch._dynamo.reset()
     assert explanation.graph_break_count == 0, explanation.break_reasons
+
+
+# (in_shape, out_shape): same grid, an odd latitude count that splits unevenly
+# across polar ranks, and a 2x downsampling as SFNO's DISCO encoders use.
+DISCO_SHAPES = pytest.mark.parametrize(
+    "in_shape, out_shape",
+    [
+        pytest.param((NLAT, NLON), (NLAT, NLON), id="same_grid"),
+        pytest.param((9, 18), (9, 18), id="odd_latitudes"),
+        pytest.param((NLAT, NLON), (NLAT // 2, NLON // 2), id="downsample"),
+    ],
+)
+
+
+def _disco_conv_forward_backward(
+    conv: torch.nn.Module, x: torch.Tensor
+) -> tuple[torch.Tensor, ...]:
+    """The output of ``conv`` on ``x`` and the gradients of a squared-sum loss
+    with respect to the input, weight and bias."""
+    x = x.clone().requires_grad_(True)
+    conv.zero_grad()
+    out = conv(x)
+    out.square().sum().backward()
+    assert x.grad is not None
+    return out.detach(), x.grad, conv.weight.grad.clone(), conv.bias.grad.clone()
+
+
+@pytest.mark.parallel
+@DISCO_SHAPES
+def test_disco_conv_matches_upstream(in_shape, out_shape):
+    """The distributed DISCO convolution matches the upstream torch-harmonics
+    class in forward and backward, given the same weights."""
+    torch.manual_seed(0)
+    kwargs = dict(in_shape=in_shape, out_shape=out_shape, kernel_shape=(3,))
+    conv = DistributedDiscreteContinuousConvS2(3, 2, **kwargs).to(get_device())
+    upstream = thd.DistributedDiscreteContinuousConvS2(3, 2, **kwargs).to(get_device())
+    upstream.load_state_dict(conv.state_dict())
+    torch.nn.init.normal_(conv.bias)
+    upstream.bias.data.copy_(conv.bias.data)
+    x = _random_local_input(in_shape, torch.float32)()
+    # the weight and bias gradients are local: upstream only reduces them
+    # across ranks through the data-parallel wrapper
+    for actual, expected in zip(
+        _disco_conv_forward_backward(conv, x),
+        _disco_conv_forward_backward(upstream, x),
+    ):
+        torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parallel
+@DISCO_SHAPES
+def test_disco_conv_compiles_without_graph_break(in_shape, out_shape):
+    """The DISCO convolution from ``Distributed.get_disco_conv_s2`` traces to a
+    single graph. Upstream's distributed class contracts with a sparse tensor,
+    which dynamo cannot wrap, breaking the graph."""
+    dist = Distributed.get_instance()
+    torch.manual_seed(0)
+    conv = dist.get_disco_conv_s2(
+        3, 2, in_shape=in_shape, out_shape=out_shape, kernel_shape=(3,)
+    ).to(get_device())
+    x = _random_local_input(in_shape, torch.float32)()
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(conv)(x)
+    finally:
+        torch._dynamo.reset()
+    if (
+        explanation.graph_break_count > 0
+        and thd.azimuth_group_size() > 1
+        and torch.distributed.get_backend() == "gloo"
+    ):
+        pytest.xfail(
+            "the azimuth transpose calls the gloo all_to_all fallback in "
+            "fme.core.distributed._gloo_patch, which dynamo cannot trace"
+        )
+    assert explanation.graph_break_count == 0, explanation.break_reasons
+    assert explanation.graph_count == 1
