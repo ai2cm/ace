@@ -57,6 +57,7 @@ def _make_stepper_training_mock():
     stepper_training.component_n_steps_max = CoupledOptionalInt(
         ocean=None, atmosphere=None
     )
+    stepper_training.uncoupled_atmosphere = None
     return stepper_training
 
 
@@ -800,4 +801,30 @@ def test_train_config_rejects_wrong_optimization_components(tmp_path):
     with pytest.raises(ValueError, match="missing"):
         _make_train_config_with_optimization(
             tmp_path, {"atmosphere": OptimizationConfig()}
+        )
+
+
+@pytest.mark.parametrize(
+    "loader_set, stepper_set",
+    [(True, False), (False, True)],
+    ids=["loader_only", "stepper_training_only"],
+)
+def test_train_config_uncoupled_atmosphere_loader_and_stepper_set_together(
+    tmp_path, loader_set: bool, stepper_set: bool
+):
+    stepper_training = _make_stepper_training_mock()
+    if stepper_set:
+        stepper_training.uncoupled_atmosphere = MagicMock()
+    with pytest.raises(ValueError, match="must be set together"):
+        TrainConfig(
+            train_loader=MagicMock(),
+            validation=_make_validation_config(),
+            stepper=_make_stepper_mock(),
+            stepper_training=stepper_training,
+            optimization=MagicMock(has_lr_schedule=False),
+            logging=MagicMock(),
+            max_epochs=1,
+            save_checkpoint=False,
+            experiment_dir=str(tmp_path),
+            train_loader_uncoupled_atmosphere=MagicMock() if loader_set else None,
         )
