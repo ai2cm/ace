@@ -179,3 +179,7 @@ run_training "pretrain-fieldsfno-v1-e384-l32-h128-4deg-rs1.yaml" "fieldsfno-v1-e
 run_training "pretrain-fieldsfno-v1-e384-l32-h128-4deg-rs2.yaml" "fieldsfno-v1-embed384-l32-h128-4deg-pretrain-rs2" 1
 run_training "pretrain-fieldsfno-v1-l32-h128-4deg-rs1.yaml" "fieldsfno-v1-l32-h128-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-v1-l32-h256-4deg-rs1.yaml" "fieldsfno-v1-l32-h256-4deg-pretrain-rs1" 1
+# v1 l16 hidden-stream arms, 240 epochs, 4deg at 1 GPU, PRIORITY=high.
+run_training "pretrain-fieldsfno-v1-l16-h256-4deg-rs1.yaml" "fieldsfno-v1-l16-h256-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-v1-e384-l16-h128-4deg-rs1.yaml" "fieldsfno-v1-embed384-l16-h128-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-v1-l16-h128-4deg-rs1.yaml" "fieldsfno-v1-l16-h128-4deg-pretrain-rs1" 1
