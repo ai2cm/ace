@@ -263,7 +263,7 @@ The last `EXPERIMENTS_COLUMNS` column sets how many GPUs `evaluate.sh` and
 - `n_initial_conditions` must be divisible by `N`; fme raises at job start,
   not at `validate_config`.
 - `inference.sh` exits for `N` > 1 when it would run `fme.coupled.inference`,
-  which does not shard initial conditions across GPUs (ai2cm/ace#632).
+  which does not shard initial conditions across GPUs (ai2cm/ace#1635).
   Coupled `evaluate.sh` rows are allowed.
 - A blank `shared_mem` scales with `N` (`default_shared_mem`).
 
