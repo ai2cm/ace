@@ -173,3 +173,17 @@ def test_test_session_compiles_with_fullgraph():
     compiled = compile_module(_BreaksGraph(), backend="eager")
     with pytest.raises(torch._dynamo.exc.Unsupported):
         compiled(torch.zeros(2))
+
+
+@pytest.mark.allow_graph_breaks(reason="the module graph-breaks on purpose")
+def test_allow_graph_breaks_marker_compiles_without_fullgraph():
+    """A test marked with a known graph break still compiles its modules,
+    without failing on the break."""
+
+    class _BreaksGraph(torch.nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            torch._dynamo.graph_break()
+            return x + 1
+
+    compiled = compile_module(_BreaksGraph(), backend="eager")
+    torch.testing.assert_close(compiled(torch.zeros(2)), torch.ones(2))

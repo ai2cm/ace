@@ -1,5 +1,6 @@
 """Helpers for tests that exercise ``torch.compile``."""
 
+import contextlib
 import os
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -71,8 +72,18 @@ def session_compile_fullgraph() -> Iterator[None]:
         yield
 
 
+ALLOW_SEEDED_NOISE_GRAPH_BREAKS = pytest.mark.allow_graph_breaks(
+    reason=(
+        "seeded noise is drawn from a torch.Generator (fme.core.rand), which "
+        "dynamo cannot pass into a graph"
+    )
+)
+"""Marks a test whose compiled modules draw noise under
+:func:`fme.core.rand.use_generator`, which graph-breaks at every draw."""
+
+
 @pytest.fixture(autouse=True)
-def dynamo_hygiene() -> Iterator[None]:
+def dynamo_hygiene(request: pytest.FixtureRequest) -> Iterator[None]:
     """Isolate each test's dynamo state from the rest of the suite.
 
     Applied to every test via ``pytest_plugins`` in the root ``conftest.py``.
@@ -84,10 +95,21 @@ def dynamo_hygiene() -> Iterator[None]:
     Within a test, hitting the recompile limit raises instead of falling back
     to eager, so tests cannot pass without running the compiled code they
     claim to exercise.
+
+    A test marked ``allow_graph_breaks(reason)`` compiles without
+    ``fullgraph``, for compiled modules with a known graph break.
     """
+    marker = request.node.get_closest_marker("allow_graph_breaks")
+    if marker is not None and not marker.kwargs.get("reason"):
+        raise ValueError("allow_graph_breaks requires a reason")
     torch._dynamo.reset()
     try:
-        with torch._dynamo.config.patch(fail_on_recompile_limit_hit=True):
+        with (
+            torch._dynamo.config.patch(fail_on_recompile_limit_hit=True),
+            compile_fullgraph(False)
+            if marker is not None
+            else contextlib.nullcontext(),
+        ):
             yield
     finally:
         torch._dynamo.reset()

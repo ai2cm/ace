@@ -71,6 +71,11 @@ def pytest_configure(config):
         "with --fast; --very-fast always uses 3 s), for slow tests that cannot "
         "be made faster (e.g. inductor compilation)",
     )
+    config.addinivalue_line(
+        "markers",
+        "allow_graph_breaks(reason): compile without fullgraph=True in a test "
+        "whose compiled modules have a known graph break, given as the reason",
+    )
 
 
 def pytest_collection_modifyitems(config, items):

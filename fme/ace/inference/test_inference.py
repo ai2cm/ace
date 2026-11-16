@@ -46,7 +46,7 @@ from fme.core.normalizer import NetworkAndLossNormalizationConfig, Normalization
 from fme.core.ocean import OceanConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
-from fme.core.testing import mock_wandb
+from fme.core.testing import ALLOW_SEEDED_NOISE_GRAPH_BREAKS, mock_wandb
 from fme.core.testing.ema import assert_parameters_equal
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -272,6 +272,7 @@ def _run_seeded_inference(
     return ds["prog"].values
 
 
+@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 @pytest.mark.slow
 def test_inference_entrypoint_seed_reproducible(tmp_path: pathlib.Path):
     """A seeded NoiseConditionedSFNO inference run is reproducible end-to-end,

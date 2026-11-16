@@ -45,6 +45,7 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
+    ALLOW_SEEDED_NOISE_GRAPH_BREAKS,
     assert_step_modules_have_no_graph_breaks,
     get_dataset_info,
     skip_unless_cuda,
@@ -2704,6 +2705,7 @@ def _relative_error(
     return (actual - expected).norm().item() / scale
 
 
+@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 @pytest.mark.slow
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)

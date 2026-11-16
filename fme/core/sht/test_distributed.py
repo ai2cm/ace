@@ -217,7 +217,9 @@ def test_disco_conv_matches_upstream(in_shape, out_shape):
         _disco_conv_forward_backward(conv, x),
         _disco_conv_forward_backward(upstream, x),
     ):
-        torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+        # the squared-sum loss accumulates float32 rounding in a different
+        # summation order than upstream's sparse contraction
+        torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
 
 
 @pytest.mark.parallel
