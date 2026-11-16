@@ -122,19 +122,17 @@ Initial conditions are automatically sharded across data-parallel ranks:
 
 .. code-block:: bash
 
-    torchrun --nproc_per_node 4 -m fme.ace.inference config-inference.yaml
+    torchrun --nproc_per_node $N_GPU -m fme.ace.inference config-inference.yaml
 
 The same works for the evaluator:
 
 .. code-block:: bash
 
-    torchrun --nproc_per_node 4 -m fme.ace.evaluator config-evaluator.yaml
+    torchrun --nproc_per_node $N_GPU -m fme.ace.evaluator config-evaluator.yaml
 
 No configuration changes are needed, but the number of initial conditions must be
 divisible by the number of GPUs.
 
-NetCDF output files (predictions, monthly means, step diagnostics, and custom
-netCDF file writers) are automatically gathered to a single rank before writing,
-so they produce the same output regardless of GPU count. Zarr output files are
-written in parallel, with each rank writing to its own region of the shared
-store.
+Output files are identical regardless of GPU count. NetCDF writers automatically
+gather data to a single rank before writing, while zarr writers write in parallel
+with each rank writing to its own region of the shared store.
