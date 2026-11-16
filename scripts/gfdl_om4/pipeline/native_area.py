@@ -409,7 +409,7 @@ def level_thickness(deptho: xr.DataArray, interfaces: np.ndarray) -> xr.DataArra
 class NativeAreaStatics:
     stored: (
         xr.Dataset
-    )  # areacello, sftof, sea_surface_fraction, mask_<k>[, h_prime_<k>]
+    )  # areacello, sftof, sea_surface_fraction, mask_<k>[, ocean_volume_per_area_<k>]
     ocean_area: xr.DataArray  # W'_J0 (m²), 0 on land and Z
     ocean_volume: xr.DataArray | None = (
         None  # V'_Jk (m³), (z_l, *target dims), 0 off mask
@@ -445,7 +445,9 @@ def native_area_statics(
     ocean_volume = ocean_volume.transpose(LEVEL_DIM, ...)
     sftof = _regrid(regridder, sftof_native.where(m0).fillna(0.0)).fillna(0.0)
     mask = ocean_volume > 0
-    h_prime = xr.where(mask, ocean_volume / ocean_area.where(ocean_area > 0), 0.0)
+    ocean_volume_per_area = xr.where(
+        mask, ocean_volume / ocean_area.where(ocean_area > 0), 0.0
+    )
 
     stored = xr.Dataset(
         {
@@ -457,7 +459,9 @@ def native_area_statics(
     for k in range(wetmask.sizes[LEVEL_DIM]):
         level = {LEVEL_DIM: k}
         stored[f"mask_{k}"] = mask.isel(level, drop=True).astype(np.float64)
-        stored[f"h_prime_{k}"] = h_prime.isel(level, drop=True)
+        stored[f"ocean_volume_per_area_{k}"] = ocean_volume_per_area.isel(
+            level, drop=True
+        )
     return NativeAreaStatics(stored, ocean_area, ocean_volume)
 
 

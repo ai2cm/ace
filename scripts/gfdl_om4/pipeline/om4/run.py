@@ -49,7 +49,7 @@ Masking conventions of the output store:
   ``ice_area_weight`` gets the same full-cell regrid when the stream sets
   ``ice_area_weight_output``, written under that name only.
 - Masks, ``idepth_*``, ``areacello``, ``sftof``, ``sea_surface_fraction``
-  and ``h_prime_*`` are exempt from land-NaN by explicit list (see
+  and ``ocean_volume_per_area_*`` are exempt from land-NaN by explicit list (see
   land_nan_exempt_names); they are 0 on land, ``idepth_*`` aside.
 """
 
@@ -152,7 +152,7 @@ def land_nan_exempt_names(level_count: int) -> list[str]:
         + ["mask_2d"]
         + [f"idepth_{k}" for k in range(level_count + 1)]
         + ["areacello", "sftof", "sea_surface_fraction"]
-        + [f"h_prime_{k}" for k in range(level_count)]
+        + [f"ocean_volume_per_area_{k}" for k in range(level_count)]
     )
 
 
@@ -716,8 +716,8 @@ def load_native_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dat
 def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     """Eagerly build all static output fields on the target grid.
 
-    Areas, fractions, masks and ``h_prime_<k>`` come from the artifact's ŵ and
-    A_J and the native ``areacello``, ``sftof``, ``deptho``
+    Areas, fractions, masks and ``ocean_volume_per_area_<k>`` come from the
+    artifact's ŵ and A_J and the native ``areacello``, ``sftof``, ``deptho``
     (native_area.native_area_statics). Built and checked in float64, cast
     to ``OUTPUT_DTYPE`` last."""
     if OCEAN_FRACTION_THRESHOLD != 0:
@@ -804,7 +804,9 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         **provenance_attrs(config.weights_url, "areacello", areacello_derivation),
     )
     for k in range(level_count):
-        statics[f"h_prime_{k}"] = area_fields[f"h_prime_{k}"].assign_attrs(
+        statics[f"ocean_volume_per_area_{k}"] = area_fields[
+            f"ocean_volume_per_area_{k}"
+        ].assign_attrs(
             long_name=f"ocean volume per ocean area, level-{k}",
             units="m",
             **provenance_attrs(

@@ -92,8 +92,8 @@ def test_build_statics_toy_table3(tmp_path, monkeypatch):
         "mask_0": [1, 1, 0],
         "mask_1": [1, 1, 0],
         "mask_2d": [1, 1, 0],
-        "h_prime_0": [1, 1, 0],
-        "h_prime_1": [F(5, 3), 1, 0],
+        "ocean_volume_per_area_0": [1, 1, 0],
+        "ocean_volume_per_area_1": [F(5, 3), 1, 0],
     }
     for name, values in tabled.items():
         _assert_stored(statics[name], values, name)
@@ -114,10 +114,29 @@ def test_build_statics_raises_on_native_assert(tmp_path, monkeypatch):
 
 def test_land_nan_exempt_includes_new_statics():
     exempt = set(land_nan_exempt_names(2))
-    assert {"areacello", "sftof", "sea_surface_fraction", "h_prime_0", "h_prime_1"} <= (
-        exempt
-    )
+    assert {
+        "areacello",
+        "sftof",
+        "sea_surface_fraction",
+        "ocean_volume_per_area_0",
+        "ocean_volume_per_area_1",
+    } <= (exempt)
     assert "deptho" not in exempt
+
+
+def test_build_statics_writes_ocean_volume_per_area_not_old_name(tmp_path, monkeypatch):
+    statics = build_statics(_toy_config(tmp_path, monkeypatch), _toy_wetmask())
+    names = set(statics.data_vars)
+    assert {"ocean_volume_per_area_0", "ocean_volume_per_area_1"} <= names
+    assert not any(name.startswith("h_" + "prime") for name in names)
+
+
+def test_statics_zero_on_land_are_land_nan_exempt(tmp_path, monkeypatch):
+    statics = build_statics(_toy_config(tmp_path, monkeypatch), _toy_wetmask())
+    level_count = 2
+    assert set(statics.data_vars) - {"deptho"} <= set(
+        land_nan_exempt_names(level_count)
+    )
 
 
 def _toy_chunk(
