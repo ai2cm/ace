@@ -3,7 +3,6 @@ import functools
 from collections.abc import Mapping
 from typing import Any, Literal, get_args
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -246,7 +245,6 @@ class Samudra(torch.nn.Module):
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:
-            crop = fts.shape[2:]
             if isinstance(layer, nn.Conv2d):
                 fts = pad_latitude(fts, self.N_pad, self.N_pad, self.lat_pad)
                 fts = torch.nn.functional.pad(
@@ -269,19 +267,19 @@ class Samudra(torch.nn.Module):
                     temp.append(fts)
                     count += 1
             elif count >= self.num_steps:
-                if isinstance(
-                    layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
+                # tuple rather than ``A | B``: dynamo cannot trace a class union here
+                if isinstance(  # noqa: UP038
+                    layer, (BilinearUpsample, ZonallyPeriodicBilinearUpsample)
                 ):
-                    crop = np.array(fts.shape[2:])
-                    shape = np.array(
-                        temp[int(2 * self.num_steps - count - 1)].shape[2:]
-                    )
-                    pads = shape - crop
-                    pads_lr = (pads[1] // 2, pads[1] - pads[1] // 2, 0, 0)
+                    # int arithmetic rather than numpy so dynamo does not graph-break
+                    skip = temp[int(2 * self.num_steps - count - 1)]
+                    pad_h = skip.shape[2] - fts.shape[2]
+                    pad_w = skip.shape[3] - fts.shape[3]
+                    pads_lr = (pad_w // 2, pad_w - pad_w // 2, 0, 0)
                     fts = pad_latitude(
-                        fts, pads[0] // 2, pads[0] - pads[0] // 2, self.lat_pad
+                        fts, pad_h // 2, pad_h - pad_h // 2, self.lat_pad
                     )
                     fts = nn.functional.pad(fts, pads_lr, mode=self.pad)
-                    fts += temp[int(2 * self.num_steps - count - 1)]
+                    fts += skip
                     count += 1
         return fts
