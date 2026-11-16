@@ -27,8 +27,8 @@ gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km precipitation generation on 1deg ERA5' \
     --workspace ai2/ace \
-    --priority low \
-    --min-runtime 0 \
+    --priority normal \
+    --min-runtime 8h \
     --cluster ai2/jupiter \
     --beaker-image $DEPS_ONLY_IMAGE \
     --env WANDB_USERNAME=$WANDB_USERNAME \
