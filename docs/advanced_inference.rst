@@ -113,3 +113,29 @@ out from training.
 By adjusting the :class:`~fme.ace.DataWriterConfig` section of the inference config,
 this strategy can be used to customize the frequency or other aspects of the output
 saved from each run segment.
+
+Multi-GPU inference
+===================
+
+Inference and evaluation can be run across multiple GPUs using ``torchrun``.
+Initial conditions are automatically sharded across data-parallel ranks, with
+each GPU processing a contiguous block of samples:
+
+.. code-block:: bash
+
+    torchrun --nproc_per_node 4 -m fme.ace.inference config-inference.yaml
+
+The same works for the evaluator:
+
+.. code-block:: bash
+
+    torchrun --nproc_per_node 4 -m fme.ace.evaluator config-evaluator.yaml
+
+No configuration changes are needed. The number of initial conditions must be
+divisible by the number of GPUs.
+
+NetCDF output files (predictions, monthly means, step diagnostics, and custom
+netCDF file writers) are automatically gathered to a single rank before writing,
+so they produce the same output regardless of GPU count. Zarr output files are
+written in parallel, with each rank writing to its own region of the shared
+store.
