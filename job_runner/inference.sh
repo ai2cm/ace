@@ -125,7 +125,7 @@ while read TRAIN_EXPER; do
     if [[ "$FME_MODULE_INFERENCE" == fme.coupled.inference ]] && (( N_GPUS > 1 )); then
         echo >&2
         echo "Error: n_gpus is ${N_GPUS} for JOB_NAME: ${JOB_NAME}, but fme.coupled.inference does not" >&2
-        echo "shard initial conditions across GPUs (multi-GPU inference: ai2cm/ace#632). Set n_gpus to 1." >&2
+        echo "shard initial conditions across GPUs (ai2cm/ace#1635). Set n_gpus to 1." >&2
         echo "This job and any remaining jobs in the input file were not submitted." >&2
         exit 1
     fi
