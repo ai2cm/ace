@@ -19,6 +19,12 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] Training scripts create `experiments.txt` with its header if missing
 - [FEAT] `{evaluate,inference}.sh --dry-run` validates each unique config and
   override set once, skipping repeats
+- [FEAT] `pretraining.txt` columns `results_dataset_ocean` and
+  `results_dataset_atmos` override the wandb-resolved results datasets in
+  `coupled_train.sh`
+- [FEAT] `experiments.txt` column `n_gpus` (last; blank = 1) runs
+  `{evaluate,inference}.sh` jobs on that many GPUs, with `torchrun` when > 1;
+  `inference.sh` rejects > 1 for `fme.coupled.inference`
 
 ### Changed
 
@@ -26,6 +32,9 @@ https://github.com/ai2cm/full-model/compare/job_runner
   launcher; training paths previously defaulted to `0`, which is backfill-only
 - Input-file columns are defined once per file in `lib.sh` (`*_COLUMNS`);
   `parse_row` reads rows and `input_header` writes headers from them
+- Training jobs write one NCCL debug log per host and process
+  (`/results/nccl_debug.%h.%p.log`); `NCCL_DEBUG` and `NCCL_DEBUG_FILE` can be
+  overridden from the launching environment
 - Remove `set_default_stats()`
 - Allow `--atmos_stats` and `--ocean_stats` to be used separately.
 - CLUSTER can be now be set for eval jobs
@@ -35,6 +44,12 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 ### Fixed
 
+- [ISSUE] `{evaluate,inference}.sh` chose `fme.coupled.*` for any `<experiment_dir>`
+  containing `coupled`, including `.../uncoupled`; now only when a path component
+  starts with `coupled`.
+- [ISSUE] `resume.sh` chose `fme.coupled.train` for any `<experiment_dir>`
+  containing `coupled`; now the same path-component rule as `{evaluate,inference}.sh`.
+- [ISSUE] `inference.sh --dry-run` printed an empty `FME Module`.
 - [ISSUE] `init_exper.sh` populates wrong dataset for `<COUPLED_ATMOS_ZARR>` in uncoupled atmosphere config.
 - [ISSUE] `init_exper.sh` populates top-level `n_forward_steps` with inference value
 - [ISSUE] Use `ocean` as sub-directory of `--coupled_stats`.

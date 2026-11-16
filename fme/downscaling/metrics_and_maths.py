@@ -252,12 +252,35 @@ def compute_zonal_power_spectrum(tensor: torch.Tensor) -> torch.Tensor:
     return power.mean(dim=-2)
 
 
-def interpolate(tensor: torch.Tensor, scale_factor: int) -> torch.Tensor:
+ALIGN_CORNERS_MODES = ("bilinear", "bicubic")
+
+
+def interpolate(
+    tensor: torch.Tensor,
+    scale_factor: int,
+    mode: str,
+    align_corners: bool,
+) -> torch.Tensor:
+    """
+    Interpolate the last two (spatial) dimensions of a 4D tensor.
+
+    Args:
+        tensor: Tensor with dimensions [batch, channel, lat, lon].
+        scale_factor: Factor by which to upsample each spatial dimension.
+        mode: Interpolation mode passed to torch.nn.functional.interpolate.
+        align_corners: Passed to torch.nn.functional.interpolate for modes
+            that support it (bilinear, bicubic); must be False otherwise.
+    """
+    if mode not in ALIGN_CORNERS_MODES and align_corners:
+        raise ValueError(
+            f"align_corners=True is only supported for modes {ALIGN_CORNERS_MODES}, "
+            f"got mode={mode!r}."
+        )
     return torch.nn.functional.interpolate(
         tensor,
         scale_factor=[scale_factor, scale_factor],
-        mode="bicubic",
-        align_corners=True,
+        mode=mode,
+        align_corners=align_corners if mode in ALIGN_CORNERS_MODES else None,
     )
 
 

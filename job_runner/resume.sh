@@ -39,7 +39,7 @@ validate_stats_args
 init_script_environment
 
 # Determine FME module based on experiment directory
-if [[ "$EXPERIMENT_DIR" =~ coupled ]]; then
+if is_coupled_experiment_dir "$EXPERIMENT_DIR"; then
     FME_MODULE="fme.coupled.train"
 else
     FME_MODULE="fme.ace.train"

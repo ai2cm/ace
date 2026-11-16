@@ -128,7 +128,8 @@ can evaluate against one maintained set of `evaluator-config-*.yaml` /
   `<experiment_dir>/<config_subdirectory>/`. The shared directory supplies
   configs, not the job list.
 - Module selection (`fme.coupled.*` vs `fme.ace.*`) stays keyed off
-  `<experiment_dir>`.
+  `<experiment_dir>`: `fme.coupled.*` when one of its path components starts
+  with `coupled` (`coupled`, `coupled_ft`), so `uncoupled/ocean` gets `fme.ace.*`.
 - An absolute path is taken as given; a relative path is resolved against the
   repository root, matching how `<experiment_dir>` is already interpreted.
 - The resolved path must lie inside the repository root — `gantry` uploads the
@@ -247,6 +248,25 @@ is protected from preemption before it can be interrupted.
   `--no-auto-resume` is never emitted on the training path.
 - **Example values**: `1h` to protect a checkpoint cycle, `8h` for a fully
   protected run. `0` is backfill-only.
+
+### `n_gpus` Field (Optional, `experiments.txt`)
+
+The last `EXPERIMENTS_COLUMNS` column sets how many GPUs `evaluate.sh` and
+`inference.sh` request (`gantry run --gpus`) and how the fme module starts.
+
+| `n_gpus` | launch |
+| --- | --- |
+| blank (or column absent) | as `1` |
+| `1` | `python -I -m <module>` |
+| `N` > 1 | `torchrun --nproc_per_node N -m <module>`, one node |
+| anything else | the script exits before submitting |
+
+- `n_initial_conditions` must be divisible by `N`; fme raises at job start,
+  not at `validate_config`.
+- `inference.sh` exits for `N` > 1 when it would run `fme.coupled.inference`,
+  which does not shard initial conditions across GPUs (ai2cm/ace#1635).
+  Coupled `evaluate.sh` rows are allowed.
+- A blank `shared_mem` scales with `N` (`default_shared_mem`).
 
 ### TAG Field (Optional)
 

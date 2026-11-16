@@ -5,7 +5,12 @@ import torch
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import TensorDict
 from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
-from fme.downscaling.data.patching import Patch, get_patches
+from fme.downscaling.data.patching import (
+    HorizontalSlice,
+    Patch,
+    PatchAverager,
+    get_patches,
+)
 from fme.downscaling.models import DiffusionModel, ModelOutputs
 from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
@@ -208,36 +213,13 @@ def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
     return y_max, x_max
 
 
-def _composite_patch_tensors(
-    predictions: list[torch.Tensor], patches: list[Patch]
-) -> TensorDict:
-    if len(predictions) != len(patches):
-        raise ValueError("The number of predictions must match the number of patches.")
-
-    y_size, x_size = _get_full_extent_from_patches(patches)
-    # list elements have shape (n_batch, n_generated_sample, patch_lat, patch_lon)
-    n_batch, n_gen_sample = predictions[0].shape[:2]
-    output_sum = torch.zeros(
-        n_batch, n_gen_sample, y_size, x_size, device=predictions[0].device
+def _trimmed_region(patch: Patch) -> HorizontalSlice:
+    """Region of the full domain covered by the patch's trimmed output."""
+    in_slice, out_slice = patch.input_slice, patch.output_slice
+    return HorizontalSlice(
+        y=slice(in_slice.y.start + (out_slice.y.start or 0), in_slice.y.stop),
+        x=slice(in_slice.x.start + (out_slice.x.start or 0), in_slice.x.stop),
     )
-    output_count = torch.zeros(
-        n_batch, n_gen_sample, y_size, x_size, device=predictions[0].device
-    )
-
-    for i, pred in enumerate(predictions):
-        in_slice = patches[i].input_slice
-        out_slice = patches[i].output_slice
-        # Adjust the input slice start if the output slice is trimmed
-        adjusted_in_slice_y = slice(
-            in_slice.y.start + (out_slice.y.start or 0), in_slice.y.stop
-        )
-        adjusted_in_slice_x = slice(
-            in_slice.x.start + (out_slice.x.start or 0), in_slice.x.stop
-        )
-        trimmed_pred = pred[..., out_slice.y, out_slice.x]
-        output_sum[..., adjusted_in_slice_y, adjusted_in_slice_x] += trimmed_pred
-        output_count[..., adjusted_in_slice_y, adjusted_in_slice_x] += 1
-    return output_sum / output_count
 
 
 def composite_patch_predictions(
@@ -248,9 +230,18 @@ def composite_patch_predictions(
     tensor with the full extent of the patches. The predictions are
     averaged in overlapping patch regions.
     """
-    combined_data = {}
-    predicted_vars = list(predictions[0].keys())
-    for var in predicted_vars:
-        var_predictions = [pred[var] for pred in predictions]
-        combined_data[var] = _composite_patch_tensors(var_predictions, patches)
-    return combined_data
+    if len(predictions) != len(patches):
+        raise ValueError("The number of predictions must match the number of patches.")
+    first = next(iter(predictions[0].values()))
+    average = PatchAverager(
+        [_trimmed_region(patch) for patch in patches],
+        _get_full_extent_from_patches(patches),
+        device=first.device,
+    )
+    return {
+        var: average(
+            pred[var][..., patch.output_slice.y, patch.output_slice.x]
+            for pred, patch in zip(predictions, patches)
+        )
+        for var in predictions[0]
+    }
