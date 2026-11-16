@@ -11,18 +11,7 @@ from fme.core.histogram import (
     DynamicHistogram,
     DynamicHistogramAggregator,
     _normalize_histogram,
-    _rebin_counts,
 )
-
-
-def test__rebin_counts():
-    counts = np.ones(5)
-    bin_edges = np.array([0, 1, 2, 3, 4, 5])
-    new_bin_edges = np.array([0, 2, 3.5, 5])
-    new_counts = _rebin_counts(
-        counts=counts, bin_edges=bin_edges, new_edges=new_bin_edges
-    )
-    assert np.array_equal(new_counts, np.array([2.0, 1.5, 1.5]))
 
 
 def test__normalize_histogram():

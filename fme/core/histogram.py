@@ -93,31 +93,6 @@ def histogram(
     return return_counts
 
 
-def _rebin_counts(counts, bin_edges, new_edges):
-    """
-    Rebin histogram counts into new_edges, preserves total counts.
-    """
-    if len(bin_edges) != len(counts) + 1:
-        raise ValueError("bin_edges must have length len(counts) + 1")
-    new_counts = np.zeros(len(new_edges) - 1, dtype=float)
-
-    i, j = 0, 0
-    while i < len(counts) and j < len(new_counts):
-        left = max(bin_edges[i], new_edges[j])
-        right = min(bin_edges[i + 1], new_edges[j + 1])
-
-        if right > left:
-            frac = (right - left) / (bin_edges[i + 1] - bin_edges[i])
-            new_counts[j] += counts[i] * frac
-
-        if bin_edges[i + 1] <= new_edges[j + 1]:
-            i += 1
-        else:
-            j += 1
-
-    return new_counts
-
-
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
