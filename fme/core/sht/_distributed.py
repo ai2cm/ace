@@ -2,11 +2,12 @@
 
 ``DistributedRealSHT`` and ``DistributedInverseRealSHT`` fork the upstream
 ``forward`` from torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The
-torch-harmonics Authors), adding a ``.clone()`` after ``torch.view_as_complex``.
-Without it, ``torch.compile`` (torch 2.7-2.9) raises "setStorage ... out of
-bounds" when that view is passed to a ``distributed_transpose``. Recheck
-against upstream when the torch-harmonics pin is bumped. Other names are
-unmodified re-exports.
+torch-harmonics Authors), adding a ``.clone()`` after ``torch.view_as_complex``
+whenever a ``distributed_transpose`` follows it. Without it, ``torch.compile``
+(torch 2.7-2.9) raises "setStorage ... out of bounds" when that view is passed
+to a transpose. When no transpose follows, the clone is skipped and
+``forward`` matches upstream. Recheck against upstream when the
+torch-harmonics pin is bumped. Other names are unmodified re-exports.
 """
 
 import torch
@@ -32,6 +33,14 @@ __all__ = [
     "init",
     "is_initialized",
 ]
+
+
+def _view_as_complex(xs: torch.Tensor, clone: bool) -> torch.Tensor:
+    """``torch.view_as_complex(xs)``, cloned if ``clone`` so that a following
+    ``distributed_transpose`` receives a tensor with its own storage.
+    """
+    x = torch.view_as_complex(xs)
+    return x.clone() if clone else x
 
 
 class DistributedRealSHT(thd.DistributedRealSHT):
@@ -72,8 +81,8 @@ class DistributedRealSHT(thd.DistributedRealSHT):
             "...kmr,mlk->...lmr", x, self.weights.to(x.dtype)
         ).contiguous()
 
-        # cast to complex; cloned so the transpose below never receives a view
-        x = torch.view_as_complex(xs).clone()
+        # cast to complex; cloned if the polar transpose below follows
+        x = _view_as_complex(xs, clone=self.comm_size_polar > 1)
 
         # transpose: after this, l is split and c is local
         if self.comm_size_polar > 1:
@@ -104,8 +113,10 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         # einsum
         xs = torch.einsum("...lmr, mlk->...kmr", x, self.pct.to(x.dtype)).contiguous()
 
-        # inverse FFT; cloned so the transposes below never receive a view
-        x = torch.view_as_complex(xs).clone()
+        # cast to complex; cloned if any of the transposes below follow
+        x = _view_as_complex(
+            xs, clone=self.comm_size_polar > 1 or self.comm_size_azimuth > 1
+        )
 
         if self.comm_size_polar > 1:
             chan_shapes = thd.compute_split_shapes(num_chans, self.comm_size_polar)
