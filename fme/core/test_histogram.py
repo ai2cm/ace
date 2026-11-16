@@ -28,33 +28,30 @@ def test__normalize_histogram():
     assert sum(np.diff(bin_edges) * normalized_counts) == 1.0
 
 
-@pytest.mark.parametrize(
-    "n_times, time_bin_len",
-    [
-        pytest.param(3, 3, id="one_time_bin"),
-        pytest.param(6, 2, id="multiple_time_bins"),
-    ],
-)
-def test_dynamic_histogram_random_values(n_times: int, time_bin_len: int):
+@pytest.mark.parametrize("n_series", [1, 3])
+def test_dynamic_histogram_random_values(n_series: int):
     np.random.seed(0)
     n_values = 50_000
     n_window = 100
-    # gradually increasing values in time ensure bins get expanded
+    # gradually increasing values ensure bins get expanded, with a different
+    # range for each series so that the bins must span the range of all series
     data = (
-        np.random.uniform(low=0, high=1, size=(n_times, n_values))
+        np.random.uniform(low=0, high=1, size=(n_series, n_values))
         * np.arange(1, n_values + 1)[None, :]
+        * np.arange(1, n_series + 1)[:, None]
     )
-    histogram = DynamicHistogram(n_times=n_times, n_bins=20)
+    histogram = DynamicHistogram(n_series=n_series, n_bins=20)
     start = time.time()
-    for i_time in range(0, n_times, time_bin_len):
-        for i in range(0, n_values, n_window):
-            histogram.add(
-                torch.as_tensor(data[i_time : i_time + time_bin_len, i : i + n_window]),
-                i_time_start=i_time,
-            )
+    for i in range(0, n_values, n_window):
+        histogram.add(
+            [
+                torch.as_tensor(data[i_series, i : i + n_window])
+                for i_series in range(n_series)
+            ]
+        )
     end = time.time()
     assert (end - start) < 0.8, "histogram too slow"
-    assert np.sum(histogram.counts) == n_times * n_values
+    assert np.sum(histogram.counts) == n_series * n_values
     direct_histogram = np.apply_along_axis(
         lambda arr: np.histogram(arr, bins=histogram.bin_edges)[0],
         axis=1,
@@ -79,25 +76,25 @@ def test_dynamic_histogram_random_values(n_times: int, time_bin_len: int):
 
 
 def test_dynamic_histogram_extends_as_expected():
-    histogram = DynamicHistogram(n_times=1, n_bins=200)
-    histogram.add(torch.as_tensor([[-1.0, 0.0, 1.0]]))
+    histogram = DynamicHistogram(n_series=1, n_bins=200)
+    histogram.add([torch.as_tensor([-1.0, 0.0, 1.0])])
     bin_edges = histogram.bin_edges
     assert bin_edges is not None
     np.testing.assert_approx_equal(bin_edges[0], -1.0, significant=6)
     np.testing.assert_approx_equal(bin_edges[-1], 1.0, significant=6)
-    histogram.add(torch.as_tensor([[-2.0]]))
+    histogram.add([torch.as_tensor([-2.0])])
     bin_edges = histogram.bin_edges
     assert bin_edges is not None
     # double in size to the left, length becomes 4, from -3 to 1.0
     np.testing.assert_approx_equal(bin_edges[0], -3.0, significant=6)
     np.testing.assert_approx_equal(bin_edges[-1], 1.0, significant=6)
-    histogram.add(torch.as_tensor([[2.0]]))
+    histogram.add([torch.as_tensor([2.0])])
     bin_edges = histogram.bin_edges
     assert bin_edges is not None
     # double in size to the right, length becomes 8, from -3 to 5.0
     np.testing.assert_approx_equal(bin_edges[0], -3.0, significant=6)
     np.testing.assert_approx_equal(bin_edges[-1], 5.0, significant=6)
-    histogram.add(torch.as_tensor([[27.0]]))
+    histogram.add([torch.as_tensor([27.0])])
     bin_edges = histogram.bin_edges
     assert bin_edges is not None
     # double in size twice to the right, length becomes 32, from -3 to 29.0
@@ -105,10 +102,41 @@ def test_dynamic_histogram_extends_as_expected():
     np.testing.assert_approx_equal(bin_edges[-1], 29.0, significant=6)
 
 
+def test_dynamic_histogram_initial_bins_span_all_series():
+    histogram = DynamicHistogram(n_series=2, n_bins=200)
+    histogram.add([torch.as_tensor([0.0, 1.0]), torch.as_tensor([-3.0, 5.0, 2.0])])
+    bin_edges = histogram.bin_edges
+    assert bin_edges is not None
+    # no doubling is needed to fit the second series
+    np.testing.assert_approx_equal(bin_edges[0], -3.0, significant=5)
+    np.testing.assert_approx_equal(bin_edges[-1], 5.0, significant=5)
+    np.testing.assert_array_equal(histogram.counts.sum(axis=1), [2, 3])
+
+
+def test_dynamic_histogram_extends_all_series_together():
+    histogram = DynamicHistogram(n_series=2, n_bins=200)
+    histogram.add([torch.as_tensor([-1.0, 1.0]), torch.as_tensor([-1.0, 1.0])])
+    # only the second series has a value outside of the existing bins
+    histogram.add([torch.as_tensor([0.5]), torch.as_tensor([2.0])])
+    bin_edges = histogram.bin_edges
+    assert bin_edges is not None
+    np.testing.assert_approx_equal(bin_edges[-1], 3.0, significant=5)
+    for i_series, values in enumerate([[-1.0, 1.0, 0.5], [-1.0, 1.0, 2.0]]):
+        np.testing.assert_array_equal(
+            histogram.counts[i_series], np.histogram(values, bins=bin_edges)[0]
+        )
+
+
+def test_dynamic_histogram_wrong_number_of_series():
+    histogram = DynamicHistogram(n_series=2, n_bins=200)
+    with pytest.raises(ValueError, match="2 series"):
+        histogram.add([torch.as_tensor([1.0])])
+
+
 def test_histogram_handles_uniform_field():
-    histogram = DynamicHistogram(n_times=1, n_bins=200)
-    histogram.add(torch.as_tensor([[1.0, 1.0, 1.0]]))  # has zero range
-    histogram.add(torch.as_tensor([[1.0, 2.0, 3.0]]))  # has non-zero range
+    histogram = DynamicHistogram(n_series=1, n_bins=200)
+    histogram.add([torch.as_tensor([1.0, 1.0, 1.0])])  # has zero range
+    histogram.add([torch.as_tensor([1.0, 2.0, 3.0])])  # has non-zero range
 
 
 @pytest.mark.parametrize(
