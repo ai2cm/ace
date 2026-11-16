@@ -1,0 +1,6 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# X3 vs p7czybxj: joint step pairs added, otherwise p7czybxj's recipe.
+# Row is 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
+
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||ace-samudra-coupled-cm4|no228urh|best_inference_ckpt|submitted|urgent|titan|8||3|ai2/ace|seed=0|01M711Y5KWBW0RH2B1EK38YTEY|8h
