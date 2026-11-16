@@ -22,8 +22,8 @@ gantry run \
     --name $JOB_NAME \
     --description 'Train topography-conditioned joint 3km precipitation and 10m wind prior for block-mean projected downscaling' \
     --workspace ai2/ace \
-    --priority low \
-    --min-runtime 0 \
+    --priority normal \
+    --min-runtime 8h \
     --cluster ai2/jupiter \
     --beaker-image $DEPS_ONLY_IMAGE \
     --env WANDB_USERNAME=$WANDB_USERNAME \
