@@ -340,6 +340,11 @@ class SecondaryModuleStep(StepABC):
         self.module = self.module.wrap_module(dist.wrap_module)
         self.secondary_module = self.secondary_module.wrap_module(dist.wrap_module)
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
+        # after distributed wrapping, so the wrapper is inside the compiled
+        # graph; state dict keys are unchanged
+        self.module = self.module.compile()
+        self.secondary_module = self.secondary_module.compile()
+        self.secondary_decoder = self.secondary_decoder.compile()
         self._timestep = dataset_info.timestep
 
         self._corrector = corrector

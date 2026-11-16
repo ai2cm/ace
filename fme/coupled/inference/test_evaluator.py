@@ -21,7 +21,7 @@ from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
-from fme.core.testing import mock_wandb
+from fme.core.testing import ALLOW_SEEDED_NOISE_GRAPH_BREAKS, mock_wandb
 from fme.core.testing.ema import (
     ScaledIdentity,
     assert_parameters_equal,
@@ -711,6 +711,7 @@ def _run_seeded_evaluator(
     return ds["a_prog"].values
 
 
+@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 @pytest.mark.slow
 def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
     """A seeded run is reproducible end-to-end and independent of

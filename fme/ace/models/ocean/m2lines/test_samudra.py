@@ -177,8 +177,11 @@ def test_samudra_output_is_unchanged():
 
 
 @pytest.mark.medium_duration
+@pytest.mark.parametrize("lat_pad", ["constant", "pole"])
 @pytest.mark.parametrize("zonally_periodic_upsample", [False, True])
-def test_samudra_forward_compiles_in_one_graph(zonally_periodic_upsample: bool):
+def test_samudra_forward_compiles_in_one_graph(
+    zonally_periodic_upsample: bool, lat_pad: LatPad
+):
     """Samudra's forward must trace end to end, with no graph breaks.
 
     A graph break in the decoder loop splits the network into one graph per
@@ -196,6 +199,7 @@ def test_samudra_forward_compiles_in_one_graph(zonally_periodic_upsample: bool):
         n_layers=[1, 1],
         norm="batch",
         zonally_periodic_upsample=zonally_periodic_upsample,
+        lat_pad=lat_pad,
     )
     model.eval()
     x = torch.randn(2, 2, 9, 18)
