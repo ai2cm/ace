@@ -31,6 +31,8 @@ from fme.ace.stepper.parameter_init import (
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
+    TrainStepper,
+    TrainStepperConfig,
     process_ensemble_prediction_generator_list,
 )
 from fme.ace.stepper.single_module import (
@@ -1696,33 +1698,55 @@ Objective = Literal["ocean", "atmosphere", "joint"]
 class ObjectivePerBatchConfig:
     """Per-batch objective draw weights for coupled training.
 
-    Each batch optimizes one objective, drawn with probability proportional to
-    its weight among the objectives with a loss that batch. An absent key has
-    weight 0, so that objective is never optimized.
+    Each coupled batch optimizes one objective, drawn with probability
+    proportional to its weight among the objectives with a loss that batch. An
+    absent key has weight 0, so that objective is never optimized.
 
     Parameters:
         atmosphere: Weight of the atmosphere objective (its schedule's losses).
         ocean: Weight of the ocean objective (its schedule's losses).
         joint: Weight of the joint objective (the loss of one pair drawn from
             ``joint_pairs``); > 0 requires ``joint_pairs``.
+        uncoupled_atmosphere: Weight of uncoupled atmosphere batches, drawn
+            from ``TrainConfig.train_loader_uncoupled_atmosphere`` and stepped
+            by the atmosphere alone. Unlike the other weights it sets the data
+            loader's share of these batches per epoch,
+            ``uncoupled_atmosphere / (atmosphere + ocean + joint +
+            uncoupled_atmosphere)``, not a per-batch draw; > 0 requires
+            ``stepper_training.uncoupled_atmosphere``.
     """
 
     atmosphere: float = 0.0
     ocean: float = 0.0
     joint: float = 0.0
+    uncoupled_atmosphere: float = 0.0
 
     def __post_init__(self):
-        weights = self.as_dict()
+        weights = {
+            "ocean": self.ocean,
+            "atmosphere": self.atmosphere,
+            "joint": self.joint,
+            "uncoupled_atmosphere": self.uncoupled_atmosphere,
+        }
         negative = [name for name, w in weights.items() if w < 0]
         if negative:
             raise ValueError(
                 f"objective_per_batch weights must be >= 0, got negative {negative}."
             )
-        if sum(weights.values()) <= 0:
-            raise ValueError("objective_per_batch needs at least one weight > 0.")
+        if sum(self.as_dict().values()) <= 0:
+            raise ValueError(
+                "objective_per_batch needs at least one weight > 0 among "
+                "atmosphere, ocean and joint."
+            )
 
     def as_dict(self) -> dict[Objective, float]:
+        """Weights of the objectives drawn per coupled batch."""
         return {"ocean": self.ocean, "atmosphere": self.atmosphere, "joint": self.joint}
+
+    def uncoupled_atmosphere_share(self) -> float:
+        """Share of each epoch's batches that are uncoupled atmosphere batches."""
+        coupled = sum(self.as_dict().values())
+        return self.uncoupled_atmosphere / (coupled + self.uncoupled_atmosphere)
 
 
 class CoupledStepperTrainLoss:
@@ -2011,6 +2035,15 @@ class CoupledTrainStepperConfig:
             ``objective_per_batch={atmosphere: 1, ocean: 1}``.
         parameter_init: The coupled parameter initialization configuration for
             fine-tuning a previously-trained coupled stepper.
+        uncoupled_atmosphere: Training of the atmosphere on uncoupled
+            atmosphere batches (``TrainConfig.train_loader_uncoupled_atmosphere``),
+            stepped by the atmosphere alone from the data's own surface
+            forcing, as in standalone atmosphere training; the ocean never sees
+            them. Set exactly when ``objective_per_batch.uncoupled_atmosphere``
+            > 0. ``n_steps`` is required; ``parameter_init`` must stay default
+            and ``loss_weight`` must be 1. These batches step the same
+            optimization as coupled batches; with per-component optimization
+            only the atmosphere's entry steps.
     """
 
     n_coupled_steps: int
@@ -2023,6 +2056,7 @@ class CoupledTrainStepperConfig:
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
     )
+    uncoupled_atmosphere: ComponentTrainingConfig | None = None
 
     def __post_init__(self):
         """Validate that parameter_init is not specified in conflicting ways.
@@ -2090,15 +2124,71 @@ class CoupledTrainStepperConfig:
                     "whose loss is statically null (zero loss_weight or zero "
                     "n_steps); that objective would never be drawn."
                 )
+        self._validate_uncoupled_atmosphere()
         if self.n_ensemble == -1:
-            use_ensemble_loss = "EnsembleLoss" in (
-                self.ocean.loss.type,
-                self.atmosphere.loss.type,
-            )
+            loss_types = [self.ocean.loss.type, self.atmosphere.loss.type]
+            if self.uncoupled_atmosphere is not None:
+                loss_types.append(self.uncoupled_atmosphere.loss.type)
+            use_ensemble_loss = "EnsembleLoss" in loss_types
             if use_ensemble_loss:
                 self.n_ensemble = 2
             else:
                 self.n_ensemble = 1
+
+    def _validate_uncoupled_atmosphere(self) -> None:
+        weight = (
+            0.0
+            if self.objective_per_batch is None
+            else self.objective_per_batch.uncoupled_atmosphere
+        )
+        if (weight > 0) != (self.uncoupled_atmosphere is not None):
+            raise ValueError(
+                "stepper_training.uncoupled_atmosphere must be set exactly when "
+                "objective_per_batch.uncoupled_atmosphere > 0, got weight "
+                f"{weight} and uncoupled_atmosphere "
+                f"{'set' if self.uncoupled_atmosphere is not None else 'unset'}."
+            )
+        config = self.uncoupled_atmosphere
+        if config is None:
+            return
+        if config.n_steps is None:
+            raise ValueError(
+                "stepper_training.uncoupled_atmosphere.n_steps must be set: the "
+                "uncoupled atmosphere loader needs a finite window."
+            )
+        if config.n_steps_max == 0:
+            raise ValueError(
+                "stepper_training.uncoupled_atmosphere.n_steps must be > 0."
+            )
+        if config.parameter_init != ParameterInitializationConfig():
+            raise ValueError(
+                "stepper_training.uncoupled_atmosphere.parameter_init must be "
+                "left default: these batches train the coupled atmosphere's "
+                "weights, initialized by stepper_training.atmosphere."
+            )
+        if config.loss_weight != 1.0:
+            raise ValueError(
+                "stepper_training.uncoupled_atmosphere.loss_weight must be 1; "
+                "set the share of these batches with "
+                "objective_per_batch.uncoupled_atmosphere."
+            )
+
+    def get_uncoupled_atmosphere_data_requirements(
+        self, stepper_config: CoupledStepperConfig
+    ) -> DataRequirements:
+        """Window requirements of the uncoupled atmosphere training loader:
+        the atmosphere stepper's own evaluation-window requirements, including
+        the surface forcings a coupled batch takes from the ocean.
+        """
+        if self.uncoupled_atmosphere is None:
+            raise ValueError("stepper_training.uncoupled_atmosphere is not set.")
+        n_steps_max = self.uncoupled_atmosphere.n_steps_max
+        assert n_steps_max is not None  # validated in __post_init__
+        return (
+            stepper_config.atmosphere.stepper.get_evaluation_window_data_requirements(
+                n_steps_max
+            )
+        )
 
     @property
     def component_n_steps_max(self) -> CoupledOptionalInt:
@@ -2273,6 +2363,20 @@ class CoupledTrainStepper(
         self._stepper = stepper
         self._config = config
         self._loss = self._config._build_loss(stepper, config.n_coupled_steps)
+        self._uncoupled_atmosphere: TrainStepper | None = None
+        if config.uncoupled_atmosphere is not None:
+            # wraps the coupled atmosphere Stepper itself: shared weights
+            self._uncoupled_atmosphere = TrainStepper(
+                stepper=stepper.atmosphere,
+                config=TrainStepperConfig(
+                    loss=config.uncoupled_atmosphere.loss,
+                    n_forward_steps=config.uncoupled_atmosphere.n_steps,
+                    n_ensemble=config.n_ensemble,
+                    optimize_last_step_only=(
+                        config.uncoupled_atmosphere.optimize_last_step_only
+                    ),
+                ),
+            )
 
     @property
     def ocean(self) -> Stepper:
@@ -2481,9 +2585,50 @@ class CoupledTrainStepper(
 
         return output_list
 
+    def _train_on_uncoupled_atmosphere_batch(
+        self,
+        data: BatchData,
+        optimization: OptimizationABC,
+        compute_derived_variables: bool,
+        evaluate_all_steps: bool,
+    ) -> CoupledTrainOutput:
+        if self._uncoupled_atmosphere is None:
+            raise ValueError(
+                "Got an uncoupled atmosphere batch but "
+                "stepper_training.uncoupled_atmosphere is not set."
+            )
+        atmos_out = self._uncoupled_atmosphere.train_on_batch(
+            data,
+            optimization,
+            compute_derived_variables=compute_derived_variables,
+            evaluate_all_steps=evaluate_all_steps,
+        )
+        # The empty ocean output and the namespaced metrics only feed the
+        # training-loop metrics: the trainer's aggregators see coupled batches.
+        return CoupledTrainOutput(
+            total_metrics={"loss": atmos_out.metrics["loss"]},
+            ocean=TrainOutput(
+                metrics={},
+                gen_data=EnsembleTensorDict({}),
+                target_data=EnsembleTensorDict({}),
+                time=atmos_out.time,
+                normalize=lambda x: dict(x),
+            ),
+            atmosphere=TrainOutput(
+                metrics={
+                    f"uncoupled_atmosphere/{k}": v for k, v in atmos_out.metrics.items()
+                },
+                gen_data=atmos_out.gen_data,
+                target_data=atmos_out.target_data,
+                time=atmos_out.time,
+                normalize=atmos_out.normalize,
+                derive_func=atmos_out.derive_func,
+            ),
+        )
+
     def train_on_batch(
         self,
-        data: CoupledBatchData,
+        data: CoupledBatchData | BatchData,
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
         evaluate_all_steps: bool = False,
@@ -2491,7 +2636,9 @@ class CoupledTrainStepper(
         """
         Args:
             data: The coupled batch data, consisting of separate batches for ocean and
-                atmosphere with the same initial condition time.
+                atmosphere with the same initial condition time; or an uncoupled
+                atmosphere batch, stepped by the atmosphere alone (requires
+                ``stepper_training.uncoupled_atmosphere``).
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             compute_derived_variables: Whether to compute derived variables for the
@@ -2501,6 +2648,11 @@ class CoupledTrainStepper(
                 the stochastically-sampled range toward the accumulated loss.
 
         """
+        # Uncoupled batches are BatchData; a typed batch union needs a trainer change.
+        if isinstance(data, BatchData):
+            return self._train_on_uncoupled_atmosphere_batch(
+                data, optimization, compute_derived_variables, evaluate_all_steps
+            )
         atmos_forward_data = self.atmosphere.get_forward_data(
             data.atmosphere_data,
             compute_derived_variables=False,

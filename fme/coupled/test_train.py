@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import torch
 import xarray as xr
+import yaml
 
 from fme.core.generics.trainer import _restore_checkpoint
 from fme.core.rand import set_seed, use_cpu_randn
@@ -842,3 +843,82 @@ def test_train_per_component_lr_schedules(
                 _expected_lr(kind, n_steps)
             ), (key, step)
         assert logs[step]["lr"] == logs[step]["lr/atmosphere"]
+
+
+_UNCOUPLED_ATMOSPHERE_TRAINING = {
+    "loss": {"type": "MSE"},
+    "n_steps": {"outcomes": [{"steps": 2, "probability": 1.0}]},
+    "optimize_last_step_only": False,
+}
+
+# Shapes of the runs this feature serves (values are test-sized):
+# atmosphere trains on uncoupled atmosphere batches only, ocean on coupled ones.
+_ATMOSPHERE_ON_UNCOUPLED_ONLY = {
+    "stepper_training": {
+        "objective_per_batch": {"ocean": 1.0, "uncoupled_atmosphere": 1.0},
+        "uncoupled_atmosphere": _UNCOUPLED_ATMOSPHERE_TRAINING,
+    },
+    "optimization": {
+        "atmosphere": {"optimizer_type": "AdamW", "lr": 1e-3},
+        "ocean": {"optimizer_type": "AdamW", "lr": 1e-3},
+    },
+}
+# single-component objectives plus joint pairs plus uncoupled atmosphere
+# batches, one optimizer over both components.
+_JOINT_PAIRS_WITH_UNCOUPLED = {
+    "stepper_training": {
+        "joint_pairs": [[1, 2]],
+        "objective_per_batch": {
+            "atmosphere": 1.0,
+            "ocean": 1.0,
+            "joint": 1.0,
+            "uncoupled_atmosphere": 1.0,
+        },
+        "uncoupled_atmosphere": _UNCOUPLED_ATMOSPHERE_TRAINING,
+    },
+    "optimization": {"optimizer_type": "AdamW", "lr": 1e-4},
+}
+
+
+def _uncoupled_atmosphere_train_config(tmp_path, name: str, patch: dict) -> str:
+    config_fname = _per_component_train_config(tmp_path, name, max_epochs=2)
+    with open(config_fname) as f:
+        config = yaml.safe_load(f)
+    config["train_loader_uncoupled_atmosphere"] = {
+        "batch_size": 2,
+        "num_data_workers": 0,
+        "dataset": config["train_loader"]["dataset"]["atmosphere"],
+    }
+    config["stepper_training"].update(patch["stepper_training"])
+    config["optimization"] = patch["optimization"]
+    with open(config_fname, "w") as f:
+        yaml.safe_dump(config, f)
+    return config_fname
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "patch",
+    [_ATMOSPHERE_ON_UNCOUPLED_ONLY, _JOINT_PAIRS_WITH_UNCOUPLED],
+    ids=["atmosphere_on_uncoupled_only", "joint_pairs_with_uncoupled"],
+)
+def test_train_with_uncoupled_atmosphere_batches(tmp_path, patch):
+    set_seed(0)
+    config = _uncoupled_atmosphere_train_config(tmp_path, "uncoupled", patch)
+    with use_cpu_randn(), mock_wandb() as wandb:
+        train_main(yaml_config=config)
+        logs = wandb.get_logs()
+    batch_logs = [log for log in logs if "training_samples_per_second_on_rank_0" in log]
+    uncoupled = [log for log in batch_logs if "batch_uncoupled_atmosphere/loss" in log]
+    coupled = [
+        log for log in batch_logs if "batch_uncoupled_atmosphere/loss" not in log
+    ]
+    assert len(uncoupled) > 0 and len(coupled) > 0
+    assert [log["epoch"] for log in logs if "epoch" in log and "val/mean/loss" in log]
+    if patch is _ATMOSPHERE_ON_UNCOUPLED_ONLY:
+        assert all(log["batch_loss/atmosphere"] == 0 for log in coupled)
+        assert not any(
+            key.startswith("batch_loss/atmosphere_step")
+            for log in coupled
+            for key in log
+        )
