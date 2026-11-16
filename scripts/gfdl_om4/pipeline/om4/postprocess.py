@@ -12,8 +12,11 @@ import functools
 import xarray as xr
 
 from ..postprocess import (
+    DERIVATION_ATTR,
     OCEAN_SEA_ICE_FRACTION,
     SEA_ICE_FRACTION,
+    SOURCE_VARIABLE_ATTR,
+    TOTAL_AREA_SUFFIX,
     ChunkContext,
     Postprocess,
     PostprocessFactory,
@@ -25,30 +28,54 @@ from ..postprocess import (
 )
 
 
-def hfds_total_area(ds: xr.Dataset, context: ChunkContext) -> xr.Dataset:
-    """Add ``hfds_total_area``: heat flux into sea water per full cell area.
+def total_area(
+    ds: xr.Dataset, context: ChunkContext, *, source: str, long_name: str | None
+) -> xr.Dataset:
+    """Add ``<source>_total_area`` = ``source`` x ocean fraction: the flux
+    per full cell area.
 
-    The wetmask-normalized ``hfds`` is an average over ocean source area
+    The wetmask-normalized ``source`` is an average over ocean source area
     only; multiplying by the same ocean fraction that normalized it recovers
-    the plain conservative regrid — the flux per total cell area.
+    the plain conservative regrid. ``long_name`` defaults to the source's.
+    A ``source`` derived from other store variables (``calving_residue``)
+    passes on its ``source_variable`` and ``derivation``, so the provenance
+    names variables in the source store.
     """
-    out = ds["hfds"] * context.ocean_fraction
+    source_attrs = ds[source].attrs
+    out = ds[source] * context.ocean_fraction
+    scaling = (
+        "multiplied by the cell's ocean fraction, giving the flux per total "
+        "cell area"
+    )
+    inputs = source_attrs.get(SOURCE_VARIABLE_ATTR, source)
+    if inputs == source:
+        derivation = f"{source} (an average over ocean source area) {scaling}"
+    else:
+        derivation = f"{source_attrs[DERIVATION_ATTR]}; then {scaling}"
     out.attrs = {
-        "long_name": "heat flux into sea water scaled by sea surface fraction",
-        "units": ds["hfds"].attrs.get("units", "W/m2"),
-        **provenance_attrs(
-            context.store,
-            "hfds",
-            "hfds (an average over ocean source area) multiplied by the "
-            "cell's ocean fraction, giving the flux per total cell area",
-        ),
+        "long_name": f"{long_name or source_attrs.get('long_name', source)} "
+        "scaled by sea surface fraction",
+        "units": source_attrs.get("units", "W/m2"),
+        **provenance_attrs(context.store, inputs, derivation),
     }
-    ds["hfds_total_area"] = out
+    ds[f"{source}{TOTAL_AREA_SUFFIX}"] = out
     return ds
 
 
+def _total_area_spec(source: str, long_name: str | None) -> Postprocess:
+    return Postprocess(
+        functools.partial(total_area, source=source, long_name=long_name),
+        requires=(source,),
+        adds=(f"{source}{TOTAL_AREA_SUFFIX}",),
+    )
+
+
+def total_area_postprocess(*, source: str) -> Postprocess:
+    return _total_area_spec(source, long_name=None)
+
+
 def hfds_total_area_postprocess() -> Postprocess:
-    return Postprocess(hfds_total_area, requires=("hfds",), adds=("hfds_total_area",))
+    return _total_area_spec("hfds", long_name="heat flux into sea water")
 
 
 # J/kg, SIS2 LATENT_HEAT_VAPOR and LATENT_HEAT_FUSION
@@ -170,6 +197,7 @@ def sea_ice_postprocess(
 POSTPROCESS: dict[str, PostprocessFactory] = {
     "kelvin_sst": kelvin_sst_postprocess,
     "hfds_total_area": hfds_total_area_postprocess,
+    "total_area": total_area_postprocess,
     "calving_residue": calving_residue_postprocess,
     "sea_ice": sea_ice_postprocess,
     "sea_ice_fraction_consistency": sea_ice_fraction_consistency_postprocess,

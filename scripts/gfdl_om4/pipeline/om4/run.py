@@ -95,6 +95,7 @@ from ..output_attrs import (
 from ..postprocess import (
     DERIVATION_ATTR,
     SEA_ICE_FRACTION,
+    TOTAL_AREA_SUFFIX,
     ChunkContext,
     PostprocessConfig,
     add_provenance_args,
@@ -445,8 +446,28 @@ def _weight_time_phrase(attrs: dict) -> str:
     return "at the output time"
 
 
-# Output name a postprocess transform reads, for each checked output.
-EXTENSIVE_SOURCES = {"hfds_total_area": "hfds"}
+def _native_total_area_terms(
+    ds: xr.Dataset,
+    output: xr.Dataset,
+    stream: StreamConfig,
+    context: ChunkContext,
+) -> dict[str, xr.DataArray]:
+    """Native X_i of each ``<X>_total_area`` output: the stream's native X,
+    or, for an X a postprocess adds (e.g. calving_residue), that transform
+    applied to the native fields under their output names."""
+    native = ds.rename(
+        {n: stream.renaming[n] for n in ds.data_vars if n in stream.renaming}
+    )
+    terms = {}
+    for name in output.data_vars:
+        if not name.endswith(TOTAL_AREA_SUFFIX):
+            continue
+        x = name.removesuffix(TOTAL_AREA_SUFFIX)
+        if x not in native.data_vars:
+            spec = next(s for s in stream.postprocess_specs() if x in s.adds)
+            native = spec.fn(native.copy(), context)
+        terms[name] = native[x]
+    return terms
 
 
 def _process_chunk(
@@ -593,10 +614,7 @@ def _process_chunk(
             if all(v in output.data_vars for v in spec.requires):
                 output = spec.fn(output, chunk_context)
 
-        source_names = {stream.renaming.get(n, n): n for n in ds.data_vars}
-        for name, read in EXTENSIVE_SOURCES.items():
-            if name in output.data_vars:
-                native_terms[name] = ds[source_names[read]]
+        native_terms.update(_native_total_area_terms(ds, output, stream, chunk_context))
         check_extensive_identities(
             output,
             native_terms,

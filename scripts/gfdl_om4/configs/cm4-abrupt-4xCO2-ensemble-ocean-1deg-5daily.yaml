@@ -75,7 +75,13 @@ streams:
       - [tauuo, tauvo]
     postprocess:
       - hfds_total_area
+      - name: total_area
+        sources:
+          source: hfrunoffds
       - calving_residue
+      - name: total_area
+        sources:
+          source: calving_residue
   # Ice-model true snapshots, subsampled from 6-hourly to the 5-daily
   # snapshot instants (every 20th step). The ice SSH is the sea surface as
   # seen by the ice model, distinct from the ocean-store SSH and zos.

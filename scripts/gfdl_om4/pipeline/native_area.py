@@ -28,7 +28,7 @@ import xarray as xr
 from xesmf.frontend import ds_to_ESMFgrid
 
 from .ocean_emulators_port import OCEAN_FRACTION_THRESHOLD, regrid_normalized
-from .postprocess import SEA_ICE_FRACTION
+from .postprocess import SEA_ICE_FRACTION, TOTAL_AREA_SUFFIX
 
 # analysis/2026-09-30-1956-native-area-regrid/05-esmpy-areas.yaml::acceptance_rtol
 ESMPY_AREA_RTOL = 1e-9
@@ -826,8 +826,15 @@ def check_field_identities(
 
 
 # Target weight of each checked postprocess output: A_J (per full cell) or 1
-# (extensive, a per-cell total).
-EXTENSIVE_OUTPUTS = {"hfds_total_area": True, "sea_ice_volume": False}
+# (extensive, a per-cell total). Every <X>_total_area output is per full cell.
+EXTENSIVE_OUTPUTS = {"sea_ice_volume": False}
+
+
+def _per_full_cell(name: str) -> bool | None:
+    """True: weight A_J; False: weight 1; None: no identity for ``name``."""
+    if name.endswith(TOTAL_AREA_SUFFIX):
+        return True
+    return EXTENSIVE_OUTPUTS.get(name)
 
 
 def check_extensive_identities(
@@ -841,16 +848,17 @@ def check_extensive_identities(
 ) -> None:
     """Step-5 identities on postprocess outputs (A6), J ∉ Z, mask_J0 = 1:
 
-        Σ_J A_J hfds_total_area_J = Σ_i a_i m_i0 hfds_i
-        Σ_J sea_ice_volume_J      = Σ_i a_i m_i0 HI_i c_i
+        Σ_J A_J X_total_area_J = Σ_i a_i m_i0 X_i   (each X, e.g. hfds)
+        Σ_J sea_ice_volume_J   = Σ_i a_i m_i0 HI_i c_i
 
     ``native`` maps each checked output name to its native counterpart."""
     covered_ocean = (ocean_fraction > OCEAN_FRACTION_THRESHOLD) & (area > 0)
     a = native_areacello.astype(np.float64)
     for name, x_native in native.items():
-        if name not in EXTENSIVE_OUTPUTS:
+        per_full_cell = _per_full_cell(name)
+        if per_full_cell is None:
             raise ValueError(f"{context}: no identity for postprocess output {name}")
-        weight = area if EXTENSIVE_OUTPUTS[name] else xr.ones_like(area)
+        weight = area if per_full_cell else xr.ones_like(area)
         _assert_sums_close(
             _target_sum(weight, output[name].astype(np.float64), covered_ocean),
             _native_sum(a, wetmask, x_native),

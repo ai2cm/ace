@@ -82,6 +82,9 @@ def test_launch_config_writes_requested_fields(name):
         *REQUESTED_FIELDS,
         "ocean_sea_ice_thickness_mean",
         "calving_residue",
+        "hfds_total_area",
+        "hfrunoffds_total_area",
+        "calving_residue_total_area",
         "SST_degK",
     }
     assert expected <= written, sorted(expected - written)

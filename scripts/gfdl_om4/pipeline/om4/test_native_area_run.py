@@ -2,6 +2,7 @@
 toy example (table 3)."""
 
 import dataclasses
+import functools
 import sys
 from fractions import Fraction as F
 
@@ -281,6 +282,105 @@ def test_process_chunk_calving_residue(tmp_path, monkeypatch):
         context="Σ_J W_J X_J = Σ_i a_i m_i X_i",
     )
     assert out["calving_residue"].attrs["units"] == "W/m2"
+
+
+TOTAL_AREA_FIELDS = {
+    "hfds": TOY_ZETA,
+    "hfrunoffds": [2.0, -4.0, np.nan],
+    "hflso": TOY_ZETA,
+    "evs": [3e-6, -1e-6, np.nan],
+    "prsn": [2e-6, 5e-6, np.nan],
+}
+
+
+def _total_area_stream() -> StreamConfig:
+    return StreamConfig(
+        name="flux",
+        store="toy",
+        variables=list(TOTAL_AREA_FIELDS),
+        postprocess=[
+            "hfds_total_area",
+            PostprocessConfig("total_area", {"source": "hfrunoffds"}),
+            "calving_residue",
+            PostprocessConfig("total_area", {"source": "calving_residue"}),
+        ],
+    )
+
+
+def test_process_chunk_total_area(tmp_path, monkeypatch):
+    """X_total_area_J = X_J f_J for each configured X; process_chunk checks
+    Σ_J A_J X_total_area_J = Σ_i a_i m_i0 X_i for each (no raise)."""
+    monkeypatch.setattr(run, "OUTPUT_DTYPE", np.float64)
+    config = _toy_config(tmp_path, monkeypatch)
+    f_J = build_statics(config, _toy_wetmask())["sea_surface_fraction"]
+    attrs = {"hfrunoffds": {"long_name": "Runoff heat flux", "units": "W m-2"}}
+    out = _toy_chunk(
+        _total_area_stream(), config.weights_url, TOTAL_AREA_FIELDS, attrs=attrs
+    )
+    for x in ("hfds", "hfrunoffds", "calving_residue"):
+        total = out[f"{x}_total_area"].values.ravel()
+        expected = (out[x] * f_J).values.ravel()[:2]
+        assert_close(
+            total[:2], expected, rtol=F64_RTOL, scale=np.abs(expected).max(), context=x
+        )
+        assert np.isnan(total[2]), f"{x}_total_area: NaN on Z"
+
+    assert out["hfds_total_area"].attrs == {
+        "long_name": "heat flux into sea water scaled by sea surface fraction",
+        "units": "W/m2",
+        "source_store": "toy",
+        "source_variable": "hfds",
+        "derivation": "hfds (an average over ocean source area) multiplied by "
+        "the cell's ocean fraction, giving the flux per total cell area",
+    }
+    runoff = out["hfrunoffds_total_area"].attrs
+    assert runoff["long_name"] == "Runoff heat flux scaled by sea surface fraction"
+    assert runoff["units"] == "W m-2"
+    assert runoff["source_variable"] == "hfrunoffds"
+    assert runoff["derivation"] == (
+        "hfrunoffds (an average over ocean source area) multiplied by "
+        "the cell's ocean fraction, giving the flux per total cell area"
+    )
+    residue = out["calving_residue_total_area"].attrs
+    assert residue["long_name"] == (
+        "Surface Downward Latent Heat Flux residue due to calving "
+        "scaled by sea surface fraction"
+    )
+    assert residue["source_variable"] == "hflso, evs, prsn"
+    assert residue["derivation"] == (
+        "-hflso + L_v evs - L_f prsn, L_v = 2.5e+06 J/kg, L_f = 334000 J/kg "
+        "(SIS2), on the per-ocean-area regridded inputs; then multiplied by "
+        "the cell's ocean fraction, giving the flux per total cell area"
+    )
+
+
+def _per_ocean_area_total(ds, context, *, source):
+    """X_total_area_J = X_J, missing the f_J factor."""
+    ds[f"{source}_total_area"] = ds[source].copy()
+    return ds
+
+
+@pytest.mark.parametrize("wrong", ["hfrunoffds", "calving_residue"])
+def test_process_chunk_checks_total_area(tmp_path, monkeypatch, wrong):
+    _, url = _toy_artifact(tmp_path, monkeypatch, z_row=True)
+
+    def factory(*, source):
+        spec = om4_postprocess.total_area_postprocess(source=source)
+        if source != wrong:
+            return spec
+        fn = functools.partial(_per_ocean_area_total, source=source)
+        return dataclasses.replace(spec, fn=fn)
+
+    monkeypatch.setitem(om4_postprocess.POSTPROCESS, "total_area", factory)
+    with pytest.raises(AssertionError, match=f"{wrong}_total_area"):
+        _toy_chunk(_total_area_stream(), url, TOTAL_AREA_FIELDS)
+
+
+def test_total_area_requires_source():
+    with pytest.raises(ValueError, match="'total_area'.*source"):
+        dataclasses.replace(
+            _total_area_stream(), postprocess=[PostprocessConfig("total_area")]
+        )
 
 
 def test_ice_area_output_attrs(tmp_path, monkeypatch):

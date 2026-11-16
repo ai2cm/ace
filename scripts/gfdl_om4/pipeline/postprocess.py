@@ -246,6 +246,9 @@ MAX_SEA_ICE_FRACTION_MISMATCH = 1e-5
 SEA_ICE_FRACTION = "sea_ice_fraction"
 OCEAN_SEA_ICE_FRACTION = "ocean_sea_ice_fraction"
 
+# <X>_total_area = X x ocean fraction: per-ocean-area X per full cell area.
+TOTAL_AREA_SUFFIX = "_total_area"
+
 
 def check_sea_ice_fraction_consistency(
     ds: xr.Dataset,
