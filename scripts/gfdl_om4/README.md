@@ -310,7 +310,7 @@ snapshots (`time_subsample_stride`) and average the daily-mean fluxes over
 only subsample the 6-hourly ice streams.
 
 Per-ice-area SIS2 fields (`HI`, `HS`, `TS`, `TSN`, `UI`, `VI`, `T1`–`T4`,
-`T_bulkice`) are regridded weighted by ice area in the 5-daily configs
+`T_bulkice`) are regridded weighted by ice area in the 1° 5-daily configs
 (stream options `ice_area_weighted`, `ice_area_weight`,
 `ice_area_weight_store`, `ice_area_products`; rule R1 in
 `pipeline/om4/ice_area.py`): `X_J = mean_ocean_J(c X) / mean_ocean_J(c)`,
