@@ -57,17 +57,20 @@ def trim_zero_bins(
     Trim bins with zero counts from the edges of the histogram.
 
     Args:
-        counts: 1D array of counts for each bin
+        counts: array of counts for each bin, with bins as the last dimension.
+            When there are leading dimensions, only bins which have zero counts
+            across all of them are trimmed, so that the trimmed histograms
+            continue to share their bins.
         bin_edges: 1D array of bin edges
 
     Returns:
         counts, bin_edges: trimmed arrays
     """
-    mask = counts > 0
+    mask = np.any(counts.reshape(-1, counts.shape[-1]) > 0, axis=0)
     first_nonzero = np.argmax(mask)
     last_nonzero = len(mask) - np.argmax(mask[::-1])
     return (
-        counts[first_nonzero:last_nonzero],
+        counts[..., first_nonzero:last_nonzero],
         bin_edges[first_nonzero : last_nonzero + 1],
     )
 

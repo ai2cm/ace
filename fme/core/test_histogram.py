@@ -12,6 +12,7 @@ from fme.core.histogram import (
     DynamicHistogramAggregator,
     _normalize_histogram,
     histogram,
+    trim_zero_bins,
 )
 
 
@@ -205,6 +206,14 @@ def test_histogram_handles_uniform_field(value: float):
     histogram.add([torch.as_tensor([value, value, value], dtype=torch.float32)])
     histogram.add([torch.as_tensor([value, 2 * value, 3 * value])])  # non-zero range
     assert histogram.counts.sum() == 6
+
+
+def test_trim_zero_bins_trims_series_together():
+    counts = np.array([[0, 0, 1, 2, 0, 0], [0, 3, 0, 0, 0, 0]])
+    bin_edges = np.arange(7.0)
+    trimmed_counts, trimmed_edges = trim_zero_bins(counts, bin_edges)
+    np.testing.assert_array_equal(trimmed_counts, [[0, 1, 2], [3, 0, 0]])
+    np.testing.assert_array_equal(trimmed_edges, [1.0, 2.0, 3.0, 4.0])
 
 
 @pytest.mark.parametrize(
