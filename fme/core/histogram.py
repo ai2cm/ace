@@ -241,12 +241,36 @@ class DynamicHistogram:
         return self.bin_edges
 
 
+def _get_nan_masks(data: TensorMapping) -> dict[str, torch.Tensor | None]:
+    # assume the final two dimensions are the spatial dimensions and the
+    # spatial pattern of NaNs is the same for all samples & time, but
+    # can vary by variable
+    ndim = next(iter(data.values())).ndim
+    index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
+    return {
+        k: v[index].isnan() if torch.any(v[index].isnan()) else None
+        for k, v in data.items()
+    }
+
+
+def _select_unmasked(
+    value: torch.Tensor, nan_mask: torch.Tensor | None
+) -> torch.Tensor:
+    """
+    Flatten the values to one dimension, removing any which are masked.
+    """
+    if nan_mask is None:
+        return value.flatten()
+    mask = ~nan_mask.to(value.device).expand(*value.shape)
+    return torch.masked_select(value, mask)
+
+
 class DynamicHistogramAggregator:
     def __init__(
         self,
         n_bins: int,
         percentiles: list[float] | None = None,
-        nan_masks: Mapping[str, torch.Tensor] | None = None,
+        nan_masks: Mapping[str, torch.Tensor | None] | None = None,
     ) -> None:
         self.n_bins = n_bins
         self.percentiles = [99.9999] if percentiles is None else percentiles
@@ -255,28 +279,14 @@ class DynamicHistogramAggregator:
 
     def set_nan_masks(self, data: TensorMapping):
         if self.nan_masks is None:
-            # assume the final two dimensions are the spatial dimensions and the
-            # spatial pattern of NaNs is the same for all samples & time, but
-            # can vary by variable
-            ndim = next(iter(data.values())).ndim
-            index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
-            self.nan_masks = {
-                k: v[index].isnan() if torch.any(v[index].isnan()) else None
-                for k, v in data.items()
-            }
+            self.nan_masks = _get_nan_masks(data)
 
     def _remove_nans(self, key: str, value: torch.Tensor):
         if self.nan_masks is None:
             raise ValueError(
                 "record_batch must be called at least once before removing NaNs"
             )
-        nan_mask = self.nan_masks[key]
-        if nan_mask is not None:
-            mask = ~nan_mask.to(value.device).expand(*value.shape)
-            value = torch.masked_select(value, mask)
-        else:
-            value = value.flatten()
-        return value
+        return _select_unmasked(value, self.nan_masks[key])
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
