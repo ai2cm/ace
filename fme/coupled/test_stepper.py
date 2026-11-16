@@ -23,7 +23,6 @@ from fme.core.coordinates import (
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.rand import randn_like
@@ -2521,7 +2520,7 @@ def test_output_only_sst_is_carried_in_the_ocean_state():
         n_samples=2,
     )
     assert "sst" not in config.ocean.stepper.prognostic_names
-    assert config.ocean_ic_names == ["sst", "thetao_0"]
+    assert config.ocean_state_names == ["sst", "thetao_0"]
     output = train_stepper.train_on_batch(
         data=coupled_data.data, optimization=NullOptimization()
     )
@@ -2531,3 +2530,73 @@ def test_output_only_sst_is_carried_in_the_ocean_state():
     assert "sst" in ic.ocean_data.as_batch_data().data
     _, state = coupler.predict_paired(initial_condition=ic, forcing=coupled_data.data)
     assert set(state.ocean_data.as_batch_data().data) == {"sst", "thetao_0"}
+
+
+def test_hfds_correction_reads_generated_sst_after_initial_condition():
+    """After the initial condition, the surface energy flux correction reads
+    the ocean's generated (output-only) sst, never the reference sst.
+    """
+    fluxes = [
+        "DLWRFsfc",
+        "ULWRFsfc",
+        "DSWRFsfc",
+        "USWRFsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "PRATEsfc",
+        "total_frozen_precipitation_rate",
+    ]
+    ocean_in = ["thetao_0", "mask_0", "land_fraction", "sea_ice_fraction", *fluxes]
+    ocean_out = ["thetao_0", "sst", "hfds"]
+    atmos_in = ["surface_temperature", "ocean_fraction"]
+    atmos_out = ["surface_temperature", *fluxes]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in,
+        ocean_out_names=ocean_out,
+        atmosphere_in_names=atmos_in,
+        atmosphere_out_names=atmos_out,
+        ocean_builder=ModuleSelector(
+            type="prebuilt",
+            config={"module": torch.nn.Conv2d(len(ocean_in), len(ocean_out), 1)},
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt",
+            config={"module": torch.nn.Conv2d(len(atmos_in), len(atmos_out), 1)},
+        ),
+    )
+    step = config.ocean.stepper.step
+    step_config = copy.deepcopy(step.config)
+    step_config["corrector"]["config"] = {
+        "surface_energy_flux_correction": {"method": "prescribed"}
+    }
+    config = dataclasses.replace(
+        config,
+        ocean=dataclasses.replace(
+            config.ocean,
+            stepper=StepperConfig(
+                step=StepSelector(type=step.type, config=step_config)
+            ),
+        ),
+    )
+    assert "sst" in config.ocean_state_names
+    coupled_data = get_coupled_data(
+        list(set(ocean_in + ocean_out) - set(atmos_out)),
+        list(set(atmos_in + atmos_out) - set(ocean_out)),
+        n_forward_times_ocean=3,
+        n_forward_times_atmosphere=6,
+        n_samples=2,
+    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=coupled_data.vertical_coord
+    ).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    data = coupled_data.data
+    ic = data.get_start(config.get_prognostic_state_data_requirements())
+    reference, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    sst = data.ocean_data.data["sst"]
+    sst[:, 1:] = float("nan")  # the IC (time 0) keeps its reference sst
+    sentinel, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    hfds = sentinel.ocean_data.prediction["hfds"]
+    assert hfds.shape[1] == 3
+    assert torch.isfinite(hfds).all()
+    torch.testing.assert_close(hfds, reference.ocean_data.prediction["hfds"])

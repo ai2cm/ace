@@ -22,11 +22,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.ocean_data import (
-    OCEAN_FIELD_NAME_PREFIXES,
-    HasOceanDepthIntegral,
-    OceanData,
-)
+from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.spatial_mask_provider import (
     NullSpatialMaskProvider,
@@ -505,13 +501,6 @@ class OceanCorrectorConfig(CorrectorConfigABC):
                     )
         return state_copy
 
-    @property
-    def input_state_names(self) -> frozenset[str]:
-        # the surface energy flux correction reads the input SST
-        if self.surface_energy_flux_correction is not None:
-            return frozenset(OCEAN_FIELD_NAME_PREFIXES["sea_surface_temperature"])
-        return frozenset()
-
     def _get_corrector(
         self,
         dataset_info: DatasetInfo,
@@ -638,13 +627,22 @@ def _correct_hfds(
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
         prescribed_open_ocean: net_flux where ocean_fraction == 1, else gen_hfds
+
+    The net flux uses the input SST when the step input has one, and otherwise
+    the generated SST (SST as an output-only diagnostic). The fluxes are means
+    over the step while SST is a snapshot, so either endpoint is equally valid.
+    When SST is output-only the input SST is absent only on the first step of
+    a standalone ocean rollout: later steps receive the previous step's
+    output, and a coupled stepper carries SST in the ocean state.
     """
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction
-    net_flux = _compute_ocean_net_surface_energy_flux(
-        forcing_data, input.sea_surface_temperature
-    )
+    try:
+        sst = input.sea_surface_temperature
+    except KeyError:
+        sst = OceanData(gen_data).sea_surface_temperature
+    net_flux = _compute_ocean_net_surface_energy_flux(forcing_data, sst)
     out: TensorDict = {}
     if "hfds" in gen_data:
         hfds_name = "hfds"
