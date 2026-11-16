@@ -110,7 +110,7 @@ logging:
   project: ace2som-xshield-tuning
   entity: ai2cm
 train_loader:
-  batch_size: 8
+  batch_size: 4
   num_data_workers: 4
   prefetch_factor: 4
   time_buffer: 1

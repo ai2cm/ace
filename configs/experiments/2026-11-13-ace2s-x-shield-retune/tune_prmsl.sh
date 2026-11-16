@@ -36,7 +36,7 @@ ONE_STEP_SHIELDPLUS=01KHCDS59F7RBJ1D42WD9HP3XC
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-xshield-10yr-control-correct-weights-seed${seed}"
+    job_name="ace2s-shieldplus-tune-xshield-10yr-control-correct-weights"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -47,7 +47,6 @@ for seed in {0..0}; do
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority urgent \
-        --preemptible \
         --cluster ai2/jupiter \
         --min-runtime 8h \
         --env WANDB_NAME=$job_name \
@@ -57,7 +56,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $ONE_STEP_SHIELDPLUS:training_checkpoints/best_ckpt.tar:/ckpt.tar \
+        --dataset $ONE_STEP_SHIELDPLUS:training_checkpoints/best_ckpt.tar:/pre-trained-weights/training_checkpoints/best_ckpt.tar \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
