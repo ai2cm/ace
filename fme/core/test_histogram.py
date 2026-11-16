@@ -11,6 +11,7 @@ from fme.core.histogram import (
     DynamicHistogram,
     DynamicHistogramAggregator,
     _normalize_histogram,
+    histogram,
 )
 
 
@@ -136,6 +137,35 @@ def test_dynamic_histogram_wrong_number_of_series():
 def test_dynamic_histogram_odd_n_bins():
     with pytest.raises(ValueError, match="even"):
         DynamicHistogram(n_series=1, n_bins=201)
+
+
+def test_dynamic_histogram_range_larger_than_float32_max():
+    # values of both signs give bins with a range that can't be represented
+    # in float32, as can happen when a prediction diverges
+    histogram = DynamicHistogram(n_series=2, n_bins=200)
+    target = 250.0 + 50.0 * torch.rand(64, dtype=torch.float32)
+    for bad_value in [-2.0e38, 2.0e38, 3.0e38]:
+        prediction = target.clone()
+        prediction[0] = bad_value
+        histogram.add([target, prediction])
+    assert histogram.bin_edges is not None
+    assert histogram.bin_edges[-1] - histogram.bin_edges[0] > 3.5e38
+    np.testing.assert_array_equal(histogram.counts.sum(axis=1), [3 * 64, 3 * 64])
+    np.testing.assert_array_equal(
+        histogram.counts[1],
+        np.histogram(
+            [-2.0e38, 2.0e38, 3.0e38] + [275.0] * (3 * 63), bins=histogram.bin_edges
+        )[0],
+    )
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.int64])
+def test_histogram_dtypes(dtype: torch.dtype):
+    # the bin of this value is not exactly representable in half precision
+    values = torch.as_tensor([1000.0]).to(dtype)
+    counts = histogram(values, vmin=0.3, bin_size=0.1, n_bins=20000)
+    assert counts.sum() == 1
+    assert counts[9997] == 1
 
 
 @pytest.mark.parametrize("value", [1.0, 300.0, 1.0e5])

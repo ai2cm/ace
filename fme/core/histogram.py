@@ -14,6 +14,7 @@ from fme.core.metrics import quantile
 from fme.core.typing_ import TensorMapping
 
 EPSILON = 1.0e-6
+_OVERFLOW_SCALE = 2.0**-4
 
 _Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
 
@@ -75,22 +76,29 @@ def histogram(
     arr: torch.Tensor, vmin: float, bin_size: float, n_bins: int
 ) -> torch.Tensor:
     """
-    Compute histogram of a tensor.
+    Compute histogram of a tensor. Values outside of the range of the bins
+    are counted in the first or last bin.
 
     Args:
-        arr: 1D tensor of values
+        arr: 1D tensor of finite values
         vmin: minimum value of the histogram
         bin_size: size of each bin
         n_bins: number of bins
 
     Returns:
-        counts, bin_edges: arrays of counts and bin edges
+        counts: tensor of counts for each bin
     """
-    # use np.bincount for speed
-    counts = torch.bincount(((arr - vmin) / bin_size).int(), minlength=n_bins)
-    return_counts = counts[:n_bins]
-    return_counts[-1] += torch.sum(counts[n_bins:])
-    return return_counts
+    if arr.dtype != torch.float64:
+        # float64 is not available on all devices
+        arr = arr.to(torch.float32)
+    # the range of the bins can be larger than the largest value which can be
+    # represented in the dtype of arr, scaling by a power of two avoids
+    # overflow without changing the result
+    scale = _OVERFLOW_SCALE
+    i_bin = (arr * scale - vmin * scale) / (bin_size * scale)
+    i_bin = i_bin.clamp(0, n_bins - 1).long()
+    # use bincount for speed
+    return torch.bincount(i_bin, minlength=n_bins)
 
 
 class DynamicHistogram:
