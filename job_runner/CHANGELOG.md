@@ -44,6 +44,9 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 ### Fixed
 
+- [ISSUE] `{evaluate,inference}.sh` chose `fme.coupled.*` for any `<experiment_dir>`
+  containing `coupled`, including `.../uncoupled`; now only when a path component
+  starts with `coupled`.
 - [ISSUE] `init_exper.sh` populates wrong dataset for `<COUPLED_ATMOS_ZARR>` in uncoupled atmosphere config.
 - [ISSUE] `init_exper.sh` populates top-level `n_forward_steps` with inference value
 - [ISSUE] Use `ocean` as sub-directory of `--coupled_stats`.
