@@ -138,10 +138,13 @@ def test_dynamic_histogram_odd_n_bins():
         DynamicHistogram(n_series=1, n_bins=201)
 
 
-def test_histogram_handles_uniform_field():
+@pytest.mark.parametrize("value", [1.0, 300.0, 1.0e5])
+def test_histogram_handles_uniform_field(value: float):
     histogram = DynamicHistogram(n_series=1, n_bins=200)
-    histogram.add([torch.as_tensor([1.0, 1.0, 1.0])])  # has zero range
-    histogram.add([torch.as_tensor([1.0, 2.0, 3.0])])  # has non-zero range
+    # has zero range, including after rounding of float32 values
+    histogram.add([torch.as_tensor([value, value, value], dtype=torch.float32)])
+    histogram.add([torch.as_tensor([value, 2 * value, 3 * value])])  # non-zero range
+    assert histogram.counts.sum() == 6
 
 
 @pytest.mark.parametrize(

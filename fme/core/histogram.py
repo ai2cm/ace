@@ -139,14 +139,12 @@ class DynamicHistogram:
                 f"expected values for {self._n_series} series, got {len(values)}"
             )
         # the bins must contain the values of all series
-        # add epsilon to ensure all values stay within (and not just equal to)
-        # the bin edges, and to avoid the case where vmin == vmax
-        vmin = min(
-            float((torch.min(value) - self._epsilon).cpu().numpy()) for value in values
-        )
-        vmax = max(
-            float((torch.max(value) + self._epsilon).cpu().numpy()) for value in values
-        )
+        vmin = min(float(torch.min(value)) for value in values)
+        vmax = max(float(torch.max(value)) for value in values)
+        # pad the range to ensure all values stay within (and not just equal
+        # to) the bin edges, and to avoid the case where vmin == vmax
+        pad = self._epsilon * max(1.0, abs(vmin), abs(vmax))
+        vmin, vmax = vmin - pad, vmax + pad
 
         if self.bin_edges is None:
             self.bin_edges = np.linspace(vmin, vmax, self._n_bins + 1)
