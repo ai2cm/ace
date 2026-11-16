@@ -1,13 +1,10 @@
-"""Distributed SHT helpers; import these from ``fme.core.sht``.
+"""Distributed SHT helpers; import from ``fme.core.sht``.
 
-``DistributedRealSHT`` and ``DistributedInverseRealSHT`` fork the upstream
-``forward`` from torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The
-torch-harmonics Authors), adding a ``.clone()`` after ``torch.view_as_complex``
-whenever a ``distributed_transpose`` follows it. Without it, ``torch.compile``
-(torch 2.7-2.9) raises "setStorage ... out of bounds" when that view is passed
-to a transpose. When no transpose follows, the clone is skipped and
-``forward`` matches upstream. Recheck against upstream when the
-torch-harmonics pin is bumped. Other names are unmodified re-exports.
+``DistributedRealSHT``/``DistributedInverseRealSHT`` fork the torch-harmonics
+0.8.0 ``forward`` (BSD-3-Clause, Copyright (c) 2022 The torch-harmonics Authors)
+to clone the ``view_as_complex`` result before a ``distributed_transpose``;
+otherwise ``torch.compile`` on torch 2.7-2.9 raises "setStorage ... out of
+bounds". Recheck on torch-harmonics pin bumps.
 """
 
 import torch
@@ -36,9 +33,7 @@ __all__ = [
 
 
 def _view_as_complex(xs: torch.Tensor, clone: bool) -> torch.Tensor:
-    """``torch.view_as_complex(xs)``, cloned if ``clone`` so that a following
-    ``distributed_transpose`` receives a tensor with its own storage.
-    """
+    """``view_as_complex(xs)``, cloned if ``clone`` so it owns its storage."""
     x = torch.view_as_complex(xs)
     return x.clone() if clone else x
 
@@ -81,7 +76,7 @@ class DistributedRealSHT(thd.DistributedRealSHT):
             "...kmr,mlk->...lmr", x, self.weights.to(x.dtype)
         ).contiguous()
 
-        # cast to complex; cloned if the polar transpose below follows
+        # cast to complex; clone before a transpose
         x = _view_as_complex(xs, clone=self.comm_size_polar > 1)
 
         # transpose: after this, l is split and c is local
@@ -113,7 +108,7 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         # einsum
         xs = torch.einsum("...lmr, mlk->...kmr", x, self.pct.to(x.dtype)).contiguous()
 
-        # cast to complex; cloned if any of the transposes below follow
+        # cast to complex; clone before a transpose
         x = _view_as_complex(
             xs, clone=self.comm_size_polar > 1 or self.comm_size_azimuth > 1
         )
