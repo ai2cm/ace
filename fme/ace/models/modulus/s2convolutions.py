@@ -22,7 +22,6 @@ import torch.nn.functional as F
 
 tl.set_backend("pytorch")
 import fme.core.sht as th
-import fme.core.sht._distributed as thd
 
 # from tensorly.plugins import use_opt_einsum
 # use_opt_einsum('optimal')
@@ -105,7 +104,7 @@ class SpectralConvS2(nn.Module):
         if not self.separable:
             weight_shape += [out_channels]
 
-        if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
+        if isinstance(self.inverse_transform, th.DistributedInverseRealSHT):
             self.modes_lat_local = self.inverse_transform.lmax_local
             self.modes_lon_local = self.inverse_transform.mmax_local
             self.lpad_local = self.inverse_transform.lpad_local

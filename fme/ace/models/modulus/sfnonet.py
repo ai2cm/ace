@@ -22,7 +22,6 @@ import torch.nn as nn
 
 # get spectral transforms from fme.core.sht
 import fme.core.sht as th
-import fme.core.sht._distributed as thd
 from torch.utils.checkpoint import checkpoint
 
 from .initialization import trunc_normal_
@@ -67,7 +66,7 @@ class SpectralFilterLayer(nn.Module):
 
         if filter_type == "non-linear" and (
             isinstance(forward_transform, th.RealSHT)
-            or isinstance(forward_transform, thd.DistributedRealSHT)
+            or isinstance(forward_transform, th.DistributedRealSHT)
         ):
             self.filter = SpectralAttentionS2(
                 forward_transform,
@@ -98,7 +97,7 @@ class SpectralFilterLayer(nn.Module):
         # spectral transform is passed to the module
         elif filter_type == "linear" and (
             isinstance(forward_transform, th.RealSHT)
-            or isinstance(forward_transform, thd.DistributedRealSHT)
+            or isinstance(forward_transform, th.DistributedRealSHT)
         ):
             self.filter = SpectralConvS2(
                 forward_transform,
@@ -524,36 +523,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 self.h, self.w, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
             ).float()
 
-        elif self.spectral_transform == "fft":
-            if residual_filter_factor != 1:
-                raise NotImplementedError(
-                    "Residual filter factor is not implemented for FFT spectral transform"
-                )
-            fft_handle = RealFFT2
-            ifft_handle = InverseRealFFT2
-
-            # effective image size:
-            self.img_shape_eff = (
-                self.img_shape[0] + self.padding[0],
-                self.img_shape[1] + self.padding[1],
-            )
-            self.img_shape_loc = (
-                self.img_shape_eff[0],
-                self.img_shape_eff[1],
-            )
-
-            self.trans_down = fft_handle(
-                *self.img_shape_eff, lmax=modes_lat, mmax=modes_lon
-            ).float()
-            self.itrans_up = ifft_handle(
-                *self.img_shape_eff, lmax=modes_lat, mmax=modes_lon
-            ).float()
-            self.trans = fft_handle(
-                self.h, self.w, lmax=modes_lat, mmax=modes_lon
-            ).float()
-            self.itrans = ifft_handle(
-                self.h, self.w, lmax=modes_lat, mmax=modes_lon
-            ).float()
         else:
             raise (ValueError("Unknown spectral transform"))
 
