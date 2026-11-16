@@ -1,3 +1,5 @@
+import dataclasses
+import typing
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -15,7 +17,9 @@ from fme.ace.stepper.time_length_probabilities import (
 )
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.loss import StepLossConfig
+from fme.core.optimization import OptimizationConfig
 from fme.core.typing_ import Slice
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import (
@@ -701,3 +705,78 @@ class TestGetInferenceCallback:
         assert error == pytest.approx(0.5)
         assert "a/time_mean_norm/rmse/channel_mean" in logs
         assert "b/time_mean_norm/rmse/channel_mean" not in logs
+
+
+def _parse_optimization(optimization: dict[str, Any]):
+    hint = typing.get_type_hints(TrainConfig)["optimization"]
+    wrapper = dataclasses.make_dataclass("Wrapper", [("optimization", hint)])
+    return dacite.from_dict(
+        wrapper, {"optimization": optimization}, config=dacite.Config(strict=True)
+    ).optimization
+
+
+@pytest.mark.parametrize(
+    "optimization, expected_type",
+    [
+        ({}, OptimizationConfig),
+        ({"lr": 0.01}, OptimizationConfig),
+        ({"atmosphere": {"lr": 0.01}, "ocean": {}}, dict),
+    ],
+    ids=["empty", "single", "per_component"],
+)
+def test_train_config_optimization_union_parse(optimization, expected_type):
+    parsed = _parse_optimization(optimization)
+    assert type(parsed) is expected_type
+    if expected_type is dict:
+        assert all(isinstance(v, OptimizationConfig) for v in parsed.values())
+
+
+def test_train_config_optimization_union_hides_entry_error():
+    # dacite tries each union member and drops the per-member error, so an
+    # invalid entry surfaces as a UnionMatchError.
+    muon_without_adamw_lr = {"optimizer_type": "Muon"}
+    with pytest.raises(ValueError, match="adamw_lr"):
+        dacite.from_dict(
+            OptimizationConfig, muon_without_adamw_lr, config=dacite.Config(strict=True)
+        )
+    with pytest.raises(dacite.UnionMatchError):
+        _parse_optimization({"atmosphere": muon_without_adamw_lr, "ocean": {}})
+    with pytest.raises(dacite.UnionMatchError):
+        _parse_optimization(muon_without_adamw_lr)
+
+
+def _make_train_config_with_optimization(tmp_path, optimization, lr_tuning=None):
+    return TrainConfig(
+        train_loader=MagicMock(),
+        validation=_make_validation_config(),
+        stepper=_make_stepper_mock(),
+        stepper_training=_make_stepper_training_mock(),
+        optimization=optimization,
+        logging=MagicMock(),
+        max_epochs=5,
+        save_checkpoint=False,
+        experiment_dir=str(tmp_path),
+        lr_tuning=lr_tuning,
+    )
+
+
+def test_train_config_rejects_lr_tuning_with_per_component_form(tmp_path):
+    optimization = {
+        "atmosphere": OptimizationConfig(lr=1e-5),
+        "ocean": OptimizationConfig(lr=1e-3),
+    }
+    _make_train_config_with_optimization(tmp_path, optimization)
+    _make_train_config_with_optimization(
+        tmp_path, OptimizationConfig(), lr_tuning=LRTuningConfig()
+    )
+    with pytest.raises(ValueError, match="lr_tuning is not supported"):
+        _make_train_config_with_optimization(
+            tmp_path, optimization, lr_tuning=LRTuningConfig()
+        )
+
+
+def test_train_config_rejects_wrong_optimization_components(tmp_path):
+    with pytest.raises(ValueError, match="missing"):
+        _make_train_config_with_optimization(
+            tmp_path, {"atmosphere": OptimizationConfig()}
+        )
