@@ -14,7 +14,8 @@ import xarray_beam as xbeam
 from obstore.store import from_url
 from zarr.storage import ObjectStore
 
-TIME_DIM = "time"
+from .dims import TIME_DIM
+
 OUTPUT_DTYPE = np.float32
 
 
