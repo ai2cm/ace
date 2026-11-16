@@ -143,6 +143,20 @@ stepper:
               conserve_dry_air: true
 """
 
+_ATMOSPHERE_INFERENCE_CONFIG_TEMPLATE = """
+atmosphere_inference:
+- name: atmosphere_only
+  loader:
+    dataset:
+      data_path: {atmosphere_data_path}
+    start_indices:
+      first: 0
+      n_initial_conditions: 2
+      interval: 4
+  n_forward_steps: 3
+  forward_steps_in_memory: 2
+"""
+
 _INFERENCE_CONFIG_TEMPLATE = """
 experiment_dir: {experiment_dir}
 n_coupled_steps: {n_coupled_steps}
@@ -196,6 +210,7 @@ def _write_test_yaml_files(
     loss_atmos_n_steps: int = 3,
     loss_ocean_weight: float = 1.0,
     crps_training: bool = False,
+    atmosphere_inference: bool = False,
 ):
     exper_dir = tmp_path / "results"
     ocean_next_step_forcing_names = list(
@@ -239,6 +254,10 @@ def _write_test_yaml_files(
         loss_type=loss_type,
         loss_kwargs=loss_kwargs,
     )
+    if atmosphere_inference:
+        train_config += _ATMOSPHERE_INFERENCE_CONFIG_TEMPLATE.format(
+            atmosphere_data_path=mock_coupled_data.atmosphere.data_dir,
+        )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
 
@@ -259,15 +278,18 @@ def _write_test_yaml_files(
 
 
 @pytest.mark.parametrize(
-    "loss_atmos_n_steps, crps_training",
+    "loss_atmos_n_steps, crps_training, atmosphere_inference",
     [
-        (2, False),
-        (0, False),
-        (3, True),  # CRPS training with EnsembleLoss
+        (2, False, False),
+        (0, False, False),
+        (3, True, False),  # CRPS training with EnsembleLoss
+        (2, False, True),
     ],
 )
 @pytest.mark.medium_duration
-def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
+def test_train_and_inference(
+    tmp_path, loss_atmos_n_steps, crps_training: bool, atmosphere_inference: bool
+):
     """Ensure that coupled training and standalone inference run without errors."""
     set_seed(42 + loss_atmos_n_steps)
 
@@ -373,6 +395,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
         coupled_steps_in_memory=2,
         loss_atmos_n_steps=loss_atmos_n_steps,
         crps_training=crps_training,
+        atmosphere_inference=atmosphere_inference,
     )
 
     with use_cpu_randn(), mock_wandb() as wandb:
@@ -515,6 +538,26 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
     )
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
+
+    if atmosphere_inference:
+        for name in atmos_out_names + atmos_derived_names:
+            assert f"atmosphere_only/time_mean/rmse/{name}" in epoch_logs
+        for epoch in (0, 1):
+            assert (
+                tmp_path
+                / "results"
+                / "output"
+                / "atmosphere_only"
+                / f"epoch_{epoch:04d}"
+                / "time_mean_diagnostics.nc"
+            ).exists()
+        # zero default weight: only the coupled entry selects best_inference_ckpt
+        coupled_errors = [
+            log["inference/time_mean_norm/rmse/channel_mean"]
+            for log in train_logs
+            if "inference/time_mean_norm/rmse/channel_mean" in log
+        ]
+        assert epoch_logs["best_inference_error"] == pytest.approx(min(coupled_errors))
 
     with use_cpu_randn(), mock_wandb() as wandb:
         inference_evaluator_main(yaml_config=inference_config_fname)

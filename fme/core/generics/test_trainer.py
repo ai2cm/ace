@@ -2162,3 +2162,21 @@ class TestBuildInferenceCallback:
             callback(epoch=1)
             callback(epoch=2)
         assert factory.call_count == 2
+
+    @pytest.mark.parametrize("task_predict", [None, "custom"])
+    def test_task_predict_used_for_rollout(self, task_predict):
+        aggregator = unittest.mock.MagicMock()
+        aggregator.get_summary.return_value = InferenceSummary(logs={}, loss=None)
+        task = self._make_task("a", aggregator=aggregator)
+        predict = unittest.mock.MagicMock() if task_predict else None
+        task.predict = predict
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_inference"
+        ) as mock_run_inference:
+            callback = build_inference_callback(
+                tasks=[task], inference_epochs=[1], stepper=stepper
+            )
+            callback(epoch=1)
+        expected = stepper.predict_paired if predict is None else predict
+        assert mock_run_inference.call_args.kwargs["predict"] is expected

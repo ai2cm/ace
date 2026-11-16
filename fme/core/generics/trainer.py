@@ -72,7 +72,7 @@ from fme.core.generics.aggregator import (
     InferenceSummary,
 )
 from fme.core.generics.data import GriddedDataABC, InferenceDataABC
-from fme.core.generics.inference import run_inference
+from fme.core.generics.inference import PredictFunction, run_inference
 from fme.core.generics.lr_tuning import (
     LRTuningConfig,
     ValidateStepper,
@@ -893,11 +893,12 @@ def inference_one_epoch(
     aggregator: InferenceAggregatorABC[PS, SD],
     label: str,
     epoch: int,
+    predict: PredictFunction[PS, FD, SD] | None = None,
 ) -> InferenceSummary:
     stepper.set_eval()
     with torch.no_grad(), validation_context(), GlobalTimer():
         run_inference(
-            predict=stepper.predict_paired,
+            predict=stepper.predict_paired if predict is None else predict,
             data=dataset,
             aggregator=aggregator,
         )
@@ -921,6 +922,8 @@ class InferenceTask(Generic[PS, FD, SD]):
         epoch_set: Epochs on which this task should run.
         weight: Contribution weight for the combined checkpoint-selection error.
             Zero means the task runs but does not contribute to the metric.
+        predict: Prediction function for the rollout. If None, uses the
+            callback stepper's ``predict_paired``.
     """
 
     name: str
@@ -928,6 +931,7 @@ class InferenceTask(Generic[PS, FD, SD]):
     aggregator_factory: Callable[[], InferenceAggregatorABC[PS, SD]]
     epoch_set: frozenset[int]
     weight: float = 0.0
+    predict: PredictFunction[PS, FD, SD] | None = None
 
 
 def build_inference_callback(
@@ -956,6 +960,7 @@ def build_inference_callback(
                 aggregator=aggregator,
                 label=task.name,
                 epoch=epoch,
+                predict=task.predict,
             )
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:
