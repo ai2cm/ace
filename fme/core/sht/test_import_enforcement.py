@@ -17,7 +17,7 @@ _ALLOWED = {
     # The disco fork references upstream for comparison.
     "fme/core/disco/",
     # Patches distributed communication primitives used by torch_harmonics.
-    "fme/core/distributed/_gloo_patch.py",
+    "fme/core/distributed/_all_to_all_patch.py",
     # Patches torch_harmonics' internal _gather to pad uneven shards.
     "fme/core/distributed/_uneven_gather_patch.py",
     # Needs the upstream class to verify fme's fork matches it.

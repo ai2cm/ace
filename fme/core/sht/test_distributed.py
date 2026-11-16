@@ -140,16 +140,30 @@ def test_isht_matches_upstream(lmax, mmax):
     _assert_matches_upstream(isht, upstream, _isht_input(isht))
 
 
+@pytest.mark.parallel
 @MODES
-def test_isht_compiles_without_graph_break(lmax, mmax):
-    """The inverse SHT zeroes the imaginary DC and Nyquist parts in a form
-    dynamo can trace, so on a single rank it compiles to a single graph.
-    Upstream's ``.imag`` setattr breaks the graph there. Not run under spatial
-    parallelism, where the distributed transposes break the graph anyway."""
-    isht = DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax).to(get_device())
+@pytest.mark.parametrize("inverse", [False, True], ids=["sht", "isht"])
+def test_transform_compiles_without_graph_break(lmax, mmax, inverse):
+    """The distributed transforms compile to a single graph, including the
+    transposes' backward, on a single rank and under spatial parallelism.
+
+    The inverse SHT zeroes the imaginary DC and Nyquist parts in a form dynamo
+    can trace (upstream's ``.imag`` setattr breaks the graph), and the
+    distributed transposes' ``all_to_all`` is traceable (see
+    ``fme.core.distributed._all_to_all_patch``)."""
+    transform: torch.nn.Module
+    if inverse:
+        transform = DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax)
+        make_input = _isht_input(transform)
+    else:
+        transform = DistributedRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax)
+        make_input = _sht_input(transform)
+    transform = transform.to(get_device())
+    # an input requiring grad makes dynamo also trace the transposes' backward
+    x = make_input().requires_grad_(True)
     torch._dynamo.reset()
     try:
-        explanation = torch._dynamo.explain(isht)(_isht_input(isht)())
+        explanation = torch._dynamo.explain(transform)(x)
     finally:
         torch._dynamo.reset()
     assert explanation.graph_break_count == 0, explanation.break_reasons
