@@ -377,6 +377,14 @@ build_fme_launch() {
     fi
 }
 
+# True when a path component of EXPERIMENT_DIR starts with `coupled`
+# (`.../coupled`, `.../coupled_ft/...`), not `.../uncoupled` or `.../atmos_from_coupled`.
+# Args: EXPERIMENT_DIR
+is_coupled_experiment_dir() {
+    local COUPLED_COMPONENT='(^|/)coupled'
+    [[ "$1" =~ $COUPLED_COMPONENT ]]
+}
+
 # Append experiment result to experiments.txt and commit
 # Args:
 #   $1 - EXPERIMENT_DIR (e.g., "experiments/2025-08-08-jamesd/coupled")

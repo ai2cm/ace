@@ -128,7 +128,8 @@ can evaluate against one maintained set of `evaluator-config-*.yaml` /
   `<experiment_dir>/<config_subdirectory>/`. The shared directory supplies
   configs, not the job list.
 - Module selection (`fme.coupled.*` vs `fme.ace.*`) stays keyed off
-  `<experiment_dir>`.
+  `<experiment_dir>`: `fme.coupled.*` when one of its path components starts
+  with `coupled` (`coupled`, `coupled_ft`), so `uncoupled/ocean` gets `fme.ace.*`.
 - An absolute path is taken as given; a relative path is resolved against the
   repository root, matching how `<experiment_dir>` is already interpreted.
 - The resolved path must lie inside the repository root — `gantry` uploads the

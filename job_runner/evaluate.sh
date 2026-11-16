@@ -53,7 +53,7 @@ done
 init_script_environment
 
 # Determine which fme module to use based on EXPERIMENT_DIR
-if [[ "$EXPERIMENT_DIR" =~ coupled ]]; then
+if is_coupled_experiment_dir "$EXPERIMENT_DIR"; then
     FME_MODULE_VALIDATE="fme.coupled.validate_config"
     FME_MODULE_EVALUATOR="fme.coupled.evaluator"
 else
