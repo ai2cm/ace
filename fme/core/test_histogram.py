@@ -184,6 +184,12 @@ def test_histogram_dtypes(dtype: torch.dtype):
     assert counts[9997] == 1
 
 
+def test_histogram_counts_values_outside_of_bins_in_end_bins():
+    values = torch.as_tensor([-5.0, 0.5, 20.0, 30.0])
+    counts = histogram(values, vmin=0.0, bin_size=1.0, n_bins=10)
+    np.testing.assert_array_equal(counts, [2, 0, 0, 0, 0, 0, 0, 0, 0, 2])
+
+
 def test_dynamic_histogram_no_finite_values():
     histogram = DynamicHistogram(n_series=1, n_bins=200)
     histogram.add([torch.as_tensor([float("nan")])])
@@ -192,7 +198,7 @@ def test_dynamic_histogram_no_finite_values():
     assert np.all(histogram.counts == 0)
 
 
-@pytest.mark.parametrize("value", [1.0, 300.0, 1.0e5])
+@pytest.mark.parametrize("value", [1.0, 300.0, 1.0e5, 1.0e12])
 def test_histogram_handles_uniform_field(value: float):
     histogram = DynamicHistogram(n_series=1, n_bins=200)
     # has zero range, including after rounding of float32 values
