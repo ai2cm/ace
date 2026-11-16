@@ -174,3 +174,8 @@ run_training "pretrain-fieldsfno-v1-l16-h512-4deg-rs1.yaml" "fieldsfno-v1-l16-h5
 # wandb run name so the resumed run keeps its display name). PRIORITY=high.
 run_training "pretrain-muon-4deg-rs1-resume240.yaml" "muon-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-pos64-mlpfilter-h512-4deg-rs1-resume240.yaml" "fieldsfno-pos64-mlpfilter-h512-4deg-pretrain-rs1" 1
+# v1 narrow/deep and l32 hidden-stream arms, 240 epochs, 4deg at 1 GPU, PRIORITY=high.
+run_training "pretrain-fieldsfno-v1-e384-l32-h128-4deg-rs1.yaml" "fieldsfno-v1-embed384-l32-h128-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-v1-e384-l32-h128-4deg-rs2.yaml" "fieldsfno-v1-embed384-l32-h128-4deg-pretrain-rs2" 1
+run_training "pretrain-fieldsfno-v1-l32-h128-4deg-rs1.yaml" "fieldsfno-v1-l32-h128-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-v1-l32-h256-4deg-rs1.yaml" "fieldsfno-v1-l32-h256-4deg-pretrain-rs1" 1
