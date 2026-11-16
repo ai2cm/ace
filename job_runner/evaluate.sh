@@ -145,6 +145,7 @@ while read TRAIN_EXPER; do
     fi
 
     require_job_name_length "$JOB_NAME"
+    require_eval_n_gpus "$JOB_NAME"
 
     if [[ -z $PRIORITY ]]; then
         PRIORITY=normal
@@ -178,7 +179,6 @@ while read TRAIN_EXPER; do
 
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
-    N_GPUS=1
 
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
@@ -186,6 +186,7 @@ while read TRAIN_EXPER; do
     FME_MODULE="$FME_MODULE_EVALUATOR"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
+    build_fme_launch "$N_GPUS"
 
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -203,6 +204,7 @@ while read TRAIN_EXPER; do
         echo " - Checkpoint: ${CKPT}"
         echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Cluster: ${CLUSTER}"
+        echo " - GPUs: ${N_GPUS}"
         echo " - Shared memory: ${SHARED_MEM}"
         echo " - Priority: ${PRIORITY}"
         echo " - ${MIN_RUNTIME}"
@@ -219,7 +221,7 @@ while read TRAIN_EXPER; do
     eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
     validate_config_once "$FME_MODULE_VALIDATE" evaluator "$CONFIG_PATH_REL" "${OVERRIDE_ARGV[@]}" "${LIFT_OVERRIDE[@]}"
 
-    JOB_COMMAND=(python -I -m "$FME_MODULE_EVALUATOR" "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}" "${LIFT_OVERRIDE[@]}")
+    JOB_COMMAND=("${FME_LAUNCH[@]}" "$FME_MODULE_EVALUATOR" "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}" "${LIFT_OVERRIDE[@]}")
     if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]]; then
         JOB_COMMAND=(bash -c "python -I $LIFT_TOOL /ckpt.tar $LIFTED_ATMOSPHERE_CKPT && exec \"\$@\"" lift-coupled-atmosphere "${JOB_COMMAND[@]}")
     fi
@@ -244,7 +246,7 @@ while read TRAIN_EXPER; do
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
-            --gpus 1 \
+            --gpus "$N_GPUS" \
             --shared-memory $SHARED_MEM \
             --budget ai2/atec-climate \
             --system-python \
