@@ -166,7 +166,7 @@ while read TRAIN_EXPER; do
     if [[ -z $SHARED_MEM ]]; then
         SHARED_MEM=$(default_shared_mem "$CLUSTER" "$N_GPUS")
     fi
-    FME_MODULE="$FME_MODULE_EVALUATOR"
+    FME_MODULE="$FME_MODULE_INFERENCE"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
     build_fme_launch "$N_GPUS"
