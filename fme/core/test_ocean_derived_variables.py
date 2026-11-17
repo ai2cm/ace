@@ -14,7 +14,7 @@ from fme.core.constants import (
     REFERENCE_SALINITY,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
-from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
+from fme.core.coordinates import DepthCoordinate, HEALPixCoordinates, LatLonCoordinates
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
@@ -631,7 +631,7 @@ def test_mld_wright97_skipped_without_salinity():
 def test_wright97_metadata_has_units():
     metadata = get_derived_variable_metadata()
     assert metadata["mld_wright97"].units == "m"
-    assert metadata["pbo_wright97"].units == "Pa"
+    assert metadata["manometric_sea_level_wright97"].units == "m"
 
 
 def _wright97_inputs():
@@ -653,7 +653,7 @@ def _wright97_inputs():
     return data, depth_coordinate, horizontal_coordinates
 
 
-def test_pbo_wright97_derived_variable():
+def test_manometric_sea_level_wright97_derived_variable():
     data, depth_coordinate, horizontal_coordinates = _wright97_inputs()
     out = compute_ocean_derived_quantities(
         dict(data),
@@ -663,12 +663,12 @@ def test_pbo_wright97_derived_variable():
     )
     expected = OceanData(
         data, depth_coordinate, cell_area_provider=horizontal_coordinates
-    ).pbo_wright97
-    torch.testing.assert_close(out["pbo_wright97"], expected)
+    ).manometric_sea_level_wright97
+    torch.testing.assert_close(out["manometric_sea_level_wright97"], expected)
 
 
 @pytest.mark.parametrize("missing", ["cell_area", "zos"])
-def test_pbo_wright97_skipped_without_cell_area_or_zos(missing):
+def test_manometric_sea_level_wright97_skipped_without_cell_area_or_zos(missing):
     data, depth_coordinate, horizontal_coordinates = _wright97_inputs()
     if missing == "zos":
         del data["zos"]
@@ -679,4 +679,22 @@ def test_pbo_wright97_skipped_without_cell_area_or_zos(missing):
         cell_area_provider=None if missing == "cell_area" else horizontal_coordinates,
     )
     assert "mld_wright97" in out
-    assert "pbo_wright97" not in out
+    assert "manometric_sea_level_wright97" not in out
+
+
+def test_manometric_sea_level_wright97_skipped_on_healpix():
+    nz = 3
+    shape = (1, 12, 2, 2)  # (batch, face, height, width)
+    data = {f"thetao_{k}": 20.0 - 3.0 * k * torch.rand(shape) for k in range(nz)}
+    data.update({f"so_{k}": 34.0 + torch.rand(shape) for k in range(nz)})
+    data["zos"] = 0.1 * torch.randn(shape)
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 30.0, 60.0]), mask=torch.ones(12, 2, 2, nz)
+    )
+    healpix = HEALPixCoordinates(
+        face=torch.arange(12), height=torch.arange(2), width=torch.arange(2)
+    )
+    derive = depth_coordinate.build_derive_function(TIMESTEP, healpix)
+    out = derive(dict(data), {})
+    assert "mld_wright97" in out
+    assert "manometric_sea_level_wright97" not in out
