@@ -18,7 +18,6 @@
 import tensorly as tl
 import torch
 import torch.nn as nn
-from fme.core.spectral_filter_parameter import SpectralFilterParameter
 import torch.nn.functional as F
 
 tl.set_backend("pytorch")
@@ -27,6 +26,8 @@ import fme.core.sht as th
 # from tensorly.plugins import use_opt_einsum
 # use_opt_einsum('optimal')
 from tltorch.factorized_tensors.core import FactorizedTensor
+
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
