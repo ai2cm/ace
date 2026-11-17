@@ -447,22 +447,6 @@ def test_ocean_volume_per_area_equality(first, second, equal):
     assert (a == b) is equal
 
 
-def test_adopt_deptho_keeps_ocean_volume_per_area():
-    ocean_volume_per_area = _ocean_volume_per_area()
-    dataset_coord = _make_ocean_volume_per_area_coordinate(ocean_volume_per_area)
-    checkpoint_coord = DepthCoordinate(
-        idepth=dataset_coord.idepth,
-        mask=dataset_coord.mask,
-        ocean_volume_per_area=ocean_volume_per_area,
-    )
-    adopted = checkpoint_coord.adopt_deptho(dataset_coord)
-    assert adopted.deptho is not None
-    assert adopted.ocean_volume_per_area is not None
-    torch.testing.assert_close(adopted.ocean_volume_per_area, ocean_volume_per_area)
-    torch.testing.assert_close(adopted.dz, checkpoint_coord.dz)
-    assert adopted == dataset_coord
-
-
 def test_ocean_volume_per_area_to_device():
     coord = _make_ocean_volume_per_area_coordinate(_ocean_volume_per_area())
     moved = coord.to(get_device())
@@ -518,56 +502,6 @@ def test_depth_integral_gradient_with_mask():
 
     assert integrand.grad is not None
     assert torch.all(torch.isfinite(integrand.grad))
-
-
-def test_with_deptho():
-    idepth = torch.tensor([0.0, 10.0, 50.0])
-    mask = torch.ones(2, 3, 2)
-    coord = DepthCoordinate(idepth=idepth, mask=mask)
-    assert coord.deptho is None
-
-    deptho = torch.full((2, 3), 40.0)
-    updated = coord.with_deptho(deptho)
-    assert updated.deptho is not None
-    torch.testing.assert_close(updated.deptho, deptho)
-    torch.testing.assert_close(updated.idepth, idepth)
-    torch.testing.assert_close(updated.mask, mask)
-    # original unchanged
-    assert coord.deptho is None
-
-
-class TestAdoptDeptho:
-    def test_depth_coordinate_adopts_when_missing(self):
-        idepth = torch.tensor([0.0, 10.0, 50.0])
-        mask = torch.ones(2, 3, 2)
-        coord = DepthCoordinate(idepth=idepth, mask=mask)
-        deptho = torch.full((2, 3), 40.0)
-        other = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
-
-        updated = coord.adopt_deptho(other)
-        assert updated is not coord
-        assert updated.deptho is not None
-        torch.testing.assert_close(updated.deptho, deptho)
-
-    def test_depth_coordinate_noop_when_already_present(self):
-        idepth = torch.tensor([0.0, 10.0, 50.0])
-        mask = torch.ones(2, 3, 2)
-        existing_deptho = torch.full((2, 3), 30.0)
-        coord = DepthCoordinate(idepth=idepth, mask=mask, deptho=existing_deptho)
-        other_deptho = torch.full((2, 3), 99.0)
-        other = DepthCoordinate(idepth=idepth, mask=mask, deptho=other_deptho)
-
-        result = coord.adopt_deptho(other)
-        assert result is coord
-
-    def test_depth_coordinate_noop_when_other_lacks_deptho(self):
-        idepth = torch.tensor([0.0, 10.0, 50.0])
-        mask = torch.ones(2, 3, 2)
-        coord = DepthCoordinate(idepth=idepth, mask=mask)
-        other = DepthCoordinate(idepth=idepth, mask=mask)
-
-        result = coord.adopt_deptho(other)
-        assert result is coord
 
 
 @pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")

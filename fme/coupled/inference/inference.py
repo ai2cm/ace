@@ -395,7 +395,6 @@ def run_inference_from_config(config: InferenceConfig):
         dataset_info=stepper.training_dataset_info,
     )
     data.apply_config_seed(config.seed)
-    stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
