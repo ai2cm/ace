@@ -300,6 +300,37 @@ class OceanData:
         return density_anomaly(thetao, so, geometry.idepth, geometry.mask)
 
     @property
+    def steric_sea_level_wright97(self) -> torch.Tensor:
+        """Steric sea level [m] of the static column, Wright (1997).
+
+            C          = sum_k rho_wright97_k * dz_k             [kg m-2]
+            eta_steric = -C / RHO_0                              [m]
+
+        k: depth level; dz_k: the depth coordinate's ``dz``. NaN where
+        ``mask_0 == 0``; a NaN ``rho_wright97_k`` contributes 0 to C.
+
+        Relative to a column of density ``RHO_0`` over the static levels (sea
+        surface at 0), as ``manometric_sea_level_wright97``, with which
+        ``zos - <zos> = eta_steric - <eta_steric> + eta_mano`` (<x> as there).
+        Not demeaned, and needs neither ``zos`` nor a cell area provider.
+
+        The static compressibility part of C scales with ``deptho`` and
+        dominates the field; gen - target differences and time anomalies are
+        the meaningful metrics, not the field itself.
+
+        Raises:
+            ValueError: If the depth coordinate is not a
+                ``HasOceanLayerGeometry``, or potential temperature or salinity
+                has more levels than it.
+            KeyError: If a level of potential temperature or salinity is
+                missing.
+        """
+        geometry = self._layer_geometry("steric_sea_level_wright97")
+        C = column_density_integral(self.rho_wright97, geometry.dz)
+        mask_0 = geometry.mask.select(dim=-1, index=0).to(C.device)
+        return torch.where(mask_0 > 0, -C / RHO_0, torch.nan)
+
+    @property
     def manometric_sea_level_wright97(self) -> torch.Tensor:
         """Globally demeaned manometric sea level [m], Wright (1997).
 
