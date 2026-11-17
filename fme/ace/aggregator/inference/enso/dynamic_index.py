@@ -35,7 +35,7 @@ from ..utils import (
     running_monthly_mean,
 )
 
-SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
+SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "SST_degK", "surface_temperature", "TS"]
 MAX_PLOTTED_PERIOD_YEARS = 16.0
 
 

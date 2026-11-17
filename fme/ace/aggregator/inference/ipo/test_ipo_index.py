@@ -89,7 +89,8 @@ class TestLowPassFilter:
 
 
 class TestIPORegionalAccumulator:
-    def test_accumulates_batches(self):
+    @pytest.mark.parametrize("sst_name", ["sst", "SST_degK"])
+    def test_accumulates_batches(self, sst_name: str):
         lat, lon = _make_lat_lon()
         n_samples, n_times, n_lat, n_lon = 2, 20, len(lat), len(lon)
 
@@ -110,7 +111,7 @@ class TestIPORegionalAccumulator:
         accumulator = _IPORegionalAccumulator(regions)
 
         time1 = _make_time(n_samples, n_times // 2)
-        data1 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon, sst_name="sst")
+        data1 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon, sst_name=sst_name)
         batch1 = InferenceBatchData(
             prediction=data1,
             time=time1,
@@ -119,7 +120,7 @@ class TestIPORegionalAccumulator:
         accumulator.record_batch(batch1)
 
         time2 = _make_time(n_samples, n_times // 2, i_start=n_times // 2)
-        data2 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon, sst_name="sst")
+        data2 = _make_sst_data(n_samples, n_times // 2, n_lat, n_lon, sst_name=sst_name)
         batch2 = InferenceBatchData(
             prediction=data2,
             time=time2,
@@ -130,8 +131,8 @@ class TestIPORegionalAccumulator:
         assert accumulator._raw_times is not None
         assert accumulator._raw_times.sizes["time"] == n_times
         for region_name in regions:
-            assert "sst" in accumulator._raw_means[region_name]
-            assert accumulator._raw_means[region_name]["sst"].shape[1] == n_times
+            assert sst_name in accumulator._raw_means[region_name]
+            assert accumulator._raw_means[region_name][sst_name].shape[1] == n_times
 
     def test_constant_sst_gives_zero_tpi(self):
         """Constant SST should give zero anomalies and hence zero TPI."""
