@@ -1,0 +1,28 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# Isolation arm C for the poor 1deg ocean_fillmean runs (xrfjr4cq, 5eovzgxd,
+# mj3koiqj). Follow-up to ocean_fillmean_noice, which is training worse still:
+# that arm dropped the sea ice OUTPUTS but had to keep ocean_sea_ice_fraction
+# as an input, because surface_energy_flux_correction derives
+# ocean_fraction = 1 - land_fraction - sea_ice_fraction from it.
+#
+# This arm removes the sea ice entirely by also turning the flux correction
+# off. Two changes from ocean_fillmean_noice, not one:
+#   1. ocean_sea_ice_fraction leaves in_names (93 -> 92 channels), so no sea
+#      ice variable is read or written anywhere.
+#   2. surface_energy_flux_correction is NOT set below, unlike every other arm
+#      in this experiment. hfds_total_area is therefore predicted freely
+#      instead of being set from the atmospheric fluxes, and the corrector
+#      reduces to ForcePositive on the salinity levels.
+# A result here is attributable to the pair, not to either one alone. The arm
+# that would separate them is the same config WITH the flux correction and
+# WITH ocean_sea_ice_fraction as input -- that is ocean_fillmean_noice, which
+# is already running.
+#
+# ch_width and fill_value=mean are held at ocean_fillmean's values.
+# 3 seeds staged, matching ocean_fillmean's seed spread, but only rs0 is set
+# to train, as in the other two arms. Flip rs1/rs2 to `train` to fill in the
+# spread once rs0 shows whether this arm moves the needle.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice_nofluxcorr|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice_nofluxcorr|rs1|skip|high|h100|4|500GiB|3|ai2/ace|seed=1
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice_nofluxcorr|rs2|skip|high|h100|4|500GiB|3|ai2/ace|seed=2

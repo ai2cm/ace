@@ -509,6 +509,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     )
     data.apply_config_seed(config.seed)
     stepper.set_eval()
+    stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))

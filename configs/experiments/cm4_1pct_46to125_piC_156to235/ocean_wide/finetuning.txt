@@ -1,0 +1,26 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+# Multi-step fine-tune of the ocean_wide_ohc_clip pretraining: identical recipe
+# except stepper_training.n_forward_steps 4 -> 8 and max_epochs 75 -> 10, from
+# each seed's own best_ckpt. See finetune-config-template.yaml, which is
+# train-config.yaml with those two edits, evaluate_before_training: true, and
+# the stepper block dropped -- uncoupled_finetune.sh merges the stepper in from
+# the pretraining run's saved config.yaml, so the checkpoint's masking,
+# corrector and variable lists are carried over verbatim rather than restated.
+#
+# The two override args are not carried by that merge and so are restated here:
+# optimization.max_grad_norm lives outside .stepper (it is the "clip" in this
+# arm's name and would otherwise revert to unclipped), and the OHC method is
+# belt-and-braces -- it is already in the checkpoint config.
+#
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train"; all
+# three seeds below are armed.
+
+# ocean_wide_ohc_clip -- pretraining finished at 75 epochs 2026-08-24
+# (beaker 01M0FY1SAKMGARA9QG2QE03868 / 01M0FY25WAPMPER8G4N1Y1EESP / 01M0FY2JC8QWR61KBKXY57B0J4)
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|ace-samudra-cm4|7w9qf9aj|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|ace-samudra-cm4|07fcva1p|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw906|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0

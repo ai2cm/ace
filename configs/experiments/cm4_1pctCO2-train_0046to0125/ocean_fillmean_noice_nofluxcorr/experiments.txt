@@ -1,0 +1,2 @@
+
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice_nofluxcorr|rs0|01KZZASVPAGY5B4YPGQJDCR3Z3|training|best_inference_ckpt|normal|--min-runtime 8h

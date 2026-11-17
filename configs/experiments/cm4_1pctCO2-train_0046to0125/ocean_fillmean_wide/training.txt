@@ -1,0 +1,17 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# Isolation arm A for the poor 1deg ocean_fillmean runs (xrfjr4cq, 5eovzgxd,
+# mj3koiqj). Identical to ocean_fillmean in every respect except the Samudra
+# ch_width, which is [280, 380, 480, 520] rather than [200, 250, 300, 400] in
+# this directory's train-config.yaml: 132.1 M -> 269.4 M parameters (2.04x).
+# fill_value=mean is held fixed, so a difference against ocean_fillmean is
+# attributable to capacity alone.
+# 3 seeds staged, matching ocean_fillmean's seed spread, but only rs0 is set
+# to train: this is a diagnostic first read on a pathology that is stark in
+# every ocean_fillmean seed. Flip rs1/rs2 to `train` to fill in the spread
+# once rs0 shows whether this arm moves the needle.
+# Same n_gpus and batch_size as ocean_fillmean so the comparison is clean; at
+# 2x parameters the first submission is the OOM check.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_wide|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_wide|rs1|skip|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_wide|rs2|skip|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'

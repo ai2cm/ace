@@ -403,6 +403,7 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
         # Must happen before the ensemble broadcast.  Gathered restarts
         # are already per-rank (scattered inside from_xarray_dataset).
         if dist.total_data_parallel_ranks > 1 and not ic_already_sharded:

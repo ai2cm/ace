@@ -1,0 +1,3 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime
+
+cm4_1pctCO2-train_0046to0125-boundary_prescribed-ocean|rs0|ace-samudra-cm4|h9lvcaed|train|high|h100|4|500GiB|3|ai2/ace|resume_results.resume_wandb=true max_epochs=175||||

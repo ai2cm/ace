@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# ocean_precorr_cde1-ft -- corrector_disabled_epochs=0 needed to undo pretraining's corrector config setting
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1-ft|rs0|ace-samudra-cm4|1t2gojtc|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.corrector_disabled_epochs=0||8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1-ft|rs1|ace-samudra-cm4|4q1d6g4v|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.corrector_disabled_epochs=0||8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1-ft|rs2|ace-samudra-cm4|mi8w82ta|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.corrector_disabled_epochs=0||8h

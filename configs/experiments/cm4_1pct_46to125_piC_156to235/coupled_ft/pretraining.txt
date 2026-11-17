@@ -1,0 +1,11 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# naming conventions: see ../coupled/pretraining.txt
+# - subdir: coupled_ft (joint ocean+atmos training from separate ocean/atmos inits)
+# - lr7e-5 = optimization.lr=0.00007 (default 0.00001)
+
+# coupled_ft-oppfm_a2sLR
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_ft-oppfm_a2sLR|o0a2rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|train|urgent|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0|8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_ft_lr7e-5-oppfm_a2sLR|o0a2rs0|ace-samudra-cm4|mnh7jo06|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|train|urgent|b200|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0 optimization.lr=0.00007|8h

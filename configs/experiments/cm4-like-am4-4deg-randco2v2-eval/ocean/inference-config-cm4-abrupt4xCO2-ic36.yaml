@@ -1,0 +1,29 @@
+# job_runner/inference.sh configs/experiments/cm4-like-am4-4deg-randco2v2-eval/ocean .
+# Uncoupled ocean inference for CM4 abrupt-4xCO2 ensemble member ic_0036: 90 days
+# from the branch time 0311-12-01T00:00:00, initialized from the daily piControl ocean store
+# and forced by the member's own 5-day surface fluxes. The forcing file puts those
+# fluxes on a 5-day axis starting at the branch time (see its description attribute).
+experiment_dir: /results
+n_forward_steps: 18 # 90 days
+forward_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+initial_condition:
+  path: /climate-default/2026-09-02-cm4-piControl-4deg-ocean-1daily.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - "0311-12-01T00:00:00"
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-10-23-cm4-abrupt-4xCO2-ensemble-4deg-ocean-forcing
+    file_pattern: ic_0036.nc
+  num_data_workers: 1
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

@@ -2858,6 +2858,70 @@ def test_get_serialized_stepper_vertical_coordinate():
     assert isinstance(vertical_coordinate, VerticalCoordinate)
 
 
+class TestBackfillDeptho:
+    def test_backfills_when_checkpoint_lacks_deptho(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask)
+        stepper.update_vertical_coordinate(ckpt_vc)
+        vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(vc, DepthCoordinate)
+        assert vc.deptho is None
+
+        deptho = torch.tensor(2.5)
+        dataset_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
+        stepper.backfill_deptho(dataset_vc)
+
+        updated_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(updated_vc, DepthCoordinate)
+        assert updated_vc.deptho is not None
+        torch.testing.assert_close(updated_vc.deptho, deptho)
+
+    def test_noop_when_checkpoint_already_has_deptho(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        deptho = torch.tensor(2.5)
+        ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
+        stepper.update_vertical_coordinate(ckpt_vc)
+
+        dataset_vc = DepthCoordinate(
+            idepth=idepth, mask=mask, deptho=torch.tensor(999.0)
+        )
+        stepper.backfill_deptho(dataset_vc)
+
+        updated_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(updated_vc, DepthCoordinate)
+        torch.testing.assert_close(updated_vc.deptho, deptho)
+
+    def test_noop_when_dataset_lacks_deptho(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        ckpt_vc = DepthCoordinate(idepth=idepth, mask=mask)
+        stepper.update_vertical_coordinate(ckpt_vc)
+
+        dataset_vc = DepthCoordinate(idepth=idepth, mask=mask)
+        stepper.backfill_deptho(dataset_vc)
+
+        vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(vc, DepthCoordinate)
+        assert vc.deptho is None
+
+    def test_noop_for_non_depth_coordinate(self):
+        stepper = _get_stepper(["a"], ["a"])
+        original_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(original_vc, HybridSigmaPressureCoordinate)
+
+        other_vc = HybridSigmaPressureCoordinate(
+            ak=torch.arange(4, dtype=torch.float),
+            bk=torch.arange(4, dtype=torch.float),
+        )
+        stepper.backfill_deptho(other_vc)
+        assert stepper.training_dataset_info.vertical_coordinate == original_vc
+
+
 def _get_scheduled_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
     return _get_stepper(
         ["a"],
@@ -2974,6 +3038,62 @@ def test_get_stepper_with_input_masking_raises():
         _ = _get_stepper_with_input_masking(
             dataset_info_has_spatial_mask_provider=False
         )
+
+
+def _get_stepper_with_fill_value_overrides(
+    fill_value_overrides: dict[str, Literal["mean"] | float],
+) -> Stepper:
+    in_names = ["thetao_0", "thetao_1", "zos", "forcing"]
+    out_names = ["thetao_0", "thetao_1", "zos", "diagnostic"]
+    mask = torch.ones(5, 5, device=fme.get_device())
+    mask[0, 0] = 0.0
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names), mean=5.0
+                    ),
+                )
+            ),
+        ),
+        input_masking=StaticSpatialMaskingConfig(
+            mask_value=0,
+            fill_value=0.0,
+            fill_value_overrides=fill_value_overrides,
+        ),
+    )
+    return config.get_stepper(
+        get_dataset_info(
+            spatial_mask_provider=SpatialMaskProvider(
+                {"mask_2d": mask, "mask_0": mask, "mask_1": mask}
+            )
+        )
+    )
+
+
+def test_get_stepper_fill_value_overrides_apply_to_inputs():
+    stepper = _get_stepper_with_fill_value_overrides({"thetao_": "mean", "zos": 1.0})
+    data = {
+        name: torch.full((1, 5, 5), 7.0, device=fme.get_device())
+        for name in ["thetao_0", "thetao_1", "zos", "forcing"]
+    }
+    out = stepper._input_process_func(data)
+    assert out["thetao_0"][0, 0, 0].item() == pytest.approx(5.0)  # mean
+    assert out["zos"][0, 0, 0].item() == pytest.approx(1.0)  # override
+    assert out["forcing"][0, 0, 0].item() == pytest.approx(0.0)  # fill_value
+    assert out["zos"][0, 1, 1].item() == pytest.approx(7.0)  # unmasked
+
+
+def test_get_stepper_fill_value_overrides_reject_output_only_key():
+    with pytest.raises(ValueError, match="match no masked input"):
+        _get_stepper_with_fill_value_overrides({"diagnostic": 1.0})
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])

@@ -47,7 +47,7 @@ import subprocess
 import sys
 
 # Column positions, set by load_columns from EXPERIMENTS_COLUMNS in lib.sh
-TAG = EXPER_ID = STATUS = CKPT = PRIORITY = MIN_RUNTIME = WORKSPACE = CLUSTER = -1
+TAG = EXPER_ID = STATUS = CKPT = PRIORITY = MIN_RUNTIME = WORKSPACE = CLUSTER = N_GPUS = -1
 
 
 def repo_root(path):
@@ -61,7 +61,7 @@ def repo_root(path):
 
 
 def load_columns(root):
-    global TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME, WORKSPACE, CLUSTER
+    global TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME, WORKSPACE, CLUSTER, N_GPUS
     out = subprocess.run(
         ["bash", "-c", "source job_runner/lib.sh; input_header EXPERIMENTS_COLUMNS"],
         cwd=root,
@@ -70,7 +70,7 @@ def load_columns(root):
         check=True,
     )
     index = {name: i for i, name in enumerate(out.stdout.strip().split("|"))}
-    TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME, WORKSPACE, CLUSTER = (
+    TAG, EXPER_ID, STATUS, CKPT, PRIORITY, MIN_RUNTIME, WORKSPACE, CLUSTER, N_GPUS = (
         index[name]
         for name in (
             "tag",
@@ -81,6 +81,7 @@ def load_columns(root):
             "min_runtime",
             "workspace",
             "cluster",
+            "n_gpus",
         )
     )
 
@@ -358,10 +359,13 @@ def cmd_apply(args):
             if args.keep_training:
                 out.append(line)
             for status in statuses:
-                g = f + [""] * (MIN_RUNTIME + 1 - len(f))
+                width = N_GPUS + 1 if args.n_gpus else MIN_RUNTIME + 1
+                g = f + [""] * (width - len(f))
                 g[STATUS] = status
                 if args.priority:
                     g[PRIORITY] = args.priority
+                if args.n_gpus:
+                    g[N_GPUS] = str(args.n_gpus)
                 if runtimes[status]:
                     g[MIN_RUNTIME] = f"--min-runtime {runtimes[status]}"
                 out.append("|".join(g))
@@ -405,6 +409,9 @@ def main():
     a.add_argument("dir")
     a.add_argument("--row", action="append", required=True, help="STATUS[:MIN_RUNTIME]")
     a.add_argument("--priority", help="default: copied from the training row")
+    a.add_argument(
+        "--n-gpus", type=int, help="default: copied from the training row, blank = 1"
+    )
     a.add_argument("--keep-training", action="store_true")
     a.add_argument(
         "--config-dir",

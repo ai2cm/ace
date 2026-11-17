@@ -1,0 +1,2 @@
+group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
+v2025-08-22-ts_unc-const_lr_20ep-nfs2-ft_18o5meta|ace2-cm4-atmos-noLSM|18o5meta|best_ckpt|train|urgent|ceres|8|600GiB|3

@@ -1,0 +1,5 @@
+group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235-ocean_ppad_mae|rs0|train|high|jupiter|4||3|ai2/ace|seed=0|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_mae|rs1|train|normal|jupiter|4||3|ai2/ace|seed=1|8h
+cm4_1pct_46to125_piC_156to235-ocean_ppad_mae|rs2|train|normal|jupiter|4||3|ai2/ace|seed=2|8h

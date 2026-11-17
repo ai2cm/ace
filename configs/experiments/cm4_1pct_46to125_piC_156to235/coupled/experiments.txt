@@ -1,0 +1,119 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# --config-dir configs/experiments/cm4_eval/coupled
+
+# 1pct-ic0001-130yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|ran_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|ran_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|ran_1pct-ic0001-130yr|best_ckpt|urgent|--min-runtime 2h
+
+# piC-ic0151-200yr
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|01M14TKQYN1AM940G7XWMTFMXH|ran_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|01M14TMAM55HPB4T2364CSC2GV|ran_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse-owc_a2s-fto|o2a0rs0|01M14TMYAYMVK3FF16RFKVFAE1|ran_piC-ic0151-200yr|best_ckpt|urgent|--min-runtime 3h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2sLR-fto|o2a2rs0|01M3345B0QJHGC7HSQND2QGEXT|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2sLR-fto|o2a2rs0|01M33460TNQWM3JJ3TQJ1D4HKM|canceled|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-owc_a2s-fto|o2a0rs0|01M33RSBSAJ20EGGS8A8AYMEXK|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-owc_a2s-fto|o2a0rs0|01M33RSBSAJ20EGGS8A8AYMEXK|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_randco2-fto|o2a2rs0|01M3AH529SY3QY7CB32HJCW4A1|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_randco2-fto|o2a2rs0|01M3AH529SY3QY7CB32HJCW4A1|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+# training finished 2026-10-17 (final attempt exit 0); results_dataset pins the final attempt's dataset.
+# Evals launched 2026-10-17 (elynnwu): 1pct 01M55VS1VSV3TKPQTB0TM4241H, piC 01M55VS90MQ38H1C9FSKE9JCMZ.
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|ran_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 8h||01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|ran_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 8h||01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0|01M4SZFVA0A9XBQC502PPC217Q|ran_1pct-ic0001-130yr-maps|best_inference_ckpt|normal|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/1pct-ic0001-130yr-maps|01M501632YXQHMZCDD4BE9JTJ0|ai2/ace|jupiter+titan
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-rerun|01M4SZFVA0A9XBQC502PPC217Q|ran_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/piC-ic0151-200yr-maps
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-ep4|01M50HQ3S2858MCF7E4Z0XZREZ|ran_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 8h||01M4YD7ATDAZ65TFEGAZZ9TJM4
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-fto|o0a2rs0-ep4|01M50HQDCV27C3WJHTH27QD8PJ|ran_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 8h||01M4YD7ATDAZ65TFEGAZZ9TJM4
+
+# --config-dir configs/experiments/cm4_eval/coupled
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_1pct-ic0001-130yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/1pct-ic0001-130yr-maps
+
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-10-19-coupled-1pct-picontrol-eval/coupled/8xx0pife/piC-ic0151-200yr-maps
+
+# MJO lag regression (DeMott et al. 2019 Fig. 2), out-of-sample piControl 0330-0350, daily tropics
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0330-21yr-mjo|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-11-mjo-lag-regression-eval/coupled/8xx0pife/piC-ic0330-21yr-mjo
+
+# TC wake statistics, out-of-sample piControl 0302-0350, 6-h tracker inputs + 5-day sst, |lat| <= 60
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0302-48yr-tc|best_inference_ckpt|high|--min-runtime 4h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-12-tc-wake-eval/coupled/8xx0pife/piC-ic0302-48yr-tc
+
+# AMOC at 26.5N, 1pctCO2 0001-0130 (rollout as 1pct-ic0001-130yr-maps), 5-day vo_0..vo_18 on the 26.5N Atlantic row
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_1pct-ic0001-130yr-amoc|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-13-amoc-eval/coupled/8xx0pife/1pct-ic0001-130yr-amoc
+
+# AMOC at 26.5N, piControl 0151-0350 (rollout as piC-ic0151-200yr-maps), 5-day vo_0..vo_18 on the 26.5N Atlantic row
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_piC-ic0151-200yr-amoc|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-13-amoc-eval/coupled/8xx0pife/piC-ic0151-200yr-amoc
+
+# --config-dir configs/experiments/cm4_eval/coupled
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a1rs0|01M5MXTR3H6WP7BASBBX6NFEKX|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+# --config-dir configs/experiments/cm4_eval/coupled
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a0rs0|01M6Q579A8XX29G6PFR902HATD|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-fto|o0a2rs0|01M6Q582H6496X338DJDM4EHQJ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a0rs0|01M6Q58ZM66DJ3QW4CMDVSX2EM|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a1rs0|01M6Q59QR76XN1NKR0CFKYB5GA|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_a2p5rco2v2-fto|o0a2rs0|01M6Q5AFPB2MSKG45NP522BWVF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# --config-dir configs/experiments/cm4_eval/coupled (job_runner/inference.sh)
+# Coupled abrupt-4xCO2: 36 90-day members branched from piControl, plus a 100-year extension of member 1 (W&B 8xx0pife).
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic1|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic2|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic3|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic4|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic5|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic6|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic7|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic8|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic9|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic10|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic11|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic12|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic13|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic14|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic15|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic16|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic17|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic18|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic19|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic20|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic21|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic22|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic23|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic24|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic25|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic26|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic27|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic28|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic29|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic30|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic31|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic32|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic33|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic34|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic35|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic36|best_inference_ckpt|high|--min-runtime 2h||01M5AR9ZMW9QMP9QHJZM3AB0SR
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto|o0a2rs0|01M5AR9ZMHXQPCNK2W8N18YQBS|ran_inf_cm4-abrupt4xCO2-ic1-100yr|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR

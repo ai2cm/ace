@@ -1,0 +1,1 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime

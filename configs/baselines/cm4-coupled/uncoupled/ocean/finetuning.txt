@@ -1,0 +1,2 @@
+group|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
+v2025-08-22-mnsf-correctHI-rs1-finetune|ace-samudra-cm4|7dysc54l|best_inference_ckpt|skip|high|ceres|8|400GiB|3||

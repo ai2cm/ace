@@ -1,0 +1,5 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+cm4_1pctCO2-train_0046to0125-atmos_baseline|rs0|train|high|h100|8|600GiB|3|ai2/ace|seed=0
+cm4_1pctCO2-train_0046to0125-atmos_baseline|rs1|train|high|h100|8|600GiB|3|ai2/ace|seed=1
+cm4_1pctCO2-train_0046to0125-atmos_baseline|rs2|train|high|h100|8|600GiB|3|ai2/ace|seed=2

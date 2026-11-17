@@ -9,8 +9,7 @@ logging:
   project: ace-som
   entity: ai2cm
 aggregator:
-  zonal_mean:
-    enabled: false
+  log_zonal_mean_images: false
 loader:
   start_indices:
     times:

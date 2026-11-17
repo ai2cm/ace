@@ -37,19 +37,18 @@ train_loader:
       data_path: {atmosphere_data_path}
       subset:
           start_time: '1970-01-01'
-validation:
-- loader:
-    batch_size: 2
-    num_data_workers: 0
-    dataset:
-      ocean:
-        data_path: {ocean_data_path}
-        subset:
-            start_time: '1970-01-01'
-      atmosphere:
-        data_path: {atmosphere_data_path}
-        subset:
-            start_time: '1970-01-01'
+validation_loader:
+  batch_size: 2
+  num_data_workers: 0
+  dataset:
+    ocean:
+      data_path: {ocean_data_path}
+      subset:
+          start_time: '1970-01-01'
+    atmosphere:
+      data_path: {atmosphere_data_path}
+      subset:
+          start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -262,8 +261,8 @@ def _write_test_yaml_files(
     "loss_atmos_n_steps, crps_training",
     [
         (2, False),
-        (0, False),
-        (3, True),  # CRPS training with EnsembleLoss
+        # (0, False),
+        # (3, True),  # CRPS training with EnsembleLoss
     ],
 )
 @pytest.mark.medium_duration

@@ -24,8 +24,7 @@ inference:
         engine: zarr
       num_data_workers: 4
     aggregator:
-      histogram:
-        enabled: true
+      log_histograms: true
 logging:
   log_to_screen: true
   log_to_wandb: true

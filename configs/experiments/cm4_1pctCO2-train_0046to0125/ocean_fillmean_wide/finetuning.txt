@@ -1,0 +1,8 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+# The finetune leg is not staged yet: its wandb_id column must be the pretraining
+# runs' ids, which do not exist until the rows in training.txt have run. Add rows
+# here (mirroring ocean_baseline/finetuning.txt) after pretraining completes.
+# Neither fill_value=mean nor the wider ch_width needs an override here -- the
+# finetune stepper is inherited from the pretraining checkpoint, so both the
+# input_masking and the architecture carry over.

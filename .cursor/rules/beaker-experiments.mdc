@@ -1,0 +1,28 @@
+---
+description: Guidelines for working with Beaker experiments and job_runner
+globs:
+  - "**/job_runner/**"
+  - "**/resuming.txt"
+  - "**/experiments.txt"
+---
+
+# Beaker Experiment Guidelines
+
+## Getting Experiment Results
+
+When querying beaker experiments that may have been preempted or retried, **always use the final job**, not the first job:
+
+```bash
+# CORRECT: Get the final job's results dataset
+beaker experiment get <EXPERIMENT_ID> --format json | jq '.[0].jobs[-1].result.beaker'
+
+# WRONG: This gets the first job, which may have been preempted
+beaker experiment get <EXPERIMENT_ID> --format json | jq '.[0].jobs[0].result.beaker'
+```
+
+Check the number of jobs to understand experiment history:
+```bash
+beaker experiment get <EXPERIMENT_ID> --format json | jq '.[0] | {num_jobs: (.jobs | length), final_exit_code: .jobs[-1].status.exitCode}'
+```
+
+An experiment with many jobs (e.g., 10+) was preempted multiple times. The final job's `exitCode: 0` indicates successful completion despite earlier preemptions.

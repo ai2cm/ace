@@ -1,0 +1,2 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+ft_9r07dbti-wu_0p5xLR-ncs4-20ep||ace-samudra-coupled-cm4|9r07dbti|best_inference_ckpt_0007|train|high||8|800GiB|1||optimization.lr=0.00005|01K8CVQ17Y68YGT27ESGFYTYPW

@@ -2,6 +2,7 @@ import dataclasses
 import logging
 import os
 from collections.abc import Sequence
+from typing import Any
 
 import dacite
 import torch
@@ -35,8 +36,17 @@ def run_train(config: TrainConfig):
     logging.info(f"DONE ---- rank {dist.rank}")
 
 
+def _handle_deprecated_config_keys(config_data: dict[str, Any]) -> dict[str, Any]:
+    config_copy = config_data.copy()
+    if "validation_loader" in config_data:
+        loader = config_copy.pop("validation_loader")
+        config_copy["validation"] = {"loader": loader}
+    return config_copy
+
+
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     data = prepare_config(yaml_config, override=override_dotlist)
+    data = _handle_deprecated_config_keys(data)
     train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,
         data=data,

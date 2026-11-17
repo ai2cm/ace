@@ -22,9 +22,8 @@ import torch
 import torch.amp as amp
 import torch.nn as nn
 
-# get spectral transforms and spherical convolutions from torch_harmonics
-import torch_harmonics as th
-import torch_harmonics.distributed as thd
+# get spectral transforms and spherical convolutions from fme.core.sht
+import fme.core.sht as th
 from torch.utils.checkpoint import checkpoint
 
 # helpers
@@ -46,6 +45,10 @@ from fme.ace.models.makani_fcn3.mpu.layers import DistributedMLP
 
 # more distributed stuff
 from fme.ace.models.makani_fcn3.utils import comm
+
+# single-rank DISCO convolution: a fork of torch_harmonics' convolution which
+# avoids sparse tensors, so it can be traced by torch.compile
+from fme.core.disco import DiscreteContinuousConvS2
 
 
 # heuristic for finding theta_cutoff
@@ -91,9 +94,9 @@ class DiscreteContinuousEncoder(nn.Module):
 
         # set up local convolution
         conv_handle = (
-            thd.DistributedDiscreteContinuousConvS2
+            th.DistributedDiscreteContinuousConvS2
             if comm.get_size("spatial") > 1
-            else th.DiscreteContinuousConvS2
+            else DiscreteContinuousConvS2
         )
         self.conv = conv_handle(
             inp_chans,
@@ -183,16 +186,16 @@ class DiscreteContinuousDecoder(nn.Module):
         if comm.get_size("spatial") > 1:
             polar_group = None if (comm.get_size("h") == 1) else comm.get_group("h")
             azimuth_group = None if (comm.get_size("w") == 1) else comm.get_group("w")
-            thd.init(polar_group, azimuth_group)
+            th.init(polar_group, azimuth_group)
 
         # spatial parallelism in the SHT
         if upsample_sht:
             # set up sht for upsampling
             sht_handle = (
-                thd.DistributedRealSHT if comm.get_size("spatial") > 1 else th.RealSHT
+                th.DistributedRealSHT if comm.get_size("spatial") > 1 else th.RealSHT
             )
             isht_handle = (
-                thd.DistributedInverseRealSHT
+                th.DistributedInverseRealSHT
                 if comm.get_size("spatial") > 1
                 else th.InverseRealSHT
             )
@@ -205,7 +208,7 @@ class DiscreteContinuousDecoder(nn.Module):
             self.upsample = nn.Sequential(self.sht, self.isht)
         else:
             resample_handle = (
-                thd.DistributedResampleS2
+                th.DistributedResampleS2
                 if comm.get_size("spatial") > 1
                 else th.ResampleS2
             )
@@ -217,6 +220,9 @@ class DiscreteContinuousDecoder(nn.Module):
                 grid_out=grid_out,
                 mode="bilinear",
             )
+            # torch-harmonics stores expand_poles as a 0-d tensor, and dynamo
+            # can't branch on a tensor without a graph break
+            self.upsample.expand_poles = bool(self.upsample.expand_poles)
 
         # heuristic for finding theta_cutoff
         # nto entirely clear if out or in shape should be used here with a
@@ -227,9 +233,9 @@ class DiscreteContinuousDecoder(nn.Module):
 
         # set up DISCO convolution
         conv_handle = (
-            thd.DistributedDiscreteContinuousConvS2
+            th.DistributedDiscreteContinuousConvS2
             if comm.get_size("spatial") > 1
-            else th.DiscreteContinuousConvS2
+            else DiscreteContinuousConvS2
         )
         self.conv = conv_handle(
             inp_chans,
@@ -308,9 +314,9 @@ class NeuralOperatorBlock(nn.Module):
             )
 
             conv_handle = (
-                thd.DistributedDiscreteContinuousConvS2
+                th.DistributedDiscreteContinuousConvS2
                 if comm.get_size("spatial") > 1
-                else th.DiscreteContinuousConvS2
+                else DiscreteContinuousConvS2
             )
             self.local_conv = conv_handle(
                 inp_chans,
@@ -720,9 +726,9 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         if comm.get_size("spatial") > 1:
             polar_group = None if (comm.get_size("h") == 1) else comm.get_group("h")
             azimuth_group = None if (comm.get_size("w") == 1) else comm.get_group("w")
-            thd.init(polar_group, azimuth_group)
-            sht_handle = thd.DistributedRealSHT
-            isht_handle = thd.DistributedInverseRealSHT
+            th.init(polar_group, azimuth_group)
+            sht_handle = th.DistributedRealSHT
+            isht_handle = th.DistributedInverseRealSHT
 
         # set up
         self.sht = sht_handle(

@@ -1,0 +1,66 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4-like-am4-4deg-eval
+experiment_dir: /results
+n_forward_steps: 360
+forward_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr.zarr
+        engine: zarr
+        overwrite:
+          constant:
+            carbon_dioxide: 1137.048
+  num_data_workers: 4
+  start_indices:
+    times:
+      - "0300-01-01T00:00:00"
+      - "0300-02-01T00:00:00"
+      - "0300-03-01T00:00:00"
+      - "0300-04-01T00:00:00"
+      - "0300-05-01T00:00:00"
+      - "0300-06-01T00:00:00"
+      - "0300-07-01T00:00:00"
+      - "0300-08-01T00:00:00"
+      - "0300-09-01T00:00:00"
+      - "0300-10-01T00:00:00"
+      - "0300-11-01T00:00:00"
+      - "0300-12-01T00:00:00"
+      - "0301-01-01T00:00:00"
+      - "0301-02-01T00:00:00"
+      - "0301-03-01T00:00:00"
+      - "0301-04-01T00:00:00"
+      - "0301-05-01T00:00:00"
+      - "0301-06-01T00:00:00"
+      - "0301-07-01T00:00:00"
+      - "0301-08-01T00:00:00"
+      - "0301-09-01T00:00:00"
+      - "0301-10-01T00:00:00"
+      - "0301-11-01T00:00:00"
+      - "0301-12-01T00:00:00"
+      - "0302-01-01T00:00:00"
+      - "0302-02-01T00:00:00"
+      - "0302-03-01T00:00:00"
+      - "0302-04-01T00:00:00"
+      - "0302-05-01T00:00:00"
+      - "0302-06-01T00:00:00"
+      - "0302-07-01T00:00:00"
+      - "0302-08-01T00:00:00"
+      - "0302-09-01T00:00:00"
+      - "0302-10-01T00:00:00"
+      - "0302-11-01T00:00:00"
+      - "0302-12-01T00:00:00"
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
