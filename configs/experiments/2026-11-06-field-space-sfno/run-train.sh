@@ -188,3 +188,4 @@ run_training "pretrain-muon-l32-4deg-rs1.yaml" "muon-l32-4deg-pretrain-rs1" 1
 run_training "pretrain-muon-e384-l32-4deg-rs1.yaml" "muon-embed384-l32-4deg-pretrain-rs1" 1
 run_training "pretrain-muon-l16-4deg-rs1.yaml" "muon-l16-4deg-pretrain-rs1" 1
 run_training "pretrain-muon-l32-ckpt-4deg-rs1.yaml" "muon-l32-ckpt-4deg-pretrain-rs1" 1
+run_training "pretrain-fieldsfno-v1-l64-h256-ckpt-4deg-rs1.yaml" "fieldsfno-v1-l64-h256-ckpt-4deg-pretrain-rs1" 1
