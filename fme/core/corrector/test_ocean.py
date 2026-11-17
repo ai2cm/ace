@@ -318,13 +318,13 @@ def test_ocean_net_surface_energy_flux_counts_snow_once():
 
 @pytest.mark.parametrize("method", ["residual_prediction", "prescribed"])
 def test_surface_energy_flux_correction_deprecated_method_warns(method):
-    with pytest.warns(DeprecationWarning, match=f"'{method}'.*prescribed_open_ocean"):
+    with pytest.warns(FutureWarning, match=f"'{method}'.*prescribed_open_ocean"):
         SurfaceEnergyFluxCorrectionConfig(method=method)
 
 
 def test_surface_energy_flux_correction_prescribed_open_ocean_does_not_warn():
     with warnings.catch_warnings():
-        warnings.simplefilter("error", DeprecationWarning)
+        warnings.simplefilter("error", FutureWarning)
         SurfaceEnergyFluxCorrectionConfig(method="prescribed_open_ocean")
 
 
