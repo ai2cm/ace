@@ -116,8 +116,6 @@ time_coarsen:
   snapshot_names:
     - PRESsfc
     - PRMSL
-    - eastward_surface_stress
-    - northward_surface_stress
     - Q2m
     - RH200
     - RH500
@@ -197,6 +195,8 @@ time_coarsen:
     - tendency_of_total_water_path
     - tendency_of_total_water_path_due_to_advection
     - total_frozen_precipitation_rate
+    - eastward_surface_stress
+    - northward_surface_stress
   constant_prefixes:
     - ak_
     - bk_
