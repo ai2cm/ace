@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import warnings
 from typing import NamedTuple
 
 import pytest
@@ -353,6 +354,18 @@ def test_ocean_net_surface_energy_flux_counts_snow_once():
         _compute_ocean_net_surface_energy_flux(am4, sst),
         f_top - l_f * am4["total_frozen_precipitation_rate"] + p_h,
     )
+
+
+@pytest.mark.parametrize("method", ["residual_prediction", "prescribed"])
+def test_surface_energy_flux_correction_deprecated_method_warns(method):
+    with pytest.warns(DeprecationWarning, match=f"'{method}'.*prescribed_open_ocean"):
+        SurfaceEnergyFluxCorrectionConfig(method=method)
+
+
+def test_surface_energy_flux_correction_prescribed_open_ocean_does_not_warn():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        SurfaceEnergyFluxCorrectionConfig(method="prescribed_open_ocean")
 
 
 def test_surface_energy_flux_correction_resid():
