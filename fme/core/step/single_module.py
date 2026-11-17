@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Any
 
 import torch
@@ -21,6 +21,7 @@ from fme.core.normalizer import (
     GroupedNormalizer,
     NetworkAndLossNormalizationConfig,
     StandardNormalizer,
+    validate_normalizer_spatial_shape,
 )
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -65,8 +66,8 @@ class ResidualPredictionConfig:
             ``normalization.residual`` units rather than full-field-normalized
             units, so a unit output is one standard deviation of the per-step
             tendency. Requires a ``normalization.residual`` block, which
-            cannot be combined with ``normalization.loss``, so enabling this
-            also commits the loss to the tendency convention.
+            also overrides ``normalization.loss`` for the residual names, so
+            enabling this also commits the loss to the tendency convention.
     """
 
     names: list[str] | None = None
@@ -161,18 +162,6 @@ class SingleModuleStepConfig(StepConfigABC):
         if self._residual_prediction_config is not None:
             self._residual_prediction_config.validate_names(self.prognostic_names)
             if self._residual_prediction_config.normalized:
-                # Report the loss conflict directly. Otherwise the user is told
-                # to add a residual block, then told it conflicts with the loss
-                # block, with neither message naming the option behind it.
-                if self.normalization.loss is not None:
-                    raise ValueError(
-                        "residual_prediction.normalized requires a "
-                        "normalization.residual block, which cannot be combined "
-                        "with normalization.loss; remove normalization.loss to "
-                        "use it. The loss then follows the prediction "
-                        "convention, scoring residual names in tendency-std "
-                        "units."
-                    )
                 if self.normalization.residual is None:
                     raise ValueError(
                         "residual_prediction.normalized requires a "
@@ -184,6 +173,7 @@ class SingleModuleStepConfig(StepConfigABC):
                         "residual_prediction.normalized cannot be combined with "
                         "normalization.grouped"
                     )
+        self.normalization.raise_if_per_grid_cell_loss_is_implicit()
         self.normalization.validate_pinned_variables(self._normalize_names)
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
@@ -364,8 +354,10 @@ class SingleModuleStepConfig(StepConfigABC):
             init_weights=init_weights,
         )
 
-    def load(self):
-        self.normalization.load()
+    def load(self, extra_names: Iterable[str] = ()):
+        self.normalization.load(
+            names=self._normalize_names, extra_loss_names=extra_names
+        )
 
 
 class SingleModuleStep(StepABC):
@@ -397,6 +389,9 @@ class SingleModuleStep(StepABC):
                 network's inputs and outputs and for global mean removal.
         """
         super().__init__()
+        validate_normalizer_spatial_shape(normalizer, dataset_info)
+        if grouped_normalizer is not None:
+            validate_normalizer_spatial_shape(grouped_normalizer, dataset_info)
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(in_names=config.in_names)
@@ -434,6 +429,7 @@ class SingleModuleStep(StepABC):
             residual_normalizer = config.normalization.residual.build(
                 names=sorted(config.residual_names)
             )
+            validate_normalizer_spatial_shape(residual_normalizer, dataset_info)
             # Scale residual outputs by residual_std / field_std in normalized
             # space, so a unit network output is one tendency std. Scale only:
             # the stats convention pairs full-field centering with tendency

@@ -48,6 +48,7 @@ from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
     StandardNormalizer,
+    validate_normalizer_spatial_shape,
 )
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
@@ -890,13 +891,18 @@ class Stepper:
             A StepLoss built using this stepper's loss normalizer, gridded
             operations, loss variable names, and channel dimension.
         """
-        loss_normalizer = self._step_obj.get_loss_normalizer()
         return loss_config.build(
             self._dataset_info.gridded_operations,
             out_names=self.loss_names,
             channel_dim=self.CHANNEL_DIM,
-            normalizer=loss_normalizer,
+            normalizer=self._get_loss_normalizer(),
         )
+
+    def _get_loss_normalizer(self) -> StandardNormalizer:
+        """The step's loss normalizer, checked against the dataset's grid."""
+        loss_normalizer = self._step_obj.get_loss_normalizer()
+        validate_normalizer_spatial_shape(loss_normalizer, self._dataset_info)
+        return loss_normalizer
 
     def build_corrector_loss(
         self, corrector_loss: CorrectorLossConfig | None
@@ -915,7 +921,7 @@ class Stepper:
             return None
         return corrector_loss.build(
             self.loss_names,
-            normalizer=self._step_obj.get_loss_normalizer(),
+            normalizer=self._get_loss_normalizer(),
             channel_dim=self.CHANNEL_DIM,
         )
 

@@ -181,6 +181,8 @@ class VideoDiffusionModelConfig:
     marginal_consistency_weight: float = 0.0
 
     def __post_init__(self):
+        if self.normalization is not None:
+            self.normalization.raise_if_per_grid_cell("Video downscaling")
         if self.n_timesteps < 3:
             raise ValueError(
                 "Video interpolation needs at least 3 frames (2 endpoints + 1 "

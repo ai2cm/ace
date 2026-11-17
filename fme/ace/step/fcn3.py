@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Literal
 
 import torch
@@ -178,7 +178,7 @@ class FCN3StepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
-        self.normalization.raise_if_grouped("FCN3StepConfig")
+        self.normalization.raise_if_unsupported("FCN3StepConfig")
         for name in self.next_step_forcing_names:
             if name not in self.forcing_names:
                 raise ValueError(
@@ -328,7 +328,7 @@ class FCN3StepConfig(StepConfigABC):
             init_weights=init_weights,
         )
 
-    def load(self):
+    def load(self, extra_names: Iterable[str] = ()):
         self.normalization.load()
 
     @property

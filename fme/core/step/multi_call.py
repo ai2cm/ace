@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import copy
 from typing import Any, TypeVar
 
@@ -153,19 +153,28 @@ class MultiCallStepConfig(StepConfigABC):
                 extra_residual_scaled_names = []
             else:
                 extra_residual_scaled_names = list(extra_residual_scaled_names)
-            for output_name in self.config.output_names:
-                for name in self.config.get_multi_called_names(output_name):
-                    extra_names.append(name)
-                    # A variant is scored in the same units as its base
-                    # variable, which follows the wrapped step's residual
-                    # convention (not mere prognostic-ness: a hybrid step
-                    # predicts some prognostics full-field).
-                    if output_name in self.wrapped_step.residual_names:
-                        extra_residual_scaled_names.append(name)
+            for output_name, name in self._multi_called_names():
+                extra_names.append(name)
+                # A variant is scored in the same units as its base
+                # variable, which follows the wrapped step's residual
+                # convention (not mere prognostic-ness: a hybrid step
+                # predicts some prognostics full-field).
+                if output_name in self.wrapped_step.residual_names:
+                    extra_residual_scaled_names.append(name)
         return self.wrapped_step.get_loss_normalizer(
             extra_names=extra_names,
             extra_residual_scaled_names=extra_residual_scaled_names,
         )
+
+    def _multi_called_names(self) -> list[tuple[str, str]]:
+        """(output name, multi-called name) for every multi-called output."""
+        if self.config is None:
+            return []
+        return [
+            (output_name, name)
+            for output_name in self.config.output_names
+            for name in self.config.get_multi_called_names(output_name)
+        ]
 
     @property
     def _multi_call_outputs(self) -> list[str]:
@@ -219,8 +228,14 @@ class MultiCallStepConfig(StepConfigABC):
     def n_ic_timesteps(self) -> int:
         return self.wrapped_step.n_ic_timesteps
 
-    def load(self):
-        self.wrapped_step.load()
+    def load(self, extra_names: Iterable[str] = ()):
+        # multi-called names need loss normalization constants from the files
+        self.wrapped_step.load(
+            extra_names=[
+                *extra_names,
+                *(name for _, name in self._multi_called_names()),
+            ]
+        )
 
     @property
     def allow_missing_variables(self) -> bool:
@@ -236,6 +251,7 @@ def _extend_normalizer_with_multi_call_outputs(
 ) -> StandardNormalizer:
     means = copy(normalizer.means)
     stds = copy(normalizer.stds)
+    grid_coords = copy(normalizer.grid_coords)
     for name in config.output_names:
         if name not in means or name not in stds:
             raise ValueError(
@@ -244,11 +260,14 @@ def _extend_normalizer_with_multi_call_outputs(
         for multi_call_name in config.get_multi_called_names(name):
             means[multi_call_name] = means[name]
             stds[multi_call_name] = stds[name]
+            if name in grid_coords:
+                grid_coords[multi_call_name] = grid_coords[name]
     return StandardNormalizer(
         means=means,
         stds=stds,
         fill_nans_on_normalize=normalizer.fill_nans_on_normalize,
         fill_nans_on_denormalize=normalizer.fill_nans_on_denormalize,
+        grid_coords=grid_coords,
     )
 
 

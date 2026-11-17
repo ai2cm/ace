@@ -182,6 +182,23 @@ def test_extend_normalizer_with_multi_call_outputs():
     }
 
 
+def test_extend_normalizer_keeps_grid_coords_of_multi_call_outputs():
+    """Multi-called outputs share their base variable's grid coordinates."""
+    coords = {"lat": [-45.0, 45.0], "lon": [0.0, 180.0]}
+    normalizer = StandardNormalizer(
+        means={"a": torch.zeros(2, 2), "b": torch.tensor(0.0)},
+        stds={"a": torch.ones(2, 2), "b": torch.tensor(1.0)},
+        grid_coords={"a": coords},
+    )
+    config = MultiCallConfig(
+        forcing_name="CO2",
+        forcing_multipliers={"_doubled_co2": 2},
+        output_names=["a", "b"],
+    )
+    result = _extend_normalizer_with_multi_call_outputs(config, normalizer)
+    assert result.grid_coords == {"a": coords, "a_doubled_co2": coords}
+
+
 @pytest.mark.parametrize("include_multi_call_in_loss", [True, False])
 def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool):
     torch.manual_seed(0)
