@@ -1,0 +1,9 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config
+
+# X4 resume after job 01M7MATX8HJCKXE0S2MJK6134K (beaker 01M7MATX4JH9XGPDD7FDEV2HQ0) died after epoch 1 (node Xid error).
+# results_dataset = maintainer-recovered epoch-1 files: config.yaml, wandb_run_id, training_checkpoints/{ckpt,ema_ckpt_0001}.tar.
+# results_dataset_{ocean,atmos} = X4's pretraining.txt init datasets (mounted at /ocean_ckpt.tar, /atmos_ckpt.tar; weights replaced by ckpt.tar on restore).
+# config blank: resumes /existing-results/config.yaml (identical to train-config.yaml).
+# Launch (maintainer's go only; <experiment_dir> must contain "coupled" for resume.sh to pick fme.coupled.train): job_runner/resume.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x4 . --coupled_stats 01KXNT0RA6VX2YTZ8WJ936Q5RS
+
+1deg-hybridsstdiag-randco2ft-x4-pclr-replay-jointpairs-tb6xf0ju||ace-samudra-coupled-cm4|lxp69d4e|train|urgent|titan|8||3|ai2/ace|resume_results.resume_wandb=true seed=0|01M7NK6SS77K8E1HD08P155EAF|01M626JPB247BQWSE0GN35SAXR|01M5JJTWWGYYSACGH3VY6GN6RF|8h|
