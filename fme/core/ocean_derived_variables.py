@@ -296,11 +296,11 @@ def mld_wright97(
 
 
 @register(
-    VariableMetadata("Pa", "Globally demeaned bottom pressure anomaly, Wright (1997)")
+    VariableMetadata("m", "Globally demeaned manometric sea level, Wright (1997)")
 )
-def pbo_wright97(
+def manometric_sea_level_wright97(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Globally demeaned bottom pressure anomaly."""
-    return data.pbo_wright97
+    """Globally demeaned manometric sea level, zos minus steric sea level."""
+    return data.manometric_sea_level_wright97

@@ -12,7 +12,6 @@ from fme.core.constants import (
 from fme.core.distributed import Distributed
 from fme.core.ocean_eos import (
     DELTA_RHO_THRESHOLD,
-    G_EARTH,
     MLD_REF_LAYER,
     RHO_0,
     _column_density_integral,
@@ -225,6 +224,7 @@ class OceanData:
 
         Raises:
             KeyError: If a level ``k < nz`` of either is missing.
+            ValueError: If either has more than ``nz`` levels.
         """
         thetao = self.sea_water_potential_temperature
         so = self.sea_water_salinity
@@ -232,7 +232,12 @@ class OceanData:
         for name, x in (("thetao", thetao), ("so", so)):
             if x.shape[-1] < nz:
                 raise KeyError(f"{name}_{x.shape[-1]}")
-        return thetao[..., :nz], so[..., :nz]
+            if x.shape[-1] > nz:
+                raise ValueError(
+                    f"{name} has {x.shape[-1]} levels, more than the "
+                    f"{nz} of the depth coordinate."
+                )
+        return thetao, so
 
     @property
     def mld_wright97(self) -> torch.Tensor:
@@ -249,7 +254,8 @@ class OceanData:
 
         Raises:
             ValueError: If the depth coordinate is not a
-                ``HasOceanLayerGeometry``.
+                ``HasOceanLayerGeometry``, or potential temperature or salinity
+                has more levels than it.
             KeyError: If potential temperature or salinity is missing from the
                 data, or it has fewer than ``MLD_REF_LAYER + 2`` levels (no
                 level below the reference layer), so
@@ -278,9 +284,14 @@ class OceanData:
         the Boussinesq pressure of each level centre, ``(..., nz)`` with level
         ``k`` on the last dim. NaN where ``mask_k == 0`` or an input is NaN.
 
+        A partial bottom cell takes the pressure of the full cell's centre, not
+        of its wet part's. Inputs are not clamped to the fit range
+        (``fme.core.ocean_eos``); outside it the fit extrapolates.
+
         Raises:
             ValueError: If the depth coordinate is not a
-                ``HasOceanLayerGeometry``.
+                ``HasOceanLayerGeometry``, or potential temperature or salinity
+                has more levels than it.
             KeyError: If a level of potential temperature or salinity is
                 missing.
         """
@@ -289,36 +300,57 @@ class OceanData:
         return _density_anomaly(thetao, so, geometry.idepth, geometry.mask)
 
     @property
-    def pbo_wright97(self) -> torch.Tensor:
-        """Globally demeaned bottom pressure anomaly [Pa], Wright (1997).
+    def manometric_sea_level_wright97(self) -> torch.Tensor:
+        """Globally demeaned manometric sea level [m], Wright (1997).
 
-        ``P = RHO_0 * G_EARTH * zos + G_EARTH * sum_k rho_wright97_k * dz_k``
-        minus its mean weighted by ``area_weights_m2`` over the cells where
-        ``mask_0 > 0`` and ``zos`` is finite; NaN elsewhere. Bottom pressure
-        up to the static ``RHO_0 * G_EARTH * deptho`` and the global mean.
+            C        = sum_k rho_wright97_k * dz_k                [kg m-2]
+            eta_mano = zos + C / RHO_0 - <zos + C / RHO_0>        [m]
+
+        k: depth level; dz_k: the depth coordinate's ``dz``; <x>: mean weighted
+        by ``area_weights_m2`` over the cells where ``mask_0 > 0`` and ``zos``
+        is finite; NaN elsewhere.
+
+        With the steric sea level ``eta_steric = -C / RHO_0``,
+        ``zos = eta_steric + eta_mano`` up to <x> (Gregory et al. 2019, Surv.
+        Geophys.). Both integrate over the static column (sea surface at 0),
+        so ``eta_mano`` differs from bottom pressure / (RHO_0 * G_EARTH) minus
+        ``deptho`` by ``rho_wright97_0 * zos / RHO_0`` before the mean is
+        removed. A spatially uniform offset in ``zos`` cancels in the mean, so
+        ``zos`` and ``SSH`` give the same field.
+
+        The static compressibility part of C scales with ``deptho`` and
+        dominates the field; gen - target differences and time anomalies are
+        the meaningful metrics, not the field itself.
 
         Raises:
             ValueError: If the depth coordinate is not a
-                ``HasOceanLayerGeometry``.
-            KeyError: If a level of potential temperature or salinity, ``zos``
-                or the cell area provider is missing.
+                ``HasOceanLayerGeometry``, or potential temperature or salinity
+                has more levels than it.
+            KeyError: If a level of potential temperature or salinity, ``zos``,
+                the cell area provider or its ``area_weights_m2`` (``None`` on
+                HEALPix) is missing.
         """
-        geometry = self._layer_geometry("pbo_wright97")
-        if self._cell_area_provider is None:
-            raise KeyError("cell area provider, needed for the mean of pbo_wright97")
+        geometry = self._layer_geometry("manometric_sea_level_wright97")
+        area = (
+            None
+            if self._cell_area_provider is None
+            else self._cell_area_provider.area_weights_m2
+        )
+        if area is None:
+            raise KeyError(
+                "area_weights_m2, needed for the mean of manometric_sea_level_wright97"
+            )
         zos = self.sea_surface_height_above_geoid
         C = _column_density_integral(self.rho_wright97, geometry.dz)
         mask_0 = geometry.mask.select(dim=-1, index=0).to(C.device)
         wet = (mask_0 > 0) & zos.isfinite()
-        P = RHO_0 * G_EARTH * torch.where(wet, zos, 0.0) + G_EARTH * C
-        wet = wet.expand(P.shape)
-        area = self._cell_area_provider.area_weights_m2.to(
-            device=P.device, dtype=P.dtype
-        )
+        eta = torch.where(wet, zos, 0.0) + C / RHO_0
+        wet = wet.expand(eta.shape)
+        area = area.to(device=eta.device, dtype=eta.dtype)
         mean = Distributed.get_instance().weighted_mean(
-            P, wet.to(P.dtype) * area, dim=(-2, -1), keepdim=True
+            eta, wet.to(eta.dtype) * area, dim=(-2, -1), keepdim=True
         )
-        return torch.where(wet, P - mean, torch.nan)
+        return torch.where(wet, eta - mean, torch.nan)
 
     @property
     def water_flux_into_sea_water(self) -> torch.Tensor:

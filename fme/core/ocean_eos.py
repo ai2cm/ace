@@ -42,6 +42,8 @@ def wright97_anomaly(
 
     Elementwise with broadcasting, differentiable, computed in the inputs'
     dtype (Python-float coefficients do not promote a float32 tensor).
+    Inputs are not clamped to the fit range above; outside it the fit
+    extrapolates.
 
     Args:
         S: Practical salinity (PSU).
