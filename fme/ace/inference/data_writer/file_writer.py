@@ -13,6 +13,7 @@ import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.time import TimeSlice
+from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
@@ -37,6 +38,35 @@ logger = logging.getLogger(__name__)
 
 LAT_NAME = DIM_INFO_LATLON[0].name
 LON_NAME = DIM_INFO_LATLON[1].name
+
+
+def _allgather_initial_condition_times(
+    local_times: npt.NDArray[cftime.datetime],
+) -> tuple[npt.NDArray[cftime.datetime], int]:
+    """Allgather local initial-condition times from all data-parallel ranks.
+
+    Returns:
+        A tuple of (global_times, sample_offset) where global_times is the
+        concatenation of all ranks' local times in rank order, and
+        sample_offset is this rank's starting index in that global array.
+    """
+    dist = Distributed.get_instance()
+    if dist.total_data_parallel_ranks <= 1:
+        return local_times, 0
+    local_n = len(local_times)
+    gathered = dist.data_parallel_gather_object(local_times)
+    if dist.is_data_parallel_root():
+        if gathered is None:
+            raise RuntimeError(
+                "data_parallel_gather_object returned None on data-parallel root"
+            )
+        global_times: npt.NDArray[cftime.datetime] = np.concatenate(gathered)
+    else:
+        global_times = None  # type: ignore[assignment]
+    global_times = dist.data_parallel_broadcast_object(global_times)
+    sample_offset = dist.data_parallel_rank * local_n
+    return global_times, sample_offset
+
 
 DatetimeDataArray: TypeAlias = xr.DataArray
 
@@ -426,17 +456,27 @@ class FileWriterConfig:
             | MonthlyZarrWriter
         )
         if isinstance(self.format, ZarrWriterConfig):
+            # Zarr supports concurrent region writes, so under multi-GPU
+            # inference each rank writes its own sample block directly.
+            # Gather all ranks' init times so the store is sized globally.
+            global_times, sample_offset = _allgather_initial_condition_times(
+                initial_condition_times
+            )
             if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                geometry = MonthlyZarrWriter.compute_store_geometry(
+                    global_times, n_timesteps, timestep
+                )
                 raw_writer = MonthlyZarrWriter(
                     path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                     initial_condition_times=initial_condition_times,
-                    n_timesteps=n_timesteps,
                     timestep=timestep,
                     save_names=self.names,
                     variable_metadata=variable_metadata,
                     coords=subselect_coords_,
                     dataset_metadata=dataset_metadata,
+                    geometry=geometry,
                     chunks=self.format.chunks,
+                    sample_offset=sample_offset,
                 )
             else:
                 if isinstance(self.time_coarsen, TimeCoarsenConfig):
@@ -451,21 +491,27 @@ class FileWriterConfig:
                 if self.separate_ensemble_members:
                     dims = ("time", *(d.name for d in spatial_dims))
                     zarr_writer_cls = SeparateICZarrWriterAdapter
+                    # SeparateICZarrWriterAdapter creates one store per IC,
+                    # so each rank keeps its LOCAL times and uses
+                    # sample_offset only for global file naming.
+                    writer_times = initial_condition_times
                 else:
                     dims = ("sample", "time", *(d.name for d in spatial_dims))
                     zarr_writer_cls = ZarrWriterAdapter
+                    writer_times = global_times
                 raw_writer = zarr_writer_cls(
                     path=os.path.join(experiment_dir, f"{self.label}.zarr"),
                     dims=dims,
                     data_coords=ensure_numpy_coords(subselect_coords_),
                     timestep=timestep_write,
                     n_timesteps=n_timesteps_write,
-                    initial_condition_times=initial_condition_times,
+                    initial_condition_times=writer_times,
                     data_vars=self.names,
                     variable_metadata=variable_metadata,
                     dataset_metadata=dataset_metadata,
                     chunks=self.format.chunks,
                     overwrite_check=self.format.overwrite_check,
+                    sample_offset=sample_offset,
                 )
         else:
             if self.separate_ensemble_members:

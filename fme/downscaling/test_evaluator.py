@@ -190,7 +190,7 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
         n_samples=2,
     )
 
-    built = config._build_default_evaluator()
+    built = config._build_default_evaluator(config.model.build())
 
     # A real roll moved the model's fine grid into the seam-crossing convention.
     assert float(built.model.full_fine_coords.lon.min()) < 0.0
@@ -241,7 +241,46 @@ def test_evaluator_raises_when_larger_without_patching(tmp_path):
         n_samples=2,
     )
     with pytest.raises(ValueError, match="requires patch prediction"):
-        config._build_default_evaluator()
+        config._build_default_evaluator(built_model)
+
+
+def test_evaluator_build_shares_one_model_across_events(tmp_path):
+    """build() builds the model once and hands it to the default evaluator and
+    every event evaluator, rather than building a copy of the weights per event.
+    """
+    model_config = unittest.mock.MagicMock()
+    built_model = model_config.build.return_value
+    built_model.coarse_shape = (4, 4)
+    built_model.with_rolled_lon.return_value = built_model  # same model, no roll
+
+    data_config = unittest.mock.MagicMock()
+    data_config.build.return_value.coarse_shape = (4, 4)
+
+    event_mocks = [unittest.mock.MagicMock() for _ in range(3)]
+    for event in event_mocks:
+        event.get_paired_gridded_data.return_value.coarse_shape = (4, 4)
+    events: list[evaluator.PairedEventConfig] = list(event_mocks)
+
+    config = evaluator.EvaluatorConfig(
+        model=model_config,
+        experiment_dir=str(tmp_path),
+        data=data_config,
+        logging=LoggingConfig(),
+        n_samples=2,
+        events=events,
+    )
+    with (
+        unittest.mock.patch.object(evaluator, "Evaluator") as default_cls,
+        unittest.mock.patch.object(evaluator, "EventEvaluator") as event_cls,
+    ):
+        built = config.build()
+
+    assert len(built) == 1 + len(events)
+    model_config.build.assert_called_once_with()
+    assert default_cls.call_args.kwargs["model"] is built_model
+    assert event_cls.call_count == len(events)
+    for call in event_cls.call_args_list:
+        assert call.kwargs["model"] is built_model
 
 
 @pytest.mark.parametrize(

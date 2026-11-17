@@ -64,6 +64,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location="cpu", weights_only=False
     )
+    trainer.model.validate_upsampling_matches_state(checkpoint["model"])
     trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
 
@@ -339,6 +340,7 @@ class Trainer:
         if self.epoch_checkpoint_path is not None:
             logging.info(f"Saving latest checkpoint")
             _save_checkpoint(self, self.epoch_checkpoint_path)
+            WandB.get_instance().mark_checkpoint()
             with self._ema_context():
                 _save_checkpoint(self, self.ema_checkpoint_path)
         else:

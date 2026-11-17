@@ -273,8 +273,8 @@ run_gantry_training_job() {
             --env WANDB_JOB_TYPE=training \
             --env WANDB_RUN_GROUP="$JOB_GROUP" \
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-            --env NCCL_DEBUG=WARN \
-            --env NCCL_DEBUG_FILE=/results/nccl_debug.log \
+            --env NCCL_DEBUG="${NCCL_DEBUG:-WARN}" \
+            --env NCCL_DEBUG_FILE="${NCCL_DEBUG_FILE:-/results/nccl_debug.%h.%p.log}" \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${STATS_DATASET_ARGS[@]}" \
@@ -351,6 +351,38 @@ require_job_name_length() {
         echo "This job and any remaining jobs in the input file were not submitted." >&2
         exit 1
     fi
+}
+
+# Default a blank N_GPUS to 1 (experiments.txt rows without the n_gpus column);
+# stop the submission loop unless it is then a positive integer.
+# Args: JOB_NAME
+require_eval_n_gpus() {
+    N_GPUS="${N_GPUS:-1}"
+    if [[ ! "$N_GPUS" =~ ^[1-9][0-9]*$ ]]; then
+        echo >&2
+        echo "Error: n_gpus must be a positive integer, got '${N_GPUS}' for JOB_NAME: $1" >&2
+        echo "This job and any remaining jobs in the input file were not submitted." >&2
+        exit 1
+    fi
+}
+
+# Set FME_LAUNCH to the command prefix that runs an fme module on N_GPUS
+# processes: `python -I -m` for one, single-node torchrun for more.
+# Args: N_GPUS
+build_fme_launch() {
+    if (( $1 > 1 )); then
+        FME_LAUNCH=(torchrun --nproc_per_node "$1" -m)
+    else
+        FME_LAUNCH=(python -I -m)
+    fi
+}
+
+# True when a path component of EXPERIMENT_DIR starts with `coupled`
+# (`.../coupled`, `.../coupled_ft/...`), not `.../uncoupled` or `.../atmos_from_coupled`.
+# Args: EXPERIMENT_DIR
+is_coupled_experiment_dir() {
+    local COUPLED_COMPONENT='(^|/)coupled'
+    [[ "$1" =~ $COUPLED_COMPONENT ]]
 }
 
 # Append experiment result to experiments.txt and commit
@@ -530,6 +562,8 @@ PRETRAINING_COLUMNS=(
     skip_or_train:STATUS priority:PRIORITY cluster:CLUSTER n_gpus:N_GPUS
     shared_mem:SHARED_MEM retries:RETRIES workspace:WORKSPACE
     override:OVERRIDE_ARGS min_runtime:MIN_RUNTIME
+    results_dataset_ocean:EXISTING_RESULTS_OCEAN_DATASET
+    results_dataset_atmos:EXISTING_RESULTS_ATMOS_DATASET
 )
 FINETUNING_COLUMNS=(
     group:GROUP tag:TAG wandb_project:WANDB_PROJECT wandb_id:WANDB_ID
@@ -553,6 +587,7 @@ EXPERIMENTS_COLUMNS=(
     results_dataset:EXISTING_RESULTS_DATASET workspace:WORKSPACE cluster:CLUSTER
     ocean_results_dataset:EXISTING_RESULTS_OCEAN_DATASET
     atmos_results_dataset:EXISTING_RESULTS_ATMOS_DATASET shared_mem:SHARED_MEM
+    n_gpus:N_GPUS
 )
 
 # Print the header line for an input file

@@ -1,5 +1,6 @@
 """Secondary decoder for computing additional diagnostic variables."""
 
+import copy
 import dataclasses
 from collections.abc import Callable
 
@@ -88,8 +89,16 @@ class SecondaryDecoder:
     def wrap_module(
         self, wrapper: Callable[[nn.Module], nn.Module]
     ) -> "SecondaryDecoder":
-        self._module = self._module.wrap_module(wrapper)
-        return self
+        """Return a decoder whose module is wrapped by ``wrapper``.
+
+        This decoder is left unchanged: steps call this on every forward pass
+        with per-call wrappers (e.g. activation checkpointing, which returns a
+        plain function rather than an nn.Module), so wrapping in place would
+        replace the module after a single call.
+        """
+        wrapped = copy.copy(self)
+        wrapped._module = self._module.wrap_module(wrapper)
+        return wrapped
 
     def to(self, device) -> "SecondaryDecoder":
         """Move the module to the specified device."""

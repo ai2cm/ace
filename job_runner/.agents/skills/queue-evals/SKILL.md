@@ -28,7 +28,10 @@ re-prefixed in step 1 (`running_` / `ran_` / `failed_`) to keep a rerun from
 relaunching them. Switching a `failed_` row back to `run_` relaunches it.
 Configs are read from `<experiment_dir>/<config_subdir>/` unless
 `--config-dir` is passed (`../../../README.md`, "Shared Config Directory").
-Blank `priority` / `min_runtime` fall back to the defaults in `evaluate.sh`.
+Blank `priority` / `min_runtime` / `n_gpus` fall back to the defaults in
+`evaluate.sh` (`n_gpus` blank = 1). `n_gpus` > 1 needs `n_initial_conditions`
+divisible by it (fme raises at job start), and `inference.sh` rejects it for
+coupled experiment directories.
 
 ## Workflow
 
@@ -76,11 +79,11 @@ Blank `priority` / `min_runtime` fall back to the defaults in `evaluate.sh`.
    ```
    python3 <skill>/scripts/queue_evals.py apply <dir> \
      --row run_<tag_a> --row run_<tag_b>[:<min_runtime>] \
-     [--priority high] [--config-dir <repo-relative dir>|auto] \
+     [--priority high] [--n-gpus <n>] [--config-dir <repo-relative dir>|auto] \
      [--keep-training] [--settle-rest] [FILTERS]
    ```
    Each finished, selected `training` row becomes one row per `--row`. The
-   other fields are copied, then `--priority` overrides theirs, and
+   other fields are copied, then `--priority` and `--n-gpus` override theirs, and
    `min_runtime` comes from, in order: the `:<min_runtime>` suffix, the
    config's `# --min-runtime <t>` comment, the training row.
    - `--config-dir auto` uses, per experiments.txt, its own directory when

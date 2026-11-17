@@ -446,6 +446,7 @@ class VideoTrainer:
     def save_epoch_checkpoint(self) -> None:
         if self.epoch_checkpoint_path is not None:
             _save_checkpoint(self, self.epoch_checkpoint_path)
+            WandB.get_instance().mark_checkpoint()
 
     def train(self) -> None:
         logging.info("Running initial validation.")
