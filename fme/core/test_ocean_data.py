@@ -3,6 +3,7 @@ import math
 import pytest
 import torch
 
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY,
@@ -221,3 +222,10 @@ def test_getitem():
         AttributeError, match="object has no attribute 'nonexistent_field'"
     ):
         _ = ocean_data["nonexistent_field"]
+
+
+def test_ocean_area_weights():
+    weights = torch.rand(2, 3)
+    assert OceanData({}).ocean_area_weights is None
+    ocean_data = OceanData({}, area_weights_provider=AreaWeightsProvider(weights))
+    assert ocean_data.ocean_area_weights is weights

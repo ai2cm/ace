@@ -57,6 +57,7 @@ from fme.ace.stepper.time_length_probabilities import (
 )
 from fme.ace.testing import DimSizes, get_batch_data, save_stepper_checkpoint
 from fme.core import AtmosphereData
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
     DepthCoordinate,
@@ -3028,6 +3029,7 @@ N_OCEAN_LEVELS = 2
 
 def _get_ocean_dataset_info(
     img_shape=(5, 5),
+    area_weights_provider: AreaWeightsProvider | None = None,
 ) -> DatasetInfo:
     """Create a DatasetInfo with DepthCoordinate for ocean testing."""
     horizontal_coordinate = LatLonCoordinates(
@@ -3043,6 +3045,7 @@ def _get_ocean_dataset_info(
         horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=depth_coordinate,
         timestep=OCEAN_TIMESTEP,
+        area_weights_provider=area_weights_provider,
     )
 
 
@@ -3050,6 +3053,7 @@ def _get_ocean_stepper(
     in_names: list[str],
     out_names: list[str],
     next_step_forcing_names: list[str],
+    area_weights_provider: AreaWeightsProvider | None = None,
 ) -> Stepper:
     """Create an ocean stepper for testing derived variables.
 
@@ -3090,7 +3094,7 @@ def _get_ocean_stepper(
             ),
         ),
     )
-    dataset_info = _get_ocean_dataset_info()
+    dataset_info = _get_ocean_dataset_info(area_weights_provider=area_weights_provider)
     return config.get_stepper(dataset_info)
 
 
@@ -4207,3 +4211,24 @@ def test_surface_energy_flux_correction_with_output_only_sst():
     )
     stepped = train_stepper.train_on_batch(data=data, optimization=NullOptimization())
     assert torch.isfinite(stepped.gen_data["hfds"]).all()
+
+
+def test_ocean_stepper_derives_zos_with_area_weights_provider():
+    torch.manual_seed(0)
+    img_shape = (5, 5)
+    provider_weights = torch.rand(*img_shape, device=DEVICE)
+    stepper = _get_ocean_stepper(
+        in_names=["SSH", "sea_surface_fraction"],
+        out_names=["SSH"],
+        next_step_forcing_names=[],
+        area_weights_provider=AreaWeightsProvider(provider_weights),
+    )
+    data = {
+        "SSH": torch.randn(2, 3, *img_shape, device=DEVICE),
+        "sea_surface_fraction": torch.rand(2, 3, *img_shape, device=DEVICE),
+    }
+    zos = stepper.derive_func(data, {})["zos"]
+    zos_mean = (provider_weights * zos).sum(dim=(-2, -1)) / provider_weights.sum()
+    torch.testing.assert_close(
+        zos_mean, torch.zeros_like(zos_mean), atol=1e-6, rtol=0.0
+    )

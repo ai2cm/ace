@@ -614,11 +614,14 @@ class StepperConfig:
         )
         try:
             derive_func = dataset_info.vertical_coordinate.build_derive_function(
-                dataset_info.timestep, dataset_info.horizontal_coordinates
+                dataset_info.timestep,
+                dataset_info.horizontal_coordinates,
+                area_weights_provider=dataset_info.area_weights_provider,
             )
         except MissingDatasetInfo:
             derive_func = dataset_info.vertical_coordinate.build_derive_function(
-                dataset_info.timestep
+                dataset_info.timestep,
+                area_weights_provider=dataset_info.area_weights_provider,
             )
         if self.input_masking is None:
             input_masking = NullSpatialMasking()
