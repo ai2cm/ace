@@ -136,14 +136,6 @@ class VerticalCoordinate(abc.ABC):
     ) -> DeriveFnABC:
         pass
 
-    def adopt_deptho(self, other: "VerticalCoordinate") -> "VerticalCoordinate":
-        """Return a coordinate updated with ``deptho`` from *other*, if applicable.
-
-        The default returns *self* unchanged.  Subclasses that support
-        ``deptho`` (e.g. :class:`DepthCoordinate`) override this.
-        """
-        return self
-
     @property
     @abc.abstractmethod
     def coords(self) -> dict[str, np.ndarray]:
@@ -406,24 +398,6 @@ class DepthCoordinate(VerticalCoordinate):
     @property
     def coords(self) -> dict[str, np.ndarray]:
         return {"idepth": self.idepth.cpu().numpy()}
-
-    def with_deptho(self, deptho: torch.Tensor) -> "DepthCoordinate":
-        """Return a new DepthCoordinate with the given ``deptho`` attached."""
-        return DepthCoordinate(
-            idepth=self.idepth,
-            mask=self.mask,
-            deptho=deptho,
-            ocean_volume_per_area=self.ocean_volume_per_area,
-        )
-
-    def adopt_deptho(self, other: "VerticalCoordinate") -> "DepthCoordinate":
-        if (
-            self.deptho is None
-            and isinstance(other, DepthCoordinate)
-            and other.deptho is not None
-        ):
-            return self.with_deptho(other.deptho)
-        return self
 
     def to(self, device: str) -> "DepthCoordinate":
         return DepthCoordinate(
