@@ -204,7 +204,9 @@ def main():
         atmos_ic=ABRUPT_RUN_ATMOS_IC,
         **HUNDRED_YEAR,
     )
-    (HERE / "inference-config-cm4-abrupt4xCO2-0251-100yr.yaml").write_text(text)
+    (
+        HERE / "inference-config-cm4-cmip6-like-ic-abrupt4xCO2-0251-100yr.yaml"
+    ).write_text(text)
 
 
 if __name__ == "__main__":
