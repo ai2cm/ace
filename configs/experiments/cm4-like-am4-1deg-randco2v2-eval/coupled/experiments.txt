@@ -218,3 +218,10 @@ hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|inf_submitted_cm4-a
 # GCS experiment_dir.
 hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_inf_cm4-piControl-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-11-hybrid1deg-cft-rs1-replay-piControl-ic1-100yr-monthly|01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|h100
 hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-piControl-ic1-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-11-hybrid1deg-ace2p5-cft-rs1-replay-piControl-ic1-100yr-monthly|01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|h100
+
+# 100-year abrupt-4xCO2 runs of the two hybrid-residual + replay arms initialized from CM4's own CMIP6 abrupt-4xCO2
+# simulation at 0251-01-02 ("CMIP6-like IC") instead of branching from piControl; same monthly outputs as the
+# -100yr-monthly runs, each in its own GCS experiment_dir. Needs the 0251 static ocean forcing on /climate-default
+# (cm4_eval/coupled/make_static_ocean_forcing.py --set abrupt-run).
+hybrid1deg-cft-rs1-replay||01M6F7YWA2VZ6YY4THWQRAGH84|run_inf_cm4-cmip6-like-ic-abrupt4xCO2-0251-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-17-hybrid1deg-cft-rs1-replay-cmip6-like-ic-abrupt4xCO2-0251-100yr-monthly|01M6KP6TVCYK4G3F1QX5NVZQS9|ai2/ace|jupiter
+hybrid1deg-ace2p5-cft-rs1-replay||01M6MDJCXNY3FW7V6A6Y5ZVER9|run_inf_cm4-cmip6-like-ic-abrupt4xCO2-0251-100yr-monthly|ema_ckpt_0007|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/spencerc/2026-11-17-hybrid1deg-ace2p5-cft-rs1-replay-cmip6-like-ic-abrupt4xCO2-0251-100yr-monthly|01M6Q0DVGM6E7VH67NQMC7KHYC|ai2/ace|jupiter
