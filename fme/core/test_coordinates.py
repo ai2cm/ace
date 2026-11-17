@@ -1,13 +1,17 @@
+import datetime
+
 import numpy as np
 import pytest
 import torch
 
 from fme.ace.models.healpix.healpix_layers import HEALPixPadding
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.coordinates import (
     DepthCoordinate,
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    NullVerticalCoordinate,
     SerializableHorizontalCoordinates,
     SerializableVerticalCoordinate,
     dz_from_idepth,
@@ -499,3 +503,52 @@ def test_horizontal_healpix_from_state_places_tensors_on_device():
     assert coord.face.device == device
     assert coord.height.device == device
     assert coord.width.device == device
+
+
+@pytest.mark.parametrize("with_provider", [True, False])
+def test_ocean_derive_fn_area_weights_provider(with_provider: bool):
+    torch.manual_seed(0)
+    n_lat, n_lon = 4, 8
+    horizontal_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-60, 60, n_lat), lon=torch.linspace(0, 315, n_lon)
+    )
+    depth_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 5.0]), mask=torch.ones(1)
+    )
+    provider_weights = torch.rand(n_lat, n_lon)
+    sea_surface_fraction = torch.rand(n_lat, n_lon)
+    kwargs = {}
+    if with_provider:
+        kwargs["area_weights_provider"] = AreaWeightsProvider(provider_weights)
+        weights = provider_weights
+    else:
+        weights = horizontal_coordinates.area_weights_m2 * sea_surface_fraction
+    derive_func = depth_coordinate.build_derive_function(
+        datetime.timedelta(days=5), horizontal_coordinates, **kwargs
+    )
+    data = {
+        "SSH": torch.randn(2, 3, n_lat, n_lon, device=get_device()),
+        "sea_surface_fraction": sea_surface_fraction.expand(2, 3, n_lat, n_lon).to(
+            get_device()
+        ),
+    }
+    zos = derive_func(data, {})["zos"].cpu()
+    weights = weights.to(zos.dtype)
+    zos_mean = (weights * zos).sum(dim=(-2, -1)) / weights.sum()
+    torch.testing.assert_close(
+        zos_mean, torch.zeros_like(zos_mean), atol=1e-6, rtol=0.0
+    )
+
+
+@pytest.mark.parametrize(
+    "vertical_coordinate",
+    [
+        HybridSigmaPressureCoordinate(ak=torch.tensor([1.0]), bk=torch.tensor([0.0])),
+        NullVerticalCoordinate(),
+    ],
+)
+def test_build_derive_function_accepts_area_weights_provider(vertical_coordinate):
+    vertical_coordinate.build_derive_function(
+        datetime.timedelta(hours=6),
+        area_weights_provider=AreaWeightsProvider(torch.ones(2, 2)),
+    )
