@@ -256,6 +256,52 @@ def net_salt_flux_into_ocean_column(
     return data.net_salt_flux_into_ocean
 
 
+@register(
+    VariableMetadata("m", "Sea surface height minus its ocean-area global mean"),
+    exists_ok=True,
+)
+def zos(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Sea surface height above geoid (zos) from sea surface height (SSH).
+
+    MOM6 in the CM4 configuration (no surface pressure in SSH) writes
+
+        zos_i = SSH_i - <SSH>_native
+
+    with <x>_native the ocean-area-weighted global mean on the native grid
+    (i: native cell). Here the mean is taken on the data grid (J: grid cell):
+
+        zos_J = SSH_J - <SSH>_W,  <x>_W = sum_J(W_J x_J) / sum_J(W_J)
+        W_J = area_weights_m2_J * sea_surface_fraction_J * isfinite(SSH_J)
+
+    <SSH>_W equals <SSH>_native only when W preserves the native ocean area
+    of each cell; geometric cell area times sea_surface_fraction does not, so
+    on regridded data zos differs from the native zos by a spatially uniform
+    offset per sample. <zos>_W is zero by construction.
+
+    Registered before derived variables that read zos, and derived only when
+    zos is absent from the data. The mean is over the local
+    spatial domain; under spatial parallelism it is not a global mean.
+    """
+    ssh = data.sea_surface_height
+    sea_surface_fraction = data.sea_surface_fraction
+    try:
+        cell_area = data.area_weights_m2
+    except ValueError as err:
+        raise KeyError("area_weights_m2") from err
+    if cell_area is None:
+        raise KeyError("area_weights_m2")
+    finite = torch.isfinite(ssh)
+    weights = torch.where(finite, cell_area * sea_surface_fraction, 0.0)
+    spatial_dims = (-2, -1)
+    mean = (weights * torch.where(finite, ssh, 0.0)).sum(
+        dim=spatial_dims, keepdim=True
+    ) / weights.sum(dim=spatial_dims, keepdim=True)
+    return ssh - mean
+
+
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
 def sea_ice_fraction(
     data: OceanData,

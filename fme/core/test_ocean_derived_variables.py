@@ -387,3 +387,140 @@ def test_HI_derived_from_ocean_sea_ice_thickness_mean():
     torch.testing.assert_close(
         out["HI"], torch.tensor([[2.0, 0.0, float("nan")]]), equal_nan=True
     )
+
+
+def _zos_inputs(n_lat: int = 4, n_lon: int = 8) -> tuple[LatLonCoordinates, TensorDict]:
+    torch.manual_seed(0)
+    horizontal_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-60, 60, n_lat),
+        lon=torch.linspace(0, 360, n_lon + 1)[:-1],
+    )
+    shape = (2, 3, n_lat, n_lon)
+    sea_surface_fraction = torch.rand(shape)
+    ssh = torch.randn(shape) + 0.5
+    land = torch.zeros(shape, dtype=torch.bool)
+    land[..., 0, :2] = True
+    ssh[land] = float("nan")
+    sea_surface_fraction[land] = 0.0
+    data = {"SSH": ssh, "sea_surface_fraction": sea_surface_fraction}
+    return horizontal_coordinates, data
+
+
+def _derive(
+    data: TensorDict, horizontal_coordinates: LatLonCoordinates | None
+) -> TensorDict:
+    return compute_ocean_derived_quantities(
+        dict(data),
+        depth_coordinate=DepthCoordinate(
+            idepth=torch.tensor([0.0, 5.0]), mask=torch.ones(1)
+        ),
+        timestep=TIMESTEP,
+        cell_area_provider=horizontal_coordinates,
+    )
+
+
+def test_zos_derived_from_ssh():
+    horizontal_coordinates, data = _zos_inputs()
+    out = _derive(data, horizontal_coordinates)
+    ssh = data["SSH"].double()
+    finite = torch.isfinite(ssh)
+    weights = (
+        horizontal_coordinates.area_weights_m2.double()
+        * data["sea_surface_fraction"].double()
+        * finite
+    )
+    expected_mean = (weights * ssh.nan_to_num()).sum(
+        dim=(-2, -1), keepdim=True
+    ) / weights.sum(dim=(-2, -1), keepdim=True)
+    torch.testing.assert_close(out["zos"].double(), ssh - expected_mean, equal_nan=True)
+    zos_mean = (weights * out["zos"].double().nan_to_num()).sum(
+        dim=(-2, -1)
+    ) / weights.sum(dim=(-2, -1))
+    torch.testing.assert_close(
+        zos_mean, torch.zeros_like(zos_mean), atol=1e-6, rtol=0.0
+    )
+    assert torch.equal(torch.isnan(out["zos"]), ~finite)
+
+
+def test_zos_land_ssh_values_do_not_change_mean():
+    horizontal_coordinates, data = _zos_inputs()
+    out_nan_land = _derive(data, horizontal_coordinates)
+    filled = dict(data)
+    filled["SSH"] = data["SSH"].nan_to_num(nan=1.0e3)
+    out_filled_land = _derive(filled, horizontal_coordinates)
+    ocean = torch.isfinite(data["SSH"])
+    torch.testing.assert_close(
+        out_nan_land["zos"][ocean], out_filled_land["zos"][ocean]
+    )
+
+
+def test_zos_mean_excludes_nan_ssh_cells_with_positive_fraction():
+    horizontal_coordinates, data = _zos_inputs()
+    nan_ssh = torch.isnan(data["SSH"])
+    data["sea_surface_fraction"] = data["sea_surface_fraction"].masked_fill(
+        nan_ssh, 1.0
+    )
+    out = _derive(data, horizontal_coordinates)
+    weights = torch.where(
+        nan_ssh,
+        0.0,
+        horizontal_coordinates.area_weights_m2 * data["sea_surface_fraction"],
+    )
+    zos_mean = (weights * out["zos"].nan_to_num()).sum(dim=(-2, -1))
+    torch.testing.assert_close(
+        zos_mean / weights.sum(dim=(-2, -1)),
+        torch.zeros_like(zos_mean),
+        atol=1e-6,
+        rtol=0.0,
+    )
+
+
+def test_zos_not_derived_without_ssh():
+    horizontal_coordinates, data = _zos_inputs()
+    del data["SSH"]
+    out = _derive(data, horizontal_coordinates)
+    assert "zos" not in out
+
+
+def test_zos_not_derived_without_cell_area_provider():
+    _, data = _zos_inputs()
+    out = _derive(data, None)
+    assert "zos" not in out
+
+
+def test_zos_not_derived_without_sea_surface_fraction():
+    horizontal_coordinates, data = _zos_inputs()
+    del data["sea_surface_fraction"]
+    out = _derive(data, horizontal_coordinates)
+    assert "zos" not in out
+
+
+class _NoCellArea:
+    area_weights_m2 = None
+
+
+def test_zos_not_derived_when_cell_area_is_none():
+    _, data = _zos_inputs()
+    out = compute_ocean_derived_quantities(
+        dict(data),
+        depth_coordinate=DepthCoordinate(
+            idepth=torch.tensor([0.0, 5.0]), mask=torch.ones(1)
+        ),
+        timestep=TIMESTEP,
+        cell_area_provider=_NoCellArea(),
+    )
+    assert "zos" not in out
+
+
+def test_zos_in_data_is_untouched():
+    horizontal_coordinates, data = _zos_inputs()
+    stored_zos = torch.randn_like(data["SSH"])
+    data["zos"] = stored_zos.clone()
+    out = _derive(data, horizontal_coordinates)
+    assert torch.equal(out["zos"], stored_zos)
+
+
+def test_zos_registered_before_variables_that_may_read_it():
+    labels = list(get_ocean_derived_variable_metadata())
+    assert labels.index("zos") < labels.index("sea_ice_fraction")
+    assert get_ocean_derived_variable_metadata()["zos"].units == "m"
