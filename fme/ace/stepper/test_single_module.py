@@ -2797,6 +2797,37 @@ class TestBackfillDeptho:
         assert updated_vc.deptho is not None
         torch.testing.assert_close(updated_vc.deptho, deptho)
 
+    def test_backfill_keeps_ocean_volume_per_area(self):
+        stepper = _get_stepper(["a"], ["a"])
+        idepth = torch.arange(4, dtype=torch.float)
+        mask = torch.ones(3)
+        ocean_volume_per_area = torch.tensor([1.0, 2.0, 3.0])
+        ckpt_vc = DepthCoordinate(
+            idepth=idepth, mask=mask, ocean_volume_per_area=ocean_volume_per_area
+        )
+        stepper.update_vertical_coordinate(ckpt_vc)
+
+        dataset_vc = DepthCoordinate(
+            idepth=idepth,
+            mask=mask,
+            deptho=torch.tensor(2.5),
+            ocean_volume_per_area=ocean_volume_per_area,
+        )
+        stepper.backfill_deptho(dataset_vc)
+
+        updated_vc = stepper.training_dataset_info.vertical_coordinate
+        assert isinstance(updated_vc, DepthCoordinate)
+        assert updated_vc.ocean_volume_per_area is not None
+        torch.testing.assert_close(
+            updated_vc.ocean_volume_per_area, ocean_volume_per_area
+        )
+        stepper.training_dataset_info.assert_compatible_with(
+            DatasetInfo(
+                vertical_coordinate=dataset_vc,
+                timestep=stepper.training_dataset_info.timestep,
+            )
+        )
+
     def test_noop_when_checkpoint_already_has_deptho(self):
         stepper = _get_stepper(["a"], ["a"])
         idepth = torch.arange(4, dtype=torch.float)
