@@ -265,7 +265,7 @@ class SurfaceEnergyFluxCorrectionConfig:
             warnings.warn(
                 f"SurfaceEnergyFluxCorrectionConfig method '{self.method}' is "
                 "deprecated. Use 'prescribed_open_ocean' instead.",
-                DeprecationWarning,
+                FutureWarning,
             )
 
 
