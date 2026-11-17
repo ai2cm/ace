@@ -383,7 +383,14 @@ class Optimization(OptimizationABC):
                 optimizer is Muon.
         """
         check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
+        # load_state_dict restores each group's saved hyperparameters, but
+        # foreach is an implementation choice of this run, not training state:
+        # keep the freshly-built value (see _default_foreach).
+        fresh_foreach = [g.get("foreach") for g in self.optimizer.param_groups]
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        for group, foreach in zip(self.optimizer.param_groups, fresh_foreach):
+            if "foreach" in group:
+                group["foreach"] = foreach
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])

@@ -18,7 +18,6 @@ import math
 
 import torch
 import torch.nn as nn
-from fme.core.spectral_filter_parameter import SpectralFilterParameter
 import torch_harmonics.distributed as thd
 from torch import amp
 
@@ -27,6 +26,7 @@ from fme.ace.models.makani_fcn3.models.common.factorizations import get_contract
 
 # import convenience functions for factorized tensors
 from fme.ace.models.makani_fcn3.utils import comm
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 
 class SpectralConv(nn.Module):

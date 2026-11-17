@@ -291,8 +291,8 @@ class Muon(torch.optim.Optimizer):
     Parameter group 0 is the Muon group (its ``lr`` is the Muon learning
     rate); group 1, if ``spectral_params`` is non-empty, is the spectral
     Muon group (per-mode complex orthogonalization for spectral filter
-    weights);
-    the last group, if ``adamw_params`` is non-empty, is the AdamW group.
+    weights); the last group, if ``adamw_params`` is non-empty, is the
+    AdamW group.
     Each group carries a ``use_muon`` flag (True for both Muon groups) and
     a ``spectral`` flag.
 

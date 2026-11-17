@@ -637,6 +637,70 @@ def test_spectral_muon_rejects_bfloat16():
         Muon([nn.Parameter(torch.randn(3, 3))], [], lr=0.02, spectral_params=[p])
 
 
+def _reference_spectral_muon_step(
+    p: torch.Tensor,
+    grad: torch.Tensor,
+    momentum_buffer: torch.Tensor,
+    lr: float,
+    momentum: float,
+    nesterov: bool,
+    weight_decay: float,
+) -> None:
+    """One spectral Muon step (default adjust_lr_fn) on a real-stored
+    (groups, modes, C_out, C_in, 2) weight, orthogonalizing one mode at a
+    time, in place."""
+    momentum_buffer.lerp_(grad, 1 - momentum)
+    update = grad.lerp(momentum_buffer, momentum) if nesterov else momentum_buffer
+    update = torch.view_as_complex(update.contiguous())
+    ortho = torch.empty_like(update)
+    for g in range(update.shape[0]):
+        for m in range(update.shape[1]):
+            ortho[g, m] = fme_muon._zeropower_via_newtonschulz_complex(
+                update[g, m].unsqueeze(0),
+                (fme_muon.DEFAULT_A, fme_muon.DEFAULT_B, fme_muon.DEFAULT_C),
+                fme_muon.DEFAULT_NS_STEPS,
+                fme_muon.EPS,
+            )[0]
+    c_out, c_in = update.shape[-2:]
+    p.mul_(1 - lr * weight_decay)
+    p.add_(torch.view_as_real(ortho), alpha=-lr * max(1, c_out / c_in) ** 0.5)
+
+
+@pytest.mark.parametrize("nesterov", [True, False])
+def test_spectral_muon_matches_reference_step(nesterov: bool):
+    """The optimizer applies momentum, Nesterov, weight decay and the
+    per-mode complex update to tall and wide spectral weights over several
+    steps, keeping momentum buffers in the parameter's shape."""
+    torch.manual_seed(0)
+    lr, momentum, weight_decay, n_steps = 0.02, 0.9, 0.1, 4
+    params = [_spectral_weight(2, 3, 6, 4), _spectral_weight(1, 4, 4, 6)]
+    ref_params = [p.detach().clone() for p in params]
+    ref_bufs = [torch.zeros_like(p) for p in ref_params]
+    optimizer = Muon(
+        [],
+        [],
+        lr=lr,
+        momentum=momentum,
+        nesterov=nesterov,
+        weight_decay=weight_decay,
+        spectral_params=params,
+    )
+    for _ in range(n_steps):
+        grads = [torch.randn_like(p) for p in ref_params]
+        for p, g in zip(params, grads):
+            p.grad = g.clone()
+        optimizer.step()
+        for p, g, buf in zip(ref_params, grads, ref_bufs):
+            _reference_spectral_muon_step(
+                p, g, buf, lr, momentum, nesterov, weight_decay
+            )
+    for p, ref, ref_buf in zip(params, ref_params, ref_bufs):
+        buf = optimizer.state[p]["momentum_buffer"]
+        assert buf.shape == p.shape
+        torch.testing.assert_close(buf, ref_buf)
+        torch.testing.assert_close(p.detach(), ref)
+
+
 def _spectral_step(param: SpectralFilterParameter, grad: torch.Tensor, lr: float):
     with torch.no_grad():
         fme_muon.spectral_muon(
@@ -824,6 +888,30 @@ def test_adam_keeps_foreach_default_with_spectral_parameters(optimizer_type):
     optimization = _build(model, OptimizationConfig(optimizer_type=optimizer_type))
     expected = fme.get_device().type == "cuda"
     assert optimization.optimizer.defaults["foreach"] is expected
+
+
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW"])
+def test_adam_resume_keeps_fresh_foreach(optimizer_type):
+    """A checkpoint saved without the foreach default (e.g. before spectral
+    weights were tagged) must not switch a resumed run back to torch's
+    per-tensor loop: load_state keeps the freshly-built foreach."""
+    torch.manual_seed(0)
+    model = _SpectralModel().to(fme.get_device())
+    saved_config = OptimizationConfig(
+        optimizer_type=optimizer_type, kwargs={"foreach": None}
+    )
+    saved_optimization = _build(model, saved_config)
+    x = torch.randn(4, 8, device=fme.get_device())
+    _train_steps(model, saved_optimization, x, 1)
+    saved_state = copy.deepcopy(saved_optimization.get_state())
+    assert saved_state["optimizer_state_dict"]["param_groups"][0]["foreach"] is None
+
+    optimization = _build(model, OptimizationConfig(optimizer_type=optimizer_type))
+    fresh = optimization.optimizer.param_groups[0]["foreach"]
+    assert fresh is (fme.get_device().type == "cuda")
+    optimization.load_state(saved_state)
+    assert optimization.optimizer.param_groups[0]["foreach"] is fresh
+    assert len(optimization.optimizer.state) > 0
 
 
 def test_adam_foreach_with_spectral_parameters_steps():

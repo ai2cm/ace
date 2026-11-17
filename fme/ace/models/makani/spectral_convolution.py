@@ -21,12 +21,13 @@ import math
 import tensorly as tl
 import torch
 import torch.nn as nn
-from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 tl.set_backend("pytorch")
 
 # import convenience functions for factorized tensors
 from tltorch.factorized_tensors.core import FactorizedTensor
+
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 # for the experimental module
 from .contractions import _contract_rank
