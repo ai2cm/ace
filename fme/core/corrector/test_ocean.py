@@ -357,6 +357,59 @@ def test_surface_energy_flux_correction_resid():
     assert ice_row_correction < open_row_correction
 
 
+def test_surface_energy_flux_correction_uses_generated_sst_when_not_an_input():
+    """With sst as an output-only diagnostic, the correction uses the
+    generated sst, giving the same result as that sst provided as an input."""
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    forcing_data = {
+        "land_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    gen_data = {"sst": sst, "hfds": torch.full(IMG_SHAPE, 5.0, device=DEVICE)}
+    input_without_sst = {**forcing_data, "sea_ice_fraction": sea_ice_fraction}
+    input_with_sst = {**input_without_sst, "sst": sst}
+
+    corrected = corrector(input_without_sst, gen_data, forcing_data, None).corrected
+    expected = corrector(input_with_sst, gen_data, forcing_data, None).corrected
+    torch.testing.assert_close(corrected["hfds"], expected["hfds"])
+
+
+def test_surface_energy_flux_correction_input_sst_takes_precedence():
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+
+    forcing_data = {
+        "land_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {
+        **forcing_data,
+        "sea_ice_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+        "sst": torch.full(IMG_SHAPE, 300.0, device=DEVICE),
+    }
+    gen_data = {
+        "sst": torch.full(IMG_SHAPE, float("nan"), device=DEVICE),
+        "hfds": torch.full(IMG_SHAPE, 5.0, device=DEVICE),
+    }
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    assert torch.isfinite(corrected["hfds"]).all()
+
+
 def test_surface_energy_flux_correction_prescribed():
     config = OceanCorrectorConfig(
         surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
