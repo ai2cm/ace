@@ -2,8 +2,10 @@
 """Write the shared 1deg coupled CM4 abrupt-4xCO2 inference configs in this directory.
 
 36 ensemble members of 90 days, branched from piControl on the first of each
-month of years 0301, 0306 and 0311, plus a 100-year extension of member 1.
-The ocean's time-constant forcings come from make_static_ocean_forcing.py.
+month of years 0301, 0306 and 0311, plus a 100-year extension of member 1, and
+a 100-year run initialized from CM4's own abrupt-4xCO2 simulation at
+0251-01-02. The ocean's time-constant forcings come from
+make_static_ocean_forcing.py.
 
 Like the other configs in this directory, these are run from an experiment
 directory's experiments.txt via --config-dir, with rows such as
@@ -26,14 +28,32 @@ STATIC_FORCING = (
 )
 CO2_4X = 1137.048
 YEARS = (301, 306, 311)
+PICONTROL_OCEAN_IC = "/climate-default/2026-09-02-cm4-piControl-1deg-ocean-1daily.zarr"
+PICONTROL_ATMOS_IC = (
+    "/climate-default/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr"
+)
+PICONTROL_IC_COMMENT = """\
+# daily piControl ocean store and the 6-hourly atmosphere store, since most
+# first-of-month start dates are not on the 5-daily training data's time axis."""
+
+# 100-year run initialized from CM4's abrupt-4xCO2 simulation itself.
+ABRUPT_RUN_START = cftime.datetime(251, 1, 2, calendar="noleap")
+ABRUPT_RUN_STATIC_FORCING = (
+    "/climate-default/2026-11-17-cm4-abrupt-4xCO2-1deg-static-ocean-forcing-0251"
+)
+ABRUPT_RUN_OCEAN_IC = "/climate-default/2026-11-17-cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-ocean-1daily.zarr"
+ABRUPT_RUN_ATMOS_IC = "/climate-default/2026-11-17-CM4-CMIP6-abrupt-4xCO2-initial-condition-atmosphere-land-1deg-8layer-2day.zarr"
+ABRUPT_RUN_IC_COMMENT = """\
+# daily ocean and 6-hourly atmosphere initial-condition stores extracted from
+# CM4's CMIP6 abrupt-4xCO2 simulation, so the run starts from a 4xCO2 state
+# rather than branching from piControl."""
 
 TEMPLATE = """\
 # job_runner/inference.sh configs/experiments/<exper> . \\
 #   --config-dir configs/experiments/cm4_eval/coupled
-# Coupled 1deg abrupt-4xCO2 {description}: {duration} inference from piControl
+# Coupled 1deg abrupt-4xCO2 {description}: {duration} inference from {origin}
 # at {time}, with CO2 held at 4x ({co2} ppm). Initial conditions come from the
-# daily piControl ocean store and the 6-hourly atmosphere store, since most
-# first-of-month start dates are not on the 5-daily training data's time axis.
+{ic_comment}
 # The ocean's exogenous forcings (land_fraction, sea_surface_fraction, deptho,
 # hfgeou) are time-constant, so they come from a small file that repeats them on
 # a 5-day axis starting at the initial time, matching the 5-day ocean step
@@ -51,10 +71,10 @@ logging:
   entity: ai2cm
 initial_condition:
   ocean:
-    path: /climate-default/2026-09-02-cm4-piControl-1deg-ocean-1daily.zarr
+    path: {ocean_ic}
     engine: zarr
   atmosphere:
-    path: /climate-default/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    path: {atmos_ic}
     engine: zarr
   start_indices:
     times:
@@ -64,7 +84,7 @@ forcing_loader:
   ocean:
     dataset:
       data_path: {static_forcing}
-      file_pattern: ic_{member:04d}.nc{ocean_repeats}
+      file_pattern: {forcing_file}{ocean_repeats}
   atmosphere:
     dataset:
       merge:
@@ -95,6 +115,31 @@ EXTENSION_COMMENT = """
 # - the ocean's time-constant forcings file only spans the 150-day window on a
 #   5-day axis, so it is tiled well past the 7301 times needed."""
 
+ABRUPT_RUN_COMMENT = """
+# Both forcing datasets are repeated in time to cover 0251-0351:
+# - the piControl atmosphere stores end in 0350, so they are repeated once; the
+#   remaining atmosphere forcings are periodic in the noleap calendar and CO2 is
+#   overwritten with a constant, so the repeat introduces no discontinuity.
+# - the ocean's time-constant forcings file only spans 150 days on a 5-day
+#   axis, so it is tiled well past the 7301 times needed."""
+
+# Shared by the 100-year configs: 7300 5-day steps is exactly 100 noleap years.
+HUNDRED_YEAR = dict(
+    n_coupled_steps=7300,
+    duration="100-year",
+    steps_comment="100 years of 5-day ocean steps",
+    min_runtime="8h",
+    in_memory=4,
+    ocean_repeats="\n      n_repeats: 500",
+    atmos_repeats="\n          n_repeats: 2",
+)
+PICONTROL_IC = dict(
+    origin="piControl",
+    ic_comment=PICONTROL_IC_COMMENT,
+    ocean_ic=PICONTROL_OCEAN_IC,
+    atmos_ic=PICONTROL_ATMOS_IC,
+)
+
 
 def start_times() -> list[cftime.datetime]:
     """Initial times of ensemble members 1-36, in member order."""
@@ -107,6 +152,12 @@ def start_times() -> list[cftime.datetime]:
 
 def format_time(time: cftime.datetime) -> str:
     return f"{time.year:04d}-{time.month:02d}-{time.day:02d}T00:00:00"
+
+
+def abrupt_run_forcing_file() -> str:
+    """Name of the abrupt-run static forcing file, keyed by its start date."""
+    t = ABRUPT_RUN_START
+    return f"ic_{t.year:04d}-{t.month:02d}-{t.day:02d}.nc"
 
 
 def main():
@@ -123,9 +174,10 @@ def main():
             min_runtime="2h",
             in_memory=6,
             static_forcing=STATIC_FORCING,
-            member=member,
+            forcing_file=f"ic_{member:04d}.nc",
             ocean_repeats="",
             atmos_repeats="",
+            **PICONTROL_IC,
         )
         (HERE / f"inference-config-cm4-abrupt4xCO2-ic{member}.yaml").write_text(text)
     text = TEMPLATE.format(
@@ -133,17 +185,26 @@ def main():
         time=format_time(times[0]),
         co2=CO2_4X,
         extra_comment=EXTENSION_COMMENT,
-        n_coupled_steps=7300,
-        duration="100-year",
-        steps_comment="100 years of 5-day ocean steps",
-        min_runtime="8h",
-        in_memory=4,
         static_forcing=STATIC_FORCING,
-        member=1,
-        ocean_repeats="\n      n_repeats: 500",
-        atmos_repeats="\n          n_repeats: 2",
+        forcing_file="ic_0001.nc",
+        **HUNDRED_YEAR,
+        **PICONTROL_IC,
     )
     (HERE / "inference-config-cm4-abrupt4xCO2-ic1-100yr.yaml").write_text(text)
+    text = TEMPLATE.format(
+        description="run",
+        origin="CM4's own abrupt-4xCO2 simulation",
+        time=format_time(ABRUPT_RUN_START),
+        co2=CO2_4X,
+        ic_comment=ABRUPT_RUN_IC_COMMENT,
+        extra_comment=ABRUPT_RUN_COMMENT,
+        static_forcing=ABRUPT_RUN_STATIC_FORCING,
+        forcing_file=abrupt_run_forcing_file(),
+        ocean_ic=ABRUPT_RUN_OCEAN_IC,
+        atmos_ic=ABRUPT_RUN_ATMOS_IC,
+        **HUNDRED_YEAR,
+    )
+    (HERE / "inference-config-cm4-abrupt4xCO2-0251-100yr.yaml").write_text(text)
 
 
 if __name__ == "__main__":
