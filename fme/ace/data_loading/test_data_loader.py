@@ -31,6 +31,7 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
@@ -1327,6 +1328,7 @@ def _global_properties():
         timestep=timestep,
         is_remote=False,
         all_labels=None,
+        area_weights_provider=AreaWeightsProvider(torch.rand(n_lat, n_lon)),
     )
 
 
@@ -1350,6 +1352,8 @@ def _assert_dataset_info_uses_global_properties(dataset_info, props):
     assert set(info_masks.keys()) == set(prop_masks.keys())
     for key in prop_masks:
         assert info_masks[key].shape == prop_masks[key].shape
+
+    assert dataset_info.area_weights_provider == props.area_weights_provider
 
 
 @pytest.mark.parallel

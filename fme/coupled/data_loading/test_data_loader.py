@@ -14,8 +14,9 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.inference import ExplicitIndices, ForcingDataLoaderConfig
 from fme.ace.data_loading.test_data_loader import _get_coords
-from fme.ace.requirements import DataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.testing import save_stats_netcdfs
+from fme.core.area_weights_provider import AreaWeightsProvider, NullAreaWeightsProvider
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalDepthCoordinate,
@@ -39,14 +40,17 @@ from fme.coupled.data_loading.data_typing import (
     CoupledVerticalCoordinate,
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
-from fme.coupled.requirements import CoupledDataRequirements
+from fme.coupled.requirements import (
+    CoupledDataRequirements,
+    CoupledPrognosticStateDataRequirements,
+)
 
 from .config import (
     CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
 )
-from .getters import get_forcing_data, get_gridded_data
+from .getters import get_forcing_data, get_gridded_data, get_inference_data
 from .inference import (
     CoupledForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
@@ -81,6 +85,9 @@ def _save_netcdf(
             dim_sizes_to_use = dim_sizes_without_time
             data = np.ones(tuple(dim_sizes_to_use.values()))
             data[0, 0] = 0.0
+        elif name in ("areacello", "sea_surface_fraction"):
+            dim_sizes_to_use = dim_sizes_without_time
+            data = np.random.uniform(0.5, 1.0, size=list(dim_sizes_to_use.values()))
         else:
             dim_sizes_to_use = dim_sizes
             data = np.random.uniform(size=list(dim_sizes_to_use.values()))
@@ -542,6 +549,58 @@ def test_zarr_engine_used_false_inference():
         start_indices=ExplicitIndices([0]),
     )
     assert not config.zarr_engine_used
+
+
+def test_coupled_dataset_info_has_ocean_area_weights_provider(tmp_path):
+    """Ocean statics areacello and sea_surface_fraction reach the training and
+    inference DatasetInfo; the atmosphere has none."""
+    ocean_names = ["bar"]
+    atmos_names = ["foo"]
+    mock_data = create_coupled_data_on_disk(
+        tmp_path,
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        ocean_names=ocean_names + ["areacello", "sea_surface_fraction"],
+        atmosphere_names=atmos_names,
+    )
+    ocean_ds = mock_data.ocean.ds
+    expected = AreaWeightsProvider.from_cell_area_and_fraction(
+        torch.as_tensor(ocean_ds["areacello"].values, dtype=torch.float64),
+        torch.as_tensor(ocean_ds["sea_surface_fraction"].values, dtype=torch.float64),
+    )
+    requirements = CoupledDataRequirements(
+        ocean_timestep=datetime.timedelta(days=2),
+        ocean_requirements=DataRequirements(ocean_names, n_timesteps=2),
+        atmosphere_timestep=datetime.timedelta(days=1),
+        atmosphere_requirements=DataRequirements(atmos_names, n_timesteps=3),
+    )
+    train_data = get_gridded_data(
+        CoupledDataLoaderConfig(
+            dataset=CoupledConcatDatasetConfig(concat=[mock_data.dataset_config]),
+            batch_size=1,
+            num_data_workers=0,
+        ),
+        False,
+        requirements,
+    )
+    inference_data = get_inference_data(
+        InferenceDataLoaderConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
+                ocean=mock_data.dataset_config.ocean,
+                atmosphere=mock_data.dataset_config.atmosphere,
+            ),
+            start_indices=ExplicitIndices([0]),
+        ),
+        total_coupled_steps=1,
+        window_requirements=requirements,
+        initial_condition=CoupledPrognosticStateDataRequirements(
+            ocean=PrognosticStateDataRequirements(ocean_names, n_timesteps=1),
+            atmosphere=PrognosticStateDataRequirements(atmos_names, n_timesteps=1),
+        ),
+    )
+    for dataset_info in (train_data.dataset_info, inference_data.dataset_info):
+        assert dataset_info.ocean.area_weights_provider == expected
+        assert dataset_info.atmosphere.area_weights_provider == NullAreaWeightsProvider
 
 
 def test_coupled_data_loader_merge_no_concat(tmp_path):
