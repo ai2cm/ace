@@ -413,6 +413,7 @@ class DepthCoordinate(VerticalCoordinate):
             idepth=self.idepth,
             mask=self.mask,
             deptho=deptho,
+            ocean_volume_per_area=self.ocean_volume_per_area,
         )
 
     def adopt_deptho(self, other: "VerticalCoordinate") -> "DepthCoordinate":

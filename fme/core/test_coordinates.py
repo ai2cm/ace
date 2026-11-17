@@ -447,6 +447,22 @@ def test_ocean_volume_per_area_equality(first, second, equal):
     assert (a == b) is equal
 
 
+def test_adopt_deptho_keeps_ocean_volume_per_area():
+    ocean_volume_per_area = _ocean_volume_per_area()
+    dataset_coord = _make_ocean_volume_per_area_coordinate(ocean_volume_per_area)
+    checkpoint_coord = DepthCoordinate(
+        idepth=dataset_coord.idepth,
+        mask=dataset_coord.mask,
+        ocean_volume_per_area=ocean_volume_per_area,
+    )
+    adopted = checkpoint_coord.adopt_deptho(dataset_coord)
+    assert adopted.deptho is not None
+    assert adopted.ocean_volume_per_area is not None
+    torch.testing.assert_close(adopted.ocean_volume_per_area, ocean_volume_per_area)
+    torch.testing.assert_close(adopted.dz, checkpoint_coord.dz)
+    assert adopted == dataset_coord
+
+
 def test_ocean_volume_per_area_to_device():
     coord = _make_ocean_volume_per_area_coordinate(_ocean_volume_per_area())
     moved = coord.to(get_device())
