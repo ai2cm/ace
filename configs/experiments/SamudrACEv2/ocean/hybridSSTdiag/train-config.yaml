@@ -448,7 +448,7 @@ stepper:
         - calving_residue_total_area
         - hfrunoffds_total_area
         - SSS
-        - SST
+        - SST_degK
       residual_prediction:
         normalized: true
         names:
