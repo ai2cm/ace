@@ -75,10 +75,9 @@ class GlobalMeanRemoval(abc.ABC):
     to ``forward_transform``, which must be the one normalizing the
     network's inputs. Its constants may be scalars or per-sample tensors
     of shape ``[batch, 1, ...]``; with per-sample constants, each sample
-    is shifted to its own climatology. Per-grid-cell constants, of shape
-    ``[*spatial]`` or ``[batch, *spatial]``, contribute their unweighted
-    mean over grid cells: a field is shifted so its spatial mean equals
-    that of its per-grid-cell means.
+    is shifted to its own climatology. Per-grid-cell constants contribute
+    their unweighted mean over grid cells, for both the shift and the
+    appended channel's std (so floored near-constant cells don't dominate).
 
     Optional synthetic input channels (when ``append_as_input=True``) are
     produced by ``forward_transform`` already in *normalized* space and
@@ -190,12 +189,7 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
 
 
 def _per_sample_constant(constant: torch.Tensor, n_spatial_dims: int) -> torch.Tensor:
-    """Reduce a normalization constant to one value per sample.
-
-    Scalar constants become ``[1]`` and per-sample constants ``[batch]``.
-    Per-grid-cell constants are first averaged over grid cells, unweighted to
-    match the unweighted sample means they are compared with.
-    """
+    """Reduce a constant to shape [1] or [batch], averaging over grid cells."""
     if constant.shape[-n_spatial_dims:].numel() > 1:
         constant = constant.mean(dim=tuple(range(-n_spatial_dims, 0)))
     return constant.reshape(-1)

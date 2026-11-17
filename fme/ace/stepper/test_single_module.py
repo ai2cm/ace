@@ -106,7 +106,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
-from fme.core.step.multi_call import MultiCallConfig
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.single_module import ResidualPredictionConfig, SingleModuleStep
 from fme.core.stepper_state import StepperState
 from fme.core.testing import (
@@ -114,6 +114,7 @@ from fme.core.testing import (
     trivial_network_and_loss_normalization,
     trivial_normalization,
     uniform_grouped_normalization,
+    write_normalization_stats,
 )
 from fme.core.testing.ema import assert_parameters_equal
 from fme.core.testing.regression import validate_tensor_dict
@@ -1821,10 +1822,30 @@ def test_reloaded_grouped_stepper_keeps_per_group_constants(tmp_path: pathlib.Pa
     )
 
 
-def _write_per_grid_cell_stats(path: pathlib.Path, values: torch.Tensor) -> str:
-    """Write per-grid-cell constants for "a" on (lat, lon) to netCDF."""
-    xr.Dataset({"a": (("lat", "lon"), values.numpy())}).to_netcdf(path)
-    return str(path)
+_PER_GRID_CELL_LAT = torch.linspace(-80.0, 80.0, 5)
+_PER_GRID_CELL_LON = torch.arange(5) * 72.0
+
+
+def _per_grid_cell_dataset_info(all_labels: set[str] | None = None) -> DatasetInfo:
+    return get_dataset_info(
+        horizontal_coordinate=LatLonCoordinates(
+            lat=_PER_GRID_CELL_LAT, lon=_PER_GRID_CELL_LON
+        ),
+        all_labels=all_labels,
+    )
+
+
+def _write_per_grid_cell_stats(
+    path: pathlib.Path, values: Mapping[str, torch.Tensor], flip_lat: bool = False
+) -> str:
+    """Write constants on ``_per_grid_cell_dataset_info``'s grid, optionally
+    with latitude flipped."""
+    lat = _PER_GRID_CELL_LAT.numpy()
+    if flip_lat:
+        lat = lat[::-1]
+        values = {name: value.flip(0) for name, value in values.items()}
+    coords = {"lat": lat, "lon": _PER_GRID_CELL_LON.numpy()}
+    return str(write_normalization_stats(path, values, coords))
 
 
 @pytest.mark.parametrize(
@@ -1832,31 +1853,28 @@ def _write_per_grid_cell_stats(path: pathlib.Path, values: torch.Tensor) -> str:
     [
         (None, None),
         (["c96", "era5"], ["c96", "era5", "c96"]),
-        (["amip", "ramped", "som", "era5"], ["amip", "som", "era5"]),
     ],
-    ids=["pooled", "source_groups", "config_groups"],
+    ids=["pooled", "grouped"],
 )
 def test_reloaded_per_grid_cell_stepper_keeps_per_cell_constants(
     tmp_path: pathlib.Path,
     group_labels: list[str] | None,
     sample_labels: list[str] | None,
 ):
-    """A checkpoint carries per-grid-cell constants, pooled or per group.
-
-    The netCDF files are deleted before the checkpoint is reloaded. The
-    add-one network advances each cell of each sample by its own std, so a
-    reload which lost or scrambled the per-grid-cell constants would not.
-    """
+    """A checkpoint carries per-grid-cell constants, pooled or per group, once
+    the netCDF files are gone: the add-one network advances each cell of each
+    sample by its own std."""
     generator = torch.Generator().manual_seed(0)
 
     def per_grid_cell_config(name: str) -> NormalizationConfig:
         return NormalizationConfig(
             global_means_path=_write_per_grid_cell_stats(
-                tmp_path / f"{name}_means.nc", torch.randn(5, 5, generator=generator)
+                tmp_path / f"{name}_means.nc",
+                {"a": torch.randn(5, 5, generator=generator)},
             ),
             global_stds_path=_write_per_grid_cell_stats(
                 tmp_path / f"{name}_stds.nc",
-                1.0 + torch.rand(5, 5, generator=generator),
+                {"a": 1.0 + torch.rand(5, 5, generator=generator)},
             ),
             per_grid_cell=True,
         )
@@ -1865,6 +1883,7 @@ def test_reloaded_per_grid_cell_stepper_keeps_per_cell_constants(
     step_config = config.step.config
     pooled = per_grid_cell_config("pooled")
     step_config["normalization"]["network"] = dataclasses.asdict(pooled)
+    step_config["normalization"]["loss"] = dataclasses.asdict(pooled)
     if group_labels is None:
         expected_configs = [pooled] * 3
         labels = None
@@ -1889,7 +1908,7 @@ def test_reloaded_per_grid_cell_stepper_keeps_per_cell_constants(
     )
     stepper = dataclasses.replace(
         config, step=StepSelector(type="single_module", config=step_config)
-    ).get_stepper(get_dataset_info(all_labels=set(group_labels or [])))
+    ).get_stepper(_per_grid_cell_dataset_info(all_labels=set(group_labels or [])))
     state = stepper.get_state()
     for path in tmp_path.glob("*.nc"):
         path.unlink()
@@ -1904,6 +1923,102 @@ def test_reloaded_per_grid_cell_stepper_keeps_per_cell_constants(
         output.data["a"][:, 0] - input_data.as_batch_data().data["a"][:, 0],
         expected_step,
     )
+
+
+def test_reloaded_per_grid_cell_multi_call_stepper_keeps_loss_constants(
+    tmp_path: pathlib.Path,
+):
+    """A checkpoint carries the per-grid-cell loss constants of the
+    multi-called outputs, but not those of unused variables."""
+    generator = torch.Generator().manual_seed(0)
+    names = ["a", "forcing", "diag", "diag_double", "unused"]
+    stats = {
+        kind: {name: low + torch.rand(5, 5, generator=generator) for name in names}
+        for kind, low in [("means", -0.5), ("stds", 1.0)]
+    }
+    per_grid_cell = NormalizationConfig(
+        global_means_path=_write_per_grid_cell_stats(
+            tmp_path / "means.nc", stats["means"]
+        ),
+        global_stds_path=_write_per_grid_cell_stats(
+            tmp_path / "stds.nc", stats["stds"]
+        ),
+        per_grid_cell=True,
+    )
+    wrapped = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a", "forcing"],
+        out_names=["a", "diag"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=per_grid_cell,
+            loss=dataclasses.replace(per_grid_cell),
+            residual=NormalizationConfig(means={"a": 0.0}, stds={"a": 0.5}),
+        ),
+    )
+    config = StepperConfig(
+        step=StepSelector(
+            type="multi_call",
+            config=dataclasses.asdict(
+                MultiCallStepConfig(
+                    wrapped_step=StepSelector(
+                        type="single_module", config=dataclasses.asdict(wrapped)
+                    ),
+                    config=MultiCallConfig(
+                        forcing_name="forcing",
+                        forcing_multipliers={"_double": 2.0},
+                        output_names=["diag"],
+                    ),
+                )
+            ),
+        )
+    )
+    state = config.get_stepper(_per_grid_cell_dataset_info()).get_state()
+    for path in tmp_path.glob("*.nc"):
+        path.unlink()
+    normalization = state["config"]["step"]["config"]["wrapped_step"]["config"][
+        "normalization"
+    ]
+    assert set(normalization["network"]["per_grid_cell_coords"]) == {
+        "a",
+        "forcing",
+        "diag",
+    }
+    assert set(normalization["loss"]["per_grid_cell_coords"]) == {
+        "a",
+        "forcing",
+        "diag",
+        "diag_double",
+    }
+    reloaded = Stepper.from_state(state)
+
+    stds = reloaded.build_loss(StepLossConfig())._normalizer.stds
+    assert set(stds) == {"a", "forcing", "diag", "diag_double"}
+    assert float(stds["a"]) == 0.5
+    for name in ["forcing", "diag", "diag_double"]:
+        torch.testing.assert_close(stds[name], stats["stds"][name].to(DEVICE))
+
+
+def test_per_grid_cell_stepper_rejects_flipped_latitude(tmp_path: pathlib.Path):
+    """Flipped latitudes have the data's shape but must still be rejected."""
+    config = _get_stepper_config(["a"], ["a"])
+    step_config = config.step.config
+    flipped = dataclasses.asdict(
+        NormalizationConfig(
+            global_means_path=_write_per_grid_cell_stats(
+                tmp_path / "means.nc", {"a": torch.zeros(5, 5)}, flip_lat=True
+            ),
+            global_stds_path=_write_per_grid_cell_stats(
+                tmp_path / "stds.nc", {"a": torch.ones(5, 5)}, flip_lat=True
+            ),
+            per_grid_cell=True,
+        )
+    )
+    step_config["normalization"]["network"] = flipped
+    step_config["normalization"]["loss"] = flipped
+    with pytest.raises(ValueError, match="reversed"):
+        dataclasses.replace(
+            config, step=StepSelector(type="single_module", config=step_config)
+        ).get_stepper(_per_grid_cell_dataset_info())
 
 
 class _RecordingCorrector(CorrectorABC):
@@ -4241,6 +4356,55 @@ def test_step_residual_normalized_prediction():
         torch.testing.assert_close(output[n], expected)
 
 
+@pytest.mark.parametrize(
+    "per_cell_network, per_cell_residual",
+    [(True, False), (False, True)],
+    ids=["network", "residual"],
+)
+def test_step_residual_normalized_prediction_per_grid_cell(
+    per_cell_network: bool, per_cell_residual: bool
+):
+    """A unit network output is one residual std of each cell's own."""
+    generator = torch.Generator().manual_seed(0)
+
+    def constant(per_cell: bool, low: float, high: float) -> torch.Tensor:
+        shape = (5, 5) if per_cell else ()
+        return low + (high - low) * torch.rand(shape, generator=generator)
+
+    field_means = constant(per_cell_network, -2.0, 2.0)
+    field_stds = constant(per_cell_network, 2.0, 4.0)
+    res_stds = constant(per_cell_residual, 0.1, 0.3)
+    network = NormalizationConfig(
+        means={"a": field_means},
+        stds={"a": field_stds},
+        per_grid_cell=per_cell_network,
+    )
+    config = _residual_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=network,
+            loss=network,
+            residual=NormalizationConfig(
+                means={"a": torch.zeros_like(res_stds)},
+                stds={"a": res_stds},
+                per_grid_cell=per_cell_residual,
+            ),
+        ),
+        ResidualPredictionConfig(normalized=True),
+        ["a"],
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    field_means, field_stds, res_stds = (
+        t.to(DEVICE) for t in (field_means, field_stds, res_stds)
+    )
+    input_norm = (input_data["a"] - field_means) / field_stds
+    expected = input_data["a"] + res_stds * (input_norm + 1)
+    torch.testing.assert_close(output["a"], expected)
+
+
 def test_step_hybrid_residual_normalized_prediction():
     """The production case: one prognostic stepped as a residual-normalized
     tendency while the other is predicted full-field, in the same step."""
@@ -4292,25 +4456,25 @@ def test_hybrid_loss_normalizer_scales_each_name_by_its_convention():
     assert stds["b"].item() == pytest.approx(field_stds["b"])
 
 
-def test_normalized_residual_prediction_rejects_explicit_loss_normalization():
-    """residual_prediction.normalized needs a residual block, which cannot
-    coexist with an explicit loss block, so the option commits the loss to the
-    tendency convention. Say that here rather than sending the user round the
-    two-step dead end of 'add a residual block' then 'residual conflicts with
-    loss', neither of which names the option that forced it."""
-    with pytest.raises(ValueError, match="cannot be combined with normalization.loss"):
-        SingleModuleStepConfig(
-            builder=ModuleSelector(
-                type="prebuilt", config={"module": torch.nn.Identity()}
-            ),
-            in_names=["a"],
-            out_names=["a"],
-            normalization=NetworkAndLossNormalizationConfig(
-                network=trivial_normalization(["a"]),
-                loss=trivial_normalization(["a"], std=2.0),
-            ),
-            residual_prediction=ResidualPredictionConfig(normalized=True),
-        )
+def test_normalized_residual_prediction_with_explicit_loss_normalization():
+    """The residual block overrides the loss block for the residual names
+    only; other names (here a diagnostic) use the loss constants."""
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a"],
+        out_names=["a", "diag"],
+        normalization=NetworkAndLossNormalizationConfig(
+            network=trivial_normalization(["a", "diag"], std=5.0),
+            loss=trivial_normalization(["a", "diag"], std=2.0),
+            residual=trivial_normalization(["a"], std=0.5),
+        ),
+        residual_prediction=ResidualPredictionConfig(normalized=True),
+    )
+    stds = config.get_loss_normalizer().stds
+    assert {name: float(std) for name, std in stds.items()} == {
+        "a": 0.5,
+        "diag": 2.0,
+    }
 
 
 def test_normalized_residual_prediction_requires_residual_block():

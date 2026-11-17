@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import torch
@@ -81,7 +81,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
-        self.normalization.raise_if_grouped("SecondaryModuleStepConfig")
+        self.normalization.raise_if_unsupported("SecondaryModuleStepConfig")
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -257,7 +257,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
             init_weights=init_weights,
         )
 
-    def load(self):
+    def load(self, extra_names: Iterable[str] = ()):
         self.normalization.load()
 
     @property

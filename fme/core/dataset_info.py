@@ -3,6 +3,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
 import torch
 
 from fme.core.atmosphere_data import HasAtmosphereVerticalIntegral
@@ -176,12 +177,22 @@ class DatasetInfo:
     @property
     def spatial_shape(self) -> tuple[int, ...]:
         """
-        Shape of the trailing spatial dimensions on this dataset's tensors,
-        including HEALPix's leading face dimension (see ``n_spatial_dims``).
+        Shape of the trailing spatial dimensions, including any face dimension.
         """
         if self._horizontal_coordinates is None:
             return tuple(self.img_shape)
         return tuple(self._horizontal_coordinates.shape)
+
+    @property
+    def spatial_coords(self) -> tuple[np.ndarray, ...] | None:
+        """
+        Coordinate values along each dimension of ``spatial_shape``, or None
+        if unknown. For HEALPix, (face, height, width) lines up with
+        ``spatial_shape`` only because height and width are equal.
+        """
+        if self._horizontal_coordinates is None:
+            return None
+        return tuple(self._horizontal_coordinates.coords.values())
 
     @property
     def gridded_operations(self) -> GriddedOperations:

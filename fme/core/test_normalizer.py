@@ -21,6 +21,7 @@ from fme.core.normalizer import (
     StandardNormalizer,
     _combine_normalizers,
 )
+from fme.core.testing import write_normalization_stats
 
 
 def test_normalize_depends_on_mean():
@@ -116,7 +117,7 @@ def test_missing_normalization_build_raises_error():
         stds={"a": 1.0, "b": 1.0},
     )
     all_names = ["a", "b", "c"]
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match=r"No normalization constants for .*\['c'\]"):
         normalization.build(all_names)
 
 
@@ -259,19 +260,6 @@ def test_combined_normalization_uses_residual_normalizer_for_prognostic_loss():
     loss_normalized = loss_normalizer.normalize(data)
     torch.testing.assert_close(direct_residual_normalized["a"], loss_normalized["a"])
     torch.testing.assert_close(direct_network_noramlized["b"], loss_normalized["b"])
-
-
-def test_combined_normalization_cannot_set_both_loss_and_residual():
-    network_config = NormalizationConfig(
-        means={"a": torch.randn(1), "b": torch.randn(1)},
-        stds={"a": torch.randn(1), "b": torch.randn(1)},
-    )
-    with pytest.raises(ValueError):
-        NetworkAndLossNormalizationConfig(
-            network=network_config,
-            loss=network_config,
-            residual=network_config,
-        )
 
 
 def test_normalization_config_with_means_and_stds_round_trip():
@@ -684,7 +672,9 @@ def test_grouped_normalizer_requires_every_group_to_cover_every_variable():
     pooled = NormalizationConfig(
         means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}
     ).build(["a", "b"])
-    with pytest.raises(ValueError, match="'era5' has no constants for variable 'b'"):
+    with pytest.raises(
+        ValueError, match=r"'era5' has no constants for variables \['b'\]"
+    ):
         config.build(
             pooled=pooled,
             names=["a", "b"],
@@ -858,6 +848,7 @@ def test_grouped_normalization_loads_into_explicit_constants():
 
 
 N_LAT, N_LON = 3, 4
+LAT, LON = np.linspace(-60.0, 60.0, N_LAT), 90.0 * np.arange(N_LON)
 
 
 def _cell_values(seed: int, low: float = -1.0, high: float = 1.0) -> torch.Tensor:
@@ -866,32 +857,22 @@ def _cell_values(seed: int, low: float = -1.0, high: float = 1.0) -> torch.Tenso
     return low + (high - low) * torch.rand(N_LAT, N_LON, generator=generator)
 
 
-def _write_constants(
-    path: pathlib.Path, constants: dict[str, float | torch.Tensor]
-) -> pathlib.Path:
-    """Write constants to netCDF: per-grid-cell ones on (lat, lon), which also
-    carry coordinates, and scalars without dimensions.
-    """
-    data_vars = {
-        name: xr.DataArray(
-            np.asarray(value), dims=("lat", "lon") if np.ndim(value) else ()
-        )
-        for name, value in constants.items()
-    }
-    coords = {"lat": np.linspace(-60.0, 60.0, N_LAT), "lon": 90.0 * np.arange(N_LON)}
-    xr.Dataset(data_vars, coords=coords).to_netcdf(path)
-    return path
-
-
 def _per_grid_cell_file_config(
     tmp_path: pathlib.Path,
     means: dict[str, float | torch.Tensor],
     stds: dict[str, float | torch.Tensor],
+    encoding: dict[str, dict] | None = None,
     **kwargs,
 ) -> NormalizationConfig:
+    """Config reading constants on (lat, lon) from netCDF files."""
+    coords = {"lat": LAT, "lon": LON}
     return NormalizationConfig(
-        global_means_path=_write_constants(tmp_path / "means.nc", means),
-        global_stds_path=_write_constants(tmp_path / "stds.nc", stds),
+        global_means_path=write_normalization_stats(
+            tmp_path / "means.nc", means, coords, encoding=encoding
+        ),
+        global_stds_path=write_normalization_stats(
+            tmp_path / "stds.nc", stds, coords, encoding=encoding
+        ),
         **kwargs,
     )
 
@@ -927,8 +908,8 @@ def test_per_grid_cell_normalization_uses_each_cells_constants(tmp_path, load):
 
 
 def test_per_grid_cell_constants_require_opt_in(tmp_path):
-    """Without per_grid_cell, files with non-scalar variables behave as
-    before: those are skipped when loading every variable, rejected by name."""
+    """Without per_grid_cell, non-scalar variables are skipped when loading
+    every variable and rejected when requested or given explicitly."""
     config = _per_grid_cell_file_config(
         tmp_path,
         means={"a": _cell_values(0), "b": 3.0},
@@ -939,25 +920,11 @@ def test_per_grid_cell_constants_require_opt_in(tmp_path):
     config.load()
     assert "a" not in config.means
     assert config.means["b"] == 3.0
-
-
-def test_per_grid_cell_load_skips_coordinates(tmp_path):
-    config = _per_grid_cell_file_config(
-        tmp_path,
-        means={"a": _cell_values(0)},
-        stds={"a": _cell_values(1, low=1.0, high=2.0)},
-        per_grid_cell=True,
-    )
-    config.load()
-    assert set(config.means) == {"a", "x", "y", "z"}
-
-
-def test_explicit_per_grid_cell_constants_require_opt_in():
     with pytest.raises(ValueError, match="set per_grid_cell"):
         NormalizationConfig(means={"a": _cell_values(0)}, stds={"a": 1.0})
 
 
-@pytest.mark.parametrize("fraction", [-0.1, 1.0])
+@pytest.mark.parametrize("fraction", [0.0, 1.0])
 def test_per_grid_cell_min_std_fraction_must_be_a_fraction(fraction):
     with pytest.raises(ValueError, match="per_grid_cell_min_std_fraction"):
         NormalizationConfig(
@@ -965,52 +932,109 @@ def test_per_grid_cell_min_std_fraction_must_be_a_fraction(fraction):
         )
 
 
-@pytest.mark.parametrize("fraction", [0.01, 0.5])
-def test_per_grid_cell_stds_are_floored(tmp_path, fraction):
-    """A near-constant cell's std is raised to a fraction of the mean std."""
+def test_per_grid_cell_stds_are_floored(tmp_path, caplog):
+    """Zero and near-zero stds are floored to a fraction of the mean over
+    finite, non-negative cells; NaN and negative cells are left to be
+    rejected on build, and scalar stds are not floored."""
     stds = torch.full((N_LAT, N_LON), 2.0)
-    stds[0, 0] = 0.0
-    stds[1, 1] = 1e-9
+    stds[0, 0] = float("nan")
+    stds[0, 1] = -0.5
+    stds[1, 1] = 0.0
+    stds[1, 2] = 1e-9
     config = _per_grid_cell_file_config(
         tmp_path,
         means={"a": torch.zeros(N_LAT, N_LON), "b": 0.0},
         stds={"a": stds, "b": 0.0},
         per_grid_cell=True,
-        per_grid_cell_min_std_fraction=fraction,
+        per_grid_cell_min_std_fraction=0.5,
     )
-    config.load()
+    with caplog.at_level(logging.INFO):
+        config.load()
+    # Half the mean of the 10 finite, non-negative cells' stds.
+    floor = 0.5 * 16.0 / 10.0
+    assert f"'a' to {floor:.6g} in 2 of 12 grid cells" in caplog.text
     floored = config.stds["a"]
     assert isinstance(floored, torch.Tensor)
-    floor = fraction * float(stds.mean())
-    assert float(floored[0, 0]) == pytest.approx(floor)
     assert float(floored[1, 1]) == pytest.approx(floor)
+    assert float(floored[1, 2]) == pytest.approx(floor)
     assert float(floored[2, 2]) == 2.0
-    # Scalar stds are not floored, as before.
+    assert float(floored[0, 1]) == -0.5
+    assert torch.isnan(floored[0, 0])
     assert config.stds["b"] == 0.0
-
-
-def test_per_grid_cell_stds_all_zero_are_rejected(tmp_path):
-    config = _per_grid_cell_file_config(
-        tmp_path,
-        means={"a": torch.zeros(N_LAT, N_LON)},
-        stds={"a": torch.zeros(N_LAT, N_LON)},
-        per_grid_cell=True,
-    )
-    with pytest.raises(ValueError, match="zero in every grid cell"):
+    with pytest.raises(ValueError, match="stds for 'a' are non-finite in 1 of 12"):
         config.build(["a"])
 
 
-def test_per_grid_cell_constants_must_be_finite(tmp_path):
-    means = torch.zeros(N_LAT, N_LON)
-    means[0, 0] = float("nan")
+@pytest.mark.parametrize("value", [0.0, -0.5])
+def test_per_grid_cell_non_positive_std_cell_is_rejected(value):
+    stds = torch.ones(N_LAT, N_LON)
+    stds[1, 2] = value
+    config = NormalizationConfig(
+        means={"a": torch.zeros(N_LAT, N_LON)}, stds={"a": stds}, per_grid_cell=True
+    )
+    with pytest.raises(ValueError, match="not positive in every grid cell"):
+        config.build(["a"])
+
+
+@pytest.mark.parametrize("attribute", [None, "_FillValue", "missing_value"])
+@pytest.mark.parametrize("constant", ["means", "stds"])
+def test_per_grid_cell_missing_cells_are_rejected_as_non_finite(
+    tmp_path, attribute, constant
+):
+    """A NaN or fill-value cell (e.g. an ocean variable over land) is
+    rejected rather than used as a mean or std of 1e20."""
+    constants = {"means": _cell_values(0), "stds": _cell_values(1, 1.0, 2.0)}
+    constants[constant][0, 0] = float("nan")
+    config = _per_grid_cell_file_config(
+        tmp_path,
+        means={"a": constants["means"]},
+        stds={"a": constants["stds"]},
+        encoding=None if attribute is None else {"a": {attribute: 1e20}},
+        per_grid_cell=True,
+    )
+    with pytest.raises(ValueError, match=rf"{constant} for 'a' are non-finite in 1 of"):
+        config.build(["a"])
+
+
+def test_per_grid_cell_packed_constants_and_coordinates_are_unpacked(tmp_path):
+    means, stds = _cell_values(0), _cell_values(1, 1.0, 2.0)
     config = _per_grid_cell_file_config(
         tmp_path,
         means={"a": means},
-        stds={"a": torch.ones(N_LAT, N_LON)},
+        stds={"a": stds},
+        encoding={
+            "a": {"dtype": "int16", "scale_factor": 0.001, "add_offset": 1.0},
+            "lat": {"dtype": "int16", "scale_factor": 0.5},
+        },
         per_grid_cell=True,
     )
-    with pytest.raises(ValueError, match="non-finite"):
-        config.load()
+    normalizer = config.build(["a"])
+    torch.testing.assert_close(
+        normalizer.means["a"], _on_device(means), atol=1e-3, rtol=0
+    )
+    torch.testing.assert_close(
+        normalizer.stds["a"], _on_device(stds), atol=1e-3, rtol=0
+    )
+    normalizer.validate_spatial_shape((N_LAT, N_LON), (LAT, LON))
+
+
+def test_per_grid_cell_constant_with_time_like_units_is_not_decoded(tmp_path):
+    means = _cell_values(0)
+    xr.Dataset(
+        {"a": (("lat", "lon"), means.numpy(), {"units": "days since 2000-01-01"})},
+        coords={"lat": LAT, "lon": LON},
+    ).to_netcdf(tmp_path / "means.nc")
+    config = NormalizationConfig(
+        global_means_path=tmp_path / "means.nc",
+        global_stds_path=write_normalization_stats(
+            tmp_path / "stds.nc",
+            {"a": np.ones((N_LAT, N_LON))},
+            {"lat": LAT, "lon": LON},
+        ),
+        per_grid_cell=True,
+    )
+    normalizer = config.build(["a"])
+    torch.testing.assert_close(normalizer.means["a"], _on_device(means))
 
 
 def test_per_grid_cell_constants_round_trip_through_serialization(tmp_path):
@@ -1039,6 +1063,7 @@ def test_per_grid_cell_constants_round_trip_through_serialization(tmp_path):
         for name in ["a", "b"]:
             torch.testing.assert_close(reloaded.means[name], normalizer.means[name])
             torch.testing.assert_close(reloaded.stds[name], normalizer.stds[name])
+        assert reloaded.grid_coords == {"a": {"lat": LAT.tolist(), "lon": LON.tolist()}}
     assert normalizer.get_normalization_config().per_grid_cell
     assert normalizer.get_state()["means"]["b"] == 3.0
 
@@ -1073,17 +1098,285 @@ def test_validate_spatial_shape():
     scalar.validate_spatial_shape((N_LON, N_LAT))
 
 
-def test_loss_normalizer_combines_per_grid_cell_network_and_residual():
-    """Loss normalization accepts per-grid-cell constants from either the
-    network or the residual config."""
-    network_stds = _cell_values(0, low=1.0, high=2.0)
-    residual_stds = _cell_values(1, low=0.1, high=0.2)
+def _gridded_config(
+    tmp_path: pathlib.Path,
+    means_coords: dict[str, np.ndarray],
+    stds_coords: dict[str, np.ndarray] | None = None,
+) -> NormalizationConfig:
+    shape = tuple(len(values) for values in means_coords.values())
+    return NormalizationConfig(
+        global_means_path=write_normalization_stats(
+            tmp_path / "means.nc", {"a": np.zeros(shape)}, means_coords
+        ),
+        global_stds_path=write_normalization_stats(
+            tmp_path / "stds.nc", {"a": np.ones(shape)}, stds_coords or means_coords
+        ),
+        per_grid_cell=True,
+    )
+
+
+SQUARE_LAT, SQUARE_LON = np.linspace(-67.5, 67.5, 4), 90.0 * np.arange(4)
+SQUARE_LON_180 = np.where(SQUARE_LON >= 180.0, SQUARE_LON - 360.0, SQUARE_LON)
+
+
+@pytest.mark.parametrize("load", [False, True], ids=["from_files", "loaded"])
+@pytest.mark.parametrize(
+    "coords, match",
+    [
+        ({"lat": SQUARE_LAT, "lon": SQUARE_LON}, None),
+        ({"lat": SQUARE_LAT[::-1], "lon": SQUARE_LON}, "reversed"),
+        ({"lon": SQUARE_LON, "lat": SQUARE_LAT}, "transposed"),
+        ({"lat": SQUARE_LAT, "lon": SQUARE_LON - 180.0}, "do not match"),
+        ({"lat": SQUARE_LAT, "lon": SQUARE_LON_180}, "0..360 vs -180..180"),
+        ({"lat": SQUARE_LAT, "lon": np.sort(SQUARE_LON_180)}, "0..360 vs -180..180"),
+        ({"lat": np.roll(SQUARE_LAT, 1), "lon": SQUARE_LON}, "dimension 'lat'"),
+    ],
+    ids=[
+        "matching",
+        "flipped_lat",
+        "transposed",
+        "shifted_lon",
+        "lon_180",
+        "rolled_lon_180",
+        "rolled_lat",
+    ],
+)
+def test_per_grid_cell_constants_are_checked_against_data_coords(
+    tmp_path, load, coords, match
+):
+    """Constants on a square grid with the data's shape but flipped,
+    transposed or shifted coordinates are rejected."""
+    config = _gridded_config(tmp_path, coords)
+    if load:
+        config.load()
+    normalizer = config.build(["a"])
+    data_coords = (SQUARE_LAT.astype(np.float32), SQUARE_LON.astype(np.float32))
+    if match is None:
+        normalizer.validate_spatial_shape((4, 4), data_coords)
+    else:
+        with pytest.raises(ValueError, match=match):
+            normalizer.validate_spatial_shape((4, 4), data_coords)
+    # Without the data's coordinates, only the shape can be checked.
+    normalizer.validate_spatial_shape((4, 4))
+
+
+def test_per_grid_cell_means_and_stds_must_share_a_grid(tmp_path):
+    config = _gridded_config(
+        tmp_path,
+        means_coords={"lat": SQUARE_LAT, "lon": SQUARE_LON},
+        stds_coords={"lat": SQUARE_LAT[::-1], "lon": SQUARE_LON},
+    )
+    with pytest.raises(ValueError, match="different dimensions or coordinates"):
+        config.load()
+
+
+def test_per_grid_cell_coords_must_match_constants():
+    means, stds = {"a": torch.zeros(N_LAT, N_LON)}, {"a": torch.ones(N_LAT, N_LON)}
+    coords = {"lat": LAT.tolist(), "lon": LON.tolist()}
+    # Coordinates may describe a variable which has only means.
+    NormalizationConfig(
+        means=means | {"b": torch.zeros(N_LAT, N_LON)},
+        stds=stds,
+        per_grid_cell=True,
+        per_grid_cell_coords={"a": coords, "b": coords},
+    )
+    with pytest.raises(ValueError, match="'b', which has neither means nor stds"):
+        NormalizationConfig(
+            means=means,
+            stds=stds,
+            per_grid_cell=True,
+            per_grid_cell_coords={"a": coords, "b": coords},
+        )
+    with pytest.raises(ValueError, match=r"means for 'a' have shape \(3, 4\)"):
+        NormalizationConfig(
+            means=means,
+            stds=stds,
+            per_grid_cell=True,
+            per_grid_cell_coords={"a": {"lon": LON.tolist(), "lat": LAT.tolist()}},
+        )
+
+
+def test_per_grid_cell_coords_cannot_be_given_with_paths(tmp_path):
+    with pytest.raises(ValueError, match="coordinates are read from the files"):
+        NormalizationConfig(
+            global_means_path=tmp_path / "means.nc",
+            global_stds_path=tmp_path / "stds.nc",
+            per_grid_cell=True,
+            per_grid_cell_coords={"a": {"lat": LAT.tolist()}},
+        )
+
+
+def test_per_grid_cell_load_skips_unrelated_variables(tmp_path):
+    """Loading every variable skips coordinates, non-numeric variables and
+    those with a dimension lacking coordinates, and keeps unused bad fields,
+    which are rejected only if requested."""
+    datasets = {}
+    for kind, fill in [("means", 0.0), ("stds", 1.0)]:
+        datasets[kind] = xr.Dataset(
+            {
+                "a": (("lat", "lon"), np.full((N_LAT, N_LON), fill)),
+                "unused_nan": (("lat", "lon"), np.full((N_LAT, N_LON), np.nan)),
+                "unused_zero": (("lat", "lon"), np.zeros((N_LAT, N_LON))),
+                "lat_bnds": (("lat", "nv"), np.zeros((N_LAT, 2))),
+                "valid_time": (
+                    ("lat", "lon"),
+                    np.full((N_LAT, N_LON), np.datetime64("2000-01-01", "ns")),
+                ),
+                "reference_time": ((), np.datetime64("2000-01-01", "ns")),
+            },
+            coords={"lat": LAT, "lon": LON},
+        )
+        datasets[kind].to_netcdf(tmp_path / f"{kind}.nc")
+    config = NormalizationConfig(
+        global_means_path=tmp_path / "means.nc",
+        global_stds_path=tmp_path / "stds.nc",
+        per_grid_cell=True,
+    )
+    config.load()
+    assert set(config.means) == {"a", "unused_nan", "unused_zero", "x", "y", "z"}
+    normalizer = config.build(["a"])
+    torch.testing.assert_close(
+        normalizer.stds["a"], _on_device(torch.ones(N_LAT, N_LON))
+    )
+    with pytest.raises(ValueError, match="non-finite"):
+        config.build(["unused_nan"])
+    with pytest.raises(ValueError, match="zero in every grid cell"):
+        config.build(["unused_zero"])
+
+
+def _healpix_config(tmp_path: pathlib.Path) -> NormalizationConfig:
+    """Per-grid-cell "a" on index dimensions without coordinates, and a
+    scalar "s"."""
+    paths = {
+        kind: write_normalization_stats(
+            tmp_path / f"{kind}.nc",
+            {"a": np.full((12, 2, 2), fill), "s": 1.0},
+            dims=("face", "height", "width"),
+        )
+        for kind, fill in [("means", 0.0), ("stds", 1.0)]
+    }
+    return NormalizationConfig(
+        global_means_path=paths["means"],
+        global_stds_path=paths["stds"],
+        per_grid_cell=True,
+    )
+
+
+def test_per_grid_cell_variable_without_coordinates(tmp_path):
+    """Requested by name, it is reported; loaded without names, it is
+    skipped, and building it then says why it may be missing."""
+    match = "dimension 'face' without numeric coordinates"
+    with pytest.raises(ValueError, match=match):
+        _healpix_config(tmp_path).build(["a"])
+    with pytest.raises(ValueError, match=match):
+        _healpix_config(tmp_path).load(names=["a"])
+    config = _healpix_config(tmp_path)
+    config.load()
+    with pytest.raises(ValueError, match=r"\['a'\].*numeric coordinates"):
+        config.build(["a", "s"])
+
+
+def test_per_grid_cell_load_by_name_loads_only_requested_per_cell_variables(
+    tmp_path,
+):
+    """Only requested per-grid-cell variables are loaded, but every scalar;
+    requested names missing from the files are left for build, and a second
+    load is a no-op."""
+    config = _per_grid_cell_file_config(
+        tmp_path,
+        means={"a": _cell_values(0), "unused": _cell_values(1), "s": 3.0},
+        stds={"a": _cell_values(2, 1.0, 2.0), "unused": _cell_values(3), "s": 2.0},
+        per_grid_cell=True,
+    )
+    config.load(names=["a", "not_in_files"])
+    assert set(config.means) == {"a", "s", "x", "y", "z"}
+    assert set(config.stds) == {"a", "s", "x", "y", "z"}
+    assert set(config.per_grid_cell_coords) == {"a"}
+    normalizer = config.build(["a", "s"])
+    torch.testing.assert_close(normalizer.means["a"], _on_device(_cell_values(0)))
+    assert float(normalizer.stds["s"]) == 2.0
+    loaded = dataclasses.asdict(config)
+    for path in tmp_path.glob("*.nc"):
+        path.unlink()
+    config.load(names=["unused"])
+    config.load()
+    assert set(config.means) == set(loaded["means"])
+    assert set(config.per_grid_cell_coords) == {"a"}
+    with pytest.raises(ValueError, match=r"\['unused'\].*only loaded if requested"):
+        config.build(["unused"])
+
+
+@pytest.mark.parametrize("shared_with", ["loss", "residual", "residual_no_loss"])
+def test_config_shared_by_network_and_loss_loads_loss_only_names(
+    tmp_path, shared_with: str
+):
+    """A per-grid-cell network config reused for the loss or residual (or
+    read by the loss for lack of a loss block) loads the loss-only names."""
+    shared = _per_grid_cell_file_config(
+        tmp_path,
+        means={"a": _cell_values(0), "b": _cell_values(1)},
+        stds={"a": _cell_values(2, 1.0, 2.0), "b": _cell_values(3, 1.0, 2.0)},
+        per_grid_cell=True,
+    )
+    scalar = NormalizationConfig(means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0})
+    loss = {"loss": shared, "residual": scalar, "residual_no_loss": None}[shared_with]
     config = NetworkAndLossNormalizationConfig(
-        network=NormalizationConfig(
-            means={"a": 0.0, "b": _cell_values(2)},
-            stds={"a": 1.0, "b": network_stds},
+        network=shared,
+        loss=loss,
+        residual=None if shared_with == "loss" else shared,
+    )
+    config.load(names=["a"], extra_loss_names=["b"])
+    residual_scaled_names = {"loss": [], "residual": ["b"], "residual_no_loss": ["a"]}
+    normalizer = config.get_loss_normalizer(
+        names=["a", "b"], residual_scaled_names=residual_scaled_names[shared_with]
+    )
+    torch.testing.assert_close(normalizer.means["b"], _on_device(_cell_values(1)))
+
+
+def test_per_grid_cell_residual_with_means_only_variable_reloads(tmp_path):
+    """A per-grid-cell residual block whose stds file lacks a variable in its
+    means file survives a checkpoint's reload of its loaded config."""
+    scalar = NormalizationConfig(
+        means={"prog": 0.0, "forcing": 0.0}, stds={"prog": 1.0, "forcing": 1.0}
+    )
+    config = NetworkAndLossNormalizationConfig(
+        network=scalar,
+        loss=dataclasses.replace(scalar),
+        residual=_per_grid_cell_file_config(
+            tmp_path,
+            means={"prog": _cell_values(0), "forcing": _cell_values(1)},
+            stds={"prog": _cell_values(2, 1.0, 2.0)},
             per_grid_cell=True,
         ),
+    )
+    config.load(names=["prog", "forcing"])
+    for path in tmp_path.glob("*.nc"):
+        path.unlink()
+    reloaded = dacite.from_dict(
+        NetworkAndLossNormalizationConfig,
+        dataclasses.asdict(config),
+        config=dacite.Config(strict=True),
+    )
+    names, residual_names = ["prog", "forcing"], ["prog"]
+    expected = config.get_loss_normalizer(names, residual_names)
+    actual = reloaded.get_loss_normalizer(names, residual_names)
+    for name in names:
+        torch.testing.assert_close(actual.means[name], expected.means[name])
+        torch.testing.assert_close(actual.stds[name], expected.stds[name])
+    assert actual.grid_coords == {"prog": {"lat": LAT.tolist(), "lon": LON.tolist()}}
+
+
+def test_loss_normalizer_combines_per_grid_cell_loss_and_residual():
+    loss_stds = _cell_values(0, low=1.0, high=2.0)
+    residual_stds = _cell_values(1, low=0.1, high=0.2)
+    per_cell = NormalizationConfig(
+        means={"a": 0.0, "b": _cell_values(2)},
+        stds={"a": 1.0, "b": loss_stds},
+        per_grid_cell=True,
+    )
+    config = NetworkAndLossNormalizationConfig(
+        network=per_cell,
+        loss=per_cell,
         residual=NormalizationConfig(
             means={"a": _cell_values(3)}, stds={"a": residual_stds}, per_grid_cell=True
         ),
@@ -1092,15 +1385,23 @@ def test_loss_normalizer_combines_per_grid_cell_network_and_residual():
         names=["a", "b"], residual_scaled_names=["a"]
     )
     torch.testing.assert_close(loss_normalizer.stds["a"], _on_device(residual_stds))
-    torch.testing.assert_close(loss_normalizer.stds["b"], _on_device(network_stds))
+    torch.testing.assert_close(loss_normalizer.stds["b"], _on_device(loss_stds))
     loss_normalizer.validate_spatial_shape((N_LAT, N_LON))
 
 
-# Grouped per-grid-cell normalization: per-grid-cell constants per group, with
-# groups by data source or by configuration. Both are the same mechanism with
-# different labels.
-SOURCE_GROUPS = ["c96", "era5"]
-CONFIG_GROUPS = ["amip", "ramped", "som", "era5"]
+def test_loss_normalizer_keeps_grid_coords_of_overriding_constants(tmp_path):
+    network = _gridded_config(tmp_path, {"lat": SQUARE_LAT, "lon": SQUARE_LON})
+    network.load()
+    config = NetworkAndLossNormalizationConfig(
+        network=network,
+        loss=network,
+        residual=NormalizationConfig(means={"a": 0.0}, stds={"a": 2.0}),
+    )
+    assert config.get_loss_normalizer(["a"], []).grid_coords == {
+        "a": {"lat": SQUARE_LAT.tolist(), "lon": SQUARE_LON.tolist()}
+    }
+    # The scalar residual constants replace the per-grid-cell ones.
+    assert config.get_loss_normalizer(["a"], ["a"]).grid_coords == {}
 
 
 def _per_grid_cell_group(seed: int) -> NormalizationConfig:
@@ -1144,40 +1445,30 @@ def _one_sample_per_label(labels: list[str]) -> BatchLabels:
     return _labels(labels, torch.eye(len(labels)).tolist())
 
 
-@pytest.mark.parametrize(
-    "labels", [SOURCE_GROUPS, CONFIG_GROUPS], ids=["source", "config"]
-)
-def test_grouped_per_grid_cell_normalizer_uses_group_cell_constants(labels):
+def test_grouped_per_grid_cell_normalizer_uses_group_cell_constants():
+    """Non-pinned variables use each group's per-grid-cell constants, and
+    pinned ones the pooled per-grid-cell constants."""
+    labels = ["amip", "ramped", "som", "era5"]
     groups = {label: _per_grid_cell_group(seed) for seed, label in enumerate(labels)}
-    grouped = _build_per_grid_cell_grouped(groups)
+    pooled = _per_grid_cell_pooled()
+    grouped = _build_per_grid_cell_grouped(groups, ["pinned"], pooled=pooled)
     assert grouped.is_per_grid_cell
     normalizer = grouped.bind(_one_sample_per_label(labels))
     x = _on_device(torch.randn(len(labels), N_LAT, N_LON))
-    normalized = normalizer.normalize({"a": x})["a"]
+    normalized = normalizer.normalize({"a": x, "pinned": x})
     for i, label in enumerate(labels):
         mean = _on_device(groups[label].means["a"])
         std = _on_device(groups[label].stds["a"])
-        torch.testing.assert_close(normalized[i], (x[i] - mean) / std)
-    torch.testing.assert_close(normalizer.denormalize({"a": normalized})["a"], x)
-
-
-def test_grouped_per_grid_cell_pinned_variable_uses_pooled_cell_constants():
-    groups = {
-        label: _per_grid_cell_group(seed) for seed, label in enumerate(SOURCE_GROUPS)
-    }
-    pooled = _per_grid_cell_pooled()
-    grouped = _build_per_grid_cell_grouped(groups, ["pinned"], pooled=pooled)
-    normalizer = grouped.bind(_one_sample_per_label(SOURCE_GROUPS))
-    x = _on_device(torch.randn(2, N_LAT, N_LON))
+        torch.testing.assert_close(normalized["a"][i], (x[i] - mean) / std)
     torch.testing.assert_close(
-        normalizer.normalize({"pinned": x})["pinned"],
-        (x - pooled.means["pinned"]) / pooled.stds["pinned"],
+        normalized["pinned"], (x - pooled.means["pinned"]) / pooled.stds["pinned"]
     )
+    torch.testing.assert_close(normalizer.denormalize(normalized)["a"], x)
 
 
 def test_grouped_normalizer_mixes_scalar_and_per_grid_cell_groups():
     """A variable may be scalar in one group and per-grid-cell in another, on
-    top of scalar pooled constants."""
+    top of scalar pooled constants; every group's grid is validated."""
     groups = {
         "c96": NormalizationConfig(
             means={"a": 5.0, "pinned": 0.0}, stds={"a": 2.0, "pinned": 1.0}
@@ -1186,7 +1477,12 @@ def test_grouped_normalizer_mixes_scalar_and_per_grid_cell_groups():
     }
     grouped = _build_per_grid_cell_grouped(groups, pooled=_pooled_normalizer())
     assert grouped.is_per_grid_cell
-    normalizer = grouped.bind(_one_sample_per_label(SOURCE_GROUPS))
+    grouped.validate_spatial_shape((N_LAT, N_LON))
+    with pytest.raises(ValueError, match="does not match the data's spatial shape"):
+        grouped.validate_spatial_shape((N_LON, N_LAT))
+    normalizer = grouped.bind(_one_sample_per_label(["c96", "era5"]))
+    with pytest.raises(ValueError, match="GroupedNormalizer"):
+        normalizer.is_per_grid_cell
     x = _on_device(torch.randn(2, N_LAT, N_LON))
     normalized = normalizer.normalize({"a": x})["a"]
     torch.testing.assert_close(normalized[0], (x[0] - 5.0) / 2.0)
@@ -1197,27 +1493,85 @@ def test_grouped_normalizer_mixes_scalar_and_per_grid_cell_groups():
     )
 
 
-def test_grouped_per_grid_cell_rejects_group_constant_in_one_cell():
-    """The check for a variable constant within a group applies per cell."""
-    group = _per_grid_cell_group(0)
-    stds = torch.as_tensor(group.stds["a"]).clone()
-    stds[0, 0] = 1e-8
-    groups = {
-        "c96": dataclasses.replace(group, stds={**group.stds, "a": stds}),
-        "era5": _per_grid_cell_group(1),
-    }
-    with pytest.raises(ValueError, match="pinned_variables"):
+def test_grouped_rejects_per_grid_cell_constants_of_different_shapes():
+    other_grid = NormalizationConfig(
+        means={"a": torch.zeros(N_LON, N_LAT), "pinned": 0.0},
+        stds={"a": torch.ones(N_LON, N_LAT), "pinned": 1.0},
+        per_grid_cell=True,
+    )
+    groups = {"c96": _per_grid_cell_group(0), "era5": other_grid}
+    with pytest.raises(ValueError, match="different shapes"):
         _build_per_grid_cell_grouped(groups)
 
 
-def test_grouped_validate_spatial_shape_checks_every_group():
-    groups = {
-        "c96": NormalizationConfig(
-            means={"a": 5.0, "pinned": 0.0}, stds={"a": 2.0, "pinned": 1.0}
-        ),
-        "era5": _per_grid_cell_group(0),
+def test_grouped_degenerate_check_skips_only_cells_constant_when_pooled():
+    """A cell constant in the pooled stats is skipped, but the group stds
+    are still checked in every other cell."""
+    pooled_stds = torch.ones(N_LAT, N_LON)
+    pooled_stds[0, 0] = 0.0
+    pooled = StandardNormalizer(
+        means={"a": torch.zeros(N_LAT, N_LON), "pinned": torch.tensor(0.0)},
+        stds={"a": pooled_stds, "pinned": torch.tensor(1.0)},
+    )
+    stds = _cell_values(100, low=1.0, high=3.0)
+    stds[0, 0] = 0.0
+    group_normalizers = {
+        label: StandardNormalizer(
+            means={"a": torch.zeros(N_LAT, N_LON), "pinned": torch.tensor(0.0)},
+            stds={"a": group_stds, "pinned": torch.tensor(1.0)},
+        )
+        for label, group_stds in [("c96", stds), ("era5", torch.ones(N_LAT, N_LON))]
     }
-    grouped = _build_per_grid_cell_grouped(groups, pooled=_pooled_normalizer())
-    grouped.validate_spatial_shape((N_LAT, N_LON))
-    with pytest.raises(ValueError, match="does not match the data's spatial shape"):
-        grouped.validate_spatial_shape((N_LON, N_LAT))
+    GroupedNormalizer(
+        pooled=pooled, groups=group_normalizers, default_label="c96", n_spatial_dims=2
+    )
+    stds[1, 1] = 1e-8
+    group_normalizers["c96"].stds["a"] = _on_device(stds)
+    with pytest.raises(ValueError, match="pinned_variables"):
+        GroupedNormalizer(
+            pooled=pooled,
+            groups=group_normalizers,
+            default_label="c96",
+            n_spatial_dims=2,
+        )
+
+
+def test_grouped_load_skips_pinned_per_grid_cell_constants(tmp_path):
+    group = _per_grid_cell_file_config(
+        tmp_path,
+        means={"a": _cell_values(0), "pinned": _cell_values(1)},
+        stds={"a": _cell_values(2, 1.0, 2.0), "pinned": _cell_values(3, 1.0, 2.0)},
+        per_grid_cell=True,
+    )
+    config = GroupedNormalizationConfig(
+        groups={"era5": group}, default_label="era5", pinned_variables=["pinned"]
+    )
+    config.load(names=["a", "pinned"])
+    assert set(group.per_grid_cell_coords) == {"a"}
+    assert "pinned" not in group.means
+    grouped = config.build(
+        pooled=_per_grid_cell_pooled(),
+        names=["a", "pinned"],
+        n_spatial_dims=2,
+        dataset_labels={"era5"},
+    )
+    assert grouped.is_per_grid_cell
+
+
+def test_raise_if_unsupported_names_the_offending_config():
+    scalar = NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0})
+    per_cell = _per_grid_cell_group(0)
+    NetworkAndLossNormalizationConfig(network=scalar).raise_if_unsupported("SomeStep")
+    grouped = NetworkAndLossNormalizationConfig(
+        network=scalar,
+        grouped=GroupedNormalizationConfig(
+            groups={"c96": scalar, "era5": per_cell}, default_label="c96"
+        ),
+    )
+    with pytest.raises(ValueError, match="SomeStep does not support grouped"):
+        grouped.raise_if_unsupported("SomeStep")
+    for key in ["network", "loss", "residual"]:
+        config = NetworkAndLossNormalizationConfig(network=scalar, loss=scalar)
+        setattr(config, key, per_cell)
+        with pytest.raises(ValueError, match=rf"SomeStep \({key} normalization\)"):
+            config.raise_if_unsupported("SomeStep")

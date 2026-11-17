@@ -1,4 +1,10 @@
+import pathlib
 from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
+
+import numpy as np
+import torch
+import xarray as xr
 
 from fme.core.normalizer import (
     GroupedNormalizationConfig,
@@ -56,3 +62,25 @@ def uniform_grouped_normalization(
         default_label=default_label,
         pinned_variables=list(pinned_variables),
     )
+
+
+def write_normalization_stats(
+    path: pathlib.Path,
+    constants: Mapping[str, float | np.ndarray | torch.Tensor],
+    coords: Mapping[str, np.ndarray] | None = None,
+    dims: Sequence[str] | None = None,
+    encoding: Mapping[str, Mapping[str, Any]] | None = None,
+) -> pathlib.Path:
+    """
+    Write scalar or per-grid-cell normalization constants to a netCDF file
+    and return its path. Per-grid-cell constants are written on ``dims``,
+    which default to the dimensions of ``coords``.
+    """
+    coords = dict(coords or {})
+    grid_dims = tuple(coords) if dims is None else tuple(dims)
+    data_vars = {
+        name: (grid_dims if np.ndim(value) else (), np.asarray(value))
+        for name, value in constants.items()
+    }
+    xr.Dataset(data_vars, coords=coords).to_netcdf(path, encoding=encoding)
+    return path

@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, ClassVar, Self, TypeVar, final
 
 import dacite
@@ -140,9 +140,13 @@ class StepConfigABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def load(self):
+    def load(self, extra_names: Iterable[str] = ()):
         """
         Update configuration in-place so it does not depend on external files.
+
+        Args:
+            extra_names: Further names a wrapping step will request from
+                ``get_loss_normalizer``, whose constants must be loaded.
         """
         pass
 
@@ -268,8 +272,8 @@ class StepSelector(StepConfigABC):
     def allow_missing_variables(self) -> bool:
         return self._step_config_instance.allow_missing_variables
 
-    def load(self):
-        self._step_config_instance.load()
+    def load(self, extra_names: Iterable[str] = ()):
+        self._step_config_instance.load(extra_names=extra_names)
         self.config = dataclasses.asdict(self._step_config_instance)
 
     @classmethod
