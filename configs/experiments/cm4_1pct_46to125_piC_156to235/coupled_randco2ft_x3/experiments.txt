@@ -1,7 +1,7 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 # U10 begin X3
-# X3 01M7HMJH344FVE77CTHHJC4EWR: training finished (jobs[-1] exit 0); results dataset 01M7HMJH3CSDP2E5W8VYN86HH5.
+# X3 01M7HMJH344FVE77CTHHJC4EWR: training finished (jobs[-1] 01M7HMJH6RA9XA5CKD9SENKBB0: exit 0); results dataset 01M7HMJH3CSDP2E5W8VYN86HH5.
 # training row: 1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|training|best_inference_ckpt|normal|--min-runtime 8h
 # Rows written by analysis/2026-11-15-2110-coupled-ft-enso-randco2-training/scripts/U10_eval_rows.py;
 # deferred_upload_* rows wait for the results dataset to be committed with their EMA file (rerun the script);
