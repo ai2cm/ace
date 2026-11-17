@@ -8,10 +8,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # running_/ran_/failed_* rows are already launched (queue_evals.py mark prefixes).
 # launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x3 . --config-dir configs/experiments/cm4_eval/coupled
 # --config-dir configs/experiments/cm4_eval/coupled
-1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|running_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
-1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|running_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
-1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|running_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
-1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|running_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
-1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|running_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
-1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|running_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|ran_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|ran_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|ran_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|ran_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
+1deg-hybridsstdiag-randco2ft-x3-jfto-alt-replay-jointpairs||01M7HMJH344FVE77CTHHJC4EWR|ran_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M7HMJH3CSDP2E5W8VYN86HH5
 # U10 end X3
