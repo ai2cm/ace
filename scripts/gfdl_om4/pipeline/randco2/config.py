@@ -63,6 +63,9 @@ class StreamConfig:
             :class:`~pipeline.postprocess.PostprocessConfig` naming the
             variables the transform reads (``kelvin_sst`` needs
             ``sources: {celsius_sst: <name>}``).
+        drop_outputs: output names (see :meth:`output_names`) removed from
+            each chunk after all postprocess transforms, e.g. a source a
+            transform replaces.
     """
 
     name: str
@@ -72,6 +75,7 @@ class StreamConfig:
     dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
     postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
+    drop_outputs: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         for name in self.full_cell_variables:
@@ -95,6 +99,21 @@ class StreamConfig:
             output_names,
             context,
         )
+        unknown = set(self.drop_outputs) - self.output_names()
+        if unknown:
+            raise ValueError(
+                f"drop_outputs {sorted(unknown)} not among stream {self.name!r} "
+                f"outputs {sorted(self.output_names())}"
+            )
+
+    def output_names(self) -> set[str]:
+        """Output names: renamed variables, full-cell variables and
+        postprocess additions."""
+        names = {self.renaming.get(name, name) for name in self.variables}
+        names.update(self.full_cell_variables)
+        for spec in self.postprocess_specs():
+            names.update(spec.adds)
+        return names
 
     def postprocess_specs(self) -> list[Postprocess]:
         """The configured transforms, with their source names bound."""

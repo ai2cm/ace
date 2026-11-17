@@ -73,6 +73,30 @@ class StreamConfig:
             :class:`~pipeline.postprocess.PostprocessConfig` naming the
             variables the transform reads (``kelvin_sst`` needs
             ``sources: {celsius_sst: <name>}``).
+        drop_outputs: output names (see :meth:`output_names`) removed from
+            each chunk after all postprocess transforms, e.g. a source a
+            transform replaces.
+        ice_area_weighted: per-ice-area source variables (e.g. ``HI``,
+            ``TS``) regridded weighted by ice area (rule R1, see
+            pipeline/om4/ice_area.py) instead of by ocean area: 0 where the
+            regridded weight is 0 over ocean, NaN over land. Subsampled or
+            native-resolution streams only (no ``time_block_mean_factor``).
+        ice_area_weight: source name of the ice-area fraction ``c`` the
+            ``ice_area_weighted`` variables are weighted by. If not in
+            ``variables``, it is read for weighting only and not written.
+        ice_area_weight_store: URL of a store to read ``ice_area_weight``
+            from instead of ``store``; its raw time axis must equal
+            ``store``'s.
+        ice_area_products: mapping of an ``ice_area_weighted`` variable ``X``
+            to an output name for the ocean-area mean of ``c X`` (e.g.
+            ``HI`` -> ice volume per ocean area).
+        ice_area_weight_output: if set, the weight-only ``ice_area_weight``
+            is also written, regridded per full cell like
+            ``full_cell_variables``, under this name, and each
+            ``ice_area_weighted`` output gets a CF ``comment`` naming it as
+            the weight for ice-area means. For a weight that no other output
+            of the store holds (e.g. the 6 h mean ice fraction at a 5-daily
+            instant).
         face_mask_url: URL prefix of a precomputed face-mask artifact (see
             pipeline/om4/face_masks.py) for sources whose staggered velocities
             carry remap-born zeros over land. When set, the flagged faces
@@ -91,6 +115,12 @@ class StreamConfig:
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
     postprocess: list[str | PostprocessConfig] = dataclasses.field(default_factory=list)
     face_mask_url: str | None = None
+    drop_outputs: list[str] = dataclasses.field(default_factory=list)
+    ice_area_weighted: list[str] = dataclasses.field(default_factory=list)
+    ice_area_weight: str | None = None
+    ice_area_weight_store: str | None = None
+    ice_area_products: dict[str, str] = dataclasses.field(default_factory=dict)
+    ice_area_weight_output: str | None = None
 
     def __post_init__(self):
         for pair in self.rotated_pairs:
@@ -118,6 +148,22 @@ class StreamConfig:
                     f"stream {self.name!r} sets both time_subsample_stride and "
                     "time_block_mean_factor; choose one"
                 )
+            if "sea_ice" in self.postprocess_names():
+                # sea_ice_volume from block means is mean_t(HI) * mean_t(c),
+                # not mean_t(HI * c).
+                raise ValueError(
+                    f"stream {self.name!r} applies sea_ice postprocess to a "
+                    "block-meaned stream (time_block_mean_factor); use "
+                    "time_subsample_stride"
+                )
+            if self.ice_area_weighted:
+                # Rule R2 (block means of c_t X_t) is not implemented; R1
+                # here would weight by mean_t(c).
+                raise ValueError(
+                    f"stream {self.name!r} sets ice_area_weighted on a "
+                    "block-meaned stream (time_block_mean_factor); use "
+                    "time_subsample_stride"
+                )
         for name in self.full_cell_variables:
             if name not in self.variables:
                 raise ValueError(
@@ -131,6 +177,7 @@ class StreamConfig:
                     "source name, so the wetmask-normalized output must be "
                     "renamed to avoid a collision"
                 )
+        self._check_ice_area()
         context = f"stream {self.name!r}"
         output_names = {self.renaming.get(name, name) for name in self.variables}
         output_names.update(self.full_cell_variables)
@@ -140,11 +187,111 @@ class StreamConfig:
             context,
             allow_level_suffix=True,
         )
+        unknown = set(self.drop_outputs) - self.output_names()
+        if unknown:
+            raise ValueError(
+                f"drop_outputs {sorted(unknown)} not among stream {self.name!r} "
+                f"outputs {sorted(self.output_names())}"
+            )
         if self.face_mask_url is not None and not self.rotated_pairs:
             raise ValueError(
                 f"stream {self.name!r} sets face_mask_url but has no "
                 "rotated_pairs for it to apply to"
             )
+
+    def _check_ice_area(self) -> None:
+        context = f"stream {self.name!r}"
+        for name in self.ice_area_weighted:
+            if name not in self.variables:
+                raise ValueError(
+                    f"ice_area_weighted variable {name!r} not in {context} variables"
+                )
+            if name in self.full_cell_variables:
+                raise ValueError(
+                    f"ice_area_weighted variable {name!r} is a full_cell_variable "
+                    f"in {context}"
+                )
+        weight = self.ice_area_weight
+        if self.ice_area_weighted and weight is None:
+            raise ValueError(
+                f"{context} sets ice_area_weighted without ice_area_weight"
+            )
+        if weight is not None and weight in self.ice_area_weighted:
+            raise ValueError(
+                f"{context}: ice_area_weight {weight!r} is in ice_area_weighted"
+            )
+        if self.ice_area_weight_store is not None:
+            if weight is None:
+                raise ValueError(
+                    f"{context} sets ice_area_weight_store without ice_area_weight"
+                )
+            if weight in self.variables:
+                raise ValueError(
+                    f"{context}: ice_area_weight {weight!r} is in variables, so it "
+                    "is read from store, not ice_area_weight_store"
+                )
+        if self.ice_area_weight_output is not None:
+            if not self.ice_area_weighted:
+                raise ValueError(
+                    f"{context} sets ice_area_weight_output without "
+                    "ice_area_weighted"
+                )
+            if self.weight_only() is None:
+                raise ValueError(
+                    f"{context} sets ice_area_weight_output, but ice_area_weight "
+                    f"{weight!r} is in variables; use full_cell_variables"
+                )
+        unweighted = set(self.ice_area_products) - set(self.ice_area_weighted)
+        if unweighted:
+            raise ValueError(
+                f"{context}: ice_area_products keys {sorted(unweighted)} not in "
+                "ice_area_weighted"
+            )
+        products = list(self.ice_area_products.values())
+        if self.ice_area_weight_output is not None:
+            products.append(self.ice_area_weight_output)
+        others = self._base_output_names()
+        weight_only = self.weight_only()
+        if weight_only is not None:
+            others.add(weight_only)
+        collisions = {
+            name for name in products if name in others or products.count(name) > 1
+        }
+        if collisions:
+            raise ValueError(
+                f"{context}: ice_area_products / ice_area_weight_output names "
+                f"{sorted(collisions)} collide with other names of the stream"
+            )
+
+    def _base_output_names(self) -> set[str]:
+        names = {self.renaming.get(name, name) for name in self.variables}
+        names.update(self.full_cell_variables)
+        for spec in self.postprocess_specs():
+            names.update(spec.adds)
+        return names
+
+    def output_names(self) -> set[str]:
+        """Output base names (3D variables unsplit): renamed variables,
+        full-cell variables, postprocess additions, ice-area products and
+        ``ice_area_weight_output``. A weight-only ``ice_area_weight`` is not
+        written under its source name."""
+        names = self._base_output_names() | set(self.ice_area_products.values())
+        if self.ice_area_weight_output is not None:
+            names.add(self.ice_area_weight_output)
+        return names
+
+    def weight_only(self) -> str | None:
+        """The ``ice_area_weight`` if it is read for weighting only."""
+        if self.ice_area_weight is None or self.ice_area_weight in self.variables:
+            return None
+        return self.ice_area_weight
+
+    def postprocess_names(self) -> list[str]:
+        """Registry names of the configured transforms, in order."""
+        return [
+            entry if isinstance(entry, str) else entry.name
+            for entry in self.postprocess
+        ]
 
     def postprocess_specs(self) -> list[Postprocess]:
         """The configured transforms, with their source names bound."""

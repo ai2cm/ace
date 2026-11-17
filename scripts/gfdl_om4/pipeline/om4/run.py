@@ -45,9 +45,11 @@ Masking conventions of the output store:
   ``sea_ice_fraction``) are regridded with full-cell semantics — the value
   is per total cell area, land counted as zero — with land-NaN applied
   after; their wetmask-normalized (per-ocean-area) twins are written under
-  renamed outputs (e.g. ``ocean_sea_ice_fraction``).
+  renamed outputs (e.g. ``ocean_sea_ice_fraction``). A weight-only
+  ``ice_area_weight`` gets the same full-cell regrid when the stream sets
+  ``ice_area_weight_output``, written under that name only.
 - Masks, ``idepth_*``, ``areacello``, ``sftof``, ``sea_surface_fraction``
-  and ``h_prime_*`` are exempt from land-NaN by explicit list (see
+  and ``ocean_volume_per_area_*`` are exempt from land-NaN by explicit list (see
   land_nan_exempt_names); they are 0 on land, ``idepth_*`` aside.
 """
 
@@ -81,9 +83,19 @@ from ..ocean_emulators_port import (
     regrid_normalized,
     rotate_vectors,
 )
+from ..output_attrs import (
+    CELL_AREA_BASIS,
+    EASTWARD,
+    NORTHWARD,
+    OCEAN_AREA_BASIS,
+    area_basis_long_name,
+    corrected_source_attrs,
+    geographic_component_attrs,
+)
 from ..postprocess import (
     DERIVATION_ATTR,
     SEA_ICE_FRACTION,
+    TOTAL_AREA_SUFFIX,
     ChunkContext,
     PostprocessConfig,
     add_provenance_args,
@@ -116,6 +128,7 @@ from ..zarr_io import (
 )
 from .config import PipelineConfig, StreamConfig, load_config
 from .face_masks import count_masked_candidate_faces, get_face_masks
+from .ice_area import add_ice_area_products, ice_area_weighted_means
 from .time_coarsening import (
     coarsen,
     select_whole_blocks,
@@ -140,7 +153,7 @@ def land_nan_exempt_names(level_count: int) -> list[str]:
         + ["mask_2d"]
         + [f"idepth_{k}" for k in range(level_count + 1)]
         + ["areacello", "sftof", "sea_surface_fraction"]
-        + [f"h_prime_{k}" for k in range(level_count)]
+        + [f"ocean_volume_per_area_{k}" for k in range(level_count)]
     )
 
 
@@ -157,16 +170,16 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
     pipeline (see :func:`coarsen`) and its output time coordinate is
     :func:`stream_output_time`.
     """
-    ds = xr.open_zarr(
-        make_zarr_store(stream.store), chunks=None, decode_timedelta=False
-    )
-    missing = set(stream.variables) - set(ds.data_vars)
-    if missing:
-        raise AssertionError(
-            f"stream {stream.name!r}: variables missing from {stream.store}: "
-            f"{sorted(missing)}"
-        )
-    ds = ds[stream.variables]
+    ds = _open_variables(stream, stream.store, _store_variables(stream))
+    weight_name = stream.weight_only()
+    if stream.ice_area_weight_store is not None and weight_name is not None:
+        weight = _open_variables(stream, stream.ice_area_weight_store, [weight_name])
+        if not ds[TIME_DIM].equals(weight[TIME_DIM]):
+            raise AssertionError(
+                f"stream {stream.name!r}: time of {stream.ice_area_weight_store} "
+                f"differs from time of {stream.store}"
+            )
+        ds = xr.merge([ds, weight], join="exact")
     if stream.dim_renaming:
         ds = ds.rename(stream.dim_renaming)
         for staggered, tracer in STAGGERED_TO_TRACER_DIM.items():
@@ -210,6 +223,25 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
                 f"levels; expected {config.expected_level_count}"
             )
     return ds
+
+
+def _store_variables(stream: StreamConfig) -> list[str]:
+    """Variables a stream reads from its own ``store``."""
+    weight = stream.weight_only()
+    if weight is None or stream.ice_area_weight_store is not None:
+        return list(stream.variables)
+    return [*stream.variables, weight]
+
+
+def _open_variables(stream: StreamConfig, store: str, names: list[str]) -> xr.Dataset:
+    ds = xr.open_zarr(make_zarr_store(store), chunks=None, decode_timedelta=False)
+    missing = set(names) - set(ds.data_vars)
+    if missing:
+        raise AssertionError(
+            f"stream {stream.name!r}: variables missing from {store}: "
+            f"{sorted(missing)}"
+        )
+    return ds[names]
 
 
 def load_wetmask(config: PipelineConfig) -> xr.DataArray:
@@ -324,7 +356,9 @@ def _rotate_pairs(
     face_masks: xr.Dataset | None,
 ) -> xr.Dataset:
     """Interpolate each configured C-grid vector pair to tracer centers and
-    rotate it to geographic components, preserving names and attrs.
+    rotate it to geographic components, preserving names and attrs except
+    the relabeled ``long_name``/``standard_name``
+    (pipeline.output_attrs.geographic_component_attrs).
 
     Faces the source masks as land drop out of the face->center average. An
     ocean center whose faces on an axis are *all* land is a wall for that
@@ -371,8 +405,12 @@ def _rotate_pairs(
                 "valid zeros by the source) treated as invalid; " + rotation_note
             )
         ds = ds.drop_vars([u_name, v_name])
-        ds[u_name] = append_derivation(u.assign_attrs(u_attrs), rotation_note)
-        ds[v_name] = append_derivation(v.assign_attrs(v_attrs), rotation_note)
+        u_attrs = geographic_component_attrs(u_attrs, u_name, EASTWARD)
+        v_attrs = geographic_component_attrs(v_attrs, v_name, NORTHWARD)
+        # Replace, not update: the rotation arithmetic carries u's attrs onto v.
+        u.attrs, v.attrs = u_attrs, v_attrs
+        ds[u_name] = append_derivation(u, rotation_note)
+        ds[v_name] = append_derivation(v, rotation_note)
     return ds
 
 
@@ -392,8 +430,44 @@ def _sea_ice_fraction_source(stream: StreamConfig) -> str | None:
     return None
 
 
-# Output name a postprocess transform reads, for each checked output.
-EXTENSIVE_SOURCES = {"hfds_total_area": "hfds"}
+def _full_cell_outputs(stream: StreamConfig) -> dict[str, str]:
+    """Source name -> output name of each full-cell regridded variable."""
+    outputs = {name: name for name in stream.full_cell_variables}
+    weight = stream.weight_only()
+    if weight is not None and stream.ice_area_weight_output is not None:
+        outputs[weight] = stream.ice_area_weight_output
+    return outputs
+
+
+def _weight_time_phrase(attrs: dict) -> str:
+    """Long-name phrase giving the time a written ice-area weight is at."""
+    if "time: mean" in attrs.get("cell_methods", ""):
+        return "mean over the source time step ending at the output time"
+    return "at the output time"
+
+
+def _native_total_area_terms(
+    ds: xr.Dataset,
+    output: xr.Dataset,
+    stream: StreamConfig,
+    context: ChunkContext,
+) -> dict[str, xr.DataArray]:
+    """Native X_i of each ``<X>_total_area`` output: the stream's native X,
+    or, for an X a postprocess adds (e.g. calving_residue), that transform
+    applied to the native fields under their output names."""
+    native = ds.rename(
+        {n: stream.renaming[n] for n in ds.data_vars if n in stream.renaming}
+    )
+    terms = {}
+    for name in output.data_vars:
+        if not name.endswith(TOTAL_AREA_SUFFIX):
+            continue
+        x = name.removesuffix(TOTAL_AREA_SUFFIX)
+        if x not in native.data_vars:
+            spec = next(s for s in stream.postprocess_specs() if x in s.adds)
+            native = spec.fn(native.copy(), context)
+        terms[name] = native[x]
+    return terms
 
 
 def _process_chunk(
@@ -431,6 +505,9 @@ def _process_chunk(
     ds = ds.astype(np.float64)
     ds = _conform_to_wetmask(ds, wetmask, context)
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
+    if stream.ice_area_weighted:
+        # After rotation: UI, VI are tracer-centered, like the weight.
+        ds = add_ice_area_products(ds, stream)
     for name in ds.data_vars:
         assert_footprint(ds[name], wetmask, context)
 
@@ -447,8 +524,9 @@ def _process_chunk(
         )
         per_volume, per_ocean_area = regridded, xr.Dataset()
 
+    full_cell_outputs = _full_cell_outputs(stream)
     full_cell = xr.Dataset()
-    for name in stream.full_cell_variables:
+    for name in full_cell_outputs:
         if name in ds.data_vars:
             full_cell[name] = regrid_full_cell(
                 regridder, ds[name], wetmask, ocean_fraction
@@ -467,6 +545,9 @@ def _process_chunk(
         full_cell=full_cell,
         dz=dz,
     )
+    regridded, ice_area_products = ice_area_weighted_means(
+        regridded, stream, ocean_fraction
+    )
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
@@ -481,19 +562,37 @@ def _process_chunk(
             derivation = f"{level_note}; {derivation}" if derivation else level_note
             da = da.squeeze(LEVEL_DIM, drop=True)
             out_name = f"{out_name}_{level_index}"
+        if name in stream.full_cell_variables:
+            da = da.assign_attrs(
+                long_name=area_basis_long_name(da.attrs, name, OCEAN_AREA_BASIS)
+            )
+        da.attrs = corrected_source_attrs(da.attrs, name)
         output[out_name] = da.assign_attrs(
             provenance_attrs(stream.store, name, derivation)
         )
 
     for name, full in full_cell.data_vars.items():
-        output[name] = full.assign_attrs(
-            provenance_attrs(
-                stream.store,
-                name,
-                "zeroed over land (wetmask) and conservatively regridded "
-                "without ocean-fraction normalization, giving the "
-                "per-total-cell-area quantity; NaN over land applied after",
+        long_name = area_basis_long_name(full.attrs, name, CELL_AREA_BASIS)
+        derivation = (
+            "zeroed over land (wetmask) and conservatively regridded "
+            "without ocean-fraction normalization, giving the "
+            "per-total-cell-area quantity; NaN over land applied after"
+        )
+        if name not in stream.full_cell_variables:
+            long_name = f"{long_name}, {_weight_time_phrase(full.attrs)}"
+            derivation = (
+                f"{derivation}; the ice_area_weight of this stream's ice-area "
+                "weighted fields"
             )
+        output[full_cell_outputs[name]] = full.assign_attrs(
+            long_name=long_name,
+            **provenance_attrs(stream.store, name, derivation),
+        )
+
+    for name, product in ice_area_products.data_vars.items():
+        source = next(x for x, out in stream.ice_area_products.items() if out == name)
+        output[name] = product.assign_attrs(
+            provenance_attrs(stream.store, source, product.attrs.get(DERIVATION_ATTR))
         )
 
     if stream.postprocess:
@@ -515,10 +614,7 @@ def _process_chunk(
             if all(v in output.data_vars for v in spec.requires):
                 output = spec.fn(output, chunk_context)
 
-        source_names = {stream.renaming.get(n, n): n for n in ds.data_vars}
-        for name, read in EXTENSIVE_SOURCES.items():
-            if name in output.data_vars:
-                native_terms[name] = ds[source_names[read]]
+        native_terms.update(_native_total_area_terms(ds, output, stream, chunk_context))
         check_extensive_identities(
             output,
             native_terms,
@@ -529,6 +625,10 @@ def _process_chunk(
             context,
         )
 
+    weight_only = stream.weight_only()
+    output = output.drop_vars(
+        [*stream.drop_outputs, *([weight_only] if weight_only in output else [])]
+    )
     for name in output.data_vars:
         output[name] = output[name].astype(OUTPUT_DTYPE)
     return output
@@ -634,8 +734,8 @@ def load_native_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dat
 def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     """Eagerly build all static output fields on the target grid.
 
-    Areas, fractions, masks and ``h_prime_<k>`` come from the artifact's ŵ and
-    A_J and the native ``areacello``, ``sftof``, ``deptho``
+    Areas, fractions, masks and ``ocean_volume_per_area_<k>`` come from the
+    artifact's ŵ and A_J and the native ``areacello``, ``sftof``, ``deptho``
     (native_area.native_area_statics). Built and checked in float64, cast
     to ``OUTPUT_DTYPE`` last."""
     if OCEAN_FRACTION_THRESHOLD != 0:
@@ -722,7 +822,9 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         **provenance_attrs(config.weights_url, "areacello", areacello_derivation),
     )
     for k in range(level_count):
-        statics[f"h_prime_{k}"] = area_fields[f"h_prime_{k}"].assign_attrs(
+        statics[f"ocean_volume_per_area_{k}"] = area_fields[
+            f"ocean_volume_per_area_{k}"
+        ].assign_attrs(
             long_name=f"ocean volume per ocean area, level-{k}",
             units="m",
             **provenance_attrs(
@@ -931,21 +1033,20 @@ def _expected_output_names(
     names: set[str] = set()
     for stream in config.streams:
         ds = stream_datasets[stream.name]
-        stream_names: set[str] = set()
-        for name in ds.data_vars:
-            out_name = stream.renaming.get(name, name)
+        stream_names = stream.output_names()
+        for name in stream.variables:
             if LEVEL_DIM in ds[name].dims:
+                out_name = stream.renaming.get(name, name)
+                stream_names.remove(out_name)
                 stream_names.update(
                     f"{out_name}_{k}" for k in range(ds.sizes[LEVEL_DIM])
                 )
-            else:
-                stream_names.add(out_name)
-        stream_names.update(stream.full_cell_variables)
         specs = stream.postprocess_specs()
-        assert_postprocess_inputs(specs, stream_names, f"stream {stream.name!r}")
-        for spec in specs:
-            stream_names.update(spec.adds)
-        names.update(stream_names)
+        added = {name for spec in specs for name in spec.adds}
+        assert_postprocess_inputs(
+            specs, stream_names - added, f"stream {stream.name!r}"
+        )
+        names.update(stream_names - set(stream.drop_outputs))
     return names
 
 

@@ -356,9 +356,14 @@ def test_toy_table3_statics(tmp_path, monkeypatch):
         "V'_J0, V'_J1",
         1.0,
     )
-    for k, h_prime in enumerate([[1, 1, 0], [F(5, 3), 1, 0]]):
+    for k, ocean_volume_per_area in enumerate([[1, 1, 0], [F(5, 3), 1, 0]]):
         _assert_tabled(stored[f"mask_{k}"].values.ravel(), [1, 1, 0], f"mask_J{k}", 1)
-        _assert_tabled(stored[f"h_prime_{k}"].values.ravel(), h_prime, f"h'_J{k}", 1)
+        _assert_tabled(
+            stored[f"ocean_volume_per_area_{k}"].values.ravel(),
+            ocean_volume_per_area,
+            f"h'_J{k}",
+            1,
+        )
     _assert_tabled(stored["areacello"].values.ravel(), [F(3, 2), F(5, 2), 0], "A_J", 1)
     _assert_tabled(deptho_J.values.ravel()[:2], [F(8, 3), 2], "deptho_J", 1.0)
     assert np.isnan(deptho_J.values.ravel()[2]), "deptho_J is NaN on Z"
@@ -692,7 +697,10 @@ def _set(da: xr.DataArray, j: int, value: float) -> None:
 @pytest.mark.parametrize(
     "corrupt, match",
     [
-        (lambda s, d: _set(s.stored["h_prime_1"], 0, np.nan), "non-finite"),
+        (
+            lambda s, d: _set(s.stored["ocean_volume_per_area_1"], 0, np.nan),
+            "non-finite",
+        ),
         (lambda s, d: _set(s.stored["mask_0"], 2, 1.0), "Z cells have mask_J0 = 1"),
         (lambda s, d: _set(s.stored["mask_1"], 1, 0.0), "mask_1"),
         (lambda s, d: _set(d, 0, 2.5), "Σ_k V'_Jk = W'_J0 deptho_J"),

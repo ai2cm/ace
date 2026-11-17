@@ -9,6 +9,7 @@ every wet cell is 100 m deep but one, 40 m.
 """
 
 import dataclasses
+import functools
 import os
 import sys
 
@@ -232,11 +233,15 @@ def _field(toy: Toy, scale: float, level: int | None = None) -> np.ndarray:
     return np.where(wet, values, np.nan).reshape(O_SHAPE)
 
 
-def _chunk(c96: C96Run, stream: StreamConfig, fields: dict, level=None):
-    """process_chunk on one timestep; ``fields`` maps names to (dims, values)."""
+def _chunk(c96: C96Run, stream: StreamConfig, fields: dict, level=None, attrs=None):
+    """process_chunk on one timestep; ``fields`` maps names to (dims, values),
+    ``attrs`` names to source attrs."""
+    attrs = attrs or {}
     ds = xr.Dataset(
         {
-            name: (dims, np.asarray(values, dtype=np.float32))
+            name: xr.Variable(
+                dims, np.asarray(values, dtype=np.float32), attrs.get(name, {})
+            )
             for name, (dims, values) in fields.items()
         }
     ).expand_dims(TIME_DIM)
@@ -323,6 +328,36 @@ def test_process_chunk_c96_path(tmp_path, monkeypatch):
     )
     assert "sea_ice_volume" in out.data_vars
     _assert_finite_where_ocean(out, ocean_0, e.gained_band)
+
+
+def test_rotated_pair_labels(tmp_path, monkeypatch):
+    """process_chunk relabels a rotated pair as geographic components."""
+    c96 = _c96_run(tmp_path, monkeypatch)
+    face = 1.0 + 0.1 * np.arange(c96.toy.wet.size).reshape(O_SHAPE)
+    ice = StreamConfig(
+        name="ice", store="toy", variables=["UI", "VI"], rotated_pairs=[["UI", "VI"]]
+    )
+    attrs = {
+        "UI": {
+            "long_name": "Sea Water X Velocity",
+            "standard_name": "sea_water_x_velocity",
+            "units": "m/s",
+        },
+        "VI": {"long_name": "ice velocity - y component", "units": "m/s"},
+    }
+    out = _chunk(
+        c96,
+        ice,
+        {"UI": (("yh", "xq"), face), "VI": (("yq", "xh"), -0.5 * face)},
+        attrs=attrs,
+    )
+    assert out["UI"].attrs["long_name"] == "Sea Water Eastward Velocity"
+    assert out["UI"].attrs["standard_name"] == "eastward_sea_water_velocity"
+    assert out["VI"].attrs["long_name"] == "ice velocity - northward component"
+    assert "standard_name" not in out["VI"].attrs
+    for name in ("UI", "VI"):
+        assert out[name].attrs["units"] == "m/s"
+        assert "rotated" in out[name].attrs[DERIVATION_ATTR]
 
 
 def _write_streams(tmp_path, c96: C96Run) -> str:
@@ -413,3 +448,46 @@ def test_main_raises_without_regrid_path(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="pipeline.native_area_weights"):
         _run_main(monkeypatch, config_path)
     assert not os.path.exists(config.output.path)
+
+
+def perturb_worker_coords(monkeypatch, run_module) -> None:
+    """Beam-side ``process_chunk`` returns ``lat``/``lon`` 1 ulp off, as on a
+    Dataflow worker whose ``np.arcsin`` rounds differently from the launch
+    client; ``build_template`` keeps the unperturbed coords."""
+    original = run_module.process_chunk
+    original_build_template = run_module.build_template
+
+    @functools.wraps(original)
+    def worker_process_chunk(key, ds, **kwargs):
+        key, out = original(key, ds, **kwargs)
+        return key, out.assign_coords(
+            lat=np.nextafter(out.lat.values, np.inf),
+            lon=np.nextafter(out.lon.values, -np.inf),
+        )
+
+    def client_build_template(*args, **kwargs):
+        run_module.process_chunk = original
+        try:
+            return original_build_template(*args, **kwargs)
+        finally:
+            run_module.process_chunk = worker_process_chunk
+
+    monkeypatch.setattr(run_module, "process_chunk", worker_process_chunk)
+    monkeypatch.setattr(run_module, "build_template", client_build_template)
+
+
+def test_main_worker_coords_one_ulp_off_template(tmp_path, monkeypatch):
+    config_path, config = _direct_run_config(tmp_path, monkeypatch)
+    reference = str(tmp_path / "reference.zarr")
+    with open(config_path) as f:
+        text = f.read()
+    with open(config_path, "w") as f:
+        f.write(text.replace(config.output.path, reference))
+    _run_main(monkeypatch, config_path)
+    with open(config_path, "w") as f:
+        f.write(text)
+    perturb_worker_coords(monkeypatch, run)
+    _run_main(monkeypatch, config_path)
+    xr.testing.assert_identical(
+        xr.open_zarr(config.output.path).load(), xr.open_zarr(reference).load()
+    )

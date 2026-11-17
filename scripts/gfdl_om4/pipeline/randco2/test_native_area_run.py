@@ -151,6 +151,7 @@ def _toy_run(tmp_path, monkeypatch, a=TOY_A, sftof=TOY_SFTOF, c=TOY_C):
             "sea_ice_fraction": (
                 (TIME_DIM, "yh", "xh"),
                 np.array([c, c])[:, None, :].astype(np.float32),
+                {"long_name": "ice concentration"},
             ),
         },
         coords={TIME_DIM: time},
@@ -229,10 +230,35 @@ def test_chunk_values_on_toy(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "OUTPUT_DTYPE", np.float64)
     out = _toy_chunk(_toy_run(tmp_path, monkeypatch))
     _assert_tabled(out["SST"], [F(1, 3), -1, NAN], "X^a_J of ζ")
+    np.testing.assert_array_equal(out["SST_degK"], out["SST"] + 273.15)
+    assert out["SST_degK"].attrs["units"] == "K"
+    assert "sst" not in out.data_vars
     _assert_tabled(
         out["sea_ice_fraction"], [F(5, 6), F(1, 10), NAN], "sea_ice_fraction_J"
     )
     _assert_tabled(out["ocean_sea_ice_fraction"], [F(5, 6), F(1, 2), NAN], "X^a_J of c")
+    assert (
+        out["sea_ice_fraction"].attrs["long_name"]
+        == "ice concentration, fraction of cell area"
+    )
+    assert (
+        out["ocean_sea_ice_fraction"].attrs["long_name"]
+        == "ice concentration, fraction of ocean area"
+    )
+
+
+def test_drop_outputs_removes_sst(tmp_path, monkeypatch):
+    config_path = _toy_run(tmp_path, monkeypatch)
+    with open(config_path, "a") as f:
+        f.write("  drop_outputs:\n    - SST\n")
+    config = load_config(config_path)
+    out = _toy_chunk(config_path)
+    expected = run._expected_output_names(
+        config, run.open_stream(config.stream, config)
+    )
+    for names in (set(out.data_vars), expected):
+        assert "SST_degK" in names
+        assert "SST" not in names
 
 
 def test_chunk_identity_raises_on_other_native_areas(tmp_path, monkeypatch):

@@ -68,11 +68,18 @@ depend on the read width.
 
 Each entry of a stream's `postprocess` list is a transform name, or
 `{name: <transform>, sources: {<argument>: <variable>}}` naming the output
-variables it reads. `kelvin_sst` needs `sources: {celsius_sst: <name>}`
-(`tos` in the OM4 configs, `SST` in randco2's). `sea_ice` and
+variables it reads, all of which the same stream must produce.
+`kelvin_sst` adds `<name>_degK` (`<name>` + 273.15, in K) and needs `sources: {celsius_sst: <name>}`:
+`SST`, the SIS2 field, in every config, so in the OM4 configs it sits on the
+`ice_snapshot` stream. `sea_ice` and
 `sea_ice_fraction_consistency` take `sea_ice_fraction` and
-`ocean_sea_ice_fraction`, defaulting to those names. A name the stream does
-not produce fails at config load.
+`ocean_sea_ice_fraction`, defaulting to those names. `calving_residue` adds
+`calving_residue` = `-hflso + L_v evs - L_f prsn` (W/m2, per ocean area like
+its inputs; L_v, L_f from SIS2), taking `hflso`, `evs`, `prsn` by default.
+A name the stream does
+not produce fails at config load. A stream's `drop_outputs` lists output names
+removed after all transforms: every config directly under `configs/` drops
+`SST`, keeping `SST_degK` (the `configs/c96-path-test/` configs keep both).
 
 ### Environment, weights and worker image
 
@@ -252,7 +259,7 @@ Contents, under `pipeline/om4/`:
   instants or block-mean time coarsening onto them, full-cell (per-total-cell-area) regridding for selected
   variables, and named postprocess transforms.
 - `pipeline/om4/postprocess.py`: named post-regrid transforms selectable per
-  stream — Kelvin `sst`, `hfds_total_area`, and the sea-ice conventions
+  stream — Kelvin `SST_degK`, `hfds_total_area`, and the sea-ice conventions
   (ice-velocity masking, thickness zeroing, `sea_ice_volume`).
 - `pipeline/om4/face_masks.py`: one-time setup step for sources whose staggered
   velocities carry remap-born zeros over land (MOM6's online z\*-remap
@@ -301,6 +308,25 @@ Its sources are raw daily/6-hourly stores, so the 5-daily configs subsample
 snapshots (`time_subsample_stride`) and average the daily-mean fluxes over
 5-day blocks (`time_block_mean_factor`) in the pipeline; the 1-daily configs
 only subsample the 6-hourly ice streams.
+
+Per-ice-area SIS2 fields (`HI`, `HS`, `TS`, `TSN`, `UI`, `VI`, `T1`–`T4`,
+`T_bulkice`) are regridded weighted by ice area in the 1° 5-daily configs
+(stream options `ice_area_weighted`, `ice_area_weight`,
+`ice_area_weight_store`, `ice_area_products`; rule R1 in
+`pipeline/om4/ice_area.py`): `X_J = mean_ocean_J(c X) / mean_ocean_J(c)`,
+0 on ice-free ocean, NaN on land. So `HI` is the ice-area mean thickness, and
+`ocean_sea_ice_thickness_mean = mean_ocean_J(c HI)` is the ice volume per
+ocean area. Block-meaned streams reject `ice_area_weighted`.
+
+`T1`–`T4` (and piControl `T_bulkice`) are 6 h means at the 5-daily instants,
+weighted by the 6 h mean ice fraction ending at that instant. The 1° 5-daily
+configs write that weight per full cell as
+`interval_average_sea_ice_fraction_6h` (stream option
+`ice_area_weight_output`), and each weighted field's `comment` names it: its
+ice-area mean or sum needs that weight, not the 5-day
+`interval_average_sea_ice_fraction` or the snapshot `sea_ice_fraction`. The
+5-day per-ocean-area `ocean_interval_average_sea_ice_fraction` is read by
+`sea_ice_fraction_consistency` and then dropped (`drop_outputs`).
 
 ### Running
 
@@ -394,12 +420,12 @@ so there is one config carrying a `{member}` placeholder rather than nine
 near-identical files, and `randco2.mk` holds the member list
 (`RANDCO2_MEMBERS`).
 
-Each output store carries exactly seven variables on the target grid:
+Each output store carries the variables below on the target grid:
 
 | Variable | Meaning |
 | --- | --- |
-| `SST` | sea surface temperature, °C, wetmask-normalized regrid of the source `SST` |
-| `sst` | the same field in K (`SST + 273.15`) |
+| `SST` | sea surface temperature, °C, wetmask-normalized regrid of the source `SST`; dropped by the randco2 configs directly under `configs/` (`drop_outputs`) |
+| `SST_degK` | the same field in K (`SST + 273.15`) |
 | `sea_ice_fraction` | ice area per total cell area |
 | `ocean_sea_ice_fraction` | ice area per ocean area |
 | `sea_surface_fraction` | time-invariant ocean fraction of each target cell (`sftof / 100`) |
@@ -428,7 +454,7 @@ grid, weights loader, regridding, config loading and zarr I/O):
 - `pipeline/randco2/config.py`: YAML→dataclass configuration (dacite); the
   `{member}` substitution is `pipeline.config_io.load_yaml`'s.
 - `pipeline/randco2/postprocess.py`: named post-regrid transforms — Kelvin
-  `sst` and the sea-ice-fraction consistency assertion.
+  `SST_degK` and the sea-ice-fraction consistency assertion.
 - `pipeline/randco2/check_output.py`: post-run assertion that a store opens
   with the variable set the config implies.
 - `pipeline/randco2/check_wetmask_equivalence.py`: assertion that all nine
