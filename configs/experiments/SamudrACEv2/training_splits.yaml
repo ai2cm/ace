@@ -1,0 +1,122 @@
+# SamudrACEv2 datasets and train / validation / inference splits.
+# Reference file; fme does not parse it. Train configs copy from it.
+#
+# Splits and merge/concat structure: as in the reference,
+#   ace-exper@32fb049ba:configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_ppad/train-config.yaml
+# Stores: .scratch/2026-11-16-1453-samudracev2-configs/data/stores.yaml (workspace root).
+#
+# Transcription into a train-config.yaml:
+#   {dataset: <key>} -> {data_path: <ocean.data_path>, file_pattern: <datasets.<key>.file_pattern>,
+#                        engine: <datasets.<key>.engine>}, plus `subset` if given.
+#   splits.train.dataset                -> train_loader.dataset
+#   splits.validation[k].dataset        -> validation[k].loader.dataset
+#   splits.inference[k].start_times     -> inference[k].loader.start_indices.times
+#   splits.inference[k].n_forward_steps -> inference[k].n_forward_steps
+#   splits.inference[k].dataset         -> inference[k].loader.dataset
+#
+# Dataset fields not transcribed (status, flipped by hand):
+#   exists:  store has been built (on gs://vcm-ml-intermediate).
+#   on_weka: store has been copied to <ocean.data_path> on Weka. Training reads
+#            only from there, so a run needs on_weka: true for every dataset it uses.
+ocean:
+  data_path: /climate-default  # Beaker Weka volume; per-dataset copy status in `on_weka`
+  datasets:
+    1pctco2_coupled_ocean:
+      # NOT YET EXISTING: placeholder name [maintainer, 2026-11-16]; store not built.
+      file_pattern: 2026-11-13-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+      exists: false
+      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+    1pctco2_ocean_5daily:
+      file_pattern: 2026-11-13-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+      exists: true  # on gs://vcm-ml-intermediate
+      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+    picontrol_coupled_ocean:
+      # NOT YET EXISTING: placeholder name [maintainer, 2026-11-16]; store not built.
+      file_pattern: 2026-11-13-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+      exists: false
+      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+    picontrol_ocean_5daily:
+      file_pattern: 2026-11-13-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+      exists: true  # on gs://vcm-ml-intermediate
+      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+  splits:
+    train:
+      # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235.
+      # Neither window enters its run's validation years (1pctCO2 0041-0045 and
+      # 0126-0130, piControl 0236-0240) or holdout (1pctCO2 0131-0140, piControl
+      # 0241-0350). One concat list per store kind, both in the same simulation
+      # order so the merged members share sample start times.
+      dataset:
+        merge:
+        - concat:
+          - dataset: 1pctco2_coupled_ocean
+            subset: {start_time: '0046-01-06T00:00:00', stop_time: '0126-01-01T00:00:00'}
+          - dataset: picontrol_coupled_ocean
+            subset: {start_time: '0156-01-06T00:00:00', stop_time: '0236-01-01T00:00:00'}
+        - concat:
+          - dataset: 1pctco2_ocean_5daily
+            subset: {start_time: '0046-01-06T00:00:00', stop_time: '0126-01-01T00:00:00'}
+          - dataset: picontrol_ocean_5daily
+            subset: {start_time: '0156-01-06T00:00:00', stop_time: '0236-01-01T00:00:00'}
+    validation:
+    - name: val_1pct_early
+      dataset:
+        merge:
+        - dataset: 1pctco2_coupled_ocean
+          subset: {start_time: '0041-01-06T00:00:00', stop_time: '0046-01-01T00:00:00'}
+        - dataset: 1pctco2_ocean_5daily
+          subset: {start_time: '0041-01-06T00:00:00', stop_time: '0046-01-01T00:00:00'}
+    - name: val_1pct_late
+      dataset:
+        merge:
+        - dataset: 1pctco2_coupled_ocean
+          subset: {start_time: '0126-01-06T00:00:00', stop_time: '0131-01-01T00:00:00'}
+        - dataset: 1pctco2_ocean_5daily
+          subset: {start_time: '0126-01-06T00:00:00', stop_time: '0131-01-01T00:00:00'}
+    - name: val_piC
+      dataset:
+        merge:
+        - dataset: picontrol_coupled_ocean
+          subset: {start_time: '0236-01-06T00:00:00', stop_time: '0241-01-01T00:00:00'}
+        - dataset: picontrol_ocean_5daily
+          subset: {start_time: '0236-01-06T00:00:00', stop_time: '0241-01-01T00:00:00'}
+    inference:
+    - name: inference_1pct
+      # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+      # (validation + training), never entering the 131-140 holdout.
+      n_forward_steps: 1460  # exactly 20 noleap years
+      start_times:
+      - '0041-01-01T00:00:00'
+      - '0051-01-01T00:00:00'
+      - '0061-01-01T00:00:00'
+      - '0071-01-01T00:00:00'
+      - '0081-01-01T00:00:00'
+      - '0091-01-01T00:00:00'
+      - '0101-01-01T00:00:00'
+      - '0111-01-01T00:00:00'
+      dataset:
+        merge:
+        - dataset: 1pctco2_coupled_ocean
+        - dataset: 1pctco2_ocean_5daily
+    - name: inference_piC
+      # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+      # 1-90, never entering the relative-year-91+ holdout. The first IC
+      # is the store's first 5-daily snapshot.
+      n_forward_steps: 1460  # exactly 20 noleap years
+      start_times:
+      - '0151-01-06T00:00:00'
+      - '0161-01-01T00:00:00'
+      - '0171-01-01T00:00:00'
+      - '0181-01-01T00:00:00'
+      - '0191-01-01T00:00:00'
+      - '0201-01-01T00:00:00'
+      - '0211-01-01T00:00:00'
+      - '0221-01-01T00:00:00'
+      dataset:
+        merge:
+        - dataset: picontrol_coupled_ocean
+        - dataset: picontrol_ocean_5daily
