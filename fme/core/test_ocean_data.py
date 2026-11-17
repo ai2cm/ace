@@ -306,3 +306,36 @@ def test_sea_ice_thickness_mean_without_ocean_fraction_uses_volume():
 def test_sea_ice_thickness_missing_inputs():
     with pytest.raises(KeyError):
         OceanData({"ocean_sea_ice_thickness_mean": torch.ones(3)}).sea_ice_thickness
+
+
+@pytest.mark.parametrize("sst_name", ["sst", "SST_degK"])
+def test_sea_surface_temperature_name_variants(sst_name: str):
+    """Either SST name resolves, for get and set."""
+    sst = torch.rand(2, 3, 4, 8) + 273.15
+    ocean_data = OceanData({sst_name: sst})
+    assert torch.equal(ocean_data.sea_surface_temperature, sst)
+
+    new_sst = sst + 1.0
+    ocean_data._set("sea_surface_temperature", new_sst)
+    assert list(ocean_data.data) == [sst_name]
+    assert torch.equal(ocean_data.data[sst_name], new_sst)
+    assert torch.equal(ocean_data.sea_surface_temperature, new_sst)
+
+
+def test_sea_surface_temperature_sst_wins_over_sst_degk():
+    """When both names are present, "sst" is used for get and set."""
+    sst = torch.full((1, 1, 2, 2), 280.0)
+    sst_degk = torch.full((1, 1, 2, 2), 290.0)
+    ocean_data = OceanData({"SST_degK": sst_degk, "sst": sst})
+    assert torch.equal(ocean_data.sea_surface_temperature, sst)
+
+    new_sst = sst + 1.0
+    ocean_data._set("sea_surface_temperature", new_sst)
+    assert torch.equal(ocean_data.data["sst"], new_sst)
+    assert torch.equal(ocean_data.data["SST_degK"], sst_degk)
+
+
+def test_sea_surface_temperature_missing():
+    ocean_data = OceanData({"zos": torch.rand(1, 1, 2, 2)})
+    with pytest.raises(KeyError, match="sea_surface_temperature"):
+        _ = ocean_data.sea_surface_temperature

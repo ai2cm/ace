@@ -21,7 +21,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_water_y_velocity": ["vo_"],
         "sea_surface_height_above_geoid": ["zos"],
         "sea_surface_height": ["SSH"],
-        "sea_surface_temperature": ["sst"],
+        "sea_surface_temperature": ["sst", "SST_degK"],
         "sea_ice_fraction": ["sea_ice_fraction"],
         "sea_ice_thickness": ["HI"],
         "sea_ice_volume": ["sea_ice_volume"],

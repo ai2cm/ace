@@ -23,7 +23,11 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
+from fme.core.ocean_data import (
+    OCEAN_FIELD_NAME_PREFIXES,
+    HasOceanDepthIntegral,
+    OceanData,
+)
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.spatial_mask_provider import (
     NullSpatialMaskProvider,
@@ -832,10 +836,12 @@ def _force_conserve_ocean_heat_content(
     for k in range(n_levels):
         name = f"thetao_{k}"
         out[name] = gen.data[name] * heat_content_correction_ratio
-    if "sst" in gen.data:
-        out["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    for sst_name in OCEAN_FIELD_NAME_PREFIXES["sea_surface_temperature"]:
+        if sst_name in gen.data:
+            out[sst_name] = (  # assuming SST in Kelvin
+                gen.data[sst_name] - FREEZING_TEMPERATURE_KELVIN
+            ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+            break
     return out
 
 
