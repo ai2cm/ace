@@ -41,10 +41,12 @@ class OceanData:
         mask_0 == 0.
 
         Raises:
+            KeyError: potential temperature or salinity, or a level of either,
+                is missing; raised before the depth coordinate is checked, so
+                compute_ocean_derived_quantities skips it.
             ValueError: depth coordinate is not a HasOceanLayerGeometry, or
                 potential temperature or salinity has more levels than it
                 (inherited from rho_wright97).
-            KeyError: a level of potential temperature or salinity is missing.
         """
         ...
 ```
@@ -81,6 +83,11 @@ def test_steric_sea_level_wright97_values_and_mask():
     # NaN exactly where mask_0 == 0; masked-deep levels contribute 0.
     ...
 
+def test_steric_sea_level_wright97_nan_wet_level_counts_as_zero():
+    # GOAL: a NaN rho_wright97_k at a wet level contributes 0 to C (as in η_mano),
+    # so η_steric stays finite there.
+    ...
+
 def test_steric_sea_level_wright97_sign():
     # GOAL: warming every wet level (same so) raises η_steric; freshening raises it too.
     # PARAMETERIZE: perturbation ∈ {thetao + 1, so - 1}.
@@ -99,6 +106,7 @@ def test_steric_sea_level_wright97_without_cell_area_or_zos():
 # EXTEND the existing parametrizations with "steric_sea_level_wright97":
 def test_wright97_without_layer_geometry_raises_value_error(name): ...  # CHANGED
 def test_wright97_extra_levels_raise_value_error(name): ...  # CHANGED
+def test_wright97_missing_profiles_raise_key_error_before_geometry(name): ...  # CHANGED
 def test_wright97_one_dimensional_mask_matches_expanded(): ...  # CHANGED (loop)
 ```
 
@@ -116,6 +124,10 @@ def test_steric_sea_level_wright97_skipped_without_salinity():
 
 # EXTEND test_manometric_sea_level_wright97_skipped_on_healpix:  # CHANGED
 #   steric_sea_level_wright97 is present on HEALPix (no cell area needed).
+# EXTEND test_wright97_skipped_without_profiles_or_layer_geometry:  # CHANGED
+#   steric_sea_level_wright97 is absent too.
+# EXTEND test_wright97_metadata_has_units:  # CHANGED
+#   steric_sea_level_wright97 has units "m".
 ```
 
 ---
