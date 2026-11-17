@@ -647,6 +647,7 @@ def test_wright97_metadata_has_units():
     metadata = get_derived_variable_metadata()
     assert metadata["mld_wright97"].units == "m"
     assert metadata["manometric_sea_level_wright97"].units == "m"
+    assert metadata["steric_sea_level_wright97"].units == "m"
 
 
 def _wright97_inputs():
@@ -682,6 +683,29 @@ def test_manometric_sea_level_wright97_derived_variable():
     torch.testing.assert_close(out["manometric_sea_level_wright97"], expected)
 
 
+def test_steric_sea_level_wright97_derived_variable():
+    data, depth_coordinate, _ = _wright97_inputs()
+    out = compute_ocean_derived_quantities(
+        dict(data), depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    expected = OceanData(data, depth_coordinate).steric_sea_level_wright97
+    torch.testing.assert_close(out["steric_sea_level_wright97"], expected)
+    metadata = get_ocean_derived_variable_metadata()["steric_sea_level_wright97"]
+    assert metadata.long_name == (
+        "Steric sea level of the static column, Wright (1997)"
+    )
+
+
+def test_steric_sea_level_wright97_skipped_without_salinity():
+    data, depth_coordinate, _ = _wright97_inputs()
+    data = {k: v for k, v in data.items() if not k.startswith("so_")}
+    out = compute_ocean_derived_quantities(
+        dict(data), depth_coordinate=depth_coordinate, timestep=TIMESTEP
+    )
+    assert "steric_sea_level_wright97" not in out
+    assert "ocean_heat_content" in out
+
+
 @pytest.mark.parametrize("missing", ["cell_area", "zos"])
 def test_manometric_sea_level_wright97_skipped_without_cell_area_or_zos(missing):
     data, depth_coordinate, horizontal_coordinates = _wright97_inputs()
@@ -715,3 +739,4 @@ def test_manometric_sea_level_wright97_skipped_on_healpix():
     out = derive(dict(data), {})
     assert "mld_wright97" in out
     assert "manometric_sea_level_wright97" not in out
+    assert "steric_sea_level_wright97" in out
