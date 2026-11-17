@@ -252,6 +252,46 @@ def test_zero_where_ice_free_names_multiple_variables():
         )
 
 
+def test_sea_ice_fraction_without_land_fraction_name():
+    torch.manual_seed(0)
+    config = SeaIceFractionConfig(
+        sea_ice_fraction_name="sea_ice_fraction",
+        zero_where_ice_free_names=["HI"],
+        remove_negative_ocean_fraction=False,
+    )
+    reference = SeaIceFractionConfig(
+        sea_ice_fraction_name="sea_ice_fraction",
+        land_fraction_name="land_fraction",
+        zero_where_ice_free_names=["HI"],
+        remove_negative_ocean_fraction=False,
+    )
+    gen_data = {
+        "sea_ice_fraction": torch.randn(IMG_SHAPE, device=DEVICE),
+        "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
+    }
+    out = config(gen_data, input_data={})
+    expected = reference(
+        gen_data, input_data={"land_fraction": torch.zeros(IMG_SHAPE, device=DEVICE)}
+    )
+    assert out.keys() == expected.keys()
+    for name in expected:
+        torch.testing.assert_close(out[name], expected[name])
+    torch.testing.assert_close(
+        out["sea_ice_fraction"], gen_data["sea_ice_fraction"].clamp(0.0, 1.0)
+    )
+    torch.testing.assert_close(
+        out["HI"], gen_data["HI"] * (out["sea_ice_fraction"] > 0.0)
+    )
+
+
+def test_sea_ice_fraction_remove_negative_ocean_fraction_requires_land_fraction():
+    with pytest.raises(ValueError, match="land_fraction_name"):
+        SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            remove_negative_ocean_fraction=True,
+        )
+
+
 def test_from_state_migrates_sea_ice_thickness_name():
     state = {
         "sea_ice_fraction_correction": {
